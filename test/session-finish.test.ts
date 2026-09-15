@@ -16,7 +16,7 @@ vi.mock('../src/main/mcp/call-context.js', async (importOriginal) => ({
   ...await importOriginal<object>(), currentCall: () => ({ caller: { ...hooks.caller }, startedAt: hooks.startedAt })
 }));
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
-const { initSessionStore, createSession, getSession, rebindSession, appendEvent, readRecentEvents, flushSessions, resetSessionStoreForTests, observeSessionModel } = await import('../src/main/session/store.js');
+const { initSessionStore, createSession, getSession, rebindSession, appendEvent, readRecentEvents, flushSessions, resetSessionStoreForTests, observeSessionModel, updateSessionPlan } = await import('../src/main/session/store.js');
 const { resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { announceSessionFinish: announceTransport, sessionFinishDeadline, settleSessionFinishForTests, requestSessionFinishGoal, sessionFinishWaiting, setFinishNotifier, releaseSessionFinish, sessionFinishHeld } = await import('../src/main/session/finish.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
@@ -53,6 +53,27 @@ afterEach(() => {
 });
 afterAll(async () => { setFinishNotifier(null); resetSessionStoreForTests(); await removeTempDir(directory); });
 describe('session finish turn identity', () => {
+  it('holds while the persisted task plan still has unfinished steps', async () => {
+    await updateSessionPlan(sessionId, hooks.caller.conversationId, { plan: [
+      { step: 'Apply the fix', status: 'completed' },
+      { step: 'Verify the installed app', status: 'pending' }
+    ] }, hooks.startedAt + 1);
+    const result = await announceSessionFinish(sessionId, 'Ready');
+    expect(result).toContain('HELD: The current task plan still has unfinished steps');
+    expect(result).toContain('pending: Verify the installed app');
+    expect(hooks.followup).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('allows finish once every persisted plan step is completed', async () => {
+    await updateSessionPlan(sessionId, hooks.caller.conversationId, { plan: [
+      { step: 'Apply the fix', status: 'completed' },
+      { step: 'Verify the installed app', status: 'completed' }
+    ] }, hooks.startedAt + 1);
+    expect(await announceSessionFinish(sessionId, 'Ready')).toContain('HELD:');
+    expect(hooks.followup).toHaveBeenCalledTimes(1);
+  });
+
   it('spends only the remaining ingress budget after late identity resolution', async () => {
     hooks.hasInput = false;
     let complete!: (text: string) => void;

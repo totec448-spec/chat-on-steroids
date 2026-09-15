@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { getConfig } from '../config.js';
 import { currentCall } from '../mcp/call-context.js';
-import { getSession } from './store.js';
+import { getSession, readSessionPlan } from './store.js';
 import { onSessionChange, recordProgress } from './recorder.js';
 import { isChatBlocked } from './blocked-chats.js';
 import { draftFastFollowup, conversationMessages, automaticFinishEnabled } from '../goal.js';
@@ -242,6 +242,14 @@ export async function announceSessionFinish(sessionId: string, summary: string, 
       call.caller.conversationId !== session.conversationId) throw new Error('Session finish requires this caller’s exact active session and turn');
   if (session.finishTurn?.turnId !== session.activeTurnId || session.finishTurn.startedAt > call.startedAt)
     throw new Error('The active turn changed or its start could not be verified');
+
+  const plan = await readSessionPlan(sessionId);
+  const incomplete = plan?.plan.filter(step => step.status !== 'completed') ?? [];
+  if (incomplete.length) {
+    const remaining = incomplete.slice(0, 3).map(step => `${step.status}: ${step.step}`).join('; ');
+    const omitted = incomplete.length > 3 ? `; +${incomplete.length - 3} more` : '';
+    return `HELD: The current task plan still has unfinished steps. Reconcile the plan before finishing this turn; do not mark work completed unless it is actually complete. Remaining: ${remaining}${omitted}`;
+  }
   const key = `${sessionId}:${session.activeTurnId}`;
   finishCalls.set(key, (finishCalls.get(key) ?? 0) + 1);
   try {

@@ -13229,6 +13229,63 @@ app-owned prompt`,
     ]);
   });
 
+  it('clears a stale native Stop after the source handoff is durably stored', async () => {
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      activity: activityReply,
+      compact: (message) => {
+        if (message.sourceMessageId) return { ok: true, data: { bound: true } };
+        if (typeof message.summary === 'string') return { ok: true, data: { stored: true, job: null } };
+        return { ok: false, error: 'unexpected_compact_shape' };
+      }
+    });
+    startGenerating(live.document, { send: false });
+    const stop = live.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
+    Object.defineProperty(stop, 'getClientRects', { value: () => [{ width: 32, height: 32 }] });
+    const stops = vi.fn(() => stop.remove());
+    stop.addEventListener('click', stops);
+    const [prompt, answer] = splitMarkedTurns();
+    await bindFiberTurns([
+      { section: assistantTurn(live.document, 'turn-prompt', []), turn: prompt },
+      { section: assistantTurn(live.document, 'turn-answer', []), turn: answer }
+    ]);
+
+    expect(live.sent.some((message) => message.type === 'compact' && typeof message.summary === 'string')).toBe(true);
+    expect(stops).toHaveBeenCalledTimes(1);
+    expect(live.document.querySelector('[data-testid="stop-button"]')).toBeNull();
+  });
+
+  it('does not stop a newer user turn after storing the source handoff', async () => {
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      activity: activityReply,
+      compact: (message) => {
+        if (message.sourceMessageId) return { ok: true, data: { bound: true } };
+        if (typeof message.summary === 'string') return { ok: true, data: { stored: true, job: null } };
+        return { ok: false, error: 'unexpected_compact_shape' };
+      }
+    });
+    startGenerating(live.document, { send: false });
+    const stop = live.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
+    Object.defineProperty(stop, 'getClientRects', { value: () => [{ width: 32, height: 32 }] });
+    const stops = vi.fn();
+    stop.addEventListener('click', stops);
+    const [prompt, answer] = splitMarkedTurns();
+    const newerUser = userTurn(live.document, 'post-handoff-user', 'Keep working in this chat.');
+    await bindFiberTurns([
+      { section: assistantTurn(live.document, 'turn-prompt', []), turn: prompt },
+      { section: assistantTurn(live.document, 'turn-answer', []), turn: answer },
+      { section: newerUser, turn: {
+        turnId: 'turn-post-handoff-user', endMessageId: null, calls: [], messages: [{
+          messageId: 'post-handoff-user', rawMessageId: 'post-handoff-user', role: 'user', stable: true,
+          rawText: 'Keep working in this chat.', renderedHtml: ''
+        }]
+      } }
+    ]);
+
+    expect(live.sent.some((message) => message.type === 'compact' && typeof message.summary === 'string')).toBe(true);
+    expect(stops).not.toHaveBeenCalled();
+    expect(live.document.querySelector('[data-testid="stop-button"]')).toBe(stop);
+  });
+
   it('waits while the turn after the marked prompt is still being written', async () => {
     live = await harness(`https://chatgpt.com/c/${CHAT}`, {
       activity: activityReply,

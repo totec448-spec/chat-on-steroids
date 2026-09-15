@@ -552,6 +552,7 @@ const commandRedeems = new Map<string, Promise<void>>();
 let requestWindow = { start: Date.now(), count: 0 };
 const listeners = new Set<() => void>();
 let extensionVersion: string | null = null;
+let extensionCompatible: boolean | null = null;
 let versionWarned = false;
 
 export function onBridgeChange(listener: () => void): () => void {
@@ -571,7 +572,8 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     paired: stored !== null && stored !== BROWSER_DISCONNECTED,
     present: browserPresent(),
     lastSeenAt,
-    extensionVersion
+    extensionVersion,
+    compatible: extensionCompatible
   };
 }
 
@@ -699,13 +701,20 @@ function protocolCompatible(req: http.IncomingMessage): boolean {
 function noteExtensionVersion(req: http.IncomingMessage): void {
   const version = req.headers['x-extension-version'];
   const protocol = extensionProtocol(req);
+  let didChange = false;
   if (typeof version === 'string' && version !== extensionVersion) {
     extensionVersion = version.slice(0, 32);
     logInfo(`bridge: browser extension ${extensionVersion} connected`);
-    // Even an incompatible peer reports its version before the protocol fence.
-    // Publish that evidence without falsely granting compatible browser presence.
-    changed();
+    didChange = true;
   }
+  const compatible = protocol === null ? null : protocol === BRIDGE_PROTOCOL;
+  if (compatible !== null && compatible !== extensionCompatible) {
+    extensionCompatible = compatible;
+    didChange = true;
+  }
+  // Even an incompatible peer reports its version and protocol before the protocol fence.
+  // Publish that evidence without falsely granting compatible browser presence.
+  if (didChange) changed();
   if (!versionWarned && protocol !== null && protocol !== BRIDGE_PROTOCOL) {
     versionWarned = true;
     logWarn(
@@ -8213,6 +8222,7 @@ export function resetBridgeForTests(): void {
   lastBrowserLaunchAt = 0;
   lastSeenAt = null;
   extensionVersion = null;
+  extensionCompatible = null;
   versionWarned = false;
   requestWindow = { start: Date.now(), count: 0 };
 }

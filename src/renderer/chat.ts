@@ -17,6 +17,7 @@ import type { RecoveryCountdown } from '../shared/recovery.js';
 import { communicationTitle, foldAgentCommunication } from './agent-communication.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { createSkills, type SkillsController } from './skills.js';
+import { createComposerSlashAutocomplete, parseComposerSlashCommand, type ComposerSlashCommandId } from './composer-slash.js';
 import { isAstraModel, isProModel } from '../shared/chat-models.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
 import { injectableAttachments } from '../shared/input.js';
@@ -142,6 +143,10 @@ function draftKey(): string { return selectedId ?? (selectedProjectId ? `project
 let selectionGeneration = 0;
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
+let composerSlash: ReturnType<typeof createComposerSlashAutocomplete> | null = null;
+let compactPanelSessionId: string | null = null;
+type PendingComposerAutomation = { mode: 'goal' | 'loop'; previous: InputAutomation };
+const pendingComposerAutomation = new Map<string, PendingComposerAutomation>();
 const expandedWorkers = new Set<string>();
 const inputDrafts = new Map<string, string>();
 const imageDrafts = new Map<string, Array<InputImage | InputAttachment>>();
@@ -169,7 +174,10 @@ function restoreDraft(): void {
   $('activeGoalRow').hidden = true; $('recoveryStatus').hidden = true;
   $<HTMLTextAreaElement>('chatInput').value = inputDrafts.get(draftKey()) ?? '';
   skillsController?.syncDraft();
-  const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = 'off'; delete automation.dataset.edited;
+  const automation = $<HTMLSelectElement>('chatAutomation');
+  const pendingAutomation = pendingComposerAutomation.get(draftKey());
+  automation.value = pendingAutomation?.mode ?? 'off';
+  if (pendingAutomation) automation.dataset.edited = 'true'; else delete automation.dataset.edited;
   $<HTMLSelectElement>('loopDelivery').value = 'finish';
   $<HTMLTextAreaElement>('sessionObjective').value = ''; delete $('sessionObjective').dataset.edited; delete $('sessionObjective').dataset.sessionId;
   paintTaskPlan(); paintComposerImages();
@@ -763,21 +771,26 @@ type GoalDraftPresentation = { stage: string; model: string; text: string; error
 let goalDraftView: GoalDraftPresentation | null = null;
 let goalWaitView: import('../shared/goal.js').GoalWait | null = null;
 let finishGoalDraftView: GoalDraftPresentation | null = null;
+let retiredGoalCompletion: string | null = null;
 function paintGoalProgress(): void {
   let row = document.getElementById('goalLifecycle');
-  if (!row) { row = el('div', 'queued-input'); row.id = 'goalLifecycle'; row.setAttribute('role', 'status'); $('activeGoalRow').before(row); }
+  if (!row) { row = el('div', 'queued-input'); row.id = 'goalLifecycle'; row.setAttribute('role', 'status'); row.hidden = true; $('activeGoalRow').before(row); }
   const progress = goalProgress?.selection === selectionGeneration ? goalProgress : null;
   const entry = progress?.inputId ? pendingComposerInputs.find(item => item.id === progress.inputId) : undefined;
   const finishDraft = controlledSessionId === selectedId && controlledSelection === selectionGeneration ? finishGoalDraftView : null;
   const draft = finishDraft ?? (controlledSessionId === selectedId && controlledSelection === selectionGeneration ? goalDraftView : null);
   const wait = controlledSessionId === selectedId && controlledSelection === selectionGeneration ? goalWaitView : null;
-  const off = $<HTMLSelectElement>('chatAutomation').value === 'off';
-  if (off && !finishDraft) { row.hidden = true; row.replaceChildren(); row.setAttribute('aria-busy', 'false'); return; }
+  const automation = $<HTMLSelectElement>('chatAutomation');
+  const off = automation.value === 'off';
+  if (off && !finishDraft) { setComposerDockSurfaceVisible(row, false); row.setAttribute('aria-busy', 'false'); return; }
   let phase = progress?.phase ?? '';
   let text = progress?.text ?? '', error = progress?.error;
   if (entry) { phase = entry.state; error = entry.error ?? undefined; }
   if (draft && (!off || finishDraft) && (finishDraft || !['saving', 'failed'].includes(phase))) { phase = draft.stage; text = draft.text; error = draft.error ?? undefined; }
   else if (wait && !['saving', 'failed'].includes(phase)) { phase = 'settling'; text = ''; error = undefined; }
+  const completionKey = `${selectionGeneration}:${selectedId ?? 'new'}`;
+  if (phase !== 'no-reply' && retiredGoalCompletion === completionKey) retiredGoalCompletion = null;
+  if (phase === 'no-reply' && retiredGoalCompletion === completionKey) { row.remove(); return; }
   const labels: Record<string, string> = { saving: t("Saving task…"), saved: t("Task saved · waiting for the next completed answer"),
     preparing: t("Preparing the opening message…"), generating: t("Generating the opening message…"), ready: t("Message ready · awaiting ChatGPT delivery"),
     sending: t("Preparing a continuation…"), answering: t("Generating a continuation…"), queued: t("Opening message queued"),
@@ -788,7 +801,7 @@ function paintGoalProgress(): void {
   const mode = $<HTMLSelectElement>('chatAutomation').value === 'loop' ? t('Loop') : t('Goal');
   labels.settling = `${mode} · ${wait?.reason === 'native-busy' ? t('ChatGPT resumed work · waiting before retry') : wait?.reason === 'silence' ? t('Waiting before recovery reload') : wait?.reason === 'quiet' ? t('Waiting for tool inactivity') :
     wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : t('Answer settling')}`;
-  row.hidden = !phase; if (!phase) return;
+  if (!phase) { setComposerDockSurfaceVisible(row, false); return; }
   const busy = ['settling', 'saving', 'preparing', 'generating', 'retrying', 'sending', 'answering', 'browser', 'queued', 'ready'].includes(phase) && !error;
   row.setAttribute('aria-busy', String(busy));
   const marker = el('span', busy ? 'session-status is-working' : 'session-status');
@@ -799,6 +812,35 @@ function paintGoalProgress(): void {
     const seconds = Math.max(0, Math.ceil((wait.until - Date.now()) / 1000));
     const timer = el('span', 'recovery-countdown', seconds ? t('Check in {0}', [`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`]) : t('Checking for activity…'));
     timer.setAttribute('role', 'timer'); timer.setAttribute('aria-live', 'off'); row.append(timer);
+  }
+  if (automation.value === 'goal' && phase !== 'no-reply') {
+    const end = el('button', 'dock-action goal-lifecycle-end') as HTMLButtonElement;
+    end.type = 'button';
+    end.append(icon('i-x'), el('span', '', t('End goal')));
+    end.addEventListener('click', () => {
+      if (end.disabled) return;
+      end.disabled = true;
+      automation.value = 'off';
+      automation.dispatchEvent(new Event('change'));
+    });
+    row.append(end);
+  }
+  setComposerDockSurfaceVisible(row, true);
+  if (phase === 'no-reply') {
+    if (row.dataset.goalCompletion !== completionKey) {
+      row.dataset.goalCompletion = completionKey;
+      row.classList.add('is-goal-complete');
+      const retire = () => {
+        if (row.dataset.goalCompletion !== completionKey) return;
+        retiredGoalCompletion = completionKey;
+        row.remove();
+      };
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) queueMicrotask(retire);
+      else window.setTimeout(retire, 320);
+    }
+  } else {
+    delete row.dataset.goalCompletion;
+    row.classList.remove('is-goal-complete');
   }
 }
 const cancelledStarts = new Set<string>();
@@ -858,22 +900,174 @@ function dockAction(label: string | (() => string), symbol: string, click: (even
   button.type = 'button'; ui(button, 'title', description); ui(button, 'aria-label', description);
   button.append(icon(symbol)); button.onclick = click; return button;
 }
+const composerDockSurfaceTimers = new WeakMap<HTMLElement, number>();
+function resetComposerDockSurfaceMotion(surface: HTMLElement): void {
+  const timer = composerDockSurfaceTimers.get(surface);
+  if (timer !== undefined) window.clearTimeout(timer);
+  composerDockSurfaceTimers.delete(surface);
+  surface.classList.remove('is-dock-entering', 'is-dock-leaving');
+  surface.style.removeProperty('--composer-dock-slide-height');
+}
+function setComposerDockSurfaceVisible(surface: HTMLElement, visible: boolean): void {
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  if (visible) {
+    if (!surface.hidden && !surface.classList.contains('is-dock-leaving')) return;
+    resetComposerDockSurfaceMotion(surface);
+    const wasHidden = surface.hidden;
+    surface.hidden = false;
+    if (!wasHidden || reducedMotion) return;
+    const height = Math.max(surface.scrollHeight, surface.getBoundingClientRect().height, 40);
+    surface.style.setProperty('--composer-dock-slide-height', `${Math.ceil(height) + 2}px`);
+    // Restarting after a quick hide/show must begin from the collapsed frame again.
+    void surface.offsetHeight;
+    surface.classList.add('is-dock-entering');
+    const timer = window.setTimeout(() => {
+      if (composerDockSurfaceTimers.get(surface) !== timer) return;
+      composerDockSurfaceTimers.delete(surface);
+      surface.classList.remove('is-dock-entering');
+      surface.style.removeProperty('--composer-dock-slide-height');
+    }, 220);
+    composerDockSurfaceTimers.set(surface, timer);
+    return;
+  }
+  if (surface.hidden || surface.classList.contains('is-dock-leaving')) return;
+  resetComposerDockSurfaceMotion(surface);
+  if (reducedMotion) { surface.hidden = true; return; }
+  const height = Math.max(surface.scrollHeight, surface.getBoundingClientRect().height, 40);
+  surface.style.setProperty('--composer-dock-slide-height', `${Math.ceil(height) + 2}px`);
+  surface.classList.add('is-dock-leaving');
+  const timer = window.setTimeout(() => {
+    if (composerDockSurfaceTimers.get(surface) !== timer) return;
+    composerDockSurfaceTimers.delete(surface);
+    surface.hidden = true;
+    surface.classList.remove('is-dock-leaving');
+    surface.style.removeProperty('--composer-dock-slide-height');
+  }, 220);
+  composerDockSurfaceTimers.set(surface, timer);
+}
+function animatedCompactRunningStatus(): HTMLElement {
+  const label = el('span', 'compact-running-label');
+  ui(label, 'aria-label', () => t("Compaction is running in ChatGPT."));
+  const copy = el('span', 'compact-running-copy');
+  ui(copy, 'textContent', () => t("Compaction is running in ChatGPT.").replace(/[.。．…]+$/u, ''));
+  const dots = el('span', 'compact-running-dots');
+  dots.setAttribute('aria-hidden', 'true');
+  dots.append(
+    el('span', 'compact-running-dot', '.'),
+    el('span', 'compact-running-dot', '.'),
+    el('span', 'compact-running-dot', '.')
+  );
+  label.append(copy, dots);
+  return label;
+}
+function paintComposerModePanels(): void {
+  const automation = $<HTMLSelectElement>('chatAutomation');
+  const automationMode = automation.value === 'goal' || automation.value === 'loop' ? automation.value : null;
+  const automationChip = $<HTMLButtonElement>('composerAutomationChip');
+  const pendingAutomation = pendingComposerAutomation.get(draftKey());
+  const armedMode = pendingAutomation?.mode === automationMode ? automationMode : null;
+  automationChip.hidden = armedMode === null;
+  if (armedMode) {
+    const loop = armedMode === 'loop';
+    ui($('composerAutomationChipLabel'), 'textContent', () => loop ? t("Loop") : t("Goal"));
+    automationChip.disabled = automation.disabled;
+    ui(automationChip, 'aria-label', () => `${t("Pause")} ${loop ? t("Loop") : t("Goal")}`);
+    ui(automationChip, 'title', () => `${loop ? t("Loop") : t("Goal")} · ${t("Pause")}`);
+  }
+
+  const plan = taskPlans.get(draftKey());
+  const armedPlan = !!plan && !plan.text && !plan.requestId && !plan.stages && !plan.error && !plan.sending;
+  const planChip = $<HTMLButtonElement>('composerPlanChip');
+  if (plan) $('composerPlanPanel').classList.remove('is-plan-complete');
+  planChip.hidden = !armedPlan;
+  if (armedPlan) {
+    ui(planChip, 'aria-label', () => `${t("Plan")} · ${t("Cancel plan")}`);
+    ui(planChip, 'title', () => `${t("Plan")} · ${t("Cancel plan")}`);
+  }
+  const planPanel = $('composerPlanPanel');
+  planPanel.classList.toggle('is-plan-writing', !!plan?.requestId && !plan.stages && !plan.error);
+  setComposerDockSurfaceVisible(planPanel, !!plan && !armedPlan);
+  if (plan && !armedPlan) {
+    ui($('composerPlanState'), 'textContent', () => plan.requestId ? t("Creating…") : plan.error ? t("Needs attention") : plan.stages ? t("{0} stages", [plan.stages.length]) : t("Ready"));
+    const hint = $('composerPlanHint');
+    hint.classList.toggle('is-plan-request', !!plan.text);
+    hint.setAttribute('dir', plan.text ? 'auto' : 'ltr');
+    ui(hint, 'textContent', () => plan.text || t("Write the task below. Send generates editable plan stages instead of sending the request directly."));
+    $<HTMLButtonElement>('composerModeCancelPlan').disabled = plan.sending;
+  }
+
+  const compactPanel = $('composerCompactPanel');
+  const compactionRunning = !$('cancelCompaction').hidden;
+  const compactVisible = !!selectedId && (compactPanelSessionId === selectedId || compactionRunning);
+  setComposerDockSurfaceVisible(compactPanel, compactVisible);
+  if (compactVisible) {
+    ui($('composerCompactState'), 'textContent', () => compactionRunning ? t("Running") : t("Ready"));
+    const status = $('sessionControlStatus').textContent?.trim();
+    const compactStatus = $('composerCompactStatus');
+    const runningStatus = t("Compaction is running in ChatGPT.");
+    if (compactionRunning && (!status || status === runningStatus)) compactStatus.replaceChildren(animatedCompactRunningStatus());
+    else {
+      const copy = el('span');
+      ui(copy, 'textContent', () => $('sessionControlStatus').textContent?.trim() || t("Compact this chat and resume it in a fresh conversation."));
+      compactStatus.replaceChildren(copy);
+    }
+    const sourceStart = $<HTMLButtonElement>('compactSession');
+    const sourceCancel = $<HTMLButtonElement>('cancelCompaction');
+    const start = $<HTMLButtonElement>('composerModeCompact');
+    const cancel = $<HTMLButtonElement>('composerModeCancelCompact');
+    start.disabled = Boolean(sourceStart.hidden || sourceStart.disabled);
+    cancel.hidden = sourceCancel.hidden;
+    cancel.disabled = sourceCancel.disabled;
+  }
+}
+function activateComposerSlashCommand(id: ComposerSlashCommandId): void {
+  const input = $<HTMLTextAreaElement>('chatInput');
+  composerSlash?.hide();
+  input.value = '';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  if (id === 'plan') {
+    if (taskPlans.has(draftKey())) cancelTaskPlan();
+    void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt');
+    queueMicrotask(() => input.focus());
+    return;
+  }
+  if (id === 'goal' || id === 'loop') {
+    const automation = $<HTMLSelectElement>('chatAutomation');
+    const key = draftKey();
+    const existing = pendingComposerAutomation.get(key);
+    pendingComposerAutomation.set(key, { mode: id, previous: existing?.previous ?? automation.value as InputAutomation });
+    automation.value = id;
+    automation.dataset.edited = 'true';
+    paintAutomationSwitch();
+    queueMicrotask(() => input.focus());
+    return;
+  }
+  if (!selectedId) {
+    toast(t("Compact is available after this chat has started."));
+    return;
+  }
+  const compact = $<HTMLButtonElement>('compactSession');
+  if (compact.hidden || compact.disabled) {
+    const status = $('sessionControlStatus').textContent?.trim();
+    toast(status || t("Compact is not available for this chat right now."));
+    return;
+  }
+  compactPanelSessionId = selectedId;
+  paintComposerModePanels();
+  compact.click();
+}
+function consumeComposerSlashCommand(): boolean {
+  const command = parseComposerSlashCommand($<HTMLTextAreaElement>('chatInput').value);
+  if (!command) return false;
+  activateComposerSlashCommand(command.id);
+  return true;
+}
 function paintActiveGoal(): void {
   const row = $('activeGoalRow');
-  const mode = $<HTMLSelectElement>('chatAutomation').value;
-  row.hidden = !selectedId || mode === 'off';
-  if (row.hidden) { row.replaceChildren(); return; }
-  const objective = $<HTMLTextAreaElement>('sessionObjective').value.trim();
-  const label = el('span', 'queue-label', () => `${mode === 'loop' ? t("Loop") : t("Pursuing goal")}${objective ? ' · ' + objective : ''}`);
-  label.title = objective;
-  row.replaceChildren(icon('i-pulse'), label,
-    dockAction(() => t("Pause automation"), 'i-power', () => { const select = $<HTMLSelectElement>('chatAutomation'); select.value = 'off'; select.dispatchEvent(new Event('change')); }),
-    dockAction(() => t("Edit task"), 'i-pencil', event => {
-      // This opener is outside the menu; its click must not immediately dismiss it.
-      event.stopPropagation();
-      $<HTMLDetailsElement>('composerSettings').open = true;
-      $<HTMLTextAreaElement>('sessionObjective').focus();
-    }));
+  // Goal and Loop now own an interactive disclosure in the composer dock.
+  row.hidden = true;
+  row.replaceChildren();
+  paintComposerModePanels();
 }
 type TaskPlanDraft = { text: string; requestId: string | null; stages: string[] | null; sending: boolean; progress: TaskProgress | null; error: string | null };
 // Planning belongs to its draft key. Completed stages own their captured objective
@@ -887,7 +1081,57 @@ function cancelTaskPlan(key = draftKey()): void {
   const plan = taskPlans.get(key);
   taskPlans.delete(key);
   if (plan?.requestId) void api.cancelTaskRequest?.(plan.requestId);
-  if (draftKey() === key) paintTaskPlan();
+  if (draftKey() === key) {
+    // Cancelling an in-flight planner returns its submitted task to an otherwise
+    // empty composer. Completed/generated plans stay detached from the composer.
+    if (plan?.requestId && !plan.stages && plan.text) {
+      const input = $<HTMLTextAreaElement>('chatInput');
+      if (!input.value.trim()) {
+        input.value = plan.text;
+        inputDrafts.set(key, plan.text);
+        skillsController?.syncDraft();
+      }
+    }
+    paintTaskPlan();
+  }
+}
+function completeTaskPlan(key: string): void {
+  const plan = taskPlans.get(key);
+  if (!plan) return;
+  taskPlans.delete(key);
+  if (plan.requestId) void api.cancelTaskRequest?.(plan.requestId);
+  if (draftKey() !== key) return;
+  const panel = $('composerPlanPanel');
+  const finish = () => {
+    resetComposerDockSurfaceMotion(panel);
+    panel.hidden = true;
+    panel.classList.remove('is-plan-complete');
+    if (draftKey() === key && !taskPlans.has(key)) paintTaskPlan();
+  };
+  paintTaskActions();
+  paintDeliveryControls();
+  if (panel.hidden || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    queueMicrotask(finish);
+    return;
+  }
+  panel.classList.add('is-plan-complete');
+  window.setTimeout(finish, 320);
+}
+function animatedPlanWritingLabel(): HTMLElement {
+  const translated = t("Writing plan…");
+  const base = translated.replace(/(?:\.\.\.|…)\s*$/, '');
+  const label = el('span', 'muted plan-writing-label');
+  label.setAttribute('aria-label', translated);
+  if (base === translated) {
+    label.textContent = translated;
+    return label;
+  }
+  label.append(el('span', 'plan-writing-copy', base));
+  const dots = el('span', 'plan-writing-dots');
+  dots.setAttribute('aria-hidden', 'true');
+  dots.append(el('span', 'plan-writing-dot', '.'), el('span', 'plan-writing-dot', '.'), el('span', 'plan-writing-dot', '.'));
+  label.append(dots);
+  return label;
 }
 function paintTaskPlan(): void {
   const plan = taskPlans.get(draftKey());
@@ -902,11 +1146,12 @@ function paintTaskPlan(): void {
     preview.append(error, el('div', 'muted', () => t("Send again to retry, or cancel the plan.")));
   } else if (plan?.requestId) {
     const progress = plan.progress;
+    const writing = !!progress && !['retrying', 'cancelled', 'preparing', 'ready', 'failed'].includes(progress.phase);
     const label = () => !progress ? t("Creating plan…") : progress.phase === 'retrying' ? t("Provider busy · retry {0}{1}", [progress.attempt ?? '', progress.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString()]) : '']) : progress.phase === 'cancelled' ? t("Plan cancelled") : progress.phase === 'preparing' ? t("Preparing plan…") : progress.phase === 'ready' ? t("Plan ready") : progress.phase === 'failed' ? t("Plan failed") : t("Writing plan…");
-    preview.append(el('span', 'muted', label));
+    preview.append(writing ? animatedPlanWritingLabel() : el('span', 'muted', label));
     if (progress?.text || progress?.error) preview.append(el('pre', 'task-progress-text', progress.error ? goalErrorMessage(progress.error) : progress.text));
   }
-  paintTaskActions(); paintDeliveryControls();
+  paintTaskActions(); paintDeliveryControls(); paintComposerModePanels();
 }
 async function createTaskPlan(backend: 'api' | 'chatgpt'): Promise<void> {
   const input = $<HTMLTextAreaElement>('chatInput'), text = input.value.trim();
@@ -915,7 +1160,16 @@ async function createTaskPlan(backend: 'api' | 'chatgpt'): Promise<void> {
   const sessionId = selectedId, projectId = selectedId ? sessions.find(row => row.id === selectedId)?.projectId ?? null : selectedProjectId;
   const requestId = text ? crypto.randomUUID() : null;
   const plan: TaskPlanDraft = { text, requestId, stages: null, sending: false, progress: null, error: null };
-  taskPlans.set(key, plan); paintTaskPlan();
+  taskPlans.set(key, plan);
+  // Once the user submits a Plan request, the plan panel owns that text. The
+  // main composer is immediately free for a separate follow-up instead of
+  // continuing to look like the task has not been submitted yet.
+  if (requestId && draftKey() === key && input.value.trim() === text) {
+    input.value = '';
+    inputDrafts.delete(key);
+    skillsController?.syncDraft();
+  }
+  paintTaskPlan();
   if (!requestId) { input.focus(); return; }
   const current = () => taskPlans.get(key) === plan;
   const unsubscribe = api.onTaskProgress?.(progress => {
@@ -926,20 +1180,27 @@ async function createTaskPlan(backend: 'api' | 'chatgpt'): Promise<void> {
   try {
     const result = await api.draftTaskPlan(text, backend, requestId);
     if (!current()) return;
-    const draft = draftKey() === key ? input.value : inputDrafts.get(key) ?? '';
-    if (draft.trim() !== text) { cancelTaskPlan(key); return; }
     if (result.ok) {
       plan.stages = result.data;
       plan.requestId = null;
-      // The accepted result now owns the captured request. Retire only its
-      // unchanged source draft, before queue admission can yield to new typing.
-      inputDrafts.delete(key);
-      if (draftKey() === key) input.value = '';
       if (sessionId) await queuePreparedPlan(key, plan as TaskPlanDraft & { stages: string[] }, sessionId, projectId);
+    } else {
+      plan.error = result.error;
+      if (draftKey() === key && !input.value.trim()) {
+        input.value = plan.text;
+        inputDrafts.set(key, plan.text);
+        skillsController?.syncDraft();
+      }
     }
-    else plan.error = result.error;
   } catch (error) {
-    if (current()) plan.error = error instanceof Error ? error.message : String(error);
+    if (current()) {
+      plan.error = error instanceof Error ? error.message : String(error);
+      if (draftKey() === key && !input.value.trim()) {
+        input.value = plan.text;
+        inputDrafts.set(key, plan.text);
+        skillsController?.syncDraft();
+      }
+    }
   } finally {
     unsubscribe?.(); plan.requestId = null;
     if (current() && draftKey() === key) paintTaskPlan();
@@ -957,15 +1218,23 @@ function paintPreparedPlan(): void {
     const row = el('div', 'plan-stage');
     const heading = el('div', 'plan-stage-heading');
     const label = el('span', 'stage-number', String(index + 1)); ui(label, 'aria-label', () => t("Stage {0}", [index + 1]));
-    const text = el('span', 'queue-label', stage); text.title = stage; text.dir = 'auto';
+    const content = el('div', 'plan-stage-content');
+    const kicker = el('span', 'plan-stage-kicker', () => t("Stage {0}", [index + 1]));
+    const text = el('div', 'plan-stage-text', stage); text.title = stage; text.dir = 'auto';
     const field = document.createElement('textarea'); field.dir = 'auto'; field.value = stage; field.maxLength = 16000; field.hidden = true;
+    field.className = 'plan-stage-editor';
     ui(field, 'aria-label', () => t("Edit stage {0}", [index + 1]));
     const error = el('span', 'stage-error', () => t("Enter text or delete this stage.")); error.id = `planStageError-${index}`; error.hidden = !!stage.trim();
     const validate = () => { error.hidden = !!field.value.trim(); field.setAttribute('aria-invalid', String(!error.hidden)); paintDeliveryControls(); };
     field.setAttribute('aria-describedby', error.id); field.setAttribute('aria-invalid', String(!error.hidden));
     field.oninput = () => { plan.stages[index] = field.value; text.textContent = field.value; text.title = field.value; validate(); };
     const edit = dockAction(() => t("Edit stage {0}", [index + 1]), 'i-pencil', () => {
-      field.hidden = !field.hidden; edit.setAttribute('aria-expanded', String(!field.hidden)); if (!field.hidden) field.focus();
+      const opening = field.hidden !== false;
+      field.hidden = !opening;
+      text.hidden = opening;
+      row.classList.toggle('is-editing', opening);
+      edit.setAttribute('aria-expanded', String(opening));
+      if (opening) field.focus();
     });
     edit.setAttribute('aria-expanded', 'false');
     const remove = dockAction(() => t("Delete stage {0}", [index + 1]), 'i-trash', () => {
@@ -975,7 +1244,9 @@ function paintPreparedPlan(): void {
     });
     edit.disabled = remove.disabled = field.disabled = plan.sending;
     ui(heading, 'title', () => selectedId ? t("Queued at Session finish; edit or delete this checkpoint independently.") : index === 0 ? t("Send includes your complete request and the full plan. Later stages are queued as verification checkpoints.") : t("Included in the first message, then queued as a checkpoint at Session finish or after a completed answer when enabled."));
-    heading.append(label, text, edit, remove); row.append(heading, field, error); return row;
+    const actions = el('div', 'plan-stage-actions'); actions.append(edit, remove);
+    content.append(kicker, text, field, error);
+    heading.append(label, content, actions); row.append(heading); return row;
   }));
 }
 async function sendPreparedPlan(): Promise<void> {
@@ -990,7 +1261,7 @@ async function sendPreparedPlan(): Promise<void> {
   plan.sending = true; paintPreparedPlan();
   try {
     const sent = await sendComposer(undefined, tasks, plan.text);
-    if (taskPlans.get(key) === plan && sent) { await refreshInputQueue(); if (taskPlans.get(key) === plan) cancelTaskPlan(key); }
+    if (taskPlans.get(key) === plan && sent) { await refreshInputQueue(); if (taskPlans.get(key) === plan) completeTaskPlan(key); }
   } finally {
     if (taskPlans.get(key) === plan) { plan.sending = false; if (draftKey() === key) paintTaskPlan(); }
   }
@@ -1009,7 +1280,7 @@ async function queuePreparedPlan(key: string, plan: TaskPlanDraft & { stages: st
     if (result) {
       // The result already retired its source prompt. Admission leaves any newer
       // composer draft and attachments alone; the durable queue owns the stages.
-      if (taskPlans.get(key) === plan) cancelTaskPlan(key);
+      if (taskPlans.get(key) === plan) completeTaskPlan(key);
       await refreshInputQueue();
     }
   } finally {
@@ -1117,6 +1388,7 @@ async function refreshSessionControls(): Promise<void> {
   $<HTMLButtonElement>('compactSession').disabled = !!controls.blocked || !!controls.job?.busy;
   $('cancelCompaction').hidden = !controls.job?.busy;
   ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.") : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
+  paintComposerModePanels();
 }
 
 async function navigateHistory(before: number | null, prepend = false): Promise<void> {
@@ -1574,6 +1846,35 @@ function retainedInputImages(event: Extract<SessionEvent, { kind: 'user_message'
     .filter(image => /^data:image\/webp;base64,/.test(image.dataUrl)).slice(0, 4) : [];
 }
 
+function inputAutomationFor(inputId: string | undefined): InputAutomation | undefined {
+  if (!inputId) return undefined;
+  return startingInputs.get(inputId)?.automation ?? pendingComposerInputs.find(entry => entry.id === inputId)?.automation;
+}
+
+function sentAsGoalTag(): HTMLElement {
+  const tag = el('span', 'message-mode-tag', () => t("Sent as Goal"));
+  ui(tag, 'title', () => t("Sent as Goal"));
+  return tag;
+}
+
+function sentAsLoopTag(): HTMLElement {
+  const tag = el('span', 'message-mode-tag', () => t("Sent as Loop"));
+  ui(tag, 'title', () => t("Sent as Loop"));
+  return tag;
+}
+
+function inputIsPlan(inputId: string | undefined): boolean {
+  if (!inputId) return false;
+  const entry = startingInputs.get(inputId) ?? pendingComposerInputs.find(item => item.id === inputId);
+  return entry?.stages !== undefined;
+}
+
+function sentAsPlanTag(): HTMLElement {
+  const tag = el('span', 'message-mode-tag', () => t("Sent as Plan"));
+  ui(tag, 'title', () => t("Sent as Plan"));
+  return tag;
+}
+
 function eventBody(event: SessionEvent, context?: { id: string; current: () => boolean; history: readonly SessionEvent[] }): HTMLElement {
   switch (event.kind) {
     case 'session_start':
@@ -1600,6 +1901,10 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       // complete instruction frame validates; keep the authored suffix exact.
       const userText = event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text;
       if (userText) box.append(textBlock('msg user-message-text', userText, event.authoredText === undefined && event.message.truncated, event.authoredText?.length ?? event.message.chars));
+      const automation = inputAutomationFor(event.inputId);
+      if (automation === 'goal') box.append(sentAsGoalTag());
+      if (automation === 'loop') box.append(sentAsLoopTag());
+      if (inputIsPlan(event.inputId)) box.append(sentAsPlanTag());
       if (event.inputDelivery) {
         box.classList.add('has-input-receipt');
         const receipt = el('span', 'input-receipt');
@@ -3101,6 +3406,9 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
     text.setAttribute('dir', 'auto');
     row.append(text);
   }
+  if (entry.automation === 'goal') row.append(sentAsGoalTag());
+  if (entry.automation === 'loop') row.append(sentAsLoopTag());
+  if (entry.stages !== undefined) row.append(sentAsPlanTag());
   const receipt = el('span', 'pending-message-status');
   ui(receipt, 'title', status); ui(receipt, 'aria-label', status);
   if (entry.error || entry.state === 'failed') {
@@ -3201,15 +3509,17 @@ async function refreshInputQueue(): Promise<void> {
   const taskList = $('finishQueue'); taskList.hidden = queuedTasks.length === 0;
   const oldCards = new Map([...taskList.children].map(node => [(node as HTMLElement).dataset.inputId, node as HTMLElement]));
   const dragging = !!taskList.querySelector('.is-dragging');
-  reconcileChildren(taskList, queuedTasks.map(entry => {
+  reconcileChildren(taskList, queuedTasks.map((entry, index) => {
     const existing = oldCards.get(entry.id);
     if (dragging && existing) return existing;
     if (entry.state === 'queued' && existing?.classList.contains('is-editing')) return existing;
     const card = el('div', 'queued-input'); card.dataset.inputId = entry.id;
     if (projectedIds.has(entry.id)) ui(card, 'aria-label', () => t("Plan stage · waiting for the first message to be sent"));
+    const order = el('span', 'queue-order', String(index + 1));
+    ui(order, 'aria-label', () => `${t("Queued")} ${index + 1}`);
     const label = el('span', 'queue-label', entry.text); ui(label, 'title', () => `${entry.state === 'queued' ? (entry.mode === 'after-turn' ? t("After the next completed answer") : t("At Session finish or after a completed answer")) : t("Awaiting receipt")} · ${entry.text}`);
     label.dir = 'auto';
-    card.append(icon('i-clock'), label);
+    card.append(order, label);
     if (entry.state === 'queued') {
       const queueSessionSummary = sessions.find(row => row.id === selectedId);
       const modelSelection = queueSessionSummary?.selectedModel;
@@ -3410,16 +3720,24 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
   const attachmentPayload = { images: images.filter((file): file is InputImage => 'dataUrl' in file), attachments: images.filter((file): file is InputAttachment => 'id' in file),
     ...(mode === 'auto' && !plan && selectedId && controlledSessionId === selectedId && controlledSelection === generation &&
       controlledCanInject && images.some(file => 'id' in file) && injectableAttachments(images) ? { attachmentDelivery: 'tool' as const } : {}) };
-  const objective = plan ? planObjective : mode === 'finish' ? undefined : $<HTMLTextAreaElement>('sessionObjective').value.trim() || undefined;
-  startingInputs.set(id, { id, sessionId, projectId, text, ...attachmentPayload, stages: plan?.slice(1), objective, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn',
-    dueAt, ...modelSettings, state: 'queued', owner: null, createdAt: dueAt, conversationId: null });
+  const automation = $<HTMLSelectElement>('chatAutomation').value as InputAutomation;
+  const pendingAutomation = pendingComposerAutomation.get(key);
+  // Slash Goal/Loop follows the Codex composer pattern: the next authored message is
+  // the task. Passing an explicit empty objective clears any older saved task at the
+  // same delivery boundary without wrapping or duplicating the user's message.
+  const objective = plan ? planObjective : mode === 'finish' ? undefined :
+    pendingAutomation?.mode === automation ? '' : $<HTMLTextAreaElement>('sessionObjective').value.trim() || undefined;
+  startingInputs.set(id, { id, sessionId, projectId, text, ...attachmentPayload, stages: plan?.slice(1), objective,
+    automation: mode === 'finish' ? undefined : automation, loopAfterTurn: mode === 'finish' ? undefined : openingLoopDelivery(),
+    mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings,
+    state: 'queued', owner: null, createdAt: dueAt, conversationId: null });
   input.value = ''; inputDrafts.delete(key);
   imageDrafts.delete(key); paintComposerImages();
   if (sessionId === null) pendingNewInput = { id, generation };
   void refreshInputQueue();
   paintDeliveryControls();
   try {
-    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, stages: plan?.slice(1), objective, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
+    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, stages: plan?.slice(1), objective, automation: mode === 'finish' ? undefined : automation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
     if (cancelledStarts.has(id)) return;
     if (!result) {
       if (selectedId === sessionId && selectionGeneration === generation && !input.value) input.value = authoredDraft;
@@ -3433,6 +3751,12 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
     // that durable row visible while the next listing crosses the process boundary.
     inputQueueGeneration++;
     pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== result.id), result];
+    if (pendingComposerAutomation.get(key) === pendingAutomation) {
+      pendingComposerAutomation.delete(key);
+      const currentAutomation = $<HTMLSelectElement>('chatAutomation');
+      if (draftKey() === key && currentAutomation.value === pendingAutomation?.mode) delete currentAutomation.dataset.edited;
+      if (draftKey() === key) paintAutomationSwitch();
+    }
     if (sessionId === null && selectionGeneration === generation && pendingNewInput?.id === id && result.automation &&
         ($<HTMLSelectElement>('chatAutomation').value !== result.automation || openingLoopDelivery() !== result.loopAfterTurn))
       await run(api.setInputAutomation(result.id, $<HTMLSelectElement>('chatAutomation').value as InputAutomation, openingLoopDelivery()));
@@ -3518,6 +3842,11 @@ export function initChat(next: Deps): void {
     input: $<HTMLTextAreaElement>('chatInput'),
     getDraftIdentity: () => `${selectionGeneration}:${draftKey()}`
   });
+  composerSlash = createComposerSlashAutocomplete({
+    input: $<HTMLTextAreaElement>('chatInput'),
+    popup: $('skillAutocomplete'),
+    onActivate: command => activateComposerSlashCommand(command.id)
+  });
   const agentToggle = el('button', 'btn btn-icon', '◫') as HTMLButtonElement;
   agentToggle.id = 'agentPanelToggle'; agentToggle.type = 'button'; agentToggle.hidden = true;
   ui(agentToggle, 'aria-label', () => t("Toggle sub-agent side panel")); agentToggle.setAttribute('aria-expanded', 'false');
@@ -3566,6 +3895,7 @@ export function initChat(next: Deps): void {
   $('chatAutomation').addEventListener('change', async () => {
     goalIntentGeneration++;
     const select = $<HTMLSelectElement>('chatAutomation');
+    pendingComposerAutomation.delete(draftKey());
     cancelGoalRequest();
     if (select.value === 'off') goalDraftView = null;
     select.dataset.edited = 'true'; paintAutomationSwitch();
@@ -3598,10 +3928,37 @@ export function initChat(next: Deps): void {
     finally {
       select.disabled = false;
       if (id === selectedId && generation === selectionGeneration) void refreshSessionControls();
+      paintComposerModePanels();
     }
   });
-  $('sessionObjective').addEventListener('input', () => { cancelGoalRequest(); goalIntentGeneration++; $('sessionObjective').dataset.edited = 'true'; delete $('sessionObjective').dataset.saved; paintTaskActions(); });
+  $('sessionObjective').addEventListener('input', () => { cancelGoalRequest(); goalIntentGeneration++; $('sessionObjective').dataset.edited = 'true'; delete $('sessionObjective').dataset.saved; paintTaskActions(); paintComposerModePanels(); });
   $('sessionObjectiveMode').addEventListener('change', () => { cancelGoalRequest(); goalIntentGeneration++; $('sessionObjective').dataset.edited = 'true'; delete $('sessionObjective').dataset.saved; paintTaskActions(); });
+  $('composerAutomationChip').addEventListener('click', () => {
+    const automation = $<HTMLSelectElement>('chatAutomation');
+    const pending = pendingComposerAutomation.get(draftKey());
+    if (pending && pending.mode === automation.value) {
+      pendingComposerAutomation.delete(draftKey());
+      automation.value = pending.previous;
+      delete automation.dataset.edited;
+      paintAutomationSwitch();
+      $<HTMLTextAreaElement>('chatInput').focus();
+      return;
+    }
+    automation.value = 'off'; automation.dispatchEvent(new Event('change'));
+  });
+  $('composerPlanChip').addEventListener('click', () => {
+    const plan = taskPlans.get(draftKey());
+    if (!plan || plan.text || plan.requestId || plan.stages || plan.error || plan.sending) return;
+    cancelTaskPlan();
+    $<HTMLTextAreaElement>('chatInput').focus();
+  });
+  $('composerModeCancelPlan').addEventListener('click', () => cancelTaskPlan());
+  $('composerModeCompact').addEventListener('click', () => {
+    if (!selectedId) return;
+    compactPanelSessionId = selectedId; paintComposerModePanels();
+    $<HTMLButtonElement>('compactSession').click();
+  });
+  $('composerModeCancelCompact').addEventListener('click', () => $<HTMLButtonElement>('cancelCompaction').click());
   for (const buttonId of ['saveSessionObjective'] as const) {
     $(buttonId).addEventListener('click', async () => {
       const id = selectedId;
@@ -3667,9 +4024,11 @@ export function initChat(next: Deps): void {
   for (const [buttonId, cancel] of [['compactSession', false], ['cancelCompaction', true]] as const) {
     $(buttonId).addEventListener('click', async () => {
       const id = selectedId; if (!id) return;
+      compactPanelSessionId = id;
+      paintComposerModePanels();
       const button = $<HTMLButtonElement>(buttonId); button.disabled = true;
       try { await run(cancel ? api.cancelSessionCompaction(id) : api.compactSession(id)); }
-      finally { button.disabled = false; if (selectedId === id) void refreshSessionControls(); }
+      finally { button.disabled = false; if (selectedId === id) void refreshSessionControls(); else paintComposerModePanels(); }
     });
   }
   const appendImages = (key: string, chosen: InputAttachment[] | null | undefined): void => {
@@ -3741,23 +4100,30 @@ export function initChat(next: Deps): void {
   });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') for (const menu of composerMenus) menu.open = false; });
   $('chatInput').addEventListener('input', () => {
-    skillsController?.onInput();
-    const hasText = !!$<HTMLTextAreaElement>('chatInput').value.trim();
-    const plan = taskPlans.get(draftKey());
-    if (plan && !plan.stages && (plan.requestId || !hasText)) {
-      cancelTaskPlan();
-      if (hasText) taskPlans.set(draftKey(), { text: '', requestId: null, stages: null, sending: false, progress: null, error: null });
+    if (composerSlash?.matchesInput()) {
+      skillsController?.syncDraft();
+      composerSlash.onInput();
+    } else {
+      composerSlash?.hide();
+      skillsController?.onInput();
     }
     paintDeliveryControls(); paintTaskActions();
   });
   $('chatInput').addEventListener('keydown', (event) => {
+    if (composerSlash?.onKeydown(event)) return;
     if (skillsController?.onKeydown(event)) return;
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (currentPreparedPlan() || $<HTMLTextAreaElement>('chatInput').value.trim() || imageDrafts.get(draftKey())?.length) $<HTMLFormElement>('composer').requestSubmit(); }
   });
   $('composerSettings').addEventListener('toggle', paintTaskActions);
   initContextMeter();
   $('createPlan').addEventListener('click', () => { if (taskPlans.has(draftKey())) cancelTaskPlan(); else void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); });
-  $('composer').addEventListener('submit', (event) => { event.preventDefault(); if (currentPreparedPlan()) void sendPreparedPlan(); else if (taskPlans.has(draftKey())) { if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); } else void sendComposer(); });
+  $('composer').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (consumeComposerSlashCommand()) return;
+    if (currentPreparedPlan()) void sendPreparedPlan();
+    else if (taskPlans.has(draftKey())) { if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); }
+    else void sendComposer();
+  });
 
   $('sessionList').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-id]');

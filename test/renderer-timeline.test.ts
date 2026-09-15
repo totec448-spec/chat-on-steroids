@@ -134,6 +134,15 @@ async function settle(ms = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+async function executeSlash(w: JSDOM['window'], command: string): Promise<void> {
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = command;
+  input.setSelectionRange(command.length, command.length);
+  input.dispatchEvent(new w.Event('input', { bubbles: true }));
+  input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await settle();
+}
+
 async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; sessions?: SessionSummary[]; pro?: boolean } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
@@ -1271,21 +1280,252 @@ it('shows Stop immediately for a queued first send, switches to Send for a new d
   expect(send.dataset.action).toBe('send');
 });
 
-it('opens the saved task editor from the Goal dock and still closes it on outside clicks', async () => {
+it('shows slash Goal as a compact composer mode instead of opening a second objective editor', async () => {
   const { w } = await boot([]);
-  (w.document.querySelector('#automationSwitch [data-mode="goal"]') as HTMLButtonElement).click();
+  await executeSlash(w, '/goal');
+  const chip = w.document.getElementById('composerAutomationChip') as HTMLButtonElement;
+  expect(chip.hidden).toBe(false);
+  expect(chip.textContent).toContain('Goal');
+  expect(w.document.getElementById('composerAutomationPanel')).toBeNull();
+  expect(w.document.getElementById('composerModeObjective')).toBeNull();
+  chip.click();
   await settle();
-  const menu = w.document.getElementById('composerSettings') as HTMLDetailsElement;
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('off');
+  expect(chip.hidden).toBe(true);
+});
+
+it('executes native Goal and Loop slash commands before a colliding Skill and never sends the command text', async () => {
+  const { w, live } = await boot([]);
+  const skillsList = vi.fn(async () => ({ ok: true, data: {
+    directory: 'C:\\skills',
+    skills: [{ id: 'goal', name: 'Conflicting goal skill', description: 'Must not override the native Goal command.' }],
+    errors: []
+  } }));
+  (w as any).api.skillsList = skillsList;
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/goal'; input.setSelectionRange(5, 5); input.dispatchEvent(new w.Event('input', { bubbles: true }));
+  const popup = w.document.getElementById('skillAutocomplete')!;
+  expect(popup.hidden).toBe(false);
+  expect(popup.querySelector('.composer-command-copy strong')?.textContent).toBe('Goal');
+  expect(popup.textContent).not.toContain('Conflicting goal skill');
+  expect(skillsList).not.toHaveBeenCalled();
+  input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await settle();
+  expect(live.controlCalls).not.toContainEqual({ id: summary([]).id, action: 'goal' });
+  expect(live.sent).toHaveLength(0);
+  expect(input.value).toBe('');
+  expect(w.document.activeElement).toBe(input);
+  expect(w.document.getElementById('composerAutomationChip')!.textContent).toContain('Goal');
+
+  await executeSlash(w, '/loop');
+  expect(live.controlCalls).not.toContainEqual({ id: summary([]).id, action: 'loop' });
+  expect(live.sent).toHaveLength(0);
+  expect(w.document.getElementById('composerAutomationChip')!.textContent).toContain('Loop');
+});
+
+it('treats the first main-composer message after /goal as the Goal task on an existing chat', async () => {
+  const { w, live } = await boot([]);
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   const objective = w.document.getElementById('sessionObjective') as HTMLTextAreaElement;
-  const edit = w.document.querySelector('#activeGoalRow button[aria-label="Edit task"]') as HTMLButtonElement;
-  expect(edit).not.toBeNull();
-  menu.open = false;
-  edit.click();
-  expect(menu.open).toBe(true);
-  expect(w.document.activeElement).toBe(objective);
-  w.document.body.click();
-  expect(menu.open).toBe(false);
+  objective.value = 'Old saved objective';
+  objective.dataset.saved = objective.value;
+  await executeSlash(w, '/goal');
+  expect(live.controlCalls).not.toContainEqual({ id: summary([]).id, action: 'goal' });
+  expect(w.document.activeElement).toBe(input);
+  input.value = 'esse é o goal';
+  input.dispatchEvent(new w.Event('input', { bubbles: true }));
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
   await settle();
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ sessionId: summary([]).id, text: 'esse é o goal', automation: 'goal', objective: '' });
+  expect(input.value).toBe('');
+  expect(w.document.getElementById('composerAutomationChip')!.hidden).toBe(true);
+  expect(w.document.querySelector('.pending-message .message-mode-tag')?.textContent).toBe('Sent as Goal');
+});
+
+it('uses the same composer flow for slash Loop and labels the sent task as Loop', async () => {
+  const { w, live } = await boot([], false);
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+
+  await executeSlash(w, '/loop');
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('loop');
+  expect(w.document.getElementById('composerAutomationChip')!.hidden).toBe(false);
+  expect(w.document.getElementById('composerAutomationChip')!.textContent).toContain('Loop');
+  expect(w.document.activeElement).toBe(input);
+
+  input.value = 'continue verificando';
+  input.dispatchEvent(new w.Event('input', { bubbles: true }));
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ text: 'continue verificando', automation: 'loop', objective: '' });
+  expect(input.value).toBe('');
+  expect(w.document.getElementById('composerAutomationChip')!.hidden).toBe(true);
+  expect(w.document.querySelector('.pending-message .message-mode-tag')?.textContent).toBe('Sent as Loop');
+});
+
+it('activates a built-in slash choice on click, closes the popup, and returns to the main composer', async () => {
+  const { w, live } = await boot([], false);
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/'; input.setSelectionRange(1, 1);
+  input.dispatchEvent(new w.Event('input', { bubbles: true }));
+  const popup = w.document.getElementById('skillAutocomplete')!;
+  expect(popup.hidden).toBe(false);
+  const goal = [...popup.querySelectorAll<HTMLButtonElement>('.composer-command-option')]
+    .find(button => button.querySelector('.composer-command-copy strong')?.textContent === 'Goal')!;
+  goal.click(); await settle();
+  expect(popup.hidden).toBe(true);
+  expect(input.value).toBe('');
+  expect(live.sent).toHaveLength(0);
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('goal');
+  expect(w.document.getElementById('composerAutomationChip')!.hidden).toBe(false);
+  expect(w.document.activeElement).toBe(input);
+});
+
+it('uses the main composer as the slash Goal task and lets Plan coexist without sending slash text', async () => {
+  const { w, live } = await boot([], false);
+  await executeSlash(w, '/goal');
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('goal');
+  expect(w.document.getElementById('composerAutomationChip')!.textContent).toContain('Goal');
+  expect(live.sent).toHaveLength(0);
+
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'esse é o goal'; input.dispatchEvent(new w.Event('input', { bubbles: true }));
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ text: 'esse é o goal', automation: 'goal', objective: '' });
+
+  await executeSlash(w, '/loop');
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('loop');
+  expect(w.document.getElementById('composerAutomationChip')!.textContent).toContain('Loop');
+  expect(live.sent).toHaveLength(1);
+
+  const draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Build foundation', 'Verify it'] }));
+  (w as any).api.draftTaskPlan = draftTaskPlan;
+  await executeSlash(w, '/plan');
+  expect(w.document.getElementById('composerPlanChip')!.hidden).toBe(false);
+  expect(w.document.getElementById('composerPlanPanel')!.hidden).toBe(true);
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('loop');
+  expect(live.sent).toHaveLength(1);
+  expect(input.placeholder).toContain('plan');
+  input.value = 'Build the feature'; input.dispatchEvent(new w.Event('input', { bubbles: true }));
+  input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await settle();
+  expect(draftTaskPlan).toHaveBeenCalledWith('Build the feature', 'chatgpt', expect.any(String));
+  expect(w.document.querySelectorAll('#taskPlanPreview .plan-stage')).toHaveLength(2);
+  expect(w.document.getElementById('composerAutomationChip')!.hidden).toBe(false);
+  expect(w.document.getElementById('composerPlanChip')!.hidden).toBe(true);
+  expect(w.document.getElementById('composerPlanPanel')!.hidden).toBe(false);
+  expect(live.sent).toHaveLength(1);
+  (w.document.getElementById('composerModeCancelPlan') as HTMLButtonElement).click();
+  expect(w.document.getElementById('composerPlanPanel')!.classList.contains('is-dock-leaving')).toBe(true);
+  await settle(240);
+  expect(w.document.getElementById('composerPlanPanel')!.hidden).toBe(true);
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('loop');
+});
+
+it('arms slash Plan as a chip, tags the eventual delivery, and retires its panel after completion', async () => {
+  const { w, live } = await boot([], false);
+  let finishPlan!: (value: any) => void;
+  const draftTaskPlan = vi.fn(() => new Promise(resolve => { finishPlan = resolve; }));
+  (w as any).api.draftTaskPlan = draftTaskPlan;
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+
+  await executeSlash(w, '/plan');
+  const chip = w.document.getElementById('composerPlanChip') as HTMLButtonElement;
+  const panel = w.document.getElementById('composerPlanPanel')!;
+  expect(chip.hidden).toBe(false);
+  expect(panel.hidden).toBe(true);
+  expect(w.document.activeElement).toBe(input);
+
+  input.value = 'esse é o plano';
+  input.dispatchEvent(new w.Event('input', { bubbles: true }));
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(draftTaskPlan).toHaveBeenCalledWith('esse é o plano', 'chatgpt', expect.any(String));
+  expect(input.value).toBe('');
+  expect(chip.hidden).toBe(true);
+  expect(panel.hidden).toBe(false);
+  expect(panel.classList.contains('is-plan-writing')).toBe(true);
+  expect(w.document.getElementById('composerPlanState')!.textContent).toContain('Creating');
+  expect(w.document.getElementById('composerPlanHint')!.textContent).toBe('esse é o plano');
+  expect(w.document.querySelectorAll('#taskPlanPreview .plan-stage')).toHaveLength(0);
+
+  finishPlan({ ok: true, data: ['Build the complete feature', 'Verify the result'] });
+  await settle();
+  expect(panel.classList.contains('is-plan-writing')).toBe(false);
+  expect(w.document.querySelectorAll('#taskPlanPreview .plan-stage')).toHaveLength(2);
+  const firstStage = w.document.querySelector<HTMLElement>('#taskPlanPreview .plan-stage')!;
+  expect(firstStage.querySelector('.stage-number')?.textContent).toBe('1');
+  expect(firstStage.querySelector('.plan-stage-kicker')?.textContent).toBe('Stage 1');
+  expect(firstStage.querySelector('.plan-stage-text')?.textContent).toBe('Build the complete feature');
+  expect(firstStage.querySelector('.plan-stage-actions [aria-label="Edit stage 1"]')).not.toBeNull();
+
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ text: 'Build the complete feature', stages: ['Verify the result'], objective: 'esse é o plano' });
+  expect(w.document.querySelector('.pending-message .message-mode-tag')?.textContent).toBe('Sent as Plan');
+  expect(panel.classList.contains('is-plan-complete')).toBe(true);
+  await settle(340);
+  expect(panel.hidden).toBe(true);
+});
+
+it('cancels a generated slash Plan as one unit without sending any stage', async () => {
+  const { w, live } = await boot([], false);
+  (w as any).api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Implement the task', 'Verify the result'] }));
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+
+  await executeSlash(w, '/plan');
+  input.value = 'teste';
+  input.dispatchEvent(new w.Event('input', { bubbles: true }));
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+
+  const panel = w.document.getElementById('composerPlanPanel')!;
+  const cancel = w.document.getElementById('composerModeCancelPlan') as HTMLButtonElement;
+  expect(panel.hidden).toBe(false);
+  expect(w.document.querySelectorAll('#taskPlanPreview .plan-stage')).toHaveLength(2);
+  expect(cancel.disabled).toBe(false);
+
+  cancel.click();
+  expect(panel.classList.contains('is-dock-leaving')).toBe(true);
+  await settle(240);
+  expect(panel.hidden).toBe(true);
+  expect(w.document.querySelectorAll('#taskPlanPreview .plan-stage')).toHaveLength(0);
+  expect(w.document.getElementById('composerPlanChip')!.hidden).toBe(true);
+  expect(live.sent).toHaveLength(0);
+  expect(input.value).toBe('');
+});
+
+it('runs and cancels Compact from its dock only when the selected session exposes the existing control', async () => {
+  const { w, live } = await boot([]);
+  await executeSlash(w, '/compact');
+  expect(live.controlCalls).toContainEqual({ id: summary([]).id, action: 'compact' });
+  expect(live.sent).toHaveLength(0);
+  expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).value).toBe('');
+  expect(w.document.getElementById('composerCompactPanel')!.hidden).toBe(false);
+  expect(w.document.getElementById('composerCompactState')!.textContent).toBe('Running');
+  const runningStatus = w.document.querySelector<HTMLElement>('#composerCompactStatus .compact-running-label')!;
+  expect(runningStatus.textContent).toBe('Compaction is running in ChatGPT...');
+  expect(runningStatus.getAttribute('aria-label')).toBe('Compaction is running in ChatGPT.');
+  expect(runningStatus.querySelectorAll('.compact-running-dot')).toHaveLength(3);
+  const cancel = w.document.getElementById('composerModeCancelCompact') as HTMLButtonElement;
+  expect(cancel.hidden).toBe(false);
+  cancel.click(); await settle();
+  expect(live.controlCalls).toContainEqual({ id: summary([]).id, action: 'cancel' });
+  expect(w.document.getElementById('composerCompactState')!.textContent).toBe('Ready');
+});
+
+it('consumes /compact on New Chat without fabricating a session or sending it as prose', async () => {
+  const { w, live } = await boot([], false);
+  await executeSlash(w, '/compact');
+  expect(live.controlCalls).toHaveLength(0);
+  expect(live.sent).toHaveLength(0);
+  expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).value).toBe('');
+  expect(w.document.getElementById('composerCompactPanel')!.hidden).toBe(true);
 });
 
 it('retains the New Chat objective through Goal, Off and Goal toggles', async () => {
@@ -1593,6 +1833,7 @@ it('queues every generated stage in an existing session without Send and preserv
   expect(input.value).toBe('');
   input.value = ''; input.dispatchEvent(new w.Event('input'));
   expect(w.document.querySelectorAll('#finishQueue .queued-input')).toHaveLength(2);
+  expect([...w.document.querySelectorAll('#finishQueue .queue-order')].map(node => node.textContent)).toEqual(['1', '2']);
   expect(w.document.querySelectorAll('[aria-label="Remove queued task"]')).toHaveLength(2);
   expect(w.document.getElementById('taskPlanPreview')!.hidden).toBe(true);
   api.cancelInput = vi.fn(async (id: string) => { live.inputs = live.inputs.filter(row => row.id !== id); return { ok: true, data: true }; });
@@ -1668,7 +1909,7 @@ it('does not erase a new composer draft while completed-plan queue admission is 
   expect(w.document.querySelectorAll('#finishQueue .queued-input')).toHaveLength(2);
 });
 
-it('clearing the complete planner task cancels generation and restores Create plan', async () => {
+it('cancels detached plan generation only through the explicit Plan controls', async () => {
   const { w, live } = await boot([], false);
   const api = (w as any).api;
   (await api.getState()).data.config.ui.finishTool = true;
@@ -1677,7 +1918,8 @@ it('clearing the complete planner task cancels generation and restores Create pl
   api.cancelTaskRequest = vi.fn(async () => ({ ok: true, data: true }));
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Write a poem'; w.document.getElementById('createPlan')!.click(); await settle();
-  input.value = ''; input.dispatchEvent(new w.Event('input'));
+  expect(input.value).toBe('');
+  (w.document.getElementById('composerModeCancelPlan') as HTMLButtonElement).click();
   expect(api.cancelTaskRequest).toHaveBeenCalled();
   expect(w.document.getElementById('createPlan')!.getAttribute('aria-pressed')).toBe('false');
   expect(w.document.getElementById('createPlan')!.textContent).toBe('Create plan');
@@ -1704,6 +1946,9 @@ it('routes an armed empty-composer plan through the planner and paints only its 
   expect(w.document.getElementById('taskPlanPreview')!.textContent).not.toContain('Wrong work');
   progress({ requestId, phase: 'generating', text: 'Design the SVG paths' });
   expect(w.document.getElementById('taskPlanPreview')!.textContent).toContain('Design the SVG paths');
+  const writing = w.document.querySelector<HTMLElement>('.plan-writing-label')!;
+  expect(writing.getAttribute('aria-label')).toBe('Writing plan…');
+  expect(writing.querySelectorAll('.plan-writing-dot')).toHaveLength(3);
   progress({ requestId, phase: 'retrying', text: '', attempt: 2, retryAt: Date.now() + 30000, error: 'rate_limited' });
   expect(w.document.getElementById('taskPlanPreview')!.textContent).toContain('Provider busy · retry 2');
   expect(w.document.getElementById('createPlan')!.getAttribute('aria-busy')).toBe('true');
@@ -1814,7 +2059,7 @@ it('preserves an Off goal and never sends its late generated opening after Off a
   expect(cancel).toHaveBeenCalledWith(requestId);
   progress({ requestId, phase: 'generating', text: 'Late provider text' });
   finish({ ok: true, data: { reply: 'Must not send', model: 'fixture' } });
-  await settle();
+  await settle(240);
   expect(live.sent).toEqual([]);
   expect(objective.value).toBe('Keep this objective');
   expect(w.document.getElementById('goalLifecycle')!.hidden).toBe(true);
@@ -1869,8 +2114,40 @@ it('shows Loop settling, its real waiting deadline, and generated text in the sa
   expect(row.textContent).toContain('Continue with the remaining checks');
   expect(row.querySelector('[role="timer"]')).toBeNull();
   controls.automation = 'off'; await append([]);
+  expect(row.classList.contains('is-dock-leaving')).toBe(true);
+  await settle(240);
   expect(row.hidden).toBe(true);
-  expect(row.textContent).toBe('');
+  expect(row.textContent).toContain('Generating a continuation');
+});
+
+it('ends an active Goal from its lifecycle row without stopping the current turn', async () => {
+  const { w, live, append } = await boot([]);
+  const api = (w as any).api;
+  const stop = vi.fn(async () => ({ ok: true, data: {} }));
+  api.stopSessionTurn = stop;
+  const controls = { automation: 'goal', objective: 'Finish the task', blocked: '', job: null,
+    goalWait: { reason: 'quiet', until: Date.now() + 60_000 }, goalDraft: null as unknown };
+  api.getSessionControls = async () => ({ ok: true, data: controls });
+  const originalSet = api.setSessionAutomation;
+  api.setSessionAutomation = async (id: string, action: string) => {
+    controls.automation = action;
+    return originalSet(id, action);
+  };
+  await append([]);
+  const automation = w.document.getElementById('chatAutomation') as HTMLSelectElement;
+  const row = w.document.getElementById('goalLifecycle')!;
+  const end = row.querySelector<HTMLButtonElement>('.goal-lifecycle-end');
+  expect(automation.value).toBe('goal');
+  expect(end?.textContent).toContain('End goal');
+  end!.click();
+  expect(end!.disabled).toBe(true);
+  await settle();
+  expect(live.controlCalls).toContainEqual({ id: summary([]).id, action: 'off' });
+  expect(automation.value).toBe('off');
+  expect(stop).not.toHaveBeenCalled();
+  expect(row.classList.contains('is-dock-leaving')).toBe(true);
+  await settle(240);
+  expect(row.hidden).toBe(true);
 });
 
 it('follows the accepted New Chat receipt while preserving a typed follow-up', async () => {
@@ -1946,7 +2223,7 @@ it('applies Off to the exact accepted New Chat opening while preserving an unrel
   expect(live.sent).toHaveLength(1);
 });
 
-it('cancels pending plan generation when its own draft changes', async () => {
+it('keeps pending plan generation in its panel while the composer accepts a new draft', async () => {
   const { w, live, progress } = await boot([], false);
   const api = (w as any).api;
   (await api.getState()).data.config.ui.finishTool = true;
@@ -1957,11 +2234,14 @@ it('cancels pending plan generation when its own draft changes', async () => {
   input.value = 'Original plan';
   w.document.getElementById('createPlan')!.click(); await settle();
   const requestId = api.draftTaskPlan.mock.calls[0][2];
+  expect(input.value).toBe('');
   input.value = 'Replacement plan'; input.dispatchEvent(new w.Event('input'));
-  expect(api.cancelTaskRequest).toHaveBeenCalledWith(requestId);
+  expect(api.cancelTaskRequest).not.toHaveBeenCalledWith(requestId);
   progress({ requestId, phase: 'generating', text: 'Old plan text' });
-  expect(w.document.getElementById('taskPlanPreview')!.textContent).not.toContain('Old plan text');
+  expect(w.document.getElementById('taskPlanPreview')!.textContent).toContain('Old plan text');
   finish({ ok: true, data: ['Old first stage', 'Old second stage'] }); await settle();
+  expect(input.value).toBe('Replacement plan');
+  expect(w.document.querySelectorAll('#taskPlanPreview .plan-stage')).toHaveLength(2);
   expect(live.sent).toHaveLength(0);
 });
 
@@ -2004,7 +2284,7 @@ it('retains an existing running chat planner across navigation and accepts its r
   progress({ requestId, phase: 'generating', text: 'Original chat progress' });
   expect(w.document.getElementById('taskPlanPreview')!.textContent).not.toContain('Original chat progress');
   (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click(); await settle();
-  expect(input.value).toBe('Plan for this running chat');
+  expect(input.value).toBe('');
   expect(w.document.getElementById('taskPlanPreview')!.textContent).toContain('Original chat progress');
   expect(w.document.getElementById('createPlan')!.getAttribute('aria-busy')).toBe('true');
   (w.document.querySelector('#sessionList [data-id="second-chat"]') as HTMLElement).click(); await settle();
@@ -2072,6 +2352,11 @@ it('renders existing-chat Goal draft stages from main controls without starting 
   expect(row.textContent).not.toContain('no_api_key');
   expect(row.getAttribute('aria-busy')).toBe('false');
   expect(opening).not.toHaveBeenCalled();
+  draft = { ...draft, stage: 'no-reply', text: '', error: null }; await append([]);
+  expect(row.classList.contains('is-goal-complete')).toBe(true);
+  expect(row.textContent).toContain('Goal reached');
+  await settle(350);
+  expect(w.document.getElementById('goalLifecycle')).toBeNull();
 });
 
 it('shows the immediate recovery deadline before a draft exists and clears it on fresh work', async () => {
@@ -2087,6 +2372,8 @@ it('shows the immediate recovery deadline before a draft exists and clears it on
   expect(row.querySelector('[role="timer"]')).not.toBeNull();
   goalWait = null;
   await append([]);
+  expect(row.classList.contains('is-dock-leaving')).toBe(true);
+  await settle(240);
   expect(row.hidden).toBe(true);
 });
 
@@ -2101,8 +2388,10 @@ it('reuses the Goal animation for a session-finish draft while ordinary automati
   expect(row.textContent).toContain('Next useful action');
   expect(row.getAttribute('aria-busy')).toBe('true');
   finishGoalDraft = null; await append([]);
-  expect(row.hidden).toBe(true);
   expect(row.getAttribute('aria-busy')).toBe('false');
+  expect(row.classList.contains('is-dock-leaving')).toBe(true);
+  await settle(240);
+  expect(row.hidden).toBe(true);
 });
 
 it('shows the active finish animation after an earlier ordinary Goal save failed', async () => {

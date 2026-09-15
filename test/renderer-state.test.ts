@@ -963,30 +963,35 @@ it('reports a staged update in the Activity line and the header bar', async () =
 });
 
 /**
- * The version difference has a direction, and only one of them is the user's to act on.
+ * Version and protocol are separate facts. A compatible extension can legitimately have an
+ * older package version while a local app build is ahead; only a proven incompatible protocol
+ * turns that version difference into an extension-update action.
  *
  * An extension newer than the app is the ordinary state while an app update is downloading, and
  * the bundled folder is then the older copy: "load the extension folder again" would talk that
  * user into downgrading a working extension. The app-update line already owns being behind.
  */
-it('asks for an extension reload only when the extension is older than this app', async () => {
+it('asks for an extension reload only when an older extension is protocol-incompatible', async () => {
   const mounted = await mountChat({
     bridge: {
-      running: true, port: 8765, paired: true, present: true, lastSeenAt: Date.now(), extensionVersion: '2.0.1'
+      running: true, port: 8765, paired: true, present: true, lastSeenAt: Date.now(), extensionVersion: '2.0.1', compatible: true
     }
   });
   const doc = mounted.window.document;
   const notice = doc.getElementById('updateNotice')!;
+  const action = doc.getElementById('updateExtension') as HTMLButtonElement;
+  expect(notice.hidden, 'an older but protocol-compatible extension is not an update failure').toBe(true);
+  expect(action.hidden).toBe(true);
+
+  const rejected = structuredClone(mounted.state) as any;
+  rejected.bridge.present = false;
+  rejected.bridge.compatible = false;
+  mounted.push(rejected);
   expect(notice.hidden).toBe(false);
   expect(doc.getElementById('updateText')!.textContent).toContain('2.0.1');
-  const action = doc.getElementById('updateExtension') as HTMLButtonElement;
   expect(action.hidden).toBe(false);
   action.click();
   expect(doc.querySelector('[data-panel="setup"]')!.classList.contains('is-active')).toBe(true);
-  const rejected = structuredClone(mounted.state) as any;
-  rejected.bridge.present = false;
-  mounted.push(rejected);
-  expect(notice.hidden, 'an old companion rejected by the protocol gate still needs an update').toBe(false);
 
   const ahead = structuredClone(mounted.state) as any;
   ahead.bridge.extensionVersion = '2.0.3';

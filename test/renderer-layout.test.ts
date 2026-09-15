@@ -74,6 +74,74 @@ it('keeps the context circle in the gear group rather than an auto-placed compos
   expect(document.getElementById('contextMeterInfo')!.parentElement?.id).toBe('contextMeter');
 });
 
+it('keeps slash modes as composer chips rather than opening an editor before the task is sent', () => {
+  const chip = document.getElementById('composerAutomationChip')!;
+  const planChip = document.getElementById('composerPlanChip')!;
+  expect(chip.closest('#composer')).not.toBeNull();
+  expect(planChip.closest('#composerModeChips')).not.toBeNull();
+  expect(document.getElementById('composerAutomationPanel')).toBeNull();
+  expect(document.getElementById('composerModeObjective')).toBeNull();
+  expect(rule('.composer #composerModeChips')).toContain('grid-column: 2');
+});
+
+it('gives built-in slash commands a full-width native-style menu above the composer', () => {
+  const autocomplete = rule('.skill-autocomplete.composer-command-autocomplete');
+  expect(autocomplete).toContain('left: -1px');
+  expect(autocomplete).toContain('right: -1px');
+  expect(autocomplete).toContain('bottom: calc(100% + 8px)');
+  expect(autocomplete).toContain('width: auto');
+  expect(autocomplete).toContain('border-radius: 20px');
+  expect(rule('.composer-command-option')).toContain('display: flex');
+  expect(rule('.composer-command-copy')).toContain('align-items: baseline');
+  expect(rule('.composer-command-copy small')).toContain('white-space: nowrap');
+});
+
+it('keeps queued Plan stages in card-style rows instead of collapsing back to one-line queue strips', () => {
+  const row = rule('#finishQueue .queued-input');
+  const label = rule('#finishQueue .queue-label');
+  expect(row).toContain('border-radius: 12px');
+  expect(row).toContain('border: 1px solid var(--edge)');
+  expect(label).toContain('white-space: pre-wrap');
+  expect(label).toContain('overflow: visible');
+  expect(rule('#finishQueue .queue-order')).toContain('border-radius: 50%');
+});
+
+it('renders generated Plan stages as readable cards instead of clipped single-line rows', () => {
+  expect(rule('.plan-stage')).toContain('border-radius: 12px');
+  expect(rule('.plan-stage-heading')).toContain('grid-template-columns: 28px minmax(0, 1fr) auto');
+  expect(rule('.plan-stage-text')).toContain('white-space: pre-wrap');
+  expect(rule('.plan-stage-text')).toContain('overflow-wrap: anywhere');
+  expect(rule('.plan-stage-actions')).toContain('display: flex');
+});
+
+it('keeps whole-plan cancellation at the bottom right and gives dock surfaces shared slide motion', () => {
+  const cancel = document.getElementById('composerModeCancelPlan')!;
+  const preview = document.getElementById('taskPlanPreview')!;
+  expect(cancel.closest('.composer-plan-actions')).not.toBeNull();
+  expect(preview.compareDocumentPosition(cancel) & document.defaultView!.Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  expect(rule('.composer-plan-actions')).toContain('margin-top: 12px');
+  expect(chatSource).toContain('setComposerDockSurfaceVisible(planPanel, !!plan && !armedPlan)');
+  expect(chatSource).toContain('setComposerDockSurfaceVisible(compactPanel, compactVisible)');
+  expect(chatSource).toContain('setComposerDockSurfaceVisible(row, true)');
+  expect(rule('.composer-dock .is-dock-entering')).toContain('animation: composer-dock-slide-up 220ms');
+  expect(rule('.composer-dock .is-dock-leaving')).toContain('animation: composer-dock-slide-down 220ms');
+  expect(css).toContain('@keyframes composer-dock-slide-up');
+  expect(css).toContain('@keyframes composer-dock-slide-down');
+  expect(css).toMatch(/prefers-reduced-motion:[^)]+\)[\s\S]*\.composer-dock \.is-dock-entering[^}]*animation:\s*none/);
+});
+
+it('keeps Writing plan and Cancel plan on the same row while the planner is active', () => {
+  expect(rule('.composer-mode-panel.is-plan-writing .composer-mode-body')).toContain('grid-template-columns: minmax(0, 1fr) auto');
+  expect(rule('.composer-mode-panel.is-plan-writing #taskPlanPreview')).toContain('grid-column: 1');
+  expect(rule('.composer-mode-panel.is-plan-writing .composer-plan-actions')).toContain('grid-column: 2');
+});
+
+it('animates only the Compact running ellipsis and respects reduced motion', () => {
+  expect(chatSource).toContain('animatedCompactRunningStatus()');
+  expect(rule('.compact-running-dot')).toContain('animation: plan-writing-dot 1.05s');
+  expect(css).toMatch(/prefers-reduced-motion:[^)]+\)[\s\S]*\.compact-running-dot[^}]*animation:\s*none/);
+});
+
 it('does not expose a periodic Astra continuation outside session_finish', () => {
   expect(document.getElementById('goalImpulseMinutes')).toBeNull();
   expect(chatSource).not.toContain("number('goalImpulseMinutes'");

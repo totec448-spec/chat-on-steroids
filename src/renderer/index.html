@@ -44,6 +44,7 @@
         </g>
         <g id="i-copy"><rect x="8.5" y="8.5" width="11" height="11" rx="2" /><path d="M15.5 5.5h-11v11" /></g>
         <g id="i-retry"><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6" /></g>
+        <g id="i-target"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /></g>
         <g id="i-check"><path d="M5 12.5 10 17.5 19 7" /></g>
         <g id="i-clock"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></g>
         <g id="i-chev"><path d="M9.5 5.5 16 12l-6.5 6.5" /></g>
@@ -861,10 +862,45 @@
                 </div>
               </div>
             </div>
-            <div class="composer-dock" id="composerDock"><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div>
+            <div class="composer-dock" id="composerDock">
+              <section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section>
+              <section class="composer-mode-panel" id="composerPlanPanel" aria-label="Plan mode" hidden>
+                <details class="composer-mode-shell" open>
+                  <summary class="composer-mode-heading">
+                    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-steps" /></svg>
+                    <span class="composer-mode-title">Plan</span>
+                    <span class="composer-mode-state" id="composerPlanState"></span>
+                  </summary>
+                  <div class="composer-mode-body composer-mode-section">
+                    <p class="composer-mode-help" id="composerPlanHint">Write the task below. Send generates editable plan stages instead of sending the request directly.</p>
+                    <div id="taskPlanPreview" aria-label="Plan stages" hidden></div>
+                    <div class="composer-mode-actions composer-plan-actions">
+                      <button class="btn" id="composerModeCancelPlan" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg><span>Cancel plan</span></button>
+                    </div>
+                  </div>
+                </details>
+              </section>
+              <section class="composer-mode-panel" id="composerCompactPanel" aria-label="Compaction" hidden>
+                <details class="composer-mode-shell" open>
+                  <summary class="composer-mode-heading">
+                    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-copy" /></svg>
+                    <span class="composer-mode-title">Compact</span>
+                    <span class="composer-mode-state" id="composerCompactState"></span>
+                  </summary>
+                  <div class="composer-mode-body composer-mode-section">
+                    <p class="composer-mode-help" id="composerCompactStatus">Compact this chat and resume it in a fresh conversation.</p>
+                    <div class="composer-mode-actions">
+                      <button class="btn" id="composerModeCompact" type="button">Compact &amp; resume</button>
+                      <button class="btn" id="composerModeCancelCompact" type="button" hidden>Cancel compaction</button>
+                    </div>
+                  </div>
+                </details>
+              </section>
+              <div id="recoveryStatus" role="status" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div>
+            </div>
             <form class="composer" id="composer">
               <label class="sr-only" for="chatInput">Message ChatGPT</label>
-              <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" placeholder="Ask anything…" aria-autocomplete="list"></textarea><div id="skillAutocomplete" class="skill-autocomplete" role="listbox" aria-label="Skills" hidden></div>
+              <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" placeholder="Ask anything…" aria-autocomplete="list"></textarea><div id="skillAutocomplete" class="skill-autocomplete" role="listbox" aria-label="Commands and skills" hidden></div>
               <div class="composer-toolbar">
                 <details class="composer-menu" id="attachmentMenu">
                   <summary aria-label="Add attachments" title="Add attachments"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></summary>
@@ -874,6 +910,16 @@
                     <button id="composerSkills" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>Skills</button>
                   </div>
                 </details>
+                <div class="composer-mode-chips" id="composerModeChips">
+                  <button class="composer-automation-chip" id="composerAutomationChip" type="button" hidden>
+                    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-pulse" /></svg>
+                    <span id="composerAutomationChipLabel">Goal</span>
+                  </button>
+                  <button class="composer-automation-chip" id="composerPlanChip" type="button" hidden>
+                    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-steps" /></svg>
+                    <span>Plan</span>
+                  </button>
+                </div>
                 <div class="composer-options">
                   <details class="composer-menu" id="composerSettings">
                     <summary aria-label="Chat options" title="Chat options"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg></summary>

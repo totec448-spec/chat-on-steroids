@@ -115,6 +115,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     '# Task plan and recorded history',
     'Use update_plan for tasks with several meaningful steps; skip it for simple tasks. Give each step a short user-facing headline and concrete details about the approach, constraints or checks. Send the complete plan on every update, preserving useful details. Keep at most one step in_progress.',
     'Update the plan when a step is completed or the approach changes. Mark steps completed only when their work is done. Do not repeat the full plan in chat: the app shows the headlines with expandable details above queued messages.',
+    'Before writing a final response for work that has a nonempty task plan, reconcile the plan so no completed work is left pending or in_progress. session_finish will hold the turn while the persisted plan still has unfinished steps.',
     'The plan does not execute steps or mark queued instructions done. New user instructions extend the work; update the plan accordingly.',
     'When the user refers to previous or concurrent work, use session action=search to find its recording, then action=read with the explicit session_id. Keep update_cursor for subsequent reads and use a short T… reference to expand an exact tool call.'
   );

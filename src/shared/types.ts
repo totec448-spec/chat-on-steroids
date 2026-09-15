@@ -484,6 +484,11 @@ export interface BridgeStatus {
    * this app process, which is why "no extension version" never means "outdated extension".
    */
   extensionVersion: string | null;
+  /**
+   * Whether the last extension protocol observed by the bridge is compatible with this app.
+   * Null means no protocol-bearing extension request has been observed in this process yet.
+   */
+  compatible?: boolean | null;
 }
 
 /**

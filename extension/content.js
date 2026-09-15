@@ -564,6 +564,10 @@
   }
   let stallReported = false;
   let userStopped = false;
+  // App-owned cleanup may click a stale Stop after ChatGPT has already published the exact
+  // terminal answer. That is not a user decision and must not turn the completed handoff into
+  // an interrupted turn merely because the synthetic click bubbles through noteStopClick().
+  let suppressUserStopClick = false;
   /**
    * Final public ChatGPT message that already terminalised the local turn while the page's
    * Stop control was still mounted. A stale Stop must not reopen the same finished turn on
@@ -8499,17 +8503,65 @@
   ].includes(reply.data?.error);
 
   /**
+   * Clears ChatGPT's stale Stop control after the source handoff is already durably stored.
+   *
+   * Live ChatGPT can publish a final public `end_turn` and still leave a trailing internal
+   * analysis message `in_progress`, so its composer keeps showing Stop forever even though the
+   * provider has already declared the answer final. Compact & Resume must trust that exact
+   * provider terminal rather than the spinner, but once the handoff is safely stored it can
+   * clean up the stale native turn. Revalidate everything at click time: same source chat,
+   * same unique HANDOFF marker, same terminal answer, and no newer user/assistant turn. A user
+   * who continued or retried in the meantime owns that Stop button and we leave it alone.
+   */
+  function stopResidualCompactionGeneration(key, marked, terminalId, ownerConversation) {
+    const stillOwnsResidual = () => {
+      if (!alive || !ownerConversation || conversationId !== ownerConversation ||
+          CLF_DOM.conversationId() !== ownerConversation) return false;
+      const currentMarked = markedContinuationTurns().find(
+        ([candidateKey, candidate]) => candidateKey === key && candidate.messageId === marked.messageId
+      )?.[1];
+      if (!currentMarked || currentMarked.answer?.endMessageId !== terminalId) return false;
+
+      let latestUser = null;
+      let latestAssistantTurn = null;
+      for (const turn of fiberTurns.values()) {
+        const messages = turn.messages || [];
+        for (const message of messages) {
+          if (message.role === 'user' && message.stable === true) latestUser = message;
+          if (message.role === 'assistant' && message.stable === true) latestAssistantTurn = turn;
+        }
+        if (turn.endMessageId) latestAssistantTurn = turn;
+      }
+      const marker = String(latestUser?.rawText || '').match(CONTINUATION_MARKER);
+      return Boolean(
+        marker && marker[1] === 'HANDOFF' && marker[2] === marked.token &&
+        (latestUser.rawMessageId || latestUser.messageId) === marked.messageId &&
+        latestAssistantTurn?.endMessageId === terminalId
+      );
+    };
+
+    if (!CLF_DOM.generating() || !stillOwnsResidual()) return false;
+    suppressUserStopClick = true;
+    try {
+      return CLF_DOM.stopGeneration(stillOwnsResidual);
+    } finally {
+      suppressUserStopClick = false;
+    }
+  }
+
+  /**
    * Advances one continuation solely from durable app state and ChatGPT's stable message ids.
    * This runs before ordinary page journaling so a marked replacement commits its rebind before
    * the recorder could create a shadow session for that same conversation.
    */
   async function reconcileContinuationMarker(key, marked) {
-    if (!conversationId || CLF_DOM.conversationId() !== conversationId) return false;
+    const ownerConversation = conversationId;
+    if (!ownerConversation || CLF_DOM.conversationId() !== ownerConversation) return false;
     if (marked.kind === 'RESUME') {
       continuationJournalPending = true;
       const reply = await ask({
         type: 'compact',
-        conversationId,
+        conversationId: ownerConversation,
         token: marked.token,
         destinationMessageId: marked.messageId
       });
@@ -8524,7 +8576,7 @@
       }
       if (reply.data?.committed !== true) return false;
       if (typeof reply.data.commandId === 'string') {
-        rememberResumeGoalPending(conversationId, reply.data.commandId);
+        rememberResumeGoalPending(ownerConversation, reply.data.commandId);
       }
       releaseContinuationJournal();
       return 'committed';
@@ -8532,7 +8584,7 @@
 
     const bound = await ask({
       type: 'compact',
-      conversationId,
+      conversationId: ownerConversation,
       token: marked.token,
       sourceMessageId: marked.messageId,
       // A monotonic measure of the exact response, not the page's generating spinner.
@@ -8557,12 +8609,13 @@
     const summary = String(terminal?.rawText || '').trim();
     if (!summary) return false;
     const pending = await peekPendingTools();
-    if (pending !== 0 || !conversationId || CLF_DOM.conversationId() !== conversationId) return false;
+    if (pending !== 0 || conversationId !== ownerConversation || CLF_DOM.conversationId() !== ownerConversation) return false;
     nativePhase = 'delivering';
     renderControl();
-    const delivered = await ask({ type: 'compact', conversationId, token: marked.token, summary });
+    const delivered = await ask({ type: 'compact', conversationId: ownerConversation, token: marked.token, summary });
     if (!delivered || delivered.ok !== true) return false;
     if (delivered.data && delivered.data.job) job = delivered.data.job;
+    stopResidualCompactionGeneration(key, marked, terminalId, ownerConversation);
     nativePhase = '';
     localError = '';
     renderControl();
@@ -10033,6 +10086,7 @@
   // ----------------------------------------------------------------- start
 
   const noteStopClick = (event) => {
+    if (suppressUserStopClick) return;
     const stop = CLF_DOM.stopButton();
     if (stop && event.target instanceof Node && stop.contains(event.target)) userStopped = true;
   };

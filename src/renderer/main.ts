@@ -765,8 +765,9 @@ let announced = false;
  *
  * Two facts feed it and this owns neither: what the update service found (state.update, which
  * reports a `latest` only when it is genuinely newer, so nothing here compares versions), and
- * the last extension version observed by the bridge. A protocol mismatch can prevent presence,
- * so an observed older version remains actionable until a current companion reports in.
+ * the extension version/protocol observed by the bridge. A version difference by itself is not
+ * an incompatibility: local builds routinely run ahead of the installed release while speaking
+ * the same bridge protocol.
  *
  * Null is the one silence that is not an answer: GitHub has not replied yet in this run, so
  * "up to date" would be a claim nobody has checked. That is what `checkedAt` is for.
@@ -776,12 +777,11 @@ let announced = false;
  * while the Activity line reports every state, including the good one.
  */
 function updateSummary({ bridge, update, config, status }: AppState): { text: string; tone: UpdateTone; notice: boolean; extensionAction: string | null } | null {
-  // Only an extension older than this app is the user's to fix. The other direction is an app
-  // that has not caught up yet - normal while an update downloads - and telling that user to
-  // load the bundled folder again would talk them into downgrading a working extension. The
-  // app sentence already owns being behind.
+  // An older version is actionable only when the bridge has also proved its protocol is
+  // incompatible. A connected compatible companion remains usable even if a local app build
+  // carries the next package version. The other direction is an app that has not caught up yet.
   const stale =
-    bridge.extensionVersion && isNewer(update.current, bridge.extensionVersion)
+    bridge.compatible === false && bridge.extensionVersion && isNewer(update.current, bridge.extensionVersion)
       ? bridge.extensionVersion
       : null;
   // A mismatched companion can fail the protocol gate before it becomes present.
