@@ -113,6 +113,7 @@ const {
   setContinuationRecoveryHooks,
   restoreContinuations
 } = await import('../src/main/session/continuation.js');
+const { RESUME_CLAIM_WINDOW_MS, resumeOpeningChat } = await import('../src/main/session/resume-gate.js');
 const {
   acknowledgeOffers,
   agentInfoForOwnedConversation,
@@ -2111,6 +2112,121 @@ describe('delivering a bootstrap', () => {
     expect(ack.body.committed).toBe(true);
     await expect(earlyObservation!).resolves.toMatchObject({ sessionId });
     expect((await getSession(sessionId))?.conversationId).toBe(destination);
+  });
+
+  it('keeps a slow resume destination protected past the old five-second recorder cutoff', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const from = '91919191-aaaa-bbbb-cccc-444444444444';
+      const destination = '92929292-aaaa-bbbb-cccc-444444444444';
+      const { sessionId, token: continuation } = await compactedSession(from, 'carry a slow resume forward');
+      let earlyObservation: Promise<{ sessionId: string | null; stored: number }> | null = null;
+
+      setBrowserOpener(async () => {
+        earlyObservation = recordChatObservations(destination, [
+          { kind: 'conversation_title', time: Date.now(), text: 'Resumed · carry a slow resume forward' }
+        ]);
+      });
+
+      const command = queueResume(sessionId, continuation)!;
+      await vi.waitFor(() => expect(earlyObservation).not.toBeNull());
+      let observationSettled = false;
+      void earlyObservation!.then(() => { observationSettled = true; });
+
+      // Live ChatGPT exposed B before its submitted bootstrap marker became stable. The old
+      // recorder-local five-second cap expired here and minted a shadow session milliseconds
+      // before the ACK arrived. B must remain unowned for the whole continuation gate instead.
+      await vi.advanceTimersByTimeAsync(5_500);
+      expect(observationSettled).toBe(false);
+      expect(await findSessionByConversation(destination)).toBeNull();
+
+      const redeemed = await request('POST', '/commands/redeem', {
+        body: { id: command.id, client: 'slow-resume-tab' }
+      });
+      expect(redeemed.status).toBe(200);
+
+      const ack = await request('POST', '/commands/ack', {
+        body: {
+          id: command.id,
+          status: 'sent',
+          conversationId: destination,
+          client: 'slow-resume-tab'
+        }
+      });
+      expect(ack.status).toBe(200);
+      expect(ack.body.committed).toBe(true);
+      await vi.advanceTimersByTimeAsync(50);
+      await expect(earlyObservation!).resolves.toMatchObject({ sessionId });
+      expect((await getSession(sessionId))?.conversationId).toBe(destination);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('moves the exact resumed chat even when ChatGPT names it after the coarse 60-second recorder gate expired', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const from = '93939393-aaaa-bbbb-cccc-444444444444';
+      const destination = '94949494-aaaa-bbbb-cccc-444444444444';
+      const { sessionId, token } = await compactedSession(from, 'carry a very slow resume forward');
+      const command = queueResume(sessionId, token)!;
+      await waitForOpened(1);
+
+      expect((await redeem(command.id, 'sixty-one-second-resume')).text).toContain('carry a very slow resume forward');
+      expect((await request('POST', '/compact', {
+        body: { token, commandId: command.id, client: 'sixty-one-second-resume', destinationAttempt: true }
+      })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', {
+        body: { token, commandId: command.id, client: 'sixty-one-second-resume', destinationDispatch: true }
+      })).body.armed).toBe(true);
+
+      // This reproduces the 2026-09-15 live failure: B appeared 61.2s after the app opened the
+      // resume. The old global guard was already gone, but the exact command was still the live
+      // owner of this one-shot continuation. Request-id evidence must commit A→B before recorder
+      // initialization rather than create a shadow local session for B.
+      await vi.advanceTimersByTimeAsync(RESUME_CLAIM_WINDOW_MS + 1_250);
+      expect(resumeOpeningChat()).toBe(false);
+      expect(await findSessionByConversation(destination)).toBeNull();
+      expect(continuationByToken(token)).toMatchObject({
+        state: 'claimed',
+        destinationSend: { state: 'dispatched-unresolved' }
+      });
+      expect(pendingCommands()).toEqual([
+        expect.objectContaining({ id: command.id, what: `resume:${sessionId}` })
+      ]);
+
+      const requestId = 'wfr_resume_after_sixty_one_seconds';
+      const correlated = await request('POST', '/correlations', {
+        body: {
+          conversationId: destination,
+          resumeCommandId: command.id,
+          calls: [{ messageId: 'resume-request-61s', requestId, createTime: Date.now() / 1000 }]
+        }
+      });
+
+      expect(correlated.status).toBe(200);
+      expect(correlated.body).toMatchObject({ sessionId, confirmed: [requestId], complete: true });
+      expect((await getSession(sessionId))?.conversationId).toBe(destination);
+      expect((await findSessionByConversation(destination))?.id).toBe(sessionId);
+
+      // An ordinary chat carries no resume command provenance. Once the coarse compatibility
+      // window is over it must get its own session immediately rather than waiting on B's much
+      // longer continuation lifetime.
+      const unrelated = '95959595-aaaa-bbbb-cccc-444444444444';
+      const independent = await request('POST', '/events', {
+        body: {
+          conversationId: unrelated,
+          events: [{ kind: 'user_message', time: Date.now(), text: 'independent chat', messageId: 'independent-user' }]
+        }
+      });
+      expect(independent.status).toBe(200);
+      expect(independent.body.sessionId).toBeTruthy();
+      expect(independent.body.sessionId).not.toBe(sessionId);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   /**

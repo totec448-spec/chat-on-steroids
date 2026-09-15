@@ -245,6 +245,11 @@
   // app will only accept lost-ACK recovery when this full random id still names the leased worker
   // command that opened this document. It comes only from the extension's redeemed command.
   let agentCommandId = null;
+  // Exact command paired with a fresh Compact & Resume destination. Unlike a worker this chat
+  // has no agent label, but it has the same lost-ACK problem: its first transcript/request-id
+  // evidence can reach the app before the command ACK that moves session A onto chat B.
+  let resumeCommandId = null;
+  let resumeCommandToken = null;
 
   const queue = [];
   const queueSizes = new WeakMap();
@@ -1573,6 +1578,8 @@
     // its first message, its title, its turn — until the tab was reloaded.
     continuationJournalPending = false;
     commandJournalGate = false;
+    resumeCommandId = null;
+    resumeCommandToken = null;
     nativeBusy = false;
     nativePhase = '';
     pressedAt = 0;
@@ -3346,6 +3353,15 @@
       CLF_DOM.conversationId() === ownerConversation && (!current || current());
     if (!owns()) return;
     if (!Array.isArray(calls) || calls.length === 0 || !ownerConversation) return;
+    if (resumeCommandId) {
+      // A command id proves which fresh document redeemed the resume; the visible provider row
+      // proves which conversation that document actually created. Keep request attribution in
+      // browser custody until both agree. Without this check a user/provider navigation from the
+      // still-idless fresh tab into an unrelated chat could lend that chat the old resume command.
+      const newestUser = [...CLF_DOM.messages()].reverse().find((message) => message.role === 'user');
+      const marker = String(newestUser?.text || '').match(CONTINUATION_MARKER);
+      if (marker?.[1] !== 'RESUME' || marker[2] !== resumeCommandToken) return;
+    }
     const byRequest = new Map();
     for (const call of calls) {
       if (!call || !call.requestId || byRequest.has(call.requestId)) continue;
@@ -3362,6 +3378,7 @@
       const reply = await ask({
         type: 'correlate',
         conversationId: ownerConversation,
+        resumeCommandId,
         calls: batch
       }, owns);
       if (!owns()) return;
@@ -8572,6 +8589,8 @@
   function releaseContinuationJournal() {
     continuationJournalPending = false;
     commandJournalGate = false;
+    resumeCommandId = null;
+    resumeCommandToken = null;
     void flush();
   }
 
@@ -9962,6 +9981,14 @@
       }
     }
     if (!stillOnTarget() || !exactBootstrapDraft()) { await rejectChangedBootstrap(); return; }
+    // From this point a resume's click is durably armed and this is the exact document that
+    // redeemed that command. Stamp its subsequent observations before Send: the DOM/Fiber can
+    // expose chat B and its first connector request synchronously with the click, before the ACK
+    // path below gets a chance to name B to the app.
+    if (boot.type === 'resume') {
+      resumeCommandId = typeof boot.id === 'string' ? boot.id : null;
+      resumeCommandToken = resumeMarker?.[2] ?? null;
+    }
     // The destination Resume prompt is the first authored evidence in a brand-new chat.
     // Record it before send() clicks so reportMessages can open B's turn immediately instead
     // of waiting until Fiber eventually exposes the first connector request.

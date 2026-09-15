@@ -13,9 +13,15 @@ it('keeps one operation on its original tab after marker loss, worker restart, a
   const update = vi.fn(async (_id: number, patch: { url: string }) => { if (tab) tab.url = patch.url; return tab; });
   const storage = { session: { get: async () => saved, set: async (next: object) => { Object.assign(saved, next); } } };
   const start = () => {
+    const browserTabs = {
+      query: async () => tab ? [tab] : [],
+      get: async () => { if (!tab) throw Error('closed'); return tab; },
+      update,
+      remove: async () => {}
+    };
     const context = vm.createContext({ URL, setTimeout, clearTimeout, CHATGPT_TAB_URLS: ['https://chatgpt.com/*'], createChatTab: create,
       call: async () => ({ ok: true, data: { requests: [{ id, appId: null }] } }),
-      chrome: { storage, tabs: { query: async () => tab ? [tab] : [], get: async () => { if (!tab) throw Error('closed'); return tab; }, update, sendMessage: async () => ({ ok: true }) } } });
+      browserTabs, chrome: { storage, tabs: { sendMessage: async () => ({ ok: true }) } } });
     vm.runInContext(`${workflow}\nglobalThis.run = inspectRequestedPluginRefresh;`, context); return context;
   };
   await start().run([{}], true);
@@ -31,9 +37,10 @@ it('keeps one operation on its original tab after marker loss, worker restart, a
 
 it('does not create a plugin helper in browser-only mode', async () => {
   const create = vi.fn();
+  const browserTabs = { query: async () => [], get: async () => null, update: async () => null, remove: async () => {} };
   const context = vm.createContext({ URL, setTimeout, clearTimeout, CHATGPT_TAB_URLS: ['https://chatgpt.com/*'], createChatTab: create,
     call: async () => ({ ok: true, data: { requests: [{ id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' }] } }),
-    chrome: { storage: { session: { get: async () => ({}) } }, tabs: { query: async () => [] } } });
+    browserTabs, chrome: { storage: { session: { get: async () => ({}) } }, tabs: { sendMessage: async () => ({ ok: true }) } } });
   vm.runInContext(`${workflow}\nglobalThis.run = inspectRequestedPluginRefresh;`, context);
   await context.run([{}], true, true);
   expect(create).not.toHaveBeenCalled();
@@ -44,8 +51,9 @@ it('records browser creation failure before claim and retries the same obligatio
   const call = vi.fn(async (_path: string, init: { body: string }) => JSON.parse(init.body).action === 'pending'
     ? { ok: true, data: { requests: [request] } } : { ok: true });
   const createChatTab = vi.fn().mockRejectedValueOnce(new Error('window size rejected')).mockResolvedValueOnce({ id: 8 });
+  const browserTabs = { query: async () => [], get: async () => null, update: async () => null, remove: async () => {} };
   const context = vm.createContext({ call, createChatTab, URL, setTimeout, clearTimeout,
-    CHATGPT_TAB_URLS: ['https://chatgpt.com/*'], chrome: { storage: { session: { get: async () => ({}), set: async () => {} } }, tabs: { query: async () => [] } } });
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*'], browserTabs, chrome: { storage: { session: { get: async () => ({}), set: async () => {} } }, tabs: { sendMessage: async () => ({ ok: true }) } } });
   vm.runInContext(`${workflow}\nglobalThis.run = inspectRequestedPluginRefresh;`, context);
   await context.run([{}], true);
   const actions = call.mock.calls.map(([, init]) => JSON.parse(init.body));

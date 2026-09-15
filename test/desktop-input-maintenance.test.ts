@@ -157,16 +157,66 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
     update: vi.fn()
   };
   const remove = vi.fn(async (_id: number) => {});
-  const query = vi.fn(async () => [...tabs]);
+  const query = vi.fn(async (_query?: Record<string, unknown>) => [...tabs]);
   const reload = vi.fn(async (_id: number) => {});
   const sendMessage = vi.fn(async (_id: number, _message: any): Promise<{ ok: boolean; ready?: boolean }> => ({ ok: true, ready: true }));
-  const update = vi.fn(async (id: number, patch: Partial<Tab>) => { const tab = tabs.find(tab => tab.id === id)!; Object.assign(tab, patch); delete tab.pendingUrl; return tab; });
-  const fetch = vi.fn(async (input: string, _init?: RequestInit): Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }> => ({
-    ok: true, status: 200,
-    json: async () => new URL(input).pathname === '/hello'
-      ? { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }
-      : { ok: true, inputs, background: true, modelCatalogRequest }
+  const update = vi.fn(async (id: number, patch: Partial<Tab>) => {
+    const tab = tabs.find(tab => tab.id === id)!;
+    Object.assign(tab, patch);
+    if (typeof patch.url === 'string') delete tab.pendingUrl;
+    return tab;
+  });
+  const hostGeneration = '11111111-2222-4333-8444-555555555555';
+  const appFetch = vi.fn(async (_input: string, _init?: RequestInit): Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }> => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ ok: true, inputs, background: true, modelCatalogRequest })
   }));
+  const fetch = async (input: string, init?: RequestInit): Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }> => {
+    const path = new URL(input).pathname;
+    if (path === '/hello') return {
+      ok: true,
+      status: 200,
+      json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true })
+    };
+    if (path === '/browser-host') {
+      const body = JSON.parse(String(init?.body || '{}')) as any;
+      if (body.action === 'query') {
+        const rows = await query(body.query);
+        return { ok: true, status: 200, json: async () => ({ tabs: rows }) };
+      }
+      if (body.action === 'get') {
+        const tab = tabs.find(tab => tab.id === body.tabId);
+        return tab
+          ? { ok: true, status: 200, json: async () => ({ tab: { ...tab } }) }
+          : { ok: false, status: 404, json: async () => ({ error: 'tab_not_found' }) };
+      }
+      if (body.action === 'create') {
+        const tab = await create(body.create || {});
+        return { ok: true, status: 200, json: async () => ({ tab: { ...tab } }) };
+      }
+      if (body.action === 'update') {
+        const tab = await update(body.tabId, body.update || {});
+        return { ok: true, status: 200, json: async () => ({ tab: { ...tab } }) };
+      }
+      if (body.action === 'remove') {
+        await remove(body.tabId);
+        const index = tabs.findIndex(tab => tab.id === body.tabId);
+        if (index >= 0) tabs.splice(index, 1);
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      }
+      if (body.action === 'reload') {
+        await reload(body.tabId);
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      }
+      if (body.action === 'events') return {
+        ok: true, status: 200,
+        json: async () => ({ generation: hostGeneration, cursor: 0, reset: body.generation !== hostGeneration, events: [] })
+      };
+      return { ok: false, status: 400, json: async () => ({ error: 'unknown_browser_host_action' }) };
+    }
+    return appFetch(input, init);
+  };
   const context = vm.createContext({
     chrome: {
       storage: { local, session },
@@ -183,7 +233,7 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   await api.load();
   Object.assign(api, { query });
   vm.runInContext('Object.assign(testMaintenance, { offerStopTurns, noteTabConversation, ackCommand })', context);
-  return { ...api, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
+  return { ...api, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch: appFetch, windows, remove, reload, local, localSaved, saved };
 }
 
 describe('one browser maintenance flight per desktop outbox publication', () => {
@@ -350,13 +400,6 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     });
     await h.maintain(); expect(h.remove).not.toHaveBeenCalled();
   });
-  it('creates a small owned restore size, then minimizes without changing geometry again', async () => {
-    const h = await worker([{ id: firstId, conversationId: null }]);
-    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true, ok: true, inputs: [{ id: firstId, conversationId: null }], background: true, browserWindowBounds: { left: -1510, top: 220, width: 800, height: 600 } }) });
-    await h.maintain();
-    expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ focused: false, left: -1510, top: 220, width: 800, height: 600 }));
-    expect(h.windows.update).toHaveBeenCalledExactlyOnceWith(80, { state: 'minimized', focused: false });
-  });
   it('reuses an idle conversation without opening or navigating a helper', async () => {
     const h = await worker([]);
     h.tabs.push({ id: 8, url: `https://chatgpt.com/c/${secondId}` });
@@ -366,14 +409,16 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.update).not.toHaveBeenCalled();
     expect(h.remove).not.toHaveBeenCalled();
   });
-  it('keeps catalog discovery minimized and unfocused even when foreground chats are preferred', async () => {
+  it('keeps catalog discovery in a background internal tab even when foreground chats are preferred', async () => {
     const h = await worker([]);
     await h.inspectModels({ nonce: firstId, expiresAt: Date.now() + 30000 }, false);
-    expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ focused: false, width: 800, height: 600 }));
-    expect(h.windows.update).toHaveBeenCalledWith(80, { state: 'minimized', focused: false });
-    expect(h.windows.update).toHaveBeenCalledTimes(1);
+    expect(h.create).toHaveBeenCalledWith(expect.objectContaining({
+      url: `https://chatgpt.com/?cos-model-catalog=${firstId}`,
+      active: false
+    }));
+    expect(h.windows.create).not.toHaveBeenCalled();
   });
-  it('places an offered worker in its unfocused background window with discard protection', async () => {
+  it('places an offered worker in a background internal tab with discard protection', async () => {
     const h = await worker([]);
     let offered = true;
     h.fetch.mockImplementation(async (input) => ({ ok: true, status: 200, json: async () => {
@@ -383,9 +428,8 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
       return { ok: true, placement, inputs: [], background: true };
     } }));
     await h.maintain();
-    expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ focused: false, width: 800, height: 600 }));
-    expect(h.windows.update).toHaveBeenCalledWith(80, { state: 'minimized', focused: false });
-    expect(h.windows.update).toHaveBeenCalledTimes(1);
+    expect(h.windows.create).not.toHaveBeenCalled();
+    expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ active: false }));
     expect(h.update).toHaveBeenCalledWith(1, { autoDiscardable: false });
     expect(String(h.create.mock.calls[0]?.[0]?.url)).toContain('model=gpt-5.6-sol&reasoning_effort=medium');
     await h.maintain();
@@ -920,16 +964,16 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect((await h.catalog(message, sender, source)).ok).toBe(false);
     expect(h.remove).not.toHaveBeenCalled();
   });
-  it('reserves initial catalog opening before Chrome acts and never retries an ambiguous failure', async () => {
+  it('reserves initial catalog opening before embedded Chromium acts and never retries an ambiguous failure', async () => {
     const h = await worker([]);
     const request = { nonce: firstId, expiresAt: Date.now() + 120000, allowOpen: true };
-    h.windows.create.mockImplementation(async () => {
+    h.create.mockImplementation(async () => {
       expect(h.saved.modelCatalogOwner).toEqual({ nonce: firstId, opening: true });
-      throw new Error('Chrome may already have created the window');
+      throw new Error('Chromium may already have created the tab');
     });
     await h.inspectModels(request, true);
     await h.inspectModels(request, true);
-    expect(h.windows.create).toHaveBeenCalledTimes(1);
+    expect(h.create).toHaveBeenCalledTimes(1);
     expect(h.saved.modelCatalogOwner).toEqual({ nonce: firstId, opening: true });
   });
   it('opens one owned blank catalog tab without blocking maintenance on DOM inspection', async () => {
@@ -946,21 +990,6 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.create).toHaveBeenCalledTimes(1);
     expect(h.sendMessage).toHaveBeenCalledTimes(1);
     finish();
-  });
-  it('reuses its own minimized window and never minimizes a user window', async () => {
-    const h = await worker([]);
-    h.tabs.push({ id: 90, windowId: 3, url: 'https://chatgpt.com/c/user-chat' });
-    await Promise.all([h.createChatTab('https://chatgpt.com/?first', true), h.createChatTab('https://chatgpt.com/?second', true)]);
-    expect(h.windows.create).toHaveBeenCalledTimes(1);
-    expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ width: 800, height: 600, focused: false }));
-    expect(h.create.mock.calls.every(([args]) => args.windowId === 80)).toBe(true);
-    expect(h.windows.update).toHaveBeenCalledExactlyOnceWith(80, { state: 'minimized', focused: false });
-    h.create.mockRejectedValueOnce(new Error('tab failed'));
-    await expect(h.createChatTab('https://chatgpt.com/?third', true)).rejects.toThrow('tab failed');
-    expect(h.windows.create).toHaveBeenCalledTimes(1);
-    h.windows.get.mockRejectedValueOnce(new Error('window closed'));
-    await h.createChatTab('https://chatgpt.com/?fourth', true);
-    expect(h.windows.create).toHaveBeenCalledTimes(2);
   });
   it('coalesces simultaneous passes while Chrome has not returned the first created tab', async () => {
     const h = await worker([{ id: firstId, conversationId: null }, { id: secondId, conversationId: null }]);
@@ -1034,7 +1063,7 @@ describe('Stop owns one exact existing or newly opened browser document', () => 
   });
   it('does not treat query failure or an expired command as permission to open', async () => {
     const h = await worker([]) as any;
-    h.query.mockRejectedValueOnce(new Error('Chrome unavailable'));
+    h.query.mockRejectedValue(new Error('Chromium unavailable'));
     await h.offerStopTurns([command()]);
     expect(h.create).not.toHaveBeenCalled();
     await h.offerStopTurns([{ ...command(), expiresAt: Date.now() - 1 }]);

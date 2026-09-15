@@ -1189,6 +1189,25 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.type === 'ack' && message.status === 'sent')).toEqual([]);
     live.hook.observe();
     await settle();
+    // The provider can begin B and publish its first connector request before the exact
+    // server-authored bootstrap row is available for the normal ACK. That was the 61.2-second
+    // live race: request attribution reached the app first. The correlation must carry the
+    // one resume command this document redeemed, so the app can move A→B before creating B.
+    const early = assistantTurn(live.document, 'early-resume-answer', []);
+    await bindFiberTurns([{ section: early, turn: {
+      turnId: 'early-resume-answer',
+      conversationId: chatA,
+      calls: [{
+        messageId: 'early-resume-call', tool: 'read_file', order: 0, answered: false,
+        requestId: 'wfr_resume_before_ack', createTime: 1_700_000_001
+      }],
+      messages: []
+    } }]);
+    expect(live.sent.filter(message => message.type === 'correlate')).toContainEqual(
+      expect.objectContaining({ conversationId: chatA, resumeCommandId: commandId,
+        calls: [expect.objectContaining({ requestId: 'wfr_resume_before_ack' })] })
+    );
+    expect(live.sent.filter(message => message.type === 'ack' && message.status === 'sent')).toEqual([]);
     await bindFiberTurns([{ section: user, turn: { turnId: 'delayed-resume-user', conversationId: chatA,
       messages: [{ role: 'user', stable: true, messageId: 'm-delayed-resume-user', rawMessageId: 'm-delayed-resume-user', rawText: prompt }] } }]);
     await new Promise(resolve => globalThis.setTimeout(resolve, 550));

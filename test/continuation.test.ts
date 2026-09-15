@@ -1152,16 +1152,18 @@ describe('the window in which a replacement chat is expected', () => {
     await claimContinuationNow(token, 'slow-resume-command');
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const create = vi.spyOn(store, 'createSession');
-    const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
     const observation = sessionForConversation(destination);
-    await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2));
+    let settled = false;
+    void observation.finally(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(6_000);
 
     // The command still owns its sixty-second claim. Five seconds without its ACK
     // cannot authorize a second durable session for the destination.
+    expect(settled).toBe(false);
+    expect(create).not.toHaveBeenCalled();
     expect(resumeOpeningChat()).toBe(true);
     expect(await commitContinuation(token, destination)).toBe(true);
-    await vi.advanceTimersByTimeAsync(50);
     expect(await observation).toBe(sessionId);
     expect(create).not.toHaveBeenCalled();
     expect((await store.findSessionByConversation(destination))?.id).toBe(sessionId);
@@ -1172,9 +1174,11 @@ describe('the window in which a replacement chat is expected', () => {
     await claimContinuationNow(token, 'unfinished-resume-command');
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const unrelated = reason === 'abort' ? '93939393-1111-4222-8333-444444444444' : '94949494-1111-4222-8333-444444444444';
-    const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
     const observation = sessionForConversation(unrelated);
-    await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2));
+    let settled = false;
+    void observation.finally(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
     if (reason === 'abort') abortContinuation(token, 'cancelled before destination');
     await vi.advanceTimersByTimeAsync(reason === 'expiry' ? RESUME_CLAIM_WINDOW_MS + 100 : 100);
     const sessionId = await observation;

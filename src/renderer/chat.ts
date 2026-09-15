@@ -426,7 +426,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     const open = document.createElement('button');
     open.className = 'btn sess-action sess-open';
     open.type = 'button';
-    ui(open, 'title', () => t("Open this chat in Chrome"));
+    ui(open, 'title', () => t("Open this chat in ChatGPT browser"));
     open.append(icon('i-out'));
     open.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -2964,7 +2964,6 @@ function applyAutoCompactHint(config: Config): void {
  * every other switch that decides what ChatGPT can reach, and saves from there.
  */
 const CHAT_INPUTS = [
-  'chatBrowser',
   'goalIncludeToolCalls',
   'planBackend',
   'finishTool', 'finishAction', 'finishLeadMinutes', 'workerModel', 'workerReasoning', 'backgroundChats', 'browserOnly', 'autoRefreshPlugins',

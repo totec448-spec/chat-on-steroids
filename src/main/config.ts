@@ -12,7 +12,6 @@ import path from 'node:path';
 import { z } from 'zod';
 import {
   CAPABILITIES,
-  CHAT_BROWSERS,
   DEFAULT_CAPABILITIES,
   GOAL_MODES,
   GOAL_PROVIDERS,
@@ -291,7 +290,6 @@ const configSchema = z.object({
     tunnelId: z.string().max(128), desktopTunnelId: z.string().max(128), pluginsTunnelId: z.string().max(128)
   })).max(11).refine(rows => new Set(rows.map(row => row.id)).size === rows.length, 'Duplicate setup profile').optional(),
   ui: z.object({
-    chatBrowser: z.enum(CHAT_BROWSERS).optional().default('chrome'),
     developerMode: z.boolean().optional(),
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),

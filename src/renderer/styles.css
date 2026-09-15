@@ -345,6 +345,33 @@ code {
 .sidebar-resize { position: absolute; z-index: 5; top: 0; bottom: 0; right: -4px; width: 8px; cursor: col-resize; touch-action: none; }
 .sidebar-resize:hover, .sidebar-resize:focus-visible, .app.is-resizing-sidebar .sidebar-resize { background: var(--accent-wash); outline: 1px solid var(--accent-edge); }
 .app.is-resizing-sidebar, .app.is-resizing-sidebar * { cursor: col-resize !important; user-select: none !important; }
+.browser-dock { position: relative; grid-column: 1; grid-row: 2 / -1; min-width: 0; min-height: 0; background: var(--sunk); border-right: 1px solid var(--line); }
+.browser-dock[hidden] { display: none; }
+.browser-dock-tabs { position: absolute; z-index: 2; inset: 0 7px auto 0; height: 34px; display: flex; align-items: center; gap: 5px; padding: 4px 7px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; background: var(--sunk); border-bottom: 1px solid var(--line); }
+.browser-dock-tabs::-webkit-scrollbar { display: none; }
+.browser-tab-pill { display: flex; align-items: center; gap: 5px; flex: 0 1 150px; min-width: 64px; max-width: 180px; height: 25px; padding: 0 5px 0 9px; border: 1px solid transparent; border-radius: var(--pill); background: transparent; color: var(--faint); font: inherit; font-size: 10.5px; cursor: pointer; }
+.browser-tab-pill:hover { background: var(--hover); color: var(--ink); }
+.browser-tab-pill[aria-selected='true'] { background: var(--card); border-color: var(--edge); color: var(--ink); }
+.browser-tab-pill.is-loading .browser-tab-title::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 50%; background: currentColor; opacity: .6; animation: working-pulse 1.4s ease-in-out infinite; vertical-align: 1px; }
+.browser-tab-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.browser-tab-close { display: grid; place-items: center; flex: 0 0 17px; width: 17px; height: 17px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; font: 14px/1 sans-serif; cursor: pointer; opacity: .55; }
+.browser-tab-close:hover { background: var(--hover); opacity: 1; }
+.browser-tab-pill:not(:hover):not([aria-selected='true']) .browser-tab-close { opacity: 0; }
+.browser-dock-slot { position: absolute; inset: 34px 7px 0 0; overflow: hidden; background: var(--page); }
+.browser-dock-resize { position: absolute; z-index: 5; top: 0; right: -1px; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }
+.browser-dock-resize:hover, .browser-dock-resize:focus-visible, .app.is-resizing-browser-dock .browser-dock-resize { background: var(--accent-wash); outline: 1px solid var(--accent-edge); }
+.app.is-resizing-browser-dock, .app.is-resizing-browser-dock * { cursor: col-resize !important; user-select: none !important; }
+.app.browser-dock-open { grid-template-columns: clamp(280px, var(--browser-dock-width, 36vw), 720px) min(var(--sidebar-width, var(--sidebar-default, 248px)), 38vw) minmax(0, 1fr); }
+.app.browser-dock-open > .sidebar { grid-column: 2; }
+.app.browser-dock-open > header, .app.browser-dock-open > .notices, .app.browser-dock-open > main { grid-column: 3; }
+.app.browser-dock-open.is-sidebar-collapsed { grid-template-columns: clamp(280px, var(--browser-dock-width, 36vw), 720px) 0 minmax(0, 1fr); }
+#browserDockToggle.is-active { background: var(--hover); }
+#browserDockToggle span { margin-left: 5px; font-size: 11px; }
+@media (max-width: 900px) {
+  #browserDockToggle span { display: none; }
+  .app.browser-dock-open { grid-template-columns: clamp(280px, var(--browser-dock-width, 42vw), 440px) min(var(--sidebar-width, 220px), 30vw) minmax(0, 1fr); }
+  .app.browser-dock-open.is-sidebar-collapsed { grid-template-columns: clamp(280px, var(--browser-dock-width, 42vw), 440px) 0 minmax(0, 1fr); }
+}
 .sidebar-brand { display: flex; align-items: center; gap: 11px; padding: 0 8px 24px; }
 .sidebar-brand strong { font-size: 15px; font-weight: 600; letter-spacing: -.025em; }
 .sidebar-brand strong span { display: block; color: var(--faint); font-size: 11px; font-weight: 400; letter-spacing: .01em; }

@@ -293,14 +293,16 @@ describe('cross-platform packaging targets', () => {
 
   it('keeps a losing second instance out of the async primary bootstrap', () => {
     const main = readFileSync(path.join(root, 'src', 'main', 'index.ts'), 'utf8');
-    const lock = main.indexOf('const hasSingleInstanceLock = app.requestSingleInstanceLock();');
+    const lock = main.indexOf('const hasSingleInstanceLock = devUserData ? true : app.requestSingleInstanceLock();');
+    const devGuard = main.indexOf("const devUserData = !app.isPackaged ? process.env.COS_DEV_USER_DATA?.trim() : '';");
     const losingBranch = main.indexOf('if (!hasSingleInstanceLock) {', lock);
     const markQuitting = main.indexOf('quitting = true;', losingBranch);
     const ready = main.indexOf('void app.whenReady().then(async () => {', losingBranch);
     const readyGuard = main.indexOf('if (!shouldBeginAppBootstrap(hasSingleInstanceLock, quitting)) return;', ready);
     const firstSharedStateRead = main.indexOf("const userData = app.getPath('userData');", ready);
 
-    expect(lock).toBeGreaterThan(-1);
+    expect(devGuard).toBeGreaterThan(-1);
+    expect(lock).toBeGreaterThan(devGuard);
     expect(losingBranch).toBeGreaterThan(lock);
     expect(markQuitting).toBeGreaterThan(losingBranch);
     expect(markQuitting).toBeLessThan(ready);

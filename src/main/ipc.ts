@@ -37,13 +37,13 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } fr
 import { z } from 'zod';
 import {
   CAPABILITIES,
-  CHAT_BROWSERS,
   GOAL_MODES,
   GOAL_PROVIDERS,
   GOAL_REASONING_LEVELS,
   type AppState,
   type Config
 } from '../shared/types.js';
+import type { InternalBrowserBounds } from '../shared/internal-browser.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS } from './config.js';
@@ -96,7 +96,15 @@ import {
 import { tokenPressure } from '../shared/session.js';
 import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
-import { openInPreferredBrowser } from './browser.js';
+import {
+  hideInternalBrowserDock,
+  internalBrowserDockState,
+  layoutInternalBrowserDock,
+  openInternalBrowserUrl,
+  closeInternalBrowserTab,
+  selectInternalBrowserTab,
+  showInternalBrowserDock
+} from './internal-browser.js';
 import { markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
 import {
   getMacOSDesktopAccess,
@@ -138,7 +146,6 @@ const settingsPatch = z.object({
     binaryPath: z.string().max(4096)
   }),
   ui: z.object({
-    chatBrowser: z.enum(CHAT_BROWSERS).optional(),
     developerMode: z.boolean().optional(),
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),
@@ -262,7 +269,6 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       binaryPath: pick(current.tunnel.binaryPath, base.tunnel.binaryPath, wanted.tunnel.binaryPath)
     },
     ui: {
-      chatBrowser: pick(current.ui.chatBrowser, base.ui.chatBrowser, wanted.ui.chatBrowser),
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       finishTool: pick(current.ui.finishTool, base.ui.finishTool, wanted.ui.finishTool),
       planBackend: pick(current.ui.planBackend, base.ui.planBackend, wanted.ui.planBackend),
@@ -912,6 +918,36 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return factor;
   });
 
+  const browserBounds = z.object({
+    x: z.number().finite().min(0).max(100_000),
+    y: z.number().finite().min(0).max(100_000),
+    width: z.number().finite().positive().max(100_000),
+    height: z.number().finite().positive().max(100_000)
+  }).strict();
+  handle('browser:dock', async (payload) => {
+    const request = z.discriminatedUnion('action', [
+      z.object({ action: z.literal('query') }).strict(),
+      z.object({ action: z.literal('show'), bounds: browserBounds }).strict(),
+      z.object({ action: z.literal('layout'), bounds: browserBounds }).strict(),
+      z.object({ action: z.literal('hide') }).strict(),
+      z.object({ action: z.literal('select'), tabId: z.number().int().positive() }).strict(),
+      z.object({ action: z.literal('close'), tabId: z.number().int().positive() }).strict()
+    ]).parse(payload);
+    if (request.action === 'query') return internalBrowserDockState();
+    if (request.action === 'hide') return hideInternalBrowserDock();
+    if (request.action === 'select') return selectInternalBrowserTab(request.tabId);
+    if (request.action === 'close') return closeInternalBrowserTab(request.tabId);
+    const win = getWindow();
+    const zoom = win?.webContents.getZoomFactor() ?? UI_BASE_ZOOM;
+    const bounds: InternalBrowserBounds = {
+      x: Math.round(request.bounds.x * zoom),
+      y: Math.round(request.bounds.y * zoom),
+      width: Math.max(1, Math.round(request.bounds.width * zoom)),
+      height: Math.max(1, Math.round(request.bounds.height * zoom))
+    };
+    return request.action === 'show' ? showInternalBrowserDock(bounds) : layoutInternalBrowserDock(bounds);
+  });
+
   handle('sessions:openChat', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
     const summary = await getSession(id);
@@ -919,7 +955,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
       throw new Error('This session has no valid ChatGPT conversation');
     }
-    await openInPreferredBrowser(chatUrl(conversationId));
+    await openInternalBrowserUrl(chatUrl(conversationId), { active: true, reveal: true, retain: true });
     return true;
   });
 

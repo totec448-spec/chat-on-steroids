@@ -99,9 +99,10 @@ it('opens an enrolled exact App Id directly in marked settings without name disc
   const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
   const code = background.slice(background.indexOf('let pluginRefreshFlight = null;'), background.indexOf('async function catalogProbe('));
   const create = vi.fn(async () => ({ id: 9 }));
+  const browserTabs = { query: async () => [], get: async () => null, update: async () => null, remove: async () => {} };
   const context = vm.createContext({ URL, setTimeout, clearTimeout, CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
     call: async () => ({ ok: true, data: { requests: [{ id, appId: 'asdk_app_synthetic', surface: 'core' }] } }), createChatTab: create,
-    chrome: { storage: { session: { get: async () => ({}), set: async () => {} } }, tabs: { query: async () => [] } }
+    browserTabs, chrome: { storage: { session: { get: async () => ({}), set: async () => {} } }, tabs: { sendMessage: async () => ({ ok: true }) } }
   });
   vm.runInContext(`${code}\nglobalThis.run = inspectRequestedPluginRefresh;`, context);
   await (context.run as Function)([{ surface: 'core' }], true);
@@ -121,9 +122,24 @@ it.each(['unpinned', 'pinned', 'pinned-during-proof'])('reuses management tabs a
   const create = vi.fn(async () => ({ id: 9 }));
   const remove = vi.fn();
   const sendMessage = vi.fn(async (): Promise<object> => ({ ok: true }));
+  const browserTabs = {
+    query: async () => tabs,
+    get: async (tabId: number) => {
+      const tab = tabs.find(tab => tab.id === tabId);
+      if (!tab) throw new Error('closed');
+      return tab;
+    },
+    update: async (tabId: number, patch: Record<string, unknown>) => {
+      const tab = tabs.find(tab => tab.id === tabId);
+      if (!tab) throw new Error('closed');
+      Object.assign(tab, patch);
+      return tab;
+    },
+    remove
+  };
   const context = vm.createContext({ URL, setTimeout, clearTimeout, CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
     call: async () => ({ ok: true, data: { requests } }), createChatTab: create,
-    chrome: { storage: { session: { get: async () => ({}), set: async () => {} } }, tabs: { query: async () => tabs, get: async (id: number) => tabs.find(tab => tab.id === id), remove, sendMessage } }
+    browserTabs, chrome: { storage: { session: { get: async () => ({}), set: async () => {} } }, tabs: { sendMessage } }
   });
   vm.runInContext(`${code}\nglobalThis.run = inspectRequestedPluginRefresh;`, context);
   const run = () => (context.run as Function)([{ surface: 'core' }], true);
