@@ -98,16 +98,31 @@ app.whenReady().then(async () => {
   }
   const selected = await win.webContents.executeJavaScript(`({ value: document.getElementById('goalBackend').value, changes: window.changes })`);
   assert.deepEqual(selected, { value: 'api', changes: 1 });
-  const translations = JSON.parse(fs.readFileSync(path.join(root, 'src/renderer/locales/zh-CN.json'), 'utf8'));
-  await win.webContents.executeJavaScript(`(() => {
-    const translations = ${JSON.stringify(translations)};
-    for (const option of document.querySelectorAll('select option')) option.textContent = translations[option.textContent] || option.textContent;
-    document.getElementById('loopDelivery').showPicker();
-  })()`, true);
-  const translated = await win.webContents.executeJavaScript(`({ value: document.getElementById('loopDelivery').value,
-    fits: [...document.getElementById('loopDelivery').options].every(option => { const r = option.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }) })`);
-  assert.deepEqual(translated, { value: 'after-turn', fits: true });
-  fs.writeFileSync(path.join(output, 'light-1.5-zh.png'), (await win.webContents.capturePage()).toPNG());
+  const sourceLabels = await win.webContents.executeJavaScript(`[...document.querySelectorAll('select option')].map(option => option.textContent)`);
+  for (const locale of ['zh-CN', 'zh-TW']) {
+    const translations = JSON.parse(fs.readFileSync(path.join(root, `src/renderer/locales/${locale}.json`), 'utf8'));
+    await win.webContents.executeJavaScript(`(() => {
+      const translations = ${JSON.stringify(translations)};
+      const sourceLabels = ${JSON.stringify(sourceLabels)};
+      [...document.querySelectorAll('select option')].forEach((option, index) => option.textContent = translations[sourceLabels[index]] || sourceLabels[index]);
+      document.getElementById('loopDelivery').showPicker();
+    })()`, true);
+    const translated = await win.webContents.executeJavaScript(`({ value: document.getElementById('loopDelivery').value,
+      fits: [...document.getElementById('loopDelivery').options].every(option => { const r = option.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }) })`);
+    assert.deepEqual(translated, { value: 'after-turn', fits: true }, locale);
+    fs.writeFileSync(path.join(output, `light-1.5-${locale}.png`), (await win.webContents.capturePage()).toPNG());
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'ESCAPE' });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'ESCAPE' });
+    await win.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+      const deadline = performance.now() + 3000;
+      const check = () => {
+        if (!document.getElementById('loopDelivery').matches(':open')) return resolve();
+        if (performance.now() >= deadline) return reject(new Error('Translated picker did not close after Escape'));
+        requestAnimationFrame(check);
+      };
+      requestAnimationFrame(check);
+    })`);
+  }
   console.log(JSON.stringify(results, null, 2));
   win.destroy(); app.quit();
 }).catch(error => { console.error(error); app.exit(1); });

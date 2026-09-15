@@ -122,10 +122,13 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
     await new Promise(r=>setTimeout(r,50));
     assert.equal(await js(`document.getElementById('setupProfileMenu').matches(':popover-open')`),false);
-    await js(`const language=document.getElementById('uiLanguage');language.value='zh-CN';language.dispatchEvent(new Event('change'));document.getElementById('setupProfile').click()`);
-    assert.equal(await js(`document.getElementById('setupProfileLabel').textContent`),'连接配置');
-    assert.equal(await js(`document.getElementById('setupProfileCurrent').textContent`),'Work');
-    assert.equal(await js(`document.querySelector('[data-remove-profile-id="default"]').getAttribute('aria-label')`),'删除配置：Default');
+    for (const [locale,label,remove] of [['zh-CN','连接配置','删除配置：Default'],['zh-TW','連線設定檔','刪除設定檔：Default']]) {
+      await js(`const language=document.getElementById('uiLanguage');language.value='${locale}';language.dispatchEvent(new Event('change'));document.getElementById('setupProfile').click()`);
+      assert.equal(await js(`document.getElementById('setupProfileLabel').textContent`),label);
+      assert.equal(await js(`document.getElementById('setupProfileCurrent').textContent`),'Work');
+      assert.equal(await js(`document.querySelector('[data-remove-profile-id="default"]').getAttribute('aria-label')`),remove);
+      if(locale==='zh-CN') await js(`document.getElementById('setupProfileMenu').hidePopover()`);
+    }
     await js(`document.querySelector('[data-remove-profile-id="default"]').click()`);
     for(let i=0;i<100 && await js(`document.querySelectorAll('[data-remove-profile-id]').length!==1`);i++) await new Promise(r=>setTimeout(r,25));
     assert.equal(await js(`document.querySelector('[data-remove-profile-id]').disabled`),true);

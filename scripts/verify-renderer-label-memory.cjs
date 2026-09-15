@@ -67,11 +67,13 @@ app.whenReady().then(async () => {
         }
       }
     }
-    const translated = await win.webContents.executeJavaScript(`(() => {
-      labels.setLanguage('zh-CN');
-      return document.querySelector('button').title;
-    })()`);
-    assert.equal(translated, '移除 0');
+    for (const locale of ['zh-CN', 'zh-TW']) {
+      const translated = await win.webContents.executeJavaScript(`(() => {
+        labels.setLanguage('${locale}');
+        return document.querySelector('button').title;
+      })()`);
+      assert.equal(translated, '移除 0');
+    }
     console.log('PASS: row memory stays bounded and mounted labels still translate');
   } finally { clearTimeout(deadline); win.destroy(); }
   app.quit();

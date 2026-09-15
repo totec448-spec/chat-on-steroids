@@ -102,6 +102,9 @@ it('replaces a failed loading state with a translated retry path and recovers in
   setLanguage('zh-CN');
   expect(list.textContent).toContain('无法加载技能。');
   expect(retry.textContent).toBe('重试');
+  setLanguage('zh-TW');
+  expect(list.textContent).toContain('無法載入技能。');
+  expect(retry.textContent).toBe('重試');
   retry.click(); await tick();
   expect(skillsList).toHaveBeenCalledTimes(2);
   expect(list.querySelectorAll('.skill-row')).toHaveLength(2);

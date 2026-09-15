@@ -52,7 +52,7 @@ app.whenReady().then(async () => {
     const ready = await win.webContents.executeJavaScript('window.fixtureReady');
     assert.equal(ready, true);
     const results = [];
-    for (const [width, height, zoom, language, theme] of [[1100, 900, 1, 'en', 'dark'], [800, 650, 1, 'en', 'dark'], [1100, 900, 1.5, 'zh-CN', 'light'], [640, 720, 1, 'zh-CN', 'dark']]) {
+    for (const [width, height, zoom, language, theme] of [[1100, 900, 1, 'en', 'dark'], [800, 650, 1, 'en', 'dark'], [1100, 900, 1.5, 'zh-CN', 'light'], [640, 720, 1, 'zh-CN', 'dark'], [1100, 900, 1.5, 'zh-TW', 'light'], [640, 720, 1, 'zh-TW', 'dark']]) {
       win.setSize(width, height);
       win.webContents.setZoomFactor(zoom);
       await win.webContents.executeJavaScript(`window.setLanguage('${language}')`);
@@ -116,7 +116,7 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'ESCAPE' });
     await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
     assert.equal(await win.webContents.executeJavaScript('document.querySelector(".setup-image-dialog").open'), false);
-    assert.equal(await win.webContents.executeJavaScript('document.activeElement.textContent'), '放大图片');
+    assert.equal(await win.webContents.executeJavaScript('document.activeElement.textContent === window.t("Enlarge image")'), true);
     const details = await win.webContents.executeJavaScript(`(() => {
       const d=document.getElementById('desktopTunnelField'); const initial=d.open;
       d.querySelector('summary').click(); return { initial, opened:d.open };

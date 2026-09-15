@@ -254,12 +254,13 @@ body {
 
 /* CJK uses natural character wrapping and full-height glyphs. Keep native controls
    flexible at narrow window widths and when the renderer is zoomed. */
-html:lang(zh-CN) body { letter-spacing: 0; line-break: strict; }
+html:lang(zh) body { letter-spacing: 0; line-break: strict; }
+html:lang(zh-TW) body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft JhengHei UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans CJK TC", sans-serif; }
 .language-select { min-width: 8em; max-width: 100%; }
 .setup-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; margin-bottom: 20px; }
 .setup-heading .settings-heading { margin-bottom: 0; padding: 0; }
 .setup-heading .settings-heading p { margin-bottom: 0; }
-.language-tabs { display: inline-flex; flex: none; padding: 3px; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.language-tabs { display: inline-flex; flex: none; flex-wrap: wrap; max-width: 100%; padding: 3px; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
 .language-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; white-space: nowrap; }
 .language-tabs button:hover { background: var(--hover); color: var(--ink); }
 .language-tabs button[aria-pressed='true'] { background: var(--hover); border-color: var(--line); color: var(--ink); }

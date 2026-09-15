@@ -287,6 +287,8 @@ it.each(['compaction', 'blocked', 'worker'])('retires %s control status when lea
   const { setLanguage } = await import('../src/renderer/i18n.js');
   setLanguage('zh-CN');
   expect(status.textContent).toBe('');
+  setLanguage('zh-TW');
+  expect(status.textContent).toBe('');
   setLanguage('en');
   // Returning to A is a new selection epoch; only its new read may restore status.
   (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click();

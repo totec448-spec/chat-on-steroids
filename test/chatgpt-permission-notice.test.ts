@@ -69,17 +69,20 @@ it('keeps the Setup notice permanent and acknowledges a pending popup once acros
   stopReload();
 });
 
-it('uses the same localized approval guidance in Setup and the popup', async () => {
+it.each([
+  ['zh-CN', '重要：ChatGPT 可能正在等待你的批准', '知道了', '示意图。ChatGPT 的实际界面可能有所不同。', 'ChatGPT 工具批准示意图，显示 Deny、Allow once 和 Always allow'],
+  ['zh-TW', '重要：ChatGPT 可能正在等待你的核准', '瞭解了', '示意圖。ChatGPT 的實際介面可能有所不同。', 'ChatGPT 工具核准示意圖，顯示 Deny、Allow once 和 Always allow'],
+] as const)('uses the same localized approval guidance in Setup and the popup for %s', async (locale, title, understood, caption, imageLabel) => {
   await shell();
   const language = await import('../src/renderer/i18n.js');
   language.initLanguage();
-  language.setLanguage('zh-CN');
-  expect(document.querySelector('.chatgpt-permission-setup-notice h3')!.textContent).toBe('重要：ChatGPT 可能正在等待你的批准');
-  expect(document.getElementById('chatgptPermissionNoticeTitle')!.textContent).toBe('重要：ChatGPT 可能正在等待你的批准');
+  language.setLanguage(locale);
+  expect(document.querySelector('.chatgpt-permission-setup-notice h3')!.textContent).toBe(title);
+  expect(document.getElementById('chatgptPermissionNoticeTitle')!.textContent).toBe(title);
   expect(document.querySelector('.chatgpt-permission-setup-notice')!.textContent).toContain('Allow once、Always allow 或 Deny');
-  expect(document.getElementById('chatgptPermissionUnderstand')!.textContent).toBe('知道了');
-  expect(document.querySelector('.chatgpt-permission-setup-notice figcaption')!.textContent).toBe('示意图。ChatGPT 的实际界面可能有所不同。');
-  expect(document.querySelector('.chatgpt-permission-setup-notice img')!.getAttribute('aria-label')).toBe('ChatGPT 工具批准示意图，显示 Deny、Allow once 和 Always allow');
+  expect(document.getElementById('chatgptPermissionUnderstand')!.textContent).toBe(understood);
+  expect(document.querySelector('.chatgpt-permission-setup-notice figcaption')!.textContent).toBe(caption);
+  expect(document.querySelector('.chatgpt-permission-setup-notice img')!.getAttribute('aria-label')).toBe(imageLabel);
 });
 
 it('shows the durable pending notice again after a renderer reload when it was not acknowledged', async () => {
