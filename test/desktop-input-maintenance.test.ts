@@ -141,12 +141,12 @@ it('carries the direct-turn offer only to the elected existing conversation', as
 });
 
 type Tab = { id: number; url?: string; pendingUrl?: string; windowId?: number; active?: boolean; pinned?: boolean };
-async function worker(inputs: Array<{ id: string; conversationId: string | null; directTurn?: { id: string; startedAt: number }; supersededConversationId?: string }>, modelCatalogRequest?: { nonce: string; expiresAt: number }, priorLocal: Record<string, unknown> = {}) {
+async function worker(inputs: Array<{ id: string; conversationId: string | null; directTurn?: { id: string; startedAt: number }; supersededConversationId?: string }>, modelCatalogRequest?: { nonce: string; expiresAt: number }, priorLocal: Record<string, unknown> = {}, priorSession: Record<string, unknown> = {}) {
   const tabs: Tab[] = [];
   const event = { addListener: () => {} };
   const localSaved: Record<string, unknown> = { port: 8765, token: 'test-pairing', ...priorLocal };
   const local = { get: async () => ({ ...localSaved }), set: vi.fn(async (value: object) => { Object.assign(localSaved, value); }), remove: async () => {} };
-  const saved: Record<string, unknown> = {};
+  const saved: Record<string, unknown> = { ...priorSession };
   const session = { get: async () => ({ ...saved }), set: async (value: object) => { Object.assign(saved, value); }, remove: async (key: string) => { delete saved[key]; } };
   const create = vi.fn(async ({ url, windowId }: { url: string; windowId?: number }) => {
     const tab = { id: tabs.length + 1, pendingUrl: url, windowId }; tabs.push(tab); return tab;
@@ -919,6 +919,22 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     await h.authorizeDocument({ ...sender, documentId: 'replacement-document' }, { navigationEpoch: 1 });
     expect((await h.catalog(message, sender, source)).ok).toBe(false);
     expect(h.remove).not.toHaveBeenCalled();
+  });
+  it('recovers an in-flight model observation after the service worker restarts', async () => {
+    const first = await worker([]);
+    const url = `https://chatgpt.com/?cos-model-catalog=${firstId}`;
+    first.tabs.push({ id: 7, url });
+    const sender = { tab: { id: 7 }, documentId: 'catalog-document', frameId: 0, url };
+    const source = await first.authorizeDocument(sender, { navigationEpoch: 1 });
+    first.saved.modelCatalogOwner = { nonce: firstId, tab: 7 };
+    first.saved.modelCatalogTarget = { tab: 7, nonce: firstId, url, documentId: 'catalog-document', navigationEpoch: 1 };
+
+    const restarted = await worker([], undefined, {}, first.saved);
+    restarted.tabs.push({ id: 7, url });
+    const result = await restarted.catalog({ nonce: firstId, models: null, error: 'picker_unavailable' }, sender, source);
+
+    expect(result).toMatchObject({ ok: true });
+    expect(restarted.fetch.mock.calls.some(([input]) => new URL(input).pathname === '/models')).toBe(true);
   });
   it('reserves initial catalog opening before Chrome acts and never retries an ambiguous failure', async () => {
     const h = await worker([]);

@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { ago, parseClientStatus, parsePollHealth, readMetric } from '../src/main/tunnel/health.js';
 import {
   describeNetworkError,
+  isBenignHarpoonChannelEvent,
   isUnreachableError,
   NO_OUTAGE,
   outageConfirmed,
@@ -113,6 +114,18 @@ describe('network error classification', () => {
       expect(said).not.toMatch(/\d/);
       expect(said.length).toBeLessThan(40);
     }
+  });
+});
+
+describe('tunnel control-channel diagnostics', () => {
+  it('suppresses only the known Harpoon unsupported-channel messages', () => {
+    expect(isBenignHarpoonChannelEvent('ERROR', 'dispatcher received unsupported channel', { channel: 'harpoon' })).toBe(true);
+    expect(isBenignHarpoonChannelEvent('ERROR', 'dispatcher received unsupported channel "harpoon"')).toBe(true);
+    expect(isBenignHarpoonChannelEvent('WARN', 'failed to process polled command: unsupported channel "harpoon"')).toBe(true);
+    expect(isBenignHarpoonChannelEvent('ERROR', 'dispatcher received unsupported channel "main"')).toBe(false);
+    expect(isBenignHarpoonChannelEvent('ERROR', 'dispatcher received unsupported channel', { channel: 'main' })).toBe(false);
+    expect(isBenignHarpoonChannelEvent('WARN', 'failed to process polled command: unsupported channel "main"')).toBe(false);
+    expect(isBenignHarpoonChannelEvent('ERROR', 'dispatcher received unsupported channel', {})).toBe(false);
   });
 });
 

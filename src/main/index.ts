@@ -131,9 +131,10 @@ function createWindow(): void {
   if (process.platform === 'win32') window.removeMenu();
 
   // First use discovers the account once. A restored catalog is immediately usable;
-  // showing the window again cannot refresh it or open another browser attempt.
+  // showing the window again may passively observe an existing ChatGPT tab, but it
+  // must not open a browser document without a concrete user operation owning it.
   window.on('show', () => {
-    if (!quitting && getChatModels().state === 'unknown') void startChatModelDiscovery(true)
+    if (!quitting && getChatModels().state === 'unknown') void startChatModelDiscovery(false)
       .catch(error => logWarn(`model discovery on window open: ${error.message}`));
   });
   window.once('ready-to-show', () => {

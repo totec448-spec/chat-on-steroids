@@ -2018,6 +2018,57 @@ async function offerStopTurns(requests, background = false) {
 let modelCatalogFlight = null;
 let modelCatalogTarget = null;
 let pluginRefreshFlight = null;
+const MODEL_CATALOG_TARGET_KEY = 'modelCatalogTarget';
+
+function validModelCatalogTarget(value) {
+  return Boolean(value) &&
+    typeof value === 'object' &&
+    /^[a-f0-9-]{36}$/i.test(value.nonce || '') &&
+    Number.isInteger(value.tab) &&
+    typeof value.url === 'string' && value.url.length > 0 && value.url.length <= 4096 &&
+    (value.documentId === undefined || (typeof value.documentId === 'string' && value.documentId.length > 0)) &&
+    (value.navigationEpoch === undefined || (Number.isSafeInteger(value.navigationEpoch) && value.navigationEpoch >= 0));
+}
+
+/**
+ * The content script can outlive the maintenance pass that sent it the inspection request.
+ * Keep the exact handoff in session storage as well as memory: MV3 is allowed to stop this
+ * worker while the native picker is being read, and the eventual model_catalog message is
+ * what wakes it again. The app-side nonce remains the final authority.
+ */
+async function holdModelCatalogTarget(target) {
+  modelCatalogTarget = target;
+  try {
+    await chrome.storage.session.set({ [MODEL_CATALOG_TARGET_KEY]: target });
+  } catch {
+    // The in-memory target still protects a live worker. A tiny session write failure must not
+    // turn a usable browser observation into an artificial picker failure.
+  }
+}
+
+async function currentModelCatalogTarget(nonce) {
+  if (modelCatalogTarget) return modelCatalogTarget.nonce === nonce ? modelCatalogTarget : null;
+  try {
+    const stored = (await chrome.storage.session.get(MODEL_CATALOG_TARGET_KEY))[MODEL_CATALOG_TARGET_KEY];
+    if (!validModelCatalogTarget(stored) || stored.nonce !== nonce) return null;
+    modelCatalogTarget = stored;
+    return stored;
+  } catch {
+    return null;
+  }
+}
+
+async function releaseModelCatalogTarget(nonce) {
+  if (modelCatalogTarget?.nonce === nonce) modelCatalogTarget = null;
+  try {
+    const stored = (await chrome.storage.session.get(MODEL_CATALOG_TARGET_KEY))[MODEL_CATALOG_TARGET_KEY];
+    if (validModelCatalogTarget(stored) && stored.nonce === nonce) {
+      await chrome.storage.session.remove(MODEL_CATALOG_TARGET_KEY);
+    }
+  } catch {
+    // Stale custody is harmless: a later request overwrites it and the bridge nonce rejects it.
+  }
+}
 function pluginRefreshMarker(tab) {
   try { const url = new URL(tab?.pendingUrl || tab?.url || ''); return url.origin === 'https://chatgpt.com' && url.pathname === '/' && /^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash) ? url.searchParams.get('cos-plugin-refresh') : null; } catch { return null; }
 }
@@ -2092,6 +2143,7 @@ function catalogTabNonce(tab) {
 function inspectRequestedModels(request) {
   if (modelCatalogFlight) return modelCatalogFlight;
   const wanted = request && /^[a-f0-9-]{36}$/i.test(request.nonce) && Number.isFinite(request.expiresAt) && Date.now() < request.expiresAt ? request : null;
+  let targetNonce = null;
   modelCatalogFlight = (async () => {
     const observed = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
     const owner = (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
@@ -2151,12 +2203,23 @@ function inspectRequestedModels(request) {
         ]);
       } finally { clearTimeout(timer); }
     };
-    modelCatalogTarget = { tab: tab.id, nonce: wanted.nonce, url: tab.url || tab.pendingUrl };
+    targetNonce = wanted.nonce;
+    const key = String(tab.id);
+    await holdModelCatalogTarget({
+      tab: tab.id,
+      nonce: wanted.nonce,
+      url: tab.url || tab.pendingUrl,
+      ...(typeof tabDocuments[key] === 'string' ? { documentId: tabDocuments[key] } : {}),
+      ...(Number.isSafeInteger(tabEpochs[key]) ? { navigationEpoch: tabEpochs[key] } : {})
+    });
     const inspected = await send({ type: 'clf-model-catalog', nonce: wanted.nonce, expiresAt: wanted.expiresAt });
     // Work->Chat is an in-document transition owned by the content script.
     // Failure never grants navigation to New Chat or a replacement helper tab.
     if (inspected === true || inspected?.ok === true) await retireCatalogTabs();
-  })().catch(() => undefined).finally(() => { modelCatalogTarget = null; modelCatalogFlight = null; });
+  })().catch(() => undefined).finally(async () => {
+    if (targetNonce) await releaseModelCatalogTarget(targetNonce);
+    modelCatalogFlight = null;
+  });
   return modelCatalogFlight;
 }
 
@@ -2658,7 +2721,10 @@ const HANDLERS = {
   async model_catalog(message, _sender, source) {
     if (!ownsDocument(source) || typeof message.nonce !== 'string' || !/^[a-f0-9-]{36}$/i.test(message.nonce)) return { ok: false };
     const tab = await chrome.tabs.get(source.tab);
-    if (!ownsDocument(source) || modelCatalogTarget?.tab !== source.tab || modelCatalogTarget.nonce !== message.nonce || modelCatalogTarget.url !== (tab.url || tab.pendingUrl)) return { ok: false };
+    const target = await currentModelCatalogTarget(message.nonce);
+    if (!ownsDocument(source) || !target || target.tab !== source.tab || target.nonce !== message.nonce || target.url !== (tab.url || tab.pendingUrl) ||
+        (target.documentId !== undefined && target.documentId !== source.documentId) ||
+        (target.navigationEpoch !== undefined && target.navigationEpoch !== source.navigationEpoch)) return { ok: false };
     const body = JSON.stringify({ nonce: message.nonce, models: message.models, error: message.error });
     if (body.length > 12000) return { ok: false };
     const result = await call('/models', { method: 'POST', body });

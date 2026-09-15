@@ -75,7 +75,9 @@ export async function startChatModelDiscovery(allowOpen = true): Promise<ChatMod
         if (request?.nonce !== nonce) return;
         if (!wake) throw new Error('Model discovery is not ready');
         await wake(nonce, attempt.allowOpen);
-        logInfo(`model discovery browser wake completed id=${nonce}`);
+        // This only confirms that the wake request reached the bridge/browser startup owner;
+        // the content script's model_catalog observation is the actual completion signal.
+        logInfo(`model discovery browser wake dispatched id=${nonce}`);
       }
       catch (error) {
         if (request?.nonce !== nonce) return;
