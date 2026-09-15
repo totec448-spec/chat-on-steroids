@@ -26,6 +26,7 @@
         <g id="i-folder"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z" /></g>
         <g id="i-image"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m4 17 5-5 4 4 3-3 4 4"/></g>
         <g id="i-plus"><path d="M12 5v14M5 12h14" /></g>
+        <g id="i-plugin"><circle cx="8.5" cy="12" r="4.5" /><circle cx="15.5" cy="12" r="4.5" /></g>
         <g id="i-eye">
           <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
           <circle cx="12" cy="12" r="3" />
@@ -86,13 +87,16 @@
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
         <button class="btn" id="backToChat" type="button" hidden>← Back to chat</button>
         <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong></div>
-        <button class="btn new-chat" id="newChat" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pencil" /></svg>New chat</button>
+        <div class="sidebar-primary" id="sidebarPrimary">
+          <button class="btn new-chat" id="newChat" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pencil" /></svg>New chat</button>
+          <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plugin" /></svg>Plugins</button>
+          <button class="btn sidebar-primary-link" id="sidebarSkills" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>Skills</button>
+        </div>
       <nav id="tabs" aria-label="Settings navigation" hidden>
         <button class="is-sel" data-tab="home" type="button">
           <svg class="ico" viewBox="0 0 24 24"><use href="#i-home" /></svg>Workspace
         </button>
         <button data-tab="usage" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Usage</button>
-        <button data-tab="plugins" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>Plugins</button>
 <button data-tab="setup" type="button">
           <svg class="ico" viewBox="0 0 24 24"><use href="#i-steps" /></svg>Setup
           <span class="badge" id="setupBadge" hidden></span>
@@ -103,24 +107,35 @@
         <button data-tab="activity" type="button">
           <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Activity
         </button>
-      </nav>          <section class="sidebar-sessions">
-            <h2>
-              Conversations
-              <span class="acts">
-                <button class="btn" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button>
-                <button class="btn" id="chatRefresh" type="button">
-                  <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Refresh
-                </button>
-              </span>
-            </h2>
-            <div class="scroll">
-              <div id="sessionList"><p class="empty" role="status">Loading conversations…</p></div>
-              <p class="empty" id="sessionsEmpty" hidden>
-                Nothing recorded yet. Turn on recording in Settings, pair the Chrome extension,
-                and this fills up as you work in ChatGPT.
-              </p>
+      </nav>
+        <section class="sidebar-sessions">
+          <div class="scroll">
+            <div id="sessionList">
+              <details class="sidebar-session-section" id="projectsSection" open>
+                <summary class="sidebar-session-heading">
+                  <span class="sidebar-session-label"><svg class="ico sidebar-section-chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev" /></svg>Projects</span>
+                  <span class="acts">
+                    <button class="btn" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button>
+                  </span>
+                </summary>
+                <div id="projectList"><p class="empty" role="status">Loading projects…</p></div>
+                <p class="empty sidebar-section-empty" id="projectsEmpty" hidden>No projects yet.</p>
+              </details>
+              <details class="sidebar-session-section" id="chatsSection" open>
+                <summary class="sidebar-session-heading">
+                  <span class="sidebar-session-label"><svg class="ico sidebar-section-chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev" /></svg>Chats</span>
+                  <span class="acts">
+                    <button class="btn" id="chatRefresh" type="button" title="Refresh chats" aria-label="Refresh chats">
+                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Refresh
+                    </button>
+                  </span>
+                </summary>
+                <div id="chatList"><p class="empty" role="status">Loading chats…</p></div>
+                <p class="empty sidebar-section-empty" id="sessionsEmpty" hidden>No chats outside projects yet.</p>
+              </details>
             </div>
-          </section>
+          </div>
+        </section>
 
         <div class="sidebar-bottom"><button class="btn" id="workspaceSettings" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg>Settings</button></div>
       </aside>
@@ -969,7 +984,7 @@
 
     <dialog id="skillsDialog" class="skills-dialog" aria-labelledby="skillsDialogTitle">
       <div class="skills-dialog-head">
-        <div><h2 id="skillsDialogTitle">Skills</h2><p>Use reusable text instructions in this message.</p></div>
+        <div><h2 id="skillsDialogTitle">Skills</h2><p>Reusable instructions for your chats.</p></div>
         <button class="btn btn-icon" id="skillsClose" type="button" aria-label="Close skills"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg></button>
       </div>
       <div class="skills-dialog-body">

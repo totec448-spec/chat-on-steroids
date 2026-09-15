@@ -563,7 +563,8 @@ function paintSessions(): void {
   // Keep the pointer's elected rows alive while asynchronous activity snapshots arrive.
   if (sidebarOrder?.interacting) return;
   document.getElementById('sessionTooltip')?.remove();
-  const list = $('sessionList');
+  const projectList = $('projectList');
+  const chatList = $('chatList');
   const children = new Map<string, SessionSummary[]>();
   const ids = new Set(sessions.map((entry) => entry.id));
   for (const entry of sessions) {
@@ -683,11 +684,15 @@ function paintSessions(): void {
     disclosure.addEventListener('toggle', () => { diagnosticsExpanded = disclosure.open; });
     rows.push(disclosure);
   }
-  // Projects must remain discoverable without scrolling through the entire ungrouped history.
-  list.replaceChildren(...projectSections, ...rows);
+  // Project-owned work and unfiled chats are separate navigation scopes. The shared
+  // sessionList remains their interaction/order root, but neither scope is visually
+  // interleaved with the other.
+  projectList.replaceChildren(...projectSections);
+  chatList.replaceChildren(...rows);
   agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
   badgeKey = badgeSignature();
-  $('sessionsEmpty').hidden = sessions.length > 0 || projects.some(project => !project.ungrouped);
+  $('projectsEmpty').hidden = projectSections.length > 0;
+  $('sessionsEmpty').hidden = rows.length > 0;
 
   scheduleToolActivityExpiry();
 }
@@ -3718,7 +3723,8 @@ export function initChat(next: Deps): void {
   $('newChat').addEventListener('click', () => {
     selectNewChat();
   });
-  $('addProject').addEventListener('click', async () => {
+  $('addProject').addEventListener('click', async event => {
+    event.preventDefault();
     const button = $<HTMLButtonElement>('addProject'); button.disabled = true;
     const generation = selectionGeneration;
     try {
@@ -3822,7 +3828,7 @@ export function initChat(next: Deps): void {
     paintDetail();
   });
 
-  $('chatRefresh').addEventListener('click', () => void refreshAll());
+  $('chatRefresh').addEventListener('click', event => { event.preventDefault(); void refreshAll(); });
 
   $('copyHandoff').addEventListener('click', async () => {
     if (!handoff) return;

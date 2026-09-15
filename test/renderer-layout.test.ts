@@ -279,6 +279,16 @@ describe('the chat panel cards', () => {
     expect(list.closest('[data-panel]')).toBeNull();
   });
 
+  it('gives primary navigation and project/chat history distinct sidebar regions', () => {
+    const primary = document.getElementById('sidebarPrimary')!;
+    expect([...primary.children].map(child => child.id)).toEqual(['newChat', 'sidebarPlugins', 'sidebarSkills']);
+    const list = document.getElementById('sessionList')!;
+    expect([...list.children].map(child => child.id)).toEqual(['projectsSection', 'chatsSection']);
+    expect(document.getElementById('projectList')!.closest('#projectsSection')).not.toBeNull();
+    expect(document.getElementById('chatList')!.closest('#chatsSection')).not.toBeNull();
+    expect(document.querySelector('#tabs [data-tab="plugins"]')).toBeNull();
+  });
+
   it('gives the session card one row per child, including its navigation row', () => {
     const card = document.getElementById('chatBody')!.closest('.card')!;
     // Subhead, scrolling conversation, shared plan/queue dock, composer and footer.
@@ -481,6 +491,13 @@ describe('the session timeline', () => {
 });
 
 describe('the window as a whole', () => {
+  it('shows one focus ring around the Skills search instead of outlining its inner input too', () => {
+    expect(rule('.skills-search:focus-within')).toContain('box-shadow: 0 0 0 3px var(--ring)');
+    expect(rule('.skills-search input')).toContain('outline: 0');
+    expect(rule('.skills-dialog button:focus-visible')).toContain('outline: 2px solid var(--ink)');
+    expect(css).not.toContain('.skills-dialog :is(button, input):focus-visible');
+  });
+
   it('keeps workspace settings in a scrollable column', () => {
     expect(rule("[data-panel='home']")).toContain('overflow-y: auto');
   });
