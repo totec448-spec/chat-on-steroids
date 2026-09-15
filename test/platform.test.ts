@@ -22,6 +22,7 @@ const allCapabilities = (): Capabilities => ({
   deleteFile: true,
   command: true,
   saveArtifact: true,
+  browserUse: true,
   screen: true,
   control: true,
   clipboardRead: true,

@@ -10,12 +10,18 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 type Handler = (event: unknown, payload: unknown) => Promise<unknown>;
+type Listener = (event: unknown, payload: unknown) => void;
 const handlers = new Map<string, Handler>();
+const listeners = new Map<string, Listener>();
 
 vi.mock('electron', () => ({
   ipcMain: {
     handle: (channel: string, handler: Handler) => handlers.set(channel, handler),
-    removeHandler: (channel: string) => handlers.delete(channel)
+    removeHandler: (channel: string) => handlers.delete(channel),
+    on: (channel: string, listener: Listener) => listeners.set(channel, listener),
+    removeListener: (channel: string, listener: Listener) => {
+      if (listeners.get(channel) === listener) listeners.delete(channel);
+    }
   },
   BrowserWindow: class {},
   clipboard: { readText: () => '', writeText: () => undefined },
@@ -386,6 +392,20 @@ beforeEach(async () => {
     sessions: { ...defaultConfig().sessions, record: true },
     multiAgent: { enabled: true, maxWorkers: 3, allowUnattributedCalls: false, recoverAgentTabs: true }
   });
+});
+
+it('accepts only validated synchronous Browser Use layout transactions', () => {
+  const listener = listeners.get('browserUse:layoutSync');
+  expect(listener).toBeTypeOf('function');
+  currentWindow = null;
+
+  const accepted = { returnValue: null as boolean | null };
+  listener!(accepted, { x: 120, y: 80, width: 640, height: 500 });
+  expect(accepted.returnValue).toBe(true);
+
+  const rejected = { returnValue: null as boolean | null };
+  listener!(rejected, { x: -1, y: 80, width: 640, height: 500 });
+  expect(rejected.returnValue).toBe(false);
 });
 
 describe('explicit settings replace the published tool contract', () => {

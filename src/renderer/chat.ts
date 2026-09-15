@@ -3,6 +3,7 @@ import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedCo
 import { marked, Marked } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
 import { createAgentPanel } from './agent-panel.js';
+import { createBrowserPanel } from './browser-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { goalErrorMessage } from '../shared/goal-errors.js';
@@ -142,6 +143,7 @@ function draftKey(): string { return selectedId ?? (selectedProjectId ? `project
 let selectionGeneration = 0;
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
+let browserPanel: ReturnType<typeof createBrowserPanel> | null = null;
 const expandedWorkers = new Set<string>();
 const inputDrafts = new Map<string, string>();
 const imageDrafts = new Map<string, Array<InputImage | InputAttachment>>();
@@ -3051,6 +3053,7 @@ export function chatVisible(next: boolean): void {
   visible = next;
   if (next) void refreshAll();
   else {
+    void browserPanel?.hide();
     window.clearTimeout(toolActivityTimer);
     window.clearTimeout(durationTimer);
     toolActivityTimer = undefined;
@@ -3458,6 +3461,7 @@ export function openChatView(name: string): void {
 }
 
 function showView(name: string): void {
+  if (name === 'settings') void browserPanel?.hide();
   $('composer').hidden = name === 'settings';
   $('composerDock').hidden = name === 'settings';
   $('inputQueue').hidden = name !== 'timeline';
@@ -3521,10 +3525,15 @@ export function initChat(next: Deps): void {
   const agentToggle = el('button', 'btn btn-icon', '◫') as HTMLButtonElement;
   agentToggle.id = 'agentPanelToggle'; agentToggle.type = 'button'; agentToggle.hidden = true;
   ui(agentToggle, 'aria-label', () => t("Toggle sub-agent side panel")); agentToggle.setAttribute('aria-expanded', 'false');
-  $('themeBtn').before(agentToggle);
+  const browserToggle = el('button', 'btn btn-icon') as HTMLButtonElement;
+  browserToggle.id = 'browserUseToggle'; browserToggle.type = 'button';
+  browserToggle.append(icon('i-globe'));
+  ui(browserToggle, 'aria-label', () => t('Toggle Browser side panel')); browserToggle.setAttribute('aria-expanded', 'false');
+  $('themeBtn').before(browserToggle, agentToggle);
   const agentToolGroups = new Map<string, HTMLDetailsElement>();
   agentPanel = createAgentPanel({
     host: document.querySelector<HTMLElement>('[data-panel="chat"]')!, toggle: agentToggle,
+    onShow: () => { void browserPanel?.hide(); },
     load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
     render: (source, id, current) => {
       let boundary = '';
@@ -3537,6 +3546,11 @@ export function initChat(next: Deps): void {
       });
       return groupToolRows(rows, `pane:${id}`, agentToolGroups);
     }
+  });
+  browserPanel = createBrowserPanel({
+    host: document.querySelector<HTMLElement>('[data-panel="chat"]')!,
+    toggle: browserToggle,
+    onShow: () => agentPanel?.hide()
   });
   initChatModels(() => {
     paintLoopDelivery();

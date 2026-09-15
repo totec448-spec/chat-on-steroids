@@ -10,6 +10,7 @@ import type { UsageOverview } from '../shared/usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
+import type { BrowserUseBounds, BrowserUseRequest, BrowserUseState } from '../shared/browser-use.js';
 /**
  * The entire renderer-facing API.
  *
@@ -190,6 +191,19 @@ const api = {
   setInputAutomation: (id: string, mode: 'off' | 'goal' | 'loop', loopAfterTurn?: boolean) => call<boolean>('sessions:inputAutomation', { id, mode, loopAfterTurn }),
   setZoom: (factor: number) => call<number>('window:zoom', { factor }),
   getZoom: () => call<number>('window:getZoom'),
+  browserUse: (request: BrowserUseRequest) => call<BrowserUseState>('browserUse:panel', request),
+  browserUseLayout: (bounds: BrowserUseBounds): void => ipcRenderer.send('browserUse:layout', bounds),
+  browserUseLayoutSync: (bounds: BrowserUseBounds): boolean => ipcRenderer.sendSync('browserUse:layoutSync', bounds) === true,
+  onBrowserUseShowRequested: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('browserUse:showRequested', wrapped);
+    return () => ipcRenderer.removeListener('browserUse:showRequested', wrapped);
+  },
+  onBrowserUseStateChanged: (listener: (state: BrowserUseState) => void): (() => void) => {
+    const wrapped = (_event: unknown, state: BrowserUseState): void => listener(state);
+    ipcRenderer.on('browserUse:stateChanged', wrapped);
+    return () => ipcRenderer.removeListener('browserUse:stateChanged', wrapped);
+  },
   openSessionChat: (id: string) => call<boolean>('sessions:openChat', { id }),
   // Stops a chat this app cannot stop in the page: every tool call it has already been proved
   // to own is refused until it is released. Returns the whole blocked set, so one press

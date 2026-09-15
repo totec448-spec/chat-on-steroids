@@ -84,6 +84,9 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     'read batches paths, lists folders, expands globs and returns numbered text. Read related files together. Read whole files for orientation; use a known region when that is enough. A start_line/end_line range applies to every file the call reads.',
   );
   if (caps.read) lines.push('view_image inspects a local image. Use it when visual evidence matters.');
+  if ((ctx.exposedCaps ?? caps).browserUse) lines.push(
+    'browser controls the separate in-app Browser Use workspace for ordinary websites. It never addresses the app-owned ChatGPT transport browser. Start each short Core exec burst with state compact:true and omit tab_id so it binds the active tab at that moment; use the returned tabId/snapshotId only inside that burst, never across exec calls. Reobserve compactly after every click/type/key/scroll. Inspect nested isError and stop on failure; STALE_TAB means the user changed tabs, so start a fresh burst. Keep full-text state outside exec when semantic reading is needed. Avoid top-level return in exec JavaScript. New origins require approval in the Browser panel.'
+  );
   if (ctx.roots.some(root => root.name === 'skills')) lines.push(
     'The managed skill library is /skills/<id>/SKILL.md. List and read it with the existing file tools when relevant. Install user-requested text skills there using the existing write tools. Skills do not register MCP tools or execute hooks. Keep explicit project workdir paths when installing skills.'
   );
