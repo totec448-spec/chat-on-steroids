@@ -866,6 +866,47 @@ export async function abortContinuationSourceBeforeSendNow(token: string, reason
   });
 }
 
+/**
+ * Gives up an armed source dispatch that the page proved ChatGPT never took.
+ *
+ * `dispatched-unresolved` is deliberately never replayed: it is written before the click, so a
+ * document that dies there may or may not have left the prompt with ChatGPT, and re-sending
+ * would be the double-send the whole fence exists to prevent. That is right, and this does not
+ * change it — nothing here re-offers the prompt to any page.
+ *
+ * What was missing is the other half. The destination side has had
+ * `releaseContinuationDestinationSendNow` since 2026-09-02, so a replacement chat whose click
+ * never landed hands the brief back at once. The source side had no equivalent, so the same
+ * event left the ticket in `dispatched-unresolved` until AUTOMATIC_HANDOVER_TTL_MS — six hours —
+ * with `handoffAsked()` true, so no pickup could re-ask and the page refusing to retype it. A
+ * 2026-09-04 QA run measured exactly that: three phase pickups fired and expired against a chat
+ * whose composer had never received the prompt. Worse than the stall itself, the chat stays in
+ * `pendingAutomaticContinuations()` the whole time, and `inspectSilentChats()` skips those — so
+ * a chat that is merely wedged also loses browser recovery for the rest of the six hours.
+ *
+ * The evidence is the page's own `send()` returning false, which is not a bare timeout: it
+ * watches five independent acceptance signals — the composer clearing, a new conversation id,
+ * generation starting, the Stop control appearing, and a freshly rendered user message matching
+ * the text — for three seconds. The compaction flow has already stopped generation and waited
+ * for settle before it types, so a landed click flips generating/Stop within milliseconds. None
+ * of the five inside three seconds is the strongest negative this page can produce.
+ *
+ * Aborting rather than releasing is the deliberate asymmetry with the destination half. The
+ * destination can prove nothing was sent (a chat that still has no id cannot have accepted a
+ * message) and so may safely re-offer the brief; here the evidence is strong but not proof, so
+ * the transaction ends instead of being re-armed. Nothing is ever sent twice, and the cost of
+ * being wrong is one abandoned compaction that auto-compaction re-files on the next qualifying
+ * turn — against six hours of a wedged chat with no browser recovery.
+ */
+export async function releaseContinuationSourceSendNow(token: string, reason: string): Promise<boolean> {
+  const entry = byToken.get(token);
+  if (!entry || !isOpen(entry) || entry.state !== 'awaiting-summary') return false;
+  // Only the armed-but-unproven state. `sent` has ChatGPT's own marker behind it and is not in
+  // doubt; the earlier states were never dispatched and are reclaimable without this.
+  if (entry.sourceSend.state !== 'dispatched-unresolved') return false;
+  return abortContinuation(token, reason);
+}
+
 /** Binds the marked source prompt to ChatGPT's stable user-message identity. */
 export async function bindContinuationSourceMessageNow(token: string, messageId: string, progress?: number): Promise<boolean> {
   if (!messageId || messageId.length > 200) return false;
