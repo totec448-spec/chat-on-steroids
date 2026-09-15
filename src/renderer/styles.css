@@ -349,14 +349,29 @@ code {
 .sidebar-brand strong { font-size: 15px; font-weight: 600; letter-spacing: -.025em; }
 .sidebar-brand strong span { display: block; color: var(--faint); font-size: 11px; font-weight: 400; letter-spacing: .01em; }
 .sidebar-brand .mark { display: none; }
-.sidebar .new-chat { padding: 10px 12px; justify-content: flex-start; background: transparent; border: 0; border-radius: 8px; margin-bottom: 10px; font-size: 13px; }
-.sidebar .new-chat:hover { background: var(--hover); }
+.sidebar-primary { display: grid; gap: 2px; margin-bottom: 18px; }
+.sidebar .new-chat, .sidebar .sidebar-primary-link { min-height: 38px; padding: 9px 12px; justify-content: flex-start; gap: 10px; background: transparent; border: 0; border-radius: 8px; margin: 0; font-size: 13px; }
+.sidebar .new-chat:hover, .sidebar .sidebar-primary-link:hover, .sidebar .sidebar-primary-link.is-sel { background: var(--hover); }
+.sidebar .sidebar-primary-link { color: var(--soft); }
+.sidebar .sidebar-primary-link.is-sel { color: var(--ink); }
 [data-theme="dark"] .sidebar .new-chat { color: #fff; }
-.sidebar-sessions { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 4px; }
+.sidebar-sessions { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 0; }
 /* Let the scrollbar reach the divider; keep a small gap on the row side of its track. */
 .sidebar-sessions > .scroll { flex: 1; margin-right: -12px; padding-right: 4px; }
 .sidebar-sessions h2 { font-size: 10px; padding: 10px 8px; }
 .sidebar-sessions .foot { border: 0; padding: 12px 8px; font-size: 10px; }
+.sidebar-session-section { margin: 0 0 16px; }
+.sidebar-session-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; padding: 5px 6px 5px 8px; color: var(--faint); list-style: none; cursor: pointer; }
+.sidebar-session-heading::-webkit-details-marker { display: none; }
+.sidebar-session-heading:hover { color: var(--ink); }
+.sidebar-session-label { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 11px; font-weight: 600; letter-spacing: .01em; }
+.sidebar-section-chev { width: 12px; height: 12px; transition: transform 130ms ease; }
+.sidebar-session-section[open] > .sidebar-session-heading .sidebar-section-chev { transform: rotate(90deg); }
+.sidebar-session-heading .acts { display: flex; align-items: center; gap: 2px; flex: none; }
+.sidebar-session-heading .acts .btn { display: grid; place-items: center; width: 26px; height: 26px; padding: 4px; color: var(--faint); font-size: 0; }
+.sidebar-session-heading .acts .btn:hover { color: var(--ink); }
+.sidebar-session-heading .acts .btn .ico { width: 14px; height: 14px; }
+.sidebar-section-empty { padding: 6px 28px 4px; text-align: left; font-size: 11px; line-height: 1.5; }
 .sidebar-bottom { border-top: 1px solid var(--line); padding-top: 12px; display: flex; align-items: center; justify-content: space-between; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -2703,7 +2718,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 /* The workspace shell follows the observed Codex chat/settings hierarchy. */
 .app > header { min-height: 48px; border-bottom: 0; padding: 8px 24px; }
 .app > header > .mark, .app > header > .title { display: none; }
-.app[data-screen='settings'] > header { display: none; }
+.app[data-screen='settings'] > header, .app[data-screen='library'] > header { display: none; }
 .app[data-screen='settings'] .sidebar-bottom { margin-top: auto; }
 .app[data-screen='settings'] #backToChat { justify-content: flex-start; align-self: start; width: auto; min-height: 36px; padding: 8px 10px; border: 0; border-radius: 8px; margin-bottom: 16px; }
 .app[data-screen='settings'] .is-session > h2,
@@ -2872,7 +2887,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .skills-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 14px 22px 18px; border-top: 1px solid var(--line); }
 .skills-dialog-actions .btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 12px; font-size: 12px; }
 .skills-dialog-actions .ico { width: 15px; height: 15px; }
-.skills-dialog :is(button, input):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.skills-dialog button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
 .chatgpt-permission-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--edge); border-radius: var(--r-xl); background: var(--card); color: var(--ink); box-shadow: 0 24px 90px #0006; }
 .chatgpt-permission-dialog::backdrop { background: #0008; backdrop-filter: blur(3px); }

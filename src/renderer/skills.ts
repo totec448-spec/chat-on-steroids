@@ -385,7 +385,7 @@ export function createSkills(options: SkillsOptions): SkillsController {
     return false;
   };
 
-  $('composerSkills').addEventListener('click', () => openDialog());
+  for (const id of ['composerSkills', 'sidebarSkills']) $(id).addEventListener('click', () => openDialog());
   $('skillsClose').addEventListener('click', () => dialog.close());
   search.addEventListener('input', () => { if (dialogState) renderDialog(dialogState); });
   search.addEventListener('keydown', event => {

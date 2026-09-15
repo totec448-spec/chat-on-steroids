@@ -643,8 +643,8 @@ it('removes a project group in one click, keeps its chats and draft, and rejects
   expect(api.removeProject).toHaveBeenCalledExactlyOnceWith(project.id);
   expect(w.document.querySelector(`[data-project-id="${project.id}"]`)).toBeNull();
   expect(w.document.querySelector(`[data-project-id="${other.id}"]`)).not.toBeNull();
-  expect(w.document.querySelector(`#sessionList > [data-id="${parent.id}"]`)).not.toBeNull();
-  expect(w.document.querySelector('#sessionList > .worker-group [data-id="child-session"]')).not.toBeNull();
+  expect(w.document.querySelector(`#chatList > [data-id="${parent.id}"]`)).not.toBeNull();
+  expect(w.document.querySelector('#chatList > .worker-group [data-id="child-session"]')).not.toBeNull();
   expect(input.value).toBe('Keep my draft');
   expect(input.placeholder).toBe('Ask anything…');
   finishList({ ok: true, data: { sessions: [parent, child], activeId: null, pressure: [], blocked: [] } });
@@ -653,6 +653,34 @@ it('removes a project group in one click, keeps its chats and draft, and rejects
   (w.document.getElementById('chatSend') as HTMLButtonElement).click();
   await settle();
   expect(live.sent[0]).toMatchObject({ sessionId: null, projectId: null, text: 'Keep my draft' });
+});
+
+it('keeps project-owned work and chats without projects in separate sidebar sections', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Alpha', path: '/alpha', createdAt: 1 };
+  const projectChat = { ...summary([]), id: 'project-chat', conversationId: 'project-conversation', title: 'Project work', projectId: project.id };
+  const looseChat = { ...summary([]), id: 'loose-chat', conversationId: 'loose-conversation', title: 'Loose work', projectId: undefined };
+  const { w } = await boot([], false, [], [project], { sessions: [projectChat, looseChat] });
+  expect(w.document.querySelector('#projectList [data-id="project-chat"]')).not.toBeNull();
+  expect(w.document.querySelector('#chatList [data-id="project-chat"]')).toBeNull();
+  expect(w.document.querySelector('#chatList [data-id="loose-chat"]')).not.toBeNull();
+  expect(w.document.querySelector('#projectList [data-id="loose-chat"]')).toBeNull();
+  expect((w.document.getElementById('projectsSection') as HTMLDetailsElement).open).toBe(true);
+  expect((w.document.getElementById('chatsSection') as HTMLDetailsElement).open).toBe(true);
+});
+
+it('opens Plugins as a workspace page without replacing the project and chat sidebar', async () => {
+  const looseChat = { ...summary([]), id: 'loose-chat', conversationId: 'loose-conversation', title: 'Loose work', projectId: undefined };
+  const { w } = await boot([], false, [], [], { sessions: [looseChat] });
+  const app = w.document.querySelector<HTMLElement>('.app')!;
+  (w.document.getElementById('sidebarPlugins') as HTMLButtonElement).click();
+  expect(app.dataset.screen).toBe('library');
+  expect(w.document.querySelector<HTMLElement>('.sidebar-sessions')!.hidden).toBe(false);
+  expect(w.document.getElementById('sidebarPrimary')!.hidden).toBe(false);
+  expect(w.document.getElementById('sidebarPlugins')!.classList.contains('is-sel')).toBe(true);
+  expect(w.document.querySelector<HTMLElement>('[data-panel="plugins"]')!.classList.contains('is-active')).toBe(true);
+  (w.document.querySelector('#chatList [data-id="loose-chat"]') as HTMLElement).click();
+  expect(app.dataset.screen).toBe('chat');
+  expect(w.document.getElementById('sidebarPlugins')!.classList.contains('is-sel')).toBe(false);
 });
 
 it('keeps the project visible when its removal fails', async () => {

@@ -47,6 +47,17 @@ it('puts Skills third in the Plus menu and provides a narrow dialog shell', asyn
   expect(mounted.api.skillsList).not.toHaveBeenCalled();
 });
 
+it('opens the same Skills manager from the primary sidebar entry', async () => {
+  const { api } = await mount();
+  const button = dom.window.document.getElementById('sidebarSkills') as HTMLButtonElement;
+  expect(button).not.toBeNull();
+  button.click();
+  await tick();
+  const dialog = dom.window.document.getElementById('skillsDialog') as HTMLDialogElement;
+  expect(dialog.open).toBe(true);
+  expect(api.skillsList).toHaveBeenCalledTimes(1);
+});
+
 it('recognizes slash completion only in the leading command block', async () => {
   const { module } = await mount();
   expect(module.skillCommandTrigger('/', 1)).toMatchObject({ kind: 'slash', query: '' });

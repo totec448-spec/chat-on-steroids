@@ -122,9 +122,11 @@ let setupKeySave: Promise<boolean> = Promise.resolve(true);
 // ------------------------------------------------------------------- tabs
 
 function showTab(name: string): void {
-  const settings = name !== 'chat';
-  document.querySelector<HTMLElement>('.app')!.dataset.screen = settings ? 'settings' : 'chat';
+  const workspaceSidebar = name === 'chat' || name === 'plugins';
+  const settings = !workspaceSidebar;
+  document.querySelector<HTMLElement>('.app')!.dataset.screen = name === 'plugins' ? 'library' : settings ? 'settings' : 'chat';
   document.querySelector<HTMLElement>('.sidebar-brand')!.hidden = settings;
+  $('sidebarPrimary').hidden = settings;
   $('workspaceSettings').hidden = settings;
   if (name === 'usage') void refreshUsage();
   $('tabs').hidden = !settings;
@@ -136,6 +138,9 @@ function showTab(name: string): void {
 
   for (const tab of document.querySelectorAll<HTMLElement>('nav button')) {
     tab.classList.toggle('is-sel', tab.dataset.tab === name);
+  }
+  for (const item of document.querySelectorAll<HTMLElement>('[data-sidebar-page]')) {
+    item.classList.toggle('is-sel', item.dataset.sidebarPage === name);
   }
   for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
     panel.classList.toggle('is-active', panel.dataset.panel === (name === 'settings' ? 'chat' : name));
@@ -152,8 +157,14 @@ function showTab(name: string): void {
 $('backToChat').addEventListener('click', () => showTab('chat'));
 $('workspaceSettings').addEventListener('click', () => showTab('home'));
 $('chatSettingsBtn').addEventListener('click', () => showTab('settings'));
-$('sessionList').addEventListener('click', () => showTab('chat'));
+$('sessionList').addEventListener('click', event => {
+  const target = event.target as HTMLElement;
+  if (target.closest('[data-id], [data-new-project]')) showTab('chat');
+});
 $('newChat').addEventListener('click', () => showTab('chat'));
+$('addProject').addEventListener('click', () => showTab('chat'));
+$('sidebarPlugins').addEventListener('click', () => showTab('plugins'));
+$('sidebarSkills').addEventListener('click', () => showTab('chat'));
 $('composerFolder').addEventListener('click', () => $('addProject').click());
 let zoomFactor = 1;
 let zoomEdited = false;
