@@ -77,6 +77,7 @@ import {
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
+import { primeControlContinuations, shutdownExternalControl, startExternalControl } from './control.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -390,6 +391,7 @@ void app.whenReady().then(async () => {
   });
   const savedContinuations = await readDurable<ContinuationSnapshot>(CONTINUATIONS_STATE);
   if (windowActivation.isDisabled()) return;
+  primeControlContinuations(savedContinuations);
   await restoreContinuations(savedContinuations);
   if (windowActivation.isDisabled()) return;
 
@@ -420,6 +422,14 @@ void app.whenReady().then(async () => {
       app.quit();
     }
   );
+  try {
+    const control = await startExternalControl(userData);
+    logInfo(`external control listening on 127.0.0.1:${control.port}`);
+  } catch (error) {
+    // The app stays usable, but control remains closed rather than rotating or exposing
+    // an invalid credential behind the caller's back.
+    logWarn(`external control unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
   windowActivation.enable();
   if (!isBackgroundLaunch(process.argv)) windowActivation.request();
   // macOS `activate` can fire on first launch, so do not wire it at module load where it could
@@ -506,7 +516,7 @@ app.on('will-quit', (event) => {
       // The budget has to clear the drains it contains, or it would silently defeat them:
       // the bridge force-closes wedged localhost sockets at 15s and the MCP endpoint forces
       // its own drain at 30s. This is the outer bound on both, not a competing one.
-      { name: 'admission/drain', budgetMs: 40_000, run: () => [shutdownConnection(), shutdownBridge()] },
+      { name: 'admission/drain', budgetMs: 40_000, run: () => [shutdownConnection(), shutdownBridge(), shutdownExternalControl()] },
       // Phase 2: only after request handlers are done may their owned child processes go.
       {
         name: 'process cleanup',
