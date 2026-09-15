@@ -126,6 +126,27 @@ export function isUnreachableError(raw: string): boolean {
   return CONTROL_PLANE_POLL.test(text) && UNREACHABLE_NETWORK.test(text);
 }
 
+/**
+ * Harpoon is an optional tunnel-client control channel. Older clients can report that this
+ * channel is unsupported even while the configured `main` channel is healthy. Suppress only
+ * the two known Harpoon dispatcher messages; an unsupported main or unknown channel remains
+ * visible because it can affect the user's connection.
+ */
+export function isBenignHarpoonChannelEvent(level: string, message: string, event?: Record<string, unknown>): boolean {
+  const normalizedLevel = String(level || '').toUpperCase();
+  if (!['WARN', 'ERROR'].includes(normalizedLevel)) return false;
+  const text = String(message || '');
+  if (/^failed to process polled command:\s*unsupported channel\s*["']harpoon["']$/i.test(text)) return true;
+  const dispatcher = text.match(/^dispatcher received unsupported channel(?:\s*["']([^"']+)["'])?$/i);
+  if (!dispatcher) return false;
+  if (dispatcher[1]) return dispatcher[1].toLowerCase() === 'harpoon';
+  try {
+    return JSON.stringify(event || '').toLowerCase().includes('harpoon');
+  } catch {
+    return false;
+  }
+}
+
 export async function startTunnel(opts: TunnelStartOptions): Promise<TunnelHandle> {
   switch (opts.settings.kind) {
     case 'openai':
@@ -561,6 +582,7 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
         ) {
           return;
         }
+        if (isBenignHarpoonChannelEvent(level, message, event)) return;
         if (level === 'ERROR' || level === 'FATAL' || level === 'WARN') {
           const errText = event['error'] ? String(event['error']) : '';
           run.lastError = `${level} ${message}${errText ? `: ${errText}` : ''}`.slice(0, 400);

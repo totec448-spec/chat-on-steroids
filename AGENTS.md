@@ -2101,9 +2101,6 @@ These are source-level discrepancies checked for this map, not new live reproduc
 permission for an unsolicited rewrite. Recheck current code/tests before acting; another
 shared-tree change may already have addressed them.
 
-- **Startup opening:** `index.ts` still calls `startChatModelDiscovery(true)` on window show
-  when the catalog is unknown. Desired policy requires a concrete operation to own any new
-  browser document; app opening alone must not become a fallback opener.
 - **Repair handout vs action:** attribution and assistant-error repairs claim their exact attempt after the
   extension's tab scan. Other repair reasons still mark handout before the tab query/action
   without that final claim. Intent requires browser actions to retain current authority
