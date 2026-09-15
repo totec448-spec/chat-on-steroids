@@ -33,7 +33,16 @@ vi.mock('electron', () => ({
 
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
 vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd() }));
-vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: vi.fn(async () => 'chrome.exe') }));
+const openInternalBrowserUrl = vi.hoisted(() => vi.fn(async () => 7));
+vi.mock('../src/main/internal-browser.js', () => ({
+  ensureInternalBrowserReady: vi.fn(async () => undefined),
+  handleInternalBrowserHostRequest: vi.fn(async () => ({})),
+  openInternalBrowserUrl,
+  internalBrowserDockState: vi.fn(() => ({ open: false, ready: true, tabId: null })),
+  showInternalBrowserDock: vi.fn(async () => ({ open: true, ready: true, tabId: 7 })),
+  layoutInternalBrowserDock: vi.fn(() => ({ open: true, ready: true, tabId: 7 })),
+  hideInternalBrowserDock: vi.fn(() => ({ open: false, ready: true, tabId: 7 }))
+}));
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, resetSecretsCacheForTests } = await import('../src/main/secrets.js');
@@ -62,7 +71,6 @@ const {
   swarmStateForCaller
 } = await import('../src/main/agents.js');
 const { registerIpc } = await import('../src/main/ipc.js');
-const { openInPreferredBrowser } = await import('../src/main/browser.js');
 const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
 const { extensionDownloadUrl } = await import('../src/main/version.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceEntries } = await import('../src/main/workspace.js');
@@ -610,22 +618,6 @@ describe('bounded IPC identities and OS launch results', () => {
 
     const punctuation = (await clear(null, 'worker-1\nspoofed')) as { ok: boolean; error?: string };
     expect(punctuation.ok).toBe(false);
-  });
-});
-
-describe('ChatGPT browser settings', () => {
-  it('persists Edge and keeps it through an unrelated stale renderer save', async () => {
-    const base = defaultConfig();
-    await saveConfig(base);
-    const result = await save({ ...base, ui: { ...base.ui, chatBrowser: 'edge' } }, base);
-    expect(result.ok, result.error).toBe(true);
-    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).ui.chatBrowser).toBe('edge');
-    const stale = await save({ ...base, ui: { ...base.ui, theme: 'light' } }, base);
-    expect(stale.ok, stale.error).toBe(true);
-    expect(getConfig().ui).toMatchObject({ chatBrowser: 'edge', theme: 'light' });
-    const current = getConfig();
-    expect((await save({ ...current, ui: { ...current.ui, chatBrowser: 'unsupported' } }, current)).ok).toBe(false);
-    expect(getConfig().ui.chatBrowser).toBe('edge');
   });
 });
 
@@ -1177,15 +1169,16 @@ describe('session IPC contracts', () => {
     resetBlockedChatsForTests();
   });
 
-  it('opens only the stored conversation URL in Chrome', async () => {
+  it('opens only the stored conversation URL in the integrated browser', async () => {
     const session = await createSession({
       title: 'open me',
       conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     });
     const reply = await handlers.get('sessions:openChat')!(null, { id: session.id }) as any;
     expect(reply.ok, reply.error).toBe(true);
-    expect(openInPreferredBrowser).toHaveBeenCalledWith(
-      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    expect(openInternalBrowserUrl).toHaveBeenCalledWith(
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { active: true, reveal: true, retain: true }
     );
 
     const unattributed = await createSession({ title: 'no conversation', conversationId: null });

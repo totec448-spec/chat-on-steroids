@@ -125,9 +125,6 @@ export interface TunnelSettings {
   binaryPath: string;
 }
 
-export const CHAT_BROWSERS = ['chrome', 'edge', 'brave'] as const;
-export type ChatBrowser = (typeof CHAT_BROWSERS)[number];
-
 export interface UiPrefs {
   /** Maintenance may reuse existing tabs but cannot open helpers or missing chats. */
   browserOnly?: boolean;
@@ -146,8 +143,6 @@ export interface UiPrefs {
   startAtLogin?: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
-  /** Browser for app-originated launches; connected source tabs retain placement ownership. */
-  chatBrowser?: ChatBrowser;
   /** Explicit choice, never inherited from the OS: the window looks how you left it. */
   theme: 'light' | 'dark';
 }

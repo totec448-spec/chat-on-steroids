@@ -232,7 +232,29 @@ describe('the chat the extension creates beside its source', () => {
     const makeTab = async (options: Created) => {
       const tab = { ...options, id: 100 + created.length };
       created.push(tab);
+      tabs.push(tab);
       return tab;
+    };
+    const browserHost = async (input: string, init?: { body?: string }) => {
+      const path = new URL(input).pathname;
+      if (path === '/hello') return { ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: 14, compatible: true, paired: true }) };
+      if (path !== '/browser-host') return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      const body = JSON.parse(String(init?.body || '{}')) as any;
+      if (body.action === 'query') return { ok: true, status: 200, json: async () => ({ tabs: [...tabs] }) };
+      if (body.action === 'get') {
+        const tab = tabs.find(entry => entry.id === body.tabId);
+        return tab ? { ok: true, status: 200, json: async () => ({ tab }) } : { ok: false, status: 404, json: async () => ({ error: 'tab_not_found' }) };
+      }
+      if (body.action === 'create') return { ok: true, status: 200, json: async () => ({ tab: await makeTab(body.create) }) };
+      if (body.action === 'update') {
+        const tab = tabs.find(entry => entry.id === body.tabId);
+        if (!tab) return { ok: false, status: 404, json: async () => ({ error: 'tab_not_found' }) };
+        Object.assign(tab, body.update);
+        return { ok: true, status: 200, json: async () => ({ tab }) };
+      }
+      if (body.action === 'remove') return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      if (body.action === 'events') return { ok: true, status: 200, json: async () => ({ generation: '11111111-2222-4333-8444-555555555555', cursor: 0, events: [] }) };
+      return { ok: false, status: 400, json: async () => ({ error: 'unknown_browser_host_action' }) };
     };
     const context = vm.createContext({
       chrome: {
@@ -260,7 +282,7 @@ describe('the chat the extension creates beside its source', () => {
         alarms: { onAlarm: event, create: () => {}, clear: async () => true },
         scripting: { executeScript: async () => [], insertCSS: async () => {} }
       },
-      fetch: async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) }),
+      fetch: browserHost,
       URL, URLSearchParams, AbortController, setTimeout, clearTimeout, TextEncoder, console,
       browserDriverModule: { installBrowserDriverLifecycle() {}, sweepStaleDrivenGroups: async () => {} }
     });

@@ -32,6 +32,13 @@
 export const RESUME_CLAIM_WINDOW_MS = 60_000;
 
 const claims = new Map<string, number>();
+const waiters = new Set<() => void>();
+
+function wakeWaiters(): void {
+  const pending = [...waiters];
+  waiters.clear();
+  for (const wake of pending) wake();
+}
 
 /** Records that a replacement chat is expected to appear imminently. */
 function noteExpectedResume(token: string): void {
@@ -41,7 +48,7 @@ function noteExpectedResume(token: string): void {
 /**
  * Arms the recorder gate before the browser is opened for a queued resume.
  *
- * This has to precede `openExternal()`, not merely the page's later redeem. Chrome/ChatGPT can
+ * This has to precede opening the replacement chat through the browser host, not merely the page's later redeem. ChatGPT can
  * expose the new conversation quickly enough for an already-journalled service-worker event to
  * reach the recorder before the content script has redeemed its marker. That observation must
  * wait for the A→B commit rather than inventing a shadow local session for B.
@@ -57,7 +64,7 @@ export function noteResumeClaim(token: string): void {
 
 /** Records that the move landed, or was given up on, so nothing waits on it any longer. */
 export function endResumeClaim(token: string): void {
-  claims.delete(token);
+  if (claims.delete(token)) wakeWaiters();
 }
 
 /**
@@ -76,7 +83,37 @@ export function resumeOpeningChat(now: number = Date.now()): boolean {
   return false;
 }
 
+/**
+ * Waits until the currently-open resume window has actually ended.
+ *
+ * Recorder callers used to impose their own five-second cutoff and could therefore outrun the
+ * continuation that owned this gate. ChatGPT can expose the new conversation id before the
+ * submitted bootstrap message becomes stable enough to ACK, so that shorter clock recreated the
+ * shadow-session race. There is only one lifetime now: a commit/abort wakes this immediately;
+ * otherwise the gate's own bounded claim window expires it. No polling loop is needed.
+ */
+export async function waitForResumeOpeningToSettle(): Promise<void> {
+  while (resumeOpeningChat()) {
+    const nextExpiry = Math.min(...[...claims.values()].map((at) => at + RESUME_CLAIM_WINDOW_MS));
+    await new Promise<void>((resolve) => {
+      let done = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const wake = (): void => {
+        if (done) return;
+        done = true;
+        waiters.delete(wake);
+        if (timer) clearTimeout(timer);
+        resolve();
+      };
+      waiters.add(wake);
+      timer = setTimeout(wake, Math.max(1, nextExpiry - Date.now() + 1));
+      timer.unref?.();
+    });
+  }
+}
+
 /** Test seam. */
 export function resetResumeGate(): void {
   claims.clear();
+  wakeWaiters();
 }

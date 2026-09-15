@@ -14,7 +14,7 @@ import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
 import { initSkills } from './skills.js';
 import { pluginManager } from './plugins/manager.js';
-import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
+import { setBrowserHostHandler, setBrowserOpener, shutdownBridge, startBridge } from './bridge.js';
 import { flushSessions, initSessionStore, pruneSessions } from './session/store.js';
 import { usageOverview } from './session/usage.js';
 import {
@@ -64,7 +64,15 @@ import { startSessionRetentionMaintenance } from './session/retention.js';
 import { runShutdownSequence } from './shutdown.js';
 import { applyStagedUpdate, startUpdateChecks } from './update.js';
 import { UI_BASE_ZOOM, windowLayoutForWorkArea, titleBarOverlayForTheme } from './window-layout.js';
-import { openInPreferredBrowser } from './browser.js';
+import {
+  attachInternalBrowserWindow,
+  ensureInternalBrowserReady,
+  handleInternalBrowserHostRequest,
+  isInternalBrowserSession,
+  openInternalBrowserUrl,
+  prewarmInternalBrowser,
+  shutdownInternalBrowser
+} from './internal-browser.js';
 import {
   applyLoginStartup,
   isBackgroundLaunch,
@@ -90,8 +98,16 @@ let shutdownComplete = false;
 let stopSessionRetention: (() => void) | null = null;
 const usageWarmup = new AbortController();
 
-// One instance only: two copies would fight over the tunnel and the config file.
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+// Development runs may live beside the installed app. Keep their Electron profile,
+// single-instance lock, secrets and internal Chromium session in a disposable directory.
+// Packaged builds deliberately ignore this escape hatch.
+const devUserData = !app.isPackaged ? process.env.COS_DEV_USER_DATA?.trim() : '';
+if (devUserData) app.setPath('userData', path.resolve(devUserData));
+
+// One installed instance only: two copies would fight over the tunnel and config file.
+// An explicitly sandboxed development run owns a different userData, bridge port and extension
+// profile, and must be able to live beside the installed app for hands-on browser testing.
+const hasSingleInstanceLock = devUserData ? true : app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   // `app.quit()` does not make the rest of this module stop executing. Mark this process as a
   // terminal secondary instance immediately, so neither native activation nor the async bootstrap
@@ -127,6 +143,7 @@ function createWindow(): void {
       webSecurity: true
     }
   });
+  attachInternalBrowserWindow(window);
 
   if (process.platform === 'win32') window.removeMenu();
 
@@ -233,8 +250,6 @@ setFinishNotifier((title, body, sessionId, turnId) => {
   notice.show();
   return true;
 });
-setBrowserWorkArea(() => screen.getPrimaryDisplay().workArea);
-
 // Electron promises `second-instance` only after its own `ready`, not after our async startup.
 // Until CSP/permission handlers and IPC are installed below, a re-launch is only a focus request
 // for the initial window that startup is already going to show, so do not construct one early.
@@ -341,20 +356,14 @@ void app.whenReady().then(async () => {
   // decides whether a previous run has been abandoned partly from which ChatGPT tabs are
   // open, and without this it can only answer "I cannot see" — which it treats, on
   // purpose, as a reason to leave the existing run alone.
-  // How a fresh chat opens when no browser can be asked to open it. The app asks the OS for
-  // the ChatGPT URL, which launches the browser if it is closed and creates the tab if there
-  // is none — the two cases the old "wait for a ChatGPT tab to poll us" delivery could never
-  // handle. Wired before any restored command is delivered, so a resume queued yesterday opens
-  // as soon as the bridge starts rather than waiting for the user to visit ChatGPT.
-  //
-  // It is deliberately not how a page-driven Compact & Resume opens chat B. The OS resolves a
-  // URL to whichever browser instance last had focus, which is a different window — and can be
-  // a browser without this extension in it — from the one holding chat A. That decision belongs
-  // to the browser that owns the source chat; see bridge.ts::offerPlacement.
+  // Cold command delivery uses the same Chromium session as every visible/background ChatGPT
+  // page. There is no OS browser selection boundary, so a fresh command cannot escape into a
+  // personal profile or another installed browser.
   setBrowserOpener(async (url) => {
-    // Let the command owner report launch failure; another browser may belong to another account.
-    await openInPreferredBrowser(url);
+    const background = getConfig().ui.backgroundChats === true;
+    await openInternalBrowserUrl(url, { active: !background, reveal: !background });
   });
+  setBrowserHostHandler(handleInternalBrowserHostRequest);
 
   // Persistence is a process-lifetime dependency of the broker, not a feature-toggle
   // dependency. Multi-agent can be enabled from Settings without restarting the process;
@@ -420,6 +429,23 @@ void app.whenReady().then(async () => {
       app.quit();
     }
   );
+  // Browser lifetime starts with the app, independently of the dock. Start the bridge alongside
+  // the persistent Chromium session, then load one hidden ChatGPT document only after both local
+  // sides are available. That gives the companion a live page to pair from before the desktop
+  // window appears, without turning startup into a visible browser action.
+  const bridgeStartup = getConfig().sessions.record || getConfig().multiAgent.enabled
+    ? startBridge().catch(error => {
+      logWarn(`browser bridge startup: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    })
+    : Promise.resolve(null);
+  try {
+    await ensureInternalBrowserReady();
+    await bridgeStartup;
+    await prewarmInternalBrowser();
+  } catch (error) {
+    logWarn(`internal browser startup: ${error instanceof Error ? error.message : String(error)}`);
+  }
   windowActivation.enable();
   if (!isBackgroundLaunch(process.argv)) windowActivation.request();
   // macOS `activate` can fire on first launch, so do not wire it at module load where it could
@@ -439,12 +465,8 @@ void app.whenReady().then(async () => {
   // traffic, so never make startup/reload wait behind years of old session history.
   queueDeterministicAttributionRepair();
 
-  // The bridge serves recording and multi-agent mode both: recording needs the
-  // extension to observe the chat, and multi-agent mode needs it to open worker tabs.
-  // Either switch being on starts it. ipc.ts applies the same rule on a settings save.
-  if (getConfig().sessions.record || getConfig().multiAgent.enabled) {
-    void startBridge();
-  }
+  // The bridge was started before browser prewarm above so the first hidden document can pair
+  // against a fully restored local authority. ipc.ts applies the same start/stop rule on saves.
   // Retention governs recordings already stored on disk, independent of whether recording is
   // currently enabled. The tray app can stay alive for days, so run once now and keep a coarse
   // maintenance timer rather than making expiry depend on the next process restart.
@@ -511,7 +533,7 @@ app.on('will-quit', (event) => {
       {
         name: 'process cleanup',
         budgetMs: 15_000,
-        run: () => [unifiedExecManager.terminateAllProcesses(), stopComputerHelper(), pluginManager.close()]
+        run: () => [unifiedExecManager.terminateAllProcesses(), stopComputerHelper(), shutdownInternalBrowser(), pluginManager.close()]
       },
       // Phase 3: recorder work can enqueue both session projections and named durable state.
       { name: 'recorder flush', budgetMs: 10_000, run: () => [flushRecorder()] },
@@ -544,6 +566,9 @@ app.on('will-quit', (event) => {
 // Belt and braces: no web contents anywhere in this app may open a window or
 // navigate. External links go through the vetted allowlist in ipc.ts instead.
 app.on('web-contents-created', (_event, contents) => {
+  // The app shell is a local page and may never navigate. The internal browser deliberately
+  // uses a separate persistent Session for remote ChatGPT pages and their OAuth popups.
+  if (isInternalBrowserSession(contents.session)) return;
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   contents.on('will-navigate', (event) => event.preventDefault());
   contents.on('will-redirect', (event) => event.preventDefault());

@@ -5,6 +5,7 @@ import type { UsageOverview } from '../src/shared/usage.js';
 
 let dom: JSDOM;
 afterEach(() => { dom?.window.close(); vi.unstubAllGlobals(); vi.resetModules(); });
+const decimalNeutral = (value: string | null | undefined) => String(value ?? '').replace(/(\d),(\d)/g, '$1.$2');
 
 it('explains a pending background rebuild and replaces transport failure with a retryable status', async () => {
   dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
@@ -39,7 +40,7 @@ it.each([256_000, 400_000])('shows the calculated %i context cap and edits formu
   const { initUsage, refreshUsage } = await import('../src/renderer/usage.js');
   const field = (id: string) => dom.window.document.getElementById(id) as HTMLInputElement;
   const change = (input: HTMLInputElement, value: string) => { input.value = value; input.dispatchEvent(new dom.window.Event('input')); };
-  const cost = () => dom.window.document.getElementById('usageTotalCost')!.textContent;
+  const cost = () => decimalNeutral(dom.window.document.getElementById('usageTotalCost')!.textContent);
   const divisor = field('usageDivisor');
   initUsage(); await refreshUsage();
   expect(dom.window.document.getElementById('usageFormula')!.textContent).toContain(`capped at ${contextTokenCap.toLocaleString()} tokens`);
@@ -90,7 +91,7 @@ it('shows the Sol picker alias rate and preserves an explicitly cleared rate aft
   usage.initUsage(); await usage.refreshUsage();
   const rate = () => dom.window.document.querySelector('input[aria-label="gpt-5-6-thinking cached-input USD per million tokens"]') as HTMLInputElement;
   expect(rate().value).toBe('0.4');
-  expect(dom.window.document.getElementById('usageTotalCost')!.textContent).toContain('0.21');
+  expect(decimalNeutral(dom.window.document.getElementById('usageTotalCost')!.textContent)).toContain('0.21');
   expect(dom.window.document.getElementById('usageDays')!.textContent).not.toContain('Rate unknown');
   rate().value = ''; rate().dispatchEvent(new dom.window.Event('input'));
   expect(getUsage).toHaveBeenCalledTimes(1);
@@ -113,12 +114,12 @@ it('combines equivalent recorded names in the table while keeping raw rate edits
   const table = () => dom.window.document.querySelector('#usageDays table')!;
   expect(table().querySelectorAll('tr')).toHaveLength(2);
   expect(table().textContent).toContain('gpt-5.6-sol · high');
-  expect(table().textContent).toContain('1.44');
+  expect(decimalNeutral(table().textContent)).toContain('1.44');
   expect(table().querySelector('[data-usage-hint]')!.getAttribute('data-usage-hint')).toBe('Recorded IDs: 5.6, gpt-5-6-thinking, gpt-5.6-sol');
   expect(dom.window.document.querySelectorAll('#usageRates input')).toHaveLength(3);
   const rate = dom.window.document.querySelector('input[aria-label="5.6 cached-input USD per million tokens"]') as HTMLInputElement;
   rate.value = ''; rate.dispatchEvent(new dom.window.Event('input'));
-  expect(table().textContent).toContain('0.96 + unpriced');
+  expect(decimalNeutral(table().textContent)).toContain('0.96 + unpriced');
   expect(getUsage).toHaveBeenCalledTimes(1);
   expect(models[0]!.model).toBe('5.6');
 });

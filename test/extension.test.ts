@@ -39,8 +39,8 @@ describe('extension release metadata', () => {
     expect(lock.version).toBe(APP_VERSION);
     expect(lock.packages?.['']?.version).toBe(APP_VERSION);
     expect(manifest.version).toBe(APP_VERSION);
-    expect(BRIDGE_PROTOCOL).toBe(13);
-    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 13;');
+    expect(BRIDGE_PROTOCOL).toBe(14);
+    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 14;');
   });
 
   /**
@@ -454,6 +454,8 @@ interface WorkerHarness {
   closeTab(tabId: number): Promise<void>;
   /** Fires only Chrome's navigation-start signal, without inventing a replacement document. */
   startTabNavigation(tabId: number, url?: string): Promise<void>;
+  /** Fires a URL-only update inside an already-running navigation/loading cycle. */
+  updateTabUrl(tabId: number, url: string): Promise<void>;
   /** Completes navigation with no URL, as Chrome does outside granted hosts. */
   completeTabNavigation(tabId: number): Promise<void>;
   /** Fires Chrome's tab URL-change lifecycle event. */
@@ -498,7 +500,7 @@ function loadWorker(options: {
   session: FakeStorageArea;
   fetch?: (input: string, init?: Record<string, unknown>) => Promise<ReturnType<typeof response>>;
   tabsGet?: (tabId: number) => Promise<{ id?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean }>;
-  tabsQuery?: () => Promise<
+  tabsQuery?: (query?: Record<string, unknown>) => Promise<
     Array<{ id?: number; windowId?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean; active?: boolean }>
   >;
   tabsSendMessage?: (tabId: number, message: Record<string, unknown>) => Promise<unknown>;
@@ -512,21 +514,50 @@ function loadWorker(options: {
   const alarmListeners: Array<(alarm: { name: string }) => void> = [];
   const knownTabs = new Map<
     number,
-    { id: number; windowId: number; url?: string; pendingUrl?: string; autoDiscardable?: boolean }
+    { id: number; windowId: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean; active?: boolean; pinned?: boolean }
   >();
+  let hostEventSeq = 0;
+  const hostGeneration = '11111111-2222-4333-8444-555555555555';
+  const hostEvents: Array<{ seq: number; type: 'updated' | 'removed'; tabId: number; changeInfo?: Record<string, unknown> }> = [];
+  const wakeSockets = new Set<{
+    readyState: number;
+    authenticated: boolean;
+    onmessage: ((event: { data: string }) => void) | null;
+  }>();
+  const wakeHost = () => {
+    for (const socket of wakeSockets) {
+      if (socket.readyState === 1 && socket.authenticated) {
+        setTimeout(() => socket.onmessage?.({ data: 'wake' }), 0);
+      }
+    }
+  };
+  const publishHostEvent = (type: 'updated' | 'removed', tabId: number, changeInfo?: Record<string, unknown>) => {
+    hostEvents.push({ seq: ++hostEventSeq, type, tabId, ...(changeInfo ? { changeInfo } : {}) });
+    wakeHost();
+  };
+  const waitForHostEvents = async () => {
+    for (let turn = 0; turn < 40; turn += 1) {
+      const stored = options.session.data.browserHostEventState as { generation?: unknown; after?: unknown } | undefined;
+      if (stored?.generation === hostGeneration && Number(stored.after) >= hostEventSeq) return;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  };
   const tabsCreate = vi.fn(async ({ url }: { url?: string } = {}) => {
     knownTabs.set(99, { id: 99, windowId: 7, ...(url ? { url } : {}) });
     return { id: 99 };
   });
   const tabsQuery = vi.fn(options.tabsQuery ?? (async () => [...knownTabs.values()]));
-  const tabsUpdate = vi.fn(async (id: number, properties: { autoDiscardable?: boolean } = {}) => {
+  const tabsUpdate = vi.fn(async (id: number, properties: { autoDiscardable?: boolean; active?: boolean; url?: string } = {}) => {
     const tab = knownTabs.get(id);
-    if (tab && typeof properties.autoDiscardable === 'boolean') tab.autoDiscardable = properties.autoDiscardable;
+    if (tab) {
+      if (typeof properties.autoDiscardable === 'boolean') tab.autoDiscardable = properties.autoDiscardable;
+      if (typeof properties.url === 'string') tab.url = properties.url;
+    }
     return { id, windowId: 7, ...properties };
   });
   const tabsSendMessage = vi.fn(options.tabsSendMessage ?? (async () => ({ ok: true })));
-  const tabsRemove = vi.fn(async () => undefined);
-  const tabsReload = vi.fn(async () => undefined);
+  const tabsRemove = vi.fn(async (_tabId: number) => undefined);
+  const tabsReload = vi.fn(async (_tabId: number) => undefined);
   const scriptingExecuteScript = vi.fn(async () => []);
   const scriptingInsertCSS = vi.fn(async () => undefined);
   const alarmCreate = vi.fn(() => undefined);
@@ -543,6 +574,47 @@ function loadWorker(options: {
     return created;
   };
   const event = () => ({ addListener: () => undefined });
+  class FakeWebSocket {
+    url: string;
+    readyState = 0;
+    bufferedAmount = 0;
+    authenticated = false;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(url: string) {
+      this.url = url;
+      wakeSockets.add(this);
+      setTimeout(() => {
+        if (this.readyState !== 0) return;
+        this.readyState = 1;
+        this.onopen?.();
+      }, 0);
+    }
+
+    send(data: string) {
+      if (data === 'pong') return;
+      if (!this.authenticated) {
+        this.authenticated = true;
+        const stored = options.session.data.browserHostEventState as { after?: unknown } | undefined;
+        const after = Number.isInteger(stored?.after) ? Number(stored?.after) : 0;
+        // Production sends one wake immediately after authenticating the socket. Model the
+        // useful part of that guarantee without injecting a redundant maintenance pass into
+        // every test: only wake here when lifecycle already accumulated before the socket came
+        // up. That is the race this bootstrap wake exists to close.
+        if (hostEventSeq > after) setTimeout(() => this.onmessage?.({ data: 'wake' }), 0);
+      }
+    }
+
+    close() {
+      if (this.readyState >= 2) return;
+      this.readyState = 3;
+      wakeSockets.delete(this);
+      this.onclose?.();
+    }
+  }
   const chrome = {
     storage: { local: options.local, session: options.session },
     runtime: {
@@ -600,7 +672,38 @@ function loadWorker(options: {
       }
     }
   };
-  const fetch = options.fetch ?? (async () => response(503, {}));
+  const downstreamFetch = options.fetch ?? (async (input: string) => {
+    const url = new URL(input);
+    if (url.pathname === '/hello' && typeof options.local.data.token === 'string') {
+      return response(200, { app: 'chat-on-steroids', paired: true });
+    }
+    return response(503, {});
+  });
+  const fetch = async (input: string, init: Record<string, unknown> = {}) => {
+    if (new URL(input).pathname !== '/browser-host') return downstreamFetch(input, init);
+    const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}') as any;
+    if (body.action === 'query') return response(200, { tabs: await tabsQuery(body.query ?? {}) });
+    if (body.action === 'get') {
+      const tab = options.tabsGet ? await options.tabsGet(body.tabId) : knownTabs.get(body.tabId);
+      if (!tab) return response(404, { error: 'tab_not_found' });
+      return response(200, { tab });
+    }
+    if (body.action === 'create') return response(200, { tab: await tabsCreate(body.create ?? {}) });
+    if (body.action === 'update') return response(200, { tab: await tabsUpdate(body.tabId, body.update ?? {}) });
+    if (body.action === 'remove') { await tabsRemove(body.tabId); knownTabs.delete(body.tabId); return response(200, { ok: true }); }
+    if (body.action === 'reload') { await tabsReload(body.tabId); return response(200, { ok: true }); }
+    if (body.action === 'events') {
+      const same = body.generation === hostGeneration;
+      const after = same && Number.isInteger(body.after) ? body.after : 0;
+      return response(200, {
+        generation: hostGeneration,
+        cursor: hostEventSeq,
+        reset: !same,
+        events: hostEvents.filter(event => event.seq > after)
+      });
+    }
+    return response(400, { error: 'unknown_browser_host_action' });
+  };
   vm.runInNewContext(backgroundSource, {
     chrome,
     fetch,
@@ -609,6 +712,7 @@ function loadWorker(options: {
     clearTimeout,
     URL,
     TextEncoder,
+    WebSocket: FakeWebSocket,
     console
   }, { filename: 'background.js' });
   if (!listener) throw new Error('background.js did not register a message listener');
@@ -647,19 +751,26 @@ function loadWorker(options: {
     },
     async closeTab(tabId: number) {
       knownTabs.delete(tabId);
+      publishHostEvent('removed', tabId);
       for (const fn of tabRemovedListeners) fn(tabId);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await waitForHostEvents();
     },
     async startTabNavigation(tabId: number, url?: string) {
+      publishHostEvent('updated', tabId, { ...(url ? { url } : {}), status: 'loading' });
       for (const fn of tabUpdatedListeners) fn(tabId, { ...(url ? { url } : {}), status: 'loading' });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await waitForHostEvents();
+    },
+    async updateTabUrl(tabId: number, url: string) {
+      const tab = knownTabs.get(tabId);
+      if (tab) tab.pendingUrl = url;
+      publishHostEvent('updated', tabId, { url });
+      for (const fn of tabUpdatedListeners) fn(tabId, { url });
+      await waitForHostEvents();
     },
     async completeTabNavigation(tabId: number) {
+      publishHostEvent('updated', tabId, { status: 'complete' });
       for (const fn of tabUpdatedListeners) fn(tabId, { status: 'complete' });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await waitForHostEvents();
     },
     registerTab(tabId, documentId = documentFor(tabId)) {
       return new Promise((resolve, reject) => {
@@ -676,8 +787,17 @@ function loadWorker(options: {
       });
     },
     async navigateTab(tabId: number, url: string) {
-      knownTabs.set(tabId, { id: tabId, windowId: 7, url });
+      const prior = knownTabs.get(tabId);
       const chatGpt = /^https:\/\/(?:chatgpt\.com|chat\.openai\.com)(?:\/|$)/i.test(url);
+      knownTabs.set(tabId, {
+        ...prior,
+        id: tabId,
+        windowId: 7,
+        ...(chatGpt
+          ? { ...(prior?.url ? { url: prior.url } : {}), pendingUrl: url, status: 'loading' }
+          : { url, status: 'complete' })
+      });
+      publishHostEvent('updated', tabId, { url, ...(chatGpt ? { status: 'loading' } : {}) });
       for (const fn of tabUpdatedListeners) fn(tabId, { url, ...(chatGpt ? { status: 'loading' } : {}) });
       let newDocument: string | null = null;
       if (chatGpt) {
@@ -686,8 +806,18 @@ function loadWorker(options: {
         newDocument = `document-${tabId}-${next}`;
         currentDocuments.set(tabId, newDocument);
       }
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await waitForHostEvents();
+      if (chatGpt) {
+        const current = knownTabs.get(tabId);
+        knownTabs.set(tabId, {
+          ...current,
+          id: tabId,
+          windowId: 7,
+          url,
+          status: 'complete',
+          pendingUrl: undefined
+        });
+      }
       // Static content injection registers the new ChatGPT document before its normal page
       // traffic. Model that handshake here rather than letting a later bind implicitly clear
       // a terminal lease.
@@ -973,6 +1103,55 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(actions).toEqual(['reopened']);
   });
 
+  it('reopens one existing conversation tab for a queued desktop input and reuses that election', async () => {
+    const local = new FakeStorageArea(paired);
+    const session = new FakeStorageArea();
+    const inputId = 'ffffffff-1111-4222-8333-444444444444';
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/status') {
+        if (typeof init.body === 'string') bodies.push(JSON.parse(init.body));
+        return response(200, {
+          ok: true,
+          background: false,
+          inputs: [{ id: inputId, conversationId: CHAT }],
+          inputOpeningIds: [inputId],
+          reusableConversations: []
+        });
+      }
+      return response(200, { ok: true });
+    });
+    const worker = loadWorker({ local, session, fetch });
+
+    await worker.fireAlarm();
+
+    expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
+    expect(worker.tabsCreate).toHaveBeenCalledWith({
+      url: `https://chatgpt.com/c/${CHAT}`,
+      active: true
+    });
+    expect(local.data.inputOpenings).toMatchObject({
+      [inputId]: { tab: 99, stage: 'ready', conversationId: CHAT }
+    });
+    expect(bodies[0]).toMatchObject({ openConversations: [] });
+
+    // A later status pass sees the same elected tab; it must never mint a duplicate opening.
+    await worker.fireAlarm();
+    expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(99, {
+      type: 'clf-desktop-input', id: inputId, conversationId: CHAT
+    });
+
+    // When that /c/<id> document comes alive, the author's ordinary document/bind path owns it.
+    expect(await worker.registerTab(99, 'old-thread-document')).toMatchObject({ ok: true, tab: 99 });
+    expect(await worker.send({ type: 'bind', conversationId: CHAT }, 99, 'old-thread-document')).toMatchObject({
+      ok: true
+    });
+    expect(session.data.tabConversations).toMatchObject({ '99': CHAT });
+  });
+
   /**
    * Automatic compaction selects its exact tab before reload while preserving
    * OS focus on the user's current app, even when Chrome is minimized.
@@ -1068,6 +1247,17 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
 
     await worker.registerTab(51);
     await worker.send({ type: 'bind', conversationId: CHAT }, 51);
+    // register_document starts a maintenance pass without awaiting it. Let that pass
+    // become observable before testing the independent alarm wake, otherwise the two
+    // valid wakes can intentionally coalesce into one maintenance flight.
+    for (let turn = 0; turn < 20 && asked.length < 2; turn += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(asked).toEqual(['status', 'status']);
+    // Seeing /status means the pass reached the app, not that maintain() has already
+    // cleared its singleflight in finally. Give that completed pass one macrotask to
+    // relinquish ownership before asserting that a later alarm starts a new pass.
+    await new Promise((resolve) => setTimeout(resolve, 10));
     await worker.fireAlarm();
     // Fresh content readiness wakes a pass without waiting for the maintenance alarm.
     expect(asked).toEqual(['status', 'status', 'status']);
@@ -2514,7 +2704,7 @@ describe('extension observation journal', () => {
   });
 
   it('keeps a fresh chat provisional journal through a real ChatGPT page reload', async () => {
-    const local = new FakeStorageArea();
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
     const session = new FakeStorageArea();
     const worker = loadWorker({ local, session });
     await worker.send(
@@ -3093,6 +3283,41 @@ describe('extension observation journal', () => {
     expect(calls).toContain('/closed');
   });
 
+  it('does not terminalize a registered replacement document on a same-cycle URL update', async () => {
+    const conversationId = '11111111-2222-3333-4444-555555555555';
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    const activity: string[] = [];
+    const worker = loadWorker({
+      local,
+      session,
+      fetch: async (input) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/activity') activity.push(url.pathname);
+        return response(200, { sessionId: 'session', stream: [] });
+      }
+    });
+    const oldDocument = 'document-27-old';
+    const replacementDocument = 'document-27-new';
+
+    await worker.send({ type: 'bind', conversationId }, 27, oldDocument);
+    await worker.startTabNavigation(27, `https://chatgpt.com/c/${conversationId}`);
+    expect(await worker.registerTab(27, replacementDocument)).toMatchObject({ ok: true });
+
+    // Electron can report additional did-start-navigation URL changes while the same loading
+    // indicator is still active. The internal host forwards these as URL-only updates; they are
+    // not another Chrome status="loading" document boundary.
+    await worker.updateTabUrl(27, `https://chatgpt.com/c/${conversationId}?redirected=1`);
+    expect(await worker.send(
+      { type: 'activity', conversationId, since: 0 },
+      27,
+      replacementDocument
+    )).toMatchObject({ ok: true });
+    expect(activity).toEqual(['/activity']);
+    expect(session.data.tabDocuments).toMatchObject({ '27': replacementDocument });
+  });
+
   it('does not let the dying document revoke its terminal lease while Chrome is still navigating', async () => {
     const a = '11111111-2222-3333-4444-555555555555';
     const b = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -3186,7 +3411,7 @@ describe('extension observation journal', () => {
 
   it('keeps a terminal document tombstone across service-worker restart', async () => {
     const conversationId = '11111111-2222-3333-4444-555555555555';
-    const local = new FakeStorageArea();
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
     const session = new FakeStorageArea();
     const oldDocument = 'document-44-old';
     const first = loadWorker({ local, session });
@@ -3204,7 +3429,7 @@ describe('extension observation journal', () => {
   });
 
   it('does not bind an abandoned fresh chat into a later chat that reuses the tab', async () => {
-    const local = new FakeStorageArea();
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
     const session = new FakeStorageArea();
     const worker = loadWorker({ local, session });
 
@@ -3444,11 +3669,13 @@ describe('extension connection', () => {
     const reply = await worker.send({
       type: 'correlate',
       conversationId,
+      resumeCommandId: 'resume-command-provenance',
       calls: [{ messageId: 'request-message', tool: 'exec_command', order: 0, answered: false, requestId }]
     });
 
     expect(body).toMatchObject({
       conversationId,
+      resumeCommandId: 'resume-command-provenance',
       calls: [expect.objectContaining({ requestId, messageId: 'request-message' })]
     });
     expect(reply).toMatchObject({
@@ -3754,8 +3981,9 @@ it.each(['matching', 'wrong-document', 'unsafe-draft', 'newer-navigation', 'pinn
     conversationFromUrl: (url: string) => url.split('/c/')[1], tabDocuments: { '71': scenario === 'wrong-document' ? 'replacement' : 'doc' },
     tabEpochs: { '71': 0 }, ownsDocument: () => true, journalCountForConversation: () => 0,
     tabReply: (...args: unknown[]) => sendMessage(...args),
-    chrome: { tabs: { get: async () => ({ ...tab, pinned: tab.pinned || scenario === 'pinned-before-proof', ...(scenario === 'newer-navigation' ? { pendingUrl: 'https://chatgpt.com/' } : {}) }),
-      sendMessage, remove: tabsRemove } }
+    browserTabs: { get: async () => ({ ...tab, pinned: tab.pinned || scenario === 'pinned-before-proof', ...(scenario === 'newer-navigation' ? { pendingUrl: 'https://chatgpt.com/' } : {}) }),
+      remove: tabsRemove },
+    chrome: { tabs: { sendMessage } }
   });
   await prune([tab], { managedConversations: [conversationId], retiredConversations: [conversationId], cancelledDecisionClaims: claims }, new Set(), new Set());
   expect(tabsRemove).toHaveBeenCalledTimes(scenario === 'matching' ? 1 : 0);
@@ -3778,8 +4006,8 @@ it.each(['idle', 'selected', 'selected-before-proof', 'selected-during-proof', '
       if (scenario === 'selected-during-proof') tab.active = true;
       return { safe: scenario !== 'draft', conversationId, navigationEpoch: 0 };
     },
-    chrome: { tabs: { get: async () => ({ ...tab, active: tab.active || scenario === 'selected-before-proof',
-      ...(scenario === 'navigation' && probed ? { pendingUrl: 'https://chatgpt.com/' } : {}) }), remove } }
+    browserTabs: { get: async () => ({ ...tab, active: tab.active || scenario === 'selected-before-proof',
+      ...(scenario === 'navigation' && probed ? { pendingUrl: 'https://chatgpt.com/' } : {}) }), remove }
   });
   await prune([tab], { managedConversations: [conversationId] }, new Set(), new Set([conversationId]));
   expect(remove).toHaveBeenCalledTimes(scenario === 'idle' ? 1 : 0);

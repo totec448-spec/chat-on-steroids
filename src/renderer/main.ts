@@ -4,6 +4,7 @@ import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
+import { initInternalBrowserDock } from './internal-browser.js';
 import { initSetupGuide } from './setup-guide.js';
 import { initChatgptPermissionNotice } from './chatgpt-permission-notice.js';
 /**
@@ -22,7 +23,7 @@ import { initChatgptPermissionNotice } from './chatgpt-permission-notice.js';
 
 import type { AppApi, SettingsPatch } from '../preload/index.js';
 import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
-import type { AppState, Capability, ChatBrowser, LogEntry, SurfaceStatus } from '../shared/types.js';
+import type { AppState, Capability, LogEntry, SurfaceStatus } from '../shared/types.js';
 import {
   browserExtensionRequired,
   isNewer,
@@ -461,7 +462,6 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
       binaryPath: $<HTMLInputElement>('binaryPath').value.trim()
     },
     ui: {
-      chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       finishTool: $<HTMLInputElement>('finishTool').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
       finishAction: $<HTMLSelectElement>('finishAction').value as 'notify' | 'goal',
@@ -1034,7 +1034,6 @@ function apply(next: AppState): void {
     previousState?.config.tunnel.desktopTunnelId
   );
   applyValue($<HTMLInputElement>('binaryPath'), config.tunnel.binaryPath, previousState?.config.tunnel.binaryPath);
-  applyValue($<HTMLSelectElement>('chatBrowser'), config.ui.chatBrowser ?? 'chrome', previousState?.config.ui.chatBrowser ?? 'chrome');
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
   applyValue($<HTMLSelectElement>('finishAction'), config.ui.finishAction ?? 'notify', previousState?.config.ui.finishAction);
@@ -1794,6 +1793,7 @@ async function refresh(): Promise<void> {
 
 buildGroups();
 initSidebarResize();
+initInternalBrowserDock();
 initUsage();
 initPlugins(apply);
 initBrowserPreferences();

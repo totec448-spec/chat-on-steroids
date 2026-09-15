@@ -10,8 +10,6 @@ import { pluginRefreshPublications, pendingPluginRefreshes, claimPluginRefresh, 
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 let browserWake: ReturnType<typeof attachBrowserWake> | null = null;
-import { browserWindowBounds, currentBrowserWorkArea } from './browser-window-layout.js';
-export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
@@ -940,6 +938,61 @@ function parseObservations(input: unknown): ChatObservation[] {
 }
 
 /**
+ * Finishes an exact Compact & Resume destination before request attribution initializes it.
+ *
+ * The normal owner is `/commands/ack`: the document that redeemed a resume names the new
+ * conversation and the continuation moves A -> B. ChatGPT can, however, start B's model and
+ * expose a request id before that ACK reaches the app. On 2026-09-15 that took
+ * 61.2 seconds, just beyond the recorder's coarse 60-second pre-redeem gate, so the recorder
+ * created a shadow session for B and the later valid ACK was refused.
+ *
+ * Current pages stamp the exact random resume command id onto the request-owner handshake only
+ * after the destination click is durably armed and the current provider row carries that same
+ * continuation marker. The service worker accepts it only from the current document. That is the
+ * same one-shot authority the ACK uses, not a heuristic based on the active/recent tab. If it
+ * still names the live claimed resume, commit that exact move first. A retryable/refused move
+ * stays out of the recorder and is retried by the browser; the ACK/marker path remains the
+ * authority that can terminally abort it.
+ */
+async function settleExactResumeCorrelation(
+  rawCommandId: unknown,
+  toConversationId: string
+): Promise<{ matched: boolean; settled: boolean; reason?: string }> {
+  const commandId = typeof rawCommandId === 'string' && rawCommandId.length <= 128 ? rawCommandId : '';
+  if (!commandId) return { matched: false, settled: false };
+  const command = commands.find((candidate) => candidate.id === commandId && candidate.spec.type === 'resume');
+  if (!command || command.spec.type !== 'resume' || command.claimedAt === null || command.owner === null) {
+    return { matched: false, settled: false };
+  }
+  const continuation = continuationByToken(command.spec.token);
+  if (
+    !continuation ||
+    continuation.from === toConversationId ||
+    !continuationClaimedBy(command.spec.token, command.id) ||
+    (continuation.destinationSend.state !== 'dispatched-unresolved' && continuation.destinationSend.state !== 'sent')
+  ) {
+    return { matched: false, settled: false };
+  }
+
+  const result = await commitContinuationResult(command.spec.token, toConversationId);
+  if (result.status === 'retryable') {
+    logWarn(`bridge: exact resume correlation for ${command.spec.sessionId} is waiting on commit — ${result.reason}`);
+    return { matched: true, settled: false, reason: result.reason };
+  }
+  if (result.status === 'rejected') {
+    // Do not abort from an observation. The document ACK or the stable marked message owns the
+    // terminal verdict; a persisted journal row may simply be stale after one of those paths won.
+    logWarn(`bridge: exact resume correlation for ${command.spec.sessionId} could not commit — ${result.reason}`);
+    return { matched: true, settled: false, reason: result.reason };
+  }
+  if (result.status === 'committed') {
+    armResumedChat(command.spec.sessionId, result.conversationId);
+    logInfo(`bridge: exact resume correlation committed ${command.spec.sessionId} before recorder initialization`);
+  }
+  return { matched: true, settled: true };
+}
+
+/**
  * Resolves a worker's terminal assistant row across the browser journal's batching boundary.
  *
  * content.js closes a generation synchronously, but its final Fiber refresh crosses a MAIN-world
@@ -1549,6 +1602,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const accepted = acknowledgeBrowserPreferences(await readBody(req));
     return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
   }
+  if (route === '/browser-host' && req.method === 'POST') {
+    if (!browserHostHandler) return json(res, 503, { error: 'browser_host_unavailable' }, origin);
+    return json(res, 200, await browserHostHandler(await readBody(req)), origin);
+  }
 
   if (route === '/status') {
     const live = liveConversations();
@@ -1594,8 +1651,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
               retire: true }))],
         background: getConfig().ui.backgroundChats === true,
         browserOnly: getConfig().ui.browserOnly === true,
-        browserWorkArea: currentBrowserWorkArea(),
-        browserWindowBounds: browserWindowBounds(),
         commands: commands.length,
         revival,
         placement: pendingBrowserPlacement(null),
@@ -1716,6 +1771,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
     const calls = parseCallEvidence(body['calls'], true).filter((call) => call.requestId !== null);
     if (calls.length === 0) return json(res, 400, { error: 'bad_request_evidence' }, origin);
+    const exactResume = await settleExactResumeCorrelation(body['resumeCommandId'], id);
+    if (exactResume.matched && !exactResume.settled) {
+      // Keep the request-id evidence in the browser until the one A→B move is safe to publish.
+      // Returning 503 is the existing correlation retry contract; creating B's session here
+      // would make the later exact ACK lose to the recorder again.
+      return json(
+        res,
+        503,
+        { error: 'resume_session_pending', retryable: true, message: exactResume.reason ?? 'resume commit pending' },
+        origin
+      );
+    }
 
     // This is the live-turn ownership handshake, deliberately separate from transcript
     // delivery. A fresh ChatGPT conversation can expose metadata.request_id before its
@@ -4938,6 +5005,7 @@ function queueResumeCommand(sessionId: string, token: string): Command {
  * having a browser-launching side effect nobody asked for.
  */
 let openInBrowser: ((url: string) => Promise<void>) | null = null;
+let browserHostHandler: ((request: unknown) => Promise<unknown>) | null = null;
 
 /**
  * How long one cold browser start is given to show up before another may be attempted.
@@ -4985,6 +5053,11 @@ function deliverAfterLaunchWindow(now = Date.now()): void {
 
 export function setBrowserOpener(open: ((url: string) => Promise<void>) | null): void {
   openInBrowser = open;
+}
+
+/** Electron-only logical tab operations injected by the desktop bootstrap. */
+export function setBrowserHostHandler(handler: ((request: unknown) => Promise<unknown>) | null): void {
+  browserHostHandler = handler;
 }
 
 /** The one place this app writes a ChatGPT conversation URL. */
@@ -8208,6 +8281,7 @@ export function resetBridgeForTests(): void {
   resetContinuationsForTests();
   sessionTokens.clear();
   openInBrowser = null;
+  browserHostHandler = null;
   if (browserLaunchTimer) clearTimeout(browserLaunchTimer);
   browserLaunchTimer = null;
   lastBrowserLaunchAt = 0;

@@ -68,7 +68,7 @@ import {
   requestCorrelation,
   resetCorrelationRegistryForTests,
 } from './correlation.js';
-import { RESUME_CLAIM_WINDOW_MS, resumeOpeningChat } from './resume-gate.js';
+import { resumeOpeningChat, waitForResumeOpeningToSettle } from './resume-gate.js';
 import { summarizeToolCall } from './summarize.js';
 
 interface LiveConversation {
@@ -236,20 +236,8 @@ export async function restoreRecordedConversation(conversationId: string): Promi
   return sessionForConversation(conversationId);
 }
 
-/**
- * Honor the continuation's existing claim window before creating an unknown conversation.
- * An independent shorter deadline can mint a shadow session while the destination still
- * legitimately awaits its commit. Cap each wait at one claim window so overlapping claims
- * cannot indefinitely prevent an unrelated new chat from being recorded.
- */
 async function settleResumeCommit(): Promise<void> {
-  const deadline = Date.now() + RESUME_CLAIM_WINDOW_MS;
-  while (resumeOpeningChat() && Date.now() < deadline) {
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, 50);
-      timer.unref?.();
-    });
-  }
+  await waitForResumeOpeningToSettle();
 }
 
 async function initializeSessionForConversation(

@@ -10,6 +10,7 @@ import type { UsageOverview } from '../shared/usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
+import type { InternalBrowserDockRequest, InternalBrowserDockState } from '../shared/internal-browser.js';
 /**
  * The entire renderer-facing API.
  *
@@ -190,6 +191,17 @@ const api = {
   setInputAutomation: (id: string, mode: 'off' | 'goal' | 'loop', loopAfterTurn?: boolean) => call<boolean>('sessions:inputAutomation', { id, mode, loopAfterTurn }),
   setZoom: (factor: number) => call<number>('window:zoom', { factor }),
   getZoom: () => call<number>('window:getZoom'),
+  internalBrowser: (request: InternalBrowserDockRequest) => call<InternalBrowserDockState>('browser:dock', request),
+  onInternalBrowserShowRequested: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('internalBrowser:showRequested', wrapped);
+    return () => ipcRenderer.removeListener('internalBrowser:showRequested', wrapped);
+  },
+  onInternalBrowserStateChanged: (listener: (state: InternalBrowserDockState) => void): (() => void) => {
+    const wrapped = (_event: unknown, state: InternalBrowserDockState): void => listener(state);
+    ipcRenderer.on('internalBrowser:stateChanged', wrapped);
+    return () => ipcRenderer.removeListener('internalBrowser:stateChanged', wrapped);
+  },
   openSessionChat: (id: string) => call<boolean>('sessions:openChat', { id }),
   // Stops a chat this app cannot stop in the page: every tool call it has already been proved
   // to own is refused until it is released. Returns the whole blocked set, so one press

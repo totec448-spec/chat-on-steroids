@@ -74,6 +74,7 @@
     <div class="app" data-screen="chat">
       <div class="app-topbar">
         <button class="btn" id="sidebarToggle" type="button" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true" title="Toggle sidebar (Ctrl+B)"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /></svg></button>
+        <button class="btn" id="browserDockToggle" type="button" aria-label="Show ChatGPT browser" aria-controls="browserDock" aria-expanded="false" title="Show ChatGPT browser"><svg class="ico" viewBox="0 0 24 24"><use href="#i-globe" /></svg><span>ChatGPT</span></button>
         <details class="view-menu" id="viewMenu"><summary>View</summary><div class="view-menu-items">
           <button class="btn" id="sidebarMenuToggle" type="button">Toggle Sidebar <kbd>Ctrl+B</kbd></button>
           <hr />
@@ -82,6 +83,11 @@
           <button class="btn" id="zoomActualSize" type="button">Actual Size <span id="zoomReset">100%</span><kbd>Ctrl+0</kbd></button>
         </div></details>
       </div>
+      <aside class="browser-dock" id="browserDock" aria-label="ChatGPT browser" hidden>
+        <div class="browser-dock-tabs" id="browserDockTabs" role="tablist" aria-label="ChatGPT tabs"></div>
+        <div class="browser-dock-slot" id="browserDockSlot"></div>
+        <div class="browser-dock-resize" id="browserDockResize" role="separator" tabindex="0" aria-label="ChatGPT browser width" aria-orientation="vertical" aria-controls="browserDock" title="Drag to resize · Double-click to reset"></div>
+      </aside>
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
         <button class="btn" id="backToChat" type="button" hidden>← Back to chat</button>
@@ -697,8 +703,7 @@
                   </div>
                 <h2 class="settings-section-title">Browser & history</h2>
                 <div class="pane">
-                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option></select></label>
-                  <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs running invisibly until you open them in the integrated browser.</em></span><input id="backgroundChats" type="checkbox" /></label>
                   <label class="setting"><span class="setting-text"><b>Automatic plugin refresh</b><em>Let the companion refresh changed connector tools in ChatGPT. Off by default; manual refresh remains available in ChatGPT.</em></span><input id="autoRefreshPlugins" type="checkbox" /></label>
                   <label class="setting"><span class="setting-text"><b>Browser only</b><em>Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.</em></span><input id="browserOnly" type="checkbox" /></label>
                   <p class="muted">Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.</p>

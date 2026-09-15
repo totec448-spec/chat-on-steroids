@@ -22,8 +22,8 @@ the code currently does it. Known implementation gaps are collected in §21 inst
 mixed into the happy path as features.
 
 Source alignment: **2026-09-14**, including current working-tree changes. App/extension **2.1.13**,
-bridge protocol **13** in the checked declarations (`package.json`, `src/main/version.ts`,
-`extension/manifest.json`). This does not prove release, installation or live Chrome behavior.
+bridge protocol **14** in the checked declarations (`package.json`, `src/main/version.ts`,
+`extension/manifest.json`). This does not prove release, installation or live Chromium behavior.
 
 ## 1. What the whole app is meant to do
 
@@ -96,7 +96,7 @@ losing the project, history, workers or queued instructions when a chat grows to
 - Waiting chats and sleeping workers retain their durable history and identity, not an
   indefinite browser tab. Settled app-owned pages become eligible for New Chat reuse after
   two minutes without work and automatic closure after five. Fresh document/draft/generation
-  checks remain mandatory; selected Chrome tabs veto idle closure, and pins veto closure and
+  checks remain mandatory; selected hosted tabs veto idle closure, and pins veto closure and
   New Chat reuse. Terminal, blocked, cancelled, superseded and duplicate cleanup retains its
   separate authority. Unknown/personal ownership, live work and pending delivery are not idle.
 - Unknown identity fails closed where a wrong choice could mutate, attribute or message the
@@ -141,7 +141,7 @@ The renderer has no direct filesystem, command, secret or generic main-process a
 | Filesystem | Approved root plus canonical real path, regardless of native/virtual spelling. |
 | MCP ingress | Normalized HTTP request id. |
 | Tool attribution | Request id → exact conversation id → local session epoch. |
-| Browser observation/action | Conversation + Chrome document id + navigation epoch + message/turn id. |
+| Browser observation/action | Conversation + Chromium tab/document id + navigation epoch + message/turn id. |
 | Session continuation | Local session id + continuation token + A/B lineage + send checkpoints. |
 | Input | Outbox UUID + local session + elected browser owner or exact tool recipient. |
 | Agent routing | Exact prime family/run incarnation + worker conversation; `worker-1` alone is ambiguous. |
@@ -197,7 +197,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Desktop | Windows on; macOS off until enabled and OS consent granted; Linux unavailable. | Unsupported platforms mask live capabilities without erasing stored choices. |
 | Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
 | Plugin auto-refresh | Off. | Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
-| Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
+| Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. App-owned Chromium keeps background tabs mounted offscreen with real geometry. |
 
 Keep evidence levels separate in all reports: **source → tests → build → package → installed
 payload → live browser/device/provider behavior**. Passing one level does not prove the next.
@@ -229,7 +229,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Continuation | `src/main/session/{continuation,resume-gate,handoff,handoff-prompt}.ts`: A→B transaction, send ambiguity and exact brief. |
 | Automation | `src/main/goal.ts`, `src/shared/{goal,goal-templates}.ts`: objectives, switches, obligations, provider/helper decisions. |
 | Agents | `src/main/agents.ts`, `src/renderer/{agent-panel,agent-communication}.ts`: independent prime families, staged mutations and addressed messages. |
-| Browser orchestration | `src/main/bridge.ts`, `browser.ts`, `browser-startup.ts`, `browser-wake.ts`, `browser-window-layout.ts`, `browser-preferences.ts`; `src/shared/browser-preferences.ts`. |
+| Browser orchestration | `src/main/internal-browser.ts`, `bridge.ts`, `browser-startup.ts`, `browser-wake.ts`, `browser-preferences.ts`; `src/shared/{internal-browser,browser-preferences}.ts`; `src/renderer/internal-browser.ts`. The host owns Chromium tab lifetime/layout; the extension still owns document election, receipts and recovery policy. |
 | Extension | `extension/{manifest.json,chatgpt-dom.js,content.js,fiber.js,background.js,usage.js,overlay.css,popup.html,popup.css,popup.js}`: injection worlds, native observations/actions, journal and UI. |
 | Models/usage | `src/main/chat-models.ts`, `session/usage.ts`; `src/shared/{chat-models,usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
 | External plugins | `src/main/plugins/{catalog,installer,manager,exposure,oauth}.ts`, `plugins-ipc.ts`, `plugin-refresh.ts`, `src/shared/{plugins,plugin-refresh}.ts`, `src/renderer/plugins.ts`. |
@@ -357,8 +357,8 @@ The opening outbox input / new-worker command owns this eligibility; no history 
 sent flag decides it. Existing-chat messages, Goal/Loop continuations, plan checkpoints, worker
 revivals, compaction requests and resumed-chat bootstraps receive no appended setup block.
 Decision/planner helpers keep their separate role-specific contract. Selecting Goal/Loop for
-a normal new executor chat does not turn it into a helper. Direct user sends in Chrome are
-not intercepted.
+a normal new executor chat does not turn it into a helper. Direct user sends in the hosted
+ChatGPT page are not intercepted.
 
 `mcp/coding-instructions.ts` contains adapted upstream collaboration prose with provenance;
 `mcp/instructions.ts` adds currently available local-tool guidance and the user's bounded
@@ -1201,7 +1201,7 @@ Send. A visible option, an English label, a remembered release name or “Upgrad
 entitlement. Do not enumerate every model × effort or create helper tabs to compensate for an
 uncertain catalog. Exact family rules live in `shared/chat-models.ts`.
 
-Direct Chrome selection is observed even with the picker closed. The existing MAIN scan reads
+Direct provider selection is observed even with the picker closed. The existing MAIN scan reads
 the current native picker state, including September's retained `dropdownContent.props`, then
 stamps exact model/effort and document/route for the isolated reader. The older closed-trigger
 model/effort join remains supported, including effort-only labels and version-prefixed Pro;
@@ -1214,7 +1214,7 @@ The closed snapshot describes only the selected native version's buckets; it is 
 evidence, never a complete catalog. Discovery elects an idle composer, reads the account-evaluated
 choices once per enabled native version, and restores the original model/effort before publication.
 Busy or drafting pages defer discovery without publishing a partial catalog or opening a replacement
-tab. Passive selection observation continues during generation and preserves drafts. OS wake is dispatch, not
+tab. Passive selection observation continues during generation and preserves drafts. Browser wake is dispatch, not
 discovery completion: the IPC request returns pending and the bounded observation deadline owns
 the result, so a stalled launch cannot hold Refresh/Send indefinitely.
 
@@ -1233,13 +1233,25 @@ its still-empty document and opening authority to the first user input, rather t
 second tab. Startup's remaining unknown-catalog opening exception is a current gap in §21,
 not permission to add more startup openers.
 
-### Browser choice and opening discipline
+### App-owned Chromium and opening discipline
 
-`browser.ts`, `browser-preferences.ts` and `browser-startup.ts` keep the selected supported
-Chromium browser/profile separate from ChatGPT account state. Use the selected browser's
-process evidence; a disconnected bridge or sleeping MV3 socket does not prove it is closed.
-OS wake launches require positive process absence and coalesce within one absence episode.
-The socket is a heartbeat/wake path; HTTP remains command/evidence authority.
+`internal-browser.ts` owns one persistent `persist:cos-browser` Electron session and one real
+`WebContentsView` per logical ChatGPT tab. The existing MV3 companion remains the browser-side
+transport and policy owner; `/browser-host` only supplies the Chrome-like tab lifetime surface
+(`query/get/create/update/remove/reload/events`) that Electron-hosted documents need. Owning the
+browser host does not authorize inferring conversation ownership from active, recent or visible
+state. The socket is a heartbeat/wake path; HTTP remains command/evidence authority.
+
+Once the owner `BrowserWindow` exists, every live hosted view stays attached and `setVisible(true)`
+with real nonzero geometry. The selected view receives the dock bounds while the dock is open;
+all other views, and every view while it is hidden, are parked fully offscreen at negative `x`.
+Do not replace parking with detachment, zero bounds or `setVisible(false)`: native ChatGPT controls,
+including model-picker preparation, require layout geometry even for background work.
+
+Electron lifecycle is mapped deliberately: `did-start-loading` is the single Chrome-like loading
+and document boundary, `did-start-navigation` only updates the main-frame URL, in-page navigation
+stays same-document, and `did-stop-loading` completes the load. The bounded browser-host event
+journal plus generation/cursor state carries those events across MV3 service-worker suspension.
 
 External navigation may hide its destination URL under ChatGPT-only host permissions.
 A completed tab absent from a successful ChatGPT URL query can release the departed
@@ -1248,10 +1260,10 @@ Loading alone and failed queries are not departure proof; replacement registrati
 Each real active-chat departure remains independently eligible for existing recovery.
 
 Browser-only preferences suppress automatic opening as defined by their owner. Background
-operations reuse a suitable existing window unchanged. If a new background window is actually
-authorized, its shared layout policy bounds it to 45% of the work area and 800×600, then
-minimizes it. User-selected foreground actions retain their own intent. Window geometry,
-process absence, tab election and provider hydration are different decisions.
+operations create or reuse logical tabs without revealing the dock; explicit foreground actions
+may request the dock. Startup prewarms one hidden ChatGPT document so the bundled companion can
+pair without an external browser launch. Tab creation authority, logical activation, dock
+visibility, document election and provider hydration remain separate decisions.
 
 ### Overwrite and recovery presentation
 
