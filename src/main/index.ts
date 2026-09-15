@@ -106,7 +106,10 @@ function createWindow(): void {
   window = new BrowserWindow({
     ...layout,
     ...(icon ? { icon } : {}),
-    fullscreenable: false,
+    // Keep native macOS window semantics: the green traffic-light button enters
+    // a real Space-backed fullscreen window instead of being reduced to Zoom/Tile.
+    // Windows/Linux keep the existing non-fullscreenable behavior unchanged.
+    fullscreenable: process.platform === 'darwin',
     show: false,
     autoHideMenuBar: true,
     ...(process.platform === 'win32' ? {

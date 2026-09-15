@@ -13,6 +13,12 @@ import {
 } from '../src/main/window-lifecycle.js';
 
 describe('native window activation', () => {
+  it('enables native fullscreen only for the macOS main window', () => {
+    const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
+    expect(source).toContain("fullscreenable: process.platform === 'darwin'");
+    expect(source).not.toContain('fullscreenable: false');
+  });
+
   it('maximizes only on initial presentation and preserves user-sized geometry on reopen', () => {
     const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
     const present = source.slice(source.indexOf('function showWindow()'), source.indexOf('\nsetFinishNotifier(', source.indexOf('function showWindow()'))).replace('function showWindow(): void', 'function showWindow()');
