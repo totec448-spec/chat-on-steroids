@@ -1,0 +1,88 @@
+{
+  "issue": 187,
+  "sourceCommit": "2f9be7eb9d6d1f13ccac9019e20965af15d4e4be",
+  "sourceBlob": "edfad203750c8fe096e0d9a63d38f8be514d6257",
+  "runtime": "v22.16.0",
+  "scope": "Unchanged published module; synthetic references and fetch stub; no real network/download or Windows worktree validation",
+  "reproduced": [
+    {
+      "host": "oaisdmntprpolandcentral.blob.core.windows.net",
+      "accepted": false,
+      "fetchCalls": 0,
+      "error": "ChatGPT file download URL is outside the trusted file host (host: oaisdmntprpolandcentral.blob.core.windows.net)."
+    },
+    {
+      "host": "oaisdmntprwestus.blob.core.windows.net",
+      "accepted": false,
+      "fetchCalls": 0,
+      "error": "ChatGPT file download URL is outside the trusted file host (host: oaisdmntprwestus.blob.core.windows.net)."
+    },
+    {
+      "host": "oaisdmntprcentralus.blob.core.windows.net",
+      "accepted": false,
+      "fetchCalls": 0,
+      "error": "ChatGPT file download URL is outside the trusted file host (host: oaisdmntprcentralus.blob.core.windows.net)."
+    }
+  ],
+  "controls": [
+    {
+      "host": "files.oaiusercontent.com",
+      "accepted": true,
+      "fetchCalls": 1
+    },
+    {
+      "host": "example-region.oaiusercontent.com",
+      "accepted": true,
+      "fetchCalls": 1
+    },
+    {
+      "host": "oaidalleapiprodscus.blob.core.windows.net",
+      "accepted": true,
+      "fetchCalls": 1
+    }
+  ],
+  "guards": [
+    {
+      "case": "http://files.oaiusercontent.com/fixture",
+      "rejectedBeforeFetch": true
+    },
+    {
+      "case": "https://files.oaiusercontent.com:8443/fixture",
+      "rejectedBeforeFetch": true
+    },
+    {
+      "case": "https://name:password@files.oaiusercontent.com/fixture",
+      "rejectedBeforeFetch": true
+    },
+    {
+      "case": "https://files.oaiusercontent.com/fixture#fragment",
+      "rejectedBeforeFetch": true
+    },
+    {
+      "case": "https://files.oaiusercontent.com.invalid/fixture",
+      "rejectedBeforeFetch": true
+    },
+    {
+      "case": "https://fakeoaiusercontent.com/fixture",
+      "rejectedBeforeFetch": true
+    },
+    {
+      "case": "https://oaidalleapiprodscus.blob.core.windows.net.invalid/fixture",
+      "rejectedBeforeFetch": true
+    },
+    {
+      "case": "https://arbitrary-account.blob.core.windows.net/fixture",
+      "rejectedBeforeFetch": true
+    },
+    {
+      "case": "Redirect from trusted URL to untrusted host",
+      "rejectedBeforeSecondFetch": true
+    }
+  ],
+  "summary": {
+    "originalFailuresReproduced": 3,
+    "positiveControls": 3,
+    "rejectionGuards": 9,
+    "fixVerified": false
+  }
+}

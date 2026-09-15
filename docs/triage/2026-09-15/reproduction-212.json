@@ -1,0 +1,61 @@
+{
+  "issue": 212,
+  "sourceCommit": "2f9be7eb9d6d1f13ccac9019e20965af15d4e4be",
+  "sourceFileBlob": "c7effab569d84ccd227d735c6e766efe4debda3b",
+  "scope": "Unchanged published function excerpt with synthetic dependencies and virtual timers. No signed-in browser or current dirty-worktree verification.",
+  "summary": {
+    "checks": 8,
+    "originalPrematureTimeoutReproduced": true,
+    "fixVerified": false
+  },
+  "checks": [
+    {
+      "name": "Source hydrates at 11 seconds",
+      "result": true,
+      "clicks": 1,
+      "finishedAtMs": 11000
+    },
+    {
+      "name": "Source hydrates at 13 seconds; enclosing operation still has budget",
+      "result": false,
+      "clicks": 0,
+      "finishedAtMs": 12000
+    },
+    {
+      "name": "Source never hydrates",
+      "result": false,
+      "clicks": 0,
+      "finishedAtMs": 12000
+    },
+    {
+      "name": "User interrupts before readiness",
+      "result": false,
+      "clicks": 0,
+      "finishedAtMs": 5000
+    },
+    {
+      "name": "Operation cancelled before readiness",
+      "result": false,
+      "clicks": 0,
+      "finishedAtMs": 5000
+    },
+    {
+      "name": "Source contains attachment",
+      "result": false,
+      "clicks": 0,
+      "finishedAtMs": 12000
+    },
+    {
+      "name": "Native project links ambiguous",
+      "result": false,
+      "clicks": 0,
+      "finishedAtMs": 12000
+    },
+    {
+      "name": "One click swallowed; no second click",
+      "result": false,
+      "clicks": 1,
+      "finishedAtMs": 13000
+    }
+  ]
+}
