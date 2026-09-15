@@ -217,6 +217,12 @@ const api = {
     ipcRenderer.on('state:changed', wrapped);
     return () => ipcRenderer.removeListener('state:changed', wrapped);
   },
+  getWindowFullscreen: () => call<boolean>('window:isFullscreen'),
+  onWindowFullscreenChanged: (listener: (fullscreen: boolean) => void): (() => void) => {
+    const wrapped = (_event: unknown, fullscreen: boolean): void => listener(fullscreen);
+    ipcRenderer.on('window:fullscreen-changed', wrapped);
+    return () => ipcRenderer.removeListener('window:fullscreen-changed', wrapped);
+  },
   onLogEntry: (listener: (entry: LogEntry) => void): (() => void) => {
     const wrapped = (_event: unknown, entry: LogEntry): void => listener(entry);
     ipcRenderer.on('log:entry', wrapped);

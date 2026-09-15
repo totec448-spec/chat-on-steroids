@@ -13,6 +13,15 @@ import {
 } from '../src/main/window-lifecycle.js';
 
 describe('native window activation', () => {
+  it('lets macOS content occupy the native title bar while retaining traffic lights', () => {
+    const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
+    expect(source).toContain("titleBarStyle: 'hiddenInset' as const");
+    expect(source).toContain('trafficLightPosition: { x: 14, y: 14 }');
+    expect(source).toContain("window.on('enter-full-screen', () => publishFullscreen(true))");
+    expect(source).toContain("window.on('leave-full-screen', () => publishFullscreen(false))");
+    expect(source).toContain("target.webContents.send('window:fullscreen-changed', fullscreen)");
+  });
+
   it('maximizes only on initial presentation and preserves user-sized geometry on reopen', () => {
     const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
     const present = source.slice(source.indexOf('function showWindow()'), source.indexOf('\nsetFinishNotifier(', source.indexOf('function showWindow()'))).replace('function showWindow(): void', 'function showWindow()');

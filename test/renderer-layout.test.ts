@@ -25,17 +25,20 @@ let document: Document;
 let css = '';
 let chatSource = '';
 let browserPreferencesSource = '';
+let mainSource = '';
 
 beforeAll(async () => {
   browserPreferencesSource = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'browser-preferences.ts'), 'utf8');
-  const [html, styles, chat] = await Promise.all([
+  const [html, styles, chat, main] = await Promise.all([
     fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8'),
     fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'styles.css'), 'utf8'),
-    fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'chat.ts'), 'utf8')
+    fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'chat.ts'), 'utf8'),
+    fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'main.ts'), 'utf8')
   ]);
   document = new JSDOM(html).window.document;
   css = styles;
   chatSource = chat;
+  mainSource = main;
 });
 
 it('searches whole settings sections without empty headings, orphaned controls or lost conditional visibility', () => {
@@ -85,6 +88,31 @@ function rule(selector: string): string {
   const match = new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`).exec(css);
   return match ? match[1]!.replace(/\s+/g, ' ').trim() : '';
 }
+
+describe('the macOS window shell', () => {
+  it('integrates the traffic-light area, sidebar and toggle into one left chrome surface', () => {
+    expect(mainSource).toContain("appShell.dataset.platform = next.platform?.family ?? 'other'");
+    expect(rule(".app[data-platform='macos']")).toContain('grid-template-rows: auto auto minmax(0, 1fr)');
+    expect(rule(".app[data-platform='macos'] > .app-topbar")).toContain('position: absolute');
+    expect(rule(".app[data-platform='macos'] > .app-topbar")).toContain('height: 52px');
+    expect(rule(".app[data-platform='macos'] > .app-topbar")).toContain('-webkit-app-region: drag');
+    expect(rule(".app[data-platform='macos'] .app-topbar > #sidebarToggle")).toContain('top: 7px');
+    expect(rule(".app[data-platform='macos'] .app-topbar > #sidebarToggle")).toContain('left: 88px');
+    expect(rule(".app[data-platform='macos'] .app-topbar > #sidebarToggle")).toContain('transition: left 220ms cubic-bezier(.22, 1, .36, 1)');
+    expect(rule(".app[data-platform='macos'][data-fullscreen='true'] .app-topbar > #sidebarToggle")).toContain('left: 14px');
+    expect(rule(".app[data-platform='macos'] .app-topbar > #sidebarToggle")).toContain('-webkit-app-region: no-drag');
+    expect(rule(".app[data-platform='macos'] .view-menu")).toContain('display: none');
+    expect(rule(".app[data-platform='macos']")).toContain('transition: grid-template-columns 220ms');
+    expect(rule(".app[data-platform='macos'] > .sidebar")).toContain('grid-row: 1 / -1');
+    expect(rule(".app[data-platform='macos'] > .sidebar")).toContain('transition: transform 220ms');
+    expect(rule(".app[data-platform='macos'].is-sidebar-collapsed > .sidebar")).toContain('transform: translateX(-16px)');
+    expect(rule(".app[data-platform='macos'].is-sidebar-collapsed > .sidebar")).toContain('display: flex');
+    expect(rule(".app[data-platform='macos'].is-sidebar-collapsed > .app-topbar")).toContain('width: 132px');
+    expect(rule(".app[data-platform='macos'].is-sidebar-collapsed > header")).toContain('padding-left: 140px');
+    expect(mainSource).toContain('api.onWindowFullscreenChanged?.(paintWindowFullscreen)');
+    expect(mainSource).toContain("appShell.dataset.fullscreen = fullscreen ? 'true' : 'false'");
+  });
+});
 
 describe('the session card header', () => {
   it('indents rendered project tasks once and gives worker children their additional depth', () => {

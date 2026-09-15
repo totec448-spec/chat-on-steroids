@@ -330,8 +330,75 @@ code {
 .view-menu-items .btn { display: flex; width: 100%; gap: 10px; padding: 9px 10px; border-radius: 5px; }
 .view-menu-items kbd { margin-left: auto; color: var(--soft); font: inherit; }
 .view-menu-items hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
+
+/* macOS uses a hidden-inset native title bar, so the web content reaches the top edge while the
+   real traffic lights remain. The sidebar therefore owns the whole left chrome, including the
+   title-bar area, and this transparent overlay contributes only a drag region plus the sidebar
+   toggle. Windows/Linux keep the existing full-width custom strip and View menu. */
+.app[data-platform='macos'] {
+  grid-template-rows: auto auto minmax(0, 1fr);
+  transition: grid-template-columns 220ms cubic-bezier(.22, 1, .36, 1);
+}
+.app[data-platform='macos'] > header { grid-row: 1; }
+.app[data-platform='macos'] > .notices { grid-row: 2; }
+.app[data-platform='macos'] > main { grid-row: 3; }
+.app[data-platform='macos'] > .sidebar {
+  grid-row: 1 / -1;
+  padding-top: 58px;
+  overflow: hidden;
+  opacity: 1;
+  transform: translateX(0);
+  transition: transform 220ms cubic-bezier(.22, 1, .36, 1), opacity 150ms ease-out;
+  will-change: transform, opacity;
+}
+.app[data-platform='macos'] > .app-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  width: min(var(--sidebar-width, var(--sidebar-default, 248px)), 50vw);
+  height: 52px;
+  padding: 0;
+  background: transparent;
+  -webkit-app-region: drag;
+}
+.app[data-platform='macos'] .app-topbar > #sidebarToggle {
+  position: absolute;
+  top: 7px;
+  left: 88px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  transition: left 220ms cubic-bezier(.22, 1, .36, 1);
+  -webkit-app-region: no-drag;
+}
+.app[data-platform='macos'][data-fullscreen='true'] .app-topbar > #sidebarToggle {
+  left: 14px;
+}
+.app[data-platform='macos'] .view-menu { display: none; }
+.app[data-platform='macos'] > .app-topbar {
+  transition: width 220ms cubic-bezier(.22, 1, .36, 1);
+}
+.app[data-platform='macos'] > header {
+  transition: padding-left 220ms cubic-bezier(.22, 1, .36, 1);
+}
+.app[data-platform='macos'].is-sidebar-collapsed > .app-topbar { width: 132px; }
+.app[data-platform='macos'].is-sidebar-collapsed > .sidebar {
+  display: flex;
+  opacity: 0;
+  transform: translateX(-16px);
+  pointer-events: none;
+}
+.app[data-platform='macos'].is-sidebar-collapsed > header { padding-left: 140px; }
+.app[data-platform='macos'].is-resizing-sidebar { transition: none; }
+.app[data-platform='macos'].is-resizing-sidebar > .sidebar,
+.app[data-platform='macos'].is-resizing-sidebar > .app-topbar { transition: none; }
+
 .app.is-sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
-.app.is-sidebar-collapsed .sidebar { display: none; }
+.app.is-sidebar-collapsed:not([data-platform='macos']) .sidebar { display: none; }
 .sidebar { position: relative; grid-column: 1; grid-row: 2 / -1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--sunk); border-right: 1px solid var(--line); padding: 20px 12px 10px; }
 /* Sampled from the reference: near-black blue, a neutral middle, then blue-grey. */
 :root[data-theme='dark'] .sidebar {

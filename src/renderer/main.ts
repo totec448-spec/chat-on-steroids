@@ -48,6 +48,15 @@ initLanguage();
 initSetupGuide();
 initChatgptPermissionNotice(api);
 
+const appShell = document.querySelector<HTMLElement>('.app')!;
+const paintWindowFullscreen = (fullscreen: boolean): void => {
+  appShell.dataset.fullscreen = fullscreen ? 'true' : 'false';
+};
+api.onWindowFullscreenChanged?.(paintWindowFullscreen);
+void api.getWindowFullscreen?.().then(result => {
+  if (result.ok) paintWindowFullscreen(result.data);
+});
+
 /** Same shape the platform uses; mirrored here only to grey out step 2 until it is valid. */
 const TUNNEL_ID_PATTERN = /^tunnel_[0-9a-f]{32}$/;
 
@@ -949,6 +958,11 @@ function apply(next: AppState): void {
   state = next;
   applying = true;
   const { config, status } = next;
+
+  // The renderer shell has one macOS-specific chrome treatment: native window chrome already
+  // supplies the title-bar surface, so the custom full-width app strip collapses to the lone
+  // sidebar control there. Keep the platform fact on the shell instead of guessing from UA text.
+  appShell.dataset.platform = next.platform?.family ?? 'other';
 
   const connected = status.state === 'connected';
   const offline = status.state === 'offline';

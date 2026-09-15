@@ -112,6 +112,12 @@ function createWindow(): void {
     ...(process.platform === 'win32' ? {
       titleBarStyle: 'hidden' as const,
       titleBarOverlay: titleBarOverlayForTheme(getConfig().ui.theme)
+    } : process.platform === 'darwin' ? {
+      // Let the web content fill the native title-bar area while keeping the real macOS
+      // traffic lights. This is the native split-view treatment used by modern Mac apps:
+      // the sidebar visually owns the chrome instead of sitting underneath a separate strip.
+      titleBarStyle: 'hiddenInset' as const,
+      trafficLightPosition: { x: 14, y: 14 }
     } : {}),
     // Painted before the renderer loads, so a dark window never flashes white.
     backgroundColor: getConfig().ui.theme === 'dark' ? '#0e0e11' : '#ffffff',
@@ -151,6 +157,17 @@ function createWindow(): void {
   // A renderer that fails to load leaves a blank window with no other clue, so
   // record it where the diagnostics panel can show it.
   window.webContents.on('did-finish-load', () => logInfo('window loaded'));
+  // Native macOS fullscreen hides the traffic lights. Tell the renderer when that happens so
+  // the sidebar toggle can occupy the space they vacate instead of staying indented for chrome
+  // that is no longer visible. These events are harmless on builds where fullscreen is disabled,
+  // which keeps this titlebar work independent from the native-fullscreen contribution.
+  const publishFullscreen = (fullscreen: boolean): void => {
+    const target = window;
+    if (!target || target.isDestroyed() || target.webContents.isDestroyed()) return;
+    target.webContents.send('window:fullscreen-changed', fullscreen);
+  };
+  window.on('enter-full-screen', () => publishFullscreen(true));
+  window.on('leave-full-screen', () => publishFullscreen(false));
   window.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || input.key !== 'F11' || input.isAutoRepeat) return;
     event.preventDefault();

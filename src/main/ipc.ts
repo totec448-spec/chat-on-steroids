@@ -906,6 +906,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return setInputAutomation(id, mode, loopAfterTurn);
   });
   handle('window:getZoom', async () => (getWindow()?.webContents.getZoomFactor() ?? UI_BASE_ZOOM) / UI_BASE_ZOOM);
+  handle('window:isFullscreen', async () => getWindow()?.isFullScreen() ?? false);
   handle('window:zoom', async (payload) => {
     const { factor } = z.object({ factor: z.number().min(0.75).max(1.5) }).parse(payload);
     getWindow()?.webContents.setZoomFactor(factor * UI_BASE_ZOOM);
