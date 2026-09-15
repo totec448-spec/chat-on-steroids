@@ -60,6 +60,7 @@
           <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4" />
         </g>
         <g id="i-moon"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" /></g>
+        <g id="i-panel-right"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M15 4v16" /></g>
         <g id="i-chat">
           <path d="M4 5.5h16a1 1 0 0 1 1 1v8.5a1 1 0 0 1-1 1h-8.5L7 19.5V16H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1Z" />
         </g>
@@ -133,6 +134,11 @@
           <span id="headerSub">Not set up yet</span>
         </span>
         <span class="state">
+          <span class="live live-compact" id="live">
+            <span class="dot"></span>
+            <span id="liveState">Not connected</span>
+            <em id="liveNote"></em>
+          </span>
           <button class="btn btn-icon" id="themeBtn" type="button" title="Switch to dark mode">
             <svg class="ico" viewBox="0 0 24 24"><use href="#i-moon" id="themeIcon" /></svg>
           </button>
@@ -143,17 +149,24 @@
             <svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>
             <span>Install update</span>
           </button>
-          <span class="live" id="live">
-            <span class="dot"></span>
-            <span id="liveState">Not connected</span>
-            <em id="liveNote"></em>
-          </span>
-          <button class="power off" id="connectBtn" type="button">
+          <button class="power off header-connect" id="connectBtn" type="button">
             <svg class="ico" viewBox="0 0 24 24"><use href="#i-power" /></svg>
             <span id="connectLabel">Connect</span>
           </button>
         </span>
       </header>
+
+      <div class="agent-panel-status-header" id="agentPanelStatusHeader" hidden>
+        <span class="live" id="agentPanelLive">
+          <span class="dot"></span>
+          <span id="agentPanelLiveState">Not connected</span>
+          <em id="agentPanelLiveNote"></em>
+        </span>
+        <button class="power off" id="agentConnectBtn" type="button">
+          <svg class="ico" viewBox="0 0 24 24"><use href="#i-power" /></svg>
+          <span id="agentConnectLabel">Connect</span>
+        </button>
+      </div>
 
       <!-- Everything this app knows about being out of date, in one line. Painted from
            state.update plus the extension version the bridge already reports; see

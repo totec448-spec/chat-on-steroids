@@ -3518,13 +3518,15 @@ export function initChat(next: Deps): void {
     input: $<HTMLTextAreaElement>('chatInput'),
     getDraftIdentity: () => `${selectionGeneration}:${draftKey()}`
   });
-  const agentToggle = el('button', 'btn btn-icon', '◫') as HTMLButtonElement;
-  agentToggle.id = 'agentPanelToggle'; agentToggle.type = 'button'; agentToggle.hidden = true;
+  const agentToggle = el('button', 'btn btn-icon agent-panel-toggle') as HTMLButtonElement;
+  agentToggle.append(icon('i-panel-right'));
+  agentToggle.id = 'agentPanelToggle'; agentToggle.type = 'button'; agentToggle.hidden = false;
   ui(agentToggle, 'aria-label', () => t("Toggle sub-agent side panel")); agentToggle.setAttribute('aria-expanded', 'false');
-  $('themeBtn').before(agentToggle);
+  $('installUpdate').before(agentToggle);
   const agentToolGroups = new Map<string, HTMLDetailsElement>();
   agentPanel = createAgentPanel({
-    host: document.querySelector<HTMLElement>('[data-panel="chat"]')!, toggle: agentToggle,
+    host: document.querySelector<HTMLElement>('.app')!, toggle: agentToggle,
+    statusHeader: $('agentPanelStatusHeader'),
     load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
     render: (source, id, current) => {
       let boundary = '';

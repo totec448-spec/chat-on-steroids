@@ -86,6 +86,48 @@ function rule(selector: string): string {
   return match ? match[1]!.replace(/\s+/g, ' ').trim() : '';
 }
 
+describe('the right sidebar chrome', () => {
+  it('keeps the chat header compact and moves detailed connection controls into the side panel', () => {
+    const header = document.querySelector('#chatTitle')!.closest('header')!;
+    const state = header.querySelector('.state')!;
+    expect(state.firstElementChild?.id).toBe('live');
+    expect(document.getElementById('live')!.classList.contains('live-compact')).toBe(true);
+    expect(document.getElementById('themeBtn')!.previousElementSibling?.id).toBe('live');
+    expect(document.getElementById('connectBtn')!.classList.contains('header-connect')).toBe(true);
+    expect(header.contains(document.getElementById('agentPanelStatusHeader'))).toBe(false);
+    expect(document.getElementById('agentPanelStatusHeader')!.contains(document.getElementById('agentPanelLive'))).toBe(true);
+    expect(document.getElementById('agentPanelStatusHeader')!.contains(document.getElementById('agentConnectBtn'))).toBe(true);
+    expect(chatSource).toContain("agentToggle.append(icon('i-panel-right'))");
+    expect(chatSource).toContain("$('installUpdate').before(agentToggle)");
+  });
+
+  it('slides the persistent right pane instead of mounting and unmounting it', () => {
+    expect(rule('.app')).toContain('grid-template-columns: min(var(--sidebar-width, var(--sidebar-default, 248px)), 50vw) minmax(0, 1fr) 0px');
+    expect(rule('.app')).toContain('transition: grid-template-columns 220ms cubic-bezier(.22, 1, .36, 1)');
+    expect(rule(".app[data-screen='chat'].has-agent-panel")).toContain('grid-template-columns: min(var(--sidebar-width, var(--sidebar-default, 248px)), 50vw) minmax(0, 1fr) var(--agent-panel-width, minmax(340px, .72fr))');
+    expect(rule('.agent-panel')).toContain('grid-column: 3');
+    expect(rule('.agent-panel')).toContain('grid-row: 3 / -1');
+    expect(rule('.agent-panel-resize')).toContain('cursor: col-resize');
+    expect(rule('.app.is-resizing-agent-panel')).toContain('transition: none');
+    expect(rule('.agent-panel')).toContain('transform: translateX(16px)');
+    expect(rule('.agent-panel')).toContain('transition: transform 220ms cubic-bezier(.22, 1, .36, 1), opacity 150ms ease-out');
+    expect(rule('.has-agent-panel > .agent-panel')).toContain('transform: translateX(0)');
+    expect(css).toContain('@media (prefers-reduced-motion: reduce)');
+  });
+
+  it('keeps notices in the center column while the side panel fills the same vertical band', () => {
+    expect(rule('.app > header')).toContain('grid-column: 2 / -1');
+    expect(rule('.app > .notices')).toContain('grid-column: 2');
+    expect(rule('.app > .notices')).toContain('grid-row: 3');
+    expect(rule('.app > main')).toContain('grid-column: 2');
+    expect(rule('.app > main')).toContain('grid-row: 4');
+    expect(rule('.agent-panel')).toContain('grid-row: 3 / -1');
+    expect(rule(".app[data-platform='macos'] > .agent-panel")).toContain('grid-row: 2 / -1');
+    expect(rule(".app[data-screen='settings'] .agent-panel")).toContain('display: none');
+    expect(css).toContain(".app[data-screen='chat'].has-agent-panel main { visibility: hidden; }");
+  });
+});
+
 describe('the session card header', () => {
   it('indents rendered project tasks once and gives worker children their additional depth', () => {
     expect(rule('.project-group > .sess, .project-group > .worker-group')).toContain('margin-inline-start: 24px');

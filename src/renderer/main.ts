@@ -964,11 +964,10 @@ function apply(next: AppState): void {
   ui($('themeBtn'), 'title', () => dark ? t("Switch to light mode") : t("Switch to dark mode"));
 
   // ---- header
-  const live = $('live');
-  live.className = `live${
-    connected ? ' is-connected' : offline ? ' is-offline' : busy ? ' is-busy' : failed ? ' is-error' : ''
-  }`;
-  ui($('liveState'), 'textContent', () => t(STATUS_TEXT[status.state]));
+  const liveTone = connected ? ' is-connected' : offline ? ' is-offline' : busy ? ' is-busy' : failed ? ' is-error' : '';
+  $('live').className = `live live-compact${liveTone}`;
+  $('agentPanelLive').className = `live${liveTone}`;
+  for (const id of ['liveState', 'agentPanelLiveState']) ui($(id), 'textContent', () => t(STATUS_TEXT[status.state]));
 
   const id = config.tunnel.tunnelId;
   ui($('headerSub'), 'textContent', () => config.tunnel.kind === 'openai'
@@ -977,11 +976,13 @@ function apply(next: AppState): void {
         : t("No tunnel yet")
       : (status.publicUrl ?? status.localUrl ?? config.tunnel.kind));
 
-  const connectBtn = $<HTMLButtonElement>('connectBtn');
-  connectBtn.classList.toggle('is-running', running);
-  ui($('connectLabel'), 'textContent', () => running ? t("Disconnect") : t("Connect"));
-  connectBtn.disabled = !running && missing !== null;
-  connectBtn.title = !running && missing ? missing.text : '';
+  for (const [buttonId, labelId] of [['connectBtn', 'connectLabel'], ['agentConnectBtn', 'agentConnectLabel']] as const) {
+    const connectBtn = $<HTMLButtonElement>(buttonId);
+    connectBtn.classList.toggle('is-running', running);
+    ui($(labelId), 'textContent', () => running ? t("Disconnect") : t("Connect"));
+    connectBtn.disabled = !running && missing !== null;
+    connectBtn.title = !running && missing ? missing.text : '';
+  }
 
   // ---- out of date, app or extension
   paintUpdate(next);
@@ -1093,7 +1094,7 @@ function apply(next: AppState): void {
 
   const wizConnect = $<HTMLButtonElement>('wizConnect');
   ui(wizConnect, 'textContent', () => running ? t("Disconnect") : t("Connect"));
-  wizConnect.disabled = connectBtn.disabled;
+  wizConnect.disabled = $<HTMLButtonElement>('connectBtn').disabled;
   ui($('wizStatus'), 'textContent', () => running || failed ? status.detail || t(STATUS_TEXT[status.state]) : '');
 
   $('chatgptConn').replaceChildren(
@@ -1373,11 +1374,14 @@ function paintClock(): void {
   request.textContent = shortAgo(status.lastRequestAt);
   request.className = status.lastRequestAt === null ? 'is-cold' : '';
 
-  ui($('liveNote'), 'textContent', () => running
+  const note = running
     ? status.handshakeAt === null
       ? t("no handshake yet")
       : t("verified {0}", [ago(status.handshakeAt)])
-    : '');
+    : '';
+  for (const id of ['liveNote', 'agentPanelLiveNote']) ui($(id), 'textContent', () => note);
+  const compactStatus = t(STATUS_TEXT[status.state]);
+  $('live').title = note ? `${compactStatus} · ${note}` : compactStatus;
 }
 
 window.setInterval(paintClock, 1000);
@@ -1701,7 +1705,7 @@ function installUpdate(): void {
 
 $('updateInstall').addEventListener('click', installUpdate);
 $('installUpdate').addEventListener('click', installUpdate);
-$('connectBtn').addEventListener('click', () => void toggleConnection());
+for (const id of ['connectBtn', 'agentConnectBtn']) $(id).addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
 
 $('pickBinary').addEventListener('click', async () => {

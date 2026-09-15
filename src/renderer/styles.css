@@ -303,11 +303,13 @@ code {
    Only the workspace grows; showing a notice must not create an implicit content row. */
 .app {
   height: 100%; display: grid;
-  grid-template-columns: min(var(--sidebar-width, var(--sidebar-default, 248px)), 50vw) minmax(0, 1fr);
+  grid-template-columns: min(var(--sidebar-width, var(--sidebar-default, 248px)), 50vw) minmax(0, 1fr) 0px;
   grid-template-rows: auto auto auto minmax(0, 1fr);
   background: var(--page);
+  transition: grid-template-columns 220ms cubic-bezier(.22, 1, .36, 1);
 }
-.app > header { grid-column: 2; grid-row: 2; }
+.app[data-screen='chat'].has-agent-panel { grid-template-columns: min(var(--sidebar-width, var(--sidebar-default, 248px)), 50vw) minmax(0, 1fr) var(--agent-panel-width, minmax(340px, .72fr)); }
+.app > header { grid-column: 2 / -1; grid-row: 2; }
 .app > .notices { grid-column: 2; grid-row: 3; min-width: 0; }
 .app[data-screen='settings'] #pluginRefreshReminder { display: none; }
 .app > main { grid-column: 2; grid-row: 4; min-width: 0; }
@@ -330,7 +332,8 @@ code {
 .view-menu-items .btn { display: flex; width: 100%; gap: 10px; padding: 9px 10px; border-radius: 5px; }
 .view-menu-items kbd { margin-left: auto; color: var(--soft); font: inherit; }
 .view-menu-items hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
-.app.is-sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+.app.is-sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) 0px; }
+.app[data-screen='chat'].is-sidebar-collapsed.has-agent-panel { grid-template-columns: 0 minmax(0, 1fr) var(--agent-panel-width, minmax(340px, .72fr)); }
 .app.is-sidebar-collapsed .sidebar { display: none; }
 .sidebar { position: relative; grid-column: 1; grid-row: 2 / -1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--sunk); border-right: 1px solid var(--line); padding: 20px 12px 10px; }
 /* Sampled from the reference: near-black blue, a neutral middle, then blue-grey. */
@@ -404,6 +407,9 @@ header {
   white-space: nowrap;
 }
 
+.app[data-screen='chat'] .header-connect,
+.app[data-screen='chat'] #installUpdate { display: none; }
+
 /* The honest status line: a colour, a word, and how old the proof is. */
 .live {
   display: flex;
@@ -426,6 +432,32 @@ header {
   color: var(--faint);
   font-variant-numeric: tabular-nums;
 }
+
+.live-compact {
+  position: relative;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  gap: 0;
+}
+.live-compact > :not(.dot) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.agent-panel-toggle {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 7px;
+  border-radius: 8px;
+}
+.agent-panel-toggle[aria-expanded='true'] { background: var(--hover); color: var(--ink); }
 
 .live.is-connected .dot {
   background: var(--green);
@@ -2989,9 +3021,34 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .sess.sort-before::before { top: -2px; }
 .sess.sort-after::after { bottom: -2px; }
 
-/* Read-only worker conversation beside the Prime, with independent scrolling. */
-[data-panel='chat'].has-agent-panel { grid-template-columns: minmax(0, 1fr) minmax(340px, 42%); }
-.agent-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--page); }
+/* Read-only worker conversation in the app's third column, with independent scrolling. */
+.agent-panel {
+  position: relative;
+  grid-column: 3;
+  grid-row: 3 / -1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 0;
+  background: var(--page);
+  opacity: 0;
+  transform: translateX(16px);
+  pointer-events: none;
+  transition: transform 220ms cubic-bezier(.22, 1, .36, 1), opacity 150ms ease-out;
+  will-change: transform, opacity;
+}
+.has-agent-panel > .agent-panel { opacity: 1; transform: translateX(0); pointer-events: auto; box-shadow: inset 1px 0 var(--line); }
+.agent-panel-resize { position: absolute; z-index: 9; top: 0; bottom: 0; left: 0; width: 8px; cursor: col-resize; touch-action: none; }
+.agent-panel-resize:hover, .agent-panel-resize:focus-visible, .app.is-resizing-agent-panel .agent-panel-resize { background: var(--hover); outline: 1px solid var(--line); outline-offset: -1px; }
+.app.is-resizing-agent-panel, .app.is-resizing-agent-panel * { cursor: col-resize !important; user-select: none !important; }
+.app.is-resizing-agent-panel { transition: none; }
+.app.is-resizing-agent-panel > .agent-panel { transition: none; }
+.agent-panel-status-header { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.agent-panel-status-header .live { min-width: 0; flex: 1; }
+.agent-panel-status-header .live > span:not(.dot), .agent-panel-status-header .live em { overflow: hidden; text-overflow: ellipsis; }
+.agent-panel-status-header .power { flex: none; }
 .agent-panel-header { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
 .agent-panel-header strong { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 550; }
 .agent-panel-header .btn { padding: 6px 10px; }
@@ -3005,9 +3062,17 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .agent-panel-body .ev-body { min-width: 0; }
 .agent-panel-body .said > b { display: none; }
 .app[data-screen='settings'] #agentPanelToggle { display: none; }
-@media (max-width: 850px) { [data-panel='chat'].has-agent-panel { grid-template-columns: minmax(0, 1fr); } .has-agent-panel > .is-session { display: none; } }
+@media (max-width: 850px) {
+  .app[data-screen='chat'].has-agent-panel,
+  .app[data-screen='chat'].is-sidebar-collapsed.has-agent-panel { grid-template-columns: min(var(--sidebar-width, var(--sidebar-default, 205px)), 50vw) minmax(0, 1fr) 0px; }
+  .app[data-screen='chat'].is-sidebar-collapsed.has-agent-panel { grid-template-columns: 0 minmax(0, 1fr) 0px; }
+  .agent-panel { grid-column: 2 / -1; grid-row: 3 / -1; z-index: 8; transform: translateX(24px); }
+  .agent-panel-resize { display: none; }
+  .has-agent-panel > .agent-panel { transform: translateX(0); }
+  .app[data-screen='chat'].has-agent-panel main { visibility: hidden; }
+}
 
-.app[data-screen='settings'] [data-panel='chat'].has-agent-panel { grid-template-columns: minmax(0, 1fr); }
+.app[data-platform='macos'] > .agent-panel { grid-row: 2 / -1; }
 .app[data-screen='settings'] .agent-panel { display: none; }
 
 .agent-plan { min-width: 0; border-bottom: 1px solid var(--edge); color: var(--soft); font-size: 13px; overflow: hidden; }
