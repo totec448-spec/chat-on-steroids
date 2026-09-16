@@ -69,6 +69,7 @@ describe('portable browser-backed feature parity', () => {
       'update_plan',
       'agents',
       'remote_steering',
+      'frontier_longrun',
       'session_finish',
       'exec'
     ]);

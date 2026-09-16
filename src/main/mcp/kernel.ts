@@ -573,17 +573,19 @@ async function dispatchTracked(
   surfaceToolCallAt.set(surface, Date.now());
   const isFinish = isFinishCall(name, args);
   const startedAt = context.startedAt;
-  // `remote_steering` is deliberately NOT a caller-identity lane. Its authority is the
-  // Command Center signature carried inside the envelope, and the relay is expected to be
-  // unattributed (for example, a mobile ChatGPT turn). Keep this exact direct tool call out
-  // of every conversation-derived fence, lifecycle mutation and inbox projection below.
-  // Ordinary tools — especially `agents` — retain the existing identity behavior unchanged.
-  const identityNeutralRemote = !nested && name === 'remote_steering';
+  // The two governed remote-control tools are deliberately NOT caller-identity lanes.
+  // `remote_steering` carries signed Command Center bytes; `frontier_longrun` accepts only
+  // semantic intent and obtains those signed bytes from the pinned local CC CLI. Both are
+  // expected to work from an unattributed mobile ChatGPT turn. Keep only these exact direct
+  // tool names out of conversation-derived fences/lifecycle/inbox projection. Ordinary tools
+  // — especially `exec` and `agents` — retain the existing identity behavior unchanged.
+  const identityNeutralRemote = !nested && (name === 'remote_steering' || name === 'frontier_longrun');
   // Cheap, non-blocking ingress identity. When the page has already reported this exact
   // request id, identity-sensitive handlers (workspace/session/agents) see it before they
   // touch state. If the page is one tick late this stays null; only handlers that actually
   // require identity wait for their own exact mate. Ordinary absolute reads/execs never wait.
   if (!nested && !identityNeutralRemote) setCallerConversation(context, callerConversation(name, startedAt, requestId));
+  const remoteControlShell = getConfig().remoteSteering.enabled && (name === 'exec_command' || name === 'write_stdin');
   // Only calls that need an *existing* per-chat workspace before the handler runs are
   // identity-sensitive here. An absolute read or an exec with an explicit absolute workdir is
   // self-contained and must stay fast; if its exact page mate is late, workspace.ts simply
@@ -598,7 +600,7 @@ async function dispatchTracked(
   // handler runs. Recording a late identity cannot recover a discarded anonymous frame.
   const desktopContext = surface === 'desktop' && (name === 'get_window_state' ||
     (WINDOWS_COMPUTER_STATE_INPUT_METHODS as readonly string[]).includes(name));
-  if (!identityNeutralRemote && !context.caller.conversationId && (desktopContext || name === 'exec' || name === 'update_plan' || (identitySensitive && swarmRunning())) && requestId) {
+  if (!identityNeutralRemote && !context.caller.conversationId && (remoteControlShell || desktopContext || name === 'exec' || name === 'update_plan' || (identitySensitive && swarmRunning())) && requestId) {
     setCallerConversation(
       context,
       await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId })
@@ -786,6 +788,12 @@ async function dispatchTracked(
           )
         : endedWorker
         ? Promise.resolve(fail(endedWorker))
+        : remoteControlShell && !context.caller.conversationId
+        ? Promise.resolve(
+            failIdentity(
+              'CALLER_IDENTITY_REQUIRED: arbitrary shell is not an identity-neutral Remote Steering surface. This call was not proven to belong to a local ChatGPT conversation, so no command or process input was executed. Use the bounded remote_steering/frontier_longrun tools for unattributed remote control.'
+            )
+          )
         : retiredLeaseAmbiguous
         ? Promise.resolve(
             failIdentity(
@@ -804,7 +812,7 @@ async function dispatchTracked(
               'CALLER_IDENTITY_REQUIRED: this operation needs this chat’s exact workspace, but the connector could not prove which ChatGPT conversation made the call. Retry after the extension reconnects; no file or command was changed.'
             )
           )
-        : nested && (name === 'exec' || name === 'session_finish' || isFinish)
+        : nested && (name === 'exec' || name === 'frontier_longrun' || name === 'session_finish' || isFinish)
         ? Promise.resolve(fail('DIRECT_CALL_REQUIRED: call this lifecycle tool directly, outside exec. No action was taken.'))
         : invokeHandler()
   );

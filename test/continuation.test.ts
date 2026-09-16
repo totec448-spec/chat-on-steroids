@@ -334,6 +334,20 @@ describe('capturing the brief', () => {
     expect(handoffEvents).toHaveLength(1);
   });
 
+  it('preserves Frontier Longrun remote-task authority provenance in a Compact & Resume handoff', async () => {
+    const summary = await createSession({
+      title: 'Frontier work',
+      conversationId: CHAT_A,
+      origin: { kind: 'frontier_longrun', fromSessionId: null, agentId: null, task: '' }
+    });
+    const { prepareHandoff, resumeBootstrapText } = await import('../src/main/session/handoff.js');
+    const prepared = await prepareHandoff({ sessionId: summary.id, text: SAMPLE_BRIEF });
+    expect(prepared.text.startsWith('[[CLF_FRONTIER_LONGRUN_REMOTE_TASK_V1]]\n')).toBe(true);
+    expect(prepared.text.match(/\[\[CLF_FRONTIER_LONGRUN_REMOTE_TASK_V1\]\]/g)).toHaveLength(1);
+    const bootstrap = resumeBootstrapText(prepared.text, 'token_0123456789abcdef');
+    expect(bootstrap).toContain('[[CLF_FRONTIER_LONGRUN_REMOTE_TASK_V1]]');
+  });
+
   it('keeps the first brief when a re-observation differs, and still reports success', async () => {
     const summary = await createSession({ title: 'work', conversationId: CHAT_A });
     const opened = await openContinuationNow(summary.id, CHAT_A);

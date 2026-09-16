@@ -71,6 +71,16 @@ afterEach(() => {
 });
 
 describe('the user’s own connector instructions', () => {
+  it('pins the Frontier Longrun remote-task marker as work direction rather than guarded-action authority', () => {
+    const text = serverInstructions(ctx, 'core', 'win32');
+    expect(text).toContain('[[CLF_FRONTIER_LONGRUN_REMOTE_TASK_V1]]');
+    expect(text).toContain('work direction');
+    for (const guarded of ['T3', 'commit', 'push', 'merge', 'deploy', 'credential', 'provider/model selection', 'destructive/root']) {
+      expect(text).toContain(guarded);
+    }
+    expect(text).toContain('ordinary unmarked user instruction');
+  });
+
   it('starts with the coding guidance and explains connectors once beside the local tools without a setup link', () => {
     const text = serverInstructions(ctx, 'core', 'win32');
     expect(text.startsWith('You are a coding agent working with the user through Chat On Steroids.')).toBe(true);

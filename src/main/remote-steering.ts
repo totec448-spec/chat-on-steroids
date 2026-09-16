@@ -51,7 +51,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentState } from '../shared/session.js';
 import type { RemoteSteeringPinView } from '../shared/types.js';
-import { isAstraModel } from '../shared/chat-models.js';
 import {
   AgentError,
   activeRunIds,
@@ -120,11 +119,34 @@ import {
   type RemoteSteeringOperationEnvelopeV3,
   type RemoteSteeringOperationV3
 } from './remote-steering-contract-v3.js';
+import {
+  FRONTIER_LONGRUN_PARENT_ENVELOPE_CONTRACT,
+  FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
+  canonicalFrontierLongrunParentGrantBytes,
+  canonicalFrontierLongrunParentOperationBytes,
+  frontierLongrunParentGrantDigest,
+  frontierLongrunParentOperationDigest,
+  frontierLongrunParentOperationGrantMismatch,
+  validateFrontierLongrunParentEnvelope,
+  validateFrontierLongrunParentSignedGrant,
+  validateFrontierLongrunParentSignedOperation,
+  type FrontierLongrunParentAction,
+  type FrontierLongrunParentGrantV1,
+  type FrontierLongrunParentOperationEnvelopeV1,
+  type FrontierLongrunParentOperationV1,
+} from './frontier-longrun-parent-contract.js';
+import {
+  frontierLongrunParentReplayState,
+  resetFrontierLongrunParentForTests,
+  restoreFrontierLongrunParent,
+  steerFrontierLongrunParent,
+  type FrontierLongrunParentRefusal,
+  type FrontierLongrunParentSlotView,
+} from './frontier-longrun-parent.js';
 import { recordAgentMessage } from './session/recorder.js';
-import { conversationWasSuperseded, getSession } from './session/store.js';
-import { cancelInput, enqueueInput, listInputs } from './session/input.js';
-import { goalObjectiveFor, goalSwitchFor, setGoalReplyActiveNow, setGoalSwitchNow } from './goal.js';
-import { isChatBlocked } from './session/blocked-chats.js';
+import { getSession } from './session/store.js';
+import { enqueueInput } from './session/input.js';
+import { disableLongrunSessionLoop, longrunSessionView } from './session/longrun-control.js';
 
 // ---------------------------------------------------------------------------
 // Bounds.
@@ -207,6 +229,12 @@ export type RemoteSteeringRefusal =
   | 'REMOTE_STEERING_OPERATION_NOT_LIVE'
   | 'REMOTE_STEERING_OPERATION_REPLAY_ALTERED'
   | 'REMOTE_STEERING_OPERATION_INDETERMINATE'
+  | 'FRONTIER_LONGRUN_PARENT_GRANT_MALFORMED'
+  | 'FRONTIER_LONGRUN_PARENT_GRANT_SIGNATURE_INVALID'
+  | 'FRONTIER_LONGRUN_PARENT_OPERATION_SIGNATURE_INVALID'
+  | 'FRONTIER_LONGRUN_PARENT_OPERATION_WINDOW_EXCEEDS_GRANT'
+  | 'FRONTIER_LONGRUN_PARENT_GRANT_NOT_LIVE'
+  | 'FRONTIER_LONGRUN_PARENT_OPERATION_NOT_LIVE'
   // --- authorized and attempted; recorded once ---
   | 'REMOTE_STEERING_RUN_NOT_FOUND'
   | 'REMOTE_STEERING_SESSION_NOT_FOUND'
@@ -219,7 +247,8 @@ export type RemoteSteeringRefusal =
   | 'REMOTE_STEERING_DELIVERY_REFUSED'
   | 'REMOTE_STEERING_SPAWN_REFUSED'
   | 'REMOTE_STEERING_RECEIPT_WRITE_FAILED'
-  | 'REMOTE_STEERING_RECEIPT_STORE_FULL';
+  | 'REMOTE_STEERING_RECEIPT_STORE_FULL'
+  | FrontierLongrunParentRefusal;
 
 // ---------------------------------------------------------------------------
 // The minimized result.
@@ -289,7 +318,7 @@ export interface RemoteSteeringLongrunView {
   readonly automation: 'loop';
 }
 
-type RemoteSteeringActionAny = RemoteSteeringAction | RemoteSteeringActionV2 | RemoteSteeringActionV3;
+type RemoteSteeringActionAny = RemoteSteeringAction | RemoteSteeringActionV2 | RemoteSteeringActionV3 | FrontierLongrunParentAction;
 type RemoteSteeringLeaseAny = RemoteSteeringLeaseV1 | RemoteSteeringLeaseV2 | RemoteSteeringLeaseV3;
 type RemoteSteeringOperationAny = RemoteSteeringOperationV1 | RemoteSteeringOperationV2 | RemoteSteeringOperationV3;
 type RemoteSteeringEnvelopeAny = RemoteSteeringOperationEnvelopeV1 | RemoteSteeringOperationEnvelopeV2 | RemoteSteeringOperationEnvelopeV3;
@@ -318,6 +347,8 @@ export interface RemoteSteeringOutcome {
   readonly run: RemoteSteeringRunView | null;
   readonly session: RemoteSteeringSessionView | null;
   readonly longrun: RemoteSteeringLongrunView | null;
+  /** Parent-slot projection. Contains no session id, conversation id, prompt text or input id. */
+  readonly frontier: FrontierLongrunParentSlotView | null;
 }
 
 /** What the ordinary `agents message` path owes a wake, supplied by its owner in tools-core. */
@@ -430,6 +461,7 @@ export async function restoreRemoteSteering(): Promise<void> {
     }
   }
   pruneReceipts(Date.now());
+  await restoreFrontierLongrunParent();
 }
 
 function receiptSnapshot(): PersistedReceipts {
@@ -598,6 +630,7 @@ function outcome(partial: Partial<RemoteSteeringOutcome> & { status: 'accepted' 
     run: null,
     session: null,
     longrun: null,
+    frontier: null,
     ...partial
   };
 }
@@ -617,6 +650,24 @@ function refuse(
     action: operation?.action ?? null,
     runId: operation ? runIdOf(operation) : null,
     sessionId: operation ? sessionIdOf(operation) : null
+  });
+}
+
+function refuseParent(
+  reason: RemoteSteeringRefusal,
+  detail: string | null,
+  operation?: FrontierLongrunParentOperationV1
+): RemoteSteeringOutcome {
+  return outcome({
+    status: 'refused',
+    verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
+    reason,
+    detail,
+    operationId: operation?.operationId ?? null,
+    operationDigest: operation ? frontierLongrunParentOperationDigest(operation) : null,
+    action: operation?.action ?? null,
+    runId: null,
+    sessionId: null
   });
 }
 
@@ -696,6 +747,15 @@ interface VerifiedEnvelope {
   readonly authorityEpoch: number;
 }
 
+interface VerifiedParentEnvelope {
+  readonly envelope: FrontierLongrunParentOperationEnvelopeV1;
+  readonly grant: FrontierLongrunParentGrantV1;
+  readonly operation: FrontierLongrunParentOperationV1;
+  readonly grantDigest: string;
+  readonly operationDigest: string;
+  readonly authorityEpoch: number;
+}
+
 /**
  * Everything that must hold before a single byte of this app's state may be touched.
  *
@@ -703,7 +763,7 @@ interface VerifiedEnvelope {
  * feature off never parses an envelope at all, and an envelope for a key this app does not
  * pin is refused before either signature is verified.
  */
-function verify(envelopeText: string): { verified: VerifiedEnvelope } | { refusal: RemoteSteeringOutcome } {
+function verify(envelopeText: string): { verified: VerifiedEnvelope } | { parent: VerifiedParentEnvelope } | { refusal: RemoteSteeringOutcome } {
   if (!getConfig().remoteSteering.enabled) {
     return {
       refusal: refuse(
@@ -712,17 +772,18 @@ function verify(envelopeText: string): { verified: VerifiedEnvelope } | { refusa
       )
     };
   }
-  // V3 is exact-session control and deliberately does not depend on the worker broker. Preserve
-  // V1/V2's old refusal ordering when multi-agent is off: only a structurally recognizable V3
-  // wrapper may pass this gate; malformed/worker-run envelopes still receive the same refusal.
+  // V3 exact-session control and the Frontier parent protocol deliberately do not depend on the
+  // worker broker. Preserve V1/V2's old refusal ordering when multi-agent is off: only one of
+  // those structurally recognizable session-control wrappers may pass this gate.
   let preparsed: unknown = undefined;
   if (!getConfig().multiAgent.enabled) {
     if (envelopeText.length <= REMOTE_STEERING_MAX_ENVELOPE_CHARS) {
       try { preparsed = JSON.parse(envelopeText); } catch { /* preserve the worker-run refusal */ }
     }
-    const v3 = typeof preparsed === 'object' && preparsed !== null && !Array.isArray(preparsed) &&
-      (preparsed as Record<string, unknown>)['contract'] === REMOTE_STEERING_ENVELOPE_CONTRACT_V3;
-    if (!v3) {
+    const contract = typeof preparsed === 'object' && preparsed !== null && !Array.isArray(preparsed)
+      ? (preparsed as Record<string, unknown>)['contract'] : null;
+    const sessionControl = contract === REMOTE_STEERING_ENVELOPE_CONTRACT_V3 || contract === FRONTIER_LONGRUN_PARENT_ENVELOPE_CONTRACT;
+    if (!sessionControl) {
       return {
         refusal: refuse(
           'REMOTE_STEERING_MULTI_AGENT_DISABLED',
@@ -751,6 +812,46 @@ function verify(envelopeText: string): { verified: VerifiedEnvelope } | { refusa
     } catch {
       return { refusal: refuse('REMOTE_STEERING_ENVELOPE_UNREADABLE', 'the envelope is not valid JSON') };
     }
+  }
+
+  if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) &&
+      (parsed as Record<string, unknown>)['contract'] === FRONTIER_LONGRUN_PARENT_ENVELOPE_CONTRACT) {
+    const record = parsed as Record<string, unknown>;
+    const signedGrant = validateFrontierLongrunParentSignedGrant(record['grant']);
+    if (!signedGrant) {
+      return { refusal: refuseParent('FRONTIER_LONGRUN_PARENT_GRANT_MALFORMED', 'the signed parent grant failed closed-schema validation') };
+    }
+    const signedOperation = validateFrontierLongrunParentSignedOperation(record['operation']);
+    if (!signedOperation) {
+      return { refusal: refuseParent('REMOTE_STEERING_ENVELOPE_MALFORMED', 'the signed parent operation failed closed-schema validation') };
+    }
+    const mismatch = frontierLongrunParentOperationGrantMismatch(signedOperation.payload, signedGrant.payload);
+    if (mismatch) {
+      return { refusal: refuseParent(mismatch, 'the parent operation is not authorized by its own grant', signedOperation.payload) };
+    }
+    const envelope = validateFrontierLongrunParentEnvelope(parsed);
+    if (!envelope) {
+      return { refusal: refuseParent('REMOTE_STEERING_ENVELOPE_MALFORMED', 'the parent envelope wrapper failed closed-schema validation', signedOperation.payload) };
+    }
+    if (envelope.signingKeyFingerprint !== pinned.fingerprint) {
+      return { refusal: refuseParent('REMOTE_STEERING_KEY_MISMATCH', 'the parent envelope names a signing key this app has not pinned', signedOperation.payload) };
+    }
+    if (!verifyRemoteSteeringSignature(canonicalFrontierLongrunParentGrantBytes(signedGrant.payload), signedGrant.signature, pinned.publicKeySpkiBase64)) {
+      return { refusal: refuseParent('FRONTIER_LONGRUN_PARENT_GRANT_SIGNATURE_INVALID', null, signedOperation.payload) };
+    }
+    if (!verifyRemoteSteeringSignature(canonicalFrontierLongrunParentOperationBytes(signedOperation.payload), signedOperation.signature, pinned.publicKeySpkiBase64)) {
+      return { refusal: refuseParent('FRONTIER_LONGRUN_PARENT_OPERATION_SIGNATURE_INVALID', null, signedOperation.payload) };
+    }
+    return {
+      parent: {
+        envelope,
+        grant: signedGrant.payload,
+        operation: signedOperation.payload,
+        grantDigest: frontierLongrunParentGrantDigest(signedGrant.payload),
+        operationDigest: frontierLongrunParentOperationDigest(signedOperation.payload),
+        authorityEpoch
+      }
+    };
   }
 
   const diagnosed = diagnose(parsed);
@@ -839,6 +940,7 @@ function replayVerdict(verified: VerifiedEnvelope): RemoteSteeringOutcome | null
     sessionId: existing.outcome.sessionId ?? null,
     session: existing.outcome.session ?? null,
     longrun: existing.outcome.longrun ?? null,
+    frontier: existing.outcome.frontier ?? null,
     replay: true
   };
 }
@@ -917,6 +1019,7 @@ async function claimReceipt(
       sessionId: previous.outcome.sessionId ?? null,
       session: previous.outcome.session ?? null,
       longrun: previous.outcome.longrun ?? null,
+      frontier: previous.outcome.frontier ?? null,
       replay: true
     };
   }
@@ -1009,35 +1112,7 @@ function runView(runId: string, workerAllowlist: readonly string[]): RemoteSteer
 
 /** Content-blind exact-session status used only by signed V3 operations. */
 async function sessionView(sessionId: string): Promise<RemoteSteeringSessionView> {
-  const session = await getSession(sessionId);
-  if (!session) {
-    return {
-      sessionId, found: false, activeTurn: false, blocked: false, superseded: false,
-      modelClass: 'unknown', loopEnabled: false, loopMode: 'goal', objectivePresent: false,
-      finishToolEnabled: getConfig().ui.finishTool === true, pendingUserInput: false, pendingLongrunStart: false
-    };
-  }
-  const conversationId = session.conversationId;
-  const selected = conversationId && session.selectedModel?.conversationId === conversationId ? session.selectedModel : null;
-  const modelClass: RemoteSteeringSessionView['modelClass'] = selected?.model
-    ? isAstraModel(selected.model, selected.reasoningEffort) ? 'astra' : 'other'
-    : 'unknown';
-  const sw = conversationId ? goalSwitchFor(conversationId) : { enabled: false, mode: 'goal' as const, own: false };
-  const inputs = (await listInputs()).filter(entry => entry.sessionId === sessionId && ['queued', 'browser', 'tool'].includes(entry.state));
-  return {
-    sessionId,
-    found: true,
-    activeTurn: Boolean(session.activeTurnId),
-    blocked: Boolean(conversationId && isChatBlocked(conversationId)),
-    superseded: Boolean(conversationId && await conversationWasSuperseded(conversationId)),
-    modelClass,
-    loopEnabled: sw.enabled,
-    loopMode: sw.mode,
-    objectivePresent: Boolean(conversationId && goalObjectiveFor(conversationId)),
-    finishToolEnabled: getConfig().ui.finishTool === true,
-    pendingUserInput: inputs.length > 0,
-    pendingLongrunStart: inputs.some(entry => entry.automation === 'loop')
-  };
+  return { sessionId, ...await longrunSessionView(sessionId) };
 }
 
 /** V3 uses no worker identity. Its lease names the exact session and every act stays inside it. */
@@ -1077,14 +1152,8 @@ async function steerSessionRemotely(
       return settleWithoutEffect(operation, operationDigest,
         refuse('REMOTE_STEERING_LOOP_CONTROL_REFUSED', 'remote-steering authority changed before Loop could be disabled', operation), nowMs);
     }
-    // Safety-first stop: cancel any pending loop-start delivery for this exact session, then
-    // durably disable Loop and revoke a pending Goal reply. A browser-claimed cancel can be
-    // transport-ambiguous, but the per-chat Loop switch is still authoritatively off.
-    const pending = (await listInputs()).filter(entry => entry.sessionId === operation.sessionId &&
-      entry.automation === 'loop' && ['queued', 'browser'].includes(entry.state));
-    for (const entry of pending) await cancelInput(entry.id);
-    await setGoalSwitchNow(conversationId, 'loop', false);
-    await setGoalReplyActiveNow(conversationId, false);
+    // Safety-first stop through the same exact-session mutation the parent-slot protocol reuses.
+    await disableLongrunSessionLoop(operation.sessionId);
     const accepted = outcome({
       status: 'accepted', verifierContractVersion: operation.verifierContractVersion,
       operationId: operation.operationId, operationDigest, action: operation.action,
@@ -1181,6 +1250,58 @@ export async function steerRemotely(
 ): Promise<RemoteSteeringOutcome> {
   const checked = verify(envelopeText);
   if ('refusal' in checked) return checked.refusal;
+  if ('parent' in checked) {
+    const verified = checked.parent;
+    const { grant, operation, grantDigest, operationDigest } = verified;
+    const replayState = await frontierLongrunParentReplayState(operation, operationDigest);
+    if (replayState === 'altered') {
+      return refuseParent(
+        'FRONTIER_LONGRUN_PARENT_OPERATION_REPLAY_ALTERED',
+        'this parent operation id was already durably assigned to different signed bytes',
+        operation
+      );
+    }
+    const grantLive = remoteSteeringWindowLive(grant.issuedAt, grant.expiresAt, nowMs);
+    const operationLive = remoteSteeringWindowLive(operation.issuedAt, operation.expiresAt, nowMs);
+    if (replayState === 'unseen' && !grantLive) {
+      return refuseParent(
+        'FRONTIER_LONGRUN_PARENT_GRANT_NOT_LIVE',
+        `the parent grant window is ${grant.issuedAt} → ${grant.expiresAt}`,
+        operation
+      );
+    }
+    if (replayState === 'unseen' && !operationLive) {
+      return refuseParent(
+        'FRONTIER_LONGRUN_PARENT_OPERATION_NOT_LIVE',
+        `the parent operation window is ${operation.issuedAt} → ${operation.expiresAt}`,
+        operation
+      );
+    }
+    const result = await steerFrontierLongrunParent(
+      operation,
+      grant,
+      grantDigest,
+      operationDigest,
+      {
+        authorityStillLive: () => authorityStillLive(verified.authorityEpoch, operation.signingKeyFingerprint, false),
+        effectsAllowed: grantLive && operationLive
+      },
+      nowMs
+    );
+    return outcome({
+      status: result.status,
+      verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
+      reason: result.reason,
+      detail: result.detail,
+      operationId: operation.operationId,
+      operationDigest,
+      action: operation.action,
+      runId: null,
+      sessionId: null,
+      replay: result.replay,
+      frontier: result.slot
+    });
+  }
   const verified = checked.verified;
   const { lease, operation, operationDigest } = verified;
 
@@ -1652,4 +1773,5 @@ export function resetRemoteSteeringForTests(): void {
   pin = null;
   receipts.clear();
   restored = false;
+  resetFrontierLongrunParentForTests();
 }

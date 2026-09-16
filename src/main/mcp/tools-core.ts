@@ -123,6 +123,10 @@ import {
 import { repairPrimeFromResumeShadow } from '../session/continuation.js';
 import { REMOTE_STEERING_MAX_ENVELOPE_CHARS, steerRemotely } from '../remote-steering.js';
 import {
+  normalizeFrontierLongrunControllerLabel,
+  runFrontierLongrunController,
+} from '../frontier-longrun-controller.js';
+import {
   currentCall,
   currentCaller,
   noteChange,
@@ -1089,7 +1093,10 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
   // V1/V2 are worker-run protocols and still refuse when multi-agent is off. V3 is a separate
   // exact-session Longrun protocol, so the transport itself must remain discoverable without
   // exposing the ordinary `agents` tool. `remote-steering.ts` performs the version-specific gate.
-  if (reg.remoteSteeringToolsExposed) registerRemoteSteeringTool(reg);
+  if (reg.remoteSteeringToolsExposed) {
+    registerRemoteSteeringTool(reg);
+    registerFrontierLongrunTool(reg);
+  }
 }
 
 
@@ -1576,8 +1583,10 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
  * The whole verify → replay → authorize → claim → broker transaction belongs to
  * `remote-steering.ts`. V1 remains STATUS/MESSAGE. V2 adds exactly one signed SPAWN of one
  * exact future worker id and one exact task. V3 is separately signed and binds one exact recorded
- * session for LONGRUN_START / LOOP_OFF / SESSION_STATUS. None grants caller identity. This function
- * is only the envelope transport, feature switch and minimized projection back to MCP.
+ * session for LONGRUN_START / LOOP_OFF / SESSION_STATUS. The separate Frontier parent protocol
+ * creates and steers at most eight CoS-owned local slots without putting local session ids in the
+ * remote authority. None grants caller identity. This function is only the envelope transport,
+ * feature switch and minimized projection back to MCP.
  */
 function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
   reg.register(
@@ -1585,10 +1594,11 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
     {
       title: 'Relay a signed remote-steering envelope',
       description:
-        'Relay one Command Center signed operation envelope, verbatim. The user minted it at their PC; ' +
+        'Relay one Command Center signed operation envelope, verbatim. Command Center issued the signed operation; ' +
         'pass its exact JSON text. It is not an identity and grants nothing beyond the single act it already names, ' +
         'once, inside its own short window: V1 supports worker status/message; V2 can additionally spawn exactly one ' +
-        'signed future worker id; V3 can start/stop/query Frontier Longrun on one exact pre-existing session and never selects a model. ' +
+        'signed future worker id; V3 can start/stop/query Frontier Longrun on one exact pre-existing session and never selects a model; ' +
+        'the Frontier parent protocol can create and steer up to eight CoS-owned Longrun slots while keeping local session/conversation ids private. ' +
         'Relaying the same envelope twice repeats nothing. ' +
         'Never edit, re-sign, summarize or construct one — an altered envelope is refused.',
       inputSchema: z
@@ -1610,10 +1620,21 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
           return reg.featureDisabled('Remote steering', 'Remote steering (Command Center bridge)');
         }
         const outcome = await steerRemotely(input.envelope, { measureSleepingWorkers });
+        const parent = outcome.frontier;
         const headline =
           outcome.status === 'accepted'
-            ? outcome.replay
-              ? 'Already carried out. This is the recorded result of that exact operation; nothing was repeated.'
+            ? parent && outcome.replay
+              ? `Recovered the exact signed parent operation for slot ${parent.slot}; its current state is ${parent.state}. No duplicate input was created.`
+              : outcome.replay
+                ? 'Already carried out. This is the recorded result of that exact operation; nothing was repeated.'
+              : parent && outcome.action === 'SESSION_CREATE'
+                ? `Frontier Longrun slot ${parent.slot} is ${parent.state}.`
+              : parent && outcome.action === 'LONGRUN_PROMPT'
+                ? `Accepted the signed Longrun prompt for slot ${parent.slot}; its current state is ${parent.state}.`
+              : parent && outcome.action === 'LOOP_OFF'
+                ? `Recorded Loop-Off for Frontier Longrun slot ${parent.slot}; its current state is ${parent.state}.`
+              : parent && outcome.action === 'SESSION_STATUS'
+                ? `Read Frontier Longrun slot ${parent.slot}; its current state is ${parent.state}.`
               : outcome.action === 'MESSAGE'
                 ? `Delivered to ${outcome.delivered?.targetWorkerId ?? 'the named worker'}${outcome.delivered?.waking ? ', which was asleep and is being woken in its existing chat' : ''}.`
                 : outcome.action === 'SPAWN'
@@ -1633,8 +1654,8 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
               text:
                 `${headline}\n` +
                 (outcome.detail ? `${outcome.detail}\n` : '') +
-                'Report this result to the user as it stands. Do not retry, edit or rebuild the envelope; ' +
-                'a refused or expired operation needs a new one minted at their PC.'
+                'Report this result to the user as it stands. Never edit, re-sign or rebuild the envelope. ' +
+                'Retry the same envelope only when this result explicitly permits exact parent CREATE recovery; otherwise a refused or expired operation needs a fresh Command Center-issued operation under still-live attended authority. Only creating or renewing the root parent authority requires PC attendance.'
             }
           ],
           structuredContent: {
@@ -1702,11 +1723,142 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
                   longrun_length: outcome.longrun.longrunLength,
                   automation: outcome.longrun.automation
                 }
+              : null,
+            frontier: outcome.frontier
+              ? {
+                  slot: outcome.frontier.slot,
+                  state: outcome.frontier.state,
+                  session: outcome.frontier.session
+                    ? {
+                        found: outcome.frontier.session.found,
+                        active_turn: outcome.frontier.session.activeTurn,
+                        blocked: outcome.frontier.session.blocked,
+                        superseded: outcome.frontier.session.superseded,
+                        model_class: outcome.frontier.session.modelClass,
+                        loop_enabled: outcome.frontier.session.loopEnabled,
+                        loop_mode: outcome.frontier.session.loopMode,
+                        objective_present: outcome.frontier.session.objectivePresent,
+                        finish_tool_enabled: outcome.frontier.session.finishToolEnabled,
+                        pending_user_input: outcome.frontier.session.pendingUserInput,
+                        pending_longrun_start: outcome.frontier.session.pendingLongrunStart
+                      }
+                    : null
+                }
               : null
           },
           ...(outcome.status === 'refused' ? { isError: true } : {})
         };
       })
+  );
+}
+
+// ---------------------------------------------------------------------------
+// frontier_longrun
+// ---------------------------------------------------------------------------
+
+/**
+ * Normal phone-control surface for Frontier Longrun.
+ *
+ * This is intentionally narrower than generic shell execution and narrower than the signed
+ * `remote_steering` transport. A fresh mobile chat supplies only semantic intent. The handler
+ * invokes one pinned local Command Center CLI command, which resolves CC-private focus/labels
+ * and issues one signed <=60s operation under the already-attended parent. The signed envelope
+ * stays inside this process and is immediately passed through the ordinary verifier above.
+ */
+function registerFrontierLongrunTool(reg: SurfaceRegistrar): void {
+  const prompt = z.string().trim().min(1).max(16_000).refine(
+    value => Buffer.byteLength(value, 'utf8') <= 16_000,
+    'prompt must be at most 16,000 UTF-8 bytes'
+  );
+  const labelValue = z.string().max(256).refine(
+    value => normalizeFrontierLongrunControllerLabel(value) !== null,
+    "label must normalize to 1..64 lowercase letters/digits plus '.', '_' or '-'"
+  );
+  const label = labelValue.optional();
+  const inputSchema = z.discriminatedUnion('action', [
+    z.object({ action: z.literal('start'), prompt, label: labelValue }).strict(),
+    z.object({ action: z.literal('continue'), prompt, label }).strict(),
+    z.object({ action: z.literal('status'), label }).strict(),
+    z.object({ action: z.literal('stop'), label }).strict(),
+    z.object({ action: z.literal('show') }).strict(),
+  ]);
+
+  reg.register(
+    'frontier_longrun',
+    {
+      title: 'Control Frontier Longrun',
+      description:
+        'Normal phone control for an already-attended Frontier Longrun parent. Give only intent: start or continue with a prompt, ' +
+        'status or stop (optionally by a semantic label), or show the bounded Longrun roster. This tool never accepts or reveals ' +
+        'grant, lease, local-session or slot authority; never accepts executable/cwd/path/TTL/model/reasoning/argv controls; and never ' +
+        'creates or renews the 72-hour parent. Command Center issues the signed operation locally and CoS verifies it internally. ' +
+        'For start, automatically choose a concise stable semantic label from the user’s goal (for example vyper-gaming-production) ' +
+        'instead of asking the user to manage one. For a later ambiguous natural-language reference, call show and resolve against ' +
+        'the stored semantic labels/focus; never ask the user for grant, lease, session or slot ids. Labels are metadata only. ' +
+        'Creating or renewing the root parent remains a separate attended PC action.',
+      inputSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+    },
+    async (input) => guard('frontier_longrun', async () => {
+      if (!reg.remoteSteeringToolsLive) {
+        return reg.featureDisabled('Remote steering', 'Remote steering (Command Center bridge)');
+      }
+      const result = await runFrontierLongrunController(input, async envelope =>
+        steerRemotely(JSON.stringify(envelope), { measureSleepingWorkers })
+      );
+      if (result.kind === 'show') {
+        const focus = result.show.parent?.focus;
+        const headline = result.show.parent
+          ? `Frontier Longrun parent is ${result.show.parent.live && !result.show.parent.revoked ? 'live' : result.show.parent.revoked ? 'revoked' : 'expired'}; ` +
+            `${result.show.parent.allocated} of ${result.show.parent.allocated + result.show.parent.remaining} slots are allocated${focus ? `, focused on ${focus}` : ''}.`
+          : 'No Frontier Longrun parent is active.';
+        return {
+          content: [{ type: 'text' as const, text: headline }],
+          structuredContent: { kind: 'show', ...result.show }
+        };
+      }
+
+      const relay = result.relay;
+      const frontier = relay.frontier;
+      const state = frontier?.state ?? null;
+      const labelText = result.label ? ` (${result.label})` : '';
+      const headline = relay.status === 'accepted'
+        ? `${result.action} accepted${labelText}${state ? `; Frontier Longrun is ${state}` : ''}.`
+        : `${result.action} refused${labelText}: ${relay.reason ?? 'unknown refusal'}.`;
+      return {
+        content: [{ type: 'text' as const, text: `${headline}${relay.detail ? `\n${relay.detail}` : ''}` }],
+        structuredContent: {
+          kind: 'intent',
+          action: result.action,
+          label: result.label,
+          status: relay.status,
+          reason: relay.reason,
+          detail: relay.detail,
+          replay: relay.replay,
+          frontier: frontier
+            ? {
+                state: frontier.state,
+                session: frontier.session
+                  ? {
+                      found: frontier.session.found,
+                      active_turn: frontier.session.activeTurn,
+                      blocked: frontier.session.blocked,
+                      superseded: frontier.session.superseded,
+                      model_class: frontier.session.modelClass,
+                      loop_enabled: frontier.session.loopEnabled,
+                      loop_mode: frontier.session.loopMode,
+                      objective_present: frontier.session.objectivePresent,
+                      finish_tool_enabled: frontier.session.finishToolEnabled,
+                      pending_user_input: frontier.session.pendingUserInput,
+                      pending_longrun_start: frontier.session.pendingLongrunStart
+                    }
+                  : null
+              }
+            : null
+        },
+        ...(relay.status === 'refused' ? { isError: true } : {})
+      };
+    })
   );
 }
 

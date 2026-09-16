@@ -40,7 +40,8 @@ export const inputArgs = z.object({
   afterTurn: z.boolean().optional(),
   dueAt: z.number().int().nonnegative(),
   model: z.string().max(80).nullable(),
-  reasoningEffort: z.enum(REASONING_EFFORTS).nullable()
+  reasoningEffort: z.enum(REASONING_EFFORTS).nullable(),
+  authorityClass: z.literal(FRONTIER_LONGRUN_AUTHORITY_CLASS).optional()
 });
 export type InputArgs = z.infer<typeof inputArgs>;
 const entrySchema = inputArgs.extend({
@@ -239,7 +240,12 @@ async function load(): Promise<InputEntry[]> {
     // is canonical history only; it never reopens transport or resends an input.
     if (row.historyRecorded && row.deliveryText && row.deliveryText !== row.text) row.historyRecorded = false;
     if (!row.sessionId && row.purpose !== 'decision' && row.conversationId && row.deliveredAt !== undefined && !stamped.has(row.conversationId)) {
-      await noteChatOrigin(row.conversationId, { kind: 'desktop', fromSessionId: null, agentId: null, task: '' });
+      await noteChatOrigin(row.conversationId, {
+        kind: row.authorityClass === FRONTIER_LONGRUN_AUTHORITY_CLASS ? 'frontier_longrun' : 'desktop',
+        fromSessionId: null,
+        agentId: null,
+        task: ''
+      });
     }
     if (row.purpose === 'decision' && row.lifetime !== 'temporary-planner' && row.conversationId && !stamped.has(row.conversationId)) await deliveryHooks?.bindHelper?.(row.conversationId, row.decisionSourceSessionId ?? null);
   }
@@ -968,7 +974,12 @@ export function acknowledgeBrowserInput(id: string, owner: string, conversationI
     if ((entry.state !== 'browser' && entry.state !== 'cancelled') || (entry.state === 'cancelled' && entry.deliveredAt !== undefined)) { await publishHistory(); return true; }
     const deliveredConversation = conversationId ?? entry.conversationId;
     if (!entry.sessionId && entry.purpose !== 'decision' && deliveredConversation) {
-      await noteChatOrigin(deliveredConversation, { kind: 'desktop', fromSessionId: null, agentId: null, task: '' });
+      await noteChatOrigin(deliveredConversation, {
+        kind: entry.authorityClass === FRONTIER_LONGRUN_AUTHORITY_CLASS ? 'frontier_longrun' : 'desktop',
+        fromSessionId: null,
+        agentId: null,
+        task: ''
+      });
     }
     const delivered = entry.sessionId ? await getSession(entry.sessionId) : deliveredConversation
       ? await findSessionByConversation(deliveredConversation, { requireUnique: true }) : null;
@@ -1218,3 +1229,4 @@ export async function collectRecordedBrowserDecision(conversationId: string): Pr
       final.message.truncated || final.message.text.length > 16000) return;
   await completeBrowserDecision(row.id, row.owner!, final.message.text, conversationId);
 }
+import { FRONTIER_LONGRUN_AUTHORITY_CLASS } from '../frontier-longrun-authority.js';

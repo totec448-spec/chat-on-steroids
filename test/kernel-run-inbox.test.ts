@@ -130,10 +130,42 @@ it('keeps direct remote_steering identity-neutral and free of ordinary broker li
   }));
 });
 
+it('keeps direct frontier_longrun identity-neutral while nested exec is refused before its handler', async () => {
+  broker.sleep.mockReturnValue([
+    { info: { id: 'worker-quiet', conversationId: 'quiet-chat', runId: 'run-quiet' }, report: { id: 'quiet-report', from: 'worker-quiet', to: 'prime', text: 'quiet' } }
+  ]);
+  const direct = governedHandler('frontier_longrun', 'intent-only');
+  expect(await direct('req-phone-chat')).toEqual(ok('intent-only'));
+  expect(broker.origin).not.toHaveBeenCalled();
+  expect(broker.sleep).not.toHaveBeenCalled();
+  expect(broker.alive).not.toHaveBeenCalled();
+  expect(broker.ack).not.toHaveBeenCalled();
+  expect(broker.offer).not.toHaveBeenCalled();
+  expect(broker.ackInput).not.toHaveBeenCalled();
+  expect(broker.offerInput).not.toHaveBeenCalled();
+  expect(broker.toolRecord).toHaveBeenCalledWith(expect.objectContaining({
+    tool: 'frontier_longrun', agent: null, conversationId: null, sessionId: null
+  }));
+
+  vi.clearAllMocks();
+  const registrar = createRegistrar(null, { roots: [], caps: defaultConfig().capabilities, readOnly: true }, 'core');
+  const ran = vi.fn(async () => ok('should-not-run'));
+  registrar.register('frontier_longrun', { description: 'direct-only fixture', inputSchema: z.object({}) }, ran);
+  const nested = await dispatch('exec', {}, null, 'req-chat-a', 'core', async () =>
+    registrar.invokeNested('frontier_longrun', {}, currentCall()!)
+  );
+  expect(JSON.stringify(nested)).toContain('DIRECT_CALL_REQUIRED');
+  expect(ran).not.toHaveBeenCalled();
+});
+
 function remoteHandler() {
+  return governedHandler('remote_steering', 'signed-only');
+}
+
+function governedHandler(name: 'remote_steering' | 'frontier_longrun', text: string) {
   let call!: (args: object) => Promise<{ content: Array<{ text?: string }> }>;
   const server = { registerTool: (_name: string, _schema: unknown, callback: typeof call) => { call = callback; } };
   const registrar = createRegistrar(server as never, { roots: [], caps: defaultConfig().capabilities, readOnly: true }, 'core');
-  registrar.register('remote_steering', { description: 'signed lane fixture', inputSchema: z.object({}) }, async () => ok('signed-only'));
+  registrar.register(name, { description: 'governed lane fixture', inputSchema: z.object({}) }, async () => ok(text));
   return (requestId: string | null) => withInboundRequestId(requestId, () => call({}));
 }
