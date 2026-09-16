@@ -243,6 +243,29 @@ it('does not let a generic failed label erase native Send authorization', async 
   expect((await listInputs()).filter(entry => entry.sessionId === row.sessionId)).toHaveLength(1);
 });
 
+it.each([false, true])('explicitly dismisses a failed opening without erasing uncertain delivery (authorized=%s)', async authorized => {
+  const request = args(), row = await enqueueInput(request);
+  await claimBrowserInput(row.id, 'failed-page', null, true);
+  if (authorized) await authorizeBrowserInput(row.id, 'failed-page', null);
+  await failBrowserInput(row.id, 'failed-page', 'Requested model or reasoning could not be confirmed');
+  expect(await getSession(row.sessionId!)).not.toBeNull();
+  expect(await cancelInput(row.id)).toBe(true);
+  expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'cancelled', cancelledByUser: true });
+  expect(!!await getSession(row.sessionId!)).toBe(authorized);
+  resetInputForTests(); resetSessionStoreForTests(); initSessionStore(directory);
+  expect(await enqueueInput(request)).toMatchObject({ state: 'cancelled', cancelledByUser: true });
+  expect(!!await getSession(row.sessionId!)).toBe(authorized);
+});
+
+it('keeps an existing bound chat when a failed follow-up is dismissed', async () => {
+  const session = await createSession({ conversationId: randomUUID() });
+  const row = await enqueueInput(args({ sessionId: session.id }));
+  await claimBrowserInput(row.id, 'follow-up-page', session.conversationId!, true);
+  await failBrowserInput(row.id, 'follow-up-page', 'Requested model or reasoning could not be confirmed');
+  expect(await cancelInput(row.id)).toBe(true);
+  expect(await getSession(session.id)).toMatchObject({ conversationId: session.conversationId });
+});
+
 it.each([false, true])('removes only the withdrawn empty reservation and keeps its tombstone (claimed=%s)', async claimed => {
   const request = args(); const row = await enqueueInput(request);
   const retained = await enqueueInput(args());

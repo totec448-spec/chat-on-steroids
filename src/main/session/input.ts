@@ -401,10 +401,12 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
         (row.transportIntent === 'browser' || (!row.transportIntent && !row.sessionId)) &&
         Date.now() - Math.max(row.createdAt, row.dueAt) >= 60_000)
       return { ...row, state: 'failed', error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
-    // Native preparation bounds include the 60s upload and 15s picker hydration.
-    // Once Send is authorized, its 30s receipt + 15s fresh-route wait are the entire tail.
+    // Preparation can expire before Send. Once authorized, this exact claim owns
+    // the uncertain outcome until receipt or explicit cancellation, regardless of
+    // how long ChatGPT takes to assign its durable conversation identity.
     const companion = current.find(other => other.id === row.companionInputId);
-    if (row.state === 'browser' && Date.now() - (row.sendAuthorizedAt ?? row.offeredAt ?? row.createdAt) >= (row.sendAuthorizedAt === undefined ? (row.attachments?.length || companion?.attachments?.length ? 720_000 : row.images?.length || companion?.images?.length ? 120_000 : 60_000) : 45_000))
+    if (row.state === 'browser' && row.sendAuthorizedAt === undefined && row.requiresAuthorization === true &&
+        Date.now() - (row.offeredAt ?? row.createdAt) >= (row.attachments?.length || companion?.attachments?.length ? 720_000 : row.images?.length || companion?.images?.length ? 120_000 : 60_000))
       return { ...row, state: 'cancelled', error: row.requiresAuthorization && row.sendAuthorizedAt === undefined
         ? 'Not sent: browser preparation timed out. This attempt was cancelled.'
         : 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.' };
@@ -693,11 +695,12 @@ export function cancelInput(id: string): Promise<boolean> {
     const current = await load();
     const selected = current.find((entry) => entry.id === id);
     const found = selected && (companionOf(current, selected) ?? selected);
-    if (!found || !['queued', 'browser'].includes(found.state)) return false;
+    if (!found || !['queued', 'browser', 'failed', 'cancelled'].includes(found.state)) return false;
     await commit(current.map((entry) => sameDelivery(found, entry) ? { ...entry, state: 'cancelled', cancelledByUser: true,
       error: found.state === 'browser' ? found.requiresAuthorization && found.sendAuthorizedAt === undefined
         ? 'Not sent: this delivery was cancelled before Send was authorized.'
-        : 'Cancelled locally. Delivery to ChatGPT is unconfirmed; the message may already have been sent.' : undefined } : entry));
+        : 'Cancelled locally. Delivery to ChatGPT is unconfirmed; the message may already have been sent.'
+        : found.state === 'queued' ? undefined : entry.error } : entry));
     decisionWaiters.get(id)?.reject(new Error('goal_browser_cancelled'));
     decisionWaiters.delete(id);
     await removeWithdrawnOpening(entries!.find(row => row.id === found.id)!, entries!);

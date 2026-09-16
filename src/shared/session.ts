@@ -691,7 +691,9 @@ export interface AgentInfo {
   primeConversationId?: string;
   id: string;
   role: AgentRole;
+  /** Spawn label; reused assignments fall back to the stable worker id. */
   label: string;
+  /** Spawn brief, or a bounded inbox preview for the current reused assignment. */
   task: string;
   /**
    * Requested reasoning level for this worker's chat, or null to inherit the default.
@@ -719,7 +721,7 @@ export interface AgentInfo {
    */
   activatedAt: number | null;
   finishedAt: number | null;
-  /** Result text the worker reported when it finished. */
+  /** Current completion report; cleared when work resumes. Prior reports remain in history/inbox. */
   result: string | null;
   /** Messages waiting for this agent, including offered-but-unacknowledged ones. */
   pending: number;

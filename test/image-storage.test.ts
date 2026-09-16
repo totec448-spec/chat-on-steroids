@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,11 +26,29 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   resetSessionStoreForTests();
   await fs.rm(directory, { recursive: true, force: true });
 });
 
 const text = (value: string) => ({ text: value, chars: value.length, truncated: false });
+
+it('reads cold usage without opening asset contents and reuses the maintained quota after writes', async () => {
+  const session = await createSession({ title: 'Usage accounting' });
+  const bytes = Buffer.from('stored asset');
+  await writeAsset(session.id, bytes, 'text/plain');
+  resetSessionStoreForTests();
+  initSessionStore(directory);
+  const openFile = vi.spyOn(fs, 'open');
+  expect(await getImageStorage()).toEqual({ usedBytes: bytes.length, limitBytes: MAX_GLOBAL_ASSET_BYTES });
+  expect(openFile).not.toHaveBeenCalled();
+  const scan = vi.spyOn(fs, 'opendir');
+  expect((await getImageStorage()).usedBytes).toBe(bytes.length);
+  expect(scan).not.toHaveBeenCalled();
+  await writeAsset(session.id, Buffer.from('another asset'), 'text/plain');
+  expect((await getImageStorage()).usedBytes).toBe(bytes.length + Buffer.byteLength('another asset'));
+  expect(scan).not.toHaveBeenCalled();
+});
 
 it('clears only persisted images after retiring every durable reference and never reacquires an exact removed native image', async () => {
   const session = await createSession({ conversationId: 'image-storage', title: 'Image storage' });

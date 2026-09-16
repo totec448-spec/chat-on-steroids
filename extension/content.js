@@ -755,8 +755,8 @@
       return !revoked;
     };
   }
-  function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, matchesUser: matchesSubmittedUser,
+  function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null) {
+    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser: matchesSubmittedUser,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -1988,7 +1988,7 @@
       if (message.id === openedUserMessageId) return false;
       const receipt = userSendReceipt;
       if (receipt) {
-        if (Date.now() - receipt.at > USER_SEND_RECEIPT_MS) {
+        if (!desktopInputBusy && Date.now() - receipt.at > USER_SEND_RECEIPT_MS) {
           userSendReceipt = null;
         } else {
           const conversationId = CLF_DOM.conversationId();
@@ -2466,8 +2466,8 @@
     // needs canonical MAIN-world text; requiring a recognized generation here would make
     // recognizing that generation depend on a scan we never admit. This only reads evidence
     // while an exact send receipt is pending; the usual route/message checks still decide it.
-    const pendingSendEvidence = pageViewChecks.size > 0 && userSendReceipt &&
-      Date.now() - userSendReceipt.at < USER_SEND_RECEIPT_MS;
+    const pendingSendEvidence = pageViewChecks.size > 0 && (desktopInputBusy ||
+      userSendReceipt && Date.now() - userSendReceipt.at < USER_SEND_RECEIPT_MS);
     if (continuationJournalPending || generating || pendingSendEvidence) {
       void refreshFiber();
     } else if (fiberTerminalMessageId && nowGenerating) {
@@ -10630,24 +10630,23 @@
       }
       // The legacy wire field also binds unfiled reserved openings before recorder evidence.
       if (input.opening || input.projectId) desktopProjectInput = { id: input.id, owner: input.owner };
+      let receipt = null;
       if (!(await sendSubmittedText(sendingTarget, false, async sendCurrent => {
         // Preserve the outbox's revocable claim until the actual native Send is ready.
         const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
         if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) return false;
         sendAttempted = true;
         return true;
-      }))) return false;
-      // Composer clear/Stop can prove acceptance before React mounts the user row.
-      // Wait for that exact receipt, not merely /c navigation: Temporary Chat never
-      // acquires a /c URL and used to discard its live decision during this gap.
-      const receipt = await waitPageView(() => {
-        const conversation = CLF_DOM.conversationId();
-        if ((!conversation && !temporary) || (target && !onTarget())) return null;
+      }, (user, conversation) => {
+        if ((!conversation && !temporary) || (target && !onTarget())) return false;
         const users = CLF_DOM.messages().filter(row => row.role === 'user');
-        if ((!target && users.length !== 1) || users.at(-1)?.id === previousUserId || !matchesSubmittedUser(users.at(-1), submittedText)) return null;
-        return { conversation, user: users.at(-1) };
-      }, sendingTarget, 15000);
-      if (!receipt) return false;
+        if ((!target && users.length !== 1) || users.at(-1)?.id !== user.id || user.id === previousUserId || !matchesSubmittedUser(user, submittedText)) return false;
+        // Freeze only identity while native Send still holds the proven row. React
+        // may replace it before this async operation resumes; do not rediscover it.
+        receipt = { conversation, user: { id: user.id } };
+        return true;
+      }))) return false;
+      if (!receipt || !sendingTarget()) return false;
       // Native Send listeners refresh the receipt; pin only that witnessed object.
       const witnessedSendReceipt = userSendReceipt;
       const deliveredConversation = receipt.conversation;
@@ -11129,6 +11128,7 @@
     // no observation, evidence or command of its can reach the app afterwards. Its
     // intervals drain themselves on their next tick through every().
     alive = false;
+    for (const check of pageViewChecks) void check();
     if (activityTimer !== null) {
       cancelLater(activityTimer);
       activityTimer = null;

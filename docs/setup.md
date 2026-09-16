@@ -2,6 +2,10 @@
 
 [Back to the overview](../README.md)
 
+## Before connecting
+
+Read the [responsible-use notice and provider rules](../README.md#responsible-use-and-provider-rules). CoS is an independent beta, used at your own risk. Its companion observes and automates the ChatGPT browser UI and records conversation content locally; this is not a public ChatGPT automation API. MCP/tunnel access does not establish permission for every automated workflow. Your account's terms, usage limits, safety decisions and workspace rules still apply.
+
 ## Quick start
 
 1. **Install and open CoS.** Choose the download for your operating system and CPU.
@@ -57,9 +61,12 @@ History is stored locally, with recording on and 30-day retention by default. Cr
 
 **Astra's finish boundary** can receive queued instructions, plan checkpoints and automatic follow-ups through tools within the same working turn when Session finish is enabled. You can end the turn from the composer. This does not remove provider usage or context limits.
 
+These continuity features do not grant additional quota or access. Do not use new chats, workers, Goal/Loop or compaction to evade a provider restriction. Supervise automated work and stop a restricted workflow instead of asking another chat or tool to continue it.
+
 ## Troubleshooting
 
 - **Missing or stale tools:** refresh the relevant CoS app in ChatGPT. Reloading the Chrome extension is a separate action.
+- **Provider usage limit or policy warning:** stop the affected workflow and disable its Goal/Loop automation. Follow the provider's stated reset or support/appeal process. Do not switch accounts, chats, models, connectors or tunnels to evade the restriction. A local retry or reconnection is not evidence that a policy restriction has been lifted. Keep account notices and appeal details private; a GitHub issue cannot resolve an account enforcement decision.
 - **Tunnel rejects the API key or tunnel ID:** check the saved tunnel ID, the selected setup profile, and that its key has Tunnels Read + Use for that tunnel. Extension pairing does not authenticate the tunnel. If Platform offers no matching ChatGPT workspace, retain the exact error for an access investigation; a different tunnel does not establish account eligibility.
 - **ChatGPT blocks a tool for safety:** local permission alone does not prove that ChatGPT accepted or dispatched the call. Inspect the local tool history for the exact request. If no result exists, execution is unconfirmed; do not replay a potentially executed operation or route it through another connector. Keep the task's progress and report the provider's error, selected Chat/Work surface, and app/extension versions without credentials or private content. A plan label alone does not diagnose a provider refusal.
 - **CoS returns `TOOL_DISABLED`:** check Read-only and the named local capability. `CALLER_IDENTITY_REQUIRED` or `WORKER_IDENTITY_LOST` instead concerns exact caller ownership; neither proves that command execution is globally disabled.
@@ -69,8 +76,6 @@ History is stored locally, with recording on and 30-day retention by default. Cr
 - **`COMPACTION_IN_PROGRESS`:** let the source chat finish its handoff. Work continues in the replacement conversation.
 - **Linux credential storage unavailable:** unlock GNOME Keyring or KWallet, then restart CoS.
 - **A chat will not stop:** **Block** revokes local tools for that exact conversation. It does not claim to cancel the provider's generation.
-
-The MCP connector uses ChatGPT's Developer mode and tunnel interfaces. The companion also observes and automates the browser UI; this is not a public ChatGPT automation API. Your account's [terms and policies](https://openai.com/policies/) apply. Do not use it to evade limits or safety controls.
 
 ## Build from source and contribute
 

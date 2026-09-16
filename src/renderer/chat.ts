@@ -156,6 +156,7 @@ let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
 const expandedWorkers = new Set<string>();
 const inputDrafts = new Map<string, string>();
+const newChatTasks = new Map<string, { objective: string; automation: string; loopDelivery: string }>();
 const imageDrafts = new Map<string, Array<InputImage | InputAttachment>>();
 const startingInputs = new Map<string, InputEntry>();
 const visibleInputIds = new Set<string>();
@@ -175,16 +176,25 @@ function dismissInputNotice(id: string): void {
   catch { /* A storage failure still allows dismissal for this window lifetime. */ }
   void refreshInputQueue();
 }
-function rememberDraft(): void { inputDrafts.set(draftKey(), $<HTMLTextAreaElement>('chatInput').value); }
+function rememberDraft(): void {
+  inputDrafts.set(draftKey(), $<HTMLTextAreaElement>('chatInput').value);
+  if (selectedId === null) newChatTasks.set(draftKey(), {
+    objective: $<HTMLTextAreaElement>('sessionObjective').value,
+    automation: $<HTMLSelectElement>('chatAutomation').value,
+    loopDelivery: $<HTMLSelectElement>('loopDelivery').value
+  });
+}
 let skillPicker: ReturnType<typeof initSkills> | undefined;
 function restoreDraft(): void {
   skillPicker?.close();
   cancelGoalRequest();
   $('activeGoalRow').hidden = true; $('recoveryStatus').hidden = true;
   $<HTMLTextAreaElement>('chatInput').value = inputDrafts.get(draftKey()) ?? '';
-  const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = 'off'; delete automation.dataset.edited;
-  $<HTMLSelectElement>('loopDelivery').value = 'finish';
-  $<HTMLTextAreaElement>('sessionObjective').value = ''; delete $('sessionObjective').dataset.edited; delete $('sessionObjective').dataset.sessionId;
+  const task = selectedId === null ? newChatTasks.get(draftKey()) : undefined;
+  const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = task?.automation ?? 'off'; delete automation.dataset.edited;
+  $<HTMLSelectElement>('loopDelivery').value = task?.loopDelivery ?? 'finish';
+  $<HTMLTextAreaElement>('sessionObjective').value = task?.objective ?? '';
+  delete $('sessionObjective').dataset.edited; delete $('sessionObjective').dataset.sessionId; delete $('sessionObjective').dataset.saved;
   paintTaskPlan(); paintComposerImages();
 }
 function paintComposerImages(): void {
@@ -682,7 +692,7 @@ function paintSessions(): void {
               const oldKey = draftKey();
               selectedProjectId = null; selectionGeneration++; replaceComposerDraft();
               // Keep the visible draft and its attachments while moving to unfiled.
-              rememberDraft(); inputDrafts.delete(oldKey);
+              rememberDraft(); inputDrafts.delete(oldKey); newChatTasks.delete(oldKey);
               const images = imageDrafts.get(oldKey);
               if (images) imageDrafts.set(draftKey(), images);
               else imageDrafts.delete(draftKey());
@@ -1177,19 +1187,8 @@ async function refreshSessionControls(): Promise<void> {
   ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.") : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
 }
 
-async function navigateHistory(before: number | null, prepend = false): Promise<void> {
-  const selected = selectedId;
-  const selection = selectionGeneration;
-  historyBefore = before;
-  if (before === null) $('timeline').style.removeProperty('--timeline-scroll-reserve');
-  detailCursor = null;
-  const loading = loadDetail(true, prepend);
-  const generation = detailLoadGeneration;
-  await loading;
-  if (selectedId !== selected || selectionGeneration !== selection || detailLoadGeneration !== generation) return;
-  if (!prepend) $('chatBody').scrollTop = before === null ? $('chatBody').scrollHeight : 0;
-}
-async function loadDetail(navigate = false, prepend = false, newerFrom?: number): Promise<void> {
+async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: number): Promise<void> {
+  const prepend = olderBefore !== undefined;
   const wanted = selectedId;
   if (wanted !== null && historyBefore !== null && detailFor === wanted && !navigate) { void refreshSessionControls(); paintDetail(); return; }
   const generation = ++detailLoadGeneration;
@@ -1208,9 +1207,9 @@ async function loadDetail(navigate = false, prepend = false, newerFrom?: number)
   const opening = detailFor !== wanted;
   if (opening) historyBefore = null;
   // Live deltas must not evict a historical page while the user is reading it.
-  const incremental = newerFrom === undefined && historyBefore === null && detailFor === wanted && detailCursor !== null;
+  const incremental = !prepend && newerFrom === undefined && historyBefore === null && detailFor === wanted && detailCursor !== null;
   const detail = await run(
-    api.getSession(wanted, newerFrom !== undefined ? { from: newerFrom, limit: MAX_TIMELINE_ROWS / 2 } : incremental ? { from: detailCursor!, limit: MAX_TIMELINE_ROWS } : { ...(historyBefore !== null ? { before: historyBefore } : {}), limit: prepend ? MAX_TIMELINE_ROWS / 2 : MAX_TIMELINE_ROWS })
+    api.getSession(wanted, newerFrom !== undefined ? { from: newerFrom, limit: MAX_TIMELINE_ROWS / 2 } : incremental ? { from: detailCursor!, limit: MAX_TIMELINE_ROWS } : { ...(olderBefore !== undefined ? { before: olderBefore } : historyBefore !== null ? { before: historyBefore } : {}), limit: prepend ? MAX_TIMELINE_ROWS / 2 : MAX_TIMELINE_ROWS })
   );
   if (generation !== detailLoadGeneration || selectedId !== wanted) return;
   if (!detail) {
@@ -1223,6 +1222,8 @@ async function loadDetail(navigate = false, prepend = false, newerFrom?: number)
     }
     return;
   }
+  // An empty older page is not navigation. Keep the live cursor and viewport intact.
+  if (prepend && !detail.events.length) return;
   // User/assistant prose is canonical in messages.json, while structured page activity stays
   // append-only by design: ChatGPT can grow one commentary caption or rewrite one activity
   // label several times. `foldProgress` turns those snapshots back into the one logical row
@@ -1238,7 +1239,8 @@ async function loadDetail(navigate = false, prepend = false, newerFrom?: number)
       // the reader's row even when they were at the bottom of the previous window.
       if (detail.events.length < MAX_TIMELINE_ROWS / 2) historyBefore = null;
     } else if (prepend) {
-      const boundary = historyBefore!;
+      const boundary = olderBefore!;
+      historyBefore = boundary;
       const retained = events.filter(event => event.seq >= boundary);
       events = retainTimelinePage(chronological(foldProgress([...folded, ...retained])), 'older');
     } else events = folded.slice(Math.max(0, folded.length - MAX_TIMELINE_ROWS));
@@ -2442,14 +2444,6 @@ function paintDetail(followBottom = historyBefore === null): void {
   const pane = $('chatBody');
   const restoreViewport = preserveTimelineViewport(pane, $('timeline'), followBottom);
   const timelineRows: HTMLElement[] = [];
-  if (selectedId && historyBefore !== null) {
-    const navigation = el('div', 'timeline-window-note');
-    const latest = el('button', 'btn small', () => t("Back to latest"));
-    latest.dataset.history = 'latest';
-    latest.addEventListener('click', () => void navigateHistory(null));
-    navigation.append(latest);
-    timelineRows.push(navigation);
-  }
   const keep = new Set<string>();
   let activityBoundary = '';
   paintRecoveryStatus();
@@ -3315,7 +3309,15 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   receipt.hidden = !entry.error && ['sent', 'tool'].includes(entry.state) && hasLaterModelActivity(entry.deliveredAt ?? entry.offeredAt ?? entry.createdAt);
   row.append(receipt);
   if (notice) {
-    row.append(dockAction(() => t("Dismiss delivery notice"), 'i-x', () => dismissInputNotice(entry.id)));
+    const dismiss = dockAction(() => t("Dismiss delivery notice"), 'i-x', () => {});
+    dismiss.onclick = async () => {
+      dismiss.disabled = true;
+      const result = await run(api.cancelInput(entry.id));
+      if (result) dismissInputNotice(entry.id);
+      else dismiss.disabled = false;
+      void refreshInputQueue();
+    };
+    row.append(dismiss);
     const retry = dockAction(() => t("Retry delivery"), 'i-retry', () => {});
     retry.classList.add('delivery-retry');
     const unqueuedPlan = entry.stages !== undefined && !entry.stagesApplied;
@@ -3367,7 +3369,7 @@ async function adoptAcceptedOpening(entry: InputEntry): Promise<boolean> {
   const images = imageDrafts.get(from);
   if (images) imageDrafts.set(summary.id, images);
   selectSession(summary.id);
-  inputDrafts.delete(from); imageDrafts.delete(from);
+  inputDrafts.delete(from); imageDrafts.delete(from); newChatTasks.delete(from);
   return true;
 }
 function paintPendingInputs(): void {
@@ -3755,8 +3757,8 @@ function selectNewChat(projectId: string | null = null): void {
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
   if (projectId) expandedProjects.add(projectId);
   applyComposerSessionModel(null, null);
-  cancelTaskPlan();
-  inputDrafts.delete(draftKey()); imageDrafts.delete(draftKey());
+  // New Chat selects its existing draft, just like a session. Navigation is not
+  // permission to discard authored text, attachments or a prepared workflow.
   $('inputQueue').replaceChildren();
   restoreDraft(); showView('timeline'); paintSessions(); void loadDetail();
   if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
@@ -4062,7 +4064,7 @@ export function initChat(next: Deps): void {
     if (newer) {
       const from = events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), 0);
       historyLoading = true;
-      void loadDetail(true, false, from).finally(() => { historyLoading = false; });
+      void loadDetail(true, undefined, from).finally(() => { historyLoading = false; });
       return;
     }
     const windowed = boundedTimeline(visibleEvents());
@@ -4070,7 +4072,7 @@ export function initChat(next: Deps): void {
     const before = boundaryRows.length ? Math.min(...boundaryRows.map(event => event.seq)) : 1;
     if (before <= 1) return;
     historyLoading = true;
-    void navigateHistory(before, true).finally(() => { historyLoading = false; });
+    void loadDetail(true, before).finally(() => { historyLoading = false; });
   };
   historyPane.addEventListener('wheel', event => { historyIntent = selectedId; historyDirection = Math.sign(event.deltaY); loadAtEdge(); }, { passive: true });
   let pointerScrollTop: number | null = null;

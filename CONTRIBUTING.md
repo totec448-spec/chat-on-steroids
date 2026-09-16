@@ -8,6 +8,10 @@ For anything non-trivial, open an issue first so the intended behavior is clear.
 
 Keep changes narrow. Preserve existing permission, identity and recovery behavior unless the issue specifically requires changing it. Avoid unrelated formatting, generated output, local debugging material and private data. In screenshots, logs and examples, replace real usernames, local paths, chat text, IDs and credentials with obvious placeholders such as `C:\Users\you\project` or `/home/you/project`.
 
+## Responsible-use expectations
+
+Contributions and examples should follow the [responsible-use notice](README.md#responsible-use-and-provider-rules). Do not propose or promote bypassing provider safety decisions, usage limits or account restrictions. Describe browser automation and recording accurately; do not market CoS as a way to avoid quota. Claims about usage allowances or OpenAI approval require evidence. Keep account notices, appeals and private conversation evidence out of public issues, PRs and documentation. These expectations do not alter the MIT license or replace any provider's terms.
+
 ## Development setup
 
 Development requires Node 22+ and is supported on Windows, macOS and Linux. Desktop/computer-use has platform-native Windows and macOS helpers behind one protocol; Core, extension, sessions, agents and tunnel behavior must stay portable. macOS helper changes require Xcode/Swift and a packaged arm64 or x64 smoke check.

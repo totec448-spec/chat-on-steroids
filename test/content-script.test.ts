@@ -747,7 +747,8 @@ describe('desktop input delivery and helper ownership', () => {
       return exec(command, showUI, value);
     };
     const instantTimer = live.window.setTimeout;
-    live.window.setTimeout = ((fn: () => void, ms?: number) => ms === 15000 ? 0 : instantTimer(fn, ms)) as typeof live.window.setTimeout;
+    // Hold the single Send/receipt deadline while canonical Fiber text arrives.
+    live.window.setTimeout = ((fn: () => void, ms?: number) => ms === 30000 ? 0 : instantTimer(fn, ms)) as typeof live.window.setTimeout;
     let clicked!: () => void;
     const click = new Promise<void>(resolve => { clicked = resolve; });
     live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
@@ -967,6 +968,33 @@ describe('desktop input delivery and helper ownership', () => {
     expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
     live.hook.observe(); await live.hook.flush();
     expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+  });
+
+  it.each([false, true])('retains an unmounted native receipt only in its sending lifetime (navigate: %s)', async navigate => {
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack
+        ? { ok: true } : { input: claimed() } })
+    });
+    let user!: HTMLElement;
+    const sends = watchSend(live.document);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      user = userTurn(live!.document, 'receipt-before-remount', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    const adapter = (live.window as any).CLF_DOM;
+    const send = adapter.send;
+    adapter.send = async (options: unknown) => {
+      const accepted = await send(options);
+      user.remove(); // React's next frame may replace/virtualize the already-proven row.
+      if (navigate) live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+      return accepted;
+    };
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: !navigate });
+    expect(live.sent.filter(message => message.ack)).toEqual(navigate ? [] : [
+      expect.objectContaining({ conversationId: chatA, messageId: 'm-receipt-before-remount' })
+    ]);
+    expect(sends()).toBe(1);
   });
 
   it('uses the original framed user text for the receipt, recording and visible prompt after native inline formatting', async () => {
@@ -1381,6 +1409,9 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.ack || message.response)).toEqual([]);
     live.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
     live.hook.observe();
+    // Native navigation unmounts the old transcript; URL-only JSDOM reconfiguration
+    // does not notify the send receipt's DOM observer.
+    user.remove();
     expect(await delivery).toEqual({ ok: false });
   });
 

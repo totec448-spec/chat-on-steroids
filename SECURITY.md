@@ -24,6 +24,12 @@ Chat On Steroids is a permission boundary between ChatGPT and the logged-in OS u
 - Stored API/bridge credentials use Electron `safeStorage` (DPAPI on Windows, Keychain on macOS, a secure desktop secret store on Linux). Linux `basic_text` is refused; normal Activity logs are redacted, capped and memory-only.
 - Session recording is separate durable local history. It is on for fresh installs and can be disabled.
 
+## Provider rules and responsible use
+
+Local permissions control access to your machine; they do not authorize bypassing a provider's safety decision, usage limit or account restriction. Do not route a blocked action through another tool, worker, connector or account. Follow the [responsible-use notice](README.md#responsible-use-and-provider-rules) and the applicable provider terms.
+
+CoS is an independent beta used at your own risk. Its browser automation and local recording are not an OpenAI approval or a guarantee of compliance or continued account access. Review the security model and limitations on this page, supervise tool use and stop workflows that receive a provider restriction or policy warning. Account enforcement questions belong with the provider's support or appeal process; keep private notices and account identifiers out of public reports.
+
 ## Expected limitations
 
 These are properties of the current design, not vulnerability reports by themselves:

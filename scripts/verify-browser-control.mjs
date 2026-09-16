@@ -57,10 +57,11 @@ const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function until(fn,description,timeout=12000){const end=Date.now()+timeout;let last;while(Date.now()<end){try{const value=await fn();if(value)return value;}catch(e){last=e;}await delay(100);}throw new Error(`${description}: ${last?.message || stderr}`);}
 let connection;let seq=0;const pending=new Map();
 async function cdp(method,params={},sessionId){const id=++seq;return new Promise((resolve,reject)=>{pending.set(id,{resolve,reject});connection.send(JSON.stringify({id,method,params,...(sessionId?{sessionId}: {})}));});}
-async function tool(name,args,owner='session:fixture'){const result=await broker.execute(name,args,owner,null,async()=>true);if(result.error)throw new Error(`${name}: ${result.error}`);return result;}
+const timings=[];
+async function tool(name,args,owner='session:fixture'){const start=Date.now();const result=await broker.execute(name,args,owner,null,async()=>true);timings.push({tool:name,action:args.action,ms:Date.now()-start,error:result.error});if(result.error)throw new Error(`${name}: ${result.error}`);return result;}
 async function snapshot(tabId){return until(async()=>{const r=await tool('browser_snapshot',{tabId,maxNodes:300,maxChars:16000});return r.value?.text ? r.value:null;},'snapshot');}
 const refFor=(snap,name)=>{const line=snap.text.split('\n').find(line=>/^\s*\[/.test(line)&&line.includes(name));assert.ok(line,`Missing ${name} in ${snap.text}`);return /^\s*\[([^\]]+)\]/.exec(line)?.[1];};
-const report={checks:[],run};
+const report={checks:[],run,timings};
 try {
   const active=await until(async()=>{const s=await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8');return s.split('\n');},'Chromium startup');
   connection=new WebSocket(`ws://127.0.0.1:${active[0]}${active[1]}`);await new Promise((resolve,reject)=>{connection.on('open',resolve);connection.on('error',reject);});
@@ -73,8 +74,28 @@ try {
   const tabId=target.tabId;
   await tool('browser_tabs',{action:'attach',tabId});
   let snap=await snapshot(tabId);assert.ok(snap.text.includes('Background fixture'));assert.ok(refFor(snap,'Shadow action'));report.checks.push('existing tab attachment; DOM and shadow-root references');
-  const foreign=await broker.execute('browser_snapshot',{tabId},'session:foreign',null,async()=>true);assert.match(foreign.error,/NOT_OWNED/);report.checks.push('foreign caller refused');
+  if(process.env.COS_BROWSER_FOCUS_PROBE==='1') {
+    const worker=(await cdp('Target.getTargets')).targetInfos.find(t=>t.type==='service_worker'&&t.url.endsWith('/fixture.js'));
+    const session=(await cdp('Target.attachToTarget',{targetId:worker.targetId,flatten:true})).sessionId;
+    const probe=[];
+    for(const enabled of [false,true]) {
+      await cdp('Runtime.evaluate',{expression:`chrome.debugger.sendCommand({tabId:${Number(tabId.split(':').at(-1))}},'Emulation.setFocusEmulationEnabled',{enabled:${enabled}})`,awaitPromise:true},session);
+      const before=Date.now();
+      await tool('browser_action',{tabId,pageId:snap.pageId,action:'click',ref:refFor(snap,'Increment counter')});
+      const elapsedMs=Date.now()-before;
+      const state=(await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'({count:document.querySelector("#count").textContent,visibility:document.visibilityState,focused:document.hasFocus()})'})).value.value;
+      const active=(await tool('browser_tabs',{action:'list'})).value.tabs.find(t=>t.active);
+      assert.equal(active.url,base+'/sentinel');probe.push({enabled,elapsedMs,state,active:active.url});
+    }
+    await fs.writeFile(path.join(output,'focus-probe.json'),JSON.stringify({run,probe},null,2));console.log(JSON.stringify(probe,null,2));
+    await tool('browser_tabs',{action:'release',tabId});
+    process.exitCode=0;
+  } else {
+  const foreign=await broker.execute('browser_snapshot',{tabId},'session:foreign',null,async()=>true);assert.match(foreign.error,/TAB_OWNED/);report.checks.push('foreign caller refused');
+  assert.equal(snap.visibility,'visible');assert.equal(snap.focused,true);
+  const clickStarted=Date.now();
   await tool('browser_action',{tabId,pageId:snap.pageId,action:'click',ref:refFor(snap,'Increment counter')});
+  assert.ok(Date.now()-clickStarted<2000,'Hidden-tab input must not wait for the five-second compositor timeout');
   await tool('browser_action',{tabId,pageId:snap.pageId,action:'fill',ref:refFor(snap,'Notes'),text:'Hello\nworld'});
   await tool('browser_action',{tabId,pageId:snap.pageId,action:'select',ref:refFor(snap,'Choice'),values:['two']});
   const evaluated=await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'({count:document.querySelector("#count").textContent,notes:document.querySelector("#notes").value,choice:document.querySelector("#choice").value})'});
@@ -85,6 +106,34 @@ try {
   await tool('browser_action',{tabId,pageId:snap.pageId,action:'hover',ref:refFor(snap,'Increment counter')});
   assert.equal((await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'document.querySelector("#click").matches(":hover")'})).value.value,true);
   report.checks.push('empty fill deletes selection; keyboard and hover are browser-local');
+  // A heading/card's accessible name must not hide its nested action or editor.
+  await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:`(()=>{
+    const fixture=document.createElement('section');fixture.id='nestedFixture';
+    fixture.innerHTML='<h2><a href="#nested" id="nestedLink">Nested heading link</a></h2><div tabindex="0" aria-label="Editor card"><label>Nested editor<input id="nestedEditor"></label></div><button id="holdTarget">Hold target</button><button id="partialTarget" style="position:relative;width:220px;height:80px">Partial target</button><div id="clickBlocker" style="position:absolute;z-index:100;width:60px;height:40px">Overlay blocker</div>';
+    document.body.append(fixture);globalThis.fixtureKeys=[];
+    document.querySelector('#nestedEditor').onkeydown=e=>fixtureKeys.push({key:e.key,code:e.code,trusted:e.isTrusted});
+    const hold=document.querySelector('#holdTarget');hold.onkeydown=()=>globalThis.heldAt=performance.now();hold.onkeyup=()=>globalThis.heldFor=performance.now()-heldAt;
+    const button=document.querySelector('#partialTarget');button.onclick=()=>globalThis.partialClicked=true;
+    const rect=button.getBoundingClientRect();Object.assign(document.querySelector('#clickBlocker').style,{left:(rect.left+scrollX+rect.width/2-30)+'px',top:(rect.top+scrollY+rect.height/2-20)+'px'});
+    return true;
+  })()`});
+  snap=await snapshot(tabId);assert.ok(refFor(snap,'link "Nested heading link"'));assert.ok(refFor(snap,'textbox "Nested editor"'));
+  await tool('browser_action',{tabId,pageId:snap.pageId,action:'fill',ref:refFor(snap,'Nested editor'),text:'nested'});
+  await tool('browser_action',{tabId,pageId:snap.pageId,action:'click',ref:refFor(snap,'Hold target')});
+  await tool('browser_action',{tabId,pageId:snap.pageId,action:'key',ref:refFor(snap,'Nested editor'),key:'ENTER'});
+  const keyState=(await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'({id:document.activeElement.id,keys:fixtureKeys})'})).value.value;
+  assert.equal(keyState.id,'nestedEditor');assert.deepEqual(keyState.keys,[{key:'Enter',code:'Enter',trusted:true}]);
+  await tool('browser_action',{tabId,pageId:snap.pageId,action:'key',ref:refFor(snap,'Hold target'),key:'w',holdMs:150});
+  const held=(await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'heldFor'})).value.value;assert.ok(held>=140&&held<2000);
+  const oldEditor=refFor(snap,'Nested editor');
+  snap=await snapshot(tabId);
+  const oldKey=await broker.execute('browser_action',{tabId,pageId:snap.pageId,action:'key',ref:oldEditor,key:'A'},'session:fixture',null,async()=>true);assert.match(oldKey.error,/REF_STALE/);
+  await tool('browser_action',{tabId,pageId:snap.pageId,action:'click',ref:refFor(snap,'Partial target')});
+  assert.equal((await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'partialClicked'})).value.value,true);
+  await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:`(()=>{const r=document.querySelector('#partialTarget').getBoundingClientRect();Object.assign(document.querySelector('#clickBlocker').style,{left:(r.left+scrollX)+'px',top:(r.top+scrollY)+'px',width:r.width+'px',height:r.height+'px'});return true})()`});
+  const obstructed=await broker.execute('browser_action',{tabId,pageId:snap.pageId,action:'click',ref:refFor(snap,'Partial target')},'session:fixture',null,async()=>true);assert.match(obstructed.error,/OBSTRUCTED.*Overlay blocker/);
+  await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'(document.querySelector("#nestedFixture").remove(),true)'});
+  report.checks.push('nested refs; case-insensitive trusted key targets; bounded held key; stale key target refusal; partial and complete obstruction');
   const buttonRect=(await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'document.querySelector("#click").getBoundingClientRect().toJSON()'})).value.value;
   const shot=await tool('browser_screenshot',{tabId,fullPage:false});
   const bytes=Buffer.from(shot.image.data,'base64');const meta=await sharp(bytes).metadata();assert.equal(meta.width,shot.value.width);assert.equal(meta.height,shot.value.height);await fs.writeFile(path.join(output,'browser-control-fixture.jpg'),bytes);report.checks.push('native background screenshot; image geometry verified');
@@ -94,6 +143,8 @@ try {
   assert.equal((await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'document.querySelector("#count").textContent'})).value.value,'2');report.checks.push('viewport image coordinates click once; consumed screenshot is refused');
   await until(async()=>{const rows=(await tool('browser_network',{tabId,after:0,limit:50})).value.entries;return rows.some(row=>row.url.endsWith('/api')&&row.finished);},'network completion');
   const consoleRows=(await tool('browser_console',{tabId,after:0,limit:50,level:'all'})).value.entries;assert.ok(consoleRows.some(row=>row.message.includes('fixture-click')));
+  const consolePage=(await tool('browser_console',{tabId,after:0,limit:1,level:'all'})).value;assert.equal(consolePage.entries.length,1);assert.equal(consolePage.truncated,true);
+  const consoleNext=(await tool('browser_console',{tabId,after:consolePage.nextCursor,limit:50,level:'all'})).value;assert.ok(consoleNext.entries.length>=1);assert.ok(consoleNext.entries.every(row=>row.seq>consolePage.nextCursor));
   const traffic=(await tool('browser_network',{tabId,after:0,limit:50})).value.entries;
   const request=traffic.find(row=>row.url.endsWith('/api'));
   const detail=(await tool('browser_network',{tabId,requestId:request.requestId,body:true})).value;
@@ -115,7 +166,7 @@ try {
   const workerSession=(await cdp('Target.attachToTarget',{targetId:worker.targetId,flatten:true})).sessionId;
   await cdp('Runtime.evaluate',{expression:'restartControl()',awaitPromise:true},workerSession);
   const restored=await snapshot(tabId);assert.notEqual(restored.pageId,snap.pageId);snap=restored;
-  const restoredForeign=await broker.execute('browser_snapshot',{tabId},'session:foreign',null,async()=>true);assert.match(restoredForeign.error,/NOT_OWNED/);report.checks.push('worker state reconstruction retains exact tab custody and renews observations');
+  const restoredForeign=await broker.execute('browser_snapshot',{tabId},'session:foreign',null,async()=>true);assert.match(restoredForeign.error,/TAB_OWNED/);report.checks.push('worker state reconstruction retains exact tab custody and renews observations');
   await cdp('Runtime.evaluate',{expression:`chrome.debugger.detach({tabId:${Number(tabId.split(':').at(-1))}})`,awaitPromise:true},workerSession);
   const cancelled=await broker.execute('browser_snapshot',{tabId},'session:fixture',null,async()=>true);assert.match(cancelled.error,/DETACHED|NOT_OWNED/);
   assert.equal((await tool('browser_tabs',{action:'list'})).value.tabs.find(t=>t.tabId===tabId).claimed,false);
@@ -131,8 +182,12 @@ try {
   const stale=await broker.execute('browser_action',{tabId,pageId:stalePage,action:'click',ref:staleRef},'session:fixture',null,async()=>true);assert.match(stale.error,/STALE/);report.checks.push('navigation revokes stale input');
   const created=await tool('browser_tabs',{action:'new',url:base+'/fixture'});assert.ok(created.value.tabId);
   await snapshot(created.value.tabId);await tool('browser_tabs',{action:'close',tabId:created.value.tabId});report.checks.push('new background tab and exact owned close');
+  const closed=await broker.execute('browser_snapshot',{tabId:created.value.tabId},'session:fixture',null,async()=>true);assert.match(closed.error,/BROWSER_TAB_CLOSED/);
   await tool('browser_tabs',{action:'release',tabId});const after=(await tool('browser_tabs',{action:'list'})).value.tabs.find(t=>t.tabId===tabId);assert.ok(after&&!after.claimed);report.checks.push('release retains existing user tab');
+  const released=await cdp('Runtime.evaluate',{expression:`chrome.scripting.executeScript({target:{tabId:${Number(tabId.split(':').at(-1))}},func:()=>document.visibilityState})`,awaitPromise:true,returnByValue:true},workerSession);
+  assert.equal(released.result.value[0].result,'hidden');report.checks.push('release removes focus emulation; closed targets are distinguished without recreation');
   assert.equal((await tool('browser_tabs',{action:'list'})).value.tabs.find(t=>t.active).url,base+'/sentinel');
   report.ok=true;await fs.writeFile(path.join(output,'verification.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
-} catch(e) {await fs.writeFile(path.join(output,'failure.json'),JSON.stringify({error:e.stack,stderr,checks:report.checks},null,2));throw e;}
+  }
+} catch(e) {await fs.writeFile(path.join(output,'failure.json'),JSON.stringify({error:e.stack,stderr,checks:report.checks,timings},null,2));throw e;}
 finally {broker.reset();for(const ws of wakeClients)ws.terminate();connection?.close();chrome.kill();await new Promise(resolve=>wss.close(resolve));await new Promise(resolve=>server.close(resolve));}

@@ -20,6 +20,8 @@
  * record the app has not accepted yet.
  */
 
+import { createBrowserControl } from './browser-control.js';
+
 const PORTS = [8765, 8766, 8767, 8768, 8769];
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -2164,12 +2166,13 @@ function inspectRequestedModels(request) {
 let maintenanceFlight = null;
 let maintenanceAgain = false;
 let wakeSocket = null;
-// Load the independent browser backend only on hosts exposing Chrome's debugger API.
+// MV3 service workers require static imports; import() rejects before registration.
+// Instantiate the backend only on hosts exposing Chrome's debugger API.
 // Credentials stay in call(); pages/content scripts cannot submit browser commands.
 let browserController;
 function getBrowserController() {
   if (!globalThis.chrome?.debugger) return Promise.resolve(null);
-  browserController ||= import('./browser-control.js').then(({ createBrowserControl }) => createBrowserControl(chrome, call,
+  browserController ||= Promise.resolve(createBrowserControl(chrome, call,
     (tabId, url, caller) => {
       const conversation = conversationFromUrl(url);
       return Boolean(conversation && (conversation === caller || discardProtectedTabs[String(tabId)] === true));

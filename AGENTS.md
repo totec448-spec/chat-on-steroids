@@ -699,6 +699,12 @@ or duplicating a message after an ambiguous browser outcome. One outbox owns all
 
 ### Input from composition to receipt
 
+New Chat selects a window-local draft; it does not reset it. Returning from another chat
+or clicking New Chat again preserves text, staged attachments, prepared workflows and the
+first-message Goal/Loop objective, mode and delivery choice. Each project and unfiled New Chat
+has its own draft key. Manual deletion remains deleted; accepted openings retire the original
+draft as the outbox/session takes ownership. Navigation still fences stale async imports.
+
 The chat composer and queued-message editor have no HTML character cap. Send and queue edits
 share the existing 96,000-character message admission ceiling; prepared delivery additionally
 enforces framing and UTF-8 byte budgets with an explicit error.
@@ -717,6 +723,9 @@ same queued input and an explicit retry action.
 Explicit withdrawal of an opening also removes its empty, unbound local reservation when Send
 was provably never authorized. The cancelled outbox tombstone survives restart. Timeouts,
 startup failures, ambiguous sends, provider bindings and recorded history never grant deletion.
+Dismiss delivery notice is an explicit withdrawal too, including after a failed first send;
+it uses the same serialized cancellation and empty-reservation checks. Dismissing a failed
+follow-up or uncertain authorized send preserves its existing chat and delivery evidence.
 
 The immutable outbox `opening` role owns first-message setup and initial null-to-provider binding;
 non-null sessionId no longer means the opening was delivered. The exact native document binds
@@ -870,6 +879,11 @@ and history publication are independent: a recorder failure retries canonical hi
 transport. Queued unclaimed input follows its durable session to the successor; already handed
 claims keep their original exact document until their outcome resolves.
 
+Desktop delivery captures the native user-message identity inside the same Send acceptance
+operation that proves its text and route. It must not discard that receipt and rediscover the
+row after an await: React may already have replaced it. Navigation still revokes the operation;
+composer clear or a Stop button alone cannot supply a desktop delivery receipt.
+
 Confirmed terminal input receipts stop owning history retries after their exact local session
 directory is positively absent under an available history root. The outbox durably retires them
 before startup origin repair, wrapped-text migration or checkpoint materialization. Corrupt
@@ -941,7 +955,7 @@ new correction typed during that wait survives. Failed/cancelled/stale generatio
 draft. Enter submits a prepared plan even when the composer is empty; Shift+Enter and IME
 composition retain their ordinary editing behavior.
 
-- **New chat:** the completed plan stays editable until explicit Send/cancel/New chat reset.
+- **New chat:** the completed plan stays editable across navigation until explicit Send/cancel.
   Clearing the composer keeps its captured objective. Send freezes the original objective and
   **every** stage in the first durable payload. Later checkpoints are materialized once after
   the first receipt creates the concrete local session. Until then, the dock projects them
@@ -1066,6 +1080,12 @@ eviction. The adjacent Free image storage action offers explicit oldest-1-GiB or
 cleanup with confirmation; chat text, original files and pending attachments remain. Store owns
 serialized image inventory, durable reference retirement and physical removal. A removed native
 provider tuple cannot silently refill the cache when the page is observed again.
+Opening the cleanup dialog reuses the store's maintained quota total; a cold read counts file
+metadata without opening image contents. Confirmed cleanup retains full image verification and
+shows an immediate busy message until success or failure; its final recount is metadata-only.
+Cleanup choices and Close are available before usage loads. Closing the dialog leaves its one
+requested operation running; reopening rejoins that same promise and retains its result. No
+poller or automatic cleanup loop is involved; completion also reports the actual freed bytes.
 The renderer groups adjacent same-response images into two columns, bounds loaded previews,
 and uses compact failure cards. Exact selection generations prevent old pages from filling a
 newly selected chat. Loading assets retain their bounded geometry through pixel hydration.
@@ -1135,8 +1155,10 @@ and retains the measured viewport plus one screen of surrounding content up to a
 discard the reader's visible prose. The existing 2 MiB text/HTML paint budget still applies.
 Overlapping activity groups keep their disclosure identity across page boundaries. The
 viewport owner preserves a surviving visible row and any underfilled tail space; new
-content consumes that space, while an unchanged refresh cannot collapse it. Back to latest
-and session selection clear that reserve. `scripts/verify-history-scroll.cjs` checks native
+content consumes that space, while an unchanged refresh cannot collapse it. Session selection
+clears that reserve. There is no Back to latest banner; navigation uses ordinary scrolling.
+Empty or failed older-page reads preserve the current live cursor and viewport instead of
+switching to historical mode. `scripts/verify-history-scroll.cjs` checks native
 Chromium wheel input over a long task, dense activity, reversals and live refreshes.
 Historical browsing does not silently evict the user's
 place on live updates; controls remain live. Selection generation fences every async page.
@@ -1212,6 +1234,11 @@ adds no per-tab approval UI: existing screen/control settings govern observation
 Read-only still masks mutation. Only an explicit `browser_tabs new` creates a tab; listing or
 attaching never activates one. A blue border identifies an attached tab; release removes the
 indicator and debugger without closing the page. Chrome's own permission/debugger UI remains.
+The root debugger session enables Chromium focus emulation while attached, so hidden pages
+continue rendering and accepting input without changing the selected tab or OS foreground.
+Detach removes that emulation. Observation `visibility`/`focused` describe the emulated page;
+they are not evidence that Chrome is selected. Native Desktop actions retain their separate
+foreground behavior and are not a browser-tool fallback.
 
 `mcp/tools-browser.ts` registers eight Desktop tools through the normal kernel, including code
 mode and recording. Screen permits list/attach/release, snapshots, screenshots and diagnostics;
@@ -1220,8 +1247,11 @@ session ownership, or the configured shared unattributed principal. Live policy 
 attachment are checked at handout and before page input. Active executor/orchestration pages
 are protected from competing browser actions.
 
-`/browser-control` uses the existing authenticated bridge and a wake-only socket topic. Its
-25-second RPCs are independent of the durable chat outbox: a dispatched action without a result
+`/browser-control` uses the existing authenticated bridge and a wake-only socket topic. The
+backend is statically imported by the module service worker: MV3 rejects dynamic `import()`.
+Controller construction remains lazy and debugger-API-gated. Verify the production entry graph
+with `scripts/verify-browser-control-entry.mjs`; a replacement fixture worker cannot prove startup.
+Its 25-second RPCs are independent of the durable chat outbox: a dispatched action without a result
 is unconfirmed, never reissued. Browser-incarnation tab handles avoid guessing between browser
 profiles; multiple browsers require explicit selection. The MV3 custodian persists leases and
 one pending result receipt in session storage. After worker reconstruction it renews debugger
@@ -1235,6 +1265,16 @@ uses that frame's debugger widget after checking parent geometry/obstruction. Vi
 coordinates require the exact image id and unchanged viewport; full-page images are inspection
 only. Native mouse position and clipboard are untouched. Results report dispatch acceptance,
 not proof the website completed an action.
+Snapshots retain independently actionable descendants of named cards/headings/editors and
+report readiness, visibility and pointer-lock state. Ref clicks choose a hit-tested point in
+the target's actual client rectangles; a fully covered target still refuses input and names
+the blocker. `pageId` is the observation's top-level UUID, separate from frame and element refs.
+Named keys accept case-insensitive spellings; an optional key ref must acquire that exact
+target before input. `holdMs` holds a key for at most two seconds and releases it in the same
+call, retaining lease checks. Tab-closed, attachment-lost, foreign-owner and stale-page errors
+stay distinct. Diagnostic pagination marks remaining matching rows as truncated. Background
+screenshots have a 20-second CDP bound inside the existing 25-second RPC; other CDP operations
+retain eight seconds. A timeout names the command and never replays it or opens a replacement.
 
 Traversal, result text, decoded image pixels/bytes, frame/session counts and console/network
 buffers are bounded. Console and network capture starts at attach; retained history is not a
@@ -1312,6 +1352,10 @@ be confirmed after relevant native changes; navigation invalidates that confirma
 Selection and discovery also await the native picker and its owned dialog closing within the
 existing three-second observer bound. Escape targets that picker focus trap; dispatch alone
 is not closure. A stuck picker refuses success before strict composer focus/insertion checks.
+During that operation only, the native picker menu/dialog has its animation suppressed:
+hidden Chrome windows can suspend the exit animation and retain an already-closed focus scope.
+Native unmount still proves closure; the temporary style is removed on completion/cancellation.
+A retained `closed` menu is reopened through its native trigger before reading selection.
 Picker access first waits for native hydration and prepares the owned Chat surface through
 the shared DOM adapter, including direct worker startup. A remembered Work surface must not
 be mistaken for unavailable Chat models and fail before prompt insertion. Startup failure
@@ -1630,6 +1674,12 @@ sleeping worker with `agents action=message` before spawning a replacement. Mess
 delivery and report receipts are at-least-once transports with durable message identities;
 acknowledgement belongs to the exact recipient/run, not a UI read. Pending reports remain
 available when the last worker sleeps and the family parks.
+
+Revival reserves the new assignment with its current inbox task preview, a neutral worker-id
+label and no completion result. The previous spawn label/result must not describe new work.
+Rejected acceptance restores that prior metadata; accepted work keeps its new metadata even
+if browser wake fails. Historical reports remain in the prime inbox and recorded history.
+A worker proving it never stopped clears its obsolete result while retaining the same task.
 
 After a worker reaches its own 400k estimated-context ceiling, its next stop becomes terminal
 and it is no longer reusable. Do not interrupt its current useful work merely for that ceiling.
