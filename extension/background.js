@@ -1782,6 +1782,23 @@ async function createChatTab(url, background = false, active = !background) {
   });
 }
 
+/**
+ * Holds discard defence for an app-opened chat until its conversation binds and the app's
+ * policy set takes over.
+ *
+ * A tab created for an input has no conversation yet, so the policy pass in maintainOnce
+ * cannot see it; a background-window chat under memory pressure could otherwise be discarded
+ * before its first Send. The maintenance pass owns release once the conversation exists.
+ */
+async function protectCreatedTab(tab) {
+  if (!Number.isInteger(tab?.id)) return;
+  try {
+    await chrome.tabs.update(tab.id, { autoDiscardable: false });
+    discardProtectedTabs[String(tab.id)] = true;
+    await persistLive();
+  } catch { /* The tab changed under creation; the next maintenance pass reconciles it. */ }
+}
+
 /** Bound waiting for a page; a missing reply never grants action or replay authority. */
 async function tabReply(tabId, message, options, timeoutMs = 3000) {
   let timer;
@@ -1927,6 +1944,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
             // exactly one replacement. Persist that expenditure before Chrome awaits.
             await elect(input.id, { tab: null, stage: 'opening', fallbackUsed: true });
             tab = await createChatTab(url, background);
+            await protectCreatedTab(tab);
             await elect(input.id, { tab: tab.id, stage: 'ready', fallbackUsed: true });
             tabs.push(tab);
             // A failed New Chat transition can leave the borrowed managed page
@@ -1953,6 +1971,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       }
       await elect(input.id, { tab: null, stage: 'opening', conversationId: target });
       tab = await createChatTab(url, background);
+      await protectCreatedTab(tab);
       await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target });
       tabs.push(tab);
       continue;
@@ -2315,7 +2334,16 @@ async function maintainOnce() {
   let observedTabs = [];
   try { observedTabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS }); } catch { /* Status/recovery still runs; no unobserved tab is pruned. */ }
   const openConversations = [...new Set(observedTabs.map(conversationForTab).filter(Boolean))];
-  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations }) });
+  // A discarded or frozen tab still answers the query with its URL, but its page is gone or
+  // suspended: nothing the app owes that chat — recording, input, a wake — can arrive until
+  // it is reloaded, and no close or silence path will ever say so. Report the shells
+  // separately so the app can tell "open" from "alive". (`frozen` exists on Chrome 132+;
+  // older versions simply report undefined.)
+  const stalledConversations = [...new Set(observedTabs
+    .filter((tab) => tab && (tab.discarded === true || tab.frozen === true))
+    .map(conversationForTab)
+    .filter(Boolean))];
+  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, stalledConversations }) });
   if (!reply.ok || !reply.data) return;
   connectWakeSocket();
   void pumpBrowserControl().catch(() => undefined);
@@ -2388,7 +2416,7 @@ async function maintainOnce() {
       const key = String(tab.id);
       const ours = discardProtectedTabs[key] === true;
       const conversation = conversationForTab(tab);
-      const opening = ours && !conversation && /[?&#]clf=/.test(tab.pendingUrl || tab.url || '');
+      const opening = ours && !conversation && /[?&#](?:clf|cos-input)=/.test(tab.pendingUrl || tab.url || '');
       const protect = opening || nonDiscardable.has(conversation);
       if (protect && tab.autoDiscardable !== false) {
         try {
@@ -3822,6 +3850,20 @@ function recoverDeferredRevivals() {
         entry.openingSpent = true;
         await persistLive();
       } else if (!exact.length) continue;
+      // A discarded tab still answers for its conversation URL, but its page is gone: the
+      // ping and the injection in restoreChatgptTab both fail on it, and reading that failure
+      // as "the exact tab is still there" parked the revival until its deadline. Reload the
+      // shell back to life instead; the reloaded document's registration re-enters this flow
+      // for the offer, and the exact conversation remains the only target.
+      let reloaded = false;
+      for (const tab of exact) {
+        if (tab.discarded !== true) continue;
+        reloaded = true;
+        try {
+          await chrome.tabs.reload(tab.id);
+        } catch { /* The tab changed under the scan; the next pass re-reads it. */ }
+      }
+      if (reloaded) continue;
       let routed = false;
       for (const tab of exact) {
         if (await restoreChatgptTab(tab.id)) {

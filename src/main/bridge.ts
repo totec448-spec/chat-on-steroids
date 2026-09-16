@@ -1746,14 +1746,28 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   if (route === '/status') {
     const live = liveConversations();
     let openConversations: string[] = [];
+    let stalledConversations: string[] = [];
     if (req.method === 'POST') {
-      const body = await readBody(req) as { openConversations?: unknown };
+      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown };
       if (!Array.isArray(body?.openConversations) || body.openConversations.length > 10_000 || body.openConversations.some(id => !conversationId(id))) {
         return json(res, 400, { error: 'invalid_open_conversations' }, origin);
       }
       openConversations = body.openConversations as string[];
+      if (body.stalledConversations !== undefined &&
+          (!Array.isArray(body.stalledConversations) || body.stalledConversations.length > 10_000 || body.stalledConversations.some(id => !conversationId(id)))) {
+        return json(res, 400, { error: 'invalid_stalled_conversations' }, origin);
+      }
+      stalledConversations = (body.stalledConversations ?? []) as string[];
     }
-    const tabPolicy = await browserTabPolicy(new Set(openConversations));
+    const openSet = new Set(openConversations);
+    const tabPolicy = await browserTabPolicy(openSet);
+    // A discarded or frozen tab still answers the extension's tab query, so neither the close
+    // path nor the silence sweep ever fires for it — while its page can neither record nor
+    // receive. Each stalled report runs the missing-tab decision minus the close side effects,
+    // before this same response hands the due repair out.
+    for (const stalledId of stalledConversations) {
+      if (openSet.has(stalledId)) await queueStalledTabRecovery(stalledId);
+    }
     // The extension's maintenance pass, and the whole conversation about repairs: `repaired`
     // reports the one handout it was last given and has now carried out, and `repairs` is every
     // chat now due one — the chats whose local tool calls stopped being attributable to them,
@@ -5905,7 +5919,7 @@ interface Repair {
   state: 'queued' | 'handed' | 'done';
   /** Stable identity of the failure/inactivity episode. A new activity stamp mints a new one. */
   episode: string;
-  reason: 'unattributed' | 'assistant-error' | 'no-tab' | 'silence' | 'goal' | 'compaction';
+  reason: 'unattributed' | 'assistant-error' | 'no-tab' | 'silence' | 'goal' | 'compaction' | 'stalled';
   /** Cooldown boundary. The browser is never asked before this instant. */
   notBefore: number;
   /**
@@ -6906,6 +6920,50 @@ async function queueMissingTab(conversationId: string, working: boolean, now = D
 }
 
 /**
+ * One stalled-tab report from the extension: a tab Chrome discarded (Memory Saver) or froze
+ * (Energy Saver) while keeping its URL, so it answers every tab query with a page that is gone
+ * or suspended.
+ *
+ * The decision is the missing-tab one minus the close side effects: the shell stays open, no
+ * run ends, and nothing is marked ended. The service worker reloads the exact tab — an action
+ * Chrome performs from the worker regardless of the page's state — which is also why this
+ * repair, and not prevention, is the answer: `autoDiscardable` covers discarding only, and no
+ * extension API exempts a tab from freezing. A compaction source is owed the reload on its
+ * ticket's own evidence, exactly like its ordinary pickups. Chat-scoped like `no-tab`: real
+ * activity from the revived page retires it, and the shared per-conversation cooldown bounds a
+ * tab Chrome keeps re-suspending.
+ */
+async function queueStalledTabRecovery(conversationId: string, now = Date.now()): Promise<void> {
+  const agent = agentInfoForOwnedConversation(conversationId);
+  const session = await findSessionByConversation(conversationId);
+  const name = agent?.id ?? conversationId;
+  const declined = (why: string): void => {
+    logInfo(`bridge: ${name} is a stalled browser tab — not reloaded: ${why}`);
+  };
+  // A chat with no session is not this app's chat; its tab sleeping is nobody's business here.
+  if (!session) return;
+  const compacting = pendingContinuations().some((entry) => entry.from === conversationId);
+  if (!compacting && !tabRecoveryWanted(conversationId)) return declined('tab recovery is off for this chat');
+  if (agent && agent.state !== 'detached' && agent.state !== 'active' && agent.state !== 'waking') {
+    return declined(`its ${agent.role} slot is ${agent.state}, not working`);
+  }
+  if (!agent && !compacting && !goalActiveFor(conversationId) && (session.toolCalls ?? 0) === 0) {
+    return declined('it has never called a tool');
+  }
+  const working =
+    liveConversations().some((entry) => entry.conversationId === conversationId && (entry.generating || Boolean(entry.activeTurnId))) ||
+    (activeUntil.get(conversationId)?.until ?? 0) > now;
+  if (!working && !compacting && agent?.role !== 'worker' && !(goalActiveFor(conversationId) && goalPendingReplyFor(conversationId))) {
+    return declined('no turn is running in it');
+  }
+  if (queueBrowserRecovery(conversationId, session.id, `stalled:${now}`, 'stalled', 0, now)) {
+    logInfo(`bridge: ${name} is a stalled browser tab — asking the browser to reload the exact chat once`);
+  } else {
+    declined('a browser action for it is already pending');
+  }
+}
+
+/**
  * Every live chat this app can presently prove is mid-turn.
  *
  * A conversation whose own page reports it is generating qualifies. A tab that went away
@@ -7392,6 +7450,7 @@ function repairReason(repair: Repair): string {
     unattributed: 'missing connector attribution',
     'assistant-error': 'an interrupted response',
     'no-tab': 'a missing browser tab',
+    stalled: 'a suspended browser tab',
     silence: 'an unresponsive open turn',
     goal: 'a goal reply nothing collected',
     compaction: 'an uncollected compaction ticket'

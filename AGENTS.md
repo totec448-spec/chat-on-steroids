@@ -1428,6 +1428,14 @@ regressions do not establish those tabs' original cause or live validation of th
 silence/no-tab recovery for workers, primes and ordinary chats. Reload repair for exact errors,
 Unattributed incidents and compaction has its own evidence. “Recover agents” is not blanket
 permission to reopen the session list. A plain historical chat with no current work is unprotected.
+Chrome can still suspend an app-used background tab two ways: Memory Saver *discards* the document
+(the shell keeps its URL and answers tab queries) and Energy Saver *freezes* its timers.
+`autoDiscardable` protects only against discarding; no extension API exempts a tab from freezing.
+The extension reports discarded/frozen shells in `stalledConversations`, and the bridge answers
+each report with the missing-tab decision minus the close side effects — same recovery policy, one
+bounded reload of the exact tab under the shared cooldown, retired by its first real activity. A
+deferred worker revival likewise reloads a discarded exact tab rather than reading its dead page
+as proof the tab is still there. An idle chat with nothing owed is deliberately left asleep.
 Provider access-limit notices preserve only an active Goal/Loop's existing exact session/turn
 recovery grant. They neither renew its deadline nor discard a pending/spent repair or postpone
 Goal pickup. Genuine new work in the same batch keeps its ordinary rearming authority, and an
@@ -1437,6 +1445,7 @@ chats retain their no-reload behavior for these blocking notices; no new grant c
 | Trigger | Required meaning |
 | --- | --- |
 | Missing tab | Current non-retired binding plus still-owed/live work and recovery policy; ordinary chats need recorded tool work, workers use broker attachment state. |
+| Stalled tab | Extension-reported discarded/frozen shell; the missing-tab decision minus close side effects, under the shared reload cooldown. |
 | Page silence | Known live activity with model-specific deadline; a live local process and browser liveness are different facts. |
 | Assistant error | Exact turn/error, per-turn retry budget and cooldown; repair the broken page without fabricating a new task. |
 | Unattributed | A separate unresolved incident after attribution has landed; re-observe suspects, never assign ownership by proximity. |

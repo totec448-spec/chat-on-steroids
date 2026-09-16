@@ -160,7 +160,9 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   const query = vi.fn(async () => [...tabs]);
   const reload = vi.fn(async (_id: number) => {});
   const sendMessage = vi.fn(async (_id: number, _message: any): Promise<{ ok: boolean; ready?: boolean }> => ({ ok: true, ready: true }));
-  const update = vi.fn(async (id: number, patch: Partial<Tab>) => { const tab = tabs.find(tab => tab.id === id)!; Object.assign(tab, patch); delete tab.pendingUrl; return tab; });
+  // tabs.update only clears the pending URL when the call itself navigates the tab;
+  // policy flips like autoDiscardable leave a still-loading page's target intact.
+  const update = vi.fn(async (id: number, patch: Partial<Tab>) => { const tab = tabs.find(tab => tab.id === id)!; Object.assign(tab, patch); if (patch.url !== undefined) delete tab.pendingUrl; return tab; });
   const fetch = vi.fn(async (input: string, _init?: RequestInit): Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }> => ({
     ok: true, status: 200,
     json: async () => new URL(input).pathname === '/hello'

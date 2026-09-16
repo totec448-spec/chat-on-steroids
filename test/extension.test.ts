@@ -499,7 +499,7 @@ function loadWorker(options: {
   fetch?: (input: string, init?: Record<string, unknown>) => Promise<ReturnType<typeof response>>;
   tabsGet?: (tabId: number) => Promise<{ id?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean }>;
   tabsQuery?: () => Promise<
-    Array<{ id?: number; windowId?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean; active?: boolean }>
+    Array<{ id?: number; windowId?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean; active?: boolean; discarded?: boolean; frozen?: boolean }>
   >;
   tabsSendMessage?: (tabId: number, message: Record<string, unknown>) => Promise<unknown>;
   windowsGet?: (windowId: number) => Promise<{ focused?: boolean }>;
@@ -1237,6 +1237,66 @@ describe('active agent tab discard protection', () => {
     live = false;
     await worker.fireAlarm();
     expect(worker.tabsUpdate).not.toHaveBeenCalled();
+  });
+
+  it('reports discarded and frozen shells separately from genuinely open conversations', async () => {
+    const DISCARDED = 'bbbbbbbb-cccc-4ddd-8eee-111111111111';
+    const FROZEN = 'cccccccc-dddd-4eee-8fff-222222222222';
+    const posted: Array<{ openConversations?: string[]; stalledConversations?: string[] }> = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') {
+          posted.push(JSON.parse(String(init?.body || '{}')));
+          return response(200, { ok: true, repairs: [] });
+        }
+        return response(404, {});
+      }),
+      tabsQuery: async () => [
+        { id: 1, windowId: 7, url: `https://chatgpt.com/c/${DISCARDED}`, discarded: true },
+        { id: 2, windowId: 7, url: `https://chatgpt.com/c/${FROZEN}`, frozen: true },
+        { id: 3, windowId: 7, url: `https://chatgpt.com/c/${CHAT}`, status: 'complete' }
+      ]
+    });
+
+    await worker.fireAlarm();
+
+    // The shells keep their URLs and stay inside openConversations — the app decides what a
+    // dead page means — while stalledConversations names the ones that cannot record or receive.
+    expect(posted.at(-1)?.openConversations).toEqual([DISCARDED, FROZEN, CHAT]);
+    expect(posted.at(-1)?.stalledConversations).toEqual([DISCARDED, FROZEN]);
+  });
+
+  it('protects a newly created input tab until its conversation binds', async () => {
+    const inputId = 'ffffffff-1111-4222-8333-444444444444';
+    const session = new FakeStorageArea();
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session,
+      fetch: vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') {
+          return response(200, { ok: true, repairs: [], inputs: [{ id: inputId }], inputOpeningIds: [inputId] });
+        }
+        return response(404, {});
+      })
+    });
+
+    await worker.fireAlarm();
+
+    expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
+    expect(worker.tabsUpdate).toHaveBeenCalledWith(99, { autoDiscardable: false });
+    expect(session.data.discardProtectedTabs).toEqual({ '99': true });
+
+    // The cos-input marker holds the protection across later passes; release belongs to the
+    // app's policy set once a real conversation binds, not to a sweep that cannot see one yet.
+    await worker.fireAlarm();
+    expect(worker.tabsUpdate).not.toHaveBeenCalledWith(99, { autoDiscardable: true });
+    expect(session.data.discardProtectedTabs).toEqual({ '99': true });
   });
 });
 
@@ -2027,6 +2087,41 @@ describe('extension revival delivery', () => {
     await worker.fireAlarm();
 
     await worker.fireAlarm();
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+  });
+
+  it('reloads a discarded exact tab and offers the revival to its reloaded document', async () => {
+    let discarded = true;
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea({ recoveryMonitoring: true }),
+      fetch: app(),
+      tabsQuery: async () => [
+        { id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}`, ...(discarded ? { discarded: true } : { status: 'complete' }) }
+      ],
+      tabsSendMessage: liveRecorder
+    });
+
+    await worker.fireAlarm();
+
+    // A discarded shell can never answer the ping or accept an injection. Reloading it is the
+    // exact repair; creating a second tab for the same conversation is the failure this
+    // prevents.
+    expect(worker.tabsReload).toHaveBeenCalledWith(4);
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+    expect(worker.tabsSendMessage.mock.calls.some(([id, message]) => id === 4 && message.type === 'clf-run-command')).toBe(false);
+
+    // The reloaded document registers, and that registration re-enters this exact flow.
+    discarded = false;
+    await worker.registerTab(4, 'document-4-reloaded');
+    await vi.waitFor(() =>
+      expect(worker.tabsSendMessage).toHaveBeenCalledWith(4, {
+        type: 'clf-run-command',
+        id: revival.id,
+        conversationId: CHAT,
+        deferredRecovery: true
+      })
+    );
     expect(worker.tabsCreate).not.toHaveBeenCalled();
   });
 

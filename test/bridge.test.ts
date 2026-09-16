@@ -6561,6 +6561,116 @@ describe('unattributed activity recovery', () => {
     }
   });
 
+  /**
+   * A discarded or frozen tab still answers the extension's tab query with its URL, so neither
+   * /closed nor the silence sweep ever fire for it. The stalled report is the only signal that
+   * its page is gone or suspended, and it is owed the missing-tab decision minus the close.
+   */
+  it('hands a stalled worker tab to the browser for one reload, never a second tab', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+    const bootstrap = await redeem();
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+    });
+    await events(WORKER, [openTurn('turn-worker-stalled')]);
+
+    const stalled = async () =>
+      ((await request('POST', '/status', { body: { openConversations: [WORKER], stalledConversations: [WORKER] } })).body
+        .repairs ?? []) as Array<{ conversationId: string; token: string; reason: string }>;
+    const handout = (await stalled()).find((row) => row.conversationId === WORKER);
+    expect(handout?.reason).toBe('stalled');
+    expect(reopened(WORKER)).toEqual([]);
+
+    // Confirming the reload retires the episode; a still-stalled report inside the shared
+    // cooldown is queued behind it rather than handed another reload every pass.
+    const confirmed = await request('POST', `/status?repaired=${encodeURIComponent(handout!.token)}&repairAction=reloaded`, {
+      body: { openConversations: [WORKER], stalledConversations: [] }
+    });
+    expect(confirmed.status).toBe(200);
+    expect((await stalled()).filter((row) => row.conversationId === WORKER)).toEqual([]);
+  });
+
+  it('waits out the shared cooldown before reloading a tab Chrome keeps stalling', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', {
+        body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+      });
+      await events(WORKER, [openTurn('turn-worker-stall-loop')]);
+      const stalled = async () =>
+        ((await request('POST', '/status', { body: { openConversations: [WORKER], stalledConversations: [WORKER] } })).body
+          .repairs ?? []) as Array<{ conversationId: string; token: string; reason: string }>;
+
+      const first = (await stalled()).find((row) => row.conversationId === WORKER);
+      expect(first?.reason).toBe('stalled');
+      await request('POST', `/status?repaired=${encodeURIComponent(first!.token)}&repairAction=reloaded`, {
+        body: { openConversations: [WORKER], stalledConversations: [] }
+      });
+
+      expect((await stalled()).filter((row) => row.conversationId === WORKER)).toEqual([]);
+      await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS - 1);
+      expect((await stalled()).filter((row) => row.conversationId === WORKER)).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      const second = (await stalled()).find((row) => row.conversationId === WORKER);
+      expect(second?.reason).toBe('stalled');
+      expect(second!.token).not.toBe(first!.token);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves a stalled ordinary tab asleep when tab recovery is off for it', async () => {
+    await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
+    await pair();
+    await events(OTHER, [openTurn('turn-ordinary-stalled')]);
+    await attributed(OTHER);
+
+    const status = (await request('POST', '/status', { body: { openConversations: [OTHER], stalledConversations: [OTHER] } })).body;
+    expect((status.repairs ?? []).filter((row: any) => row.conversationId === OTHER)).toEqual([]);
+  });
+
+  it('ignores a stalled report for a chat the same pass did not report open', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+    const bootstrap = await redeem();
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+    });
+    await events(WORKER, [openTurn('turn-worker-not-open')]);
+
+    // A stalled shell is defined by its surviving tab. Without one the report names nothing —
+    // the missing-tab path, not this one, owns a genuinely absent tab.
+    const status = (await request('POST', '/status', { body: { openConversations: [], stalledConversations: [WORKER] } })).body;
+    expect((status.repairs ?? []).filter((row: any) => row.conversationId === WORKER)).toEqual([]);
+  });
+
+  it('repairs a stalled compaction source on the ticket’s own evidence, even with tab recovery off', async () => {
+    await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ad01';
+    await request('POST', '/events', {
+      body: {
+        conversationId,
+        events: [{ kind: 'user_message', time: Date.now(), text: 'compact me later', messageId: 'stalled-source' }]
+      }
+    });
+    const filed = await request('POST', '/compact', { body: { conversationId, ticket: true } });
+    expect(filed.status).toBe(202);
+
+    const status = (await request('POST', '/status', { body: { openConversations: [conversationId], stalledConversations: [conversationId] } })).body;
+    const handout = (status.repairs ?? []).find((row: any) => row.conversationId === conversationId);
+    expect(handout?.reason).toBe('stalled');
+  });
+
+  it('rejects a malformed stalled report', async () => {
+    await pair();
+    expect((await request('POST', '/status', { body: { openConversations: [], stalledConversations: ['not-a-conversation'] } })).status).toBe(400);
+  });
+
   it('records explicit provider access limits without scheduling a reload or silence retry', async () => {
     vi.useFakeTimers();
     try {
