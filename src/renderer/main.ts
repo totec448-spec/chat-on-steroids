@@ -4,6 +4,7 @@ import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
+import { initConnectionAdvanced } from './connection-popover.js';
 import { initSetupGuide } from './setup-guide.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
@@ -45,6 +46,7 @@ declare global {
 const api = window.api;
 initLanguage();
 initSetupGuide();
+const connectionAdvanced = initConnectionAdvanced();
 
 /** Same shape the platform uses; mirrored here only to grey out step 2 until it is valid. */
 const TUNNEL_ID_PATTERN = /^tunnel_[0-9a-f]{32}$/;
@@ -123,7 +125,8 @@ function showTab(name: string): void {
   const settings = name !== 'chat';
   document.querySelector<HTMLElement>('.app')!.dataset.screen = settings ? 'settings' : 'chat';
   document.querySelector<HTMLElement>('.sidebar-brand')!.hidden = settings;
-  $('workspaceSettings').hidden = settings;
+  $('workspaceSettings').hidden = false;
+  $('workspaceSettings').classList.toggle('is-sel', settings);
   if (name === 'usage') void refreshUsage();
   $('tabs').hidden = !settings;
   $('backToChat').hidden = !settings;
@@ -147,8 +150,45 @@ function showTab(name: string): void {
   for (const id of FEEDS) stickToNewest(id);
 }
 
+function setConnectionPopover(open: boolean): void {
+  const popover = $('connectionPopover');
+  const trigger = $('sidebarConnection');
+  popover.hidden = !open;
+  trigger.setAttribute('aria-expanded', String(open));
+  if (open) {
+    positionConnectionPopover();
+    paintClock();
+    connectionAdvanced.refreshIfOpen();
+  }
+}
+
+/** Keep this diagnostic surface anchored to the status button and inside the viewport. */
+function positionConnectionPopover(): void {
+  const popover = $('connectionPopover');
+  if (popover.hidden) return;
+  const trigger = $('sidebarConnection').getBoundingClientRect();
+  const margin = 12;
+  const width = Math.min(360, Math.max(0, window.innerWidth - margin * 2));
+  const preferredLeft = trigger.left + trigger.width / 2 - width / 2;
+  const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+  popover.style.left = `${Math.min(Math.max(margin, preferredLeft), maxLeft)}px`;
+  popover.style.bottom = `${Math.max(margin, window.innerHeight - trigger.top + 8)}px`;
+}
+
+window.addEventListener('resize', () => positionConnectionPopover());
+
 $('backToChat').addEventListener('click', () => showTab('chat'));
 $('workspaceSettings').addEventListener('click', () => showTab('home'));
+$('sidebarConnection').addEventListener('click', () => {
+  setConnectionPopover(Boolean($('connectionPopover').hidden));
+});
+$('connectionPopoverSettings').addEventListener('click', () => {
+  setConnectionPopover(false);
+  showAllSteps = true;
+  if (state) apply(state);
+  showTab('setup');
+  step('connect').scrollIntoView({ block: 'center', behavior: 'smooth' });
+});
 $('chatSettingsBtn').addEventListener('click', () => showTab('settings'));
 $('sessionList').addEventListener('click', () => showTab('chat'));
 $('newChat').addEventListener('click', () => showTab('chat'));
@@ -930,12 +970,13 @@ function apply(next: AppState): void {
   $('themeIcon').setAttribute('href', dark ? '#i-sun' : '#i-moon');
   ui($('themeBtn'), 'title', () => dark ? t("Switch to light mode") : t("Switch to dark mode"));
 
-  // ---- header
-  const live = $('live');
-  live.className = `live${
-    connected ? ' is-connected' : offline ? ' is-offline' : busy ? ' is-busy' : failed ? ' is-error' : ''
-  }`;
-  ui($('liveState'), 'textContent', () => t(STATUS_TEXT[status.state]));
+  // ---- global connection surface
+  const connectionTone = connected ? 'is-connected' : offline ? 'is-offline' : busy ? 'is-busy' : failed ? 'is-error' : '';
+  const sidebarConnection = $('sidebarConnection');
+  sidebarConnection.className = `sidebar-connection${connectionTone ? ` ${connectionTone}` : ''}`;
+  const connectionPopover = $('connectionPopover');
+  connectionPopover.className = `connection-popover scroll${connectionTone ? ` ${connectionTone}` : ''}`;
+  ui($('connectionPopoverTitle'), 'textContent', () => t(STATUS_TEXT[status.state]));
 
   const id = config.tunnel.tunnelId;
   ui($('headerSub'), 'textContent', () => config.tunnel.kind === 'openai'
@@ -944,11 +985,14 @@ function apply(next: AppState): void {
         : t("No tunnel yet")
       : (status.publicUrl ?? status.localUrl ?? config.tunnel.kind));
 
-  const connectBtn = $<HTMLButtonElement>('connectBtn');
-  connectBtn.classList.toggle('is-running', running);
-  ui($('connectLabel'), 'textContent', () => running ? t("Disconnect") : t("Connect"));
+  const connectBtn = $<HTMLButtonElement>('connectionPopoverToggle');
+  ui(connectBtn, 'textContent', () => running ? t("Disconnect") : t("Connect"));
   connectBtn.disabled = !running && missing !== null;
   connectBtn.title = !running && missing ? missing.text : '';
+
+  ui($('connectionPopoverExtension'), 'textContent', () => next.bridge.extensionVersion
+    ? `v${next.bridge.extensionVersion}`
+    : t("Not reported"));
 
   // ---- out of date, app or extension
   paintUpdate(next);
@@ -1320,7 +1364,7 @@ function facts(next: AppState): HTMLElement[] {
  */
 function paintClock(): void {
   if (!state) return;
-  const { status } = state;
+  const { status, bridge } = state;
   const running = isRunning(status.state);
   const connected = status.state === 'connected';
 
@@ -1332,11 +1376,29 @@ function paintClock(): void {
   request.textContent = shortAgo(status.lastRequestAt);
   request.className = status.lastRequestAt === null ? 'is-cold' : '';
 
-  ui($('liveNote'), 'textContent', () => running
+  const core = status.surfaces.find((surface) => surface.id === 'core');
+  ui($('connectionPopoverConnector'), 'textContent', () => !running
+    ? t("Not connected")
+    : core?.lastRequestAt
+      ? t("Reached {0}", [ago(core.lastRequestAt)])
+      : connected
+        ? t("Waiting for ChatGPT")
+        : t(STATUS_TEXT[status.state]));
+  ui($('connectionPopoverBrowser'), 'textContent', () => bridge.present
+    ? bridge.lastSeenAt ? t("Seen {0}", [ago(bridge.lastSeenAt)]) : t("Connected")
+    : bridge.paired ? t("Paired · not active") : t("Not connected"));
+
+  ui($('connectionPopoverVerified'), 'textContent', () => running
     ? status.handshakeAt === null
       ? t("no handshake yet")
       : t("verified {0}", [ago(status.handshakeAt)])
-    : '');
+    : t("Connection is off"));
+
+  const triggerText = status.handshakeAt !== null && running
+    ? `${t(STATUS_TEXT[status.state])} · ${t("verified {0}", [ago(status.handshakeAt)])}`
+    : t(STATUS_TEXT[status.state]);
+  ui($('sidebarConnection'), 'aria-label', () => triggerText);
+  ui($('sidebarConnection'), 'title', () => triggerText);
 }
 
 window.setInterval(paintClock, 1000);
@@ -1661,7 +1723,7 @@ function installUpdate(): void {
 
 $('updateInstall').addEventListener('click', installUpdate);
 $('installUpdate').addEventListener('click', installUpdate);
-$('connectBtn').addEventListener('click', () => void toggleConnection());
+$('connectionPopoverToggle').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
 
 $('pickBinary').addEventListener('click', async () => {
@@ -1730,8 +1792,15 @@ for (const id of [
 }
 
 document.addEventListener('click', (event) => {
-  const link = (event.target as HTMLElement).closest<HTMLElement>('[data-link]');
+  const target = event.target as HTMLElement;
+  if (!target.closest('.connection-anchor') && !$('connectionPopover').hidden) setConnectionPopover(false);
+  const link = target.closest<HTMLElement>('[data-link]');
   if (link?.dataset.link) void run(api.openLink(link.dataset.link));
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || $('connectionPopover').hidden) return;
+  setConnectionPopover(false);
+  $('sidebarConnection').focus();
 });
 
 $('bridgeDownload').addEventListener('click', () => void run(api.downloadExtension()));
