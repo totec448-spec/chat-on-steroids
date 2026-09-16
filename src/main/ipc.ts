@@ -60,6 +60,7 @@ import { bundledVersion, locateBinary } from './tunnel/locate.js';
 import { TUNNEL_ID_PATTERN } from './tunnel/index.js';
 import {
   bridgeStatus,
+  companionDiagnostics,
   sessionActivityExpiresAt,
   sessionInputActivity,
   sessionControlsFor, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, cancelSessionCompaction,
@@ -981,6 +982,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     await unpair();
     return buildState();
   });
+
+  handle('bridge:diagnostics', async () => companionDiagnostics());
 
   handle('bridge:downloadExtension', async () => {
     // This is a recovery path for the extension bundled with *this installed app*. Never use

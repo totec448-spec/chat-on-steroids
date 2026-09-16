@@ -18,7 +18,7 @@ import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '..
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { AppState, Capabilities, Config, Diagnosis, LogEntry } from '../shared/types.js';
+import type { AppState, Capabilities, CompanionDiagnostics, Config, Diagnosis, LogEntry } from '../shared/types.js';
 import type {
   Handoff,
   ImageStorageClearMode,
@@ -162,6 +162,7 @@ const api = {
   generateFinishGoal: (id: string, expectedTurnId: string) => call<string>('sessions:generateFinishGoal', { id, expectedTurnId }),
   getChatModels: () => call<ChatModelCatalog>('chatModels:get'),
   browserPreferences: (patch: Partial<BrowserPreferences> = {}) => call<BrowserPreferences>('browser:preferences', patch),
+  companionDiagnostics: () => call<CompanionDiagnostics | null>('bridge:diagnostics'),
   requestChatModels: () => call<ChatModelCatalog>('chatModels:request'),
   onToolApprovalNotice: (listener: () => void): (() => void) => {
     const wrapped = (): void => listener();

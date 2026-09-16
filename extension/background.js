@@ -41,6 +41,9 @@ const MODEL_REQUEST_TIMEOUT_MS = 190_000;
 const TIMED_OUT = 'the app took too long to answer';
 /** Bumped only when the request/response shape changes; the app compares it. */
 const BRIDGE_PROTOCOL = 14;
+/** Browser-owned presentation preferences also exposed by the popup. */
+const RENDER_STREAM_KEY = 'renderStreamEnabled';
+const SHOW_TIMES_KEY = 'showStreamTimes';
 
 /**
  * Journal caps. The byte figure is what actually matters — chrome.storage.session has a
@@ -2317,6 +2320,14 @@ async function maintainOnce() {
   const openConversations = [...new Set(observedTabs.map(conversationForTab).filter(Boolean))];
   const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations }) });
   if (!reply.ok || !reply.data) return;
+  // Diagnostics are deliberately out-of-band. Recovery/status cadence is authority-bearing and
+  // must never wait on popup-quality page inspection merely because the native app is showing it.
+  void (async () => {
+    const found = await discover();
+    if (!found) return;
+    const snapshot = await companionDiagnosticSnapshot(found);
+    await call('/diagnostics', { method: 'POST', body: JSON.stringify(snapshot) });
+  })().catch(() => undefined);
   connectWakeSocket();
   void pumpBrowserControl().catch(() => undefined);
   // Quoted back exactly as they arrived. A token names the handout being answered, so that a
@@ -3407,6 +3418,35 @@ const HANDLERS = {
     return result;
   }
 };
+
+/** Snapshot sent to the app only over the already-authenticated local bridge. */
+async function companionDiagnosticSnapshot(found) {
+  const preferences = await chrome.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
+  return {
+    capturedAt: Date.now(),
+    status: {
+      connected: found !== null,
+      port: found ? found.port : null,
+      paired: token !== null,
+      disconnected,
+      pending: journal.length,
+      pendingCommandAcks: commandAckOutbox.length,
+      compatible: found ? found.compatible !== false : null,
+      appVersion: found ? found.version : null,
+      appProtocol: found ? found.bridge : null,
+      extensionVersion: chrome.runtime.getManifest().version,
+      extensionProtocol: BRIDGE_PROTOCOL,
+      pairError: pairingError
+        ? { error: String(pairingError.error || ''), message: String(pairingError.message || '') }
+        : null
+    },
+    preferences: {
+      overwrite: preferences[RENDER_STREAM_KEY] !== false,
+      durations: preferences[SHOW_TIMES_KEY] === true
+    },
+    tab: await HANDLERS.tabStatus()
+  };
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handler = message && typeof message.type === 'string' ? HANDLERS[message.type] : null;

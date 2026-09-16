@@ -97,9 +97,24 @@ describe('the session card header', () => {
    * because the chat is what writes the brief — a button here would be a second way to
    * start the one thing that must happen exactly once.
    */
-  it('keeps the title beside connection status and chat controls in the composer', () => {
+  it('keeps global connection status out of the chat header and in the sidebar footer', () => {
     const header = document.querySelector('#chatTitle')!.closest('header')!;
-    expect(header.contains(document.getElementById('live'))).toBe(true);
+    const connection = document.getElementById('sidebarConnection')!;
+    const footer = connection.closest('.sidebar-bottom')!;
+    expect(header.contains(connection)).toBe(false);
+    expect(footer).not.toBeNull();
+    expect([...footer.children].map((node) => (node as HTMLElement).id || (node as HTMLElement).className)).toEqual([
+      'workspaceSettings',
+      'connection-anchor'
+    ]);
+    expect(document.getElementById('connectionPopover')!.closest('.connection-anchor')).not.toBeNull();
+    expect(rule('.connection-popover')).toContain('position: fixed');
+    expect(rule('.connection-popover')).toContain('max-height: min(680px, calc(100vh - 70px))');
+    expect(rule('.connection-popover::-webkit-scrollbar-track')).toContain('margin-block: 10px');
+    expect(rule('#workspaceSettings')).toContain('height: 36px');
+    expect(rule('.sidebar-connection')).toContain('width: 36px; height: 36px');
+    expect(document.getElementById('connectionAdvanced')).not.toBeNull();
+    expect(document.getElementById('connectionAdvancedGrid')).not.toBeNull();
     expect(document.getElementById('sessionControls')!.closest('#composerSettings')).not.toBeNull();
     expect(header.querySelector('.session-controls')).toBeNull();
   });

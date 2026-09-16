@@ -122,7 +122,96 @@
             </div>
           </section>
 
-        <div class="sidebar-bottom"><button class="btn" id="workspaceSettings" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg>Settings</button></div>
+        <div class="sidebar-bottom">
+          <button class="btn" id="workspaceSettings" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg>Settings</button>
+          <div class="connection-anchor">
+            <button
+              class="sidebar-connection"
+              id="sidebarConnection"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="connectionPopover"
+              aria-label="Not connected"
+              title="Not connected"
+            >
+              <span class="sidebar-connection-dot" aria-hidden="true"></span>
+            </button>
+            <section class="connection-popover scroll" id="connectionPopover" role="dialog" aria-label="Connection" hidden>
+              <div class="connection-popover-head">
+                <div>
+                  <strong id="connectionPopoverTitle">Not connected</strong>
+                  <span id="connectionPopoverVerified">Connection is off</span>
+                </div>
+                <span class="connection-popover-status-dot" aria-hidden="true"></span>
+              </div>
+              <div class="connection-popover-card">
+                <div class="connection-popover-row">
+                  <span>ChatGPT connector</span>
+                  <span id="connectionPopoverConnector">Not connected</span>
+                </div>
+                <div class="connection-popover-row">
+                  <span>Browser companion</span>
+                  <span id="connectionPopoverBrowser">Not seen</span>
+                </div>
+                <div class="connection-popover-row">
+                  <span>Extension</span>
+                  <span id="connectionPopoverExtension">—</span>
+                </div>
+              </div>
+              <details class="connection-advanced" id="connectionAdvanced">
+                <summary>
+                  <span>Advanced</span>
+                  <span class="connection-advanced-age" id="connectionAdvancedAge">Runtime diagnostics</span>
+                  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev" /></svg>
+                </summary>
+                <div class="connection-advanced-body">
+                  <p class="connection-advanced-alert" id="connectionAdvancedAlert" hidden></p>
+
+                  <p class="connection-advanced-caption">Session capture</p>
+                  <div class="connection-advanced-card">
+                    <div class="connection-advanced-row" id="connectionAdvancedTab"><span>ChatGPT tab</span><span class="meta">—</span><i></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedRecording"><span>Recording this chat</span><span class="meta">—</span><i></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedChat"><span>Chat ID</span><button class="meta copy" type="button">—</button><i></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedRequest"><span>Current request</span><button class="meta copy" type="button">—</button><i></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedApp"><span>Reaching the app</span><span class="meta">—</span><i></i></div>
+                  </div>
+
+                  <div class="connection-pipeline" id="connectionPipeline">
+                    <div class="connection-pipeline-stage" id="connectionPipelineRead"><i></i><span>Request ID found</span><em></em></div>
+                    <div class="connection-pipeline-stage" id="connectionPipelineSent"><i></i><span>Sent to app</span><em></em></div>
+                    <div class="connection-pipeline-stage" id="connectionPipelineOwner"><i></i><span>Owner confirmed</span><em></em></div>
+                    <p id="connectionPipelineWhy"></p>
+                    <div class="connection-pipeline-calls" id="connectionPipelineCalls"></div>
+                  </div>
+
+                  <p class="connection-advanced-caption">Augment ChatGPT</p>
+                  <div class="connection-advanced-card">
+                    <label class="connection-advanced-switch">
+                      <span><b>Overwrite ChatGPT</b><em>Show recorded local activity in the ChatGPT page.</em></span>
+                      <input id="connectionAdvancedOverwrite" type="checkbox" disabled />
+                    </label>
+                    <label class="connection-advanced-switch">
+                      <span><b>Timestamps</b><em>Show timing details in the companion-rendered activity.</em></span>
+                      <input id="connectionAdvancedDurations" type="checkbox" disabled />
+                    </label>
+                  </div>
+
+                  <p class="connection-advanced-caption">Runtime diagnostics</p>
+                  <dl class="connection-advanced-grid" id="connectionAdvancedGrid"></dl>
+                  <div class="connection-advanced-actions">
+                    <button class="btn" id="connectionAdvancedCopy" type="button">Copy</button>
+                    <button class="btn" id="connectionAdvancedRefresh" type="button">Refresh</button>
+                  </div>
+                </div>
+              </details>
+              <div class="connection-popover-actions">
+                <button class="btn btn-solid" id="connectionPopoverToggle" type="button">Connect</button>
+                <button class="btn" id="connectionPopoverSettings" type="button">Connection settings</button>
+              </div>
+            </section>
+          </div>
+        </div>
       </aside>
       <!-- ------------------------------------------------------------ header -->
       <header>
@@ -142,15 +231,6 @@
           <button class="btn btn-install" id="installUpdate" type="button" hidden>
             <svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>
             <span>Install update</span>
-          </button>
-          <span class="live" id="live">
-            <span class="dot"></span>
-            <span id="liveState">Not connected</span>
-            <em id="liveNote"></em>
-          </span>
-          <button class="power off" id="connectBtn" type="button">
-            <svg class="ico" viewBox="0 0 24 24"><use href="#i-power" /></svg>
-            <span id="connectLabel">Connect</span>
           </button>
         </span>
       </header>
