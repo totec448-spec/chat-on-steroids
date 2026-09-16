@@ -51,6 +51,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { isProModel } from '../../shared/chat-models.js';
 import { isReasoningEffort, type Handoff, type ReasoningEffort } from '../../shared/session.js';
 import { logInfo, logWarn } from '../logger.js';
 import {
@@ -86,6 +87,18 @@ import {
  * than staying transferable indefinitely.
  */
 export const CONTINUATION_TTL_MS = 10 * 60_000;
+
+/**
+ * The longer writing deadline for a manual ticket whose frozen source selection is Pro.
+ *
+ * Pro reasoning is not part of the visible transcript, so a brief it spends twenty minutes
+ * thinking about produces no text growth and never renews `touchedAt` — the ordinary clock
+ * then sweeps a perfectly healthy generation as "took too long". Only the `awaiting-summary`
+ * phase uses this: once the brief is captured, opening chat B is app-paced work that keeps
+ * the ordinary clock. An unobserved (null) selection keeps the ordinary clock too, because
+ * unknown identity never widens a deadline.
+ */
+export const CONTINUATION_PRO_WRITING_TTL_MS = 60 * 60_000;
 
 /**
  * How long an automatic handover may run once it has actually been asked for.
@@ -194,7 +207,9 @@ interface Continuation {
    * compaction itself as an eligible turn, stopped it, and started another one.
    *
    * Renewed only by real forward progress. A token that has genuinely gone quiet for a full TTL
-   * still expires, so this lengthens nothing for a stalled handoff.
+   * still expires, so this lengthens nothing for a stalled handoff. Pro reasoning is not visible
+   * text, so it produces no growth to renew on: while a Pro brief is being written the deadline
+   * itself is longer instead — see CONTINUATION_PRO_WRITING_TTL_MS.
    */
   touchedAt: number;
   sourceProgress: number;
@@ -456,14 +471,25 @@ const handoffAsked = (entry: Continuation): boolean =>
   entry.sourceSend.state === 'sent';
 
 /**
+ * The waiting deadline for a manual ticket. Pro's longer budget exists only while its brief
+ * is being written: later phases are app-paced and keep the ordinary clock.
+ */
+const manualWaitingTtlMs = (state: ContinuationState, requested: RequestedModel | null): number =>
+  state === 'awaiting-summary' && requested !== null &&
+  isProModel(requested.model, requested.reasoningEffort ?? undefined)
+    ? CONTINUATION_PRO_WRITING_TTL_MS
+    : CONTINUATION_TTL_MS;
+
+/**
  * Whether a nonterminal continuation has outlived its wait. A manual one gets
- * CONTINUATION_TTL_MS from opening; an automatic one has no clock until it is asked for and
+ * CONTINUATION_TTL_MS from its last sign of progress — CONTINUATION_PRO_WRITING_TTL_MS while
+ * a Pro brief is still being written; an automatic one has no clock until it is asked for and
  * AUTOMATIC_HANDOVER_TTL_MS from then.
  */
 const expired = (entry: Continuation, now = Date.now()): boolean =>
   entry.automatic
     ? entry.askedAt !== null && now - entry.askedAt >= AUTOMATIC_HANDOVER_TTL_MS
-    : now - entry.touchedAt >= CONTINUATION_TTL_MS;
+    : now - entry.touchedAt >= manualWaitingTtlMs(entry.state, entry.requestedModel);
 
 const isOpen = (entry: Continuation): boolean =>
   entry.state !== 'committed' && entry.state !== 'aborted' && !expired(entry);
@@ -1502,16 +1528,21 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
     'aborted'
   ]);
   for (const raw of snapshot.entries.slice(0, 32)) {
+    if (!raw) continue;
+    // The retention window scales with the same per-ticket deadline the live sweep uses:
+    // a Pro brief still inside its longer writing clock must survive a restart within it
+    // rather than vanish silently at twice the ordinary TTL.
+    const retentionMs = manualWaitingTtlMs(raw.state, requestedModel(raw.requestedModel)) * 2;
+    const lastTouchedAt = Number.isFinite(raw.touchedAt) && raw.touchedAt! <= now ? raw.touchedAt! : raw.openedAt;
     if (
-      !raw ||
       !/^[A-Za-z0-9_-]{16,64}$/.test(raw.token) ||
       !/^[0-9a-z-]{8,64}$/i.test(raw.sessionId) ||
       typeof raw.from !== 'string' ||
       raw.from.length === 0 || raw.from.length > 256 ||
       !validStates.has(raw.state) ||
       !Number.isFinite(raw.openedAt) ||
-      ((raw.state === 'committed' || raw.state === 'aborted') && now - (Number.isFinite(raw.touchedAt) && raw.touchedAt! <= now ? raw.touchedAt! : raw.openedAt) >= CONTINUATION_TTL_MS * 2) ||
-      (raw.automatic !== true && now - (Number.isFinite(raw.touchedAt) && raw.touchedAt! <= now ? raw.touchedAt! : raw.openedAt) >= CONTINUATION_TTL_MS * 2)
+      ((raw.state === 'committed' || raw.state === 'aborted') && now - lastTouchedAt >= retentionMs) ||
+      (raw.automatic !== true && now - lastTouchedAt >= retentionMs)
     ) {
       continue;
     }
