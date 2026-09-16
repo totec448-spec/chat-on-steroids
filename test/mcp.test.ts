@@ -294,6 +294,7 @@ beforeEach(async () => {
   ctx.roots = [{ name: 'workspace', path: approved }];
   ctx.sessionTools = false;
   ctx.agentTools = false;
+  ctx.headlessClaudeTools = false;
   // A fresh endpoint gives every test a fresh ChatGPT tool-surface snapshot. Tests
   // that change permissions mid-flight still exercise the real live-config path.
   endpoint = await startMcpServer(() => ctx);
@@ -589,6 +590,7 @@ describe('surface boundaries', () => {
     ctx.readOnly = false;
     ctx.sessionTools = true;
     ctx.agentTools = true;
+    ctx.headlessClaudeTools = true;
   };
 
   it('advertises exactly Core’s tools on Core, with nothing from Desktop', async () => {
@@ -1087,6 +1089,8 @@ describe('capability gating', () => {
     const names = toolNames(await core('tools/list'));
     expect(names).toContain('exec_command');
     expect(names).toContain('write_stdin');
+    expect(names).toContain('session');
+    expect(names).not.toContain('update_plan');
   });
 
   it('drops find when exec_command can do the same job better', async () => {
@@ -1454,14 +1458,18 @@ describe('capability gating', () => {
     expect(textOf(fromSearch)).toMatch(/recorded context/i);
   });
 
-  it('rejects the removed history/status contract and ambiguous read fields', async () => {
+  it('rejects the removed history/status contract and ambiguous session fields', async () => {
     ctx.sessionTools = true;
     const advertised = toolList(await core('tools/list')).find((tool) => tool.name === 'session');
     expect(advertised?.inputSchema).toMatchObject({
-      properties: { action: { enum: ['search', 'read'] } },
+      properties: {
+        action: { enum: ['search', 'read', 'send'] },
+        provider: { enum: ['claude', 'codex'] }
+      },
       required: ['action']
     });
-    expect(advertised?.inputSchema?.properties).not.toHaveProperty('limit');
+    expect(advertised?.inputSchema?.properties).toHaveProperty('limit');
+    expect(advertised?.inputSchema?.properties).toHaveProperty('message');
     expect(advertised?.inputSchema?.properties).not.toHaveProperty('call_id');
     expect(advertised?.inputSchema?.properties).not.toHaveProperty('part');
 
@@ -1477,11 +1485,11 @@ describe('capability gating', () => {
     });
     expect(failed(missingSession)).toBe(true);
 
-    const oldLimit = await core('tools/call', {
+    const cliLimitWithoutProvider = await core('tools/call', {
       name: 'session',
       arguments: { action: 'search', limit: 40 }
     });
-    expect(failed(oldLimit)).toBe(true);
+    expect(failed(cliLimitWithoutProvider)).toBe(true);
   });
 
   it('starts a fresh install with every capability effective', () => {
@@ -1798,10 +1806,118 @@ describe('tool annotations', () => {
     const session = toolList(await core('tools/list')).find((tool) => tool.name === 'session');
     expect(read?.annotations?.readOnlyHint).toBe(true);
     expect(read?.annotations?.destructiveHint).toBe(false);
-    // Both session actions are inspection only. Marking this as a write tool makes clients
-    // apply confirmation/write semantics to searching and reading local recordings.
-    expect(session?.annotations?.readOnlyHint).toBe(true);
+    // The same schema now contains an explicit CLI send action, so the static annotation is
+    // pessimistic even though ChatGPT-recording search/read remain inspection only.
+    expect(session?.annotations?.readOnlyHint).toBe(false);
     expect(session?.annotations?.destructiveHint).toBe(false);
+  });
+});
+
+describe('headless Claude through the Core surface', () => {
+  const sessionSchema = async () => toolList(await core('tools/list')).find((tool) => tool.name === 'session');
+
+  it('keeps invoke absent from the combined recording/CLI tool until the operator switches it on', async () => {
+    ctx.sessionTools = true;
+    const before = await sessionSchema();
+    expect(before?.inputSchema?.properties?.action?.enum).toEqual(['search', 'read', 'send']);
+    expect(before?.inputSchema?.properties).not.toHaveProperty('prompt');
+    expect(before?.description).not.toContain('invoke');
+
+    // A stale snapshot naming the action is refused by the schema, not by a process.
+    const early = await core('tools/call', {
+      name: 'session',
+      arguments: { action: 'invoke', provider: 'claude', prompt: 'hello' }
+    });
+    expect(failed(early)).toBe(true);
+    expect(textOf(early)).toMatch(/Input validation error|INVALID_ARGUMENTS/);
+  });
+
+  it('adds invoke with its fields, drops the read-only hints and stays inside the per-tool budget', async () => {
+    ctx.sessionTools = true;
+    ctx.headlessClaudeTools = true;
+    const advertised = await sessionSchema();
+    expect(advertised?.inputSchema?.properties?.action?.enum).toEqual(['search', 'read', 'send', 'invoke']);
+    expect(advertised?.inputSchema?.properties?.provider?.enum).toEqual(['claude', 'codex']);
+    expect(advertised?.inputSchema?.properties?.model?.enum).toEqual(['fable', 'opus', 'sonnet', 'haiku']);
+    expect(advertised?.inputSchema?.properties?.profile?.enum).toEqual(['reasoning', 'coding']);
+    for (const field of ['prompt', 'workdir', 'timeout_seconds', 'allow_model_fallback']) {
+      expect(advertised?.inputSchema?.properties).not.toHaveProperty('max_turns');
+      expect(advertised?.inputSchema?.properties, field).toHaveProperty(field);
+    }
+    expect(advertised?.annotations?.readOnlyHint).toBe(false);
+    expect(advertised?.annotations?.openWorldHint).toBe(true);
+    expect(advertised?.annotations?.destructiveHint).toBe(false);
+    const bytes = Buffer.byteLength(JSON.stringify(advertised), 'utf8');
+    expect(bytes, `session schema with invoke is ${bytes} bytes`).toBeLessThan(3_000);
+  });
+
+  it('refuses invoke while the live switch is off even though the schema still offers it', async () => {
+    ctx.sessionTools = true;
+    ctx.headlessClaudeTools = true;
+    await core('tools/list');
+    ctx.headlessClaudeTools = false;
+    const reply = await core('tools/call', {
+      name: 'session',
+      arguments: { action: 'invoke', provider: 'claude', prompt: 'hello' }
+    });
+    expect(failed(reply)).toBe(true);
+    expect(textOf(reply)).toContain('FEATURE_DISABLED');
+    expect(textOf(reply)).toContain('Allow headless Claude invocation');
+  });
+
+  it('validates the invoke envelope before anything runs', async () => {
+    ctx.sessionTools = true;
+    ctx.headlessClaudeTools = true;
+    for (const args of [
+      { action: 'invoke', prompt: 'hello' },
+      { action: 'invoke', provider: 'openai', prompt: 'hello' },
+      { action: 'invoke', provider: 'claude' },
+      { action: 'invoke', provider: 'claude', prompt: 'hello', model: 'gpt-5' },
+      { action: 'invoke', provider: 'claude', prompt: 'hello', profile: 'yolo' },
+      { action: 'invoke', provider: 'claude', prompt: 'hello', timeout_seconds: 5 },
+      { action: 'invoke', provider: 'claude', prompt: 'hello', max_turns: 3 },
+      { action: 'invoke', provider: 'claude', prompt: 'hello', query: 'mixed' },
+      { action: 'search', prompt: 'hello' },
+      { action: 'read', session_id: 'abcdefgh', model: 'fable' }
+    ]) {
+      const reply = await core('tools/call', { name: 'session', arguments: args });
+      expect(failed(reply), JSON.stringify(args)).toBe(true);
+      expect(textOf(reply), JSON.stringify(args)).toMatch(/Input validation error|INVALID_ARGUMENTS/);
+    }
+  });
+
+  it('refuses a working directory outside the approved roots before any process exists', async () => {
+    ctx.sessionTools = true;
+    ctx.headlessClaudeTools = true;
+    for (const workdir of ['/private', '/workspace/../private', outside]) {
+      const reply = await core('tools/call', {
+        name: 'session',
+        arguments: { action: 'invoke', provider: 'claude', prompt: 'hello', workdir }
+      });
+      expect(failed(reply), workdir).toBe(true);
+      expect(textOf(reply), workdir).not.toContain('status: ');
+    }
+    const missing = await core('tools/call', {
+      name: 'session',
+      arguments: { action: 'invoke', provider: 'claude', prompt: 'hello', workdir: '/workspace/does-not-exist' }
+    });
+    expect(failed(missing)).toBe(true);
+    expect(textOf(missing)).not.toContain('status: ');
+  });
+
+  it('refuses the coding profile without its own switch, in read-only mode, and without write permissions', async () => {
+    ctx.sessionTools = true;
+    ctx.headlessClaudeTools = true;
+    ctx.readOnly = false;
+    ctx.caps = withCaps({ edit: true, create: true });
+    // The operator switch is off in the test config.
+    const unswitched = await core('tools/call', {
+      name: 'session',
+      arguments: { action: 'invoke', provider: 'claude', prompt: 'hello', profile: 'coding' }
+    });
+    expect(failed(unswitched)).toBe(true);
+    expect(textOf(unswitched)).toContain('PROFILE_DISABLED');
+    expect(textOf(unswitched)).toContain('Allow the coding profile');
   });
 });
 
@@ -3444,6 +3560,7 @@ describe('exec sessions belong to the chat that opened them', () => {
       `write_stdin failed: session ${sessionId} is not proven to belong to this durable Chat On Steroids session.`
     );
     expect(textOf(stranger)).not.toContain('echo=stolen');
+    expect(textOf(stranger)).toContain('This refusal concerns this process id, not Read-only mode');
 
     // Caller identity is the authorization boundary. An unattributed call must not inherit
     // the owner's authority merely because it can guess the small numeric session id.
@@ -3455,6 +3572,7 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(unproven.body.result?.isError).toBe(true);
     expect(textOf(unproven)).toContain('is not proven to belong to this durable Chat On Steroids session');
     expect(textOf(unproven)).not.toContain('echo=anon');
+    expect(textOf(unproven)).toContain('This refusal concerns this process id, not Read-only mode');
 
     // The replacement session contract exposes recordings only; the removed status action no
     // longer gives either owner or stranger a side channel into the process manager. Terminal
@@ -3654,6 +3772,10 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(textOf(later)).toContain('background-e2e-once');
     expect(textOf(later)).not.toContain(`write_stdin(session_id=${sessionId}`);
 
+    // Publication receipts require a strictly later timestamp; loopback calls can
+    // otherwise share one millisecond even though this response was already read.
+    const receivedAt = Date.now();
+    await vi.waitFor(() => expect(Date.now()).toBeGreaterThan(receivedAt), { timeout: 1000, interval: 1 });
     const after = await asChat('wfr_background_owner', 'read', { paths: ['/workspace/src/app.ts'] });
     expect(textOf(after)).not.toContain(`Background session ${sessionId}`);
     expect(unifiedExecManager.exitedUnread(owned)).toEqual([]);

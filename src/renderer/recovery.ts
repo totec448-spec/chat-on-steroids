@@ -1,0 +1,51 @@
+import type { RecoveryCountdown } from '../shared/recovery.js';
+import { el, icon } from './dom.js';
+import { t, ui } from './i18n.js';
+
+/** Only the displayed seconds tick here. Main owns every deadline and cancellation. */
+export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly RecoveryCountdown[], now = Date.now()): boolean {
+  const key = JSON.stringify(countdowns);
+  if (!countdowns.length) { delete host.dataset.countdowns; return false; }
+  if (host.dataset.countdowns !== key) {
+    host.replaceChildren(...countdowns.map(countdown => {
+      const row = el('div', 'recovery-notice');
+      const label = el('span', 'queue-label', () => {
+        if (countdown.next) {
+          const reason = countdown.kind === 'post-reload' ? t('Reloaded') :
+            countdown.kind === 'thinking-failed' ? t('Thinking failed') : t('ChatGPT still generating');
+          const next = countdown.next === 'queue' ? t('Queued message') : countdown.next === 'goal' ? t('Goal') : t('Loop');
+          return t('{0} · next: {1}', [reason, next]);
+        }
+        return countdown.kind === 'unattributed' ? t('Unattributed call') :
+        countdown.kind === 'unattributed-wait' ? t('Unattributed activity · awaiting attribution') :
+        countdown.kind === 'silence' ? t('No recent activity') :
+        countdown.kind === 'post-reload' ? t('Reloaded · waiting for activity') :
+        countdown.kind === 'thinking-failed' ? t('Thinking failed · waiting for activity') : t('ChatGPT still generating · waiting for activity');
+      });
+      ui(row, 'title', () => countdown.kind === 'unattributed-wait'
+        ? t('An attributed MCP call clears this chat. The five-minute window starts with the first unattributed call.')
+        : countdown.kind === 'unattributed'
+        ? t('This chat is a possible source. An attributed MCP call cancels its reload.')
+        : countdown.kind === 'silence' ? t('New activity cancels this countdown.')
+        : t('New activity cancels recovery. If ChatGPT is still busy when checked, the wait extends by five minutes.'));
+      const timer = el('span', 'recovery-countdown');
+      timer.setAttribute('role', 'timer');
+      timer.setAttribute('aria-live', 'off');
+      row.append(icon('i-pulse'), label, timer);
+      return row;
+    }));
+    host.dataset.countdowns = key;
+  }
+  host.hidden = countdowns.every(countdown => (countdown.visibleAt ?? 0) > now);
+  host.querySelectorAll<HTMLElement>('.recovery-countdown').forEach((timer, index) => {
+    const countdown = countdowns[index]!;
+    timer.closest<HTMLElement>('.recovery-notice')!.hidden = (countdown.visibleAt ?? 0) > now;
+    const seconds = Math.max(0, Math.ceil((countdown.deadline - now) / 1000));
+    const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    const text = countdown.kind === 'unattributed' || countdown.kind === 'silence'
+      ? seconds ? t('Reload in {0}', [time]) : t('Reload pending…')
+      : seconds ? t('Check in {0}', [time]) : t('Checking for activity…');
+    if (timer.textContent !== text) timer.textContent = text;
+  });
+  return true;
+}

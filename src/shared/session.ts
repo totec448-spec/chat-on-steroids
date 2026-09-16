@@ -179,6 +179,8 @@ export const ATTRIBUTION_LABELS: Record<CallAttribution, string> = {
 };
 
 export interface ToolCallRecord {
+  /** Child lifetime, independent of the initial tool response and output delivery. */
+  process?: { sessionId: string; completedAt?: number; exitCode?: number | null; durationMs?: number };
   /** Recorded model evidence, when known; absence is not the current picker selection. */
   model?: string;
   reasoningEffort?: ReasoningEffort;
@@ -208,6 +210,17 @@ export interface ToolCallRecord {
 }
 
 export type MessageState = 'streaming' | 'final';
+
+/** A persisted launch acknowledgement never proves that its child is still alive. */
+export function toolCallSummary(call: Pick<ToolCallRecord, 'tool' | 'summary'>): ActivitySummary {
+  return call.tool === 'exec_command' && call.summary.metric === 'running'
+    ? { ...call.summary, metric: 'started' } : call.summary;
+}
+
+/** Process-status revisions are delivery cursors, not new model work. */
+export function workSequence(event: SessionEvent): number {
+  return event.kind === 'tool_call' ? event.origin ?? event.seq : event.seq;
+}
 
 /** Reads current outcomes and only self-proving legacy `error` rows; ambiguous legacy errors abstain. */
 export function normalizedToolOutcome(
@@ -325,7 +338,7 @@ export type SessionEvent =
   | (BaseEvent & { kind: 'turn_start'; detail?: string })
   | (BaseEvent & { kind: 'turn_end'; outcome: TurnOutcome; detail?: string; reason?: 'thinking_failed' })
   | (BaseEvent & { kind: 'chat_error'; message: StoredText; recoverable?: boolean; blocking?: boolean; reason?: 'thinking_failed' })
-  | (BaseEvent & { kind: 'tool_call'; call: ToolCallRecord })
+  | (BaseEvent & { kind: 'tool_call'; call: ToolCallRecord; origin?: number })
   /**
    * An app-authored line. `continuation` names the Compact & Resume it is about, so the
    * timeline can fold the note into that compaction's one row instead of showing it loose.
@@ -822,13 +835,16 @@ export function estimateTokens(text: string): number {
 }
 
 /** Recorder clipping changes storage, not the text already sent to the model. */
-function storedTextTokens(value: StoredText): number {
+export function storedTextTokens(value: StoredText): number {
   const chars = value.truncated && Number.isSafeInteger(value.chars) && value.chars >= 0
     ? value.chars : value.text.length;
   return Math.ceil(chars / 4);
 }
 
-/** Token weight of original recorded text; previews, assets and HTML are not extra context. */
+/** Local estimation policy for one MCP return, independent of recorder/transport limits. */
+export const MAX_TOOL_RESULT_TOKENS = 10_000;
+
+/** Token weight of recorded context; previews, assets and HTML are not extra context. */
 export function eventTokens(event: SessionEvent): number {
   switch (event.kind) {
     case 'user_message':
@@ -851,7 +867,7 @@ export function eventTokens(event: SessionEvent): number {
     case 'tool_call':
       return (
         storedTextTokens(event.call.args) +
-        storedTextTokens(event.call.result) +
+        Math.min(MAX_TOOL_RESULT_TOKENS, storedTextTokens(event.call.result)) +
         estimateTokens(event.call.summary.title)
       );
     case 'handoff':
@@ -890,6 +906,7 @@ export function foldProgress(events: readonly SessionEvent[]): SessionEvent[] {
     if (!event) continue;
     let key: string | null = null;
     if (event.kind === 'progress' && event.progressId) key = `progress\u0000${event.progressId}`;
+    else if (event.kind === 'tool_call') key = `tool_call\u0000${event.call.callId}`;
     else if (event.kind === 'page_tool' && event.messageId) key = `page_tool\u0000${event.messageId}`;
     if (!key) continue;
     const at = anchor.get(key);
@@ -902,6 +919,8 @@ export function foldProgress(events: readonly SessionEvent[]): SessionEvent[] {
       out[at] = { ...held, message: event.message };
     } else if (held && held.kind === 'page_tool' && event.kind === 'page_tool') {
       out[at] = { ...held, label: event.label };
+    } else if (held && held.kind === 'tool_call' && event.kind === 'tool_call') {
+      out[at] = event.seq >= held.seq ? { ...event, origin: held.origin ?? held.seq, time: held.time } : held;
     }
     out[index] = null;
   }

@@ -26,6 +26,7 @@ import {
   type GoalSettings,
   type MultiAgentSettings,
   type RemoteSteeringSettings,
+  type HeadlessClaudeSettings,
   type Root,
   type SessionSettings
 } from '../shared/types.js';
@@ -182,6 +183,12 @@ const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
  * alike, so there is no path through this file that turns it on.
  */
 const DEFAULT_REMOTE_STEERING: RemoteSteeringSettings = { enabled: false };
+/**
+ * Headless Claude is off everywhere for the same reason: nothing about installing this app is
+ * consent to let ChatGPT spend a Claude subscription, and a config the app cannot trust is not
+ * consent either. Both switches are opted into by hand, and the coding profile separately.
+ */
+const DEFAULT_HEADLESS_CLAUDE: HeadlessClaudeSettings = { enabled: false, allowCodingProfile: false };
 
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
@@ -287,6 +294,9 @@ const configSchema = z.object({
   capabilities: capabilitiesSchema,
   readOnly: z.boolean(),
   tunnel: z.object({
+    profileId: z.string().min(1).max(64).optional(),
+    profileName: z.string().trim().min(1).max(80).optional(),
+    profileEpoch: z.number().int().nonnegative().optional(),
     kind: z.enum(['openai', 'cloudflared', 'manual']),
     tunnelId: z.string().max(128),
     // Optional with an empty default, so a config written before the connector split
@@ -296,6 +306,10 @@ const configSchema = z.object({
     pluginsTunnelId: z.string().max(128).optional().default(''),
     binaryPath: z.string().max(4096)
   }),
+  setupProfiles: z.array(z.object({
+    id: z.string().min(1).max(64), name: z.string().trim().min(1).max(80),
+    tunnelId: z.string().max(128), desktopTunnelId: z.string().max(128), pluginsTunnelId: z.string().max(128)
+  })).max(11).refine(rows => new Set(rows.map(row => row.id)).size === rows.length, 'Duplicate setup profile').optional(),
   ui: z.object({
     chatBrowser: z.enum(CHAT_BROWSERS).optional().default('chrome'),
     developerMode: z.boolean().optional(),
@@ -378,6 +392,13 @@ const configSchema = z.object({
     .object({ enabled: z.boolean().optional().default(DEFAULT_REMOTE_STEERING.enabled) })
     .optional()
     .default({ ...DEFAULT_REMOTE_STEERING }),
+  headlessClaude: z
+    .object({
+      enabled: z.boolean().optional().default(DEFAULT_HEADLESS_CLAUDE.enabled),
+      allowCodingProfile: z.boolean().optional().default(DEFAULT_HEADLESS_CLAUDE.allowCodingProfile)
+    })
+    .optional()
+    .default({ ...DEFAULT_HEADLESS_CLAUDE }),
   // An empty model id is repaired rather than rejected: the id is free text from a
   // provider listing that changes weekly, and a config that lost it must still load with
   // every root and permission in it intact.
@@ -498,6 +519,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     multiAgent: { ...FIRST_LAUNCH_MULTI_AGENT },
     artifacts: { ...DEFAULT_ARTIFACTS },
     remoteSteering: { ...DEFAULT_REMOTE_STEERING },
+    headlessClaude: { ...DEFAULT_HEADLESS_CLAUDE },
     goal: { ...DEFAULT_GOAL },
     mcp: { ...DEFAULT_MCP }
   };
@@ -521,6 +543,7 @@ function conservativeRecoveryConfig(): Config {
     // into the user's chat, whatever the unreadable file said — nor to have an off-machine
     // envelope steering this one.
     remoteSteering: { ...DEFAULT_REMOTE_STEERING },
+    headlessClaude: { ...DEFAULT_HEADLESS_CLAUDE },
     goal: { ...DEFAULT_GOAL }
   };
 }

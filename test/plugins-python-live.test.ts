@@ -7,8 +7,8 @@ import { initDurableStore, flushDurable, resetDurableForTests } from '../src/mai
 import { pluginCatalog } from '../src/main/plugins/catalog.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
-/** Live regression: upstream Fetch's loose mcp>=1.1.3 otherwise resolves incompatible SDK v2. */
-it.runIf(process.env.COS_PLUGIN_LIVE_TEST === '1')('installs the reviewed Python dependency pins and discovers the real Fetch server', async () => {
+/** Live regression: reviewed Fetch release and bounded Windows installation paths. */
+it.runIf(process.env.COS_PLUGIN_LIVE_TEST === '1')('installs the reviewed Fetch release and discovers its real server', async () => {
   const temporary = await makeTempDir('cos-python-plugin-live-');
   const packageData = 'venv/Lib/site-packages/jsonschema_specifications/schemas/draft201909/metaschema.json';
   const legacySuffix = path.win32.join('plugins', '0'.repeat(36), '0'.repeat(36), packageData);
@@ -22,7 +22,7 @@ it.runIf(process.env.COS_PLUGIN_LIVE_TEST === '1')('installs the reviewed Python
   });
   try {
     const source = pluginCatalog.find(recipe => recipe.id === 'fetch')!.source;
-    expect(source.dependencies).toEqual([{ package: 'mcp', version: '1.30.0' }]);
+    expect(source.dependencies).toBeUndefined();
     initDurableStore(directory);
     await manager.initialize(directory);
     const installed = (await manager.install({ catalogId: 'fetch' })).plugins[0]!;

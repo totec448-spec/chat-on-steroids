@@ -18,6 +18,8 @@ import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { filterSettingsSections } from '../src/renderer/dom.js';
+import { sessionWorkingAt } from '../src/shared/session-activity.js';
+import { CHAT_ACTIVE_MS, type SessionSummary } from '../src/shared/session.js';
 
 let document: Document;
 let css = '';
@@ -55,11 +57,12 @@ it('searches whole settings sections without empty headings, orphaned controls o
   expect(document.getElementById('settingsSearchEmpty')!.hidden).toBe(true);
 });
 
-it('exposes Goal tool context as an opt-in setting wired into the existing form', () => {
+it('limits the existing tool-detail preference to handoff briefs', () => {
   const toggle = document.getElementById('goalIncludeToolCalls') as HTMLInputElement;
   expect(toggle.type).toBe('checkbox');
   expect(toggle.checked).toBe(false);
-  expect(toggle.closest('label')?.textContent).toContain('recorded tool arguments and results');
+  expect(toggle.closest('label')?.textContent).toContain('Include tool details in handoffs');
+  expect(toggle.closest('label')?.textContent).toContain('Goal and Loop use user messages and assistant updates and answers');
   expect(chatSource).toContain("includeToolCalls: $<HTMLInputElement>('goalIncludeToolCalls').checked");
   expect(chatSource).toContain("applyChatChecked($<HTMLInputElement>('goalIncludeToolCalls')");
 });
@@ -85,7 +88,7 @@ function rule(selector: string): string {
 
 describe('the session card header', () => {
   it('indents rendered project tasks once and gives worker children their additional depth', () => {
-    expect(rule('.project-group > .sess, .project-group > .worker-group, .project-show-more')).toContain('margin-left: 20px');
+    expect(rule('.project-group > .sess, .project-group > .worker-group')).toContain('margin-inline-start: 24px');
     expect(rule('.worker-group')).toContain('padding-left: 16px');
     expect(css).not.toContain('.project-group .session-row');
   });
@@ -168,8 +171,11 @@ describe('a session row', () => {
   it('does not call an idle prime active merely because it still owns the run', () => {
     expect(chatSource).toMatch(/else if \(agent && agent\.role !== 'prime'\)/);
     // Idle means idle: generic recording traffic cannot renew the exact tool clock.
-    expect(chatSource).toMatch(/Math\.max\(summary\.lastAssistantFinalAt \?\? 0, summary\.lastTurnEndAt \?\? 0\)/);
-    expect(chatSource).toMatch(/lastActivityAt > finishedAt/);
+    const summary = { startedAt: 100, lastToolCallAt: 200, lastAssistantFinalAt: 300,
+      lastTurnEndAt: 300, updatedAt: 400, activeTurnId: 'old-open-turn', agents: ['prime'],
+      endedAt: null, origin: null } as SessionSummary;
+    expect(sessionWorkingAt(summary, 400)).toBe(false);
+    expect(sessionWorkingAt({ ...summary, lastToolCallAt: 350 }, 400)).toBe(true);
   });
 
   /**
@@ -178,8 +184,12 @@ describe('a session row', () => {
    * one a user most wants to see is still going - as idle.
    */
   it('uses session start and exact calls rather than reload-generated turn boundaries for visible activity', () => {
-    expect(chatSource).toMatch(/Math\.max\(summary\.startedAt, summary\.lastToolCallAt \?\? 0\)/);
-    expect(chatSource).toMatch(/return summary\.endedAt === null && !workerReportedFinish\(summary\) && recentChatActivity\(summary\)/);
+    const summary = { startedAt: 100, lastToolCallAt: null, endedAt: null, origin: null,
+      activeTurnId: 'reload-turn', updatedAt: 100 + CHAT_ACTIVE_MS } as SessionSummary;
+    expect(sessionWorkingAt(summary, 101)).toBe(true);
+    expect(sessionWorkingAt(summary, 101 + CHAT_ACTIVE_MS)).toBe(false);
+    expect(sessionWorkingAt({ ...summary, activityExpiresAt: 100 + 10 * 60_000 }, 101 + CHAT_ACTIVE_MS)).toBe(true);
+    expect(sessionWorkingAt({ ...summary, activityExpiresAt: null }, 101)).toBe(false);
     expect(chatSource).toMatch(/else if \(!agent && workerReportedFinish\(summary\)\) badges\.push\(AGENT_BADGE\.sleeping\)/);
     expect(chatSource).toMatch(/if \(sessionWorking\(summary\)\) badges\.push\(AGENT_BADGE\.active\)/);
     expect(chatSource).toMatch(/scheduleToolActivityExpiry/);
@@ -413,7 +423,7 @@ describe('the settings sheet', () => {
   it('asks for a single compaction threshold', () => {
     const pane = document.querySelector('.view[data-view="settings"]')!;
     const numbers = [...pane.querySelectorAll('input[type="number"]')].map((input) => input.id);
-    expect(numbers).toEqual(['sessRetain', 'autoCompactTokens', 'maWorkers']);
+    expect(numbers).toEqual(['maWorkers', 'sessRetain', 'autoCompactTokens']);
     for (const id of ['sessAdvisory', 'sessLimit']) {
       expect(document.getElementById(id), `#${id} is back`).toBeNull();
     }

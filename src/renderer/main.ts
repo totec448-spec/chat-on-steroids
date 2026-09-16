@@ -4,6 +4,7 @@ import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
+import { initSetupGuide } from './setup-guide.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
  *
@@ -43,6 +44,7 @@ declare global {
 
 const api = window.api;
 initLanguage();
+initSetupGuide();
 
 /** Same shape the platform uses; mirrored here only to grey out step 2 until it is valid. */
 const TUNNEL_ID_PATTERN = /^tunnel_[0-9a-f]{32}$/;
@@ -110,8 +112,10 @@ function applyChecked(control: HTMLInputElement, next: boolean, previous?: boole
 }
 /** The one expanded permission group, or null. One at a time keeps the layout still. */
 let openGroup: string | null = null;
-/** Whether the finished setup steps are unfolded again. Reset on every app start. */
-let showAllSteps = false;
+/** Null follows setup completion; an explicit guide choice survives status pushes. */
+let showAllSteps: boolean | null = null;
+let setupProfileBusy = false;
+let setupKeySave: Promise<boolean> = Promise.resolve(true);
 
 // ------------------------------------------------------------------- tabs
 
@@ -446,6 +450,8 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
     capabilities,
     readOnly,
     tunnel: {
+      profileId: previous.tunnel.profileId,
+      profileEpoch: previous.tunnel.profileEpoch,
       kind: $<HTMLSelectElement>('tunnelKind').value as 'openai' | 'cloudflared' | 'manual',
       tunnelId: $<HTMLInputElement>('tunnelId').value.trim(),
       desktopTunnelId: $<HTMLInputElement>('desktopTunnelId').value.trim(),
@@ -487,10 +493,6 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
   const toolSurfaceChanged =
     previous.sessions.record !== patch.sessions.record ||
     previous.multiAgent.enabled !== patch.multiAgent.enabled ||
-    // The user's own connector instructions are part of what each server advertises about
-    // itself, and ChatGPT reads that once when it loads the tools. Editing them is therefore
-    // the same kind of change as adding a tool: it needs the same reconnect to be seen.
-    (previous.mcp?.instructions ?? '') !== patch.mcp.instructions ||
     (Object.keys(patch.capabilities) as Capability[]).some((cap) => {
       const before = previous.capabilities[cap] && !(previous.readOnly && WRITE_CAPABILITIES.includes(cap));
       const after = patch.capabilities[cap] && !(patch.readOnly && WRITE_CAPABILITIES.includes(cap));
@@ -506,6 +508,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     mcp: previous.mcp ?? { instructions: '' },
     multiAgent: previous.multiAgent,
     remoteSteering: previous.remoteSteering,
+    headlessClaude: previous.headlessClaude,
     goal: previous.goal
   };
   const next = await run(api.saveSettings(patch, base));
@@ -859,7 +862,88 @@ function paintUpdate(next: AppState): void {
   }
 }
 
+function paintSetupProfiles(next: AppState): void {
+  const tunnel = next.config.tunnel;
+  const select = $<HTMLButtonElement>('setupProfile');
+  const menu = $('setupProfileMenu');
+  const profiles = [{ id: tunnel.profileId ?? 'default', name: tunnel.profileName ?? t('Default') }, ...(next.config.setupProfiles ?? [])];
+  const signature = JSON.stringify(profiles);
+  if (select.dataset.profiles !== signature) {
+    menu.replaceChildren(...profiles.map(profile => {
+      const row = el('div', 'setup-profile-option');
+      const choose = document.createElement('button');
+      choose.type = 'button'; choose.className = 'btn'; choose.textContent = profile.name;
+      choose.translate = false;
+      choose.dataset.profileId = profile.id;
+      choose.setAttribute('aria-pressed', String(profile.id === (tunnel.profileId ?? 'default')));
+      choose.addEventListener('click', () => void changeSetupProfile('select', profile.id));
+      const remove = document.createElement('button');
+      remove.type = 'button'; remove.className = 'btn'; remove.dataset.removeProfileId = profile.id;
+      ui(remove, 'title', () => t('Delete profile: {0}', [profile.name]));
+      ui(remove, 'aria-label', () => t('Delete profile: {0}', [profile.name]));
+      remove.append(icon('i-trash'));
+      remove.addEventListener('click', () => void changeSetupProfile('remove', profile.id));
+      row.append(choose, remove); return row;
+    }));
+    select.dataset.profiles = signature;
+  }
+  $('setupProfileCurrent').textContent = profiles[0]!.name;
+  select.disabled = setupProfileBusy;
+  for (const button of menu.querySelectorAll<HTMLButtonElement>('button')) {
+    button.disabled = setupProfileBusy || (button.dataset.removeProfileId !== undefined && profiles.length === 1);
+  }
+  $<HTMLButtonElement>('setupProfileAdd').disabled = setupProfileBusy || profiles.length >= 12;
+  $<HTMLInputElement>('setupProfileName').disabled = setupProfileBusy;
+  for (const id of ['tunnelId', 'desktopTunnelId']) $<HTMLInputElement>(id).disabled = setupProfileBusy;
+  $<HTMLInputElement>('apiKey').disabled = setupProfileBusy || next.secureStorage?.available === false;
+  $<HTMLButtonElement>('removeApiKey').disabled = setupProfileBusy || next.secureStorage?.available === false;
+}
+
+async function changeSetupProfile(action: 'add' | 'select' | 'remove', id?: string): Promise<void> {
+  if (!state || setupProfileBusy) return;
+  const nameInput = $<HTMLInputElement>('setupProfileName');
+  const name = nameInput.value.trim();
+  if (action === 'add' && !name) { nameInput.focus(); return; }
+  setupProfileBusy = true; paintSetupProfiles(state);
+  try {
+    await settingsSaveQueue;
+    if (!(await setupKeySave)) return;
+    const next = await run(action === 'add' ? api.addSetupProfile(name)
+      : action === 'remove' ? api.removeSetupProfile(id!) : api.selectSetupProfile(id!));
+    if (!next) return;
+    requestedSettings = null;
+    $<HTMLInputElement>('apiKey').value = '';
+    if (action === 'add') {
+      if (nameInput.value.trim() === name) nameInput.value = '';
+      $<HTMLDialogElement>('setupProfileDialog').close();
+    }
+    $('setupProfileMenu').hidePopover();
+    showAllSteps = null;
+    apply(next);
+  } finally {
+    setupProfileBusy = false;
+    if (state) paintSetupProfiles(state);
+  }
+}
+$('setupProfileAdd').addEventListener('click', () => {
+  $<HTMLDialogElement>('setupProfileDialog').showModal();
+  $('setupProfileName').focus();
+});
+$('setupProfileCancel').addEventListener('click', () => $<HTMLDialogElement>('setupProfileDialog').close());
+$('setupProfileForm').addEventListener('submit', event => { event.preventDefault(); void changeSetupProfile('add'); });
+
+function paintSetupFields(): void {
+  for (const id of ['tunnelId', 'apiKey']) {
+    const input = $<HTMLInputElement>(id);
+    const stored = id === 'apiKey' && state?.hasApiKey === true;
+    input.classList.toggle('is-empty', !stored && input.value.trim() === '');
+    input.setAttribute('aria-required', String(!stored));
+  }
+}
+
 function apply(next: AppState): void {
+  // An older key/status response must not restore a profile retired by a newer switch.
+  if ((next.config.tunnel.profileEpoch ?? 0) < (state?.config.tunnel.profileEpoch ?? 0)) return;
   applyPluginsState(next);
   const previousState = state;
   state = next;
@@ -997,6 +1081,8 @@ function apply(next: AppState): void {
   const apiKey = $<HTMLInputElement>('apiKey');
   ui(apiKey, 'placeholder', () => next.hasApiKey ? t("•••••••• stored") : 'sk-…');
   apiKey.disabled = !secureStorageAvailable;
+  paintSetupFields();
+  paintSetupProfiles(next);
   ui($('apiKeyState'), 'textContent', () => !secureStorageAvailable
     ? (next.secureStorage?.detail ?? t("Secure credential storage is unavailable."))
     : next.hasApiKey
@@ -1032,7 +1118,7 @@ function apply(next: AppState): void {
   ui(chatgptNote, 'textContent', () => status.lastRequestAt === null
       ? t("ChatGPT has not called this app yet.")
       : status.lastToolCallAt === null
-        ? t("ChatGPT connected {0} but has never run a tool. If it says “does not support developer MCPs”, switch Developer mode back on in ChatGPT → Settings → Apps & Connectors → Advanced.", [ago(status.lastRequestAt)])
+        ? t("ChatGPT connected {0} but has never run a tool. Check Developer mode in ChatGPT → Settings → Security and login.", [ago(status.lastRequestAt)])
         : unverified.length > 0
           ? // One connector working is not the whole setup. Naming the missing one is the
             // difference between "something is off" and knowing what to go and create.
@@ -1046,7 +1132,8 @@ function apply(next: AppState): void {
   // so its card must survive the tidy collapse instead of disappearing behind "Show all
   // steps" — otherwise a half-done Desktop setup reads as a complete one.
   cards.classList.toggle('has-unfinished', unverified.length > 0);
-  cards.replaceChildren(...connectorCards(next));
+  const desktopExpanded = cards.querySelector<HTMLDetailsElement>('details')?.open ?? false;
+  cards.replaceChildren(...connectorCards(next, desktopExpanded));
 
   // Step marks: everything before the first unfinished step counts as done.
   const order = ['folder', 'tunnel', 'key', 'connect', 'chatgpt', 'browser'];
@@ -1079,10 +1166,12 @@ function apply(next: AppState): void {
   // Setup that is finished should stop reading like a to-do list: the instructions
   // collapse away so the page fits without scrolling, and come back on request.
   const allDone = current === null;
-  $('wizard').classList.toggle('is-tidy', allDone && !showAllSteps);
+  const tidy = showAllSteps === null ? allDone : !showAllSteps;
+  $('wizard').classList.toggle('is-tidy', tidy);
   const expand = $<HTMLButtonElement>('wizExpand');
-  expand.hidden = !allDone;
-  ui(expand, 'textContent', () => showAllSteps ? t("Hide finished steps") : t("Show all steps"));
+  expand.hidden = false;
+  expand.setAttribute('aria-expanded', String(!tidy));
+  ui(expand, 'textContent', () => tidy ? t("Show setup guide") : t("Hide setup guide"));
 
   const needsBinary = config.tunnel.kind !== 'manual';
   ui($('binaryState'), 'textContent', () => !needsBinary
@@ -1136,17 +1225,21 @@ function copyRow(label: string | (() => string), value: string, what: string): H
  * connector called "my pc" with a description the user invented is one the model may
  * never reach for, and that failure looks exactly like the app being broken.
  */
-function connectorCards(next: AppState): HTMLElement[] {
+function connectorCards(next: AppState, desktopExpanded: boolean): HTMLElement[] {
   const { status, config } = next;
   return status.surfaces
     .filter((surface) => surface.id !== 'plugins' && (surface.id !== 'desktop' || (next.platform?.desktopAutomation ?? true)))
     .map((surface) => {
-    const card = el('div', `connector is-${surface.state}`);
+    const optional = surface.id === 'desktop';
+    const card = optional ? document.createElement('details') : el('div');
+    card.className = `connector is-${surface.state}`;
+    if (optional) (card as HTMLDetailsElement).open = desktopExpanded;
 
-    const head = el('div', 'connector-head');
+    const head = optional ? document.createElement('summary') : el('div');
+    head.className = 'connector-head';
     head.append(
       el('h4', '', surface.connectorName),
-      el('span', 'tag', () => t(surface.optional ? 'optional' : 'required')),
+      el('span', `tag${surface.optional ? ' is-optional' : ''}`, () => t(surface.optional ? 'optional' : 'required')),
       el('span', `pill is-${surface.state}`, () => t(SURFACE_STATE_TEXT[surface.state]))
     );
     card.append(head, el('p', 'hint', () => t(surface.cardSummary)));
@@ -1589,7 +1682,7 @@ window.addEventListener('drop', (event) => event.preventDefault());
 }
 
 $('wizExpand').addEventListener('click', () => {
-  showAllSteps = !showAllSteps;
+  showAllSteps = $('wizard').classList.contains('is-tidy');
   if (state) apply(state);
 });
 $('updateGet').addEventListener('click', () => void run(api.openLink(RELEASES_PAGE)));
@@ -1634,22 +1727,29 @@ $('copyLogJson').addEventListener('click', async () => {
 });
 
 // The API key is written on blur so it is not saved keystroke by keystroke.
-$('apiKey').addEventListener('blur', async () => {
+for (const id of ['tunnelId', 'apiKey']) $(id).addEventListener('input', paintSetupFields);
+$('apiKey').addEventListener('blur', () => {
   const input = $<HTMLInputElement>('apiKey');
   const submitted = input.value;
   if (submitted === '') return;
-  const next = await run(api.setApiKey(submitted));
-  if (next) {
+  const owner = state?.config.tunnel.profileId;
+  setupKeySave = (async () => {
+    const next = await run(api.setApiKey(submitted, owner));
+    if (next) {
     // Do not erase a newer value typed while safeStorage/IPC was still resolving the previous
     // blur. On failure keep the submitted value too, so the user can retry instead of losing it.
-    if (input.value === submitted) input.value = '';
-    apply(next);
-    toast('API key stored');
-  }
+      if (state?.config.tunnel.profileId === owner) {
+        if (input.value === submitted) input.value = '';
+        apply(next);
+      }
+      toast('API key stored');
+    }
+    return next !== null;
+  })();
 });
 
 $('removeApiKey').addEventListener('click', async () => {
-  const next = await run(api.setApiKey(''));
+  const next = await run(api.setApiKey('', state?.config.tunnel.profileId));
   if (next) {
     apply(next);
     toast('API key removed');

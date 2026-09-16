@@ -621,7 +621,7 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.ack)).toHaveLength(change === 'accepted' ? 1 : 0);
     if (change === 'draft') expect(composerText(live.document)).toBe('My own draft');
   });
-  it('retains a reused-document send boundary when canonical Fiber text arrives before activity identity', async () => {
+  it.each([false, true])('retains a reused-document send boundary when canonical Fiber text arrives before activity identity (promoted submit: %s)', async promotedSubmit => {
     const submitted = 'Keep [literal] #tags in the receipt.';
     const escaped = String.raw`Keep \[literal\] \#tags in the receipt\.`;
     const run = async (canonical: string, acknowledge = true, invalidate?: 'epoch' | 'receipt'): Promise<number> => {
@@ -639,6 +639,11 @@ describe('desktop input delivery and helper ownership', () => {
       live.hook.observe();
       let user!: HTMLElement;
       live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        if (promotedSubmit) {
+          live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+          live!.hook.observe();
+          live!.document.dispatchEvent(new live!.window.Event('submit', { bubbles: true }));
+        }
         user = userTurn(live!.document, 'gated-spa-user', submitted, { sent: false });
         startGenerating(live!.document, { send: false });
         live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
@@ -4511,6 +4516,32 @@ describe('the app-owned chronological stream', () => {
     expect(overwriteText(section)).toContain('✕ exit 1');
   });
 
+  it('updates a background process in its existing stream row when its exit arrives', async () => {
+    let completed = false;
+    const processActivity = () => ({ ok: true, data: { entries: [], nextSince: completed ? 10 : 3,
+      stream: [
+        { seq: 1, time: 100, kind: 'turn_start', turnId, agent: null },
+        { seq: 2, time: 110, kind: 'tool_call', turnId, agent: null, tool: 'exec_command',
+          callId: 'process-call', requestId: 'wfr-process-stream', outcome: 'ok', durationMs: 10,
+          process: { sessionId: '1234', ...(completed ? { completedAt: 200, exitCode: 0 } : {}) },
+          summary: { kind: 'run', tone: completed ? 'good' : 'neutral',
+            title: completed ? 'Completed render' : 'Started render', metric: completed ? '✓ finished' : 'started' } }
+      ], job: null } });
+    live = await harness(undefined, { activity: processActivity });
+    renderingOn();
+    const section = assistantTurn(live.document, turnId, []);
+    await bindFiberRequest(section, 'wfr-process-stream', 'exec_command');
+    live.hook.renderStreams();
+    expect(overwriteText(section)).toContain('Started render');
+    completed = true;
+    await live.hook.pullActivity();
+    live.hook.renderStreams();
+    expect(overwriteText(section)).toContain('Completed render');
+    expect(overwriteText(section)).toContain('✓ finished');
+    expect(overwriteText(section)).not.toContain('Started render');
+    expect(overwriteStream(section)?.querySelectorAll('.clf-stream-tool_call')).toHaveLength(1);
+  });
+
   it('ignores ChatGPT DOM reasoning order and renders only the order recorded by the app', async () => {
     const orderedActivity = () => ({
       ok: true,
@@ -6945,6 +6976,45 @@ describe('a content script reloaded into a turn already in flight', () => {
     expect(order.indexOf('bind')).toBeLessThan(order.indexOf('events'));
   });
 
+  it('retains the recorded turn when runtime activity expired before reload and Thinking failed arrives later', async () => {
+    const recordedTurnId = 'g-original-mcp-run-0-2';
+    live = await harness('https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', {
+      activity: () => activity({ activeTurnId: null, recordedTurnId,
+        userAnchors: [{ seq: 20, time: 1700000000000, messageId: 'm-turn-live-user' }] })
+    }, midTurn);
+    live.hook.observe(); await settle();
+    live.advance(live.hook.TURN_SETTLE_MS * 2);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+    const section = live.document.querySelector('[data-turn-id="turn-live"]')!;
+    const failure = live.document.createElement('button');
+    failure.type = 'button'; failure.setAttribute('aria-expanded', 'false'); failure.textContent = 'Thinking failed';
+    section.append(failure);
+    stopGenerating(live.document);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: recordedTurnId, outcome: 'failed', reason: 'thinking_failed' })
+    ]);
+    expect(emitted(live.sent, 'chat_error').at(-1)?.event.turnId).toBe(recordedTurnId);
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+  });
+
+  it('opens a genuinely newer native user question after adopting an inactive recorded turn', async () => {
+    const recordedTurnId = 'g-original-mcp-run-0-2';
+    live = await harness('https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', {
+      activity: () => activity({ activeTurnId: null, recordedTurnId,
+        userAnchors: [{ seq: 20, time: 1700000000000, messageId: 'm-turn-live-user' }] })
+    }, midTurn);
+    live.hook.observe(); await settle();
+    userTurn(live.document, 'newly-submitted-question', 'Now verify the export');
+    assistantTurn(live.document, 'new-response', []);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    const starts = emitted(live.sent, 'turn_start');
+    expect(starts).toHaveLength(1);
+    expect(starts[0]!.event.turnId).not.toBe(recordedTurnId);
+    expect(emitted(live.sent, 'turn_end').at(-1)?.event.turnId).toBe(recordedTurnId);
+  });
+
   /**
    * The 2026-09-02 gap. The previous document never delivered its `turn_start`, so the app
    * holds no turn for the chat; the reload then filed the question as history and the chat
@@ -7222,6 +7292,34 @@ describe('a content script reloaded into a turn already in flight', () => {
     settled.append(answered);
   };
 
+  it.each([true, false])('keeps the adopted answer boundary when its next question arrives before observation (own answer: %s)', async ownAnswer => {
+    live = await harness(undefined, {
+      activity: () => activity({ activeTurnId: 'g-adopted-followup',
+        userAnchors: [{ seq: 1, time: 1, messageId: 'm-adopted-question' }] })
+    }, document => {
+      const previous = assistantTurn(document, 'previous-answer', []);
+      prose(document, previous, 'previous-prose', 'An older answer.');
+      userTurn(document, 'adopted-question', 'The current question.', { sent: false });
+    });
+    live.hook.observe(); await settle();
+
+    // Hydration and a real follow-up can land in one observer batch. Only prose
+    // between the adopted question and the new question belongs to the old turn.
+    const previous = live.document.querySelector('[data-turn-id="previous-answer"]')!;
+    previous.replaceWith(previous.cloneNode(true));
+    if (ownAnswer) {
+      const answer = assistantTurn(live.document, 'adopted-answer', []);
+      prose(live.document, answer, 'adopted-prose', 'The answer to the current question.');
+    }
+    userTurn(live.document, 'next-question', 'Thanks, now do this.');
+    live.hook.observe(); await settle(); await live.hook.flush(); await settle();
+
+    const ends = emitted(live.sent, 'turn_end').map(entry => entry.event);
+    expect(ends).toHaveLength(1);
+    expect(ends[0]).toMatchObject({ turnId: 'g-adopted-followup', outcome: ownAnswer ? 'completed' : 'interrupted' });
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+  });
+
   it('closes an open turn that finished while the page was reloading, once', async () => {
     live = await harness(
       'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
@@ -7318,7 +7416,7 @@ describe('a content script reloaded into a turn already in flight', () => {
    * reload while the same request went on calling tools. A section above the question is not
    * this turn's; with none after it, the turn stays open until one appears and ends.
    */
-  it('never binds an adopted turn to an answer that sits above the question it is answering', async () => {
+  it.each(['static', 'remounted-final', 'remounted-interim'])('never binds an adopted turn to an answer above its question (%s)', async variant => {
     live = await harness(
       'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       { activity: () => activity({ activeTurnId: 'g-old-run-0-4' }) },
@@ -7338,12 +7436,17 @@ describe('a content script reloaded into a turn already in flight', () => {
     await settle();
 
     // The page model names the previous answer terminal. It is the previous answer.
-    const settled = live.document.querySelector('[data-turn-id="turn-old"]') as HTMLElement;
+    let settled = live.document.querySelector('[data-turn-id="turn-old"]') as HTMLElement;
+    if (variant !== 'static') {
+      const replacement = settled.cloneNode(true) as HTMLElement;
+      settled.replaceWith(replacement); settled = replacement;
+      live.hook.observe(); await settle();
+    }
     await bindFiberTurns([{
       section: settled,
       turn: {
         turnId: 'turn-old',
-        endMessageId: 'reload-prev-final',
+        endMessageId: variant === 'remounted-interim' ? undefined : 'reload-prev-final',
         messages: [{
           messageId: 'reload-prev-final', rawMessageId: 'reload-prev-final', stable: true, order: 1,
           rawText: 'The recorder is fixed.', renderedHtml: '<p>The recorder is fixed.</p>'
@@ -7374,7 +7477,7 @@ describe('a content script reloaded into a turn already in flight', () => {
     live.hook.observe();
     await settle();
     await bindFiberTurns([
-      { section: settled, turn: { turnId: 'turn-old', endMessageId: 'reload-prev-final', messages: [{
+      { section: settled, turn: { turnId: 'turn-old', endMessageId: variant === 'remounted-interim' ? undefined : 'reload-prev-final', messages: [{
         messageId: 'reload-prev-final', rawMessageId: 'reload-prev-final', stable: true, order: 1,
         rawText: 'The recorder is fixed.', renderedHtml: '<p>The recorder is fixed.</p>'
       }] } },
@@ -14295,6 +14398,48 @@ describe('the goal loop', () => {
     }
   });
 
+  it.each(['before-insert', 'before-send', 'lost-ack'])('abandons a ready continuation when work resumes (%s)', async change => {
+    let draft: ReturnType<typeof readyDraft> | null = null, pendingTools = 0, deferrals = 0;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => {
+        const value = feed(draft)();
+        return { ...value, data: { ...value.data, pendingTools } };
+      },
+      goal_ack: message => {
+        expect(message.nativeBusy).toBe(true);
+        deferrals += 1;
+        if (change === 'lost-ack' && deferrals === 1) return { ok: false, status: 0 };
+        draft = null;
+        return { ok: true, data: { acknowledged: false, deferred: true, listenUntil: Date.now() + 120_000 } };
+      }
+    }, () => undefined, false, true);
+    const sends = watchSend(live.document);
+    const button = live.document.querySelector<HTMLButtonElement>('[data-testid="send-button"]')!;
+    if (change === 'before-send') button.disabled = true;
+    else pendingTools = 1;
+    draft = readyDraft('This stale continuation must never be sent');
+    const pulling = live.hook.pullActivity();
+    if (change === 'before-send') {
+      await settle();
+      expect(composerText(live.document)).toBe('This stale continuation must never be sent');
+      pendingTools = 1;
+      button.disabled = false;
+    }
+    await pulling; await settle();
+    expect(sends()).toBe(0);
+    expect(composerText(live.document)).toBe('');
+    expect(deferrals).toBe(1);
+    if (change === 'lost-ack') {
+      pendingTools = 0;
+      await live.hook.pullActivity(); await settle();
+      expect(deferrals).toBe(2);
+      expect(sends()).toBe(0);
+      expect(composerText(live.document)).toBe('');
+    }
+    expect(acks(live).every(message => message.nativeBusy === true)).toBe(true);
+  });
+
   it('holds a ready Goal draft while the queue owns priority without spending its acknowledgement', async () => {
     let draft: ReturnType<typeof readyDraft> | null = null, queuePending = true;
     live = await harness(`https://chatgpt.com/c/${CHAT}`, {
@@ -14575,6 +14720,118 @@ describe('the goal loop', () => {
    * keeps the turn, says so on the bar, and asks again on the plain wait — no backoff, because
    * nothing was spent — until the app has seen the chat finish.
    */
+  it('shows the complete missing-MCP explanation without retrying or claiming Loop was disabled', async () => {
+    const message = 'No MCP tool call was recorded in the last response, so the app cannot tell whether the tool connection was lost. Automatic continuation is paused; Loop remains enabled. Check the tunnel and Core connector before continuing.';
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      goal_draft: () => ({ ok: false, status: 409, data: { error: 'loop_mcp_call_missing', message, retryable: false } })
+    });
+    await live.hook.pullActivity();
+    await answerATurn(live, 'a completed answer without tool work');
+    expect(live.document.querySelector('.clf-stage')?.textContent).toContain(message);
+    expect(drafts(live)).toHaveLength(1);
+    expect(live.hook.goalStageView({ mode: 'loop', phase: 'requesting', error: message })).toMatchObject({
+      stage: 'Loop continuation paused', detail: message
+    });
+    expect(live.hook.goalStageView({ phase: 'drafting', draft: {
+      stage: 'failed', error: 'reply_too_long', message: 'The helper wrote a continuation that is too long to send.'
+    } })).toMatchObject({ detail: 'The helper wrote a continuation that is too long to send.' });
+  });
+
+  it.each([false, true])('sends expired recovery debt without a final or a second settle wait (Pro: %s)', async silencePro => {
+    const source = 'g-dead-source';
+    const pending = { replyId: 'silence:confirmed-refresh', turnId: 'g-silence-confirmed-refresh',
+      silenceSourceTurnId: source, silencePro, acceptedAt: 1, eventSeq: 12, listenUntil: 0 };
+    let offer = false;
+    let draft: Record<string, unknown> | null = null;
+    let sends = 0;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
+        recordedTurnId: source, activeTurnId: null, job: null,
+        goal: { enabled: true, own: true, mode: 'loop', afterTurn: silencePro, hasKey: true, model: MODEL,
+          pending: offer ? pending : null, draft } } }),
+      goal_draft: () => {
+        draft = { token: 'recovery-draft', turnId: pending.turnId, conversationId: CHAT, stage: 'ready',
+          model: MODEL, text: '', reply: 'Continue the original task', error: null };
+        return { ok: true, data: { goal: draft } };
+      },
+      goal_ack: () => { draft = null; return { ok: true, data: { acknowledged: true } }; }
+    }, document => {
+      userTurn(document, 'dead-user', 'Finish the original task');
+      assistantTurn(document, 'dead-answer-without-final', []);
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        sends++;
+        userTurn(document, 'recovery-user', 'Continue the original task');
+        document.querySelector('#prompt-textarea')!.textContent = '';
+        startGenerating(document);
+      });
+    });
+    pending.listenUntil = live.window.Date.now() + 60_000;
+    offer = true;
+    await live.hook.pullActivity(); await settle();
+    expect(drafts(live)).toHaveLength(0);
+    live.advance(60_000);
+    await live.hook.pullActivity(); await settle(1200);
+    expect(drafts(live)).toEqual([expect.objectContaining({ turnId: pending.turnId, terminalRequired: true })]);
+    expect(sends).toBe(1);
+    expect(acks(live)).toHaveLength(1);
+    expect(live.document.querySelector('.clf-stage')?.textContent ?? '').not.toContain('Checking the answer');
+  });
+
+  it.each([false, true])('withdraws recovery debt when new MCP work arrives before listening expires (Pro: %s)', async silencePro => {
+    const source = 'g-recovered-source';
+    const pending = { replyId: 'silence:refresh-before-new-work', turnId: 'g-silence-before-new-work',
+      silenceSourceTurnId: source, silencePro, acceptedAt: 1, eventSeq: 12, listenUntil: 0 };
+    let offer = false;
+    let working = false;
+    let sends = 0;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: working ? 1 : 0,
+        recordedTurnId: source, activeTurnId: working ? source : null, job: null,
+        goal: { enabled: true, own: true, mode: 'loop', afterTurn: silencePro, hasKey: true, model: MODEL,
+          pending: offer && !working ? pending : null, draft: null } } })
+    }, document => {
+      userTurn(document, 'working-user', 'Finish the original task');
+      assistantTurn(document, 'working-answer-without-final', []);
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => { sends++; });
+    });
+    pending.listenUntil = live.window.Date.now() + 60_000;
+    offer = true;
+    await live.hook.pullActivity(); await settle();
+    live.advance(59_999);
+    // The app has attributed fresh MCP work and withdrawn this exact silence
+    // ticket. Expiring the old page-side timestamp grants no delivery authority.
+    working = true;
+    await live.hook.pullActivity(); await settle();
+    live.advance(1);
+    await live.hook.pullActivity(); await settle(1200);
+    expect(drafts(live)).toHaveLength(0);
+    expect(sends).toBe(0);
+    expect(acks(live)).toHaveLength(0);
+    expect(live.document.querySelector('#prompt-textarea')?.textContent).toBe('');
+  });
+
+  it('removes the immediate recovery countdown when fresh MCP work clears the server wait', async () => {
+    let working = false;
+    const until = Date.now() + 600_000;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: working ? 1 : 0,
+        recordedTurnId: 'countdown-source', activeTurnId: working ? 'countdown-source' : null, job: null,
+        goal: { enabled: true, own: true, mode: 'loop', hasKey: true, model: MODEL,
+          pending: null, draft: null, wait: working ? null : { reason: 'silence', until } } } })
+    });
+    await live.hook.pullActivity(); await settle();
+    expect(live.document.querySelector('.clf-stage')?.textContent).toContain('Waiting before recovery reload');
+    working = true;
+    await live.hook.pullActivity(); await settle();
+    expect(live.document.querySelector('.clf-stage')?.textContent ?? '').not.toContain('Waiting before recovery reload');
+    expect(drafts(live)).toHaveLength(0);
+    expect(acks(live)).toHaveLength(0);
+  });
+
   it('keeps the turn the app still sees working, and asks again on the plain wait', async () => {
     let asked = 0;
     let working = true;
@@ -14963,6 +15220,13 @@ describe('the goal loop', () => {
 
     expect(view({ phase: 'settling', error: '', model: MODEL, draft: null })).toMatchObject({
       stage: 'Checking the answer is finished'
+    });
+    expect(view({ phase: 'settling', wait: { reason: 'quiet', until: live.window.Date.now() + 125_000 } })).toMatchObject({
+      stage: 'Waiting for tool inactivity', detail: 'Checking again in 2:05', at: 0
+    });
+    expect(view({ phase: 'settling', wait: { reason: 'tools' } })).toMatchObject({ stage: 'Waiting for running tools', detail: '' });
+    expect(view({ phase: 'settling', wait: { reason: 'listening', until: live.window.Date.now() + 60_000 } })).toMatchObject({
+      stage: 'Waiting for activity after recovery', detail: 'Checking again in 1:00'
     });
     expect(view({ phase: 'requesting', error: '', model: MODEL, draft: null })).toMatchObject({
       stage: 'Sending the answer to OpenRouter',

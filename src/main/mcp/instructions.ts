@@ -72,6 +72,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     `; ${surfaceDefinition('plugins').connectorName} for enabled external apps and services.`,
     `Host: ${host}. Roots: ${roots}`,
     ctx.readOnly ? 'The local tools are read-only.' : 'Use the tools listed in this conversation.',
+    'Report the specific tool failure, not an inferred global restriction. Missing chat identity, an unavailable process session_id, or an output limit does not establish Read-only mode. Successful patches and commands remain completed work; continue other authorized work and never rerun a completed job just to recover its terminal.',
     'An approved root may be the parent of the project. Use the exact project path and keep every intermediate folder; do not guess a missing project level.',
     'Paths may be virtual under the roots above or absolute native paths inside them. Once this chat has a project, later paths may be relative to it. Use a full path to select another project.',
   ];

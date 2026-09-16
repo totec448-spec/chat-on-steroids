@@ -118,14 +118,14 @@ describe('cross-platform packaging targets', () => {
     ]) expect(pkg.scripts[script]).toBeTypeOf('string');
   });
 
-  it('pins Electron 43.4.1 exactly and proves packaged runners use those runtime bytes', () => {
+  it('pins Electron 44.3.0 exactly and proves packaged runners use those runtime bytes', () => {
     const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
     const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
     const smoke = readFileSync(path.join(root, 'scripts', 'smoke-packaged-runtime.mjs'), 'utf8');
 
-    expect(pkg.devDependencies.electron).toBe('43.4.1');
-    expect(lock.packages?.['']?.devDependencies?.electron).toBe('43.4.1');
-    expect(lock.packages?.['node_modules/electron']?.version).toBe('43.4.1');
+    expect(pkg.devDependencies.electron).toBe('44.3.0');
+    expect(lock.packages?.['']?.devDependencies?.electron).toBe('44.3.0');
+    expect(lock.packages?.['node_modules/electron']?.version).toBe('44.3.0');
     expect(smoke).toContain('const expectedElectronVersion = sourcePackage.devDependencies?.electron;');
     expect(smoke).toContain('electron: process.versions.electron');
     expect(smoke).toContain('runtime.electron !== expectedElectronVersion');
@@ -450,7 +450,9 @@ describe('cross-platform packaging targets', () => {
       "normalized.includes('.app/Contents/MacOS/')",
       "path.basename(file) === 'chrome_crashpad_handler'",
       "path.basename(file) === 'macos-desktop-addon.node'",
-      'desktopPayload ? \'12.3\'',
+      'requireThinMachO(desktopAddon, true)',
+      'requireThinMachO(desktopLibrary, true)',
+      'requireThinMachO(file, launched)',
       'launchedMachOCount < 6',
       "run('plutil', ['-extract', key, 'raw', plist])",
       "run('codesign', ['--display', '--verbose=4', app]",
@@ -458,6 +460,7 @@ describe('cross-platform packaging targets', () => {
       'assertNoTrustBearingMacCodeSignature(',
       "path.join(contents, '_CodeSignature', 'CodeResources')"
     ]) expect(macSmoke).toContain(marker);
+    expect(macSmoke).not.toContain("'12.3'");
     expect(macSmoke).toContain("requireFile(path.join(resources, 'icon.icns'))");
     expect(macSmoke).toContain("iconBytes.toString('ascii', 0, 4) !== 'icns'");
     const packagedRuntime = readFileSync(path.join(root, 'scripts', 'smoke-packaged-runtime.mjs'), 'utf8');
@@ -530,6 +533,10 @@ Load command 11
     expect(() => assertCompatibleMacOSDeploymentTargets('good.node', modern, '12.0')).not.toThrow();
 
     const tooNew = modern.replace('minos 11.0', 'minos 13.0');
+    expect(() => assertCompatibleMacOSDeploymentTargets('desktop.node', tooNew, '13.0')).not.toThrow();
+    expect(() => assertCompatibleMacOSDeploymentTargets('desktop.node', tooNew.replace('minos 13.0', 'minos 14.0'), '13.0')).toThrow(
+      /requires macOS 14\.0, newer than Info\.plist LSMinimumSystemVersion 13\.0/
+    );
     expect(() => assertCompatibleMacOSDeploymentTargets('bad.node', tooNew, '12.0')).toThrow(
       /requires macOS 13\.0, newer than Info\.plist LSMinimumSystemVersion 12\.0/
     );

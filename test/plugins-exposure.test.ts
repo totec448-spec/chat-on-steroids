@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { Tool } from '@modelcontextprotocol/client';
-import { pluginExposure, PLUGIN_MAX_TOOLS, type PluginExposureSource } from '../src/main/plugins/exposure.js';
+import { pluginExposure, PLUGIN_MAX_SCHEMA_BYTES, PLUGIN_MAX_TOOLS, type PluginExposureSource } from '../src/main/plugins/exposure.js';
 
 const tool = (name: string): Tool => ({
   name, description: `Upstream ${name}`,
@@ -18,6 +18,26 @@ it('publishes exact upstream names and complete schemas without IDs, prefixes or
   expect(result.tools.map(tool => tool.name)).toEqual(['create_entities', 'read_graph', 'get_scene_info']);
   expect(result.owners.get('get_scene_info')).toBe(blender.id);
   expect(result.issues.size).toBe(0);
+});
+
+it('publishes catalogs larger than 64 tools when they remain within the schema byte budget', () => {
+  const many = source('one', 'Many', Array.from({ length: 118 }, (_, i) => `tool_${i}`));
+  expect(Buffer.byteLength(JSON.stringify(many.tools))).toBeLessThan(PLUGIN_MAX_SCHEMA_BYTES);
+  const result = pluginExposure([many]);
+  expect(result.tools).toEqual(many.tools);
+  expect(result.owners.size).toBe(118);
+  expect(result.issues.size).toBe(0);
+});
+
+it('uses the schema byte budget before the emergency tool-count ceiling', () => {
+  const large: PluginExposureSource = {
+    id: 'one', name: 'Large', enabled: true, disabledTools: [],
+    tools: Array.from({ length: 3 }, (_, i) => ({ ...tool(`large_${i}`), description: 'x'.repeat(100000) })),
+  };
+  const result = pluginExposure([large]);
+  expect(result.tools).toHaveLength(2);
+  expect(result.owners.has('large_2')).toBe(false);
+  expect(result.issues.get('one')?.get('large_2')).toContain('limit');
 });
 
 it('withholds every conflicting name independent of installation order and keeps other tools', () => {

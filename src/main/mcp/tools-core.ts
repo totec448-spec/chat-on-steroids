@@ -139,6 +139,7 @@ import { findSessionByConversation } from '../session/store.js';
 import {
   adoptAgent,
   fail,
+  failIdentity,
   formatFileInfo,
   friendlyError,
   guard,
@@ -851,6 +852,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
                 )
               : nonZeroExitIsBenign(boundCommand, output.exitCode, responseText);
             noteExec({
+              completion: output.completion,
               ...(output.processId === null ? {} : { id: String(output.processId) }),
               running: output.processId !== null,
               exitCode: output.exitCode,
@@ -941,7 +943,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           const asking = await execSession('write_stdin');
           if (execOwnershipDenied(input.session_id, asking)) {
             return fail(
-              `write_stdin failed: session ${input.session_id} is not proven to belong to this durable Chat On Steroids session. A completed process may already have delivered its output and been retired. Check earlier tool results before deciding whether any work remains; an unavailable session id alone is not a reason to rerun the command.`
+              `write_stdin failed: session ${input.session_id} is not proven to belong to this durable Chat On Steroids session. A completed process may already have delivered its output and been retired. This refusal concerns this process id, not Read-only mode or permission to edit files or launch other authorized work. Check earlier tool results before deciding whether any work remains; an unavailable session id alone is not a reason to rerun the command.`
             );
           }
           // Both sides of the wait. An empty poll blocks for seconds by design, and a caller
@@ -1057,8 +1059,10 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
 
   // ---------------------------------------------------------------- session
 
-  if (reg.sessionToolsExposed) {
+  if (reg.sessionToolsExposed || exposedCaps.command) {
     registerSessionSearchReadTool(reg);
+  }
+  if (reg.sessionToolsExposed) {
     registerPlanTool(reg);
   }
   if (reg.ctx.exposedFinishTool ?? getConfig().ui.finishTool === true) {
@@ -1069,7 +1073,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
     })), async ({ summary }) => {
       if (!getConfig().ui.finishTool) return { content: [{ type: 'text' as const, text: 'RELEASED: The user disabled finish hold. You may write your final answer.' }] };
       const caller = currentCaller();
-      if (!caller.sessionId || !caller.conversationId) return fail('Exact session identity is required');
+      if (!caller.sessionId || !caller.conversationId) return failIdentity('Exact session identity is required');
       if (goalWorkerChat(caller.conversationId)) return fail('Session finish hold is not applicable to workers or decision helpers. Workers report with agents action=finish; decision helpers answer normally.');
       return guard('session_finish', async () => ({ content: [{ type: 'text', text: await announceSessionFinish(caller.sessionId!, summary) }] }));
     });
@@ -1082,10 +1086,10 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
 
   // ------------------------------------------------------- remote steering
   //
-  // Gated on the agents surface as well as its own switch. Every versioned action is about a
-  // worker run, so an install with multi-agent off must not meet worker vocabulary here —
-  // and a signed envelope for a run that cannot exist authorizes nothing anyway.
-  if (reg.remoteSteeringToolsExposed && reg.agentToolsExposed) registerRemoteSteeringTool(reg);
+  // V1/V2 are worker-run protocols and still refuse when multi-agent is off. V3 is a separate
+  // exact-session Longrun protocol, so the transport itself must remain discoverable without
+  // exposing the ordinary `agents` tool. `remote-steering.ts` performs the version-specific gate.
+  if (reg.remoteSteeringToolsExposed) registerRemoteSteeringTool(reg);
 }
 
 
@@ -1571,7 +1575,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
  *
  * The whole verify → replay → authorize → claim → broker transaction belongs to
  * `remote-steering.ts`. V1 remains STATUS/MESSAGE. V2 adds exactly one signed SPAWN of one
- * exact future worker id and one exact task; it still grants no caller identity. This function
+ * exact future worker id and one exact task. V3 is separately signed and binds one exact recorded
+ * session for LONGRUN_START / LOOP_OFF / SESSION_STATUS. None grants caller identity. This function
  * is only the envelope transport, feature switch and minimized projection back to MCP.
  */
 function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
@@ -1582,8 +1587,8 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
       description:
         'Relay one Command Center signed operation envelope, verbatim. The user minted it at their PC; ' +
         'pass its exact JSON text. It is not an identity and grants nothing beyond the single act it already names, ' +
-        'once, inside its own short window: V1 supports status and message; V2 can additionally spawn exactly one ' +
-        'signed future worker id with its signed task, using app-configured worker model/reasoning defaults. ' +
+        'once, inside its own short window: V1 supports worker status/message; V2 can additionally spawn exactly one ' +
+        'signed future worker id; V3 can start/stop/query Frontier Longrun on one exact pre-existing session and never selects a model. ' +
         'Relaying the same envelope twice repeats nothing. ' +
         'Never edit, re-sign, summarize or construct one — an altered envelope is refused.',
       inputSchema: z
@@ -1613,7 +1618,13 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
                 ? `Delivered to ${outcome.delivered?.targetWorkerId ?? 'the named worker'}${outcome.delivered?.waking ? ', which was asleep and is being woken in its existing chat' : ''}.`
                 : outcome.action === 'SPAWN'
                   ? `Created ${outcome.spawned?.workerId ?? 'the signed worker'}; its worker chat is being opened through the ordinary broker path.`
-                : 'Read the signed run’s current state.'
+                  : outcome.action === 'LONGRUN_START'
+                    ? `Queued Frontier Longrun for exact session ${outcome.sessionId ?? 'named by the lease'}; Loop arms at the existing session-input send boundary.`
+                    : outcome.action === 'LOOP_OFF'
+                      ? `Disabled Loop for exact session ${outcome.sessionId ?? 'named by the lease'}.`
+                      : outcome.action === 'SESSION_STATUS'
+                        ? `Read the signed session’s bounded state.`
+                        : 'Read the signed run’s current state.'
             : `Refused: ${outcome.reason}.`;
         return {
           content: [
@@ -1636,6 +1647,7 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
             operation_digest: outcome.operationDigest,
             action: outcome.action,
             run_id: outcome.runId,
+            session_id: outcome.sessionId,
             replay: outcome.replay,
             decided_at: outcome.decidedAt,
             delivered: outcome.delivered
@@ -1665,6 +1677,30 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
                     revivable: info.revivable,
                     waiting: info.waiting
                   }))
+                }
+              : null,
+            session: outcome.session
+              ? {
+                  session_id: outcome.session.sessionId,
+                  found: outcome.session.found,
+                  active_turn: outcome.session.activeTurn,
+                  blocked: outcome.session.blocked,
+                  superseded: outcome.session.superseded,
+                  model_class: outcome.session.modelClass,
+                  loop_enabled: outcome.session.loopEnabled,
+                  loop_mode: outcome.session.loopMode,
+                  objective_present: outcome.session.objectivePresent,
+                  finish_tool_enabled: outcome.session.finishToolEnabled,
+                  pending_user_input: outcome.session.pendingUserInput,
+                  pending_longrun_start: outcome.session.pendingLongrunStart
+                }
+              : null,
+            longrun: outcome.longrun
+              ? {
+                  input_id: outcome.longrun.inputId,
+                  longrun_sha256: outcome.longrun.longrunSha256,
+                  longrun_length: outcome.longrun.longrunLength,
+                  automation: outcome.longrun.automation
                 }
               : null
           },

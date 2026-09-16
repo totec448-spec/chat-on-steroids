@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { installSource, runInstaller } from '../src/main/plugins/installer.js';
+import { terminateProcessTree } from '../src/main/exec.js';
 import path from 'node:path';
 import { createServer } from 'node:http';
 import { pluginCatalog } from '../src/main/plugins/catalog.js';
@@ -13,6 +14,7 @@ for (const id of ['blender', 'unity', 'playwright']) {
   it.runIf(process.env.COS_PLUGIN_LIVE_TEST === '1')(`installs ${id} and verifies its advertised tool preview over stdio`, async () => {
     const directory = await makeTempDir(`cos-catalog-${id}-`);
     const client = new Client({ name: 'CoS catalog discovery acceptance', version: '1.0.0' });
+    let transport: StdioClientTransport | undefined;
     const page = createServer((_request, response) => { response.setHeader('Content-Type', 'text/html'); response.end('<h1>CoS plugin browser fixture</h1>'); });
     try {
       const recipe = pluginCatalog.find(entry => entry.id === id)!;
@@ -21,7 +23,8 @@ for (const id of ['blender', 'unity', 'playwright']) {
         await runInstaller(launch.command, [path.join(directory, 'node_modules/playwright/cli.js'), 'install', 'chromium'], directory);
         launch.args.push('--headless', '--browser', 'chromium', '--isolated');
       }
-      await client.connect(new StdioClientTransport({ command: launch.command, args: launch.args, cwd: directory, stderr: 'ignore' }), { timeout: 20000 });
+      transport = new StdioClientTransport({ command: launch.command, args: launch.args, cwd: directory, stderr: 'ignore' });
+      await client.connect(transport, { timeout: 20000 });
       const names = (await client.listTools({}, { timeout: 15000 })).tools.map(tool => tool.name);
       expect(names.length).toBeGreaterThan(0);
       expect(names).toEqual(expect.arrayContaining(recipe.tools!));
@@ -38,6 +41,9 @@ for (const id of ['blender', 'unity', 'playwright']) {
         expect(JSON.stringify(content)).toContain('CoS plugin browser fixture');
       }
     } finally {
+      // Match PluginManager shutdown: Python entry-point launchers can own a child
+      // that keeps the Windows cwd locked after the SDK closes only its parent.
+      if (transport?.pid) await terminateProcessTree(transport.pid, true);
       await client.close();
       if (page.listening) await new Promise<void>((resolve, reject) => page.close(error => error ? reject(error) : resolve()));
       await removeTempDir(directory);

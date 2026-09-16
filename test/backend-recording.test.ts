@@ -6,7 +6,7 @@ import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import { observeRequestCorrelation, requestCorrelation } from '../src/main/session/correlation.js';
 import { recordToolCall, recordChatObservations, recordRequestEvidence, sessionForConversation, flushRecorder, resetRecorderForTests } from '../src/main/session/recorder.js';
-import { appendEvent, createSession, flushSessions, initSessionStore, readActivityEvents, readAsset, readEvents, readRecentEvents, resetSessionStoreForTests, unsetSessionRootForTests, upsertMessageEvent } from '../src/main/session/store.js';
+import { appendEvent, createSession, flushSessions, initSessionStore, readActivityEvents, readAsset, readEvents, readOldestEvents, readRecentEvents, resetSessionStoreForTests, unsetSessionRootForTests, upsertMessageEvent } from '../src/main/session/store.js';
 
 let dir = '';
 const gate = () => { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; };
@@ -163,4 +163,44 @@ it('an old canonical message cannot hide a gap before a byte-bounded cold journa
   expect(tail.events.some((event) => event.seq === 2)).toBe(false);
   // General explicit history must still fall back to disk instead of trusting that gap.
   expect((await readEvents(session.id, { from: 2, limit: 1 }))[0]?.seq).toBe(2);
+});
+
+it('oldest history preserves a user row larger than the forward scanner chunk', async () => {
+  const session = await createSession({ conversationId: 'conv-oldest-large-row' });
+  const original = `ORIGINAL LARGE BRIEF ${'x'.repeat(90_000)} ORIGINAL END`;
+  await appendEvent(session.id, { kind: 'user_message', source: 'extension', time: 1,
+    message: { text: original, chars: original.length, truncated: false } });
+  await appendEvent(session.id, { kind: 'user_message', source: 'extension', time: 2,
+    message: { text: 'later correction', chars: 16, truncated: false } });
+  const [first] = await readOldestEvents(session.id, 1, { kinds: ['user_message'] });
+  expect(first).toMatchObject({ kind: 'user_message', seq: 1, message: { text: original } });
+});
+
+it('oldest history keeps canonical message origin while returning its latest revision', async () => {
+  const session = await createSession({ conversationId: 'conv-oldest-canonical' });
+  await upsertMessageEvent(session.id, { kind: 'user_message', source: 'extension', time: 1, messageId: 'opening',
+    message: { text: 'initial opening', chars: 15, truncated: false } });
+  for (let i = 0; i < 140; i++) await appendEvent(session.id, { kind: 'progress', source: 'app', time: i + 2,
+    message: { text: `progress-${i}`, chars: String(i).length + 9, truncated: false } });
+  const revised = await upsertMessageEvent(session.id, { kind: 'user_message', source: 'extension', time: 500, messageId: 'opening',
+    message: { text: 'revised complete opening', chars: 24, truncated: false } });
+  await appendEvent(session.id, { kind: 'user_message', source: 'extension', time: 600,
+    message: { text: 'later user correction', chars: 21, truncated: false } });
+  const [first] = await readOldestEvents(session.id, 1, { kinds: ['user_message'] });
+  expect(first).toMatchObject({ kind: 'user_message', seq: revised.event.seq, origin: 1,
+    message: { text: 'revised complete opening' } });
+});
+
+it('oldest history stays byte-bounded when a tool-heavy journal has few user rows', async () => {
+  const session = await createSession({ conversationId: 'conv-oldest-byte-budget' });
+  await appendEvent(session.id, { kind: 'user_message', source: 'extension', time: 1,
+    message: { text: 'original bounded brief', chars: 22, truncated: false } });
+  const heavy = 'x'.repeat(430_000);
+  for (let i = 0; i < 21; i++) await appendEvent(session.id, { kind: 'progress', source: 'app', time: i + 2,
+    message: { text: heavy, chars: heavy.length, truncated: false } });
+  await appendEvent(session.id, { kind: 'user_message', source: 'extension', time: 100,
+    message: { text: 'user row beyond oldest read budget', chars: 34, truncated: false } });
+  const users = await readOldestEvents(session.id, 120, { kinds: ['user_message'] });
+  expect(users).toHaveLength(1);
+  expect(users[0]).toMatchObject({ kind: 'user_message', message: { text: 'original bounded brief' } });
 });

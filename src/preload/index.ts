@@ -1,4 +1,5 @@
 import type { ChatModelCatalog } from '../shared/chat-models.js';
+import type { GoalModel } from '../shared/goal-reasoning.js';
 import type { TaskProgress } from '../shared/task-progress.js';
 import type { BrowserPreferences } from '../shared/browser-preferences.js';
 import type { SessionControlsView } from '../main/bridge.js';
@@ -47,14 +48,16 @@ export interface SettingsPatch {
   compaction: Config['compaction'];
   multiAgent: Config['multiAgent'];
   remoteSteering: Config['remoteSteering'];
+  headlessClaude: Config['headlessClaude'];
   goal: Config['goal'];
   mcp: Config['mcp'];
 }
 
 /** One page of the model catalogue, as the model picker asks for it. */
 export interface GoalModelPage {
-  models: Array<{ id: string; name: string; created: number; contextLength: number }>;
+  models: GoalModel[];
   total: number;
+  selectedModel?: GoalModel;
 }
 
 export interface SessionList {
@@ -121,7 +124,10 @@ const api = {
   addRootPath: (file: File) => call<AppState>('roots:addPath', { path: webUtils.getPathForFile(file) }),
   removeRoot: (name: string) => call<AppState>('roots:remove', { name }),
   renameRoot: (name: string, newName: string) => call<AppState>('roots:rename', { name, newName }),
-  setApiKey: (value: string) => call<AppState>('secret:set', { value }),
+  setApiKey: (value: string, profileId?: string) => call<AppState>('secret:set', { value, ...(profileId ? { profileId } : {}) }),
+  addSetupProfile: (name: string) => call<AppState>('setup:profile', { action: 'add', name }),
+  selectSetupProfile: (id: string) => call<AppState>('setup:profile', { action: 'select', id }),
+  removeSetupProfile: (id: string) => call<AppState>('setup:profile', { action: 'remove', id }),
   // The goal loop's own credential. Same channel, named slot; the value only ever goes in.
   setGoalKey: (value: string) => call<AppState>('secret:set', { value, key: 'openRouterApiKey' }),
   // The same, for a custom provider endpoint. Optional: keyless local servers need nothing stored.

@@ -1,5 +1,5 @@
 import { currentCaller, currentCall } from './call-context.js';
-import { fail, guard, ok, type SurfaceRegistrar } from './kernel.js';
+import { fail, failIdentity, guard, ok, type SurfaceRegistrar } from './kernel.js';
 import { toolDeclaration } from './tool-declarations.js';
 import { updateSessionPlan } from '../session/store.js';
 import { agentPlanUpdateSchema } from '../../shared/agent-plan.js';
@@ -19,7 +19,7 @@ export function registerPlanTool(reg: SurfaceRegistrar): void {
     if (!reg.sessionToolsLive) return reg.featureDisabled('Session recording', 'Settings → Chat');
     const caller = currentCaller();
     if (!caller.sessionId || !caller.conversationId) {
-      return fail('Exact chat identity is required to update its plan. No plan was changed; retry after the companion reconnects.');
+      return failIdentity('Exact chat identity is required to update its plan. No plan was changed; retry after the companion reconnects.');
     }
     const accepted = await updateSessionPlan(caller.sessionId, caller.conversationId, update, currentCall()!.startedAt);
     return accepted ? ok('Plan updated') : fail('This plan update is stale or its chat was replaced. The current plan was preserved.');
