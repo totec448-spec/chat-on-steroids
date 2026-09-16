@@ -221,6 +221,8 @@ export async function installSource(source: PluginSource, dir: string): Promise<
       '--no-audit',
       '--no-fund',
       '--save-exact',
+      '--prefix',
+      dir,
       `${source.package}@${source.version}`,
     ];
     if (process.platform === 'win32') {
