@@ -8,7 +8,7 @@ import type { ChatModelCatalog } from '../shared/chat-models.js';
 import { readDurable, writeDurableSoon } from './durable.js';
 const observation = z.object({
   nonce: z.string().uuid(),
-  error: z.enum(['picker_unavailable', 'model_unconfirmed', 'power_unknown', 'power_unconfirmed', 'power_changed', 'restore_failed', 'inspection_failed']).optional(),
+  error: z.enum(['picker_unavailable', 'picker_close_failed', 'model_unconfirmed', 'power_unknown', 'power_unconfirmed', 'power_changed', 'restore_failed', 'inspection_failed']).optional(),
   models: z.array(z.object({
     id: z.string().min(1).max(80).regex(/^[a-zA-Z0-9._-]+$/),
     label: z.string().trim().min(1).max(80),

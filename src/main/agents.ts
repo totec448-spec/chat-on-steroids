@@ -1697,7 +1697,7 @@ function stageMessagesActive(
   }
   // Reservation is part of the same all-or-nothing plan as the queue entries: every check
   // above has passed by now, so no recipient can still turn out to be unreachable.
-  for (const agent of reserved) beginRevival(agent);
+  const previousAssignments = new Map([...reserved].map((agent) => [agent, beginRevival(agent)]));
   changed();
   const messages = planned.map(({ message }) => ({ ...message }));
   let settled = false;
@@ -1728,6 +1728,7 @@ function stageMessagesActive(
       // leave a worker `waking` with nothing on its way to wake it.
       for (const agent of reserved) {
         if (agent.info.state !== 'waking') continue;
+        Object.assign(agent.info, previousAssignments.get(agent));
         returnWakingWorkerToStopped(
           agent,
           Date.now(),
@@ -2527,6 +2528,8 @@ function planRevivalText(agent: Agent): { text: string; messageIds: string[] } {
   return { text, messageIds: waiting.map((message) => message.id) };
 }
 
+type WorkerAssignment = Pick<AgentInfo, 'label' | 'task' | 'result'>;
+
 /**
  * Reserves a slot for a sleeping worker and asks the browser to wake it, or refuses.
  *
@@ -2535,7 +2538,16 @@ function planRevivalText(agent: Agent): { text: string; messageIds: string[] } {
  * slot, so the transition into `waking` — which {@link occupiesSlot} counts — happens here,
  * synchronously, before anything touches the browser.
  */
-function beginRevival(agent: Agent): void {
+function beginRevival(agent: Agent): WorkerAssignment {
+  const previous = { label: agent.info.label, task: agent.info.task, result: agent.info.result };
+  // The accepted inbox owns this assignment. A spawn label is not a label for later work,
+  // and an old report must not masquerade as the result of the waking assignment. Keep that
+  // report in the prime's existing inbox/history; status carries only a bounded task preview.
+  agent.info.label = agent.info.id;
+  agent.info.task = agent.queue
+    .filter((message) => message.ackedAt === null && !message.offeredViaRevival)
+    .map((message) => message.text).join('\n\n').slice(0, MAX_TASK_CHARS);
+  agent.info.result = null;
   agent.info.state = 'waking';
   // `sleptAt` stays: the worker is still stopped while waking, and that timestamp is what tells
   // a turn the page reports *now* apart from the page replaying the turn that ended before the
@@ -2547,6 +2559,7 @@ function beginRevival(agent: Agent): void {
   agent.info.revivable = true;
   agent.info.lastRevivalCommandId = null;
   logInfo(`multi-agent: ${agent.info.id} is being woken in conversation ${agent.info.conversationId}`);
+  return previous;
 }
 
 /**
@@ -2569,7 +2582,7 @@ export function stageQueuedWorkerRevivals(ids: readonly string[], runId?: string
   const run = scopedRun(runId);
   if (!run || ids.length === 0) return { waking: [], commit: () => undefined, rollback: () => undefined };
   const wanted = new Set(ids);
-  const reserved: Array<{ agent: Agent; sleptAt: number | null }> = [];
+  const reserved: Array<{ agent: Agent; sleptAt: number | null; assignment: WorkerAssignment }> = [];
   for (const agent of run.agents.values()) {
     if (
       agent.info.role !== 'worker' ||
@@ -2589,8 +2602,8 @@ export function stageQueuedWorkerRevivals(ids: readonly string[], runId?: string
     );
     if (!hasUnseen || freeWorkerSlots(run.runId) <= 0) continue;
     const sleptAt = agent.info.sleptAt;
-    beginRevival(agent);
-    reserved.push({ agent, sleptAt });
+    const assignment = beginRevival(agent);
+    reserved.push({ agent, sleptAt, assignment });
   }
   if (reserved.length === 0) return { waking: [], commit: () => undefined, rollback: () => undefined };
   changed();
@@ -2605,8 +2618,9 @@ export function stageQueuedWorkerRevivals(ids: readonly string[], runId?: string
     rollback: () => {
       if (settled) return;
       settled = true;
-      for (const { agent, sleptAt } of reserved) {
+      for (const { agent, sleptAt, assignment } of reserved) {
         if (agent.info.state !== 'waking') continue;
+        Object.assign(agent.info, assignment);
         returnWakingWorkerToStopped(
           agent,
           sleptAt ?? Date.now(),
@@ -3083,7 +3097,7 @@ export function noteAgentAlive(
   agent.info.sleptAt = null;
   agent.info.revivable = false;
   agent.info.lastSeenAt = now;
-  if (was === 'failed') agent.info.result = null;
+  agent.info.result = null;
   if (!agent.info.activatedAt) agent.info.activatedAt = now;
   // Two revivals need saying, and both for the same reason: the prime was told something
   // about this worker that has just stopped being true, and left standing it is how the same

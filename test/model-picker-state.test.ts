@@ -97,6 +97,39 @@ it('waits for the model picker to close before allowing composer insertion', asy
   expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(true);
   expect(page.window.document.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
 });
+it.each([false, true])('releases native hidden-window Presence and reopens a retained closed menu (retained=%s)', async retained => {
+  const f = fixture('', null), win = page.window, doc = win.document;
+  const nativeStyle = doc.createElement('style');
+  nativeStyle.textContent = '[role="menu"] { animation: picker-exit 320ms; }';
+  doc.head.append(nativeStyle);
+  const trigger = doc.querySelector('button')!;
+  const opens = vi.fn();
+  trigger.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    opens();
+    const panel = doc.querySelector('[data-testid="composer-intelligence-picker-content"]')!;
+    let menu = panel.closest('[role="menu"]');
+    if (!menu) { menu = doc.createElement('div'); menu.setAttribute('role', 'menu'); doc.body.append(menu); menu.append(panel); }
+    menu.setAttribute('data-state', 'open');
+  });
+  if (retained) {
+    trigger.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter' }));
+    doc.querySelector('[role="menu"]')!.setAttribute('data-state', 'closed');
+    opens.mockClear();
+  }
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const menu = doc.querySelector('[role="menu"]')!;
+    menu.setAttribute('data-state', 'closed');
+    // Native Presence unmounts immediately without an animation; a hidden page
+    // cannot supply the animationend which otherwise releases its focus scope.
+    if (win.getComputedStyle(menu).animation === 'none') menu.remove();
+  });
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
+  expect(opens).toHaveBeenCalledTimes(1);
+  expect(doc.querySelector('[role="menu"]')).toBeNull();
+  expect([...doc.querySelectorAll('style')]).toEqual([nativeStyle]);
+});
 it('refuses selection success when the picker retains its focus trap', async () => {
   const f = fixture('', null);
   expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(false);

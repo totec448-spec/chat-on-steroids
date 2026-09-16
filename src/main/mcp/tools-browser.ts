@@ -13,7 +13,7 @@ import { compactingConversation } from '../session/continuation.js';
 import { dormantWorkerNotice, endedWorkerNotice, retiredWorkerForConversation } from '../agents.js';
 
 const tabId = z.string().regex(/^[a-f\d-]{36}:\d+$/i).describe('Exact tabId returned by browser_tabs.');
-const pageId = z.string().max(100).describe('Current pageId from attach, snapshot or screenshot; navigation invalidates it.');
+const pageId = z.string().uuid('Copy the top-level pageId from the observation, not a frameId or element ref.').describe('Exact top-level pageId UUID from attach, snapshot or screenshot. Do not extract it from an element ref. Navigation invalidates it.');
 const ref = z.string().max(100);
 const target = { tabId, pageId };
 const point = { x: z.number().finite().min(0).max(10000).optional(), y: z.number().finite().min(0).max(10000).optional(), screenshotId: z.string().max(100).optional() };
@@ -42,7 +42,8 @@ const declarations: Record<BrowserTool, { description: string; inputSchema: z.Zo
   browser_action: {
     description: 'Background tab input: click/hover by DOM ref or viewport screenshot coordinates, fill/type, select, key chords, scroll, drag, and JavaScript dialogs. Ref input resolves the live element; stale pages or obstructed targets fail. No OS cursor or clipboard changes. Observe after input to verify.',
     inputSchema: z.object({ ...target, action: z.enum(['click', 'hover', 'fill', 'type', 'select', 'key', 'scroll', 'drag', 'dialog']), ref: ref.optional(), ...point,
-      text: z.string().max(24000).optional(), key: z.string().max(100).optional(), values: z.array(z.string().max(1000)).max(50).optional(),
+      text: z.string().max(24000).optional(), key: z.string().max(100).optional().describe('Character or case-insensitive named key (Enter/Return, Escape/Esc, Tab, Space, arrows), optionally Control/Shift/Alt/Meta+key. Optional ref focuses that exact target first; otherwise uses current page focus.'),
+      holdMs: z.number().int().min(0).max(2000).optional().describe('Key only: hold down for this many milliseconds, then release in the same call. Useful for canvas movement; defaults to a tap.'), values: z.array(z.string().max(1000)).max(50).optional(),
       button: z.enum(['left','middle','right']).default('left'), clickCount: z.number().int().min(1).max(3).default(1),
       deltaX: z.number().finite().min(-10000).max(10000).optional(), deltaY: z.number().finite().min(-10000).max(10000).optional(),
       toRef: ref.optional(), toX: z.number().finite().min(0).max(10000).optional(), toY: z.number().finite().min(0).max(10000).optional(), accept: z.boolean().optional()
@@ -53,6 +54,7 @@ const declarations: Record<BrowserTool, { description: string; inputSchema: z.Zo
       if (['fill','type'].includes(v.action)) need(v.text !== undefined,'text','Text required (empty fill clears the field)');
       if (v.action === 'select') need(v.values !== undefined,'values','Values required');
       if (v.action === 'key') need(!!v.key,'key','Key chord required');
+      if (v.holdMs !== undefined) need(v.action === 'key','holdMs','Only supported for key input');
       if (v.action === 'dialog') need(v.accept !== undefined,'accept','Specify accept');
       if (v.action === 'drag') need(!!v.toRef || (v.toX !== undefined && v.toY !== undefined && !!v.screenshotId),'toRef','Destination ref or coordinates required');
     })

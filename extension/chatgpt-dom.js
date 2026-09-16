@@ -1797,7 +1797,7 @@ var CLF_DOM = (() => {
     }, false);
   }
 
-  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null } = {}) {
+  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null } = {}) {
     try {
       const box = composer();
       if (!box || !box.isConnected || !stillCurrent() || generating() || stopButton()) return false;
@@ -1832,11 +1832,14 @@ var CLF_DOM = (() => {
           const message = visible[at];
           if (message.role !== 'user') continue;
           if (!priorUserNodes.has(message.node) && !priorUserIds.has(message.id) && (matchesUser ? matchesUser(message, submitted) : compact(message.text) === expected)) {
+            if (acceptUserReceipt && !acceptUserReceipt(message, currentConversation)) continue;
             submittedMessageObserved = true;
             return true;
           }
         }
-        if (currentConversation !== beforeConversation) return false;
+        // Receipt-owned delivery must settle on this exact native row. Composer clear
+        // or Stop alone cannot hand off a receipt, and a later DOM read can lose it.
+        if (acceptUserReceipt || currentConversation !== beforeConversation) return false;
         const current = composer();
         if (current === box && box.isConnected && (current.textContent || '').trim() === '') return true;
         if (!beforeGenerating && generating()) return true;
@@ -1889,6 +1892,10 @@ var CLF_DOM = (() => {
                 !sendButtonEnabled(button) || box.getAttribute('aria-disabled') === 'true' ||
                 box.getAttribute('contenteditable') === 'false') return finish(false);
             attempted = true;
+            // The deadline bounds readiness, not an already-dispatched receipt.
+            // Keep this same observer and exact send lifetime until the provider
+            // publishes its identity; never click again because that is delayed.
+            if (acceptUserReceipt && timer !== null) { clearTimeout(timer); timer = null; }
             try { button.click(); } catch { return finish(false); }
             check(); // Synchronous navigation/cancellation during click also re-proves ownership.
           };
@@ -1910,7 +1917,7 @@ var CLF_DOM = (() => {
         if (observeEvidence) unsubscribeEvidence = observeEvidence(check);
         // Readiness and acceptance share one deadline below the app's command lease.
         const timeout = Number.isFinite(acceptanceTimeoutMs) ? Math.max(1, Math.min(30000, acceptanceTimeoutMs)) : 30000;
-        timer = setTimeout(() => { if (attempted) check(); finish(false); }, timeout);
+        timer = setTimeout(() => { if (attempted) check(); if (!attempted || !acceptUserReceipt) finish(false); }, timeout);
         check();
       });
     } catch {
@@ -2082,6 +2089,11 @@ var CLF_DOM = (() => {
     const shown = node => node && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
     const picker = () => document.querySelector('[data-testid="composer-intelligence-picker-content"]');
     const trigger = modelPickerTrigger;
+    let motion = null;
+    const openPicker = () => {
+      const panel = picker();
+      return panel && panel.closest('[role="menu"],[role="dialog"]')?.getAttribute('data-state') !== 'closed' ? panel : null;
+    };
     const wait = (read, timeout = 3000) => new Promise(resolve => {
       let reading = false, dirty = false, done = false;
       const finish = value => { if (done) return; done = true; observer.disconnect(); clearTimeout(timer); resolve(value); };
@@ -2103,15 +2115,25 @@ var CLF_DOM = (() => {
     return {
       state,
       async open() {
+        if (!stillCurrent()) return null;
+        // Native Presence waits for the menu's exit animation. Chrome can suspend
+        // that animation in a hidden window, retaining a closed picker and its
+        // focus scope indefinitely. Suppress only this owned picker animation for
+        // this operation; native state still closes/unmounts it and proves release.
+        motion = document.createElement('style');
+        motion.textContent = '[role="menu"]:has(> [data-testid="composer-intelligence-picker-content"]),[role="dialog"]:has([data-testid="composer-intelligence-picker-content"]){animation:none!important}';
+        document.head.append(motion);
         // A cold home editor mounts before its native Chat/Work picker. Workers
         // enter here directly, without the New Chat reuse/catalog preparation.
         // Wait for that surface, then use the same owned Chat transition before
         // interpreting account choices. Work's picker is not a denied Chat model.
         if (!await wait(trigger, 15000) || !await prepareChatModelSurface(stillCurrent)) return null;
-        if (!picker()) { const button = await wait(trigger, 15000); if (!key(button, 'Enter') || !await wait(picker)) return null; }
+        // A retained exit-animation node is not an open native menu.
+        if (!openPicker()) { const button = await wait(trigger, 15000); if (!key(button, 'Enter') || !await wait(openPicker)) return null; }
         return state();
       },
       async close() {
+        try {
         if (!stillCurrent()) return false;
         const panel = picker();
         if (!panel) return true;
@@ -2121,6 +2143,7 @@ var CLF_DOM = (() => {
         // A dispatched key is only an attempt: native unmount/animation owns closure.
         if (!key(panel.contains(active) || dialog?.contains(active) ? active : panel, 'Escape')) return false;
         return Boolean(await wait(() => !shown(picker()) && (!dialog?.isConnected || !shown(dialog))));
+        } finally { motion?.remove(); motion = null; }
       },
       async version(version) {
         const before = await state(); if (!before) return null;

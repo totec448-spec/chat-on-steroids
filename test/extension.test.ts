@@ -601,7 +601,9 @@ function loadWorker(options: {
     }
   };
   const fetch = options.fetch ?? (async () => response(503, {}));
-  vm.runInNewContext(backgroundSource, {
+  // This legacy VM harness exercises non-debugger hosts. The real MV3 entry fixture
+  // separately loads the unchanged module graph and verifies browser registration.
+  vm.runInNewContext(backgroundSource.replace(/^import .*$/gm, ''), {
     chrome,
     fetch,
     AbortController,

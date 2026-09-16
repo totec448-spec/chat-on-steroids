@@ -415,10 +415,12 @@ describe('durable user input ownership', () => {
     expect(await pendingBrowserInputs()).toEqual([]);
     expect(await claimBrowserInput(row.id, 'late-page', null, true)).toBeNull();
     now += 45000;
-    expect((await listInputs())[0]).toMatchObject({ state: 'cancelled', error: expect.stringContaining('may already') });
+    // An authorized Send retains exact custody while native identity is still pending.
+    expect((await listInputs())[0]).toMatchObject({ state: 'browser', owner: 'replacement-page' });
+    expect(await claimBrowserInput(row.id, 'late-page', null, true)).toBeNull();
     await expect(enqueueInput(input())).resolves.toMatchObject({ state: 'queued' });
     expect(await acknowledgeBrowserInput(row.id, 'replacement-page', binding.conversationId, 'late-native')).toBe(true);
-    expect((await listInputs())[0]).toMatchObject({ state: 'cancelled', messageId: 'late-native' });
+    expect((await listInputs())[0]).toMatchObject({ state: 'sent', messageId: 'late-native' });
   });
   it('does not replay a retained transcript after a migrated opening owns its exact session', async () => {
     const row = await seedLegacyInput(input({ sessionId: null }));
@@ -875,7 +877,9 @@ describe('durable user input ownership', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ state: 'cancelled', messageId: 'native-id', error: expect.stringContaining('later confirmed') });
     expect(await enqueueInput(input({ ...row, sessionId: null }))).toMatchObject({ state: 'cancelled' });
-    expect(await cancelInput(row.id)).toBe(false);
+    // Explicit notice dismissal is idempotent and cannot erase a late receipt.
+    expect(await cancelInput(row.id)).toBe(true);
+    expect((await listInputs())[0]).toMatchObject({ state: 'cancelled', messageId: 'native-id', error: expect.stringContaining('later confirmed') });
   });
   it('does not publish a rejected enqueue through a background durable retry', async () => {
     vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk busy'));
@@ -1669,18 +1673,19 @@ describe('one silence delivery for a correction and its next checkpoint', () => 
     expect(await offerToolInput(sessionId, binding.conversationId, 'resumed-call', now)).toEqual([expect.objectContaining({ text: 'Use real 3D shapes' })]);
   });
 
-  it.each(['cancel', 'failure', 'timeout'] as const)('keeps both originals under one late receipt after %s', async outcome => {
+  it.each(['cancel', 'failure', 'delay'] as const)('keeps both originals under one late receipt after %s', async outcome => {
     const { head, correction } = await bundle();
     await claimBrowserInput(correction.id, 'page', binding.conversationId, true);
     await authorizeBrowserInput(correction.id, 'page', binding.conversationId);
     if (outcome === 'cancel') expect(await cancelInput(head.id)).toBe(true);
     if (outcome === 'failure') expect(await failBrowserInput(correction.id, 'page', 'Lost response after Send')).toBe(true);
-    if (outcome === 'timeout') now += 45_001;
+    if (outcome === 'delay') now += 45_001;
     resetInputForTests();
-    for (const id of [head.id, correction.id]) expect((await listInputs()).find(row => row.id === id)).toMatchObject({ state: 'cancelled' });
+    for (const id of [head.id, correction.id]) expect((await listInputs()).find(row => row.id === id)).toMatchObject({ state: outcome === 'delay' ? 'browser' : 'cancelled' });
     expect(await pendingBrowserInputs()).toEqual([]);
+    expect(await claimBrowserInput(correction.id, 'replacement-page', binding.conversationId, true)).toBeNull();
     expect(await acknowledgeBrowserInput(correction.id, 'page', binding.conversationId, 'late-native-id')).toBe(true);
-    for (const id of [head.id, correction.id]) expect((await listInputs()).find(row => row.id === id)).toMatchObject({ state: 'cancelled', messageId: 'late-native-id' });
+    for (const id of [head.id, correction.id]) expect((await listInputs()).find(row => row.id === id)).toMatchObject({ state: outcome === 'delay' ? 'sent' : 'cancelled', messageId: 'late-native-id' });
   });
 
   it('preserves authorized bundle custody against a fresh-work revocation and false safe-withdrawal report', async () => {

@@ -7,6 +7,13 @@ const models = [{ id: 'gpt-example', label: 'GPT Example', efforts: ['none', 'me
 beforeEach(() => { resetChatModelsForTests(); saved.value = null; vi.useFakeTimers(); });
 afterEach(() => vi.useRealTimers());
 describe('durable observed ChatGPT model catalog', () => {
+  it('settles native picker close failure immediately while retaining observed choices', () => {
+    requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });
+    requestChatModels();
+    expect(observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: null, error: 'picker_close_failed' })).toBe(true);
+    expect(pendingChatModelRequest()).toBeNull();
+    expect(getChatModels()).toMatchObject({ state: 'ready', models, error: expect.any(String) });
+  });
   it('restores successful choices after restart without restoring browser opening authority', async () => {
     requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });
     resetChatModelsForTests(); await restoreChatModels();

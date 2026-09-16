@@ -1383,7 +1383,7 @@ it('keeps the model in use when OpenRouter cannot be reached', async () => {
   expect(doc.getElementById('goalModelName')!.textContent).toBe('deepseek/deepseek-v4-flash');
 });
 
-it('edits a fresh Goal before first send and clears it on an independent New Chat', async () => {
+it('retains a fresh Goal and first message when rejected sends return to New Chat', async () => {
   const sendInput = vi.fn(async () => ({ ok: false, error: 'test delivery stopped' }));
   const mounted = await mountChat({}, [], { sendInput,
     getChatModels: async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['none', 'high'] }] } }),
@@ -1407,7 +1407,9 @@ it('edits a fresh Goal before first send and clears it on an independent New Cha
   expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, automation: 'goal', objective: 'Build and verify the requested feature' }));
   (doc.getElementById('newChat') as HTMLButtonElement).click();
   await settle();
-  expect(objective.value).toBe('');
+  expect(objective.value).toBe('Build and verify the requested feature');
+  expect(input.value).toBe('Start with the existing code');
+  expect((doc.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('goal');
 });
 
 

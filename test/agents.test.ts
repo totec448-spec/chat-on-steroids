@@ -965,6 +965,73 @@ describe('clearing one agent from the app', () => {
  * and about the worker slot, which is the only genuinely scarce thing in the run.
  */
 describe('a worker that is sleeping', () => {
+  it.each(['browser', 'call'] as const)('replaces old assignment metadata before %s revival and retains the old report', (delivery) => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'task A completed');
+    const staged = stageMessages(prime, [{ to: 'worker-1', text: 'inspect task B' }]);
+    staged.commit();
+    const current = () => statusForCaller(prime).state.agents.find((agent) => agent.id === 'worker-1');
+    expect(current()).toMatchObject({ state: 'waking', label: 'worker-1', task: 'inspect task B', result: null });
+    expect(offerMessages(PRIME_ID).some((message) => message.text.includes('task A completed'))).toBe(true);
+    const saved = snapshotSwarm();
+    resetAgentsForTests();
+    restoreSwarm(saved);
+    expect(current()).toMatchObject({ state: 'waking', label: 'worker-1', task: 'inspect task B', result: null });
+    if (delivery === 'browser') {
+      const revival = pendingWorkerRevivals()[0]!;
+      expect(noteWorkerRevived('worker-1', 'c-worker-1', revival.messageIds)).toBe(true);
+    }
+    expect(noteAgentAlive('c-worker-1', 'call')?.revived).toBe(true);
+    expect(current()).toMatchObject({ state: 'active', label: 'worker-1', task: 'inspect task B', result: null });
+    finishAgent(worker.caller, 'task B completed');
+    expect(current()).toMatchObject({ state: 'sleeping', result: 'task B completed' });
+  });
+
+  it('restores prior assignment metadata when a new assignment is rejected before acceptance', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'task A completed');
+    const staged = stageMessages(prime, [{ to: 'worker-1', text: 'inspect task B' }]);
+    staged.rollback();
+    expect(statusForCaller(prime).state.agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping', label: 'Worker 1', task: 'task 1', result: 'task A completed', pending: 0
+    });
+  });
+
+  it('clears a completion result when the same assignment proves it is still running', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'premature report');
+    expect(noteAgentAlive('c-worker-1', 'page')?.revived).toBe(false);
+    expect(statusForCaller(prime).state.agents.find((agent) => agent.id === 'worker-1')?.result).toBe('premature report');
+    expect(noteAgentAlive('c-worker-1', 'call')?.revived).toBe(true);
+    expect(statusForCaller(prime).state.agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'active', label: 'Worker 1', task: 'task 1', result: null
+    });
+  });
+
+  it('refreshes queued-work assignment metadata and restores it if reservation rolls back', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    sendMessage(prime, 'worker-1', 'queued task B');
+    finishAgent(worker.caller, 'task A completed');
+    const staged = stageQueuedWorkerRevivals(['worker-1']);
+    expect(staged.waking).toEqual(['worker-1']);
+    expect(statusForCaller(prime).state.agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'waking', label: 'worker-1', task: 'queued task B', result: null
+    });
+    staged.rollback();
+    expect(statusForCaller(prime).state.agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping', label: 'Worker 1', task: 'task 1', result: 'task A completed', pending: 1
+    });
+    stageQueuedWorkerRevivals(['worker-1']).commit();
+    failWorkerRevival('worker-1', 'fixture pre-send failure');
+    expect(statusForCaller(prime).state.agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping', label: 'worker-1', task: 'queued task B', result: null, pending: 1
+    });
+  });
+
   it('lets a proven call from a parked sleeping worker take the slot back, as inside a live run', () => {
     startSwarm(1);
     const worker = startWorker('worker-1');

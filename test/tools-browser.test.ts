@@ -28,6 +28,7 @@ function registrar() {
   return {tools,call:(name:string,input:unknown)=>{const tool=tools.get(name)!;return tool.handler(tool.schema.parse(input));}};
 }
 const tabId='11111111-1111-4111-8111-111111111111:12';
+const pageId='22222222-2222-4222-8222-222222222222';
 beforeEach(()=>{
   state.caps={screen:true,control:true};state.unattributed=true;state.caller=null;state.attachment='current';state.blocked=false;
   state.execute.mockReset().mockResolvedValue({value:{ok:true}});state.image.mockClear();
@@ -59,10 +60,16 @@ describe('Desktop browser invocation boundary',()=>{
   });
   it('validates action targets and required values before admitting a command',()=>{
     const schema=registrar().tools.get('browser_action')!.schema;
-    expect(schema.safeParse({tabId,pageId:'p',action:'click',x:20,y:20}).success).toBe(false);
-    expect(schema.safeParse({tabId,pageId:'p',action:'fill',ref:'r'}).success).toBe(false);
-    expect(schema.safeParse({tabId,pageId:'p',action:'fill',ref:'r',text:''}).success).toBe(true);
-    expect(schema.safeParse({tabId,pageId:'p',action:'click',x:20,y:20,screenshotId:'s'}).success).toBe(true);
+    expect(schema.safeParse({tabId,pageId,action:'click',x:20,y:20}).success).toBe(false);
+    expect(schema.safeParse({tabId,pageId,action:'fill',ref:'r'}).success).toBe(false);
+    expect(schema.safeParse({tabId,pageId,action:'fill',ref:'r',text:''}).success).toBe(true);
+    expect(schema.safeParse({tabId,pageId,action:'click',x:20,y:20,screenshotId:'s'}).success).toBe(true);
+    const confused=schema.safeParse({tabId,pageId:`${pageId}:frame`,action:'key',key:'ENTER'});
+    expect(confused.success).toBe(false);
+    if (!confused.success) expect(confused.error.issues[0]?.message).toContain('top-level pageId');
+    expect(schema.safeParse({tabId,pageId,action:'key',key:'w',holdMs:300}).success).toBe(true);
+    expect(schema.safeParse({tabId,pageId,action:'key',key:'w',holdMs:2001}).success).toBe(false);
+    expect(schema.safeParse({tabId,pageId,action:'click',ref:'r',holdMs:300}).success).toBe(false);
   });
   it('returns screenshots once as native image blocks after invoking the pixel validator',async()=>{
     const data=Buffer.from('fixture bytes').toString('base64');

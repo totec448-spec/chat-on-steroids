@@ -41,6 +41,10 @@ incorporate the rest of the native Desktop proposal.
 
 ## Reports, review and proposed work
 
+[@raxy24](https://github.com/raxy24)'s report in
+[#262](https://github.com/totec448-spec/chat-on-steroids/issues/262) led to the independently
+implemented fix for stale assignment metadata when reusing a sleeping worker.
+
 [@Bemirror99](https://github.com/Bemirror99)'s model-picker focus diagnostics in
 [#256](https://github.com/totec448-spec/chat-on-steroids/issues/256) led to an independently
 implemented bounded picker-close check before helper/composer preparation continues.

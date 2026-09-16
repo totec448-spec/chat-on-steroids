@@ -3002,7 +3002,7 @@ async function inspectVerifiedAssetFile(directory: VerifiedAssetsDirectory, name
 }
 
 /** Exact physical quota inventory. Directory entries, not caller paths, define the scope. */
-async function imageStorageInventory(): Promise<{ usedBytes: number; images: StoredImageFile[] }> {
+async function imageStorageInventory(collectImages = true): Promise<{ usedBytes: number; images: StoredImageFile[] }> {
   assertReady();
   let usedBytes = 0;
   const images: StoredImageFile[] = [];
@@ -3027,6 +3027,17 @@ async function imageStorageInventory(): Promise<{ usedBytes: number; images: Sto
         for await (const entry of entries) {
           // Symlinks and other special files neither consume the app's quota nor become cleanup targets.
           if (!entry.isFile() || !/^[0-9a-f]{8,64}\.(?:bin|png|jpg|txt)$/i.test(entry.name)) continue;
+          // Usage needs metadata only. Opening every file to classify its contents belongs
+          // to confirmed cleanup, not to displaying the quota (including a cold start).
+          if (!collectImages) {
+            try {
+              const stat = await fs.lstat(path.join(assetsDir.path, entry.name));
+              if (stat.isFile() && !stat.isSymbolicLink()) sessionBytes += stat.size;
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+            }
+            continue;
+          }
           const file = await inspectVerifiedAssetFile(assetsDir, entry.name);
           if (!file) continue;
           sessionBytes += file.bytes;
@@ -3164,7 +3175,9 @@ async function retireSessionImages(sessionId: string, selected: ReadonlySet<stri
 
 export function getImageStorage(): Promise<ImageStorageInfo> {
   return enqueueAssetOperation(async () => {
-    const { usedBytes } = await imageStorageInventory();
+    assertReady();
+    // Asset writes and cleanup already maintain this quota authority under the same queue.
+    const usedBytes = globalAssetUsage ?? (await imageStorageInventory(false)).usedBytes;
     return { usedBytes, limitBytes: MAX_GLOBAL_ASSET_BYTES };
   });
 }
@@ -3215,7 +3228,7 @@ export async function clearImageStorage(mode: ImageStorageClearMode): Promise<Im
       }
       sessionAssetUsage.clear();
       globalAssetUsage = null;
-      const after = await imageStorageInventory();
+      const after = await imageStorageInventory(false);
       return { freedBytes, removedFiles, usedBytes: after.usedBytes, limitBytes: MAX_GLOBAL_ASSET_BYTES };
     } catch (error) {
       rejectSelection(error);

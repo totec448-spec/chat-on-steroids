@@ -4,6 +4,8 @@ Settings → Plugins manages external MCP integrations. Core and Desktop keep th
 connectors, permissions and tool registration. Plugins uses a third, separately tokenized
 endpoint and the shared **Chat On Steroids Plugins** connector.
 
+The [responsible-use notice](../README.md#responsible-use-and-provider-rules) applies to plugins too. Each external service retains its own terms, permissions and usage limits. Installing or enabling a plugin does not authorize routing a provider-blocked action through it or bypassing an account restriction.
+
 ## Setup
 
 1. Open Plugins and choose **Set up plugins** in the prominent connection card.

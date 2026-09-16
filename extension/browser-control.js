@@ -58,6 +58,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
   function alive(state, command) {
     if (tabs.get(state.tabId) !== state) error('BROWSER_DETACHED: tab ownership was released. Attach again deliberately.');
     if (command && (command.epoch !== epoch || command.expiresAt <= Date.now())) error('BROWSER_EXPIRED: remaining input was not dispatched. Earlier actions may have completed.');
+    if (command?.args.pageId && !/^[a-f\d-]{36}$/i.test(command.args.pageId)) error('BROWSER_PAGE_ID_INVALID: copy the top-level pageId from the observation, not a frameId or element ref. No input was dispatched.');
     if (command?.args.pageId && state.pageId !== command.args.pageId) error('BROWSER_PAGE_STALE: navigation invalidated the observation. Snapshot again.');
   }
   async function send(state, method, params = {}, sessionId, command) {
@@ -79,8 +80,10 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
             void chrome.debugger.detach({tabId:state.tabId}).catch(() => {});
             void save().catch(() => {});
           }
-          reject(new Error('BROWSER_CDP_TIMEOUT: the operation may have run. Inspect before repeating; this tab was detached.'));
-        }, Math.min(8000,command ? Math.max(1,command.expiresAt-Date.now()) : 8000)); })
+          reject(new Error(`BROWSER_CDP_TIMEOUT: ${method} did not acknowledge within its deadline. This attachment was retired; the tab was not closed. List tabs, explicitly attach the same existing tab, then inspect before repeating any input.`));
+        // Background compositing can legitimately outlast input's 8s bound. A
+        // capture gets 20s within the same absolute RPC deadline, never a retry.
+        }, Math.min(method==='Page.captureScreenshot' ? 20000 : 8000,command ? Math.max(1,command.expiresAt-Date.now()) : 8000)); })
       ]);
     } catch (cause) {
       clearTimeout(timer);
@@ -98,12 +101,19 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
   }
   async function currentTab(state, command) {
     alive(state,command);
-    const tab = await chrome.tabs.get(state.tabId);
+    const tab = await getTab(state.tabId);
     alive(state,command);
     pageURL(tab.url);
     if (tab.pendingUrl && tab.pendingUrl !== tab.url) error('BROWSER_NAVIGATING: wait for the destination and snapshot again.');
     if (protectedTab(state.tabId, tab.url, command?.conversationId)) error('BROWSER_EXECUTOR_TAB: this tab belongs to active ChatGPT orchestration. Choose a separate page.');
     return tab;
+  }
+  async function getTab(tabId) {
+    try { return await chrome.tabs.get(tabId); }
+    catch (cause) {
+      if (/No tab with id|Invalid tab ID/i.test(cause?.message || '')) error('BROWSER_TAB_CLOSED: this exact tab no longer exists, possibly closed by the user. List tabs to inspect current state; do not recreate it automatically.');
+      throw cause;
+    }
   }
   async function input(state, method, params, command) {
     await authorize(command);
@@ -123,6 +133,10 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       await send(state,'Runtime.disable');state.restored = false;
     }
     await send(state,'Page.enable',{},sessionId);
+    // Hidden widgets otherwise wait ~5s for mouse ACKs and suspend animation/media.
+    // This affects only the attached page, never Chrome's selected tab or OS focus.
+    // Chrome drops the emulation when its debugger session is detached.
+    if (!sessionId) await send(state,'Emulation.setFocusEmulationEnabled',{enabled:true});
     await send(state,'Runtime.enable',{},sessionId);
     await send(state,'Network.enable',{ maxTotalBufferSize: 2_000_000, maxResourceBufferSize: 500_000, maxPostDataSize: 16000 },sessionId);
     await send(state,'Log.enable',{},sessionId);
@@ -228,7 +242,11 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
   }
   async function owned(command) {
     const state = tabs.get(command.args.tabId);
-    if (!state || state.owner !== command.owner) error('BROWSER_TAB_NOT_OWNED: attach this exact tab before using it.');
+    if (!state) {
+      await getTab(command.args.tabId);
+      error('BROWSER_TAB_NOT_OWNED: the tab still exists but has no live attachment. Chrome may have ended debugging or the extension restarted. Explicitly attach this same tab, then take a fresh observation. Do not open a replacement.');
+    }
+    if (state.owner !== command.owner) error('BROWSER_TAB_OWNED: another conversation owns this tab. Choose an unclaimed tab.');
     await currentTab(state,command);
     if (!state.initialized) {
       try { await initialize(state); } catch { await release(state); error('BROWSER_DETACHED: Chrome ended this debugger attachment. Attach again deliberately.'); }
@@ -288,10 +306,12 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       if (!bit) error('BROWSER_KEY_INVALID: use Control/Shift/Alt/Meta plus one key.');
       modifiers |= bit;
     }
-    const key = parts.at(-1);
+    const supplied = parts.at(-1);
     const special = { Enter:['Enter',13], Tab:['Tab',9], Escape:['Escape',27], Backspace:['Backspace',8], Delete:['Delete',46], ArrowLeft:['ArrowLeft',37], ArrowRight:['ArrowRight',39], ArrowUp:['ArrowUp',38], ArrowDown:['ArrowDown',40], Home:['Home',36], End:['End',35], PageUp:['PageUp',33], PageDown:['PageDown',34], Space:['Space',32] };
+    const aliases = {return:'Enter',esc:'Escape',spacebar:'Space',left:'ArrowLeft',right:'ArrowRight',up:'ArrowUp',down:'ArrowDown'};
+    const key = Object.keys(special).find(name => name.toLowerCase() === supplied.toLowerCase()) || aliases[supplied.toLowerCase()] || supplied;
     const named = special[key];
-    if (!named && key.length !== 1) error('BROWSER_KEY_INVALID: use a supported DOM key or single character.');
+    if (!named && key.length !== 1) error('BROWSER_KEY_INVALID: use a character, Enter, Tab, Escape, Backspace, Delete, ArrowLeft/Right/Up/Down, Home, End, PageUp/Down or Space, optionally prefixed by Control/Shift/Alt/Meta. Named keys are case-insensitive.');
     const actual = key === 'Space' ? ' ' : key;
     const code = named?.[0] || (/^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : /^\d$/.test(key) ? `Digit${key}` : '');
     const vk = named?.[1] || key.toUpperCase().charCodeAt(0);
@@ -304,10 +324,16 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       await input(state,'Page.handleJavaScriptDialog',{ accept:args.accept,promptText:args.text || '' },command);
     } else if (a === 'key') {
       const key = keyEvents(args.key);
+      if (args.ref) {
+        await authorize(command);
+        await page(state,'focus',{ref:args.ref,frameId:state.refFrames?.get(args.ref),keyTarget:true},command);
+      }
       await input(state,'Input.dispatchKeyEvent',{ type:'keyDown',...key },command);
       const { text:_text,...up } = key;
       // Releasing the key has the same exact tab custody even if keyDown navigated it.
-      await send(state,'Input.dispatchKeyEvent',{ type:'keyUp',...up });
+      try {
+        if (args.holdMs) await new Promise(resolve => setTimeout(resolve,Math.min(2000,Math.max(0,args.holdMs))));
+      } finally { await send(state,'Input.dispatchKeyEvent',{ type:'keyUp',...up }); }
     } else if (a === 'fill' || a === 'type') {
       if (typeof args.text !== 'string' || !args.ref) error('BROWSER_TEXT_TARGET_REQUIRED: pass text and an editable ref.');
       await authorize(command);
@@ -379,9 +405,10 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       return { ...value,...(body ? {body}: {}) };
     }
     const rows = network ? [...state.network.values()] : state.console;
-    const selected = rows.filter(row => row.seq > (args.after || 0) &&
+    const matching = rows.filter(row => row.seq > (args.after || 0) &&
       (!args.filter || JSON.stringify(row).toLowerCase().includes(args.filter.toLowerCase())) &&
-      (network || !args.level || args.level === 'all' || row.level === args.level)).sort((a,b) => a.seq-b.seq).slice(0,args.limit || 50);
+      (network || !args.level || args.level === 'all' || row.level === args.level)).sort((a,b) => a.seq-b.seq);
+    const selected = matching.slice(0,args.limit || 50);
     const values = []; let size = 0;
     for (const row of selected) {
       const { nativeId:_native,sessionId:_session,requestHeaders:_rq,responseHeaders:_rs,postData:_post,...brief } = row;
@@ -391,7 +418,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       values.push(value);
     }
     if (args.clear) { if (network) state.network.clear(); else state.console = []; }
-    return { entries:values,nextCursor:values.at(-1)?.seq || args.after || 0,truncated:values.length < selected.length,dropped:network ? state.networkDropped : state.consoleDropped,capture:'Since debugger attachment; older events are unavailable.' };
+    return { entries:values,nextCursor:values.at(-1)?.seq || args.after || 0,truncated:values.length < matching.length,dropped:network ? state.networkDropped : state.consoleDropped,capture:'Since debugger attachment; older events are unavailable.' };
   }
   async function execute(command) {
     if (command.epoch !== epoch || command.expiresAt <= Date.now()) error('BROWSER_EXPIRED: no operation dispatched.');
@@ -422,7 +449,8 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
           const value = await attach(tab.id,command);
           if (url !== 'about:blank') {
             const state = tabs.get(tab.id);
-            await input(state,'Page.navigate',{url},command); invalidate(state);
+            const navigation = await input(state,'Page.navigate',{url},command); invalidate(state);
+            if (navigation.errorText) error(`BROWSER_NAVIGATION_FAILED: ${cut(navigation.errorText)}`);
             return {value:{tabId:handle(tab.id),attached:true,navigationRequested:url,message:'Snapshot to inspect the loaded destination.'}};
           }
           return {value};

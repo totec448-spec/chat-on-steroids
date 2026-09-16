@@ -57,11 +57,12 @@ export function browserPage(operation, args) {
     const lines = []; let chars = 0, visited = 0, emitted = 0, truncated = false;
     const filter = (args.filter || '').toLocaleLowerCase();
     const implicit = { A: 'link', BUTTON: 'button', TEXTAREA: 'textbox', SELECT: 'combobox', IMG: 'img', H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', SUMMARY: 'button' };
-    const stack = [{ node: document.body || document.documentElement, depth: 0 }];
+    const stack = [{ node: document.body || document.documentElement, depth: 0, namedParent: false }];
     while (stack.length) {
       if (++visited > 15000 || emitted >= args.maxNodes || chars >= args.maxChars) { truncated = true; break; }
-      const { node, depth } = stack.pop();
+      const { node, depth, namedParent } = stack.pop();
       if (node.nodeType === Node.TEXT_NODE) {
+        if (namedParent) continue; // The ancestor's accessible name already includes this text.
         const text = compact(node.nodeValue, 500);
         if (text && (!filter || text.toLocaleLowerCase().includes(filter))) {
           const line = `${'  '.repeat(Math.min(depth, 16))}${text}`;
@@ -75,7 +76,7 @@ export function browserPage(operation, args) {
       let role = compact(node.getAttribute('role'), 50) || implicit[node.tagName];
       if (node.tagName === 'INPUT') role = ({ checkbox: 'checkbox', radio: 'radio', range: 'slider', button: 'button', submit: 'button' })[node.type] || 'textbox';
       if (!role && (node.isContentEditable || node.tabIndex >= 0 || node.hasAttribute('onclick'))) role = node.isContentEditable ? 'textbox' : 'interactive';
-      const terminal = role && ['button','link','textbox','checkbox','radio','combobox','slider','img','heading','interactive'].includes(role);
+      const named = role && ['button','link','textbox','checkbox','radio','combobox','slider','img','heading','interactive'].includes(role);
       if (role) {
         const name = label(node);
         if (!filter || `${role} ${name}`.toLocaleLowerCase().includes(filter)) {
@@ -88,17 +89,20 @@ export function browserPage(operation, args) {
           state.refs.set(id, node); lines.push(line); chars += line.length + 1; emitted++;
         }
       }
-      if (terminal) continue;
+      // Named containers (headings, cards, comboboxes) can contain independently
+      // actionable links/editors. Traverse them without duplicating their label text.
       if (depth >= 40) { truncated = true; continue; }
       // Reverse iteration avoids allocating a full array for a huge DOM parent.
       const roots = node.shadowRoot ? [node, node.shadowRoot] : [node];
       for (const root of roots) {
         let child = root.lastChild, count = 0;
-        while (child && stack.length < 15000 && count++ < 15000) { stack.push({ node: child, depth: depth + (role ? 1 : 0) }); child = child.previousSibling; }
+        while (child && stack.length < 15000 && count++ < 15000) { stack.push({ node: child, depth: depth + (role ? 1 : 0), namedParent: namedParent || !!named }); child = child.previousSibling; }
         if (child) truncated = true;
       }
     }
-    return { title: compact(document.title, 500), url: location.href.slice(0, 8192), text: lines.join('\n'), truncated, visited, elements: state.refs.size, refs: [...state.refs.keys()] };
+    return { title: compact(document.title, 500), url: location.href.slice(0, 8192), readyState: document.readyState,
+      visibility: document.visibilityState, focused: document.hasFocus(), pointerLocked: !!document.pointerLockElement,
+      text: lines.join('\n'), truncated, visited, elements: state.refs.size, refs: [...state.refs.keys()] };
   }
 
   const element = resolve(args.ref);
@@ -107,15 +111,27 @@ export function browserPage(operation, args) {
     if (!args.noScroll && (before.left < 0 || before.top < 0 || before.right > innerWidth || before.bottom > innerHeight)) element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     const rect = element.getBoundingClientRect();
     if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) fail('BROWSER_ELEMENT_OFFSCREEN: inspect the target before dragging.');
-    const x = Math.max(0, rect.left) + (Math.min(innerWidth, rect.right) - Math.max(0, rect.left)) / 2;
-    const y = Math.max(0, rect.top) + (Math.min(innerHeight, rect.bottom) - Math.max(0, rect.top)) / 2;
-    let hit = document.elementFromPoint(x, y);
-    while (hit?.shadowRoot?.elementFromPoint(x,y) && hit.shadowRoot.elementFromPoint(x,y) !== hit) hit = hit.shadowRoot.elementFromPoint(x,y);
-    if (!hit || !(hit === element || element.contains(hit))) fail('BROWSER_ELEMENT_OBSTRUCTED: inspect a fresh screenshot.');
-    return { x, y };
+    // Inline/multiline links and partly covered controls need a point in an actual
+    // client rect, not the empty/covered center of the combined bounding box.
+    let blocker = '';
+    const boxes = element.getClientRects();
+    for (let i = 0; i < Math.min(boxes.length,20); i++) {
+      const box = boxes[i];
+      const left = Math.max(0,box.left), top = Math.max(0,box.top);
+      const width = Math.min(innerWidth,box.right)-left, height = Math.min(innerHeight,box.bottom)-top;
+      if (width <= 0 || height <= 0) continue;
+      for (const [fx,fy] of [[.5,.5],[.2,.2],[.8,.2],[.2,.8],[.8,.8]]) {
+        const x = left+width*fx, y = top+height*fy;
+        let hit = document.elementFromPoint(x,y);
+        while (hit?.shadowRoot?.elementFromPoint(x,y) && hit.shadowRoot.elementFromPoint(x,y) !== hit) hit = hit.shadowRoot.elementFromPoint(x,y);
+        if (hit && (hit === element || element.contains(hit))) return {x,y};
+        if (!blocker && hit) blocker = `${hit.tagName.toLowerCase()} ${JSON.stringify(label(hit))}`;
+      }
+    }
+    fail(`BROWSER_ELEMENT_OBSTRUCTED: target ${JSON.stringify(label(element))} is covered${blocker ? ` by ${blocker}` : ''}. No click was dispatched. Inspect a fresh snapshot or screenshot.`);
   }
   if (operation === 'focus') {
-    if (!(element.matches('input,textarea') || element.isContentEditable)) fail('BROWSER_NOT_EDITABLE');
+    if (!args.keyTarget && !(element.matches('input,textarea') || element.isContentEditable)) fail('BROWSER_NOT_EDITABLE');
     if (element.readOnly) fail('BROWSER_ELEMENT_READONLY');
     if (element.matches('input[type="file"]')) fail('BROWSER_FILE_INPUT: use an explicit file upload workflow.');
     element.focus({ preventScroll: true });

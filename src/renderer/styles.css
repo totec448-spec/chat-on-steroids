@@ -1864,16 +1864,6 @@ input[readonly] {
   padding: 8px 0 calc(10px + var(--timeline-scroll-reserve, 0px));
 }
 
-.timeline-window-note {
-  margin: 2px 16px 10px 86px;
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--sunk);
-  color: var(--faint);
-  font-size: 11px;
-}
-
 .ev {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1949,7 +1939,8 @@ input[readonly] {
 .said.is-user.has-reaction-slot { position: relative; margin-bottom: 26px; }
 .message-reaction { position: absolute; inset-inline-end: 12px; top: calc(100% - 4px); width: 28px; height: 28px; display: grid; place-items: center; border: 2px solid var(--page); border-radius: 50%; background: var(--card); font-family: "Segoe UI Emoji", "Apple Color Emoji", sans-serif; font-size: 17px; line-height: 1; user-select: none; }
 .said.is-user.has-reaction-slot.has-input-receipt { margin-bottom: 26px; }
-.has-reaction-slot > .input-receipt { right: 44px; }
+/* Delivery stays at the right edge; a reaction shares the footer to its left. */
+.has-reaction-slot.has-input-receipt > .message-reaction { inset-inline-end: 30px; }
 .user-message-text, .pending-message-text { max-width: 100%; padding: 16px 20px; border-radius: 20px; background: var(--hover); }
 
 .said b {

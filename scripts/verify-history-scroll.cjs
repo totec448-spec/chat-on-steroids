@@ -104,16 +104,15 @@ app.whenReady().then(async () => {
   }
   const latest=await win.webContents.executeJavaScript(`(async()=>{
     const readBefore=fixture.reads.length;
-    const button=document.querySelector('[data-history="latest"]');
-    const alreadyLatest=!button;
-    if(button){
-      button.click();
-      await waitFor(()=>fixture.reads.length>readBefore&&!document.querySelector('[data-history="latest"]'));
+    const pane=document.getElementById('chatBody');
+    for(let i=0;i<4;i++){
+      pane.scrollTop=pane.scrollHeight;
+      pane.dispatchEvent(new WheelEvent('wheel',{deltaY:100}));
+      await frame();
     }
-    await frame();return {...geometry(),alreadyLatest,readBefore,readAfter:fixture.reads.length};
+    return {...geometry(),banner:!!document.querySelector('[data-history="latest"]'),readBefore,readAfter:fixture.reads.length};
   })()`);
-  assert.ok(latest.readAfter>latest.readBefore||latest.alreadyLatest,
-    'The fixture must either page back to latest or retain the deliberate live-reader position reached by direction reversal');
+  assert.equal(latest.banner,false,'History navigation never renders a Back to latest banner');
   const refresh=await win.webContents.executeJavaScript(`(async()=>{
     const before=geometry();
     const readBefore=fixture.reads.length;
@@ -138,7 +137,27 @@ app.whenReady().then(async () => {
   })()`);
   assert.ok(bottomRefresh.readAfter>bottomRefresh.readBefore,'Bottom refresh must perform a session read');
   assert.equal(bottomRefresh.after.readerTop,bottomRefresh.before.readerTop,'An unchanged live repaint cannot consume the tail reserve');
-  console.log(JSON.stringify({observations,historicalRefresh,latest,refresh,bottomRefresh},null,2));
+  await win.webContents.executeJavaScript(`(async()=>{
+    document.getElementById('newChat').click();await frame();
+    fixture.history.splice(0,fixture.history.length,{seq:50,time:50,source:'extension',kind:'user_message',messageId:'short',message:{text:'Short chat',chars:10,truncated:false}});
+    fixture.session.events=1;
+    document.querySelector('#sessionList [data-id="history-fixture"]').click();
+    await waitFor(()=>document.getElementById('timeline').textContent.includes('Short chat'));await frame();
+  })()`);
+  const shortBefore=await win.webContents.executeJavaScript('geometry()');
+  assert.equal(shortBefore.height,shortBefore.viewport,'Short conversation fits without overflow');
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',x:shortBefore.x,y:shortBefore.y,deltaY:-100,deltaX:0});
+  const shortAfter=await win.webContents.executeJavaScript(`(async()=>{
+    await waitFor(()=>fixture.reads.at(-1)?.before===50);await frame();
+    const after=geometry();
+    fixture.history.push({seq:51,time:51,source:'extension',kind:'assistant_message',messageId:'short-live',message:{text:'Still live',chars:10,truncated:false},final:true});
+    fixture.signal();await waitFor(()=>document.getElementById('timeline').textContent.includes('Still live'));
+    return {...after,banner:!!document.querySelector('.timeline-window-note')};
+  })()`);
+  assert.equal(shortAfter.top,0,'Wheel-up cannot scroll a fitting conversation');
+  assert.equal(shortAfter.height,shortAfter.viewport,'Empty history does not create overflow');
+  assert.equal(shortAfter.banner,false,'Short conversation never shows a navigation banner');
+  console.log(JSON.stringify({observations,historicalRefresh,latest,refresh,bottomRefresh,shortAfter},null,2));
   console.log('Dense history scroll passed: real renderer, native wheel, overlap, reversals, scrollbar continuity and live refresh.');
   if(show) { win.webContents.debugger.detach(); return; }
   win.destroy();app.exit(0);
