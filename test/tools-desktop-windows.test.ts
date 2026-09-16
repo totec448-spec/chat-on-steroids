@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { capabilityTools, DESKTOP_CAPABILITIES, type Capabilities } from '../src/shared/types.js';
+import { BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from '../src/shared/browser-control.js';
 
 const native = vi.hoisted(() => ({ act: vi.fn(), getWindowState: vi.fn(), call: null as any, apis: [] as any[], allowUnattributed: false }));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ multiAgent: { allowUnattributedCalls: native.allowUnattributed } }) }));
@@ -34,9 +35,10 @@ describe('Windows Desktop public registrar', () => {
   it('matches the settings tool names to registration for each Desktop permission', () => {
     for (const capability of DESKTOP_CAPABILITIES) {
       const caps = { screen: false, control: false, clipboardRead: false, clipboardWrite: false, [capability]: true };
-      expect(capabilityTools(capability, 'windows')).toEqual([...surface(caps).tools.keys()]);
-      expect(capabilityTools(capability, 'linux')).toEqual([]);
-      expect(capabilityTools(capability)).toEqual([]);
+      const browser = capability === 'screen' ? BROWSER_READ_TOOLS : capability === 'control' ? BROWSER_WRITE_TOOLS : [];
+      expect(capabilityTools(capability, 'windows')).toEqual([...browser, ...surface(caps).tools.keys()]);
+      expect(capabilityTools(capability, 'linux')).toEqual(browser);
+      expect(capabilityTools(capability)).toEqual(browser);
     }
   });
 

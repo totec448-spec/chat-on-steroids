@@ -1,5 +1,5 @@
-/** User-facing 100% is the previous 130% size; IPC exposes relative zoom only. */
-export const UI_BASE_ZOOM = 1.3;
+/** User-facing 100% is 10% smaller than the former 1.3 base; IPC exposes relative zoom only. */
+export const UI_BASE_ZOOM = 1.17;
 
 /** Native Windows caption controls share the renderer's compact title-bar row. */
 export function titleBarOverlayForTheme(theme: 'dark' | 'light') {

@@ -40,6 +40,8 @@ interface ActivityEntry {
   attribution: string;
   outcome: string;
   durationMs: number;
+  detailRevision?: number;
+  displayOutcome?: { code: string; label: string; exitCode?: number | null };
   summary: { kind: string; tone: string; title: string; detail?: string; metric?: string };
   /** Which agent ran it. Absent, and shown as nothing, in a chat with no agents. */
   agent?: string | null;
@@ -76,11 +78,7 @@ interface StagePanelView {
 interface Hook {
   /** Legacy test archive only. Production 1.8 removed row-count ownership evidence. */
   connectorBlockCount(section: Element | null): number;
-  planLabels(
-    blocks: Array<{ callId: string | null; original: string; hidden?: number; tool?: string | null }>,
-    calls: ActivityEntry[]
-  ): Array<[number, ActivityEntry | null, ActivityEntry[]]>;
-  refreshFiber(settled?: Record<string, unknown> | null): Promise<void>;
+  refreshFiber(settled?: Record<string, unknown> | null, presentationOnly?: boolean): Promise<void>;
   fiberFor(block: Element): Descriptor | null;
   readDescriptor(raw: unknown): Descriptor | null;
   controlState(input: Record<string, unknown>): { mode: string; label: string; hint: string; action: string };
@@ -147,6 +145,9 @@ interface Hook {
     entries: Array<{ seq: number; time: number; kind: string; turnId?: string | null }>
   ): Array<{ id: string; entries: Array<{ seq: number; kind: string; turnId?: string | null }> }>;
   visibleStream(entries: Array<Record<string, any>>, groupId?: string | null): Array<Record<string, any>>;
+  remountedStreamRecord(streamKey: string, rendered: Array<Record<string, any>>,
+    roots: Map<string, Record<string, any>>, now: number): { key: string; record: Record<string, any> } | null;
+  streamRootKeys(): string[];
   /** How long the stop button must stay gone before content.js calls a turn finished. */
   TURN_SETTLE_MS: number;
   /** Test seam for the no-visible-progress fallback. */
@@ -156,6 +157,8 @@ interface Hook {
   /** Test-only gate; production defaults ON while the harness starts presentation OFF. */
   setRenderStream(on: boolean): void;
   renderStreamEnabled(): boolean;
+  setDesktopProjectInputForTest(claim: { id: string; owner: string } | null): void;
+  desktopProjectInputForTest(): { id: string; owner: string } | null;
   setShowTimes(on: boolean): void;
   /** How long Overwrite leaves a user-driven scroll completely presentation-stable. */
   PRESENTATION_SCROLL_IDLE_MS: number;
@@ -878,6 +881,71 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toEqual([
       expect.objectContaining({ id: inputId, owner: 'input-owner', conversationId: chatA, ack: true })
     ]);
+  });
+
+  it('carries the exact pending opening into first-call correlation and retires only its accepted claim', async () => {
+    const firstRequest = 'wfr_opening_before_ack', secondRequest = 'wfr_after_opening_bind';
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      events: () => ({ ok: false }),
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack
+        ? { ok: true } : { input: claimed({ opening: true }) } }),
+      correlate: message => ({ ok: true, data: {
+        ok: true, conversationId: chatA, confirmed: message.calls.map((call: any) => call.requestId),
+        projectBound: message.projectInput?.id
+      } })
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      userTurn(live!.document, 'fresh-opening-user', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      startGenerating(live!.document, { send: false });
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+
+    const publish = (requestId: string) => live!.window.dispatchEvent(new live!.window.MessageEvent('message', {
+      source: live!.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-request-origin', conversationId: chatA, requestIds: [requestId] }
+    }));
+    publish(firstRequest); await settle();
+    publish(secondRequest); await settle();
+    const correlations = live.sent.filter(message => message.type === 'correlate');
+    expect(correlations).toEqual([
+      expect.objectContaining({ conversationId: chatA, projectInput: { id: inputId, owner: 'input-owner' },
+        calls: [expect.objectContaining({ requestId: firstRequest })] }),
+      expect.objectContaining({ conversationId: chatA, projectInput: null,
+        calls: [expect.objectContaining({ requestId: secondRequest })] })
+    ]);
+  });
+
+  it('does not let a late correlation success retire a newer exact project claim', async () => {
+    const secondInput = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+    const firstRequest = 'wfr_late_old_project_bind', secondRequest = 'wfr_current_project_bind';
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      correlate: message => {
+        if (message.calls.some((call: any) => call.requestId === firstRequest)) {
+          // A newer claim arrives while the old app response is in flight.
+          live!.hook.setDesktopProjectInputForTest({ id: secondInput, owner: `owner-${secondInput}` });
+          return { ok: true, data: { ok: true, conversationId: chatA,
+            confirmed: [firstRequest], projectBound: inputId } };
+        }
+        return { ok: true, data: { ok: true, conversationId: chatA,
+          confirmed: message.calls.map((call: any) => call.requestId), projectBound: message.projectInput?.id } };
+      }
+    });
+    live.hook.setDesktopProjectInputForTest({ id: inputId, owner: `owner-${inputId}` });
+    const publish = (requestId: string) => live!.window.dispatchEvent(new live!.window.MessageEvent('message', {
+      source: live!.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-request-origin', conversationId: chatA, requestIds: [requestId] }
+    }));
+    publish(firstRequest); await settle();
+    expect(live.hook.desktopProjectInputForTest()).toEqual({ id: secondInput, owner: `owner-${secondInput}` });
+    publish(secondRequest); await settle();
+
+    const correlations = live.sent.filter(message => message.type === 'correlate');
+    expect(correlations[0]).toMatchObject({ projectInput: { id: inputId, owner: `owner-${inputId}` } });
+    expect(correlations[1]).toMatchObject({ projectInput: { id: secondInput, owner: `owner-${secondInput}` } });
+    expect(live.hook.desktopProjectInputForTest()).toBeNull();
   });
 
   it('records an image-only native send under its exact user identity and existing turn receipt', async () => {
@@ -1607,9 +1675,8 @@ function userTurn(document: Document, id: string, text: string, options: { sent?
 /** The app-owned Overwrite surface for one logical assistant turn. */
 function overwriteStream(section: HTMLElement): HTMLElement | null {
   const legacy = section.querySelector('.clf-stream') as HTMLElement | null;
-  if (legacy) return legacy;
   const key = section.getAttribute('data-clf-stream-key');
-  if (!key) return null;
+  if (!key) return legacy;
   return (
     [...section.ownerDocument.querySelectorAll<HTMLElement>('.clf-stream')].find(
       (root) => root.getAttribute('data-clf-key') === key
@@ -1618,11 +1685,13 @@ function overwriteStream(section: HTMLElement): HTMLElement | null {
 }
 
 function overwriteText(section: HTMLElement): string {
-  return overwriteStream(section)?.textContent ?? '';
+  const key = section.dataset.clfStreamKey;
+  return [...section.ownerDocument.querySelectorAll<HTMLElement>('.clf-stream')].filter(root => root.dataset.clfKey === key).map(root => root.textContent).join(' ');
 }
 
 function overwriteRows(section: HTMLElement, selector: string): HTMLElement[] {
-  return [...(overwriteStream(section)?.querySelectorAll<HTMLElement>(selector) ?? [])];
+  const key = section.dataset.clfStreamKey;
+  return [...section.ownerDocument.querySelectorAll<HTMLElement>('.clf-stream')].filter(root => root.dataset.clfKey === key).flatMap(root => [...root.querySelectorAll<HTMLElement>(selector)]);
 }
 
 /**
@@ -1774,12 +1843,27 @@ async function replyFiber(
         node.setAttribute(attr, `${scanToken}:${Number(rawIndex)}`);
       }
     }
+    for (const node of window.document.querySelectorAll('[data-clf-fiber-message]')) {
+      if (!restamp) continue;
+      const parts = node.getAttribute('data-clf-fiber-message').split(':');
+      if (parts.length >= 2) node.setAttribute('data-clf-fiber-message', `${scanToken}:${parts.at(-2)}:${parts.at(-1)}`);
+    }
+    for (const node of window.document.querySelectorAll('[data-clf-fiber-thought]')) {
+      if (!restamp) continue;
+      const parts = node.getAttribute('data-clf-fiber-thought').split(':');
+      if (parts.length >= 2) node.setAttribute('data-clf-fiber-thought', `${scanToken}:${parts.at(-2)}:${parts.at(-1)}`);
+    }
+    for (const node of window.document.querySelectorAll('[data-clf-fiber-image]')) {
+      if (!restamp) continue;
+      const parts = node.getAttribute('data-clf-fiber-image').split(':');
+      if (parts.length >= 3) node.setAttribute('data-clf-fiber-image', `${scanToken}:${parts.at(-3)}:${parts.at(-2)}:${parts.at(-1)}`);
+    }
     const indexedTurns = turns.map((turn: any, index) =>
       turn && typeof turn === 'object' && Number.isInteger(turn.index) ? turn : { ...(turn as Record<string, unknown>), index }
     );
     window.dispatchEvent(
       new window.MessageEvent('message', {
-        data: { source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken, v: 10, scanOk: true, rows, turns: indexedTurns },
+        data: { source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken, v: 12, scanOk: true, rows, turns: indexedTurns },
         source: window
       })
     );
@@ -1814,597 +1898,6 @@ function labels(section: HTMLElement): string[] {
 }
 
 // ------------------------------------------------------------------- tests
-
-describe('matching recorded calls to ChatGPT tool blocks', () => {
-  it('relabels the blocks it is sure about instead of giving up on the whole turn', async () => {
-    const plan = (blocks: Array<[string | null, string]>, calls: ActivityEntry[]) =>
-      live!.hook.planLabels(
-        blocks.map(([callId, original]) => ({ callId, original })),
-        calls
-      );
-    live = await harness();
-
-    // Two of ours and one ChatGPT named itself. The old rule required the counts to match
-    // exactly, so this turn kept three identical "Called tool" rows forever.
-    const calls = [call({ turnId: 't1' }), call({ turnId: 't1' })];
-    const result = plan(
-      [
-        [null, 'Called tool'],
-        [null, 'Searched the web'],
-        [null, 'Called tool']
-      ],
-      calls
-    );
-    expect(result).toEqual([
-      [0, calls[0], []],
-      [2, calls[1], []]
-    ]);
-  });
-
-  it('pairs blocks and calls one for one when the counts agree', async () => {
-    live = await harness();
-    const calls = [call({ turnId: 't1' }), call({ turnId: 't1' })];
-    expect(
-      live.hook.planLabels(
-        [
-          { callId: null, original: 'Called tool' },
-          { callId: null, original: 'Called tool' }
-        ],
-        calls
-      )
-    ).toEqual([
-      [0, calls[0], []],
-      [1, calls[1], []]
-    ]);
-  });
-
-  it('leaves a genuinely ambiguous turn alone', async () => {
-    live = await harness();
-    // Two unlabelled blocks ChatGPT named differently, one recorded call: there is no
-    // evidence which of them it was, and a wrong label is worse than none.
-    expect(
-      live.hook.planLabels(
-        [
-          { callId: null, original: 'Searched the web' },
-          { callId: null, original: 'Ran a canvas action' }
-        ],
-        [call({ turnId: 't1' })]
-      )
-    ).toEqual([]);
-  });
-
-  it('never moves a label from the block it is already on', async () => {
-    live = await harness();
-    const first = call({ turnId: 't1', callId: 'call-a' });
-    const second = call({ turnId: 't1', callId: 'call-b' });
-    const result = live.hook.planLabels(
-      [
-        { callId: 'call-a', original: 'Called tool' },
-        { callId: null, original: 'Called tool' }
-      ],
-      [first, second]
-    );
-    expect(result).toEqual([
-      [0, first, []],
-      [1, second, []]
-    ]);
-  });
-
-  it('keeps a block whose call has scrolled out of the feed rather than reassigning it', async () => {
-    live = await harness();
-    const fresh = call({ turnId: 't1', callId: 'call-new' });
-    expect(
-      live.hook.planLabels(
-        [
-          { callId: 'call-forgotten', original: 'Called tool' },
-          { callId: null, original: 'Called tool' }
-        ],
-        [fresh]
-      )
-    ).toEqual([[1, fresh, []]]);
-  });
-});
-
-/**
- * ChatGPT folds a run of calls to the same tool into a single row — observed live as
- * "4 earlier tool calls hidden" over a `collapsedSameToolCallCount: 4`, so five calls
- * behind one row. Every rule above used to count a row as one call, which meant that on
- * any turn where something was collapsed the even-count fast path fired against
- * mismatched sets and put confidently wrong labels on real calls.
- */
-describe('a tool row that stands for several calls', () => {
-  const five = (): ActivityEntry[] =>
-    [0, 1, 2, 3, 4].map((n) =>
-      call({ turnId: 't1', callId: `call-${n}`, seq: n, summary: { kind: 'agent', tone: 'neutral', title: `Step ${n}` } })
-    );
-
-  it('gives the row the last call of its group, not the first', async () => {
-    live = await harness();
-    const calls = five();
-    expect(live.hook.planLabels([{ callId: null, original: 'Called tool', hidden: 4 }], calls)).toEqual([
-      [0, calls[4], calls.slice(0, 4)]
-    ]);
-  });
-
-  it('counts a folded row as the calls it hides when sizing the turn', async () => {
-    live = await harness();
-    const calls = five();
-    // One row hiding two, then two ordinary rows: 3 + 1 + 1 = 5 calls across 3 rows.
-    expect(
-      live.hook.planLabels(
-        [
-          { callId: null, original: 'Called tool', hidden: 2 },
-          { callId: null, original: 'Called tool' },
-          { callId: null, original: 'Called tool' }
-        ],
-        calls
-      )
-    ).toEqual([
-      [0, calls[2], calls.slice(0, 2)],
-      [1, calls[3], []],
-      [2, calls[4], []]
-    ]);
-  });
-
-  it('does not mislabel when the old one-row-one-call rule would have matched', async () => {
-    live = await harness();
-    const calls = five();
-    // Five rows, five calls — but the first row hides four, so this turn really shows
-    // eight calls and only five are known. The old rule paired them off regardless.
-    const plan = live.hook.planLabels(
-      [
-        { callId: null, original: 'Called tool', hidden: 4 },
-        { callId: null, original: 'Called tool' },
-        { callId: null, original: 'Called tool' },
-        { callId: null, original: 'Called tool' },
-        { callId: null, original: 'Called tool' }
-      ],
-      calls
-    );
-    // The fast path must not fire (5 rows span 9 calls, not 5), and the fallback must not
-    // spend the fold count either: nothing here says the four calls this row folded away
-    // are the four sitting in front of it in the recorder's list rather than four the
-    // recorder never saw. It used to assume they were, and hand the row call five.
-    expect(plan).toEqual([]);
-  });
-
-  /**
-   * Failing closed on the fold count is not the same as giving up on the turn, and it is
-   * emphatically not the same as making the row generic: the row still carries the name
-   * the page's own descriptor gave it, which is evidence about that row alone. What stops
-   * is the *arithmetic* — every row after a fold is at an unknown offset.
-   */
-  it('labels what it can before a folded row and stops there', async () => {
-    live = await harness();
-    // Three rows standing for five calls, four of them recorded. The fold count fits
-    // arithmetically — 1 + 3 lands exactly on the four — which is precisely the trap: it
-    // fits any four calls, and it used to hand the second row the last of them.
-    const calls = five().slice(0, 4);
-    expect(
-      live.hook.planLabels(
-        [
-          { callId: null, original: 'Called tool' },
-          { callId: null, original: 'Called tool', hidden: 2 },
-          { callId: null, original: 'Called tool' }
-        ],
-        calls
-      )
-    ).toEqual([[0, calls[0], []]]);
-  });
-
-  it('keeps a bound folded row bound, along with the calls behind it', async () => {
-    live = await harness();
-    const calls = five();
-    expect(
-      live.hook.planLabels(
-        [
-          { callId: 'call-2', original: 'Called tool', hidden: 2 },
-          { callId: null, original: 'Called tool' },
-          { callId: null, original: 'Called tool' }
-        ],
-        calls
-      )
-    ).toEqual([
-      [0, calls[2], calls.slice(0, 2)],
-      [1, calls[3], []],
-      [2, calls[4], []]
-    ]);
-  });
-
-  it('treats a missing or nonsense fold count as no folding at all', async () => {
-    live = await harness();
-    const calls = [call({ turnId: 't1', callId: 'a' })];
-    for (const hidden of [undefined, 0, -3, 1.5, '4', null]) {
-      expect(
-        live.hook.planLabels([{ callId: null, original: 'Called tool', hidden } as never], calls)
-      ).toEqual([[0, calls[0], []]]);
-    }
-  });
-});
-
-/**
- * Every rule in planLabels is an argument from position, and position is what goes wrong
- * when the recorder's view of a turn and the page's view of it are not the same set of
- * calls. The row's own Fiber descriptor is the one piece of evidence that is about *that
- * row* and nothing else, so it gets a veto over all of them.
- *
- * Both fixtures here were taken from live chats on 2026-08-16, where in each case the
- * single bound row on the page was wearing another call's name: a row whose descriptor
- * said `screenshot` labelled with a recorded `list_windows`, and a row whose descriptor
- * said `run_powershell` labelled with a recorded `computer`. Both were produced by rules
- * that "fit" — the counts came out even, so the pairing looked proven.
- */
-describe('a row refusing a call the page says it did not make', () => {
-  const named = (tool: string, title: string) =>
-    call({ turnId: 't1', tool, summary: { kind: 'agent', tone: 'neutral', title } });
-
-  it('refuses the pairing when the descriptor names a different tool', async () => {
-    live = await harness();
-    // The live row 9 case: one row, one recorded call, the counts could not fit better.
-    const calls = [named('computer', 'Focused a window and 1 more')];
-    expect(
-      live.hook.planLabels([{ callId: null, original: 'Called tool', tool: 'run_powershell' }], calls)
-    ).toEqual([]);
-  });
-
-  it('pairs exactly as before when the descriptor agrees', async () => {
-    live = await harness();
-    const calls = [named('run_powershell', 'Ran a script')];
-    expect(
-      live.hook.planLabels([{ callId: null, original: 'Called tool', tool: 'run_powershell' }], calls)
-    ).toEqual([[0, calls[0], []]]);
-  });
-
-  it('says nothing either way when the page did not name the row', async () => {
-    live = await harness();
-    const calls = [named('computer', 'Clicked something')];
-    for (const tool of [undefined, null]) {
-      expect(
-        live.hook.planLabels([{ callId: null, original: 'Called tool', tool }], calls)
-      ).toEqual([[0, calls[0], []]]);
-    }
-  });
-
-  it('abandons the whole even pairing when one row contradicts it', async () => {
-    live = await harness();
-    // Two rows, two calls, in order — the strongest signal this file has. One descriptor
-    // disagreeing means these are not the same two calls, so the other pair is worth no
-    // more than this one. The contradiction is on the first row, so nothing downstream
-    // can label it either: if the even pairing had fired, both rows would be named.
-    const calls = [named('read_file', 'Read a.ts'), named('computer', 'Clicked something')];
-    expect(
-      live.hook.planLabels(
-        [
-          { callId: null, original: 'Called tool', tool: 'screenshot' },
-          { callId: null, original: 'Called tool', tool: 'computer' }
-        ],
-        calls
-      )
-    ).toEqual([]);
-  });
-
-  it('stops the generic run at the first row the page contradicts', async () => {
-    live = await harness();
-    // Three rows and four calls, so the counts do not fit and the weakest rule is reached.
-    // It walks in order, which means one wrong row puts every later row at an unknown
-    // offset — so it ends the run rather than skipping the entry.
-    const calls = [
-      named('read_file', 'Read a.ts'),
-      named('screenshot', 'Took a picture'),
-      named('computer', 'Clicked something'),
-      named('read_file', 'Read b.ts')
-    ];
-    expect(
-      live.hook.planLabels(
-        [
-          { callId: null, original: 'Called tool', tool: 'read_file' },
-          { callId: null, original: 'Called tool', tool: 'list_windows' },
-          { callId: null, original: 'Called tool', tool: 'computer' }
-        ],
-        calls
-      )
-    ).toEqual([[0, calls[0], []]]);
-  });
-
-  /**
-   * "Never move a label" exists so labels do not shuffle between repaints. It is not a
-   * reason to let a label the page has since contradicted stay on a row: the first paint
-   * can happen before any descriptor has arrived, which is exactly how the live rows got
-   * their wrong names.
-   */
-  it('takes back a bound label the page contradicts, and re-lands both calls', async () => {
-    live = await harness();
-    const first = call({
-      turnId: 't1',
-      callId: 'call-b',
-      seq: 1,
-      tool: 'computer',
-      summary: { kind: 'agent', tone: 'neutral', title: 'Clicked something' }
-    });
-    const second = call({
-      turnId: 't1',
-      callId: 'call-a',
-      seq: 2,
-      tool: 'run_powershell',
-      summary: { kind: 'agent', tone: 'neutral', title: 'Ran a script' }
-    });
-    const plan = live.hook.planLabels(
-      [
-        { callId: 'call-a', original: 'Called tool', tool: 'computer' },
-        { callId: null, original: 'Called tool', tool: 'run_powershell' }
-      ],
-      [first, second]
-    );
-    // A null call is the instruction to take the label off. The call it was wearing goes
-    // back into the pool unconsumed, and both rows then land on the call they name.
-    expect(plan).toEqual([
-      [0, null, []],
-      [0, first, []],
-      [1, second, []]
-    ]);
-  });
-});
-
-/**
- * Which agent ran which tool.
- *
- * A run with a prime and two workers puts three streams of calls into one chat. The rows
- * said three tools ran and nothing about who ran them, so a worker's failed command read
- * as the prime's. The app attributes this itself, having run the call, which is why it can
- * be shown flatly rather than hedged the way page-sourced evidence has to be.
- */
-describe('naming the agent behind a row', () => {
-  async function turnOf(entries: ActivityEntry[]): Promise<HTMLElement> {
-    // Relabelling a row is presentation, so it lives behind the same switch as the stream
-    // and a test that wants it has to ask. See renderingOn().
-    renderingOn();
-    const section = assistantTurn(
-      live!.document,
-      'turn-1',
-      entries.map(() => 'Called tool')
-    );
-    live!.reply.set('activity', () => ({
-      ok: true,
-      data: {
-        entries,
-        job: null
-      }
-    }));
-    await live!.hook.pullActivity();
-    await settle();
-    return section;
-  }
-
-  it('puts the agent in front of what it did', async () => {
-    live = await harness();
-    const section = await turnOf([
-      call({ turnId: 'turn-1', seq: 1, agent: 'prime', summary: { kind: 'read', tone: 'neutral', title: 'Read a.ts' } }),
-      call({
-        turnId: 'turn-1',
-        seq: 2,
-        agent: 'worker-1',
-        outcome: 'error',
-        summary: { kind: 'run', tone: 'bad', title: 'Command failed' }
-      })
-    ]);
-    expect(labels(section)).toEqual(['primeRead a.ts', 'worker-1Command failed']);
-    expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(2);
-    expect([...section.querySelectorAll('[data-clf-agent]')].map((node) => node.getAttribute('data-clf-agent'))).toEqual(
-      ['prime', 'worker-1']
-    );
-  });
-
-  it('says nothing in a chat that has no agents', async () => {
-    live = await harness();
-    const section = await turnOf([
-      call({ turnId: 'turn-1', seq: 1, summary: { kind: 'read', tone: 'neutral', title: 'Read a.ts' } })
-    ]);
-    expect(labels(section)).toEqual(['Read a.ts']);
-    expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(1);
-    expect(section.querySelector('.clf-agent')).toBeNull();
-  });
-
-  /** An id long enough to push the tool's own name off the row would hide the row's point. */
-  it('ignores an agent id that is not one', async () => {
-    live = await harness();
-    for (const agent of ['', '   ', 'w'.repeat(41), 42 as never, null]) {
-      const section = await turnOf([
-        call({ turnId: 'turn-1', seq: 1, agent, summary: { kind: 'read', tone: 'neutral', title: 'Read a.ts' } })
-      ]);
-      expect(section.querySelector('.clf-agent'), String(agent)).toBeNull();
-      section.remove();
-    }
-  });
-
-  /**
-   * ChatGPT collapses a run of rows by *tool name*, which says nothing about who called
-   * it — so one folded row can hide two agents' work behind a third agent's label. That
-   * makes the folded list the place where mixing them up is easiest and worst.
-   */
-  it('names the agent on each call a row folded away', async () => {
-    live = await harness();
-    renderingOn();
-    const section = assistantTurn(live.document, 'turn-1', ['Called tool!']);
-    section.querySelector('[aria-label="Open tool call list"]')!.setAttribute('data-clf-fiber', '0');
-    // The recorded tool matches the one the row's descriptor names below, as it does for a
-    // row that really is these calls — a row only takes a call it does not contradict.
-    const entries = ['prime', 'worker-1', 'worker-2'].map((agent, n) =>
-      call({
-        turnId: 'turn-1',
-        seq: n + 1,
-        agent,
-        tool: 'run_command',
-        summary: { kind: 'run', tone: 'neutral', title: `Step ${n}` }
-      })
-    );
-    live.reply.set('activity', () => ({
-      ok: true,
-      data: {
-        entries,
-        job: null
-      }
-    }));
-    await replyFiber([
-      {
-        v: 10,
-        index: 0,
-        tool: 'run_command',
-        path: null,
-        app: null,
-        resource: null,
-        messageId: null,
-        turnId: 'turn-1',
-        conversationId: null,
-        createTime: null,
-        hidden: 2,
-        answered: true
-      }
-    ]);
-    await live.hook.pullActivity();
-    await settle();
-
-    expect(labels(section)).toEqual(['worker-2Step 2+2']);
-    expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(1);
-    expect([...section.querySelectorAll('.clf-fold-list .clf-agent')].map((node) => node.textContent)).toEqual([
-      'prime',
-      'worker-1'
-    ]);
-  });
-});
-
-/**
- * One transcript, not a transcript plus a shadow log.
- *
- * The appended "Local timeline" block existed because relabelling was unreliable, and it
- * restated rows that were already on the page a few pixels above it. Its other half was
- * ChatGPT's own progress captions, which `progressLine()` reads straight out of the
- * reasoning box the page is already showing — so both halves were duplication.
- *
- * The calls that genuinely had nowhere to appear are the ones ChatGPT collapsed into a
- * neighbouring row. Those go inside the row that swallowed them.
- */
-describe('the calls a row folded away', () => {
-  const FOLDED = {
-    v: 10,
-    index: 0,
-    tool: 'run_command',
-    path: '/TobisComputer/mcp/run_command',
-    app: 'TobisComputer',
-    resource: null,
-    messageId: 'msg-1',
-    turnId: 'turn-1',
-    conversationId: 'conv-1',
-    createTime: 1_700_000_000,
-    hidden: 4,
-    localCount: 5,
-    answered: true
-  };
-
-  /** A turn of one row that stands for five recorded calls. */
-  async function foldedTurn(): Promise<HTMLElement> {
-    renderingOn();
-    const section = assistantTurn(live!.document, 'turn-1', ['Called tool!']);
-    section.querySelector('[aria-label="Open tool call list"]')!.setAttribute('data-clf-fiber', '0');
-    const calls = [0, 1, 2, 3, 4].map((n) =>
-      call({
-        turnId: 'turn-1',
-        callId: `call-${n}`,
-        seq: n + 1,
-        tool: 'run_command',
-        summary: { kind: 'run', tone: 'neutral', title: `Step ${n}`, metric: n === 0 ? '3 lines' : '' }
-      })
-    );
-    live!.reply.set('activity', () => ({
-      ok: true,
-      data: {
-        entries: calls,
-        job: null
-      }
-    }));
-    await replyFiber([FOLDED]);
-    await live!.hook.pullActivity();
-    await settle();
-    return section;
-  }
-
-  it('never appends a second transcript to the turn', async () => {
-    live = await harness();
-    const section = await foldedTurn();
-    expect(section.querySelector('.clf-timeline')).toBeNull();
-    expect((section.textContent || '')).not.toContain('Local timeline');
-  });
-
-  it('puts them under the row that hides them, closed until asked', async () => {
-    live = await harness();
-    const section = await foldedTurn();
-    expect(labels(section)).toEqual(['Step 4+4']);
-    expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(1);
-
-    const list = section.querySelector('.clf-fold-list') as HTMLElement;
-    expect(list.hasAttribute('hidden')).toBe(true);
-    expect([...list.querySelectorAll('.clf-label')].map((node) => node.textContent)).toEqual([
-      'Step 0',
-      'Step 1',
-      'Step 2',
-      'Step 3'
-    ]);
-    // The row's own metric belongs to the row; a folded call keeps its own.
-    expect(list.querySelector('.clf-metric')!.textContent).toBe('3 lines');
-  });
-
-  /**
-   * The chip sits inside ChatGPT's own header button, so an unhandled click would open
-   * the row's card as well — two things from one press, neither of them asked for.
-   */
-  it('opens and closes them without also working ChatGPT’s own control', async () => {
-    live = await harness();
-    const section = await foldedTurn();
-    const chip = section.querySelector('.clf-folded') as HTMLElement;
-    const list = section.querySelector('.clf-fold-list') as HTMLElement;
-    const header = section.querySelector('button') as HTMLElement;
-
-    let reached = 0;
-    header.addEventListener('click', () => {
-      reached++;
-    });
-
-    const press = () =>
-      chip.dispatchEvent(new live!.window.MouseEvent('click', { bubbles: true, cancelable: true }));
-
-    press();
-    expect(chip.getAttribute('aria-expanded')).toBe('true');
-    expect(list.hasAttribute('hidden')).toBe(false);
-
-    press();
-    expect(chip.getAttribute('aria-expanded')).toBe('false');
-    expect(list.hasAttribute('hidden')).toBe(true);
-    expect(reached).toBe(0);
-  });
-
-  it('leaves it open across a repaint', async () => {
-    live = await harness();
-    const section = await foldedTurn();
-    const chip = section.querySelector('.clf-folded') as HTMLElement;
-    chip.dispatchEvent(new live.window.MouseEvent('click', { bubbles: true, cancelable: true }));
-
-    await live.hook.pullActivity();
-    await settle();
-    expect((section.querySelector('.clf-folded') as HTMLElement).getAttribute('aria-expanded')).toBe('true');
-    expect((section.querySelector('.clf-fold-list') as HTMLElement).hasAttribute('hidden')).toBe(false);
-  });
-
-  /** Hidden by default; the popup switch restores it for debugging. */
-  it('gives every relabelled row the time the app ran the call when enabled', async () => {
-    live = await harness();
-    live.hook.setShowTimes(true);
-    const section = await foldedTurn();
-    const when = section.querySelector('.clf-when') as HTMLElement;
-    expect(when.textContent).toBe(new Date(1_700_000_000_005).toLocaleTimeString());
-    expect([...section.querySelectorAll('.clf-fold-list .clf-time')].map((node) => node.textContent)).toEqual(
-      [1, 2, 3, 4].map((n) => new Date(1_700_000_000_000 + n).toLocaleTimeString())
-    );
-  });
-});
 
 describe('page-native tool presentation and archived row evidence', () => {
   /**
@@ -2465,36 +1958,24 @@ describe('page-native tool presentation and archived row evidence', () => {
     expect(row.querySelectorAll('[class^="clf-"], [class*=" clf-"]')).toHaveLength(0);
   });
 
-  it('takes its own labels back off the page when the renderer is switched off', async () => {
-    // The disabled path runs the restore rather than skipping the loop. Without that, a
-    // switch flipped mid-session would leave this app's names frozen over ChatGPT's for the
-    // life of the tab — the page would keep asserting a record nobody is maintaining.
+  it('retires stale native relabel markers left by an older candidate', async () => {
     live = await harness();
     const section = assistantTurn(live.document, 'turn-restored', ['Called tool!']);
     const row = section.querySelector('.pointer-events-none.contents') as HTMLElement;
     const label = row.querySelector('.text-start') as HTMLElement;
     const said = label.textContent;
-    live.reply.set('activity', () => ({
-      ok: true,
-      data: {
-        entries: [call({ turnId: 'turn-restored', callId: 'call-restored' })],
-        job: null
-      }
-    }));
-    renderingOn();
-    await live.hook.pullActivity();
-    await settle();
-    live.hook.paint();
-    expect(label.textContent).not.toBe(said);
-    expect(row.classList.contains('clf-tool')).toBe(true);
-
-    live.hook.setRenderStream(false);
+    row.dataset.clfOriginal = said || '';
+    row.dataset.clfCall = 'old-call';
+    row.classList.add('clf-tool');
+    label.textContent = 'Old local label';
+    label.classList.add('clf-tool-title');
     live.hook.paint();
 
     expect(label.textContent).toBe(said);
     expect(label.classList.contains('clf-tool-title')).toBe(false);
     expect(row.classList.contains('clf-tool')).toBe(false);
     expect(row.dataset['clfCall']).toBeUndefined();
+    expect(row.dataset['clfOriginal']).toBeUndefined();
   });
 
   it('does not close a bound conversation when ChatGPT temporarily loses its route id', async () => {
@@ -2697,6 +2178,31 @@ describe('recording authored message text', () => {
     const messages = emitted(live.sent, 'user_message');
     expect(messages).toHaveLength(1);
     expect(messages[0]!.event.text).toBe('the exact authored message');
+  });
+
+  it('records reaction revisions on their exact user message without treating them as new sends', async () => {
+    live = await harness();
+    const section = userTurn(live.document, 'reaction-owner', 'Original question');
+    const message = section.querySelector('[data-message-id]')!;
+    live.hook.observe(); await settle();
+    const badge = live.document.createElement('div');
+    badge.dataset.testid = 'assistant-message-reaction'; badge.setAttribute('role', 'img');
+    message.append(badge);
+    for (const emoji of ['😂', '❤️', '😂']) {
+      badge.textContent = emoji;
+      live.hook.observe(); await settle();
+      const row = emitted(live.sent, 'user_message').at(-1)!.event;
+      expect(row).toMatchObject({ messageId: message.getAttribute('data-message-id'), text: 'Original question', reaction: emoji });
+      expect(row.authoredNow).not.toBe(true);
+    }
+    const count = emitted(live.sent, 'user_message').length;
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'user_message')).toHaveLength(count);
+    badge.remove(); live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'user_message').at(-1)!.event.reaction).toBeNull();
+    message.querySelector('.whitespace-pre-wrap')!.append(badge);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'user_message').at(-1)!.event.reaction).toBeNull();
   });
 
   /**
@@ -3621,6 +3127,27 @@ async function bindFiberTurns(
   await settle();
 }
 
+/** Older rendering fixtures supplied model objects but omitted native prose nodes.
+ * Materialize those declared objects with explicit native identity; production never
+ * synthesizes anchors or matches their text. Missing-anchor tests use bindFiberTurns. */
+async function bindRenderedFiberTurns(bindings: Array<{ section: HTMLElement; turn: Record<string, unknown> }>, observeOnly = false): Promise<void> {
+  for (const [index, { section, turn }] of bindings.entries()) {
+    for (const message of (turn.messages ?? []) as Array<Record<string, any>>) {
+      if (message.role === 'user' || !message.messageId) continue;
+      const id = message.rawMessageId || message.messageId;
+      let node = [...section.querySelectorAll<HTMLElement>('[data-message-id]')]
+        .find(node => node.dataset.messageId === id)?.querySelector<HTMLElement>('.markdown');
+      if (!node) {
+        prose(section.ownerDocument, section, id, message.rawText || 'Native fixture message');
+        node = [...section.querySelectorAll<HTMLElement>('[data-message-id]')]
+          .find(node => node.dataset.messageId === id)!.querySelector<HTMLElement>('.markdown');
+      }
+      node!.setAttribute('data-clf-fiber-message', `${index}:${encodeURIComponent(id)}`);
+    }
+  }
+  await bindFiberTurns(bindings, observeOnly);
+}
+
 async function bindFiberRequest(section: HTMLElement, requestId: string, tool = 'read_file'): Promise<void> {
   await bindFiberTurns([{ section, turn: {
     turnId: section.getAttribute('data-turn-id'),
@@ -3628,94 +3155,747 @@ async function bindFiberRequest(section: HTMLElement, requestId: string, tool = 
   } }]);
 }
 
-describe('naming rows in a chat that has been reloaded', () => {
-  /**
-   * The live failure: relabelling worked, the tab was refreshed, and the same chat came
-   * back wearing nothing but ChatGPT's own names. Nothing had been switched off — the join
-   * had expired. `data-turn-id` is minted per page load (`g-…` live, `request-WEB:<load>-…`
-   * after a refresh), so the turn id every recorded call carries names no visible turn any
-   * more. ChatGPT's connector request id is on both sides and means the same thing across
-   * a reload, so that is what the fallback matches on.
-   */
-  it('names a reloaded turn from the request id, when its recorded turn id is gone', async () => {
-    live = await harness();
-    renderingOn();
-    const section = assistantTurn(live!.document, 'request-WEB:6b1f2f0a-4d2c-4f2e-9a6a-2c1d6f0b0a11-3', [
-      'Called tool!'
-    ]);
-    live!.reply.set('activity', () => ({
-      ok: true,
-      data: {
-        entries: [
-          call({ turnId: 'g-1s6atlm1inbjf2-0-1', callId: 'call-before-reload', requestId: 'wfr_reloaded_turn' })
-        ],
-        job: null
-      }
-    }));
-    await live!.hook.pullActivity();
-    await settle();
-    await bindFiberRequest(section, 'wfr_reloaded_turn');
-    live!.hook.paint();
-
-    const row = section.querySelector('.pointer-events-none.contents') as HTMLElement;
-    expect(row.dataset['clfCall']).toBe('call-before-reload');
-    expect(labels(section)[0]).toContain('Read src/main/bridge.ts');
-    // Not the quieter page-named treatment, which is what this row used to fall back to:
-    // that one has no result, no duration and no outcome behind it.
-    expect(row.dataset['clfPage']).toBeUndefined();
-  });
-
-  it('gives one response’s calls to one visible turn and no more', async () => {
-    live = await harness();
-    renderingOn();
-    const first = assistantTurn(live!.document, 'request-WEB:6b1f2f0a-0000-4f2e-9a6a-2c1d6f0b0a11-0', [
-      'Called tool!'
-    ]);
-    const second = assistantTurn(live!.document, 'request-WEB:6b1f2f0a-0000-4f2e-9a6a-2c1d6f0b0a11-1', [
-      'Called tool!'
-    ]);
-    live!.reply.set('activity', () => ({
-      ok: true,
-      data: {
-        entries: [call({ turnId: 'g-shared-0-1', callId: 'call-once', requestId: 'wfr_one_response' })],
-        job: null
-      }
-    }));
-    await live!.hook.pullActivity();
-    await settle();
-    // Both sections claim the same request. One response's calls cannot have been made by
-    // two visible turns, so the second must not be handed the same call over again.
-    await bindFiberTurns([
-      {
-        section: first,
-        turn: {
-          turnId: first.getAttribute('data-turn-id'),
-          calls: [{ messageId: 'fiber-first', tool: 'read_file', order: 0, answered: true, requestId: 'wfr_one_response' }]
-        }
-      },
-      {
-        section: second,
-        turn: {
-          turnId: second.getAttribute('data-turn-id'),
-          calls: [{ messageId: 'fiber-second', tool: 'read_file', order: 0, answered: true, requestId: 'wfr_one_response' }]
-        }
-      }
-    ]);
-    live!.hook.paint();
-
-    expect((first.querySelector('.pointer-events-none.contents') as HTMLElement).dataset['clfCall']).toBe('call-once');
-    expect(
-      (second.querySelector('.pointer-events-none.contents') as HTMLElement).dataset['clfCall']
-    ).toBeUndefined();
-  });
-});
-
 describe('the app-owned chronological stream', () => {
+  it('inherits open group intent and visible focus when late public prose splits a tool run', async () => {
+    const owner = 'late-prose-owner';
+    const tools = Array.from({ length: 4 }, (_, i) => ({ seq: i + 3, time: 120 + i * 10,
+      kind: 'tool_call', turnId: owner, callId: `split-${i}`, tool: 'read', summary: { title: `Read ${i}` } }));
+    const opening = { seq: 2, time: 110, kind: 'assistant_message', turnId: owner, messageId: 'split-start', text: 'Start', final: false };
+    const middle = { seq: 8, time: 135, kind: 'assistant_message', turnId: owner, messageId: 'split-middle', text: 'Middle', final: false };
+    const final = { seq: 7, time: 200, kind: 'assistant_message', turnId: owner, messageId: 'split-final', text: 'Final', final: true };
+    let split = false;
+    live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], resetActivity: true,
+      stream: [{ seq: 1, time: 100, kind: 'turn_start', turnId: owner }, opening, ...tools, ...(split ? [middle] : []), final] } }) });
+    renderingOn(); const section = assistantTurn(live.document, 'split-page', []);
+    const bind = () => bindRenderedFiberTurns([{ section, turn: { turnId: 'split-page', messages:
+      [opening, ...(split ? [middle] : []), final].map(row => ({ messageId: row.messageId, rawMessageId: row.messageId,
+        stable: true, rawText: row.text, renderedHtml: `<p>${row.text}</p>` })) } }]);
+    await bind(); await live.hook.pullActivity(); live.hook.renderStreams();
+    const group = section.querySelector<HTMLDetailsElement>('.clf-stream-tool-group')!;
+    group.open = true;
+    const focused = section.querySelector<HTMLElement>('[data-clf-call="split-2"] summary')!;
+    focused.focus();
+    split = true; await bind(); await live.hook.pullActivity(); live.hook.renderStreams();
+    const groups = [...section.querySelectorAll<HTMLDetailsElement>('.clf-stream-tool-group')];
+    expect(groups).toHaveLength(2);
+    expect(groups.map(node => node.open)).toEqual([true, true]);
+    expect(live.document.activeElement).toBe(focused);
+    expect(focused.closest('.clf-stream-tool-group')).toBe(groups[1]);
+    expect(section.querySelectorAll('[data-clf-call]')).toHaveLength(4);
+  });
+
+  it('groups twenty calls around public interim prose and retains open nodes across updates', async () => {
+    const owner = 'read20-owner';
+    const calls = Array.from({ length: 20 }, (_, i) => ({ seq: i + 3 + (i >= 10 ? 1 : 0), time: 120 + i * 10,
+      kind: 'tool_call', turnId: owner, callId: `read20-${i + 1}`, tool: 'read', outcome: 'ok',
+      summary: { kind: 'read', title: `Read ${i + 1}` } }));
+    const stream = [
+      { seq: 1, time: 100, kind: 'turn_start', turnId: owner },
+      { seq: 2, time: 110, kind: 'assistant_message', turnId: owner, messageId: 'read20-start', text: 'READ_START', final: false },
+      ...calls.slice(0, 10),
+      { seq: 13, time: 215, kind: 'assistant_message', turnId: owner, messageId: 'read20-middle', text: 'READ_HALFWAY', final: false },
+      ...calls.slice(10),
+      { seq: 24, time: 400, kind: 'assistant_message', turnId: owner, messageId: 'read20-final', text: 'READ20_DONE', final: true }
+    ];
+    live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], stream } }) });
+    renderingOn();
+    const section = assistantTurn(live.document, 'read20-page', []);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'read20-page', messages: [
+      { messageId: 'read20-start', rawMessageId: 'read20-start', stable: true, rawText: 'READ_START', renderedHtml: '<p>READ_START</p>' },
+      { messageId: 'read20-middle', rawMessageId: 'read20-middle', stable: true, rawText: 'READ_HALFWAY', renderedHtml: '<p>READ_HALFWAY</p>' },
+      { messageId: 'read20-final', rawMessageId: 'read20-final', stable: true, rawText: 'READ20_DONE', renderedHtml: '<p>READ20_DONE</p>' }
+    ] } }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    const groups = [...section.querySelectorAll<HTMLDetailsElement>('.clf-stream-tool-group')];
+    expect(groups).toHaveLength(2);
+    expect(groups.map(group => group.open)).toEqual([false, false]);
+    expect(groups.map(group => group.querySelector(':scope > summary')!.textContent)).toEqual(['Read 10', 'Read 20']);
+    expect([...groups[0]!.querySelectorAll<HTMLElement>('[data-clf-call]')].map(row => row.dataset.clfCall))
+      .toEqual(Array.from({ length: 10 }, (_, i) => `read20-${10 - i}`));
+    const group = groups[0]!;
+    group.open = true;
+    const disclosure = group.querySelector<HTMLDetailsElement>('[data-clf-call="read20-5"]')!;
+    disclosure.open = true;
+    const summary = disclosure.querySelector('summary')!;
+    summary.focus();
+    calls[0]!.summary.title = 'Read 1 updated';
+    await live.hook.pullActivity(); live.advance(6000); live.hook.renderStreams();
+    expect(section.querySelector('.clf-stream-tool-group')).toBe(group);
+    expect(group.open).toBe(true);
+    expect(group.querySelector('[data-clf-call="read20-5"]')).toBe(disclosure);
+    expect(disclosure.open).toBe(true);
+    expect(live.document.activeElement).toBe(summary);
+    expect(section.querySelectorAll('.markdown')).toHaveLength(3);
+    expect(section.querySelectorAll('[data-clf-call]')).toHaveLength(20);
+
+    // Provider collapse removes its interim nodes. The same local groups move to the
+    // closed-fold projection instead of being recreated with default expansion.
+    const host = live.document.createElement('div');
+    const button = live.document.createElement('button'); button.setAttribute('aria-expanded', 'false');
+    const clip = live.document.createElement('div');
+    clip.setAttribute('data-item-anchor', 'start'); clip.setAttribute('data-clip', 'true'); clip.setAttribute('data-dimension', 'height');
+    host.append(button, clip); section.prepend(host);
+    const interimNodes = ['read20-start', 'read20-middle'].map(id => section.querySelector<HTMLElement>(`[data-message-id="${id}"]`)!);
+    for (const node of interimNodes) node.remove();
+    live.hook.renderStreams();
+    expect(section.querySelector('.clf-stream-tool-group')).toBe(group);
+    expect(group.open).toBe(true);
+    expect(section.querySelectorAll('.clf-stream-assistant_message')).toHaveLength(2);
+    button.setAttribute('aria-expanded', 'true');
+    for (const node of interimNodes) clip.append(node);
+    live.hook.renderStreams();
+    expect(section.querySelector('.clf-stream-tool-group')).toBe(group);
+    expect(group.open).toBe(true);
+    expect(section.querySelectorAll('.clf-stream-assistant_message')).toHaveLength(0);
+    expect(section.querySelectorAll('[data-clf-call]')).toHaveLength(20);
+  });
+
+  it('keeps an opened live call group through whole-section completion remount and durable-key promotion', async () => {
+    const owner = 'read20-remount-owner';
+    const requestId = 'wfr-read20-remount';
+    let completed = false;
+    let visibleCalls = 4;
+    const call = (index: number) => ({
+      seq: index + 3 + (index >= 10 ? 1 : 0),
+      time: 120 + index * 10,
+      kind: 'tool_call',
+      turnId: completed ? owner : null,
+      callId: `read20-remount-${index + 1}`,
+      requestId,
+      tool: 'read',
+      outcome: 'ok',
+      summary: { kind: 'read', title: `Read ${index + 1}` }
+    });
+    const messages = () => [
+      { seq: 2, time: 110, kind: 'assistant_message', turnId: completed ? owner : null,
+        messageId: 'read20-remount-start', text: 'READ_START', final: false },
+      ...(completed ? [{ seq: 13, time: 215, kind: 'assistant_message', turnId: owner,
+        messageId: 'read20-remount-middle', text: 'READ_HALFWAY', final: false }] : []),
+      ...(completed ? [{ seq: 24, time: 400, kind: 'assistant_message', turnId: owner,
+        messageId: 'read20-remount-final', text: 'READ20_DONE', final: true }] : [])
+    ];
+    const stream = () => [
+      ...(completed ? [{ seq: 1, time: 100, kind: 'turn_start', turnId: owner }] : []),
+      messages()[0]!,
+      ...Array.from({ length: visibleCalls }, (_, index) => call(index)),
+      ...messages().slice(1)
+    ];
+    live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], stream: stream() } }) });
+    renderingOn();
+    let section = assistantTurn(live.document, 'read20-remount-live-page', []);
+    const bind = async () => bindRenderedFiberTurns([{ section, turn: {
+      turnId: section.dataset.turnId,
+      calls: [{ messageId: 'fiber-read20-remount', requestId, tool: 'read', order: 0, answered: completed }],
+      messages: messages().map(row => ({ messageId: row.messageId, rawMessageId: row.messageId,
+        stable: true, rawText: row.text, renderedHtml: `<p>${row.text}</p>` }))
+    } }]);
+    await bind(); await live.hook.pullActivity();
+    let group = section.querySelector<HTMLDetailsElement>('.clf-stream-tool-group')!;
+    expect(group).toBeTruthy(); group.open = true;
+
+    visibleCalls = 10; await bind(); await live.hook.pullActivity();
+    expect(section.querySelector('.clf-stream-tool-group')).toBe(group);
+    expect(group.open).toBe(true);
+
+    visibleCalls = 20; await bind(); await live.hook.pullActivity();
+    expect(section.querySelector('.clf-stream-tool-group')).toBe(group);
+    expect(group.open).toBe(true);
+
+    // Completion replaces the whole React section, so the new native owner has no copied
+    // data-clf-stream-key. The feed simultaneously promotes the orphan/canonical key to its
+    // durable local turn and introduces the public prose that divides the two call runs.
+    const replacement = assistantTurn(live.document, 'read20-remount-final-page', []);
+    section.replaceWith(replacement); section = replacement;
+    completed = true;
+    await bind(); await live.hook.pullActivity();
+
+    const groups = [...section.querySelectorAll<HTMLDetailsElement>('.clf-stream-tool-group')];
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toBe(group);
+    expect(groups.map(node => node.open)).toEqual([true, true]);
+    expect(section.querySelectorAll('[data-clf-call]')).toHaveLength(20);
+    expect(live.document.querySelectorAll('.clf-stream-tool-group')).toHaveLength(2);
+    expect(live.hook.streamRootKeys()).toEqual([owner]);
+  });
+
+  it('reclaims only one current exact call owner and rejects neighbors, conflicts and ambiguity', async () => {
+    live = await harness();
+    const now = 10_000;
+    const rendered = [
+      { seq: 1, time: 1, kind: 'assistant_message', messageId: 'current-message', text: 'Current', final: true },
+      { seq: 2, time: 2, kind: 'tool_call', callId: 'current-call', tool: 'read' }
+    ];
+    const record = (calls: string[], strongKeys = ['message\0current-message'], completeAt = now) => ({
+      rows: new Map(calls.map(callId => [`call:${callId}`, {}])),
+      strongKeys,
+      completeAt
+    });
+    const exact = record(['current-call']);
+    const neighbor = record(['neighbor-call']);
+    expect(live.hook.remountedStreamRecord('new-owner', rendered,
+      new Map([['neighbor', neighbor], ['exact', exact]]), now)).toEqual({ key: 'exact', record: exact });
+    expect(live.hook.remountedStreamRecord('new-owner', rendered,
+      new Map([['neighbor', neighbor]]), now)).toBeNull();
+    expect(live.hook.remountedStreamRecord('new-owner', rendered,
+      new Map([['conflict', record(['current-call'], ['message\0different-message'])]]), now)).toBeNull();
+    expect(live.hook.remountedStreamRecord('new-owner', rendered,
+      new Map([['partial-conflict', record(['current-call', 'foreign-call'])]]), now)).toBeNull();
+    expect(live.hook.remountedStreamRecord('new-owner', rendered,
+      new Map([['exact', exact], ['conflict', record(['current-call'], ['message\0different-message'])]]), now)).toBeNull();
+    expect(live.hook.remountedStreamRecord('new-owner', rendered,
+      new Map([['first', record(['current-call'])], ['second', record(['current-call'])]]), now)).toBeNull();
+    expect(live.hook.remountedStreamRecord('new-owner', rendered,
+      new Map([['expired', record(['current-call'], [], now - 8_000)]]), now)).toBeNull();
+  });
+
+  it('hides the complete live tool-only layout slot and restores old targets without touching prose, actions, media or Worked', async () => {
+    live = await harness();
+    const section = assistantTurn(live.document, 'native-layout-slots', []);
+    const stack = live.document.createElement('div');
+    stack.className = 'flex flex-col gap-4 pt-4';
+    section.append(stack);
+
+    const proseLayout = live.document.createElement('div');
+    const proseNode = live.document.createElement('p');
+    proseNode.setAttribute('data-clf-fiber-message', 'scan:0:public');
+    proseNode.textContent = 'Native public prose';
+    proseLayout.append(proseNode);
+
+    const toolLayout = live.document.createElement('div');
+    toolLayout.className = 'native-layout w-full';
+    const transition = live.document.createElement('div');
+    const relative = live.document.createElement('div'); relative.className = 'block relative';
+    const innerTransition = live.document.createElement('div');
+    const column = live.document.createElement('div'); column.className = 'flex flex-col';
+    const group = live.document.createElement('div'); group.className = 'group relative';
+    const nativeTool = toolBlock(live.document, 'Executed delayed command');
+    const toolDetails = live.document.createElement('button');
+    toolDetails.className = 'absolute'; toolDetails.setAttribute('aria-label', 'Executed delayed command');
+    group.append(nativeTool, toolDetails); column.append(group, live.document.createElement('div'));
+    innerTransition.append(column); relative.append(innerTransition); transition.append(relative); toolLayout.append(transition);
+
+    const actionLayout = live.document.createElement('div');
+    const responseAction = live.document.createElement('button');
+    responseAction.setAttribute('aria-label', 'Copy response'); actionLayout.append(responseAction);
+
+    const worked = live.document.createElement('details');
+    worked.setAttribute('data-clf-progress', '1'); worked.open = true;
+    const workedSummary = live.document.createElement('summary'); workedSummary.textContent = 'Worked for 21s';
+    const workedBranch = live.document.createElement('div'); workedBranch.append(toolBlock(live.document, 'Checked files'));
+    worked.append(workedSummary, workedBranch);
+
+    const mediaLayout = live.document.createElement('div');
+    const media = live.document.createElement('div'); media.className = 'group/imagegen-image';
+    media.append(live.document.createElement('img')); mediaLayout.append(media);
+    stack.append(proseLayout, toolLayout, actionLayout, worked, mediaLayout);
+
+    const domApi = (live.window as any).CLF_DOM;
+    let turn = domApi.turns()[0];
+    domApi.hideActivity(turn, domApi.toolBlocks(turn));
+    expect(toolLayout.getAttribute('data-clf-native-hidden')).toBe('1');
+    expect(nativeTool.hasAttribute('data-clf-native-hidden')).toBe(false);
+    expect(stack.hasAttribute('data-clf-native-hidden')).toBe(false);
+    expect(proseLayout.closest('[data-clf-native-hidden]')).toBeNull();
+    expect(actionLayout.closest('[data-clf-native-hidden]')).toBeNull();
+    expect(worked.hasAttribute('data-clf-native-hidden')).toBe(false);
+    expect(workedSummary.isConnected).toBe(true);
+    expect(media.closest('[data-clf-native-hidden]')).toBeNull();
+
+    // React can move the same native row to a new layout owner between paints. The old
+    // flex child must be restored while only the newly proven branch becomes hidden.
+    const replacementLayout = live.document.createElement('div');
+    const replacementWrapper = live.document.createElement('div');
+    replacementWrapper.append(nativeTool); replacementLayout.append(replacementWrapper); stack.append(replacementLayout);
+    turn = domApi.turns()[0];
+    domApi.hideActivity(turn, domApi.toolBlocks(turn));
+    expect(toolLayout.hasAttribute('data-clf-native-hidden')).toBe(false);
+    expect(replacementLayout.getAttribute('data-clf-native-hidden')).toBe('1');
+    domApi.hideActivity(turn, []);
+    expect(section.querySelectorAll('[data-clf-native-hidden]')).toHaveLength(0);
+  });
+
+  it('restores tool and progress containers when native generated media arrives after an empty scan', async () => {
+    live = await harness();
+    assistantTurn(live.document, 'native-dynamic-media', ['Native tool']);
+    const domApi = (live.window as any).CLF_DOM;
+    const turn = domApi.turns()[0];
+    const tool = domApi.toolBlocks(turn)[0] as HTMLElement;
+    const iconButton = live.document.createElement('button'); const logo = live.document.createElement('img');
+    iconButton.append(logo); tool.append(iconButton);
+    expect(domApi.canHideActivity(tool)).toBe(true);
+    domApi.hideActivity(turn, [tool]); expect(tool.getAttribute('data-clf-native-hidden')).toBe('1');
+    const output = live.document.createElement('div'); output.className = 'group/imagegen-image';
+    const image = live.document.createElement('img'); output.append(image); tool.append(output);
+    domApi.hideActivity(turn, [tool]);
+    expect(tool.hasAttribute('data-clf-native-hidden')).toBe(false);
+    expect(image.closest('[data-clf-native-hidden]')).toBeNull();
+    output.remove();
+    const canvas = live.document.createElement('canvas'); tool.append(canvas);
+    domApi.hideActivity(turn, [tool]); expect(tool.hasAttribute('data-clf-native-hidden')).toBe(false);
+  });
+
+  it('keeps lifecycle ownership canonical without creating a margin-only stream root', async () => {
+    const owner = 'lifecycle-only-owner';
+    const messageId = 'lifecycle-native-final';
+    live = await harness(undefined, { activity: () => ({ ok: true, data: {
+      entries: [],
+      stream: [
+        { seq: 1, time: 100, kind: 'turn_start', turnId: owner },
+        { seq: 2, time: 110, kind: 'assistant_message', turnId: owner, messageId, text: 'Native final', final: true },
+        { seq: 3, time: 120, kind: 'turn_end', turnId: owner, outcome: 'completed' }
+      ],
+      job: null
+    } }) });
+    renderingOn();
+    const section = assistantTurn(live.document, 'lifecycle-page-turn', []);
+    await bindRenderedFiberTurns([{ section, turn: {
+      turnId: 'lifecycle-page-turn',
+      messages: [{ messageId, rawMessageId: messageId, stable: true, rawText: 'Native final', renderedHtml: '<p>Native final</p>' }]
+    } }]);
+    await live.hook.pullActivity();
+    live.hook.renderStreams();
+
+    expect(live.document.querySelectorAll('.clf-stream')).toHaveLength(0);
+    expect(section.hasAttribute('data-clf-turn-replaced')).toBe(true);
+    expect(section.textContent).toContain('Native final');
+  });
+
+  it('refreshes and paints an idle virtualized history mount through the existing coalescer without self-feedback or live attribution', async () => {
+    const owner = 'idle-history-owner';
+    const requestId = 'wfr_idle_history';
+    const interimId = 'idle-history-interim';
+    const messageId = 'idle-history-final';
+    live = await harness(undefined, { activity: () => ({ ok: true, data: {
+      entries: [],
+      stream: [
+        { seq: 1, time: 100, kind: 'turn_start', turnId: owner },
+        { seq: 2, time: 105, kind: 'assistant_message', turnId: owner, messageId: interimId, text: 'Historical interim', final: false },
+        { seq: 3, time: 110, kind: 'tool_call', turnId: owner, callId: 'idle-history-call', requestId,
+          tool: 'exec_command', outcome: 'ok', durationMs: 4, summary: { kind: 'run', title: 'Ran historical command' } },
+        { seq: 4, time: 120, kind: 'assistant_message', turnId: owner, messageId, text: 'Historical final', final: true },
+        { seq: 5, time: 130, kind: 'turn_end', turnId: owner, outcome: 'completed' }
+      ], job: null
+    } }) });
+    renderingOn();
+    await live.hook.pullActivity();
+
+    let section: HTMLElement | null = null;
+    let scans = 0;
+    let collapsed = false;
+    const onAsk = (event: any) => {
+      if (!event.data || event.data.source !== 'clf-fiber-ask' || !section) return;
+      scans += 1;
+      const scanToken = event.data.nonce;
+      section.setAttribute('data-clf-fiber-turn', `${scanToken}:0`);
+      for (const id of [interimId, messageId]) {
+        section.querySelector(`[data-message-id="${id}"] .markdown`)?.setAttribute('data-clf-fiber-message', `${scanToken}:0:${id}`);
+      }
+      live!.window.dispatchEvent(new live!.window.MessageEvent('message', {
+        data: { source: 'clf-fiber-reply', nonce: scanToken, scanToken, v: 12, scanOk: true, rows: [], turns: [{
+          index: 0, turnId: 'idle-history-page', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+          calls: [{ messageId: 'idle-history-tool', requestId, tool: 'exec_command', order: 0, answered: true }],
+          messages: [
+            ...(!collapsed ? [{ messageId: interimId, rawMessageId: interimId, stable: true, rawText: 'Historical interim',
+              renderedHtml: '<p>Historical interim</p>', createTime: 1_699_998_000 }] : []),
+            { messageId, rawMessageId: messageId, stable: true, rawText: 'Historical final',
+              renderedHtml: '<p>Historical final</p>', createTime: 1_699_999_000 }
+          ], activities: []
+        }] }, source: live!.window as unknown as Window
+      }));
+    };
+    live.window.addEventListener('message', onAsk);
+    const instantTimeout = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => globalThis.setTimeout(fn, ms === 250 ? 0 : ms)) as unknown as typeof live.window.setTimeout;
+    try {
+      section = assistantTurn(live.document, 'idle-history-page', []);
+      prose(live.document, section, interimId, 'Historical interim');
+      prose(live.document, section, messageId, 'Historical final');
+      await vi.waitFor(() => expect(scans).toBeGreaterThan(0), { timeout: 1000, interval: 10 });
+      await vi.waitFor(() => {
+        expect(overwriteText(section!)).toContain('Ran historical command');
+      }, { timeout: 2000, interval: 10 });
+      const scansAtPaint = scans;
+      await new Promise(resolve => globalThis.setTimeout(resolve, 25));
+      expect(scans).toBe(scansAtPaint);
+      collapsed = true;
+      section.querySelector(`[data-message-id="${interimId}"]`)!.remove();
+      await vi.waitFor(() => expect(overwriteText(section!)).toBe(''), { timeout: 2000, interval: 10 });
+      await settle(100);
+    } finally {
+      live.window.removeEventListener('message', onAsk);
+      live.window.setTimeout = instantTimeout;
+    }
+
+    expect(scans).toBeGreaterThan(0);
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+    expect(emitted(live.sent, 'assistant_message')).toHaveLength(0);
+    expect(emitted(live.sent, 'tool_evidence')).toHaveLength(0);
+    expect(emitted(live.sent, 'page_tool')).toHaveLength(0);
+  });
+
+  it('does not reconcile a historical Resume marker during presentation-only Fiber refresh', async () => {
+    const token = '0123456789abcdef0123456789abcdef';
+    const compact = vi.fn(() => ({ ok: true, data: { committed: true } }));
+    let section!: HTMLElement;
+    live = await harness(undefined, { compact }, document => {
+      userTurn(document, 'idle-resume-user', `[[CLF-RESUME:${token}]]\n\nContinue`, { sent: false });
+      section = assistantTurn(document, 'idle-resume-answer', []);
+      prose(document, section, 'idle-resume-final', 'Already finished');
+    });
+    renderingOn(); compact.mockClear();
+    const onAsk = (event: any) => {
+      if (!event.data || event.data.source !== 'clf-fiber-ask') return;
+      const scanToken = event.data.nonce;
+      section.setAttribute('data-clf-fiber-turn', `${scanToken}:0`);
+      live!.window.dispatchEvent(new live!.window.MessageEvent('message', { source: live!.window as unknown as Window, data: {
+        source: 'clf-fiber-reply', nonce: scanToken, scanToken, v: 12, scanOk: true, rows: [], turns: [{
+          index: 0, turnId: 'idle-resume-answer', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+          calls: [], activities: [], endMessageId: 'idle-resume-final-raw', messages: [
+            { role: 'user', messageId: 'idle-resume-user', rawMessageId: 'idle-resume-user-raw', stable: true,
+              rawText: `[[CLF-RESUME:${token}]]\n\nContinue`, renderedHtml: '' },
+            { role: 'assistant', messageId: 'idle-resume-final', rawMessageId: 'idle-resume-final-raw', stable: true,
+              rawText: 'Already finished', renderedHtml: '<p>Already finished</p>' }
+          ]
+        }]
+      }}));
+    };
+    live.window.addEventListener('message', onAsk);
+    try {
+      await live.hook.refreshFiber(null, true);
+    } finally {
+      live.window.removeEventListener('message', onAsk);
+    }
+    expect(compact).not.toHaveBeenCalled();
+    expect(live.sent.filter(message => message.type === 'compact')).toEqual([]);
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+  });
+
+  it.each(['exact', 'split', 'missing', 'stale', 'duplicate'])('places activity in exact native folded gaps and protects media (%s)', async mode => {
+    let revision = 0;
+    const owner = 'native-gap-owner';
+    const stream = () => [
+      { seq: 1, time: 100, kind: 'turn_start', turnId: owner },
+      { seq: 2, time: 110, kind: 'assistant_message', turnId: owner, messageId: 'A', text: 'A', final: false },
+      { seq: 3, time: 120, kind: 'tool_call', turnId: owner, callId: 'X', tool: 'exec_command', outcome: 'ok', summary: { title: `X${revision || ''}` } },
+      { seq: 4, time: 130, kind: 'assistant_message', turnId: owner, messageId: 'B', text: 'B', final: false },
+      { seq: 5, time: 140, kind: 'tool_call', turnId: owner, callId: 'Y', tool: 'exec_command', outcome: 'ok', summary: { title: 'Y' } },
+      { seq: 6, time: 150, kind: 'assistant_message', turnId: owner, messageId: 'C', text: 'C', final: true }
+    ];
+    live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], stream: stream(), job: null } }) });
+    renderingOn();
+    const section = assistantTurn(live.document, 'native-gap-page', []);
+    const finalSection = mode === 'split' ? assistantTurn(live.document, 'native-gap-final-section', []) : section;
+    const folded = live.document.createElement('details'); folded.open = true; folded.setAttribute('data-clf-progress', '1');
+    const summary = live.document.createElement('summary'); summary.textContent = 'Worked for 17s'; folded.append(summary);
+    const steps = live.document.createElement('div'); folded.append(steps); section.append(folded);
+    const native = new Map<string, HTMLElement>();
+    for (const id of ['A', 'B', 'C']) {
+      const host = live.document.createElement('div');
+      const markdown = live.document.createElement('div'); markdown.className = 'markdown'; markdown.textContent = id;
+      markdown.setAttribute('data-clf-fiber-message', `0:${id}`); host.append(markdown);
+      (id === 'C' ? finalSection : steps).append(host); native.set(id, markdown);
+      if (id !== 'C') steps.append(toolBlock(live.document, `Native ${id === 'A' ? 'X' : 'Y'}`));
+    }
+    const media = live.document.createElement('div'); media.className = 'group/imagegen-image';
+    const picture = live.document.createElement('img'); picture.src = 'data:image/png;base64,YQ=='; media.append(picture);
+    const edit = live.document.createElement('button'); edit.setAttribute('aria-label', 'Edit image'); media.append(edit);
+    const clicked = vi.fn(); edit.addEventListener('click', clicked); folded.append(media);
+    const messages = ['A', 'B', 'C'].map(id => ({ messageId: id, rawMessageId: id, stable: true, rawText: id, renderedHtml: '' }));
+    if (mode === 'split') {
+      native.get('C')!.setAttribute('data-clf-fiber-message', '1:C');
+      await bindFiberTurns([
+        { section, turn: { turnId: 'native-gap-page', messages: messages.slice(0, 2) } },
+        { section: finalSection, turn: { turnId: 'native-gap-final-section', messages: messages.slice(2) } }
+      ]);
+    } else await bindFiberTurns([{ section, turn: { turnId: 'native-gap-page', messages } }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    if (mode !== 'exact' && mode !== 'split') {
+      if (mode === 'missing') native.get('B')!.removeAttribute('data-clf-fiber-message');
+      if (mode === 'stale') native.get('B')!.setAttribute('data-clf-fiber-message', 'old-scan:0:B');
+      if (mode === 'duplicate') steps.append(native.get('B')!.cloneNode(true));
+      live.hook.renderStreams();
+      expect(section.querySelectorAll('.clf-stream')).toHaveLength(mode === 'missing' ? 2 : 0);
+      expect([...section.querySelectorAll<HTMLElement>('[data-clf-call]')].map(node => node.dataset.clfCall).sort())
+        .toEqual(mode === 'missing' ? ['X', 'Y'] : []);
+      expect(section.hasAttribute('data-clf-turn-replaced')).toBe(mode === 'missing');
+      expect(native.get('A')!.isConnected).toBe(true);
+      expect(native.get('C')!.isConnected).toBe(true);
+      expect(picture.closest('[data-clf-native-hidden]')).toBeNull();
+      return;
+    }
+    const ordered = () => [...section.parentElement!.querySelectorAll<HTMLElement>('.markdown, .clf-stream-tool-disclosure')]
+      .map(node => node.classList.contains('markdown') ? node.textContent : node.dataset.clfCall);
+    expect(ordered()).toEqual(['A', 'X', 'B', 'Y', 'C']);
+    expect(section.querySelector('[data-message-id]')).toBeNull(); // Interim identity came only from the exact scan.
+    const x = section.querySelector<HTMLDetailsElement>('[data-clf-call="X"]')!; x.open = true;
+    revision = 1; await live.hook.pullActivity(); live.hook.renderStreams();
+    expect(section.querySelector<HTMLDetailsElement>('[data-clf-call="X"]')!.open).toBe(true);
+    expect(ordered()).toEqual(['A', 'X', 'B', 'Y', 'C']);
+    const remounted = native.get('A')!.cloneNode(true) as HTMLElement;
+    native.get('A')!.replaceWith(remounted); native.set('A', remounted);
+    live.hook.renderStreams();
+    expect(ordered()).toEqual(['A', 'X', 'B', 'Y', 'C']);
+    expect(section.querySelector<HTMLDetailsElement>('[data-clf-call="X"]')!.open).toBe(true);
+    expect(folded.hasAttribute('data-clf-native-hidden')).toBe(false);
+    expect(picture.closest('[data-clf-native-hidden]')).toBeNull(); edit.click(); expect(clicked).toHaveBeenCalledOnce();
+    folded.open = false;
+    expect(section.querySelector('[data-clf-call="X"]')!.closest('details[data-clf-progress]')).toBe(folded);
+    expect(native.get('C')!.closest('details')).toBeNull();
+    live.hook.setRenderStream(false); live.hook.renderStreams();
+    expect(section.querySelectorAll('.clf-stream')).toHaveLength(0);
+    expect(native.get('A')!.isConnected).toBe(true); expect(picture.isConnected).toBe(true);
+  });
+
+  it('uses only the exact closed-fold structure, then repartitions A/X/B/Y/C on expansion', async () => {
+    const owner = 'closed-fold-owner';
+    const requestId = 'wfr-closed-fold';
+    const foldActivity = () => ({ ok: true, data: { entries: [], stream: [
+      { seq: 1, time: 100, kind: 'turn_start', turnId: owner },
+      { seq: 2, time: 110, kind: 'assistant_message', turnId: owner, messageId: 'A-fold', text: 'A', final: false },
+      { seq: 3, time: 120, kind: 'tool_call', turnId: owner, callId: 'X-fold', requestId, tool: 'exec_command', outcome: 'ok', summary: { title: 'X' } },
+      { seq: 4, time: 130, kind: 'assistant_message', turnId: owner, messageId: 'B-fold', text: 'B', final: false },
+      { seq: 5, time: 140, kind: 'tool_call', turnId: owner, callId: 'Y-fold', requestId, tool: 'read_file', outcome: 'ok', summary: { title: 'Y' } },
+      { seq: 6, time: 150, kind: 'assistant_message', turnId: owner, messageId: 'C-fold', text: 'C', final: true }
+    ], job: null } });
+    live = await harness(undefined, { activity: foldActivity }); renderingOn();
+    const section = assistantTurn(live.document, 'closed-fold-page', []);
+    const host = live.document.createElement('div'); host.className = 'arbitrary-provider-shell';
+    const button = live.document.createElement('button'); button.className = 'anything';
+    button.setAttribute('aria-expanded', 'false'); button.textContent = '任意の要約';
+    const clip = live.document.createElement('div');
+    clip.setAttribute('data-item-anchor', 'start'); clip.setAttribute('data-clip', 'true'); clip.setAttribute('data-dimension', 'height');
+    host.append(button, clip); section.append(host);
+    prose(live.document, section, 'C-fold', 'C');
+    const final = section.querySelector<HTMLElement>('[data-message-id="C-fold"] .markdown')!;
+    final.setAttribute('data-clf-fiber-message', '0:C-fold');
+    const messages = ['A-fold', 'B-fold', 'C-fold'].map((messageId, index) => ({
+      messageId, rawMessageId: messageId, stable: true, rawText: String.fromCharCode(65 + index), renderedHtml: ''
+    }));
+    await bindFiberTurns([{ section, turn: { turnId: 'closed-fold-page', calls: [
+      { messageId: 'call-x-fold', requestId, tool: 'exec_command', order: 0, answered: true },
+      { messageId: 'call-y-fold', requestId, tool: 'read_file', order: 1, answered: true }
+    ], messages } }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    let root = overwriteStream(section)!;
+    expect(root.previousElementSibling).toBe(clip);
+    expect(Boolean(root.compareDocumentPosition(final) & live.window.Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect([...root.querySelectorAll<HTMLElement>('.clf-stream-row')].map(node =>
+      node.classList.contains('clf-stream-assistant_message') ? node.textContent : node.closest<HTMLElement>('[data-clf-call]')?.dataset.clfCall
+    )).toEqual(['A', 'X-fold', 'B', 'Y-fold']);
+    expect([...root.querySelectorAll<HTMLElement>('[data-clf-call]')].map(node => node.dataset.clfCall)).toEqual(['X-fold', 'Y-fold']);
+    expect(section.querySelectorAll('.clf-stream-assistant_message')).toHaveLength(2);
+    expect(section.textContent?.match(/C/g)).toHaveLength(1);
+    const xSummary = root.querySelector<HTMLElement>('[data-clf-call="X-fold"] summary')!;
+    xSummary.click(); xSummary.focus();
+
+    button.setAttribute('aria-expanded', 'true');
+    prose(live.document, section, 'A-fold', 'A'); prose(live.document, section, 'B-fold', 'B');
+    const a = section.querySelector<HTMLElement>('[data-message-id="A-fold"] .markdown')!;
+    const b = section.querySelector<HTMLElement>('[data-message-id="B-fold"] .markdown')!;
+    section.insertBefore(a.parentElement!, host);
+    section.insertBefore(b.parentElement!, final.parentElement!);
+    a.setAttribute('data-clf-fiber-message', '0:A-fold'); b.setAttribute('data-clf-fiber-message', '0:B-fold');
+    await bindFiberTurns([{ section, turn: { turnId: 'closed-fold-page', messages } }]);
+    live.hook.renderStreams();
+    const ordered = [...section.querySelectorAll<HTMLElement>('.markdown, [data-clf-call]')]
+      .map(node => node.classList.contains('markdown') ? node.textContent : node.dataset.clfCall);
+    expect(ordered).toEqual(['A', 'X-fold', 'B', 'Y-fold', 'C']);
+    expect(section.querySelector<HTMLDetailsElement>('[data-clf-call="X-fold"]')!.open).toBe(true);
+    expect(section.querySelector('[data-clf-call="X-fold"] summary')).toBe(live.document.activeElement);
+
+    a.parentElement!.remove(); b.parentElement!.remove(); button.setAttribute('aria-expanded', 'false');
+    await bindFiberTurns([{ section, turn: { turnId: 'closed-fold-page', messages } }]);
+    live.hook.renderStreams(); root = overwriteStream(section)!;
+    expect(root.previousElementSibling).toBe(clip);
+    expect([...root.querySelectorAll<HTMLElement>('.clf-stream-row')].map(node =>
+      node.classList.contains('clf-stream-assistant_message') ? node.textContent : node.closest<HTMLElement>('[data-clf-call]')?.dataset.clfCall
+    )).toEqual(['A', 'X-fold', 'B', 'Y-fold']);
+    expect(root.querySelector<HTMLDetailsElement>('[data-clf-call="X-fold"]')!.open).toBe(true);
+  });
+
+  it.each(['two-folds', 'non-empty-clip', 'missing-final', 'final-before'])('refuses an ambiguous closed-fold placement (%s)', async mode => {
+    const owner = 'closed-fold-negative';
+    live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], stream: [
+      { seq: 1, time: 100, kind: 'turn_start', turnId: owner },
+      { seq: 2, time: 110, kind: 'tool_call', turnId: owner, callId: 'fold-negative-call', requestId: 'wfr-fold-negative', tool: 'read_file', outcome: 'ok', summary: { title: 'Local call' } },
+      { seq: 3, time: 120, kind: 'assistant_message', turnId: owner, messageId: 'fold-negative-final', text: 'Final', final: true }
+    ] } }) }); renderingOn();
+    const section = assistantTurn(live.document, 'closed-fold-negative-page', []);
+    const pair = () => {
+      const button = live!.document.createElement('button'); button.setAttribute('aria-expanded', 'false');
+      const clip = live!.document.createElement('div'); clip.setAttribute('data-item-anchor', 'start'); clip.setAttribute('data-clip', 'true'); clip.setAttribute('data-dimension', 'height');
+      section.append(button, clip); return { button, clip };
+    };
+    const first = pair(); if (mode === 'two-folds') pair();
+    if (mode === 'non-empty-clip') first.clip.append(live.document.createElement('span'));
+    prose(live.document, section, 'fold-negative-final', 'Final');
+    const final = section.querySelector<HTMLElement>('[data-message-id="fold-negative-final"] .markdown')!;
+    if (mode !== 'missing-final') final.setAttribute('data-clf-fiber-message', '0:fold-negative-final');
+    if (mode === 'final-before') section.insertBefore(final.parentElement!, first.button);
+    await bindFiberTurns([{ section, turn: { turnId: 'closed-fold-negative-page', messages: [
+      { messageId: 'fold-negative-final', rawMessageId: 'fold-negative-final', stable: true, rawText: 'Final', renderedHtml: '' }
+    ] } }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    const roots = [...section.querySelectorAll<HTMLElement>('.clf-stream')];
+    if (mode === 'missing-final') expect(roots).toHaveLength(0);
+    else {
+      expect(roots).toHaveLength(1);
+      expect(roots[0]!.dataset.clfGap).not.toMatch(/^fold:/);
+      expect(roots[0]!.previousElementSibling).not.toBe(first.clip);
+    }
+  });
+
+  it('hides duplicate exact typed thought notifications only for the owned response with a local call, then restores on proof loss, Off and navigation', async () => {
+    const owner = 'typed-thought-owner';
+    const thoughtId = 'thought-11111111-2222-4333-8444-555555555555-7';
+    const requestId = 'wfr-typed-thought';
+    live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], stream: [
+      { seq: 1, time: 100, kind: 'turn_start', turnId: owner },
+      { seq: 2, time: 110, kind: 'tool_call', turnId: owner, callId: 'typed-call', requestId,
+        tool: 'exec_command', outcome: 'ok', summary: { title: 'Exact local call' } },
+      { seq: 3, time: 120, kind: 'assistant_message', turnId: owner, messageId: 'typed-final', text: 'Native final', final: true },
+      { seq: 4, time: 130, kind: 'turn_end', turnId: owner, outcome: 'completed' }
+    ] } }) });
+    renderingOn();
+    const section = assistantTurn(live.document, 'typed-thought-page', []);
+    const stack = live.document.createElement('div'); stack.className = 'flex flex-col gap-4'; section.append(stack);
+    const makeNotification = (label: string, protectedOutput = false) => {
+      const layout = live!.document.createElement('div'); layout.className = 'native-thought-layout';
+      const branch = live!.document.createElement('div');
+      const row = toolBlock(live!.document, label); row.setAttribute('data-clf-fiber-thought', `0:${thoughtId}`);
+      branch.append(row); layout.append(branch);
+      if (protectedOutput) {
+        const image = live!.document.createElement('img'); image.alt = 'native generated output';
+        const web = live!.document.createElement('a'); web.href = 'https://example.com/result'; web.textContent = 'Native web result';
+        const download = live!.document.createElement('a'); download.download = 'result.txt'; download.href = '#'; download.textContent = 'Download';
+        const code = live!.document.createElement('pre'); code.textContent = 'native code result';
+        const result = live!.document.createElement('div'); result.className = 'markdown'; result.textContent = 'Native result body';
+        const actions = live!.document.createElement('div'); actions.setAttribute('role', 'toolbar'); actions.append(live!.document.createElement('button'));
+        layout.append(image, web, download, code, result, actions);
+      }
+      stack.append(layout);
+      return { layout, row };
+    };
+    const first = makeNotification('任意の実行通知');
+    let second = makeNotification('任意の実行通知');
+    const protectedBranch = makeNotification('任意の実行通知', true);
+    prose(live.document, section, 'typed-final', 'Native final');
+    section.querySelector('[data-message-id="typed-final"] .markdown')!.setAttribute('data-clf-fiber-message', '0:typed-final');
+    await bindFiberTurns([{ section, turn: { turnId: 'typed-thought-page', calls: [
+      { messageId: 'typed-call-message', requestId, tool: 'exec_command', order: 0, answered: true }
+    ], messages: [
+      { messageId: 'typed-final', rawMessageId: 'typed-final', stable: true, rawText: 'Native final', renderedHtml: '' }
+    ], thoughtNotifications: [{ messageId: thoughtId, kind: 'thought_notification' }] } }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+
+    expect(first.layout.getAttribute('data-clf-native-hidden')).toBe('1');
+    expect(second.layout.getAttribute('data-clf-native-hidden')).toBe('1');
+    expect(protectedBranch.layout.hasAttribute('data-clf-native-hidden')).toBe(false);
+    expect(protectedBranch.row.closest('[data-clf-native-hidden]')).not.toBeNull();
+    expect(protectedBranch.row.closest('[data-clf-native-hidden]')).not.toBe(protectedBranch.layout);
+    for (const node of protectedBranch.layout.querySelectorAll('img, a, pre, .markdown, [role="toolbar"]')) {
+      expect(node.closest('[data-clf-native-hidden]')).toBeNull();
+    }
+    expect(section.textContent).toContain('Native final');
+
+    const disconnectedSecond = second.layout;
+    const remountedLayout = second.layout.cloneNode(true) as HTMLDivElement;
+    for (const node of [remountedLayout, ...remountedLayout.querySelectorAll<HTMLElement>('[data-clf-native-hidden]')]) {
+      node.removeAttribute('data-clf-native-hidden');
+    }
+    second.layout.replaceWith(remountedLayout);
+    second = { layout: remountedLayout, row: remountedLayout.querySelector<HTMLElement>('[data-clf-fiber-thought]')! };
+    live.hook.renderStreams();
+    expect(disconnectedSecond.isConnected).toBe(false);
+    expect(second.layout.getAttribute('data-clf-native-hidden')).toBe('1');
+
+    first.row.setAttribute('data-clf-fiber-thought', `stale-scan:0:${thoughtId}`);
+    live.hook.renderStreams();
+    expect(first.layout.hasAttribute('data-clf-native-hidden')).toBe(false);
+    expect(second.layout.getAttribute('data-clf-native-hidden')).toBe('1');
+
+    first.row.setAttribute('data-clf-fiber-thought', `0:${thoughtId}`);
+    await bindFiberTurns([{ section, turn: { turnId: 'typed-thought-page', messages: [
+      { messageId: 'typed-final', rawMessageId: 'typed-final', stable: true, rawText: 'Native final', renderedHtml: '' }
+    ], thoughtNotifications: [{ messageId: thoughtId, kind: 'thought_notification' }] } }]);
+    live.hook.renderStreams();
+    expect(first.layout.getAttribute('data-clf-native-hidden')).toBe('1');
+    live.hook.setRenderStream(false); live.hook.renderStreams();
+    expect(section.querySelectorAll('[data-clf-native-hidden]')).toHaveLength(0);
+
+    live.hook.setRenderStream(true); live.hook.renderStreams();
+    expect(first.layout.getAttribute('data-clf-native-hidden')).toBe('1');
+    live.dom.reconfigure({ url: 'https://chatgpt.com/c/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' });
+    live.hook.observe();
+    expect(section.querySelectorAll('[data-clf-native-hidden]')).toHaveLength(0);
+  });
+
+  it.each(['no-local-call', 'foreign-owner'])('keeps typed native thought notifications when suppression authority is absent (%s)', async mode => {
+    const thoughtId = 'thought-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee-2';
+    live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], stream: [
+      { seq: 1, time: 100, kind: 'turn_start', turnId: 'typed-negative-owner' },
+      ...(mode === 'no-local-call' ? [] : [{ seq: 2, time: 110, kind: 'tool_call', turnId: 'typed-negative-owner',
+        callId: 'typed-negative-call', requestId: 'wfr-typed-negative', tool: 'read_file', outcome: 'ok', summary: { title: 'Local call' } }]),
+      { seq: 3, time: 120, kind: 'assistant_message', turnId: 'typed-negative-owner', messageId: 'typed-negative-final', text: 'Final', final: true }
+    ] } }) });
+    renderingOn();
+    const section = assistantTurn(live.document, 'typed-negative-page', []);
+    const row = toolBlock(live.document, '任意の実行通知'); row.setAttribute('data-clf-fiber-thought', `0:${thoughtId}`); section.append(row);
+    prose(live.document, section, 'typed-negative-final', 'Final');
+    await bindFiberTurns([{ section, turn: { turnId: 'typed-negative-page',
+      ...(mode === 'foreign-owner' ? { conversationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' } : {}),
+      messages: [{ messageId: 'typed-negative-final', rawMessageId: 'typed-negative-final', stable: true, rawText: 'Final', renderedHtml: '' }],
+      thoughtNotifications: [{ messageId: thoughtId, kind: 'thought_notification' }]
+    } }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    expect(row.closest('[data-clf-native-hidden]')).toBeNull();
+    expect(row.isConnected).toBe(true);
+  });
+
+  it('keeps typed native notifications when the response local call has no mounted canonical call row', async () => {
+    const thoughtId = 'thought-bbbbbbbb-cccc-4ddd-8eee-ffffffffffff-4';
+    const requestId = 'wfr-unplaced-caption-call';
+    live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], stream: [
+      { seq: 1, time: 100, kind: 'turn_start', turnId: 'unplaced-caption-owner' },
+      { seq: 2, time: 110, kind: 'tool_call', turnId: 'unplaced-caption-owner', callId: 'unplaced-caption-call',
+        requestId, tool: 'read_file', outcome: 'ok', summary: { title: 'Unplaced local call' } },
+      { seq: 3, time: 120, kind: 'assistant_message', turnId: 'unplaced-caption-owner', messageId: 'unplaced-caption-a', text: 'Hidden A', final: false },
+      { seq: 4, time: 130, kind: 'progress', turnId: 'unplaced-caption-owner', text: 'Mounted progress' },
+      { seq: 5, time: 140, kind: 'assistant_message', turnId: 'unplaced-caption-owner', messageId: 'unplaced-caption-final', text: 'Final', final: true }
+    ] } }) });
+    renderingOn();
+    const section = assistantTurn(live.document, 'unplaced-caption-page', []);
+    const row = toolBlock(live.document, '型付き実行通知');
+    row.setAttribute('data-clf-fiber-thought', `0:${thoughtId}`);
+    section.append(row);
+    prose(live.document, section, 'unplaced-caption-final', 'Final');
+    section.querySelector('[data-message-id="unplaced-caption-final"] .markdown')!
+      .setAttribute('data-clf-fiber-message', '0:unplaced-caption-final');
+    await bindFiberTurns([{ section, turn: { turnId: 'unplaced-caption-page', calls: [
+      { messageId: 'unplaced-caption-call-message', requestId, tool: 'read_file', order: 0, answered: true }
+    ], messages: [
+      { messageId: 'unplaced-caption-a', rawMessageId: 'unplaced-caption-a', stable: true, rawText: 'Hidden A', renderedHtml: '' },
+      { messageId: 'unplaced-caption-final', rawMessageId: 'unplaced-caption-final', stable: true, rawText: 'Final', renderedHtml: '' }
+    ], thoughtNotifications: [{ messageId: thoughtId, kind: 'thought_notification' }] } }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    expect(overwriteStream(section)?.textContent).toContain('Mounted progress');
+    expect(section.querySelector('[data-clf-call="unplaced-caption-call"]')).toBeNull();
+    expect(row.closest('[data-clf-native-hidden]')).toBeNull();
+  });
+
   const turnId = 'turn-app-stream';
+  const ownerMessageId = 'm-stream-owner';
+  const ownedStreamTurn = (labels: string[] = []) => {
+    if (!live!.document.querySelector(`[data-message-id="${ownerMessageId}"]`)) {
+      userTurn(live!.document, 'stream-owner', 'Run the recorded workflow', { sent: false });
+    }
+    return assistantTurn(live!.document, turnId, labels);
+  };
   const activity = () => ({
     ok: true,
     data: {
       entries: [],
+      userAnchors: [{ seq: 0, time: 50, messageId: ownerMessageId }],
       stream: [
         { seq: 1, time: 100, kind: 'turn_start', turnId, agent: 'prime' },
         {
@@ -3761,7 +3941,7 @@ describe('the app-owned chronological stream', () => {
     };
     live = await harness(undefined, { activity: withDetails });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     await bindFiberRequest(section, 'wfr-app-stream');
     live.hook.renderStreams();
     const details = overwriteRows(section, 'details.clf-stream-tool-disclosure') as HTMLDetailsElement[];
@@ -3780,10 +3960,252 @@ describe('the app-owned chronological stream', () => {
     expect(disclosure.open).toBe(false);
   });
 
+  it('loads only the opened call recorded preview, keeps markup inert, and reuses it across repaint', async () => {
+    const activityWithRevisions = () => {
+      const payload = activity();
+      for (const entry of payload.data.stream.filter((value) => value.kind === 'tool_call')) {
+        Object.assign(entry, { detailRevision: entry.seq + 100,
+          displayOutcome: { code: 'completed', label: 'completed' } });
+      }
+      return payload;
+    };
+    const detail = vi.fn((message: Record<string, any>) => ({ ok: true, data: {
+      ok: true, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      callId: message.callId, detailRevision: message.detailRevision, tool: 'read_file',
+      args: { text: `{"path":"<img src=x onerror=alert(1)>","line":"${'L'.repeat(1200)}"}`,
+        truncated: false, chars: 1260 },
+      result: { text: `result only for ${message.callId}`, truncated: true, chars: 9_000 }
+    } }));
+    live = await harness(undefined, { activity: activityWithRevisions, activity_detail: detail });
+    renderingOn();
+    const section = ownedStreamTurn();
+    await bindFiberRequest(section, 'wfr-app-stream');
+    live.hook.renderStreams();
+    expect(live.sent.filter(message => message.type === 'activity_detail')).toEqual([]);
+
+    let disclosure = overwriteRows(section, 'details.clf-stream-tool-disclosure')
+      .find(node => node.dataset.clfCall === 'call-third') as HTMLDetailsElement;
+    disclosure.querySelector('summary')!.click();
+    disclosure.dispatchEvent(new live.window.Event('toggle'));
+    await settle();
+    expect(detail).toHaveBeenCalledOnce();
+    expect(live.sent.filter(message => message.type === 'activity_detail')).toEqual([
+      expect.objectContaining({ conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        callId: 'call-third', detailRevision: 104 })
+    ]);
+    expect(disclosure.textContent).toContain('Recorded arguments (redacted)');
+    expect(disclosure.textContent).toContain('<img src=x onerror=alert(1)>');
+    expect(disclosure.textContent).toContain('L'.repeat(512));
+    expect(disclosure.textContent).toContain('result only for call-third');
+    expect(disclosure.textContent).toContain('Preview truncated from 9000 characters.');
+    expect(disclosure.querySelector('img')).toBeNull();
+    expect(overwriteRows(section, '[data-clf-call="call-second"] .clf-stream-recorded-detail')).toHaveLength(0);
+
+    disclosure.querySelector('summary')!.focus();
+    live.hook.setShowTimes(true);
+    live.hook.renderStreams();
+    await settle();
+    disclosure = overwriteRows(section, 'details.clf-stream-tool-disclosure')
+      .find(node => node.dataset.clfCall === 'call-third') as HTMLDetailsElement;
+    expect(disclosure.open).toBe(true);
+    expect(disclosure.textContent).toContain('result only for call-third');
+    expect(live.document.activeElement).toBe(disclosure.querySelector('summary'));
+    disclosure.querySelector('summary')!.click();
+    disclosure.querySelector('summary')!.click();
+    disclosure.dispatchEvent(new live.window.Event('toggle'));
+    await settle();
+    expect(detail).toHaveBeenCalledOnce();
+  });
+
+  it('invalidates one open call preview when its canonical detail revision advances', async () => {
+    let revision = 301;
+    const revised = () => {
+      const payload = activity();
+      const entry = payload.data.stream.find((value) => value.seq === 4)!;
+      Object.assign(entry, { detailRevision: revision, displayOutcome: revision === 301
+        ? { code: 'started', label: 'started' }
+        : { code: 'failed', label: 'failed · exit 7', exitCode: 7 } });
+      return payload;
+    };
+    const detail = vi.fn((message: Record<string, any>) => ({ ok: true, data: {
+      ok: true, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', callId: message.callId,
+      detailRevision: message.detailRevision, tool: 'exec_command',
+      args: { text: 'same args', truncated: false, chars: 9 },
+      result: { text: `revision ${message.detailRevision}`, truncated: false, chars: 12 }
+    } }));
+    live = await harness(undefined, { activity: revised, activity_detail: detail }); renderingOn();
+    const section = ownedStreamTurn(); await bindFiberRequest(section, 'wfr-app-stream'); live.hook.renderStreams();
+    let disclosure = overwriteRows(section, 'details').find(node => node.dataset.clfCall === 'call-third') as HTMLDetailsElement;
+    disclosure.querySelector('summary')!.click(); disclosure.dispatchEvent(new live.window.Event('toggle')); await settle();
+    expect(disclosure.textContent).toContain('revision 301');
+    expect(disclosure.textContent).toContain('started');
+
+    revision = 302;
+    await live.hook.pullActivity(); live.hook.renderStreams(); await settle();
+    disclosure = overwriteRows(section, 'details').find(node => node.dataset.clfCall === 'call-third') as HTMLDetailsElement;
+    expect(disclosure.open).toBe(true);
+    expect(disclosure.textContent).toContain('revision 302');
+    expect(disclosure.textContent).toContain('failed · exit 7');
+    expect(disclosure.textContent).not.toContain('revision 301');
+    expect(detail.mock.calls.map(([message]) => message.detailRevision)).toEqual([301, 302]);
+  });
+
+  it('rejects a delayed recorded detail across an actual A to B to A route epoch', async () => {
+    let release!: (value: unknown) => void;
+    let requests = 0;
+    const withRevision = () => {
+      const payload = activity();
+      Object.assign(payload.data.stream.find((entry) => entry.seq === 4)!, { detailRevision: 404 });
+      return payload;
+    };
+    const response = { ok: true, data: { ok: true,
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', callId: 'call-third', detailRevision: 404,
+      tool: 'read_file', args: { text: 'epoch args', truncated: false, chars: 10 },
+      result: { text: 'epoch result', truncated: false, chars: 12 } } };
+    const detail = vi.fn(() => {
+      requests++;
+      return requests === 1 ? new Promise(resolve => { release = resolve; }) : response;
+    });
+    live = await harness(undefined, { activity: withRevision, activity_detail: detail }); renderingOn();
+    let section = ownedStreamTurn(); await bindFiberRequest(section, 'wfr-app-stream'); live.hook.renderStreams();
+    const old = overwriteRows(section, 'details').find(node => node.dataset.clfCall === 'call-third') as HTMLDetailsElement;
+    old.querySelector('summary')!.click(); old.dispatchEvent(new live.window.Event('toggle')); await settle(); expect(detail).toHaveBeenCalledOnce();
+
+    live.dom.reconfigure({ url: 'https://chatgpt.com/c/bbbbbbbb-cccc-dddd-eeee-ffffffffffff' });
+    live.hook.observe(); await settle();
+    live.document.querySelector('#thread')!.replaceChildren();
+    live.dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    live.hook.observe(); await settle();
+    release(response); await settle();
+    expect(old.isConnected).toBe(false);
+
+    section = ownedStreamTurn();
+    await bindFiberRequest(section, 'wfr-app-stream');
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    const current = overwriteRows(section, 'details').find(node => node.dataset.clfCall === 'call-third') as HTMLDetailsElement;
+    expect(current.textContent).not.toContain('epoch result');
+    current.querySelector('summary')!.click(); current.dispatchEvent(new live.window.Event('toggle')); await settle();
+    expect(detail).toHaveBeenCalledTimes(2);
+    expect(current.textContent).toContain('epoch result');
+  });
+
+  it.each(['call', 'conversation', 'revision'])('keeps metadata usable after a mismatched %s detail and retries on reopen', async mismatch => {
+    const withRevision = () => {
+      const payload = activity();
+      Object.assign(payload.data.stream.find((entry) => entry.seq === 4)!, { detailRevision: 505 });
+      return payload;
+    };
+    let attempt = 0;
+    const detail = vi.fn((message: Record<string, any>) => {
+      attempt++;
+      const data = { ok: true, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        callId: message.callId, detailRevision: message.detailRevision, tool: 'read_file',
+        args: { text: 'verified args', truncated: false, chars: 13 },
+        result: { text: 'verified result', truncated: false, chars: 15 } };
+      if (attempt === 1) {
+        if (mismatch === 'call') data.callId = 'some-other-call';
+        if (mismatch === 'conversation') data.conversationId = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
+        if (mismatch === 'revision') data.detailRevision = 506;
+      }
+      return { ok: true, data };
+    });
+    live = await harness(undefined, { activity: withRevision, activity_detail: detail }); renderingOn();
+    const section = ownedStreamTurn(); await bindFiberRequest(section, 'wfr-app-stream'); live.hook.renderStreams();
+    const disclosure = overwriteRows(section, 'details').find(node => node.dataset.clfCall === 'call-third') as HTMLDetailsElement;
+    const summary = disclosure.querySelector('summary')!;
+    summary.click(); disclosure.dispatchEvent(new live.window.Event('toggle')); await settle();
+    expect(disclosure.textContent).toContain('Read third.ts');
+    expect(disclosure.textContent).toContain('Recorded details are unavailable for this activity revision.');
+    expect(disclosure.textContent).not.toContain('verified result');
+    summary.click(); disclosure.dispatchEvent(new live.window.Event('toggle'));
+    summary.click(); disclosure.dispatchEvent(new live.window.Event('toggle')); await settle();
+    expect(detail).toHaveBeenCalledTimes(2);
+    expect(disclosure.textContent).toContain('verified result');
+  });
+
+  it('bounds recorded preview cache entries and refetches an evicted exact call', async () => {
+    const owner = 'detail-cache-owner';
+    const requestId = 'wfr-detail-cache';
+    const tools = Array.from({ length: 33 }, (_, index) => ({
+      seq: index + 2, time: 110 + index, kind: 'tool_call', turnId: owner,
+      callId: `cache-call-${index}`, detailRevision: 1_000 + index, requestId,
+      tool: 'read_file', outcome: 'ok', summary: { title: `Cache call ${index}` }
+    }));
+    const detail = vi.fn((message: Record<string, any>) => ({ ok: true, data: {
+      ok: true, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', callId: message.callId,
+      detailRevision: message.detailRevision, tool: 'read_file',
+      args: { text: `args ${message.callId}`, truncated: false, chars: 20 },
+      result: { text: `result ${message.callId}`, truncated: false, chars: 22 }
+    } }));
+    live = await harness(undefined, { activity: () => ({ ok: true, data: {
+      entries: [], userAnchors: [{ seq: 0, time: 50, messageId: 'm-detail-cache-user' }],
+      stream: [{ seq: 1, time: 100, kind: 'turn_start', turnId: owner }, ...tools]
+    } }), activity_detail: detail });
+    renderingOn(); userTurn(live.document, 'detail-cache-user', 'Read many files', { sent: false });
+    const section = assistantTurn(live.document, 'detail-cache-page', []);
+    await bindFiberRequest(section, requestId); await live.hook.pullActivity(); live.hook.renderStreams();
+    const disclosures = overwriteRows(section, 'details.clf-stream-tool-disclosure') as HTMLDetailsElement[];
+    expect(disclosures).toHaveLength(33);
+    for (const disclosure of disclosures) {
+      disclosure.open = true;
+      disclosure.dispatchEvent(new live.window.Event('toggle'));
+      await settle(20);
+    }
+    expect(detail).toHaveBeenCalledTimes(33);
+    disclosures[0]!.open = false; disclosures[0]!.dispatchEvent(new live.window.Event('toggle'));
+    disclosures[0]!.open = true; disclosures[0]!.dispatchEvent(new live.window.Event('toggle'));
+    await settle(20);
+    expect(detail).toHaveBeenCalledTimes(34);
+    expect(detail.mock.calls.at(-1)?.[0]).toMatchObject({ callId: 'cache-call-32', detailRevision: 1_032 });
+  });
+
+  it('bounds simultaneous detail reads without permanently blocking a disclosure reopen', async () => {
+    const owner = 'detail-inflight-owner';
+    const requestId = 'wfr-detail-inflight';
+    const tools = Array.from({ length: 17 }, (_, index) => ({
+      seq: index + 2, time: 110 + index, kind: 'tool_call', turnId: owner,
+      callId: `inflight-call-${index}`, detailRevision: 2_000 + index, requestId,
+      tool: 'read_file', outcome: 'ok', summary: { title: `Inflight call ${index}` }
+    }));
+    const releases = new Map<string, (value: unknown) => void>();
+    const answer = (message: Record<string, any>) => ({ ok: true, data: {
+      ok: true, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', callId: message.callId,
+      detailRevision: message.detailRevision, tool: 'read_file',
+      args: { text: `args ${message.callId}`, truncated: false, chars: 20 },
+      result: { text: `result ${message.callId}`, truncated: false, chars: 22 }
+    } });
+    const detail = vi.fn((message: Record<string, any>) => message.callId === 'inflight-call-16'
+      ? answer(message)
+      : new Promise(resolve => releases.set(message.callId, resolve)));
+    live = await harness(undefined, { activity: () => ({ ok: true, data: {
+      entries: [], userAnchors: [{ seq: 0, time: 50, messageId: 'm-detail-inflight-user' }],
+      stream: [{ seq: 1, time: 100, kind: 'turn_start', turnId: owner }, ...tools]
+    } }), activity_detail: detail });
+    renderingOn(); userTurn(live.document, 'detail-inflight-user', 'Read simultaneously', { sent: false });
+    const section = assistantTurn(live.document, 'detail-inflight-page', []);
+    await bindFiberRequest(section, requestId); await live.hook.pullActivity(); live.hook.renderStreams();
+    const disclosures = overwriteRows(section, 'details.clf-stream-tool-disclosure') as HTMLDetailsElement[];
+    for (const disclosure of disclosures.filter(node => node.dataset.clfCall !== 'inflight-call-16')) {
+      disclosure.open = true; disclosure.dispatchEvent(new live.window.Event('toggle'));
+    }
+    await settle(40); expect(detail).toHaveBeenCalledTimes(16);
+    const blocked = disclosures.find(node => node.dataset.clfCall === 'inflight-call-16')!;
+    blocked.open = true; blocked.dispatchEvent(new live.window.Event('toggle')); await settle();
+    expect(detail).toHaveBeenCalledTimes(16);
+    expect(blocked.textContent).toContain('Recorded details are unavailable for this activity revision.');
+
+    releases.get('inflight-call-0')!(answer({ callId: 'inflight-call-0', detailRevision: 2_000 }));
+    await settle(40);
+    blocked.open = false; blocked.dispatchEvent(new live.window.Event('toggle'));
+    blocked.open = true; blocked.dispatchEvent(new live.window.Event('toggle')); await settle(40);
+    expect(detail).toHaveBeenCalledTimes(17);
+    expect(blocked.textContent).toContain('result inflight-call-16');
+  });
+
   it('keeps only the same calls expanded when activity rows are repainted', async () => {
     live = await harness(undefined, { activity });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     await bindFiberRequest(section, 'wfr-app-stream');
     live.hook.renderStreams();
     const first = overwriteRows(section, 'details.clf-stream-tool-disclosure') as HTMLDetailsElement[];
@@ -3793,7 +4215,7 @@ describe('the app-owned chronological stream', () => {
     live.hook.setShowTimes(true);
     live.hook.renderStreams();
     const second = overwriteRows(section, 'details.clf-stream-tool-disclosure') as HTMLDetailsElement[];
-    expect(second[0]).not.toBe(first[0]);
+    expect(second[0]).toBe(first[0]);
     expect(second.map((node) => node.open)).toEqual([true, false]);
     expect(live.document.activeElement).toBe(second[0]!.querySelector('summary'));
     expect(second[0]!.dataset.clfCall).toBe(first[0]!.dataset.clfCall);
@@ -3812,7 +4234,7 @@ describe('the app-owned chronological stream', () => {
     };
     live = await harness(undefined, { activity: withDetails });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     await bindFiberRequest(section, 'wfr-app-stream');
     live.hook.renderStreams();
     const before = overwriteRows(section, 'details').find((node) => node.textContent?.includes('Read third.ts')) as HTMLDetailsElement;
@@ -3842,7 +4264,7 @@ describe('the app-owned chronological stream', () => {
     };
     live = await harness(undefined, { activity: withDetails });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     await bindFiberRequest(section, 'wfr-app-stream');
     live.hook.renderStreams();
     const panel = overwriteRows(section, '.clf-stream-tool-panel').find((node) => node.textContent?.includes('unknown'))!;
@@ -3859,7 +4281,7 @@ describe('the app-owned chronological stream', () => {
   it('does not carry expansion into a different conversation with reused call ids', async () => {
     live = await harness(undefined, { activity });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     await bindFiberRequest(section, 'wfr-app-stream');
     live.hook.renderStreams();
     const original = overwriteRows(section, 'details')[0] as HTMLDetailsElement;
@@ -3869,16 +4291,17 @@ describe('the app-owned chronological stream', () => {
     live.hook.observe();
     await settle();
     live.document.querySelector('#thread')!.replaceChildren();
+    userTurn(live.document, 'stream-owner', 'Run the recorded workflow', { sent: false });
     const replacement = assistantTurn(live.document, turnId, []);
     live.hook.observe();
     await settle();
-    await bindFiberTurns([{ section: replacement, turn: {
+    await bindRenderedFiberTurns([{ section: replacement, turn: {
       turnId, conversationId: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff',
       calls: [{ messageId: 'fiber-wfr-app-stream', tool: 'read_file', order: 0, answered: true, requestId: 'wfr-app-stream' }]
     } }]);
     await live.hook.pullActivity();
     live.hook.renderStreams();
-    const disclosures = overwriteRows(replacement, 'details') as HTMLDetailsElement[];
+    const disclosures = overwriteRows(replacement, 'details.clf-stream-tool-disclosure') as HTMLDetailsElement[];
     expect(disclosures).toHaveLength(2);
     expect(disclosures.every((node) => !node.open)).toBe(true);
     expect(original.isConnected).toBe(false);
@@ -3905,7 +4328,7 @@ describe('the app-owned chronological stream', () => {
     };
     live = await harness(undefined, { activity: withReload });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     await bindFiberRequest(section, 'wfr-app-stream');
 
     live.hook.renderStreams();
@@ -3914,7 +4337,6 @@ describe('the app-owned chronological stream', () => {
       (node.textContent || '').trim()
     );
     expect(rows).toEqual([
-      'Turn started',
       'Checking the repository',
       'Read second.ts',
       'Reloaded chat to recover missing connector attribution.',
@@ -3933,7 +4355,7 @@ describe('the app-owned chronological stream', () => {
   it('shows local calls even when ChatGPT rendered no native tool row for them', async () => {
     live = await harness(undefined, { activity });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     await bindFiberRequest(section, 'wfr-app-stream');
 
     live.hook.renderStreams();
@@ -3941,10 +4363,33 @@ describe('the app-owned chronological stream', () => {
     const rows = overwriteRows(section, '.clf-stream-row .clf-stream-text').map((node) =>
       (node.textContent || '').trim()
     );
-    expect(rows).toEqual(['Turn started', 'Checking the repository', 'Read second.ts', 'Read third.ts']);
+    expect(rows).toEqual(['Checking the repository', 'Read third.ts', 'Read second.ts']);
     expect(overwriteRows(section, '.clf-stream-tool_call')).toHaveLength(2);
     expect(section.querySelectorAll('.pointer-events-none.contents')).toHaveLength(0);
     expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
+  });
+
+  it('keeps prime and worker attribution on their independent canonical call rows', async () => {
+    const attributed = () => ({ ok: true, data: {
+      entries: [], userAnchors: [{ seq: 0, time: 50, messageId: ownerMessageId }], stream: [
+        { seq: 1, time: 100, kind: 'turn_start', turnId: 'g-attributed-calls' },
+        { seq: 2, time: 110, kind: 'tool_call', turnId: 'g-attributed-calls', agent: 'prime',
+          tool: 'read_file', callId: 'prime-call', requestId: 'wfr-attributed', outcome: 'ok',
+          summary: { kind: 'read', title: 'Prime read' } },
+        { seq: 3, time: 120, kind: 'tool_call', turnId: 'g-attributed-calls', agent: 'worker-1',
+          tool: 'exec_command', callId: 'worker-call', requestId: 'wfr-attributed', outcome: 'ok',
+          summary: { kind: 'run', title: 'Worker command' } }
+      ]
+    } });
+    live = await harness(undefined, { activity: attributed }); renderingOn();
+    userTurn(live.document, 'stream-owner', 'Coordinate the agents', { sent: false });
+    const section = assistantTurn(live.document, 'page-attributed-calls', []);
+    await bindFiberRequest(section, 'wfr-attributed');
+    live.hook.renderStreams();
+
+    expect(overwriteRows(section, '[data-clf-call] .clf-agent').map(node => node.textContent)).toEqual(['worker-1', 'prime']);
+    expect(overwriteRows(section, '[data-clf-call]').map(node => node.dataset.clfCall)).toEqual(['worker-call', 'prime-call']);
+    expect(section.querySelectorAll('.pointer-events-none.contents')).toHaveLength(0);
   });
 
   it('keeps recorder calls with no turn id visible in the turn whose time window they ran in', async () => {
@@ -3952,6 +4397,7 @@ describe('the app-owned chronological stream', () => {
       ok: true,
       data: {
         entries: [],
+        userAnchors: [{ seq: 0, time: 50, messageId: ownerMessageId }],
         stream: [
           { seq: 1, time: 100, kind: 'turn_start', turnId: 'g-one', agent: null },
           { seq: 2, time: 140, kind: 'turn_end', turnId: 'g-one', outcome: 'unknown', detail: '' },
@@ -3974,7 +4420,9 @@ describe('the app-owned chronological stream', () => {
     });
     live = await harness(undefined, { activity: orphanActivity });
     renderingOn();
+    userTurn(live.document, 'stream-owner', 'Continue the recorded task', { sent: false });
     const first = assistantTurn(live.document, 'dom-one', []);
+    userTurn(live.document, 'orphan-unrecorded-next', 'A different response', { sent: false });
     const second = assistantTurn(live.document, 'dom-two', []);
     await bindFiberRequest(first, 'wfr-orphan-render');
     await live.hook.pullActivity();
@@ -3990,6 +4438,7 @@ describe('the app-owned chronological stream', () => {
       ok: true,
       data: {
         entries: [],
+        userAnchors: [{ seq: 0, time: 50, messageId: ownerMessageId }],
         stream: [
           { seq: 1, time: 100, kind: 'turn_start', turnId: brokenTurn, agent: 'prime' },
           { seq: 2, time: 110, kind: 'assistant_message', turnId: brokenTurn, agent: 'prime', messageId: 'site-before-dropout', text: 'Before the dropout.', final: true },
@@ -4020,7 +4469,7 @@ describe('the app-owned chronological stream', () => {
     prose(live.document, section, 'site-before-dropout', 'Before the dropout.');
     prose(live.document, section, 'site-orphan-one', 'Still working after it.');
     prose(live.document, section, 'site-orphan-two', 'And kept going.');
-    await bindFiberTurns([{ section, turn: {
+    await bindRenderedFiberTurns([{ section, turn: {
       turnId: 'page-broken-interrupted',
       calls: [{ messageId: 'fiber-broken-call', tool: 'read_file', order: 0, answered: true, requestId: 'wfr-after-broken-end' }],
       messages: [
@@ -4036,12 +4485,8 @@ describe('the app-owned chronological stream', () => {
     const rows = overwriteRows(section, '.clf-stream-row .clf-stream-text').map((node) =>
       (node.textContent || '').trim()
     );
-    expect(rows).toEqual([
-      'Turn started',
-      'Read after the false end',
-      'Inspected after the false end',
-      'Turn interrupted'
-    ]);
+    expect(rows).toEqual(['Read after the false end']);
+    expect(section.querySelector('.clf-stream-page_tool')).toBeNull();
     expect(section.textContent).toContain('Before the dropout.');
     expect(section.textContent).toContain('Still working after it.');
     expect(section.textContent).toContain('And kept going.');
@@ -4065,7 +4510,7 @@ describe('the app-owned chronological stream', () => {
     expect(section.hasAttribute('data-clf-turn-replaced')).toBe(false);
 
     final = true;
-    await bindFiberTurns([{ section, turn: { turnId: 'page-orphan-only',
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-orphan-only',
       calls: [{ messageId: 'fiber-wfr-orphan-only', tool: 'agents', order: 0, answered: true, requestId: 'wfr-orphan-only' }],
       messages: [{ messageId: 'stable-orphan-answer', stable: true, rawText: 'Workers finished.', renderedHtml: '' }]
     } }]);
@@ -4094,6 +4539,7 @@ describe('the app-owned chronological stream', () => {
       ok: true,
       data: {
         entries: [],
+        userAnchors: [{ seq: 0, time: 50, messageId: ownerMessageId }],
         stream: [
           { seq: 10, origin: 4, time: 100, kind: 'assistant_message', turnId: null, agent: null, messageId: 'site-message-only-one', text: 'First canonical partial.', final: true },
           { seq: 11, origin: 9, time: 200, kind: 'assistant_message', turnId: null, agent: null, messageId: 'site-message-only-two', text: 'Second canonical partial.', final: true }
@@ -4108,7 +4554,7 @@ describe('the app-owned chronological stream', () => {
     native.className = 'markdown';
     native.textContent = 'Second canonical partial.';
     section.append(native);
-    await bindFiberTurns([{ section, turn: {
+    await bindRenderedFiberTurns([{ section, turn: {
       turnId: 'page-message-only',
       messages: [
         { messageId: 'site-message-only-one', stable: true, rawText: 'First canonical partial.', renderedHtml: '' },
@@ -4121,6 +4567,138 @@ describe('the app-owned chronological stream', () => {
     expect(overwriteRows(section, '.clf-stream-assistant_message')).toEqual([]);
     expect(native.textContent).toBe('Second canonical partial.');
     expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
+  });
+
+  it.each(['alias', 'duplicate-provider', 'direct-conflict', 'provider-conflict'])('resolves exact provider aliases and immediately rejects %s contradictions', async mode => {
+    const provider = '11111111-1111-4111-8111-111111111111';
+    let conflicting = false;
+    live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], job: null, stream: [
+      { seq: 0, time: 90, kind: 'turn_start', turnId: 'alias-owner' },
+      { seq: 1, time: 100, kind: 'assistant_message', turnId: 'alias-owner', messageId: 'canonical-original',
+        providerMessageId: provider, text: 'Native answer', final: true },
+      ...(conflicting && mode === 'duplicate-provider' ? [{ seq: 2, time: 100, kind: 'assistant_message', turnId: null,
+        messageId: 'other-canonical', providerMessageId: provider, text: 'Duplicate', final: true }] : []),
+      ...(conflicting && mode === 'direct-conflict' ? [{ seq: 3, time: 100, kind: 'assistant_message', turnId: null,
+        messageId: 'current-logical', providerMessageId: '22222222-2222-4222-8222-222222222222', text: 'Conflict', final: true }] : [])
+    ] } }) });
+    renderingOn();
+    const section = assistantTurn(live.document, 'page-provider-alias', []);
+    const native = live.document.createElement('div'); native.className = 'markdown'; native.textContent = 'Native answer'; section.append(native);
+    const bind = async (rawMessageId = provider) => bindRenderedFiberTurns([{ section, turn: { turnId: 'page-provider-alias',
+      messages: [{ messageId: 'current-logical', rawMessageId, stable: true, rawText: 'Native answer', renderedHtml: '' }] } }]);
+    await bind();
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    const root = overwriteStream(section);
+    expect(root).toBeNull();
+    expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
+    if (mode === 'alias') {
+      await bind(); live.hook.renderStreams();
+      expect(overwriteStream(section)).toBeNull();
+    } else {
+      conflicting = true;
+      if (mode === 'provider-conflict') await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-provider-alias',
+        messages: [{ messageId: 'canonical-original', rawMessageId: '22222222-2222-4222-8222-222222222222',
+          stable: true, rawText: 'Native answer', renderedHtml: '' }] } }]);
+      await live.hook.pullActivity(); live.hook.renderStreams();
+      expect(live.document.querySelectorAll('.clf-stream')).toHaveLength(0);
+      expect(section.hasAttribute('data-clf-turn-replaced')).toBe(false);
+      expect(native.isConnected).toBe(true);
+    }
+  });
+
+  it.each(['same-turn', 'cross-turn', 'duplicate-descriptor'])('keeps provider alias ownership exact for %s native objects', async mode => {
+    const provider = '11111111-1111-4111-8111-111111111111';
+    live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], job: null, stream: [
+      { seq: 1, time: 100, kind: 'turn_start', turnId: 'owner-one' },
+      { seq: 2, time: 110, kind: 'assistant_message', turnId: 'owner-one', messageId: 'canonical-one',
+        providerMessageId: provider, text: 'First', final: true },
+      ...(mode === 'cross-turn' ? [{ seq: 3, time: 120, kind: 'turn_start', turnId: 'owner-two' }] : []),
+      { seq: 4, time: 130, kind: 'assistant_message', turnId: mode === 'cross-turn' ? 'owner-two' : 'owner-one',
+        messageId: 'canonical-two', text: 'Second', final: true }
+    ] } }) });
+    renderingOn();
+    const section = assistantTurn(live.document, 'native-owned-objects', []);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'native-owned-objects', messages: [
+      { messageId: 'renamed-one', rawMessageId: provider, stable: true, rawText: 'First', renderedHtml: '' },
+      { messageId: 'canonical-two', ...(mode === 'duplicate-descriptor' ? { rawMessageId: provider } : {}),
+        stable: true, rawText: 'Second', renderedHtml: '' }
+    ] } }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    expect(overwriteStream(section)).toBeNull();
+    expect(section.hasAttribute('data-clf-turn-replaced')).toBe(mode === 'same-turn');
+  });
+
+  it('promotes an exact orphan root to its durable group without leaving a grace-period duplicate', async () => {
+    let owned = false;
+    const provider = '11111111-1111-4111-8111-111111111111';
+    live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], job: null, stream: [
+      ...(owned ? [{ seq: 1, time: 90, kind: 'turn_start', turnId: 'recovered-owner' }] : []),
+      { seq: owned ? 3 : 2, origin: 2, time: 100, kind: 'assistant_message', turnId: owned ? 'recovered-owner' : null,
+        messageId: 'canonical-root', providerMessageId: provider, text: 'Native', final: true }
+    ] } }) });
+    renderingOn();
+    const section = assistantTurn(live.document, 'native-recovered-owner', []);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'native-recovered-owner', messages: [
+      { messageId: 'current-logical-root', rawMessageId: provider, stable: true, rawText: 'Native', renderedHtml: '' }
+    ] } }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    const root = overwriteStream(section);
+    expect(root).toBeNull();
+    expect(section.dataset.clfStreamKey).toBeTruthy();
+    owned = true;
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    expect(overwriteStream(section)).toBeNull();
+    expect(section.dataset.clfStreamKey).toBe('recovered-owner');
+    expect(live.document.querySelectorAll('.clf-stream')).toHaveLength(0);
+  });
+
+  it('applies an in-flight exact detail after its response root is promoted to a durable group', async () => {
+    let owned = false;
+    let release!: (value: unknown) => void;
+    const detail = vi.fn(() => new Promise(resolve => { release = resolve; }));
+    const provider = '11111111-1111-4111-8111-111111111112';
+    const owner = 'promoted-detail-owner';
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [
+        ...(owned ? [{ seq: 1, time: 90, kind: 'turn_start', turnId: owner }] : []),
+        { seq: 2, time: 100, kind: 'tool_call', turnId: owned ? owner : null, callId: 'promoted-detail-call',
+          detailRevision: 202, requestId: 'wfr-promoted-detail', tool: 'read_file', outcome: 'ok',
+          displayOutcome: { code: 'completed', label: 'completed' }, summary: { title: 'Promoted detail call' } },
+        { seq: 3, time: 110, kind: 'assistant_message', turnId: owned ? owner : null,
+          messageId: 'promoted-detail-answer', providerMessageId: provider, text: 'Native final', final: true }
+      ] } }),
+      activity_detail: detail
+    });
+    renderingOn();
+    const section = assistantTurn(live.document, 'promoted-detail-page', []);
+    prose(live.document, section, 'current-promoted-detail', 'Native final');
+    await bindRenderedFiberTurns([{ section, turn: {
+      turnId: 'promoted-detail-page',
+      calls: [{ messageId: 'fiber-promoted-detail', requestId: 'wfr-promoted-detail', tool: 'read_file', order: 0, answered: true }],
+      messages: [{ messageId: 'current-promoted-detail', rawMessageId: provider, stable: true,
+        rawText: 'Native final', renderedHtml: '' }]
+    } }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    const firstKey = section.dataset.clfStreamKey;
+    const first = overwriteRows(section, 'details').find(node => node.dataset.clfCall === 'promoted-detail-call') as HTMLDetailsElement;
+    expect(first).toBeDefined(); first.querySelector('summary')!.click();
+    first.dispatchEvent(new live.window.Event('toggle')); await settle();
+    expect(detail).toHaveBeenCalledOnce();
+
+    owned = true;
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    expect(section.dataset.clfStreamKey).toBe(owner);
+    expect(section.dataset.clfStreamKey).not.toBe(firstKey);
+    const promoted = overwriteRows(section, 'details').find(node => node.dataset.clfCall === 'promoted-detail-call') as HTMLDetailsElement;
+    expect(promoted.open).toBe(true);
+    release({ ok: true, data: { ok: true, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      callId: 'promoted-detail-call', detailRevision: 202, tool: 'read_file',
+      args: { text: 'promoted args', truncated: false, chars: 13 },
+      result: { text: 'promoted result', truncated: false, chars: 15 } } });
+    await settle();
+    expect(promoted.textContent).toContain('promoted args');
+    expect(promoted.textContent).toContain('promoted result');
+    expect(detail).toHaveBeenCalledOnce();
   });
 
   it('updates one reload-only overwrite in place when another canonical assistant id arrives later', async () => {
@@ -4141,18 +4719,19 @@ describe('the app-owned chronological stream', () => {
     live = await harness(undefined, { activity: messageOnlyActivity });
     renderingOn();
     const section = assistantTurn(live.document, 'page-message-growing', []);
-    await bindFiberTurns([{ section, turn: {
+    await bindRenderedFiberTurns([{ section, turn: {
       turnId: 'page-message-growing',
       messages: [{ messageId: 'site-growing-one', stable: true, rawText: 'First canonical partial.', renderedHtml: '' }]
     } }]);
     await live.hook.pullActivity();
     live.hook.renderStreams();
     const firstRoot = overwriteStream(section)!;
-    expect(firstRoot).toBeTruthy();
-    expect(live.document.querySelectorAll('.clf-stream')).toHaveLength(1);
+    expect(firstRoot).toBeNull();
+    expect(section.dataset.clfStreamKey).toBeTruthy();
+    expect(live.document.querySelectorAll('.clf-stream')).toHaveLength(0);
 
     expanded = true;
-    await bindFiberTurns([{ section, turn: {
+    await bindRenderedFiberTurns([{ section, turn: {
       turnId: 'page-message-growing',
       messages: [
         { messageId: 'site-growing-one', stable: true, rawText: 'First canonical partial.', renderedHtml: '' },
@@ -4163,7 +4742,7 @@ describe('the app-owned chronological stream', () => {
     live.hook.renderStreams();
 
     expect(overwriteStream(section)).toBe(firstRoot);
-    expect(live.document.querySelectorAll('.clf-stream')).toHaveLength(1);
+    expect(live.document.querySelectorAll('.clf-stream')).toHaveLength(0);
     expect(overwriteRows(section, '.clf-stream-assistant_message')).toEqual([]);
   });
 
@@ -4198,7 +4777,7 @@ describe('the app-owned chronological stream', () => {
     native.className = 'markdown';
     native.textContent = 'This native interim has not reached the local app yet.';
     section.append(native);
-    await bindFiberTurns([{ section, turn: {
+    await bindRenderedFiberTurns([{ section, turn: {
       turnId: 'page-incomplete-overwrite',
       calls: [{
         messageId: 'fiber-incomplete-call',
@@ -4246,7 +4825,7 @@ describe('the app-owned chronological stream', () => {
     renderingOn();
     const section = assistantTurn(live.document, 'page-sticky-overwrite', []);
     prose(live.document, section, 'site-sticky-one', 'First complete local snapshot');
-    await bindFiberTurns([{ section, turn: {
+    await bindRenderedFiberTurns([{ section, turn: {
       turnId: 'page-sticky-overwrite',
       messages: [{
         messageId: 'site-sticky-one',
@@ -4260,7 +4839,7 @@ describe('the app-owned chronological stream', () => {
     expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
     expect(section.textContent).toContain('First complete local snapshot');
 
-    await bindFiberTurns([{ section, turn: {
+    await bindRenderedFiberTurns([{ section, turn: {
       turnId: 'page-sticky-overwrite',
       messages: [
         { messageId: 'site-sticky-one', stable: true, rawText: 'First complete local snapshot', renderedHtml: '' },
@@ -4273,11 +4852,13 @@ describe('the app-owned chronological stream', () => {
     expect(section.textContent).toContain('First complete local snapshot');
   });
 
-  it('drops a stale overwrite immediately when Fiber exposes a new exact in-flight call', async () => {
-    const activity = () => ({
+  it('keeps prior local calls mounted while a new exact app call is still native', async () => {
+    let secondRecorded = false;
+    const partialActivity = () => ({
       ok: true,
       data: {
         entries: [],
+        userAnchors: [{ seq: 0, time: 50, messageId: 'm-live-call-owner' }],
         stream: [
           { seq: 1, time: 100, kind: 'turn_start', turnId: 'g-live-call-gap', agent: null },
           {
@@ -4292,36 +4873,75 @@ describe('the app-owned chronological stream', () => {
             outcome: 'ok',
             durationMs: 2,
             summary: { kind: 'read', tone: 'neutral', title: 'First call' }
-          }
+          },
+          ...(secondRecorded ? [{
+            seq: 3, time: 120, kind: 'tool_call', turnId: 'g-live-call-gap', agent: null,
+            tool: 'exec_command', callId: 'call-two', requestId: 'wfr-live-two', outcome: 'ok',
+            durationMs: 3, summary: { kind: 'run', tone: 'neutral', title: 'Second call' }
+          }] : [])
         ],
         job: null
       }
     });
-    live = await harness(undefined, { activity });
+    live = await harness(undefined, { activity: partialActivity });
     renderingOn();
-    const section = assistantTurn(live.document, 'page-live-call-gap', []);
-    await bindFiberTurns([{ section, turn: {
-      turnId: 'page-live-call-gap',
-      calls: [{ messageId: 'fiber-one', tool: 'read_file', order: 0, answered: true, requestId: 'wfr-live-one' }]
-    } }]);
-    await live.hook.pullActivity();
-    live.hook.renderStreams();
-    expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
-
-    // ChatGPT knows call two has begun, but the handler has not returned yet, so /activity
-    // necessarily still contains only call one. The native page must become visible now rather
-    // than remain hidden behind the grace period's stale replacement.
-    await bindFiberTurns([{ section, turn: {
+    userTurn(live.document, 'live-call-owner', 'Run both calls', { sent: false });
+    const section = assistantTurn(live.document, 'page-live-call-gap', ['Native first', 'Native second']);
+    const blocks = blocksOf(section);
+    section.setAttribute('data-clf-fiber-turn', '0');
+    blocks[0]!.setAttribute('data-clf-fiber', '0');
+    blocks[1]!.setAttribute('data-clf-fiber', '1');
+    const rows = (secondAnswered: boolean) => [
+      { v: 12, index: 0, messageId: 'fiber-one', tool: 'read_file', path: '/Chat On Steroids Core/read_file',
+        app: 'Chat On Steroids Core', answered: true, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' },
+      { v: 12, index: 1, messageId: 'fiber-two', tool: 'exec_command', path: '/Chat On Steroids Core/exec_command',
+        app: 'Chat On Steroids Core', answered: secondAnswered, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }
+    ];
+    const turn = (secondAnswered: boolean) => ({
       turnId: 'page-live-call-gap',
       calls: [
         { messageId: 'fiber-one', tool: 'read_file', order: 0, answered: true, requestId: 'wfr-live-one' },
-        { messageId: 'fiber-two', tool: 'exec_command', order: 1, answered: false, requestId: 'wfr-live-two' }
+        { messageId: 'fiber-two', tool: 'exec_command', order: 1, answered: secondAnswered, requestId: 'wfr-live-two' }
       ]
-    } }]);
+    });
+    await replyFiber(rows(false), [turn(false)]);
+    await live.hook.pullActivity();
     live.hook.renderStreams();
+    expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
+    expect(overwriteRows(section, '[data-clf-call]')).toHaveLength(1);
+    expect(blocks[0]!.closest('[data-clf-native-hidden]')).not.toBeNull();
+    expect(blocks[1]!.closest('[data-clf-native-hidden]')).toBeNull();
 
-    expect(section.getAttribute('data-clf-turn-replaced')).toBeNull();
-    expect(overwriteStream(section)).toBeNull();
+    secondRecorded = true;
+    await live.hook.pullActivity();
+    await replyFiber(rows(true), [turn(true)]);
+    live.hook.renderStreams();
+    expect(overwriteRows(section, '[data-clf-call]')).toHaveLength(2);
+    expect(blocks[1]!.closest('[data-clf-native-hidden]')).not.toBeNull();
+  });
+
+  it.each([
+    ['Chat On Steroids Plugins', true],
+    ['Chat On Steroids Backup', false]
+  ] as const)('suppresses only an answered exact supported connector block (%s)', async (app, hidden) => {
+    live = await harness(undefined, { activity: () => ({ ok: true, data: {
+      entries: [], userAnchors: [{ seq: 0, time: 50, messageId: 'm-exact-block-owner' }], stream: [
+        { seq: 1, time: 100, kind: 'turn_start', turnId: 'exact-block-owner' },
+        { seq: 2, time: 110, kind: 'tool_call', turnId: 'exact-block-owner', callId: 'exact-block-call',
+          requestId: 'wfr-exact-block', tool: 'read_file', outcome: 'ok', summary: { title: 'Local exact call' } }
+      ]
+    } }) }); renderingOn();
+    userTurn(live.document, 'exact-block-owner', 'Read the exact file', { sent: false });
+    const section = assistantTurn(live.document, 'exact-block-page', ['Native connector row']);
+    const block = blocksOf(section)[0]!; section.setAttribute('data-clf-fiber-turn', '0'); block.setAttribute('data-clf-fiber', '0');
+    await replyFiber([{ v: 12, index: 0, messageId: 'fiber-exact-block', tool: 'read_file',
+      path: `/${app}/read_file`, app, answered: true, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }], [{
+      turnId: 'exact-block-page', calls: [{ messageId: 'fiber-exact-block', tool: 'read_file', order: 0,
+        answered: true, requestId: 'wfr-exact-block' }]
+    }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    expect(overwriteRows(section, '[data-clf-call="exact-block-call"]')).toHaveLength(1);
+    expect(block.closest('[data-clf-native-hidden]') !== null).toBe(hidden);
   });
 
   it('does not merge separate assistant turns when ChatGPT reuses the same DOM turn id', async () => {
@@ -4346,7 +4966,7 @@ describe('the app-owned chronological stream', () => {
     const first = assistantTurn(live.document, 'request-reused', []);
     userTurn(live.document, 'user-between', 'next');
     const second = assistantTurn(live.document, 'request-reused', []);
-    await bindFiberTurns([
+    await bindRenderedFiberTurns([
       { section: first, turn: { turnId: 'request-reused', messages: [{ messageId: 'site-reused-one', stable: true, rawText: 'First answer', renderedHtml: '' }] } },
       { section: second, turn: { turnId: 'request-reused', messages: [{ messageId: 'site-reused-two', stable: true, rawText: 'Second answer', renderedHtml: '' }] } }
     ]);
@@ -4356,7 +4976,7 @@ describe('the app-owned chronological stream', () => {
     expect(overwriteText(first)).toContain('First work');
     expect(overwriteText(first)).not.toContain('Second work');
     expect(overwriteText(second)).toContain('Second work');
-    expect(live.document.querySelectorAll('.clf-stream')).toHaveLength(2);
+    expect(new Set([...live.document.querySelectorAll<HTMLElement>('.clf-stream')].map(root => root.dataset.clfKey)).size).toBe(2);
   });
 
   /**
@@ -4459,7 +5079,7 @@ describe('the app-owned chronological stream', () => {
   it('hides timestamps by default and can show them without changing the stream', async () => {
     live = await harness(undefined, { activity });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     await bindFiberRequest(section, 'wfr-app-stream');
     live.hook.renderStreams();
     expect(overwriteStream(section)?.querySelector('.clf-when') ?? null).toBeNull();
@@ -4474,6 +5094,7 @@ describe('the app-owned chronological stream', () => {
       ok: true,
       data: {
         entries: [],
+        userAnchors: [{ seq: 0, time: 50, messageId: ownerMessageId }],
         stream: [
           { seq: 1, time: 100, kind: 'turn_start', turnId, agent: null },
           {
@@ -4508,7 +5129,7 @@ describe('the app-owned chronological stream', () => {
     });
     live = await harness(undefined, { activity: metricActivity });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     await bindFiberRequest(section, 'wfr-metric-stream', 'exec_command');
     live.hook.renderStreams();
 
@@ -4520,6 +5141,7 @@ describe('the app-owned chronological stream', () => {
   it('updates a background process in its existing stream row when its exit arrives', async () => {
     let completed = false;
     const processActivity = () => ({ ok: true, data: { entries: [], nextSince: completed ? 10 : 3,
+      userAnchors: [{ seq: 0, time: 50, messageId: ownerMessageId }],
       stream: [
         { seq: 1, time: 100, kind: 'turn_start', turnId, agent: null },
         { seq: 2, time: 110, kind: 'tool_call', turnId, agent: null, tool: 'exec_command',
@@ -4530,7 +5152,7 @@ describe('the app-owned chronological stream', () => {
       ], job: null } });
     live = await harness(undefined, { activity: processActivity });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     await bindFiberRequest(section, 'wfr-process-stream', 'exec_command');
     live.hook.renderStreams();
     expect(overwriteText(section)).toContain('Started render');
@@ -4548,10 +5170,11 @@ describe('the app-owned chronological stream', () => {
       ok: true,
       data: {
         entries: [],
+        userAnchors: [{ seq: 0, time: 50, messageId: ownerMessageId }],
         stream: [
-          { seq: 0, time: 90, kind: 'turn_start', turnId, agent: null },
+          { seq: 1, time: 90, kind: 'turn_start', turnId, agent: null },
           {
-            seq: 1,
+            seq: 2,
             time: 100,
             kind: 'tool_call',
             turnId,
@@ -4564,7 +5187,7 @@ describe('the app-owned chronological stream', () => {
             summary: { kind: 'read', tone: 'neutral', title: 'Listed approved folders' }
           },
           {
-            seq: 2,
+            seq: 3,
             time: 200,
             kind: 'tool_call',
             turnId,
@@ -4582,7 +5205,7 @@ describe('the app-owned chronological stream', () => {
     });
     live = await harness(undefined, { activity: orderedActivity });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     const reasoning = live.document.createElement('div');
     reasoning.setAttribute('data-interrupted', 'false');
     reasoning.append(toolBlock(live.document, 'Checked available roots'));
@@ -4598,13 +5221,13 @@ describe('the app-owned chronological stream', () => {
     const rows = overwriteRows(section, '.clf-stream-row .clf-stream-text').map((node) =>
       (node.textContent || '').trim()
     );
-    expect(rows).toEqual(['Turn started', 'Listed approved folders', 'Listed open windows']);
+    expect(rows).toEqual(['Listed open windows', 'Listed approved folders']);
     expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
-    expect(reasoning.getAttribute('data-clf-native-hidden')).toBe('1');
-    for (const block of blocksOf(section)) expect(block.getAttribute('data-clf-native-hidden')).toBe('1');
+    expect(reasoning.getAttribute('data-clf-native-hidden')).toBeNull();
+    for (const block of blocksOf(section)) expect(block.getAttribute('data-clf-native-hidden')).toBeNull();
   });
 
-  it('replaces a recorded ChatGPT-native web row while leaving connector attribution separate', async () => {
+  it('keeps a recorded ChatGPT-native web row native exactly once', async () => {
     const nativeActivity = () => ({
       ok: true,
       data: {
@@ -4619,16 +5242,18 @@ describe('the app-owned chronological stream', () => {
     live = await harness(undefined, { activity: nativeActivity });
     renderingOn();
     const section = assistantTurn(live.document, turnId, ['Searched the web']);
-    await bindFiberTurns([{ section, turn: {
+    await bindRenderedFiberTurns([{ section, turn: {
       turnId,
       activities: [{ messageId: 'native-web', label: 'Searched the web' }]
     } }]);
 
     live.hook.renderStreams();
 
-    expect(overwriteStream(section)?.querySelector('.clf-stream-page_tool')?.textContent).toContain('Searched the web');
-    expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
-    expect(blocksOf(section)[0]!.getAttribute('data-clf-native-hidden')).toBe('1');
+    expect(overwriteStream(section)).toBeNull();
+    expect(section.querySelector('.clf-stream-page_tool')).toBeNull();
+    expect(section.textContent).toContain('Searched the web');
+    expect(section.getAttribute('data-clf-turn-replaced')).toBeNull();
+    expect(blocksOf(section)[0]!.getAttribute('data-clf-native-hidden')).toBeNull();
   });
 
   it('keeps native code/document rendering and response actions while replacing settled activity', async () => {
@@ -4681,14 +5306,14 @@ describe('the app-owned chronological stream', () => {
     actions.append(responseCopy);
     section.append(reasoning, prose, actions);
 
-    await bindFiberTurns([{ section, turn: {
+    await bindRenderedFiberTurns([{ section, turn: {
       turnId,
       messages: [{ messageId: 'site-settled-answer', stable: true, rawText: 'Here is the answer.', renderedHtml: '' }]
     } }]);
     live.hook.renderStreams();
     expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
     expect(overwriteStream(section)?.querySelector('.clf-stream-assistant_message')).toBeNull();
-    expect(overwriteStream(section)?.querySelector('.clf-stream-turn_end')?.textContent).toContain('Turn completed');
+    expect(overwriteRows(section, '.clf-stream-turn_end')).toHaveLength(0);
     expect(prose.isConnected).toBe(true);
     expect(code.isConnected).toBe(true);
     expect(actions.isConnected).toBe(true);
@@ -4718,7 +5343,7 @@ describe('the app-owned chronological stream', () => {
     const second = assistantTurn(live.document, 'request-reused-y', []);
     prose(live.document, first, 'site-reload-one', 'First answer');
     prose(live.document, second, 'site-reload-two', 'Second answer');
-    await bindFiberTurns([
+    await bindRenderedFiberTurns([
       { section: first, turn: { turnId: 'request-reused-x', messages: [{ messageId: 'site-reload-one', stable: true, rawText: 'First answer', renderedHtml: '' }] } },
       { section: second, turn: { turnId: 'request-reused-y', messages: [{ messageId: 'site-reload-two', stable: true, rawText: 'Second answer', renderedHtml: '' }] } }
     ]);
@@ -4793,7 +5418,7 @@ describe('the app-owned chronological stream', () => {
     renderingOn();
     const first = assistantTurn(live.document, 'page-split-one', []);
     const second = assistantTurn(live.document, 'page-split-two', []);
-    await bindFiberTurns([
+    await bindRenderedFiberTurns([
       {
         section: first,
         turn: {
@@ -4864,7 +5489,7 @@ describe('the app-owned chronological stream', () => {
     const first = assistantTurn(live.document, 'page-anchor-one', []);
     userTurn(live.document, 'user-anchor-two', 'second question');
     const second = assistantTurn(live.document, 'page-anchor-two', []);
-    await bindFiberTurns([
+    await bindRenderedFiberTurns([
       {
         section: first,
         turn: {
@@ -4944,7 +5569,7 @@ describe('the app-owned chronological stream', () => {
     const first = assistantTurn(live.document, 'page-image-anchor', []);
     userTurn(live.document, 'user-after-image', 'later question');
     const second = assistantTurn(live.document, 'page-after-image', []);
-    await bindFiberTurns([
+    await bindRenderedFiberTurns([
       {
         section: first,
         turn: {
@@ -5017,7 +5642,7 @@ describe('the app-owned chronological stream', () => {
    * underneath it. Only the first section owns the render; the rest of the response is the
    * same answer and stays behind it.
    */
-  it('renders one answer once when ChatGPT splits it across sections with no turn id', async () => {
+  it('keeps duplicate native object mounts visible rather than guessing one placement', async () => {
     const splitActivity = () => ({
       ok: true,
       data: {
@@ -5048,18 +5673,16 @@ describe('the app-owned chronological stream', () => {
     first.removeAttribute('data-turn-id');
     second.removeAttribute('data-turn-id');
     const message = { messageId: 'site-split', stable: true, rawText: 'The one and only answer', renderedHtml: '' };
-    await bindFiberTurns([
+    await bindRenderedFiberTurns([
       { section: first, turn: { turnId: null, messages: [message] } },
       { section: second, turn: { turnId: null, messages: [message] } }
     ]);
     await live.hook.pullActivity();
     live.hook.renderStreams();
 
-    expect(live.document.querySelectorAll('.clf-stream')).toHaveLength(1);
-    expect(overwriteStream(first)).not.toBeNull();
-    // The trailing section is part of the same response, so it is hidden rather than left
-    // showing ChatGPT's own copy of prose the reconstruction above already carries.
-    expect(second.getAttribute('data-clf-turn-replaced')).toBe('1');
+    expect(live.document.querySelectorAll('.clf-stream')).toHaveLength(0);
+    expect(first.hasAttribute('data-clf-turn-replaced')).toBe(false);
+    expect(second.hasAttribute('data-clf-turn-replaced')).toBe(false);
   });
 
   it('does not merge a genuine reissue after the same user message when its request id changed', async () => {
@@ -5094,7 +5717,7 @@ describe('the app-owned chronological stream', () => {
     renderingOn();
     userTurn(live.document, 'user-reissue', 'same user message');
     const section = assistantTurn(live.document, 'page-current-reissue', []);
-    await bindFiberTurns([{
+    await bindRenderedFiberTurns([{
       section,
       turn: {
         turnId: 'page-current-reissue',
@@ -5128,7 +5751,7 @@ describe('the app-owned chronological stream', () => {
     // Reload recovery is by the stable website message id, never by list position.
     const previous = assistantTurn(live.document, 'request-old', []);
     prose(live.document, previous, 'site-old-answer', 'Previous answer');
-    await bindFiberTurns([{ section: previous, turn: {
+    await bindRenderedFiberTurns([{ section: previous, turn: {
       turnId: 'request-old',
       messages: [{ messageId: 'site-old-answer', stable: true, rawText: 'Previous answer', renderedHtml: '' }]
     } }]);
@@ -5141,7 +5764,7 @@ describe('the app-owned chronological stream', () => {
     // tail alignment reinterpret the previous durable group as the new turn.
     userTurn(live.document, 'user-next', 'Next question');
     const next = assistantTurn(live.document, 'request-new', []);
-    await bindFiberTurns([
+    await bindRenderedFiberTurns([
       { section: previous, turn: { turnId: 'request-old', messages: [{ messageId: 'site-old-answer', stable: true, rawText: 'Previous answer', renderedHtml: '' }] } },
       { section: next, turn: { turnId: 'request-new', messages: [{ messageId: 'site-new-answer', stable: true, rawText: 'New answer beginning', renderedHtml: '' }] } }
     ]);
@@ -5156,7 +5779,7 @@ describe('the app-owned chronological stream', () => {
   it('reattaches the same recorded stream after React replaces the assistant section', async () => {
     live = await harness(undefined, { activity });
     renderingOn();
-    const first = assistantTurn(live.document, turnId, []);
+    const first = ownedStreamTurn();
     await bindFiberRequest(first, 'wfr-app-stream');
     live.hook.renderStreams();
     expect(overwriteStream(first)).not.toBeNull();
@@ -5177,7 +5800,7 @@ describe('the app-owned chronological stream', () => {
   it('keeps the visible overwrite before the next user message when React moves its native assistant host', async () => {
     live = await harness(undefined, { activity });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     await bindFiberRequest(section, 'wfr-app-stream');
     live.hook.renderStreams();
 
@@ -5201,6 +5824,31 @@ describe('the app-owned chronological stream', () => {
     expect(Boolean(root.compareDocumentPosition(user) & live.window.Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
+  it('restores a native connector row when a preserved moved root loses current suppression proof', async () => {
+    live = await harness(undefined, { activity }); renderingOn();
+    const section = ownedStreamTurn(['Native app call']);
+    const block = blocksOf(section)[0]!;
+    section.setAttribute('data-clf-fiber-turn', '0');
+    block.setAttribute('data-clf-fiber', '0');
+    const bind = async (answered: boolean) => replyFiber([{
+      v: 12, index: 0, messageId: 'fiber-moved-call', tool: 'read_file',
+      path: '/Chat On Steroids Core/read_file', app: 'Chat On Steroids Core', answered,
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    }], [{ turnId, calls: [{ messageId: 'fiber-moved-call', tool: 'read_file', order: 0,
+      answered, requestId: 'wfr-app-stream' }] }]);
+    await bind(true); live.hook.renderStreams();
+    const root = overwriteStream(section)!;
+    expect(root).toBeTruthy();
+    expect(block.closest('[data-clf-native-hidden]')).not.toBeNull();
+
+    userTurn(live.document, 'user-after-moved-proof', 'Next question');
+    live.document.querySelector('#thread')!.append(section);
+    await bind(false); live.hook.renderStreams();
+
+    expect(overwriteStream(section)).toBe(root);
+    expect(block.closest('[data-clf-native-hidden]')).toBeNull();
+  });
+
   it('keeps an older activity root before the user, then mounts truly later activity after that user', async () => {
     const pageTurnId = 'request-reused-presentation-order';
     let phase: 'old' | 'old-updated' | 'new' = 'old';
@@ -5210,8 +5858,9 @@ describe('the app-owned chronological stream', () => {
         entries: [],
         stream: [
           { seq: 1, time: 100, kind: 'turn_start', turnId: 'g-order-old', agent: null },
+          { seq: 2, time: 110, kind: 'progress', turnId: 'g-order-old', agent: null, text: 'Older response activity' },
           {
-            seq: 2,
+            seq: 3,
             time: 120,
             kind: 'assistant_message',
             turnId: 'g-order-old',
@@ -5244,7 +5893,7 @@ describe('the app-owned chronological stream', () => {
     live = await harness(undefined, { activity: orderedActivity });
     renderingOn();
     const section = assistantTurn(live.document, pageTurnId, []);
-    await bindFiberTurns([{
+    await bindRenderedFiberTurns([{
       section,
       turn: {
         turnId: pageTurnId,
@@ -5261,13 +5910,13 @@ describe('the app-owned chronological stream', () => {
     expect(oldKey).toBeTruthy();
 
     const user = userTurn(live.document, 'presentation-order-user', 'This is the newer user turn');
-    // Model the same transient React move as the existing regression. A late update to the old
-    // response must stay in its already-correct sibling before the user instead of riding the
-    // native section across the boundary.
+    expect(user.isConnected).toBe(true);
+    // Anchored chunks follow their native prose through a React move. A later
+    // response still cannot borrow the old response's chunk or canonical identity.
     thread.append(section);
     phase = 'old-updated';
     await live.hook.pullActivity();
-    await bindFiberTurns([{
+    await bindRenderedFiberTurns([{
       section,
       turn: {
         turnId: pageTurnId,
@@ -5277,7 +5926,7 @@ describe('the app-owned chronological stream', () => {
     live.hook.renderStreams();
 
     expect(overwriteStream(section)).toBe(oldRoot);
-    expect(Boolean(oldRoot.compareDocumentPosition(user) & live.window.Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(oldRoot.parentElement).toBe(section.querySelector('[data-message-id="site-order-old"]'));
 
     // React now reuses that same native section for the response caused by the newer user turn.
     // The Fiber/canonical website identity changes before a new local generation id exists.
@@ -5285,7 +5934,7 @@ describe('the app-owned chronological stream', () => {
     // the new response, and the reused section must shed the stale old-root association.
     phase = 'new';
     await live.hook.pullActivity();
-    await bindFiberTurns([{
+    await bindRenderedFiberTurns([{
       section,
       turn: {
         turnId: pageTurnId,
@@ -5294,18 +5943,17 @@ describe('the app-owned chronological stream', () => {
     }]);
     live.hook.renderStreams();
 
-    expect(Boolean(oldRoot.compareDocumentPosition(user) & live.window.Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(oldRoot.parentElement).toBe(section.querySelector('[data-message-id="site-order-old"]'));
     const laterRoot = overwriteStream(section)!;
-    expect(laterRoot).toBeTruthy();
-    expect(laterRoot).not.toBe(oldRoot);
-    expect(Boolean(user.compareDocumentPosition(laterRoot) & live.window.Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(laterRoot).toBeNull(); // The later response contains only native prose, no local activity.
+    expect(oldRoot.textContent).not.toContain('Truly later assistant transcription');
     expect(section.getAttribute('data-clf-stream-key')).not.toBe(oldKey);
   });
 
   it('does not hide or inject a virtualized historical remount while the user is scrolling', async () => {
     live = await harness(undefined, { activity });
     renderingOn();
-    const first = assistantTurn(live.document, turnId, []);
+    const first = ownedStreamTurn();
     await bindFiberRequest(first, 'wfr-app-stream');
     live.hook.renderStreams();
     expect(first.getAttribute('data-clf-turn-replaced')).toBe('1');
@@ -5333,29 +5981,34 @@ describe('the app-owned chronological stream', () => {
   it('freezes an already-mounted synthetic stream for the whole user scroll gesture', async () => {
     live = await harness(undefined, { activity });
     renderingOn();
-    const section = assistantTurn(live.document, turnId, []);
+    const section = ownedStreamTurn();
     await bindFiberRequest(section, 'wfr-app-stream');
     live.hook.renderStreams();
     const root = overwriteStream(section)!;
-    const before = root.dataset.clfSignature;
+    const before = root.innerHTML;
 
     // A render-signature change stands in for the Fiber/activity changes that arrive while
     // ChatGPT is virtualizing history. No root.replaceChildren is allowed during the gesture.
     live.window.dispatchEvent(new live.window.Event('wheel'));
     live.hook.setShowTimes(true);
     live.hook.renderStreams();
-    expect(root.dataset.clfSignature).toBe(before);
+    expect(root.innerHTML).toBe(before);
 
     live.advance(live.hook.PRESENTATION_SCROLL_IDLE_MS + 1);
     live.hook.renderStreams();
-    expect(root.dataset.clfSignature).not.toBe(before);
+    expect(root.innerHTML).not.toBe(before);
   });
 
   it('preserves a visible user-turn viewport anchor when idle Overwrite changes history height', async () => {
     live = await harness(undefined, { activity });
     renderingOn();
-    const historical = assistantTurn(live.document, turnId, []);
+    const historical = ownedStreamTurn();
     const visibleUser = userTurn(live.document, 'viewport-anchor', 'Keep this question under my eyes');
+    const ownerUser = live.document.querySelector<HTMLElement>('[data-turn-id="stream-owner"]')!;
+    Object.defineProperty(ownerUser, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ top: -240, bottom: -200, left: 0, right: 600, width: 600, height: 40, x: 0, y: -240, toJSON: () => ({}) })
+    });
     await bindFiberRequest(historical, 'wfr-app-stream');
     const thread = live.document.querySelector('#thread') as HTMLElement;
     thread.style.overflowY = 'auto';
@@ -5524,7 +6177,7 @@ describe('where the page stream puts an event that was recorded late', () => {
     renderingOn();
     const section = assistantTurn(live.document, turnId, []);
     prose(live.document, section, 'site-late-anchor', 'Final answer');
-    await bindFiberTurns([{ section, turn: {
+    await bindRenderedFiberTurns([{ section, turn: {
       turnId,
       messages: [{ messageId: 'site-late-anchor', stable: true, rawText: 'Final answer', renderedHtml: '' }]
     } }]);
@@ -5534,7 +6187,7 @@ describe('where the page stream puts an event that was recorded late', () => {
     const before = overwriteRows(section, '.clf-stream-row .clf-stream-text').map((node) =>
       (node.textContent || '').trim()
     );
-    expect(before).toEqual(['Turn started', 'Checking the repository', 'Writing it up']);
+    expect(before).toEqual(['Checking the repository', 'Writing it up']);
     expect(section.textContent).toContain('Final answer');
 
     late = true;
@@ -5543,7 +6196,7 @@ describe('where the page stream puts an event that was recorded late', () => {
     const after = overwriteRows(section, '.clf-stream-row .clf-stream-text').map((node) =>
       (node.textContent || '').trim()
     );
-    expect(after).toEqual(['Turn started', 'Checking the repository', 'Read second.ts', 'Writing it up']);
+    expect(after).toEqual(['Checking the repository', 'Read second.ts', 'Writing it up']);
   });
 
 });
@@ -6323,7 +6976,7 @@ describe('a stop button that goes missing while the turn is still running', () =
           source: 'clf-fiber-reply',
           nonce: event.data.nonce,
           scanToken: event.data.nonce,
-          v: 10,
+          v: 12,
           scanOk: true,
           rows: [],
           turns: [{
@@ -6764,6 +7417,149 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(ends).toHaveLength(1);
     expect(ends[0]!.outcome).toBe('completed');
     expect(live.sent.some(message => message.type === 'reload_owned_chat')).toBe(false);
+  });
+
+  it('records two generated gallery assets once each despite nine native presentation clones', async () => {
+    live = await harness();
+    const section = assistantTurn(live.document, 'turn-generated-gallery', []);
+    section.setAttribute('data-clf-fiber-turn', '0');
+    const messageId = '3150f756-bf2d-45fa-ac0f-45010b2239fb';
+    const blue = 'file_000000005f2c823085a542762d1de785';
+    const orange = 'file_00000000dc58821198efef946a9ade33';
+    const chosen: string[] = [];
+    const canvasSources = new WeakMap<HTMLCanvasElement, HTMLImageElement>();
+    (live.window.HTMLCanvasElement.prototype as any).getContext = function () {
+      return { drawImage: (node: HTMLImageElement) => { canvasSources.set(this, node); chosen.push(new URL(node.src).searchParams.get('id')!); } };
+    };
+    (live.window.HTMLCanvasElement.prototype as any).toBlob = function (callback: (blob: any) => void) {
+      const id = new URL(canvasSources.get(this)!.src).searchParams.get('id')!;
+      const bytes = new TextEncoder().encode(id === blue ? 'blue-webp' : 'orange-webp');
+      callback({ type: 'image/webp', size: bytes.length, arrayBuffer: async () => bytes.buffer });
+    };
+    const addClones = (assetId: string, count: number, main: boolean) => {
+      for (let index = 0; index < count; index++) {
+        const group = live!.document.createElement('div');
+        group.className = 'group/imagegen-image';
+        const image = live!.document.createElement('img');
+        image.src = `https://chatgpt.com/backend-api/estuary/content?id=${assetId}&sig=private-${index}`;
+        image.setAttribute('data-clf-fiber-image', `0:${encodeURIComponent(messageId)}:${encodeURIComponent(assetId)}`);
+        Object.defineProperties(image, {
+          complete: { configurable: true, value: true },
+          naturalWidth: { configurable: true, value: 1254 },
+          naturalHeight: { configurable: true, value: 1254 }
+        });
+        image.getBoundingClientRect = () => ({ width: main && index === 0 ? 480 : 48, height: main && index === 0 ? 480 : 48 } as DOMRect);
+        group.append(image); section.append(group);
+      }
+    };
+    addClones(blue, 6, true);
+    addClones(orange, 3, false);
+    const images = [blue, orange].map((assetId, partOrder) => ({ messageId, assetId, providerRole: 'tool',
+      providerChannel: 'final', providerStatus: 'finished_successfully', width: 1254, height: 1254,
+      order: 0, partOrder, createTime: Date.now() - 1_000 }));
+
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const progressive = images.map(image => ({ ...image, providerStatus: 'in_progress' }));
+    await replyFiber([], [{ turnId: 'turn-generated-gallery', conversationId, messages: [], activities: [], images: progressive }]);
+    await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'native_image').map(entry => entry.event.previewStatus)).toEqual(['pending', 'pending']);
+    expect(chosen).toEqual([]);
+
+    await replyFiber([], [{ turnId: 'turn-generated-gallery', conversationId, messages: [], activities: [], images }]);
+    await settle(); await live.hook.flush(); await settle();
+
+    const events = emitted(live.sent, 'native_image').map(entry => entry.event);
+    expect(events.filter(event => event.previewStatus === 'pending').map(event => event.providerAssetId)).toEqual([blue, orange, blue, orange]);
+    expect(events.filter(event => event.previewStatus === 'available').map(event => event.providerAssetId)).toEqual([blue, orange]);
+    expect(chosen).toEqual([blue, orange]);
+    expect(JSON.stringify(events)).not.toContain('sig=');
+    expect(section.querySelectorAll('[data-clf-fiber-image]')).toHaveLength(9);
+
+    await replyFiber([], [{ turnId: 'turn-generated-gallery', conversationId, messages: [], activities: [], images }]);
+    await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'native_image')).toHaveLength(6);
+  });
+
+  it('drops a late generated-image encode after an A to B to A navigation epoch change', async () => {
+    live = await harness();
+    const section = assistantTurn(live.document, 'turn-stale-generated-image', []);
+    section.setAttribute('data-clf-fiber-turn', '0');
+    const messageId = '4150f756-bf2d-45fa-ac0f-45010b2239fb';
+    const assetId = 'file_000000005f2c823085a542762d1de785';
+    const group = live.document.createElement('div'); group.className = 'group/imagegen-image';
+    const image = live.document.createElement('img');
+    image.src = `https://chatgpt.com/backend-api/estuary/content?id=${assetId}&sig=never-export`;
+    image.setAttribute('data-clf-fiber-image', `0:${encodeURIComponent(messageId)}:${encodeURIComponent(assetId)}`);
+    Object.defineProperties(image, { complete: { configurable: true, value: true }, naturalWidth: { configurable: true, value: 1254 }, naturalHeight: { configurable: true, value: 1254 } });
+    image.getBoundingClientRect = () => ({ width: 480, height: 480 } as DOMRect);
+    group.append(image); section.append(group);
+    const finishes: Array<(blob: any) => void> = [];
+    (live.window.HTMLCanvasElement.prototype as any).getContext = () => ({ drawImage: () => undefined });
+    (live.window.HTMLCanvasElement.prototype as any).toBlob = (_callback: (blob: any) => void) => { finishes.push(_callback); };
+    const conversationA = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const conversationB = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
+    const descriptor = { turnId: 'turn-stale-generated-image', conversationId: conversationA, messages: [], activities: [], images: [{
+      messageId, assetId, providerRole: 'tool', providerChannel: 'final', providerStatus: 'finished_successfully',
+      width: 1254, height: 1254, order: 0, partOrder: 0
+    }] };
+    await replyFiber([], [descriptor]); await settle();
+    expect(finishes).toHaveLength(1);
+    live.dom.reconfigure({ url: `https://chatgpt.com/c/${conversationB}` }); live.hook.observe();
+    live.dom.reconfigure({ url: `https://chatgpt.com/c/${conversationA}` }); live.hook.observe();
+    const bytes = new TextEncoder().encode('late-webp');
+    await replyFiber([], [descriptor]); await settle();
+    expect(finishes).toHaveLength(2);
+    finishes[0]!({ type: 'image/webp', size: bytes.length, arrayBuffer: async () => bytes.buffer });
+    await settle();
+    // The retired A task must not delete the new A epoch's pending cache entry. Otherwise
+    // this identical scan starts a third encode while the accepted second one is still live.
+    await replyFiber([], [descriptor]); await settle();
+    expect(finishes).toHaveLength(2);
+    finishes[1]!({ type: 'image/webp', size: bytes.length, arrayBuffer: async () => bytes.buffer });
+    await settle(); await live.hook.flush();
+    const events = emitted(live.sent, 'native_image').map(entry => entry.event);
+    expect(events.filter(event => event.previewStatus === 'pending')).toHaveLength(2);
+    expect(events.filter(event => event.previewStatus === 'available')).toHaveLength(1);
+    expect(events.filter(event => event.previewStatus === 'unavailable')).toHaveLength(0);
+  });
+
+  it('waits for a complete generated-image node even when progressive pixels already expose dimensions', async () => {
+    live = await harness();
+    const section = assistantTurn(live.document, 'turn-progressive-pixels', []);
+    section.setAttribute('data-clf-fiber-turn', '0');
+    const messageId = '6150f756-bf2d-45fa-ac0f-45010b2239fb';
+    const assetId = 'file_000000005f2c823085a542762d1de785';
+    const group = live.document.createElement('div'); group.className = 'group/imagegen-image';
+    const image = live.document.createElement('img');
+    image.src = `https://chatgpt.com/backend-api/estuary/content?id=${assetId}&sig=progressive`;
+    image.setAttribute('data-clf-fiber-image', `0:${encodeURIComponent(messageId)}:${encodeURIComponent(assetId)}`);
+    let complete = false;
+    Object.defineProperties(image, {
+      complete: { configurable: true, get: () => complete },
+      naturalWidth: { configurable: true, value: 1254 }, naturalHeight: { configurable: true, value: 1254 }
+    });
+    image.getBoundingClientRect = () => ({ width: 480, height: 480 } as DOMRect);
+    group.append(image); section.append(group);
+    const encode = vi.fn();
+    (live.window.HTMLCanvasElement.prototype as any).getContext = () => ({ drawImage: encode });
+    (live.window.HTMLCanvasElement.prototype as any).toBlob = function (callback: (blob: any) => void) {
+      const bytes = new TextEncoder().encode('final-webp');
+      callback({ type: 'image/webp', size: bytes.length, arrayBuffer: async () => bytes.buffer });
+    };
+    const descriptor = { turnId: 'turn-progressive-pixels', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      messages: [], activities: [], images: [{ messageId, assetId, providerRole: 'tool', providerChannel: 'final',
+        providerStatus: 'finished_successfully', width: 1254, height: 1254, order: 0, partOrder: 0 }] };
+
+    await replyFiber([], [descriptor]); await settle(); await live.hook.flush();
+    expect(encode).not.toHaveBeenCalled();
+    expect(emitted(live.sent, 'native_image').map(entry => entry.event.previewStatus)).toEqual(['pending', 'unavailable']);
+    await replyFiber([], [descriptor]); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'native_image')).toHaveLength(2);
+
+    complete = true;
+    await replyFiber([], [descriptor]); await settle(); await live.hook.flush();
+    expect(encode).toHaveBeenCalledTimes(1);
+    expect(emitted(live.sent, 'native_image').map(entry => entry.event.previewStatus)).toEqual(['pending', 'unavailable', 'available']);
   });
 
   it('mints no turn for a Fiber retry that releases the stale-Stop terminal latch', async () => {
@@ -8306,7 +9102,7 @@ describe('a page leaving the screen', () => {
  */
 describe('evidence from the page context', () => {
   const GOOD = {
-    v: 10,
+    v: 12,
     index: 0,
     tool: 'agent_status',
     path: '/TobisComputer/mcp/agent_status',
@@ -9383,7 +10179,7 @@ describe('evidence from the page context', () => {
             source: 'clf-fiber-reply',
             nonce: event.data.nonce,
             scanToken: event.data.nonce,
-            v: 10,
+            v: 12,
             scanOk: true,
             rows: [],
             turns: [
@@ -9490,7 +10286,7 @@ describe('evidence from the page context', () => {
             source: 'clf-fiber-reply',
             nonce: event.data.nonce,
             scanToken: event.data.nonce,
-            v: 10,
+            v: 12,
             scanOk: true,
             rows: [{ ...GOOD, tool: 'read' }],
             turns: []
@@ -9511,14 +10307,7 @@ describe('evidence from the page context', () => {
     expect(live.hook.fiberFor(block)).toMatchObject({ tool: 'read' });
   });
 
-  /**
-   * The case that made relabelling look broken everywhere but one chat. Verified on disk:
-   * the failing conversation's session holds 10 recorded calls, all from a single turn on
-   * one day, while the chat's connector rows go back several. The recorder only ever holds
-   * the slice it observed live, so for most of a long-running chat there is nothing to
-   * match against and no matching rule could ever have fixed it.
-   */
-  it('names a row the app has no record of, from the page’s own record', async () => {
+  it('reads an unrecorded native row without taking over its presentation', async () => {
     live = await harness();
     renderingOn();
     const section = assistantTurn(live.document, 'turn-1', ['Called tool!']);
@@ -9535,15 +10324,15 @@ describe('evidence from the page context', () => {
     await live.hook.pullActivity();
     await settle();
 
-    expect(labels(section)).toEqual(['agent_status']);
-    const block = section.querySelector('[data-clf-page]')!;
-    expect(block.getAttribute('data-clf-page')).toBe('agent_status');
-    // Named, not claimed: no call bound, so a recorded call can still take the row later.
+    const block = section.querySelector('.pointer-events-none.contents') as HTMLElement;
+    expect(labels(section)).toEqual(['Called tool']);
+    expect(live.hook.fiberFor(block)).toMatchObject({ tool: 'agent_status' });
+    expect(block.getAttribute('data-clf-page')).toBeNull();
     expect(block.getAttribute('data-clf-call')).toBeNull();
-    expect(block.classList.contains('clf-page')).toBe(true);
+    expect(block.classList.contains('clf-page')).toBe(false);
   });
 
-  it('lets a recorded call take over a row the page had only named', async () => {
+  it('keeps a native row intact when matching recorded evidence arrives', async () => {
     live = await harness();
     renderingOn();
     const section = assistantTurn(live.document, 'turn-1', ['Called tool!']);
@@ -9565,26 +10354,24 @@ describe('evidence from the page context', () => {
       }
     }));
 
-    // An ordinary row standing for one call, which is the case where a recorded entry can
-    // legitimately replace the page's name for it.
     await reply([{ ...GOOD, hidden: 0 }]);
     await live.hook.pullActivity();
     await settle();
-    expect(labels(section)).toEqual(['agent_status']);
+    expect(labels(section)).toEqual(['Called tool']);
 
     recordedYet = true;
     await live.hook.pullActivity();
     await settle();
-    // The recorder ran the call and knows what it did; the page only knew its name.
-    expect(labels(section)).toEqual(['Checked the swarm']);
-    expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(1);
+    expect(labels(section)).toEqual(['Called tool']);
+    expect(section.querySelector('[data-clf-call]')).toBeNull();
+    expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(0);
   });
 
   /**
    * The other direction: the app knows about one call, but the page says this row stands
    * for five. Putting the one label it has on that row would name it after the wrong call.
    */
-  it('leaves a folded row alone rather than naming it after the wrong call', async () => {
+  it('leaves a folded native row alone while retaining its capture descriptor', async () => {
     live = await harness();
     renderingOn();
     const section = assistantTurn(live.document, 'turn-1', ['Called tool!']);
@@ -9601,9 +10388,12 @@ describe('evidence from the page context', () => {
     await reply([GOOD]);
     await live.hook.pullActivity();
     await settle();
-    // Named from the page, which is honest about what it is, and not bound to the call.
-    expect(labels(section)).toEqual(['agent_status']);
+    const block = section.querySelector('.pointer-events-none.contents') as HTMLElement;
+    expect(labels(section)).toEqual(['Called tool']);
+    expect(live.hook.fiberFor(block)).toMatchObject({ tool: 'agent_status', hidden: 4 });
     expect(section.querySelector('[data-clf-call]')).toBeNull();
+    expect(section.querySelector('[data-clf-page]')).toBeNull();
+    expect(section.querySelector('.clf-tool-title')).toBeNull();
   });
 
   /**
@@ -9612,7 +10402,7 @@ describe('evidence from the page context', () => {
    * worse than "Called tool" — another call's name, in this app's styling, with a
    * duration and an outcome, over work it did not describe.
    */
-  it('takes a wrong label back off when the page names the row later', async () => {
+  it('updates capture evidence without projecting either descriptor onto the native row', async () => {
     live = await harness();
     renderingOn();
     const section = assistantTurn(live.document, 'turn-1', ['Called tool!']);
@@ -9631,26 +10421,22 @@ describe('evidence from the page context', () => {
       }
     }));
 
-    // The payload was truncated and the call had not been answered yet, so the page could
-    // not name the row. One row, one call, the counts fit: the label goes on.
     await reply([{ ...GOOD, tool: null, hidden: 0 }]);
     await live.hook.pullActivity();
     await settle();
-    expect(labels(section)).toEqual(['Listed open windows6 windows']);
-    expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(1);
+    expect(labels(section)).toEqual(['Called tool']);
+    expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(0);
 
-    // Then the result comes back and the page names the row a different tool.
     await reply([{ ...GOOD, tool: 'screenshot', hidden: 0 }]);
     await live.hook.pullActivity();
     await settle();
-    // Back to ChatGPT's row, renamed from the page's own record, with nothing of the
-    // recorded call left on it — not the binding, not the metric, not the styling.
-    expect(labels(section)).toEqual(['screenshot']);
+    const block = section.querySelector('.pointer-events-none.contents') as HTMLElement;
+    expect(labels(section)).toEqual(['Called tool']);
+    expect(live.hook.fiberFor(block)).toMatchObject({ tool: 'screenshot' });
     expect(section.querySelector('[data-clf-call]')).toBeNull();
     expect(section.querySelector('.clf-metric')).toBeNull();
-    const block = section.querySelector('[data-clf-page]')!;
-    expect(block.getAttribute('data-clf-page')).toBe('screenshot');
-    expect(block.classList.contains('clf-tool')).toBe(true);
+    expect(block.getAttribute('data-clf-page')).toBeNull();
+    expect(block.classList.contains('clf-tool')).toBe(false);
   });
 });
 
@@ -9821,14 +10607,14 @@ describe('the activity feed', () => {
     await live.hook.pullActivity();
     await settle();
 
-    // The off-by-one that made every poll re-deliver the newest call — and so made the
-    // turn look like it had more calls than blocks, which suppressed every label.
+    // The off-by-one that made every poll re-deliver the newest call. Native rows remain
+    // provider-owned; pagination still must advance past the last durable sequence.
     expect(asked).toEqual([0, 6]);
-    expect(labels(section)).toEqual(['Read a.ts', 'Command failed npm test✕ exit 1']);
-    expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(2);
+    expect(labels(section)).toEqual(['Called tool', 'Called tool']);
+    expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(0);
   });
 
-  it('marks a failed call as failed on the block itself, not only in its colour', async () => {
+  it('does not project a failed feed entry onto a native block', async () => {
     live = await harness();
     renderingOn();
     const section = assistantTurn(live.document, 'turn-2', ['Called tool']);
@@ -9850,9 +10636,9 @@ describe('the activity feed', () => {
     await settle();
 
     const block = section.querySelector('.pointer-events-none.contents') as HTMLElement;
-    expect(block.dataset.clfOutcome).toBe('error');
-    expect(block.classList.contains('clf-bad')).toBe(true);
-    expect(block.textContent).toContain('Could not run git push');
+    expect(block.dataset.clfOutcome).toBeUndefined();
+    expect(block.classList.contains('clf-bad')).toBe(false);
+    expect(block.textContent).toContain('Called tool');
   });
 
   it('survives the same entry being delivered twice', async () => {
@@ -9875,8 +10661,8 @@ describe('the activity feed', () => {
     await live.hook.pullActivity();
     await settle();
 
-    expect(labels(section)).toEqual(['Read one.ts', 'Read two.ts']);
-    expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(2);
+    expect(labels(section)).toEqual(['Called tool', 'Called tool']);
+    expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(0);
   });
 });
 
@@ -15718,7 +16504,7 @@ describe('the goal loop', () => {
             source: 'clf-fiber-reply',
             nonce: event.data.nonce,
             scanToken,
-            v: 10,
+            v: 12,
             scanOk: true,
             rows: [],
             turns: [{
@@ -15801,7 +16587,7 @@ describe('the goal loop', () => {
             source: 'clf-fiber-reply',
             nonce: event.data.nonce,
             scanToken,
-            v: 10,
+            v: 12,
             scanOk: true,
             rows: [],
             turns: [{
@@ -16951,7 +17737,7 @@ describe('app Stop command uses current native turn proof', () => {
       if (event.data?.source !== 'clf-fiber-ask') return;
       section.setAttribute('data-clf-fiber-turn', `${event.data.nonce}:0`);
       window.dispatchEvent(new window.MessageEvent('message', { source: window, data: {
-        source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 10, scanOk: true, rows: [],
+        source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 12, scanOk: true, rows: [],
         turns: [{ ...terminal, index: 0, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', messages: [{
           messageId: 'late-final-message', stable: true, rawText: 'First words and the complete final answer.', renderedHtml: '<p>First words and the complete final answer.</p>'
         }] }]
@@ -16990,7 +17776,7 @@ describe('app Stop command uses current native turn proof', () => {
       }
       section.setAttribute('data-clf-fiber-turn', `${event.data.nonce}:0`);
       window.dispatchEvent(new window.MessageEvent('message', { source: window, data: {
-        source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 10, scanOk: true, rows: [],
+        source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 12, scanOk: true, rows: [],
         turns: [{ ...terminal, index: 0, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', endMessageId: next === 'retry' ? null : terminal.endMessageId }]
       } }));
     };

@@ -13,6 +13,21 @@ import {
 } from '../src/main/window-lifecycle.js';
 
 describe('native window activation', () => {
+  it.each(['darwin', 'win32', 'linux'])('keeps native fullscreen available on macOS (%s)', (platform) => {
+    const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
+    const constructor = source.slice(source.indexOf('  window = new BrowserWindow({'), source.indexOf("  if (process.platform === 'win32') window.removeMenu();"))
+      .replace(' as const', '');
+    let options: Record<string, unknown> | undefined;
+    vm.runInNewContext(constructor, {
+      BrowserWindow: function (value: Record<string, unknown>) { options = value; },
+      layout: {}, icon: null, process: { platform },
+      titleBarOverlayForTheme: () => ({}), getConfig: () => ({ ui: { theme: 'dark' } }),
+      UI_BASE_ZOOM: 1, path: { join: () => 'preload.js' }, __dirname: '/app'
+    });
+    expect(options?.fullscreenable).toBe(platform === 'darwin');
+    expect(options?.webPreferences).toMatchObject({ sandbox: true, contextIsolation: true, nodeIntegration: false });
+  });
+
   it('maximizes only on initial presentation and preserves user-sized geometry on reopen', () => {
     const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
     const present = source.slice(source.indexOf('function showWindow()'), source.indexOf('\nsetFinishNotifier(', source.indexOf('function showWindow()'))).replace('function showWindow(): void', 'function showWindow()');

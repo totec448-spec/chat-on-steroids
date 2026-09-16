@@ -26,6 +26,7 @@ app.whenReady().then(async () => {
   await win.webContents.executeJavaScript(`(() => {
     const ok = data => Promise.resolve({ok:true, data});
     const text = value => ({text:value, truncated:false, chars:value.length});
+    let sessionChanged = null;
     const history = [];
     const add = event => { const seq=history.length+1; history.push({seq,time:seq,source:'extension',...event}); };
     add({kind:'user_message',messageId:'long-task',message:text(('The full earlier task stays above the recent work.\\n\\n').repeat(120))});
@@ -36,10 +37,13 @@ app.whenReady().then(async () => {
     const session={id:'history-fixture',title:'Dense history fixture',conversationId:'fixture',chatIds:['fixture'],
       startedAt:1,updatedAt:1,endedAt:null,events:history.length,userMessages:1,toolCalls:200,
       errors:0,estimatedTokens:0,contextTokens:0,agents:[],origin:null};
-    window.fixture={history,session,reads:[],add};
+    window.fixture={history,session,reads:[],listReads:0,
+      add:event=>{add(event);session.events=history.length;session.updatedAt++;},
+      signal:()=>{if(!sessionChanged)throw new Error('onSessionChanged was not registered');sessionChanged();}};
     window.api=new Proxy({
-      listSessions:()=>ok({sessions:[session],activeId:null,blocked:[],pressure:[]}),
+      listSessions:()=>{fixture.listReads++;return ok({sessions:[session],activeId:null,blocked:[],pressure:[]})},
       listProjects:()=>ok([]),listInputs:()=>ok([]),listPausedHelpers:()=>ok([]),
+      onSessionChanged:handler=>{sessionChanged=handler;return()=>{if(sessionChanged===handler)sessionChanged=null;}},
       getSession:(_id,options)=>{
         fixture.reads.push(options);
         const eligible=history.filter(e=>(options.from===undefined||e.seq>=options.from)&&(options.before===undefined||e.seq<options.before));
@@ -48,6 +52,11 @@ app.whenReady().then(async () => {
       }
     },{get:(target,key)=>target[key]??(()=>ok(null))});
     window.frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    window.waitFor=async predicate=>{
+      const deadline=performance.now()+5000;
+      while(performance.now()<deadline){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,25));}
+      throw new Error('Timed out waiting for synthetic session refresh');
+    };
     window.geometry=()=>{
       const pane=document.getElementById('chatBody'),timeline=document.getElementById('timeline');
       const row=[...timeline.querySelectorAll('.ev-assistant_message')].find(e=>e.textContent.includes('Recent visible message 0'));
@@ -55,6 +64,7 @@ app.whenReady().then(async () => {
       return {top:pane.scrollTop,height:pane.scrollHeight,viewport:pane.clientHeight,
         readerTop:row?.getBoundingClientRect().top-bounds.top,readerPresent:!!row,
         groups:timeline.querySelectorAll('.tool-group').length,records:timeline.querySelectorAll('.ev').length,
+        bottomGap:pane.scrollHeight-pane.clientHeight-pane.scrollTop,
         x:Math.round(bounds.right-100),y:Math.round(bounds.top+100)};
     };
   })()`);
@@ -75,7 +85,12 @@ app.whenReady().then(async () => {
   assert.ok(Math.abs(older.readerTop-initial.readerTop) <= 110, 'One wheel step must not jump to the earlier long task: '+JSON.stringify({initial,older}));
   assert.ok(older.height > 4000,'Earlier task must actually load above the reader: '+JSON.stringify({initial,older,reads:await win.webContents.executeJavaScript('fixture.reads')}));
   assert.equal(older.groups,1,'The overlapping activity remains one disclosure');
-  const historicalRefresh=await win.webContents.executeJavaScript('(async()=>{chat.chatVisible(true);await frame();return geometry();})()');
+  const historicalRefresh=await win.webContents.executeJavaScript(`(async()=>{
+    const listBefore=fixture.listReads;fixture.signal();
+    await waitFor(()=>fixture.listReads>listBefore);await frame();
+    return {...geometry(),listBefore,listAfter:fixture.listReads};
+  })()`);
+  assert.ok(historicalRefresh.listAfter>historicalRefresh.listBefore,'Historical refresh must perform a list read');
   assert.equal(historicalRefresh.readerTop,older.readerTop,'Historical repaint preserves the underfilled tail reserve');
   const observations=[{phase:'initial',...initial},{phase:'older',...older}];
   for(let cycle=0;cycle<4;cycle++) {
@@ -87,19 +102,43 @@ app.whenReady().then(async () => {
     assert.ok(after.height > 4000,'Returning to the tail must retain the adjacent long row instead of collapsing the scrollbar');
     observations.push({phase:'reverse-'+cycle,...after});
   }
+  const latest=await win.webContents.executeJavaScript(`(async()=>{
+    const readBefore=fixture.reads.length;
+    const button=document.querySelector('[data-history="latest"]');
+    const alreadyLatest=!button;
+    if(button){
+      button.click();
+      await waitFor(()=>fixture.reads.length>readBefore&&!document.querySelector('[data-history="latest"]'));
+    }
+    await frame();return {...geometry(),alreadyLatest,readBefore,readAfter:fixture.reads.length};
+  })()`);
+  assert.ok(latest.readAfter>latest.readBefore||latest.alreadyLatest,
+    'The fixture must either page back to latest or retain the deliberate live-reader position reached by direction reversal');
   const refresh=await win.webContents.executeJavaScript(`(async()=>{
     const before=geometry();
+    const readBefore=fixture.reads.length;
     fixture.add({kind:'assistant_message',messageId:'live-new',message:{text:'New live work',truncated:false,chars:13},state:'final',final:true});
-    chat.chatVisible(true);await frame();return {before,after:geometry()};
+    fixture.signal();
+    await waitFor(()=>fixture.reads.length>readBefore&&[...document.querySelectorAll('.ev-assistant_message')].some(row=>row.textContent.includes('New live work')));
+    await frame();
+    return {before,after:geometry(),readBefore,readAfter:fixture.reads.length,
+      inserted:[...document.querySelectorAll('.ev-assistant_message')].some(row=>row.textContent.includes('New live work'))};
   })()`);
+  assert.ok(refresh.readAfter>refresh.readBefore,'Live refresh must perform a session read');
+  assert.equal(refresh.inserted,true,'Live refresh must render the inserted assistant row');
+  assert.ok(refresh.after.records>refresh.before.records,'Live refresh must add a rendered record');
   assert.ok(refresh.after.readerPresent,'Live deltas retain the reader');
-  assert.ok(Math.abs(refresh.after.readerTop-refresh.before.readerTop)<2,'Live refresh must not restore a fixed 160-event tail');
+  if(refresh.before.bottomGap<=1) assert.ok(refresh.after.bottomGap<=1,'A live refresh at the bottom must continue following it');
+  else assert.ok(Math.abs(refresh.after.readerTop-refresh.before.readerTop)<2,'A live refresh must preserve the deliberate reader row');
   const bottomRefresh=await win.webContents.executeJavaScript(`(async()=>{
     const pane=document.getElementById('chatBody');pane.scrollTop=pane.scrollHeight;await frame();
-    const before=geometry();chat.chatVisible(true);await frame();return {before,after:geometry()};
+    const before=geometry(),readBefore=fixture.reads.length;fixture.signal();
+    await waitFor(()=>fixture.reads.length>readBefore);await frame();
+    return {before,after:geometry(),readBefore,readAfter:fixture.reads.length};
   })()`);
+  assert.ok(bottomRefresh.readAfter>bottomRefresh.readBefore,'Bottom refresh must perform a session read');
   assert.equal(bottomRefresh.after.readerTop,bottomRefresh.before.readerTop,'An unchanged live repaint cannot consume the tail reserve');
-  console.log(JSON.stringify({observations,refresh},null,2));
+  console.log(JSON.stringify({observations,historicalRefresh,latest,refresh,bottomRefresh},null,2));
   console.log('Dense history scroll passed: real renderer, native wheel, overlap, reversals, scrollbar continuity and live refresh.');
   if(show) { win.webContents.debugger.detach(); return; }
   win.destroy();app.exit(0);

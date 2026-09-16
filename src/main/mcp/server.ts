@@ -26,15 +26,8 @@ import { getConfig } from '../config.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 import { buildServer, resetToolClock, type ToolContext } from './tools.js';
 import { SURFACE_IDS, surfaceDefinition, type SurfaceId } from './surfaces.js';
-import { observeCatalogTraffic, type CatalogObservation } from './catalog-observation.js';
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
-const catalogResponses = new Map<SurfaceId, CatalogObservation & { at: number }>();
-let catalogEpoch = Symbol('mcp-catalog');
-export function lastCatalogResponse(surface: SurfaceId = 'core'): (CatalogObservation & { at: number }) | null {
-  const observation = catalogResponses.get(surface);
-  return observation ? { ...observation } : null;
-}
 
 export interface McpEndpoint {
   /** Reuses the endpoint's actual exposure projection; no tool handlers are executed. */
@@ -269,8 +262,6 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
   // A per-session token in the path is what authorises callers. It is regenerated on
   // every app start, so a URL that leaks stops working when the app restarts.
   requestSeenAt = null;
-  const thisCatalogEpoch = catalogEpoch = Symbol('mcp-catalog');
-  catalogResponses.clear();
   surfaceRequestAt.clear();
   resetToolClock();
   selfTestToken = randomBytes(16).toString('hex');
@@ -331,7 +322,10 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
     ...surface,
     prmPath: `${PRM_PREFIX}${surface.basePath}`,
     url: '',
-    mcp: createMcpHandler(() => buildServer(stableContext(surface.id), surface.id, undefined, () => stableContext(surface.id)))
+    handler: toNodeHandler(
+      createMcpHandler(() => buildServer(stableContext(surface.id), surface.id, undefined, () => stableContext(surface.id))),
+      { onerror: (error) => logError(`MCP handler error (${surface.id}): ${error.message}`) }
+    )
   }));
   const checkHost = localhostHostValidation();
   const checkOrigin = localhostOriginValidation();
@@ -415,24 +409,6 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
     // The tool dispatch reads this back to join the call to the page request that issued
     // it; see inbound.ts for why it cannot be taken from the MCP call context.
     const requestId = requestIdFromHeader(req.headers['x-request-id']);
-    const handler = toNodeHandler(observeCatalogTraffic(route.mcp, observation => {
-      const completed = () => {
-        try {
-          if (publication.failed || publication.completedAt === null || thisCatalogEpoch !== catalogEpoch) return;
-          const who = selfTest ? 'self-test' : tunnelProbe ? 'tunnel probe' : 'external client';
-          const fields = `method=${observation.method} outcome=${observation.outcome}` +
-            (observation.toolCount === undefined ? '' : ` tools=${observation.toolCount}`) +
-            (observation.definitionHash ? ` schema=${observation.definitionHash}` : '') +
-            (observation.rpcErrorCode === undefined ? '' : ` rpc_error=${observation.rpcErrorCode}`);
-          const failed = observation.outcome !== 'success' && observation.outcome !== 'unparsed' || observation.toolCount === 0;
-          (failed ? logWarn : logInfo)(`catalog mcp/${route.id} ${fields} (${who})`);
-          if (!selfTest && !tunnelProbe && observation.method === 'tools/list') {
-            catalogResponses.set(route.id, { ...observation, at: publication.completedAt });
-          }
-        } catch { /* Diagnostics cannot break HTTP completion. */ }
-      };
-      if (res.writableFinished) completed(); else res.once('finish', completed);
-    }), { onerror: error => logError(`MCP handler error (${route.id}): ${error.message}`) });
     if (req.method === 'POST' && declaredHeader === undefined) {
       void readBoundedJsonBody(req).then((parsed) => {
         if (parsed.error === 'payload_too_large') {
@@ -443,11 +419,11 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
           jsonError(res, 400, 'invalid_json');
           return;
         }
-        withInboundRequestId(requestId, () => void handler(req, res, parsed.body), timing, publication);
+        withInboundRequestId(requestId, () => void route.handler(req, res, parsed.body), timing, publication);
       });
       return;
     }
-    withInboundRequestId(requestId, () => void handler(req, res), timing, publication);
+    withInboundRequestId(requestId, () => void route.handler(req, res), timing, publication);
   });
 
   // Reject slow or oversized bodies rather than holding sockets open indefinitely.

@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { closeConversation, liveConversations, recordChatObservations, recordToolCall, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { emptyEvidence, trackInFlight } from '../src/main/mcp/call-context.js';
-import { appendEvent, flushSessions, getSession, initSessionStore, readEvents, resetSessionStoreForTests } from '../src/main/session/store.js';
+import { appendEvent, flushSessions, getSession, initSessionStore, readEvents, readCompletedFinal, upsertMessageEvent, rebindSession, resetSessionStoreForTests } from '../src/main/session/store.js';
+import { sessionInputPolicy } from '../src/main/session/input.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let directory: string;
@@ -144,7 +146,7 @@ it('does not close the old turn after a newer user message arrives in the recove
   expect(await readEvents(opened.sessionId!, { kinds: ['turn_end'] })).toHaveLength(0);
 });
 
-it('waits for a running tool before accepting a recovered final', async () => {
+it('commits a recovered final while its running tool still blocks delivery', async () => {
   const conversationId = 'final-with-running-tool';
   const opened = await recordChatObservations(conversationId, [
     { kind: 'turn_start', time: 10, turnId: 'turn' },
@@ -154,9 +156,9 @@ it('waits for a running tool before accepting a recovered final', async () => {
   await trackInFlight({ startedAt: 12, transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
     caller: { conversationId, requestId: 'running-call', transportKey: null } }, async () => {
     await recordChatObservations(conversationId, [final]);
-    expect((await getSession(opened.sessionId!))?.activeTurnId).toBe('turn');
+    expect((await getSession(opened.sessionId!))?.activeTurnId).toBeNull();
+    expect(await readEvents(opened.sessionId!, { kinds: ['turn_end'] })).toHaveLength(1);
   });
-  await recordChatObservations(conversationId, [final]);
   expect((await getSession(opened.sessionId!))?.activeTurnId).toBeNull();
 });
 
@@ -255,4 +257,77 @@ it('does not close an old turn when its revised final follows a newer user messa
   ]);
   expect((await getSession(opened.sessionId!))?.activeTurnId).toBe('turn');
   expect(await readEvents(opened.sessionId!, { kinds: ['turn_end'] })).toHaveLength(0);
+});
+
+
+it('uses an unowned canonical final as a settled ordinary input boundary without inventing a turn', async () => {
+  const conversationId = 'unowned-final-current-question';
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'model_selection', time: 1, model: 'gpt-5-6-pro', reasoningEffort: 'pro' },
+    { kind: 'user_message', time: 10, messageId: 'question', text: 'Report the findings' },
+    { kind: 'assistant_message', time: 20, messageId: 'reply', text: 'Complete report', state: 'final', final: true }
+  ]);
+  const id = opened.sessionId!;
+  expect(await readCompletedFinal(id, conversationId)).toMatchObject({ messageId: 'reply', turnId: null });
+  expect(await sessionInputPolicy(id)).toMatchObject({ browserAllowed: true, settled: true });
+  expect(await readEvents(id, { kinds: ['turn_start', 'turn_end'] })).toEqual([]);
+  await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests();
+  expect(await readCompletedFinal(id, conversationId)).toMatchObject({ messageId: 'reply', turnId: null });
+  await recordChatObservations(conversationId, [{ kind: 'user_message', time: 30, messageId: 'new-question', text: 'New work', authoredNow: true }]);
+  await recordChatObservations(conversationId, [{ kind: 'assistant_message', time: 40, messageId: 'reply', text: 'Complete report plus metadata', state: 'final', final: true }]);
+  expect(await readCompletedFinal(id, conversationId)).toBeNull();
+  expect((await sessionInputPolicy(id)).settled).toBe(false);
+});
+
+it('preserves final acceptance across metadata, late call recording and restart, but rejects fresh work and rebinding', async () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(1000);
+  try {
+    const conversationId = 'completion-observed-time';
+    const opened = await recordChatObservations(conversationId, [
+      { kind: 'user_message', time: 1, messageId: 'question', text: 'Do work' },
+      { kind: 'assistant_message', time: 10, messageId: 'answer', text: 'Done', state: 'final', final: true }
+    ]);
+    const id = opened.sessionId!;
+    clock.mockReturnValue(2000);
+    await recordChatObservations(conversationId, [{ kind: 'assistant_message', time: 10, messageId: 'answer', text: 'Done', renderedHtml: '<p>Done</p>', state: 'final', final: true }]);
+    expect(await readCompletedFinal(id, conversationId)).toMatchObject({ completedAt: 1000 });
+    const call = (time: number) => appendEvent(id, { kind: 'tool_call', source: 'mcp', time,
+      call: { callId: `call-${time}`, tool: 'read', attribution: 'request_id', attributionMethod: 'request_id', conversationId, requestId: 'request',
+        args: { text: '{}', chars: 2, truncated: false }, result: { text: 'ok', chars: 2, truncated: false }, summary: { kind: 'read', title: 'Read', tone: 'good' }, outcome: 'ok', durationMs: 1 } });
+    await call(500); // Starts after provider creation, before actual final acceptance.
+    expect(await readCompletedFinal(id, conversationId)).toMatchObject({ completedAt: 1000 });
+    await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests();
+    expect(await readCompletedFinal(id, conversationId)).toMatchObject({ completedAt: 1000 });
+    await call(1500);
+    expect(await readCompletedFinal(id, conversationId)).toBeNull();
+    await upsertMessageEvent(id, { kind: 'assistant_message', source: 'extension', time: 10,
+      messageId: 'answer', message: { text: 'A fresh final after more work', chars: 29, truncated: false }, state: 'final', final: true });
+    expect(await readCompletedFinal(id, conversationId)).toMatchObject({ completedAt: 2000 });
+    expect(await rebindSession(id, conversationId, 'completion-new-binding')).toBe(true);
+    expect(await readCompletedFinal(id, conversationId)).toBeNull();
+  } finally { clock.mockRestore(); }
+});
+
+it.each(['question', 'rebind'] as const)('rejects a final snapshot when %s changes during its disk read', async change => {
+  const conversationId = `completion-race-${change}`;
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'user_message', time: 1, messageId: 'question', text: 'Do work' },
+    { kind: 'assistant_message', time: 2, messageId: 'answer', text: 'Done', state: 'final', final: true }
+  ]);
+  await flushSessions();
+  const originalOpen = fs.open;
+  let intercepted = false;
+  const spy = vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+    if (!intercepted && String(args[0]).endsWith('events.jsonl') && args[1] === 'r') {
+      intercepted = true;
+      if (change === 'rebind') await rebindSession(opened.sessionId!, conversationId, 'race-destination');
+      else await upsertMessageEvent(opened.sessionId!, { kind: 'user_message', source: 'extension', time: 3,
+        messageId: 'new-question', message: { text: 'Next', chars: 4, truncated: false } });
+    }
+    return originalOpen(...args);
+  });
+  try {
+    expect(await readCompletedFinal(opened.sessionId!, conversationId)).toBeNull();
+    expect(intercepted).toBe(true);
+  } finally { spy.mockRestore(); }
 });

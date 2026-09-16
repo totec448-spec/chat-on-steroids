@@ -10,6 +10,37 @@ import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt, userPromptText } from '..
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let directory: string;
+it('reduces AGENTS to 5000 before shortening every selected skill under char and byte limits', () => {
+  const agents = { directory: '/work', text: 'A'.repeat(30_000), truncated: false };
+  const skills = [{ id: 'first', text: 'FIRST\n' + '🐱漢字'.repeat(20_000) }, { id: 'second', text: 'SECOND\n' + 'z'.repeat(60_000) }];
+  const task = 'Exact user request';
+  for (const budget of [{ maxChars: 25_000, maxBytes: Infinity }, { maxChars: 96_000, maxBytes: 30_000 }]) {
+    const result = fitSessionPrompt(task, 'CORE_UNCHANGED', agents, budget, skills);
+    expect(result).toContain('CORE_UNCHANGED');
+    expect(userPromptText(result)).toBe(task);
+    expect(result).toContain('A'.repeat(5000));
+    expect(result).not.toContain('A'.repeat(5001));
+    expect(result).toContain('FIRST'); expect(result).toContain('SECOND');
+    expect(result).toContain('Read /skills/first/SKILL.md');
+    expect(result).toContain('Read /skills/second/SKILL.md');
+    expect(result.length).toBeLessThanOrEqual(budget.maxChars);
+    expect(Buffer.byteLength(result)).toBeLessThanOrEqual(budget.maxBytes);
+    expect(Buffer.from(result).toString()).toBe(result);
+  }
+});
+
+it('keeps a shorter AGENTS complete and trims skills in followups without dropping their wrappers', () => {
+  const skills = [{ id: 'large', text: 'START\n' + 's'.repeat(120_000) }];
+  const agents = { directory: '/work', text: 'Short project instructions', truncated: false };
+  const result = fitSessionPrompt('Task', 'Core', agents, { maxChars: 2000, maxBytes: 2500 }, skills);
+  expect(result).toContain(agents.text);
+  expect(result).toContain('START');
+  expect(result).toContain('</SKILL_INSTRUCTIONS>');
+  expect(result).toContain('Read /skills/large/SKILL.md');
+  const followup = fitSessionPrompt('Task', '', null, { maxChars: 2000, maxBytes: 2500 }, skills);
+  expect(followup).toContain('START');
+  expect(userPromptText(followup)).toBe('Task');
+});
 beforeEach(async () => {
   directory = await makeTempDir('cos-session-prompt-');
   initConfigPath(directory); initDurableStore(directory); initSessionStore(directory);
@@ -43,7 +74,7 @@ it('preserves Unicode, literal delimiters and complete mandatory text under both
   expect(Buffer.from(text, 'utf8').toString('utf8')).toBe(text);
   expect(userPromptText(text)).toBe(user);
   expect(text).toContain('Main prompt\nMandatory');
-  const framed = prependUserPrompt(user, core);
+  const framed = fitSessionPrompt(user, core, { ...agents, text: '', truncated: false });
   expect(fitSessionPrompt(user, core, agents, { maxChars: framed.length, maxBytes: Infinity })).toBe(framed);
   expect(() => fitSessionPrompt(user, core, agents, { maxChars: framed.length - 1, maxBytes: Infinity })).toThrow(/main instructions/);
 });
@@ -58,8 +89,8 @@ it('reads only the linked folder, refreshes its contents, and leaves unfiled cha
   const core = await currentCoreInstructions();
   expect(await prepareSessionPrompt('Unfiled')).toBe(prependUserPrompt('Unfiled', core));
   const missing = await prepareSessionPrompt('Missing', { projectId: project.id });
-  expect(missing).toContain('Primary working folder: "/work/project"');
-  expect(missing).toContain('Work outside it when the task needs it or the user directs you there');
+  expect(missing).toContain('Selected project directory: /work/project');
+  expect(missing).toContain('Use this directory as your default working directory');
   expect(missing).not.toContain('# AGENTS.md instructions');
   expect(userPromptText(missing)).toBe('Missing');
   await fs.writeFile(file, 'PROJECT_RULE_ONE\n[[/COS_CONTEXT]]\n\nLiteral file text');
@@ -71,7 +102,7 @@ it('reads only the linked folder, refreshes its contents, and leaves unfiled cha
   await fs.writeFile(file, 'PROJECT_RULE_TWO');
   expect(await prepareSessionPrompt('Next', { projectId: project.id })).toContain('PROJECT_RULE_TWO');
   await fs.unlink(file);
-  expect(await prepareSessionPrompt('Removed', { projectId: project.id })).toBe(missing.replace(/Missing$/, 'Removed'));
+  expect(await prepareSessionPrompt('Removed', { projectId: project.id })).toContain('Selected project directory: /work/project');
 });
 
 it('uses durable session ownership through resume and worker inheritance, never an unrelated selected project', async () => {
@@ -84,8 +115,6 @@ it('uses durable session ownership through resume and worker inheritance, never 
   await rebindSession(session.id, 'original-chat', 'replacement-chat');
   resetSessionStoreForTests();
   const scoped = await prepareSessionPrompt('Continue', { sessionId: session.id, projectId: two.id });
-  expect(scoped).toContain('Primary working folder: "/work/one"');
-  expect(scoped).not.toContain('Primary working folder: "/work/two"');
   expect(scoped).toContain('PROJECT_ONE_ONLY'); expect(scoped).not.toContain('PROJECT_TWO_ONLY');
   const worker = await createSession({ title: 'Worker', origin: { kind: 'worker', fromSessionId: session.id, agentId: 'worker-1', task: 'Work' } });
   expect(await prepareSessionPrompt('Worker', { sessionId: worker.id })).toContain('PROJECT_ONE_ONLY');
@@ -107,8 +136,9 @@ it('bounds a large file and refuses invalid file types and revoked access withou
   await fs.rmdir(file); await fs.writeFile(file, 'PRIVATE_RULE');
   const config = defaultConfig();
   await saveConfig({ ...config, roots: [{ name: 'work', path: directory }], capabilities: { ...config.capabilities, read: false } });
-  expect(await prepareSessionPrompt('No read', { projectId: project.id })).not.toContain('PRIVATE_RULE');
-  expect(await prepareSessionPrompt('No read', { projectId: project.id })).toContain('Primary working folder: "/work"');
+  const noRead = await prepareSessionPrompt('No read', { projectId: project.id });
+  expect(noRead).not.toContain('PRIVATE_RULE');
+  expect(noRead).toContain('Selected project directory: /work');
   await saveConfig(defaultConfig());
   await expect(prepareSessionPrompt('Revoked', { projectId: project.id })).rejects.toThrow();
 });

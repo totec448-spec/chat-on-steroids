@@ -36,6 +36,12 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { assertNoTrustBearingMacCodeSignature } from './macos-audit-utils.mjs';
 
+const UNUSED_MEDIA_PRIVACY_KEYS = [
+  'NSCameraUsageDescription',
+  'NSMicrophoneUsageDescription',
+  'NSAudioCaptureUsageDescription'
+];
+
 /** Runs a command and returns its combined output, throwing with that output on failure. */
 function run(command, args) {
   const result = spawnSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -52,6 +58,21 @@ export default async function sealMacOsBundle(context) {
   const appName = `${context.packager.appInfo.productFilename}.app`;
   const app = path.join(context.appOutDir, appName);
   if (!existsSync(app)) throw new Error(`afterPack could not find ${app} to seal`);
+
+  const plist = path.join(app, 'Contents', 'Info.plist');
+  const originalPlist = JSON.parse(run('plutil', ['-convert', 'json', '-o', '-', plist]).stdout);
+  for (const key of UNUSED_MEDIA_PRIVACY_KEYS) {
+    if (Object.hasOwn(originalPlist, key)) run('plutil', ['-remove', key, plist]);
+  }
+
+  // Electron's generic app template declares camera/microphone/audio capture even when an app
+  // never uses those APIs. CoS denies renderer permission requests and has no media-capture
+  // feature, so shipping those declarations is misleading and can make macOS surface unrelated
+  // privacy prompts. Keep only privacy declarations for capabilities CoS actually exposes.
+  const cleanedPlist = JSON.parse(run('plutil', ['-convert', 'json', '-o', '-', plist]).stdout);
+  for (const key of UNUSED_MEDIA_PRIVACY_KEYS) {
+    if (Object.hasOwn(cleanedPlist, key)) throw new Error(`afterPack failed to remove unused Info.plist key ${key}`);
+  }
 
   // Electron nests frameworks and helper apps that each need their own signature. Signing only the outer
   // bundle would leave the same self-contradiction one level down. Apple discourages --deep for

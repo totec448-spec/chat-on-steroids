@@ -41,7 +41,6 @@ function caps(over: Partial<Capabilities>): Capabilities {
     move: false,
     deleteFile: false,
     command: false,
-    saveArtifact: false,
     screen: false,
     control: false,
     clipboardRead: false,

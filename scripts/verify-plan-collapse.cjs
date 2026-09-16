@@ -23,6 +23,9 @@ app.whenReady().then(async () => {
   const results = [];
   for (const zoom of [1, 1.5]) {
     win.webContents.setZoomFactor(zoom);
+    // Zoom is committed across the renderer boundary. Do not compare geometry
+    // captured before its reflow with geometry captured after a later frame.
+    await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
     results.push(await win.webContents.executeJavaScript(`(async () => {
       const host = document.getElementById('agentPlan');
       const plan = { updatedAt: 1, plan: Array.from({length: 12}, (_, i) => ({step: 'Step ' + i, status: 'pending'})) };

@@ -59,7 +59,9 @@ function enrollable(tools: unknown, publication: PluginPublication): boolean {
   // Enabling or disabling Core capabilities can change the set before enrollment.
   // Two unchanged full declarations identify the older known surface; names alone
   // do not, and a foreign tool cannot join that evidence through a matching name.
-  return publication.surface === 'core' && tools.every(tool => surfaceDefinition('core').tools.includes(tool.name) || tool.name === 'keep_astra_on_forever') &&
+  // Retired names identify an old schema only; they are never registered, and
+  // completion still requires the exact current declaration set.
+  return publication.surface === 'core' && tools.every(tool => surfaceDefinition('core').tools.includes(tool.name) || tool.name === 'keep_astra_on_forever' || tool.name === 'session') &&
     tools.filter(tool => publication.tools.some(expected => hash(declaration([tool])) === hash(declaration([expected])))).length >= 2;
 }
 function matches(tools: unknown, expected: PluginToolSchema[], surface: PluginSurface = 'core'): boolean {

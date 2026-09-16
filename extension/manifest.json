@@ -2,14 +2,18 @@
   "manifest_version": 3,
   "name": "Chat On Steroids companion",
   "version": "2.1.13",
-  "description": "Records your ChatGPT session into the local Chat On Steroids app and labels its MCP tool calls with what they actually did.",
-  "minimum_chrome_version": "116",
+  "description": "Connects ChatGPT to Chat On Steroids and controls browser tabs in the background with DOM, screenshots and developer tools.",
+  "minimum_chrome_version": "125",
   "permissions": [
     "storage",
     "scripting",
-    "alarms"
+    "alarms",
+    "debugger",
+    "tabs"
   ],
   "host_permissions": [
+    "http://*/*",
+    "https://*/*",
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "http://127.0.0.1:8765/*",

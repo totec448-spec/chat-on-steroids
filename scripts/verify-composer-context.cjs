@@ -27,18 +27,22 @@ app.whenReady().then(async () => {
       attachments.textContent = 'Example image'; attachments.style.height = '60px';
       await new Promise(resolve => requestAnimationFrame(resolve));
       const gear = rect('#composerSettings > summary'), circle = rect('#contextMeterButton'), tooltip = rect('#contextMeterInfo'), input = rect('#chatInput'), send = rect('#chatSend');
-      output.push({width, images, gap: circle.left - gear.right, centerDifference: Math.abs((circle.top + circle.bottom - gear.top - gear.bottom) / 2), tooltipAnchor: Math.abs(tooltip.right - circle.right), toolbarBelowInput: circle.top >= input.bottom, sendAligned: Math.abs((send.top + send.bottom - circle.top - circle.bottom) / 2) < 1, overflow: fixture.scrollWidth > fixture.clientWidth});
+      output.push({width, images, gap: circle.left - gear.right, centerDifference: Math.abs((circle.top + circle.bottom - gear.top - gear.bottom) / 2),
+        tooltipCenterDifference: Math.abs((tooltip.left + tooltip.right - circle.left - circle.right) / 2),
+        tooltipInViewport: tooltip.left >= 0 && tooltip.right <= document.documentElement.clientWidth && tooltip.top >= 0 && tooltip.bottom <= document.documentElement.clientHeight,
+        toolbarBelowInput: circle.top >= input.bottom, sendAligned: Math.abs((send.top + send.bottom - circle.top - circle.bottom) / 2) < 1, overflow: fixture.scrollWidth > fixture.clientWidth});
     }
     return output;
   })()`);
   for (const row of results) {
     assert.ok(row.gap >= 1 && row.gap <= 4, JSON.stringify(row));
     assert.ok(row.centerDifference < 1, 'Circle and gear share their vertical center');
-    assert.ok(row.tooltipAnchor < 1, 'Tooltip remains anchored to circle');
+    assert.ok(row.tooltipCenterDifference < 1, 'Tooltip remains centered over the context circle');
+    assert.equal(row.tooltipInViewport, true, 'Tooltip remains within the visible viewport');
     assert.equal(row.toolbarBelowInput, true);
     assert.equal(row.sendAligned, true);
     assert.equal(row.overflow, false);
   }
-  console.log('Composer geometry passed at1000/640/430px with/without attachments:2px gear-circle gap, centered row and anchored tooltip.');
+  console.log('Composer geometry passed at1000/640/430px with/without attachments:2px gear-circle gap, centered row and centered visible tooltip.');
   win.destroy(); app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });

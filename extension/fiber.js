@@ -41,7 +41,7 @@
   'use strict';
 
   /** Bumped when the descriptor shape changes, so a stale pair cannot half-understand. */
-  const VERSION = 10;
+  const VERSION = 12;
   // The MAIN world survives an extension reload because the ChatGPT document survives it.
   // Recovery may therefore execute this file again in a page that still has an older helper
   // listener. Keep at most one listener for this protocol version; content.js rejects older
@@ -64,15 +64,18 @@
   const MAX_TEXT = 200;
   /** A page with more connector rows than this is not one we need to read exhaustively. */
   const MAX_ROWS = 400;
-  /** Assistant turns whose message model is read for per-call evidence, newest first. */
+  /** Mounted section groups read per scan, including user and assistant groups. */
   const MAX_TURNS = 6;
   /** Connector requests reported for one turn. Far above any real turn's call count. */
   const MAX_CALLS = 200;
+  /** Public generated-image descriptors retained per turn. Pixels never cross this boundary. */
+  const MAX_GENERATED_IMAGES = 200;
   /** ChatGPT's own assistant turn sections, which is where a turn's message model hangs. */
   const TURN_SECTION = 'section[data-testid^="conversation-turn"]';
   /** ChatGPT-rendered authored prose. Tool rows and this extension's own surfaces are excluded. */
   const MARKDOWN = '.markdown';
   const TOOL = 'span[class*="tool-message"], div.pointer-events-none.contents';
+  const GENERATED_IMAGE = '[class~="group/imagegen-image"] img';
   const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot';
   const MAX_RENDERED_HTML = 120_000;
   // A 15k–20k-token compaction answer is routinely 60k–90k characters. Capping public
@@ -251,20 +254,34 @@
   }
 
   /** An authored assistant message object, when a rendered prose node exposes one directly. */
-  function messageOf(fiber) {
+  function messageOf(fiber, candidates, conversationId) {
     let found = null;
+    const scope = conversationEvidenceOf(fiber);
+    if (scope.conflict || (scope.conversationId && conversationId && scope.conversationId !== conversationId)) return null;
     let at = fiber;
     for (let up = 0; at && up < MAX_CLIMB; up++, at = at.return) {
       const props = at.memoizedProps;
       if (!props || typeof props !== 'object') continue;
       const candidate = props.message;
-      if (!candidate || typeof candidate !== 'object') continue;
-      const author = candidate.author;
-      const id = str(candidate.id);
-      if (!id || !author || author.role !== 'assistant') continue;
-      if (requestOf(candidate) || resultOf(candidate)) continue;
-      if (found && found !== id) return null;
-      found = id;
+      const direct = candidate && typeof candidate === 'object' && candidate.author?.role === 'assistant' &&
+        !requestOf(candidate) && !resultOf(candidate) ? str(candidate.id) : null;
+      const scoped = props.conversation && scope.conversationId && scope.conversationId === conversationId ? str(props.messageId) : null;
+      // Native public interim rows expose a typed preamble key, while their
+      // messageId/conversation props can both be undefined. Join the complete key
+      // to this turn's authored candidates; displayed prose is never identity.
+      const item = props.item;
+      let preamble = null;
+      if (item?.type === 'preamble') {
+        if (!scope.conversationId || scope.conversationId !== conversationId) return null;
+        preamble = candidates.find(candidate => item.key === `preamble-${candidate.id}`)?.id;
+        if (!preamble) return null;
+      }
+      for (const id of [direct, scoped, preamble]) {
+        if (!id) continue;
+        if (!candidates.some(candidate => candidate.id === id)) return null;
+        if (found && found !== id) return null;
+        found = id;
+      }
     }
     return found;
   }
@@ -573,6 +590,94 @@
   }
 
   /**
+   * Public native generated-image outputs in ChatGPT's own turn model.
+   *
+   * Live evidence records these as role=tool, channel=final multimodal messages rather than
+   * assistant prose. The typed public assistant role is also supported for the same payload;
+   * every other role/channel is private or unknown. User image pointers are
+   * uploads and every other role/channel is private or unknown. Only the provider message UUID,
+   * sediment file id and bounded geometry cross worlds; no signed URL or arbitrary metadata does.
+   */
+  function generatedImagesOf(sections, messages, exactImageNodes) {
+    const out = [];
+    const seen = new Set();
+    if (!Array.isArray(messages)) return out;
+    for (let index = 0; index < messages.length && out.length < MAX_GENERATED_IMAGES; index++) {
+      const message = messages[index];
+      if (!message || typeof message !== 'object' || hiddenMessage(message) || analysisMessage(message)) continue;
+      const role = message.author && (message.author.role === 'tool' || message.author.role === 'assistant')
+        ? message.author.role : null;
+      if (!role || message.recipient !== 'all' || neverTerminalChannel(message)) continue;
+      const messageId = str(message.id);
+      const content = message.content;
+      if (!messageId || !content || typeof content !== 'object' || content.content_type !== 'multimodal_text' || !Array.isArray(content.parts)) continue;
+      for (let partOrder = 0; partOrder < content.parts.length && out.length < MAX_GENERATED_IMAGES; partOrder++) {
+        const part = content.parts[partOrder];
+        if (!part || typeof part !== 'object' || part.content_type !== 'image_asset_pointer') continue;
+        const pointer = str(part.asset_pointer);
+        const match = pointer && /^sediment:\/\/(file_[A-Za-z0-9_-]{8,100})$/.exec(pointer);
+        if (!match) continue;
+        const assetId = match[1];
+        const key = `${messageId}\u0000${assetId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const width = Number.isInteger(part.width) && part.width > 0 && part.width <= 30_000 ? part.width : null;
+        const height = Number.isInteger(part.height) && part.height > 0 && part.height <= 30_000 ? part.height : null;
+        out.push({
+          messageId,
+          assetId,
+          providerRole: role,
+          providerChannel: channelOf(message) || null,
+          providerStatus: message.status === 'finished_successfully' || message.status === 'in_progress' ? message.status : null,
+          order: index,
+          partOrder,
+          createTime: authoredTime(message),
+          ...(width ? { width } : {}),
+          ...(height ? { height } : {})
+        });
+      }
+    }
+
+    // The URL is an ephemeral pixel selector, never durable identity. It is accepted only
+    // inside this exact turn, for the exact same-origin estuary endpoint, and only when typed
+    // ownership is unique for the sediment file id. A gallery can mount several presentation
+    // clones of the same exact asset, so DOM node count is not ownership.
+    const descriptorsByAsset = new Map();
+    for (const image of out) {
+      const list = descriptorsByAsset.get(image.assetId) || [];
+      list.push(image);
+      descriptorsByAsset.set(image.assetId, list);
+    }
+    const nodesByAsset = new Map();
+    for (const section of sections) {
+      let nodes = [];
+      try { nodes = section.querySelectorAll(GENERATED_IMAGE); } catch { nodes = []; }
+      for (const node of nodes) {
+        try {
+          const url = new URL(node.currentSrc || node.src, location.href);
+          if (url.origin !== location.origin || url.pathname !== '/backend-api/estuary/content') continue;
+          const assetId = url.searchParams.get('id');
+          if (!assetId || !descriptorsByAsset.has(assetId)) continue;
+          const list = nodesByAsset.get(assetId) || [];
+          list.push(node);
+          nodesByAsset.set(assetId, list);
+        } catch {
+          // A malformed or inaccessible URL simply has no pixel authority.
+        }
+      }
+    }
+    for (const [assetId, descriptors] of descriptorsByAsset) {
+      const nodes = nodesByAsset.get(assetId) || [];
+      // A native gallery mounts several presentation clones (main image, thumbnail, mask and
+      // blur layers) for one exact asset. They all resolve the same source bytes, so stamp all
+      // of them. Ambiguous *typed ownership* remains fail-closed.
+      if (descriptors.length !== 1 || nodes.length === 0) continue;
+      for (const node of nodes) exactImageNodes.set(node, descriptors[0]);
+    }
+    return out;
+  }
+
+  /**
    * Whether ChatGPT's own message model says this turn reached a terminal successful end.
    *
    * Live 2026-08-19 evidence: an actively generating turn can already expose
@@ -629,7 +734,7 @@
    * raw Markdown. Finally, the old positional fallback remains only for the fully balanced
    * case, where every remaining candidate has exactly one remaining visible block.
    */
-  function renderedMessagesOf(sections, messages, budget) {
+  function renderedMessagesOf(sections, messages, budget, exactAnchors, conversationId) {
     const assistantCandidates = authoredAssistantMessages(messages, budget);
     const userCandidates = authoredUserMessages(messages, budget);
     if (assistantCandidates.length === 0 && userCandidates.length === 0) return [];
@@ -668,7 +773,7 @@
       if (!id) {
         try {
           const fiber = fiberOf(block);
-          if (fiber) id = messageOf(fiber);
+          if (fiber) id = messageOf(fiber, assistantCandidates, conversationId);
         } catch {
           id = null;
         }
@@ -678,6 +783,12 @@
       if (!known) id = null;
       if (id) used.add(id);
       ids.push(id);
+    }
+    // Only direct native/Fiber identity can authorize DOM placement. The optional
+    // HTML attachment fallbacks below must never become mutation anchors.
+    for (let at = 0; at < ids.length; at++) {
+      const id = ids[at];
+      if (id && ids.filter(value => value === id).length === 1) exactAnchors.set(blocks[at], id);
     }
 
     const freeBlocks = [];
@@ -802,7 +913,7 @@
    * with different labels (a transition/reparent race), that scan is ambiguous and emits
    * neither version. The next stable scan reconciles it.
    */
-  function nativeActivitiesOf(sections, messages) {
+  function nativeActivitiesOf(sections, messages, exactThoughtRows) {
     const thoughtIds = new Set();
     const thoughtOrder = new Map();
     for (let at = 0; at < messages.length; at++) {
@@ -813,9 +924,10 @@
         thoughtOrder.set(id, at);
       }
     }
-    if (thoughtIds.size === 0) return [];
+    if (thoughtIds.size === 0) return { events: [], notifications: [] };
 
     const held = [];
+    const notificationIds = new Set();
     for (let sectionAt = 0; sectionAt < sections.length; sectionAt++) {
       const section = sections[sectionAt];
       let found;
@@ -858,6 +970,12 @@
           activity = null;
         }
         if (!activity) continue;
+        // Presentation identity is independent from label stability. React can keep the same
+        // typed thought item mounted twice while changing its caption; both exact DOM copies
+        // remain safe suppression targets even though the recorder must refuse the conflicting
+        // display text for this scan.
+        exactThoughtRows.set(row, activity.messageId);
+        notificationIds.add(activity.messageId);
 
         let prior = null;
         for (let entryAt = 0; entryAt < held.length; entryAt++) {
@@ -867,7 +985,7 @@
           held.push({
             messageId: activity.messageId,
             label,
-            order: thoughtOrder.get(activity.messageId),
+            order: thoughtOrder.get(activity.thoughtMessageId),
             conflicted: false
           });
         } else if (prior.label !== label) {
@@ -881,7 +999,13 @@
         out.push({ messageId: held[at].messageId, label: held[at].label, order: held[at].order });
       }
     }
-    return out;
+    return {
+      events: out,
+      notifications: [...notificationIds].slice(0, MAX_CALLS).map(messageId => ({
+        messageId,
+        kind: 'thought_notification'
+      }))
+    };
   }
 
   /**
@@ -1193,6 +1317,9 @@
     // remove+restore on every scan creates a self-sustaining scan/mutation loop. Build the
     // desired stamp set first, then change only attributes whose value actually differs.
     const desiredTurnStamps = new Map();
+    const desiredMessageStamps = new Map();
+    const desiredThoughtStamps = new Map();
+    const desiredImageStamps = new Map();
     const groups = [];
     for (let at = 0; at < sections.length; at++) {
       const section = sections[at];
@@ -1201,9 +1328,29 @@
       if (id && previous && previous.turnId === id) previous.sections.push(section);
       else groups.push({ turnId: id, sections: [section] });
     }
-    const first = Math.max(0, groups.length - MAX_TURNS);
+    // Keep the latest user/assistant boundary even while reading older history.
+    // Visible groups share the remaining slots; no additional scan lifecycle.
+    const selected = new Set();
+    for (let at = Math.max(0, groups.length - 2); at < groups.length; at++) selected.add(at);
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+      for (let at = groups.length - 1; at >= 0 && selected.size < MAX_TURNS; at--) {
+        if (selected.has(at)) continue;
+        const visible = groups[at].sections.some(section => {
+          try {
+            const rect = section.getBoundingClientRect();
+            return [rect.top, rect.bottom, rect.left, rect.right].every(Number.isFinite) &&
+              rect.bottom > rect.top && rect.right > rect.left &&
+              rect.bottom > 0 && rect.top < height && rect.right > 0 && rect.left < width;
+          } catch { return false; }
+        });
+        if (visible) selected.add(at);
+      }
+    }
+    for (let at = groups.length - 1; at >= 0 && selected.size < MAX_TURNS; at--) selected.add(at);
     const responseBudget = { remaining: MAX_RESPONSE_TEXT };
-    for (let at = first; at < groups.length; at++) {
+    for (const at of [...selected].sort((a, b) => a - b)) {
       const group = groups[at];
       const section = group.sections[0];
       let entry = null;
@@ -1213,20 +1360,25 @@
         const messages = turnMessagesOf(fiber);
         const calls = callsOf(messages);
         const requests = requestIdsOf(messages);
+        const conversation = conversationEvidenceOf(fiber);
+        const exactAnchors = new Map();
+        const exactThoughtRows = new Map();
+        const exactImageNodes = new Map();
         const turnBudget = { remaining: Math.min(MAX_TURN_TEXT, responseBudget.remaining) };
         const before = turnBudget.remaining;
-        const renderedMessages = renderedMessagesOf(group.sections, messages, turnBudget);
+        const renderedMessages = renderedMessagesOf(group.sections, messages, turnBudget, exactAnchors, conversation.conversationId);
         responseBudget.remaining -= before - turnBudget.remaining;
-        const activities = nativeActivitiesOf(group.sections, messages);
+        const nativeActivities = nativeActivitiesOf(group.sections, messages, exactThoughtRows);
+        const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes);
+        const activities = nativeActivities.events;
         const endMessageId = turnEndMessageId(messages);
         if (
           calls.length === 0 &&
           requests.length === 0 &&
           renderedMessages.length === 0 &&
-          activities.length === 0 && !endMessageId
+          activities.length === 0 && nativeActivities.notifications.length === 0 && generatedImages.length === 0 && !endMessageId
         ) continue;
         const index = out.length;
-        const conversation = conversationEvidenceOf(fiber);
         entry = {
           index,
           turnId: group.turnId,
@@ -1236,7 +1388,9 @@
           calls,
           requests,
           messages: renderedMessages,
-          activities
+          activities,
+          thoughtNotifications: nativeActivities.notifications,
+          images: generatedImages
         };
         // The isolated-world renderer needs to know which visible section this exact Fiber
         // turn descriptor came from. Remember the desired ephemeral scan index now and apply
@@ -1244,6 +1398,15 @@
         for (let sectionAt = 0; sectionAt < group.sections.length; sectionAt++) {
           const stamped = group.sections[sectionAt];
           if (stamped) desiredTurnStamps.set(stamped, `${scanToken}:${index}`);
+        }
+        if (!conversation.conflict) for (const [node, id] of exactAnchors) {
+          desiredMessageStamps.set(node, `${scanToken}:${index}:${encodeURIComponent(id)}`);
+        }
+        if (!conversation.conflict) for (const [node, id] of exactThoughtRows) {
+          desiredThoughtStamps.set(node, `${scanToken}:${index}:${encodeURIComponent(id)}`);
+        }
+        if (!conversation.conflict) for (const [node, image] of exactImageNodes) {
+          desiredImageStamps.set(node, `${scanToken}:${index}:${encodeURIComponent(image.messageId)}:${encodeURIComponent(image.assetId)}`);
         }
       } catch {
         // One unreadable turn must not cost the others their evidence.
@@ -1261,6 +1424,27 @@
       const section = sections[at];
       try {
         if (!section || !section.getAttribute) continue;
+        for (const node of section.querySelectorAll('[data-clf-fiber-message], .markdown')) {
+          const wantedMessage = desiredMessageStamps.get(node);
+          const currentMessage = node.getAttribute('data-clf-fiber-message');
+          if (wantedMessage === undefined) {
+            if (currentMessage !== null) node.removeAttribute('data-clf-fiber-message');
+          } else if (currentMessage !== wantedMessage) node.setAttribute('data-clf-fiber-message', wantedMessage);
+        }
+        for (const node of section.querySelectorAll(`${TOOL}, [data-clf-fiber-thought]`)) {
+          const wantedThought = desiredThoughtStamps.get(node);
+          const currentThought = node.getAttribute('data-clf-fiber-thought');
+          if (wantedThought === undefined) {
+            if (currentThought !== null) node.removeAttribute('data-clf-fiber-thought');
+          } else if (currentThought !== wantedThought) node.setAttribute('data-clf-fiber-thought', wantedThought);
+        }
+        for (const node of section.querySelectorAll(`${GENERATED_IMAGE}, [data-clf-fiber-image]`)) {
+          const wantedImage = desiredImageStamps.get(node);
+          const currentImage = node.getAttribute('data-clf-fiber-image');
+          if (wantedImage === undefined) {
+            if (currentImage !== null) node.removeAttribute('data-clf-fiber-image');
+          } else if (currentImage !== wantedImage) node.setAttribute('data-clf-fiber-image', wantedImage);
+        }
         const wanted = desiredTurnStamps.get(section);
         const current = section.getAttribute('data-clf-fiber-turn');
         if (wanted === undefined) {
@@ -1344,9 +1528,8 @@
     const node = document.querySelector('[data-testid="composer-intelligence-picker-content"]') || (triggers.length === 1 ? triggers[0] : null);
     let state = null;
     try { state = readPickerSnapshot(node); } catch { /* Unknown state invalidates prior proof. */ }
-    // A recognized account denial must never fall through to label-only observation.
-    const selected = state ? state.choices.find(choice => choice.bucket === state.currentBucket && choice.available)
-      : (triggers.length === 1 && node === triggers[0] ? closedPickerSelection(node) : null);
+    const selected = state?.choices.find(choice => choice.bucket === state.currentBucket && choice.available) ||
+      (triggers.length === 1 && node === triggers[0] ? closedPickerSelection(node) : null);
     for (const [attribute, value] of [['data-clf-selected-model', selected?.id], ['data-clf-selected-effort', selected?.effort], ['data-clf-selected-route', selected && location.pathname]]) {
       if (!value) node?.removeAttribute(attribute);
       else if (node.getAttribute(attribute) !== value) node.setAttribute(attribute, value);
@@ -1357,13 +1540,9 @@
   // Its own ancestor carries the current execution model; its visible label
   // carries the selected effort. These are observation, never catalog discovery.
   function closedPickerSelection(node) {
-    // Latest omits the family prefix; explicit versions and Pro may retain it.
-    // Adjacent native spans can yield "6Pro" rather than "6 Pro" in textContent.
-    const text = String(node.textContent || '').replace(/\s+/g, ' ').trim();
-    const selected = /^(?:(?:GPT[- ]?)?(\d+(?:\.\d+)?)\s*)?(instant|minimal|low|medium|high|extra\s*high|max|ultra|pro)$/i.exec(text);
-    if (!selected) return null;
     const effort = ({ instant: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high',
-      extrahigh: 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[selected[2].toLowerCase().replace(/\s/g, '')];
+      'extra high': 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[String(node.textContent || '').trim().toLowerCase()];
+    if (!effort) return null;
     let model = null;
     for (let fiber = fiberOf(node), up = 0; fiber && up < MAX_CLIMB; up++, fiber = fiber.return) {
       const current = fiber.memoizedProps?.currentModelId;
@@ -1371,15 +1550,7 @@
       if (typeof current !== 'string' || !/^[a-zA-Z0-9._-]{1,80}$/.test(current) || (model && model !== current)) return null;
       model = current;
     }
-    if (!model) return null;
-    // A visible version is a consistency check, never a source of execution ids.
-    if (selected[1]) {
-      const actual = /^gpt-?(\d+)(?:[.-](\d+))?(?:-|$)/i.exec(model);
-      const [major, minor = '0'] = selected[1].split('.');
-      if (!actual || Number(actual[1]) !== Number(major) || Number(actual[2] || 0) !== Number(minor) ||
-          (effort === 'pro') !== /-pro$/i.test(model)) return null;
-    }
-    return { id: model, effort };
+    return model ? { id: model, effort } : null;
   }
   function readPickerSnapshot(node) {
     let fiber = node && fiberOf(node);
@@ -1399,21 +1570,13 @@
         : ['auto', 'instant'].includes(choice.category?.modelLane) ? 'none'
         : choice.thinkingEffort === 'max' && choice.modelConfig?.isWorkModeModel === true ? 'max'
         : ({ min: 'low', standard: 'medium', extended: 'high', max: 'xhigh', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', ultra: 'ultra' })[choice.thinkingEffort] || null;
-      // Titles are presentation, not entitlement or execution identity. Latest can
-      // suppress the family shortLabel, or display only an effort such as High.
-      const modelLabel = value => {
-        const name = label(value);
-        return name && !/^(instant|minimal|low|medium|high|extra\s*high|max|ultra|pro)$/i.test(name)
-          ? (/^\d/.test(name) ? `GPT-${name}` : name) : null;
-      };
       const choices = state.bucketSelections.map(choice => {
-        const modelId = id(choice.modelSlug);
-        const familyId = groupId(choice.category?.modelVersion) || modelId;
+        const name = label(choice.category?.shortLabel);
+        const familyId = groupId(choice.category?.modelVersion) || id(choice.modelSlug);
         const family = data.versions.find(version => version.id === familyId);
-        const name = modelLabel(choice.category?.shortLabel) || modelLabel(choice.modelConfig?.title) || modelId;
-        return { bucket: choice.bucket, id: modelId,
-          label: name, effort: effortOf(choice),
-          familyId, familyLabel: modelLabel(family?.displayTextForIntelligence) || modelLabel(choice.modelConfig?.title) || name,
+        return { bucket: choice.bucket, id: id(choice.modelSlug),
+          label: name && (/^\d/.test(name) ? `GPT-${name}` : name), effort: effortOf(choice),
+          familyId, familyLabel: label(family?.displayTextForIntelligence) || label(choice.modelConfig?.title) || (name && (/^\d/.test(name) ? `GPT-${name}` : name)),
           available: choice.availability?.status === 'available' && !props.modelSwitcherDenialsBySlug?.[choice.modelSlug] };
       });
       const versions = data.versions.filter(version => version.enabled === true).map(version => ({ id: groupId(version.id), label: label(version.displayTextForIntelligence) }));

@@ -67,7 +67,10 @@ async function stage(source: AttachmentSource, retained: Set<string>): Promise<I
     } else await fs.writeFile(destination, 'text' in source ? source.text : source.bytes, { flag: 'wx' });
     if (attachment.mimeType.startsWith('image/') && size <= 12 * 1024 * 1024) {
       try {
-        const thumbnail = await sharp(destination, { limitInputPixels: 30_000_000, animated: false }).rotate()
+        // libvips caches filename inputs after toBuffer() resolves, locking the
+        // immutable original against retention on Windows. Own the bounded read
+        // and close its handle before decoding, as image injection already does.
+        const thumbnail = await sharp(await readImageBytes(attachment), { limitInputPixels: 30_000_000, animated: false }).rotate()
           .resize({ width: 160, height: 160, fit: 'inside', withoutEnlargement: true }).webp({ quality: 60 }).toBuffer();
         if (thumbnail.length <= 24000) attachment.preview = `data:image/webp;base64,${thumbnail.toString('base64')}`;
       } catch { /* Preview is presentation only; the original file remains unchanged for native validation. */ }
@@ -88,24 +91,27 @@ export function normalizeInputAttachments(attachments: InputAttachment[]) {
     await validate(attachments);
     const images = [];
     for (const attachment of attachments) {
-      if (attachment.size > 12 * 1024 * 1024) throw new Error('Images for injection must be 12 MB or smaller');
-      const handle = await fs.open(fileFor(attachment.id), 'r');
-      try {
-        if ((await handle.stat()).size !== attachment.size) throw new Error('Attachment changed; attach it again');
-        const bytes = Buffer.alloc(attachment.size);
-        let offset = 0;
-        while (offset < bytes.length) {
-          const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
-          if (!bytesRead) throw new Error('Attachment read incomplete');
-          offset += bytesRead;
-        }
-        images.push(await normalizeInputImage(bytes, attachment.name));
-      } finally { await handle.close(); }
+      images.push(await normalizeInputImage(await readImageBytes(attachment), attachment.name));
     }
     return images;
   });
   staging = next.catch(() => undefined);
   return next;
+}
+async function readImageBytes(attachment: InputAttachment): Promise<Buffer> {
+  if (attachment.size > 12 * 1024 * 1024) throw new Error('Images for injection must be 12 MB or smaller');
+  const handle = await fs.open(fileFor(attachment.id), 'r');
+  try {
+    if ((await handle.stat()).size !== attachment.size) throw new Error('Attachment changed; attach it again');
+    const bytes = Buffer.alloc(attachment.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (!bytesRead) throw new Error('Attachment read incomplete');
+      offset += bytesRead;
+    }
+    return bytes;
+  } finally { await handle.close(); }
 }
 async function validate(attachments: InputAttachment[]): Promise<void> {
   if (attachments.length > 20 || attachments.reduce((sum, file) => sum + file.size, 0) > MAX_ATTACHMENT_BYTES) throw new Error('Attach up to 20 files and 512 MB per message');

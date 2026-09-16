@@ -150,6 +150,35 @@ it('rejects stale profile tunnel edits after A to B to A while accepting unrelat
   expect(getConfig().setupProfiles).toHaveLength(1);
 });
 
+it.each([true, false])('forwards canonical input commitment even when a legacy writer proposes recording=%s', async recording => {
+  const input = await import('../src/main/session/input.js');
+  const store = await import('../src/main/session/store.js');
+  const previous = await readDurable('session-input');
+  const session = await createSession({ title: 'Input commitment fixture', conversationId: 'input-commitment-fixture' });
+  const id = '30000000-0000-4000-8000-000000000001';
+  try {
+    await saveConfig({ ...getConfig(), sessions: { ...getConfig().sessions, record: recording } });
+    await writeDurableNow('session-input', [{ id, sessionId: session.id, text: 'Delivered fixture', mode: 'auto', model: null,
+      reasoningEffort: null, dueAt: 100, createdAt: 100, state: 'sent', owner: null, conversationId: 'input-commitment-fixture',
+      messageId: `input:${id}`, offeredAt: 200, deliveredAt: 300, historyRecorded: false,
+      toolImages: [{ name: 'invalid.webp', dataUrl: 'data:image/webp;base64,YQ==' }] }]);
+    input.resetInputForTests();
+    const result = await handlers.get('sessions:outbox')!(null, undefined) as any;
+    expect(result.ok).toBe(true);
+    const row = result.data[0];
+    expect(getConfig().sessions).toMatchObject({ record: true, retainDays: 0 });
+    expect(row.historyAnchored).toBe(true);
+    expect(row.historyRecorded).not.toBe(true);
+    expect((await readDurable<any[]>('session-input'))![0].historyAnchored).toBe(true);
+    const canonical = (await store.readEvents(session.id)).filter(event => event.kind === 'user_message');
+    expect(canonical).toHaveLength(1);
+    expect(canonical[0]).toMatchObject({ inputId: id, time: 200 });
+  } finally {
+    await writeDurableNow('session-input', previous ?? []);
+    input.resetInputForTests();
+  }
+});
+
 it('validates dropped file count and stages arbitrary native file types', async () => {
   const drop = (payload: unknown) => handlers.get('sessions:dropFiles')!(null, payload) as Promise<any>;
   expect(await drop({ files: [] })).toMatchObject({ ok: false });
@@ -167,42 +196,6 @@ it('publishes Goal draft progress through the session refresh channel without a 
     expect(currentWindow.webContents.send).toHaveBeenCalledWith('session:changed');
   } finally {
     resetGoalStateForTests();
-  }
-});
-
-it('requests the tool-approval notice on explicit successful model opening, persists its acknowledgement and leaves passive discovery alone', async () => {
-  const models = await import('../src/main/chat-models.js');
-  const notices = await import('../src/main/chatgpt-permission-notice.js');
-  const bridge = await import('../src/main/bridge.js');
-  const browser = await import('../src/main/browser-startup.js');
-  const bridgeStart = vi.spyOn(bridge, 'startBridge').mockResolvedValue(8765);
-  const wake = vi.spyOn(browser, 'wakeBrowserUrl').mockResolvedValue(undefined);
-  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
-  await writeDurableNow('chatgpt-permission-notice', null);
-  notices.resetChatgptPermissionNoticeForTests();
-  models.resetChatModelsForTests();
-  registerIpc(() => currentWindow as any, () => {});
-  const getNotice = () => handlers.get('chatgptPermissionNotice:get')!(null, undefined) as Promise<any>;
-  try {
-    await models.startChatModelDiscovery(false);
-    expect(wake).not.toHaveBeenCalled();
-    expect(await getNotice()).toMatchObject({ ok: true, data: { pending: false } });
-    wake.mockRejectedValueOnce(new Error('Browser opening failed'));
-    await handlers.get('chatModels:request')!(null, undefined);
-    await vi.waitFor(() => expect(models.getChatModels().error).toContain('Browser opening failed'));
-    expect(await getNotice()).toMatchObject({ ok: true, data: { pending: false } });
-    await handlers.get('chatModels:request')!(null, undefined);
-    await vi.waitFor(async () => expect(await getNotice()).toMatchObject({ ok: true, data: { pending: true } }));
-    await vi.waitFor(() => expect(currentWindow!.webContents.send).toHaveBeenCalledWith('chatgptPermissionNotice:changed', expect.objectContaining({ pending: true })));
-    expect(await handlers.get('chatgptPermissionNotice:ack')!(null, undefined)).toMatchObject({ ok: true, data: { pending: false } });
-    expect(await readDurable('chatgpt-permission-notice')).toEqual({ requested: true, acknowledged: true });
-    notices.resetChatgptPermissionNoticeForTests();
-    expect(await getNotice()).toMatchObject({ ok: true, data: { pending: false } });
-  } finally {
-    bridgeStart.mockRestore(); wake.mockRestore();
-    models.resetChatModelsForTests(); notices.resetChatgptPermissionNoticeForTests();
-    await writeDurableNow('chatgpt-permission-notice', null);
-    registerIpc(() => currentWindow as any, () => {});
   }
 });
 
@@ -389,7 +382,7 @@ beforeEach(async () => {
 });
 
 describe('explicit settings replace the published tool contract', () => {
-  it.each(['finish', 'command', 'session'] as const)('withdraws %s from real endpoint publication after its setting is disabled', async kind => {
+  it.each(['finish', 'command'] as const)('withdraws %s from real endpoint publication after its setting is disabled', async kind => {
     const { startMcpServer } = await import('../src/main/mcp/server.js');
     const { effectiveCapabilities } = await import('../src/main/config.js');
     const { publishPluginSurface, pluginRefreshPublications, resetPluginRefreshForTests } = await import('../src/main/plugin-refresh.js');
@@ -402,13 +395,17 @@ describe('explicit settings replace the published tool contract', () => {
     };
     try {
       const before = snapshot();
-      const tool = kind === 'finish' ? 'session_finish' : kind === 'command' ? 'exec_command' : kind;
+      const tool = kind === 'finish' ? 'session_finish' : 'exec_command';
       expect(before.tools.map(row => row.name)).toContain(tool);
+      expect(before.tools.map(row => row.name)).not.toContain('session');
       const current = getConfig();
-      const patch = { ...current, ...(kind === 'finish' ? { ui: { ...current.ui, finishTool: false } } : kind === 'command' ? { capabilities: { ...current.capabilities, command: false } } : { sessions: { ...current.sessions, record: false } }) };
+      const patch = { ...current, ...(kind === 'finish'
+        ? { ui: { ...current.ui, finishTool: false } }
+        : { capabilities: { ...current.capabilities, command: false } }) };
       expect((await save(patch)).ok).toBe(true);
       const after = snapshot();
       expect(after.tools.map(row => row.name)).not.toContain(tool);
+      expect(after.tools.map(row => row.name)).not.toContain('session');
       expect(after.schemaId).not.toBe(before.schemaId);
       const saved = getConfig();
       expect((await save({ ...saved, ui: { ...saved.ui, theme: 'dark' } })).ok).toBe(true);

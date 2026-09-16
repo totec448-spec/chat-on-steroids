@@ -23,15 +23,15 @@ afterEach(async () => {
   resetInputForTests(); resetSessionStoreForTests(); resetDurableForTests();
   await removeTempDir(directory);
 });
-it('retires receipts after actual retention removes their closed session', async () => {
+it('keeps closed-session receipts because legacy age pruning is permanently inert', async () => {
   const session = await createSession({ title: 'Retention candidate' });
   await writeDurableNow('session-input', [receipt(session.id, { sessionId: session.id })]);
   resetSessionStoreForTests();
   const now = Date.now();
   vi.spyOn(Date, 'now').mockReturnValue(now + 32 * 24 * 60 * 60_000);
-  expect(await pruneSessions(30)).toBe(1);
-  expect(await listInputs()).toEqual([]);
-  expect(record).not.toHaveBeenCalled();
+  expect(await pruneSessions(30)).toBe(0);
+  expect((await listInputs()).map((row) => row.id)).toHaveLength(1);
+  expect((await fs.stat(path.join(directory, 'sessions', session.id))).isDirectory()).toBe(true);
 });
 it.each(['ENOENT', 'EACCES'])('does not infer deletion when the history root is unavailable (%s)', async code => {
   const sessionId = randomUUID();

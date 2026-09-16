@@ -76,19 +76,29 @@ describe('the user’s own connector instructions', () => {
     expect(text.startsWith('You are a coding agent working with the user through Chat On Steroids.')).toBe(true);
     const intro = text.split('\n').find(line => line.startsWith('Use the connected tools as needed:'))!;
     expect(intro).toContain('Chat On Steroids Core for files');
-    expect(intro).toContain('Chat On Steroids Desktop for screen');
+    expect(intro).toContain('Chat On Steroids Desktop for background browser tabs');
     expect(intro).toContain('Chat On Steroids Plugins for enabled external apps');
     expect(text.indexOf(intro)).toBeGreaterThan(text.indexOf('# Local tools'));
     expect(text).not.toMatch(/This is Chat On Steroids|https:\/\/chatgpt.com\/#settings\/Plugins/);
-    expect(serverInstructions(ctx, 'core', 'linux')).not.toContain('Chat On Steroids Desktop');
+    expect(serverInstructions(ctx, 'core', 'linux')).toContain('Chat On Steroids Desktop');
+  });
+  it('routes Linux browser users to Core for files without advertising native desktop tools', () => {
+    const text = serverInstructions(ctx, 'desktop', 'linux');
+    expect(text).toContain('browser_snapshot');
+    expect(text).toContain('Files, patches and shell commands live in the separate "Chat On Steroids Core" connector.');
+    expect(text).not.toContain('get_window_state');
+    expect(text).not.toContain('Do not poll with a batch that only waits');
   });
   it('adapts upstream instructions without unsupported facilities and projects live tools', () => {
     const text = serverInstructions(ctx, 'core', 'win32');
     expect(text).toContain('Do not settle for a partial or "helpful enough" solution');
     expect(text).toContain('look for AGENTS.md');
-    expect(text).not.toMatch(/SKILL\.md|functions\.|tool_search|approval auto-review|user-requested computer shutdown/);
+    expect(text).not.toMatch(/functions\.|tool_search|approval auto-review|user-requested computer shutdown/);
+    expect(text).toContain('/skills/<id>/SKILL.md');
     expect(text).not.toContain('Use update_plan');
-    expect(serverInstructions({ ...ctx, sessionTools: true }, 'core', 'win32')).toContain('Use update_plan');
+    const recorded = serverInstructions({ ...ctx, sessionTools: true }, 'core', 'win32');
+    expect(recorded).toContain('Use update_plan');
+    expect(recorded).not.toMatch(/session action=|update_cursor|recorded history/);
     const withoutCommands = serverInstructions({ ...ctx, caps: { ...ctx.caps, command: false } }, 'core', 'linux');
     expect(withoutCommands).toContain('find searches');
     expect(withoutCommands).not.toContain('exec_command runs');

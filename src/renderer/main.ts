@@ -5,7 +5,6 @@ import { initSidebarResize } from './sidebar-resize.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
 import { initSetupGuide } from './setup-guide.js';
-import { initChatgptPermissionNotice } from './chatgpt-permission-notice.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
  *
@@ -46,7 +45,6 @@ declare global {
 const api = window.api;
 initLanguage();
 initSetupGuide();
-initChatgptPermissionNotice(api);
 
 /** Same shape the platform uses; mirrored here only to grey out step 2 until it is valid. */
 const TUNNEL_ID_PATTERN = /^tunnel_[0-9a-f]{32}$/;
@@ -73,13 +71,13 @@ const GROUPS: Group[] = [
     title: "Change files",
     icon: 'i-pencil',
     blurb: "Create, edit, move, delete and save ChatGPT files, inside those folders only.",
-    caps: ['create', 'edit', 'move', 'deleteFile', 'saveArtifact']
+    caps: ['create', 'edit', 'move', 'deleteFile']
   },
   {
     id: 'desktop',
-    title: "See and use the desktop",
+    title: "Browser and desktop control",
     icon: 'i-monitor',
-    blurb: "Screenshots, the list of open windows, and the mouse and keyboard.",
+    blurb: "Background browser tabs, DOM, console and network; native windows and input where supported.",
     caps: ['screen', 'control', 'clipboardRead', 'clipboardWrite']
   },
   {
@@ -259,31 +257,6 @@ function buildGroups(): void {
     return root;
   });
 
-  // Recording and sub-agents are tool surfaces exactly like the file and desktop
-  // permissions — `session` and `agents` are two of the nine tools ChatGPT can discover —
-  // and they used to be checkboxes buried in a settings pane behind a gear. Every switch
-  // that decides what ChatGPT can reach now lives in this one list. Chat settings keeps
-  // only the numbers that tune them.
-  const record = document.createElement('input');
-  record.type = 'checkbox';
-  record.id = 'sessRecord';
-  ui(record, 'title', () => t("Record this chat locally, and expose the session tool in ChatGPT"));
-  record.addEventListener('change', () => void save());
-  const recording = groupShell('recording', 'Session recording', 'i-steps', record);
-  const recordTools = el('div', 'tools');
-  for (const [name, detail] of [
-    ['search', 'List recent recordings or find past and concurrent work by text.'],
-    ['read', 'Read one explicit recording, continue it, or expand one short T… tool reference.']
-  ] as Array<[string, string]>) {
-    const row = el('div', 'tool is-static');
-    const body = el('span');
-    body.append(el('strong', '', name), el('em', '', () => t(detail)));
-    row.append(body);
-    recordTools.append(row);
-  }
-  recordTools.append(toolNames(['session']));
-  recording.append(recordTools);
-
   const enabled = document.createElement('input');
   enabled.type = 'checkbox';
   enabled.id = 'homeMaEnabled';
@@ -310,7 +283,7 @@ function buildGroups(): void {
   tools.append(toolNames(['agents']));
   agents.append(tools);
 
-  $('groups').replaceChildren(...permissionGroups, recording, agents);
+  $('groups').replaceChildren(...permissionGroups, agents);
 }
 
 function capInput(cap: Capability): HTMLInputElement {
@@ -325,12 +298,7 @@ function paintGroups(): void {
 
   for (const group of GROUPS) {
     const root = document.querySelector<HTMLElement>(`[data-group="${group.id}"]`)!;
-    const supported = group.id !== 'desktop' || desktopSupported;
-    root.hidden = !supported;
-    if (!supported) {
-      for (const cap of group.caps) capInput(cap).disabled = true;
-      continue;
-    }
+    root.hidden = false;
     root.classList.toggle('is-open', openGroup === group.id);
 
     const names = [...new Set(group.caps.flatMap((cap) => capabilityTools(cap, state!.platform?.family)))];
@@ -340,7 +308,8 @@ function paintGroups(): void {
       namesRow.replaceChildren(...names.map(name => el('code', '', name)));
     }
 
-    const usable = group.caps.filter((cap) => !(readOnly && WRITE_CAPABILITIES.includes(cap)));
+    const usable = group.caps.filter((cap) => !(readOnly && WRITE_CAPABILITIES.includes(cap)) &&
+      (desktopSupported || cap !== 'clipboardRead' && cap !== 'clipboardWrite'));
     const on = group.caps.filter((cap) => capInput(cap).checked);
 
     const box = root.querySelector<HTMLInputElement>('.group-box')!;
@@ -361,15 +330,15 @@ function paintGroups(): void {
   }
 
   for (const cap of WRITE_CAPABILITIES) capInput(cap).disabled = readOnly;
+  for (const cap of ['clipboardRead', 'clipboardWrite'] as const) {
+    capInput(cap).disabled = !desktopSupported || (readOnly && WRITE_CAPABILITIES.includes(cap));
+  }
 
-  // The two feature groups. apply() already passed both switches through the
+  // The feature group. apply() already passed its switch through the
   // focused/dirty-field guard. Recopying state here undid that protection and visibly
   // flipped a user's just-clicked toggle back when an unsolicited stale state push
   // arrived before save completed, so this only reads them.
-  for (const [id, onText] of [
-    ['recording', 'session tool exposed'],
-    ['agents', 'agents tool exposed']
-  ] as Array<[string, string]>) {
+  for (const [id, onText] of [['agents', 'agents tool exposed']] as Array<[string, string]>) {
     const root = document.querySelector<HTMLElement>(`[data-group="${id}"]`);
     if (!root) continue;
     const box = root.querySelector<HTMLInputElement>('.sw input')!;
@@ -443,7 +412,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
     // config. A hidden disabled checkbox is presentation,
     // not a user edit: copying its forced-false value into every unrelated settings save
     // would erase those choices merely because the config was opened on another OS.
-    if (!(state.platform?.desktopAutomation ?? true) && DESKTOP_CAPABILITIES.includes(capability)) continue;
+    if (!(state.platform?.desktopAutomation ?? true) && DESKTOP_CAPABILITIES.includes(capability) && capability !== 'screen' && capability !== 'control') continue;
     capabilities[capability] = input.checked;
   }
   const readOnly = over.readOnly ?? previous.readOnly;
@@ -464,7 +433,6 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
       chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       finishTool: $<HTMLInputElement>('finishTool').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
-      finishAction: $<HTMLSelectElement>('finishAction').value as 'notify' | 'goal',
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
       backgroundChats: $<HTMLInputElement>('backgroundChats').checked,
       browserOnly: $<HTMLInputElement>('browserOnly').checked,
@@ -493,7 +461,6 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
 
 async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']): Promise<void> {
   const toolSurfaceChanged =
-    previous.sessions.record !== patch.sessions.record ||
     previous.multiAgent.enabled !== patch.multiAgent.enabled ||
     (Object.keys(patch.capabilities) as Capability[]).some((cap) => {
       const before = previous.capabilities[cap] && !(previous.readOnly && WRITE_CAPABILITIES.includes(cap));
@@ -995,20 +962,13 @@ function apply(next: AppState): void {
   $('readOnlyBtn').classList.toggle('is-on', config.readOnly);
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const cap = input.dataset.cap as Capability;
-    const supported = (next.platform?.desktopAutomation ?? true) || !DESKTOP_CAPABILITIES.includes(cap);
+    const supported = (next.platform?.desktopAutomation ?? true) || !DESKTOP_CAPABILITIES.includes(cap) || cap === 'screen' || cap === 'control';
     applyChecked(input, supported && config.capabilities[cap], previousState?.config.capabilities[cap]);
   }
   applyChecked(
     $<HTMLInputElement>('homeMaEnabled'),
     config.multiAgent.enabled,
     previousState?.config.multiAgent.enabled
-  );
-  // Recording is a tool switch like the rest of this list, so it goes through the same
-  // dirty-field guard rather than being assigned outright from the Chat panel.
-  applyChecked(
-    $<HTMLInputElement>('sessRecord'),
-    config.sessions.record,
-    previousState?.config.sessions.record
   );
   paintGroups();
   paintDesktopAccess(next);
@@ -1037,7 +997,6 @@ function apply(next: AppState): void {
   applyValue($<HTMLSelectElement>('chatBrowser'), config.ui.chatBrowser ?? 'chrome', previousState?.config.ui.chatBrowser ?? 'chrome');
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
-  applyValue($<HTMLSelectElement>('finishAction'), config.ui.finishAction ?? 'notify', previousState?.config.ui.finishAction);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyChecked($<HTMLInputElement>('browserOnly'), config.ui.browserOnly === true, previousState?.config.ui.browserOnly);
@@ -1228,7 +1187,7 @@ function copyRow(label: string | (() => string), value: string, what: string): H
 function connectorCards(next: AppState, desktopExpanded: boolean): HTMLElement[] {
   const { status, config } = next;
   return status.surfaces
-    .filter((surface) => surface.id !== 'plugins' && (surface.id !== 'desktop' || (next.platform?.desktopAutomation ?? true)))
+    .filter((surface) => surface.id !== 'plugins')
     .map((surface) => {
     const optional = surface.id === 'desktop';
     const card = optional ? document.createElement('details') : el('div');
@@ -1660,7 +1619,8 @@ $('wizManageFolders').addEventListener('click', () => {
 });
 
 // Dropping a file anywhere on an Electron window otherwise navigates the whole window to
-// it. Only the Folders card accepts drops, and everything else swallows them.
+// it. The Folders card and chat attachment owner handle their own file drops; this fence
+// prevents navigation for every remaining target.
 window.addEventListener('dragover', (event) => event.preventDefault());
 window.addEventListener('drop', (event) => event.preventDefault());
 {

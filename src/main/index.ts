@@ -1,3 +1,5 @@
+import { stopInputStartup } from './session/start-input.js';
+import { browserExtensionRequired } from '../shared/types.js';
 import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js';
 /**
  * Main process entry: window, tray, and the security posture for the renderer.
@@ -12,10 +14,10 @@ import { getChatModels, restoreChatModels, startChatModelDiscovery } from './cha
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
-import { initSkills } from './skills.js';
 import { pluginManager } from './plugins/manager.js';
 import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
-import { flushSessions, initSessionStore, pruneSessions } from './session/store.js';
+import { flushSessions, initSessionStore } from './session/store.js';
+import { initSkillsPath } from './skills.js';
 import { usageOverview } from './session/usage.js';
 import {
   flushRecorder,
@@ -60,7 +62,6 @@ import {
   setContinuationRecoveryHooks,
   type ContinuationSnapshot
 } from './session/continuation.js';
-import { startSessionRetentionMaintenance } from './session/retention.js';
 import { runShutdownSequence } from './shutdown.js';
 import { applyStagedUpdate, startUpdateChecks } from './update.js';
 import { UI_BASE_ZOOM, windowLayoutForWorkArea, titleBarOverlayForTheme } from './window-layout.js';
@@ -87,7 +88,6 @@ let tray: Tray | null = null;
 let quitting = false;
 let shutdownStarted = false;
 let shutdownComplete = false;
-let stopSessionRetention: (() => void) | null = null;
 const usageWarmup = new AbortController();
 
 // One instance only: two copies would fight over the tunnel and the config file.
@@ -106,7 +106,8 @@ function createWindow(): void {
   window = new BrowserWindow({
     ...layout,
     ...(icon ? { icon } : {}),
-    fullscreenable: false,
+    // Preserve the native macOS green-button fullscreen action.
+    fullscreenable: process.platform === 'darwin',
     show: false,
     autoHideMenuBar: true,
     ...(process.platform === 'win32' ? {
@@ -302,12 +303,12 @@ void app.whenReady().then(async () => {
   initConfigPath(userData);
   initSecretsPath(userData);
   initSessionStore(userData);
+  try { await initSkillsPath(userData); }
+  catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
   await restoreChatModels();
   if (windowActivation.isDisabled()) return;
   await loadConfig();
-  try { await initSkills(userData); }
-  catch (error) { logWarn(`Skills could not initialize: ${error instanceof Error ? error.message : String(error)}`); }
   await pluginManager.initialize(userData);
   if (windowActivation.isDisabled()) return;
   try { applyLoginStartup(app, getConfig().ui.startAtLogin === true); }
@@ -439,22 +440,11 @@ void app.whenReady().then(async () => {
   // traffic, so never make startup/reload wait behind years of old session history.
   queueDeterministicAttributionRepair();
 
-  // The bridge serves recording and multi-agent mode both: recording needs the
-  // extension to observe the chat, and multi-agent mode needs it to open worker tabs.
-  // Either switch being on starts it. ipc.ts applies the same rule on a settings save.
-  if (getConfig().sessions.record || getConfig().multiAgent.enabled) {
+  // Recording, workers and direct browser tools share one extension transport.
+  // ipc.ts uses the same eligibility rule when settings change.
+  if (browserExtensionRequired(getConfig())) {
     void startBridge();
   }
-  // Retention governs recordings already stored on disk, independent of whether recording is
-  // currently enabled. The tray app can stay alive for days, so run once now and keep a coarse
-  // maintenance timer rather than making expiry depend on the next process restart.
-  stopSessionRetention = startSessionRetentionMaintenance({
-    retainDays: () => getConfig().sessions.retainDays,
-    prune: pruneSessions,
-    onRemoved: (removed) => logInfo(`removed ${removed} session(s) past the retention window`),
-    onError: (err) => logError(`session pruning failed: ${err.message}`)
-  });
-
   if (getConfig().ui.autoConnect) void connect();
 
   // Never awaited: an unreachable GitHub, a slow download or a broken release must not delay a
@@ -495,8 +485,7 @@ app.on('will-quit', (event) => {
   event.preventDefault();
   if (shutdownStarted) return;
   shutdownStarted = true;
-  stopSessionRetention?.();
-  stopSessionRetention = null;
+  stopInputStartup();
   tray?.destroy();
   tray = null;
 

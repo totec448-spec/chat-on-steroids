@@ -39,8 +39,8 @@ describe('extension release metadata', () => {
     expect(lock.version).toBe(APP_VERSION);
     expect(lock.packages?.['']?.version).toBe(APP_VERSION);
     expect(manifest.version).toBe(APP_VERSION);
-    expect(BRIDGE_PROTOCOL).toBe(13);
-    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 13;');
+    expect(BRIDGE_PROTOCOL).toBe(14);
+    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 14;');
   });
 
   /**
@@ -368,7 +368,7 @@ describe('ChatGPT DOM adapter', () => {
     const commentary = new FakeNode({ 'data-interrupted': 'false' }, 'Reading files');
     const answer = new FakeNode({ 'data-interrupted': 'false' }, 'Here is the summary');
     answer.with('.markdown', [new FakeNode({ class: 'markdown' }, 'Here is the summary')]);
-    const section = turn('assistant', 'request-answer').with('[data-interrupted]', [commentary, answer]);
+    const section = turn('assistant', 'request-answer').with('[data-interrupted], [data-clf-progress]', [commentary, answer]);
     const dom = loadDom([section]);
     const logical = dom.turns()[0]!;
 
@@ -2844,6 +2844,78 @@ describe('extension observation journal', () => {
     expect(closed).toEqual([conversationId]);
   });
 
+  it('relays one exact recorded-call disclosure only while its document and route stay current', async () => {
+    const conversationId = '11111111-2222-3333-4444-555555555555';
+    const other = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    let tabUrl = `https://chatgpt.com/c/${conversationId}`;
+    let tabStatus = 'complete';
+    let pendingUrl: string | undefined;
+    const detailBodies: unknown[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const path = new URL(input).pathname;
+      if (path === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (path === '/activity/detail') {
+        detailBodies.push(JSON.parse(String(init.body)));
+        return response(200, { ok: true, conversationId, callId: 'call-1', detailRevision: 17 });
+      }
+      return response(200, {});
+    });
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      fetch,
+      tabsGet: async (id) => ({ id, url: tabUrl, status: tabStatus, ...(pendingUrl ? { pendingUrl } : {}) })
+    });
+
+    await worker.send({ type: 'bind', conversationId }, 63);
+    await expect(worker.send({ type: 'activity_detail', conversationId, callId: 'call-1', detailRevision: 17 }, 63))
+      .resolves.toMatchObject({ ok: true, data: { callId: 'call-1', detailRevision: 17 } });
+    expect(detailBodies).toEqual([{ conversationId, callId: 'call-1', detailRevision: 17 }]);
+
+    await expect(worker.send({ type: 'activity_detail', conversationId, callId: ['call-1'], detailRevision: 17 }, 63))
+      .resolves.toMatchObject({ ok: false, status: 400, error: 'bad_activity_detail' });
+    await expect(worker.send({ type: 'activity_detail', conversationId, callId: 'call-1', detailRevision: 0 }, 63))
+      .resolves.toMatchObject({ ok: false, status: 400, error: 'bad_activity_detail' });
+    await expect(worker.send({ type: 'activity_detail', conversationId: other, callId: 'call-1', detailRevision: 17 }, 63))
+      .resolves.toMatchObject({ ok: false, error: 'stale_document' });
+    tabStatus = 'loading';
+    await expect(worker.send({ type: 'activity_detail', conversationId, callId: 'call-1', detailRevision: 17 }, 63))
+      .resolves.toMatchObject({ ok: false, error: 'stale_document' });
+    tabStatus = 'complete'; pendingUrl = tabUrl;
+    await expect(worker.send({ type: 'activity_detail', conversationId, callId: 'call-1', detailRevision: 17 }, 63))
+      .resolves.toMatchObject({ ok: false, error: 'stale_document' });
+    pendingUrl = undefined;
+    tabUrl = `https://chatgpt.com/c/${other}`;
+    await expect(worker.send({ type: 'activity_detail', conversationId, callId: 'call-1', detailRevision: 17 }, 63))
+      .resolves.toMatchObject({ ok: false, error: 'stale_document' });
+    expect(detailBodies).toHaveLength(1);
+  });
+
+  it('discards a recorded-call detail response if the browser route changes during the read', async () => {
+    const conversationId = '11111111-2222-3333-4444-555555555555';
+    const other = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    let tabUrl = `https://chatgpt.com/c/${conversationId}`;
+    const fetch = vi.fn(async (input: string) => {
+      const path = new URL(input).pathname;
+      if (path === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (path === '/activity/detail') {
+        tabUrl = `https://chatgpt.com/c/${other}`;
+        return response(200, { ok: true, conversationId, callId: 'call-1', detailRevision: 17 });
+      }
+      return response(200, {});
+    });
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(), fetch,
+      tabsGet: async (id) => ({ id, url: tabUrl, status: 'complete' })
+    });
+
+    await worker.send({ type: 'bind', conversationId }, 64);
+    await expect(worker.send({ type: 'activity_detail', conversationId, callId: 'call-1', detailRevision: 17 }, 64))
+      .resolves.toMatchObject({ ok: false, error: 'stale_document' });
+    expect(fetch.mock.calls.filter(([input]) => new URL(String(input)).pathname === '/activity/detail')).toHaveLength(1);
+  });
+
   it.each(['absent', 'present', 'query-failed', 'same-chat', 'pending-chat', 'still-loading'])(
     'only closes a URL-redacted completed departure with positive absence: %s', async (mode) => {
       const conversationId = '11111111-2222-3333-4444-555555555555';
@@ -3438,7 +3510,8 @@ describe('extension connection', () => {
     const worker = loadWorker({
       local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
       session: new FakeStorageArea(),
-      fetch
+      fetch,
+      tabsGet: async (id) => ({ id, url: `https://chatgpt.com/c/${conversationId}` })
     });
 
     const reply = await worker.send({
@@ -3456,6 +3529,33 @@ describe('extension connection', () => {
       status: 200,
       data: { conversationId, confirmed: [requestId], complete: true }
     });
+  });
+
+  it('does not publish request ownership from a document on another conversation route', async () => {
+    const conversationId = 'abababab-cdcd-efef-1212-343434343434';
+    const otherConversationId = '11111111-2222-3333-4444-555555555555';
+    const requested: string[] = [];
+    const fetch = vi.fn(async (input: string) => {
+      const pathname = new URL(input).pathname;
+      requested.push(pathname);
+      return pathname === '/hello'
+        ? response(200, { app: 'chat-on-steroids', paired: true })
+        : response(200, { ok: true });
+    });
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      fetch,
+      tabsGet: async (id) => ({ id, url: `https://chatgpt.com/c/${otherConversationId}` })
+    });
+
+    await expect(worker.send({
+      type: 'correlate',
+      conversationId,
+      calls: [{ messageId: 'request-message', tool: 'exec_command', order: 0, answered: false,
+        requestId: 'f0f00009-1111-4111-8111-111111111111' }]
+    })).resolves.toMatchObject({ ok: false, error: 'stale_document' });
+    expect(requested).not.toContain('/correlations');
   });
 
   it('does not re-ask where the app is before every single request', async () => {
@@ -3662,6 +3762,14 @@ describe('the overlay stylesheet', () => {
     expect(used.size, 'the stylesheet animates nothing — has the namespace changed?').toBeGreaterThan(0);
     expect([...used].filter((name) => !defined.has(name))).toEqual([]);
   });
+
+  it('wraps long recorded call lines inside their disclosure panel', async () => {
+    const css = await fs.readFile(path.join(process.cwd(), 'extension', 'overlay.css'), 'utf8');
+    const rule = /\.clf-stream-recorded-detail\s+pre\s*\{([^}]+)\}/.exec(css)?.[1] ?? '';
+    expect(rule).toMatch(/white-space:\s*pre-wrap/);
+    expect(rule).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(rule).toMatch(/overflow:\s*auto/);
+  });
 });
 
 /**
@@ -3783,4 +3891,51 @@ it.each(['idle', 'selected', 'selected-before-proof', 'selected-during-proof', '
   });
   await prune([tab], { managedConversations: [conversationId] }, new Set(), new Set([conversationId]));
   expect(remove).toHaveBeenCalledTimes(scenario === 'idle' ? 1 : 0);
+});
+
+it.each([
+  { name: 'just read then switched away', age: 0, close: false },
+  { name: 'one millisecond before grace expires', age: 299_999, close: false },
+  { name: 'exact grace boundary', age: 300_000, close: true },
+  { name: 'old access', age: 600_000, close: true },
+  { name: 'absent timestamp', timestamp: undefined, close: true },
+  { name: 'invalid timestamp', timestamp: NaN, close: true },
+  { name: 'infinite timestamp', timestamp: Infinity, close: true },
+  { name: 'zero timestamp', timestamp: 0, close: true },
+  { name: 'negative timestamp', timestamp: -1, close: true },
+  { name: 'future timestamp', age: -1, close: true },
+  { name: 'read and left before proof', age: 600_000, freshAt: 1, close: false },
+  { name: 'read and left during proof', age: 600_000, freshAt: 2, close: false },
+  { name: 'explicit retired cleanup', age: 0, retired: true, close: true },
+  { name: 'surplus copy cleanup', age: 10, duplicate: true, close: true }
+])('honors tab-local reading intent without changing separate retirement authority: $name', async scenario => {
+  const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const now = 1_800_000_000_000;
+  const tab = { id: 71, url: `https://chatgpt.com/c/${conversationId}`, active: false, pinned: false,
+    lastAccessed: 'age' in scenario ? now - scenario.age! : scenario.timestamp };
+  const remove = vi.fn();
+  const proof = vi.fn(async () => ({ safe: true, conversationId, navigationEpoch: 0 }));
+  let snapshots = 0;
+  const get = vi.fn(async () => ({ ...tab,
+    lastAccessed: ++snapshots === scenario.freshAt ? now : tab.lastAccessed }));
+  const code = backgroundSource.slice(backgroundSource.indexOf('async function pruneManagedTabs('),
+    backgroundSource.indexOf('\nfunction maintain(', backgroundSource.indexOf('async function pruneManagedTabs(')));
+  const prune = vm.runInNewContext(`${code}\npruneManagedTabs`, {
+    Date: { now: () => now },
+    cleanConversationId: (id: string) => id, conversationForTab: () => conversationId,
+    conversationFromUrl: (url: string) => url.split('/c/')[1], tabDocuments: { '71': 'doc' },
+    tabEpochs: { '71': 0 }, ownsDocument: (source: { tab: number }) => source.tab === 71,
+    journalCountForConversation: () => 0, tabReply: proof, chrome: { tabs: { get, remove } }
+  });
+  const policy = { managedConversations: [conversationId], idleCloseAfterMs: 300_000,
+    retiredConversations: scenario.retired ? [conversationId] : [],
+    conversationActivityAt: { [conversationId]: now - 3_600_000 } };
+  const tabs = scenario.duplicate ? [tab, { ...tab, id: 72, lastAccessed: now }] : [tab];
+  const remaining = await prune(tabs, policy, new Set(), new Set([conversationId]));
+  expect(remove.mock.calls).toEqual(scenario.close ? [[71]] : []);
+  expect(remaining.map((held: { id: number }) => held.id)).toEqual(
+    scenario.close ? tabs.filter(held => held.id !== 71).map(held => held.id) : tabs.map(held => held.id));
+  if (scenario.freshAt === 1) expect(proof).not.toHaveBeenCalled();
+  if (scenario.freshAt === 2) expect(proof).toHaveBeenCalledOnce();
+  expect(policy.conversationActivityAt[conversationId]).toBe(now - 3_600_000);
 });

@@ -15,8 +15,7 @@ import { getStatus, isServerRunning, tunnelHealthBase } from './connection.js';
 
 import { effectiveCapabilities, getConfig } from './config.js';
 import { logInfo, logWarn } from './logger.js';
-import { lastRequestAt, lastCatalogResponse, selfTestHeaders } from './mcp/server.js';
-import { summarizeCatalogResponse, type CatalogObservation } from './mcp/catalog-observation.js';
+import { lastRequestAt, selfTestHeaders } from './mcp/server.js';
 import { lastToolCallAt } from './mcp/tools.js';
 import {
   ago,
@@ -192,7 +191,7 @@ export function describeMacOSDesktopAccess(
 }
 
 /** Runs an initialize + tools/list against our own loopback endpoint. */
-export async function checkLocalServer(url: string): Promise<Check> {
+async function checkLocalServer(url: string): Promise<Check> {
   const init = await fetchJson(url, {
     jsonrpc: '2.0',
     id: 1,
@@ -206,9 +205,8 @@ export async function checkLocalServer(url: string): Promise<Check> {
   if (init === null) {
     return { name: 'Local server', status: 'fail', ok: false, detail: 'No answer on the loopback address.' };
   }
-  const initObj = init.json as { result?: unknown; error?: { message?: string } } | null;
-  const handshake = summarizeCatalogResponse('initialize', 1, init.status, init.text);
-  if (handshake.outcome !== 'success' || !handshake.advertisesTools) {
+  const initObj = init.json as { error?: { message?: string } } | null;
+  if (init.status >= 400 || initObj?.error) {
     return {
       name: 'Local server',
       status: 'fail',
@@ -219,11 +217,10 @@ export async function checkLocalServer(url: string): Promise<Check> {
 
   const list = await fetchJson(url, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
   const listObj = list?.json as
-    | { result?: { tools?: Array<{ name?: unknown; inputSchema?: unknown }> }; error?: { message?: string } }
+    | { result?: { tools?: Array<{ name?: string }> }; error?: { message?: string } }
     | null;
   const tools = listObj?.result?.tools;
-  const listEnvelope = list?.json as { id?: unknown; jsonrpc?: unknown } | null;
-  if (!Array.isArray(tools) || (list?.status ?? 0) >= 400 || listObj?.error || listEnvelope?.id !== 2 || listEnvelope?.jsonrpc !== '2.0') {
+  if (!Array.isArray(tools)) {
     return {
       name: 'Local server',
       status: 'fail',
@@ -231,18 +228,7 @@ export async function checkLocalServer(url: string): Promise<Check> {
       detail: `tools/list failed: ${listObj?.error?.message ?? `HTTP ${list?.status ?? 0}`}`
     };
   }
-  if (!tools.length) return { name: 'Local server', status: 'fail', ok: false,
-    detail: 'The MCP server responds, but tools/list is empty. Check the enabled Core features or the external plugin connection. A connected tunnel alone does not make actions available.' };
-  const names: string[] = [];
-  for (const tool of tools) {
-    const schema = tool?.inputSchema;
-    if (!tool || typeof tool.name !== 'string' || !tool.name.trim() || names.includes(tool.name) ||
-      !schema || typeof schema !== 'object' || Array.isArray(schema) || (schema as { type?: unknown }).type !== 'object') {
-      return { name: 'Local server', status: 'fail', ok: false,
-        detail: 'tools/list returned an invalid or duplicate tool definition. ChatGPT may be unable to load this catalog.' };
-    }
-    names.push(tool.name);
-  }
+  const names = tools.map((t) => t.name).filter(Boolean);
   return {
     name: 'Local server',
     status: 'pass',
@@ -264,41 +250,46 @@ async function probeText(url: string): Promise<{ status: number; body: string } 
   }
 }
 
-/** Only an observed tools/list response proves what this app sent to an external client. */
-export function describeExternalCatalog(observation: (CatalogObservation & { at: number }) | null): Check {
-  const name = 'Core catalog sent to ChatGPT';
-  if (!observation || observation.outcome === 'unparsed') return { name, status: 'not-run', ok: null,
-    detail: 'No readable external Core tools/list response has been observed since Connect. A tunnel handshake or another HTTP request does not verify the Actions list. Refresh the Core plugin in ChatGPT, then run checks again.' };
-  if (observation.outcome !== 'success' || !observation.toolCount) return { name, status: 'fail', ok: false,
-    detail: `The last external Core tools/list response ${ago(observation.at)} was ${observation.outcome === 'success' ? 'empty' : observation.outcome} (HTTP ${observation.httpStatus}${observation.rpcErrorCode === undefined ? '' : `, RPC ${observation.rpcErrorCode}`}). Check the Core configuration and refresh its plugin actions.` };
-  return { name, status: 'pass', ok: true,
-    detail: `This app sent ${observation.toolCount} Core tools ${ago(observation.at)} (catalog ${observation.definitionHash ?? 'unknown'}). Check that they appear in ChatGPT's Actions list; this server response does not prove the host accepted or enabled them.` };
-}
-
-/** Request arrival cannot prove provider approval, tool success, or current permissions. */
-export function describeToolRequests(seen: number | null, called: number | null): Check {
+/**
+ * Tells apart "everything works" from the one failure that mimics it.
+ *
+ * When Developer mode is off in ChatGPT — and a ChatGPT update has been seen to switch
+ * it off on its own — the connector still handshakes: this app is asked to initialize
+ * and to list its tools, so every other check here goes green, while the model itself
+ * is refused with FORBIDDEN and never calls a single tool. Requests arriving with no
+ * tool call ever following is that exact fingerprint.
+ *
+ * It is not proof, because it also describes a connector nobody has used yet, so this
+ * never reports a hard failure. It names the suspicion, which is the part that costs
+ * an hour to work out from scratch.
+ */
+function developerMode(seen: number | null, called: number | null): Check {
   if (called !== null) {
     return {
-      name: 'ChatGPT tool calls',
+      name: 'ChatGPT allowed to use the tools',
       status: 'pass',
       ok: true,
-      detail: `A tool request reached this app ${ago(called)}. Check its recorded result for success or a specific refusal; other tools and future actions can have different permissions.`
+      detail: `Yes — ChatGPT last ran a tool ${ago(called)}, so Developer mode is on and the whole chain works.`
     };
   }
   if (seen === null) {
     return {
-      name: 'ChatGPT tool calls',
+      name: 'ChatGPT allowed to use the tools',
       status: 'not-run',
       ok: null,
       detail: 'Unknown — ChatGPT has not reached this app at all yet, so there is nothing to judge.'
     };
   }
   return {
-    name: 'ChatGPT tool calls',
+    name: 'ChatGPT allowed to use the tools',
     status: 'not-run',
     ok: null,
     detail:
-      'An external request arrived, but no tool call has reached this app yet. Ask ChatGPT to use Core read on a shared file. If no call arrives, check the Core Actions list, Developer mode, and the opened ChatGPT window for an approval prompt. The request alone does not identify the cause.'
+      'Cannot tell — ChatGPT connected and read the tool list, but has never run a tool. ' +
+      'That is normal if you have not asked it to do anything yet. If you have asked and it ' +
+      'answered “does not support developer MCPs”, the cause is on ChatGPT’s side: turn ' +
+      'Developer mode back on in ChatGPT → Settings → Apps & Connectors → Advanced. It can ' +
+      'switch itself off after a ChatGPT update.'
   };
 }
 
@@ -399,7 +390,7 @@ export async function runDiagnostics(): Promise<Diagnosis> {
     }
   }
 
-  // 6. Transport arrival and a completed catalog response are separate evidence.
+  // 6. The only end-to-end proof there is.
   const seen = lastRequestAt();
   checks.push({
     name: 'ChatGPT reaching this PC',
@@ -407,12 +398,13 @@ export async function runDiagnostics(): Promise<Diagnosis> {
     ok: seen === null ? null : true,
     detail:
       seen === null
-        ? 'No external request has arrived since the server started. Check the tunnel, selected workspace and Core plugin connection.'
+        ? 'No request has arrived since the server started. If ChatGPT reports an error, it never got as far as this app — that failure is on ChatGPT’s side, not here.'
         : `Last request from ChatGPT ${ago(seen)}.`
   });
 
-  checks.push(describeExternalCatalog(lastCatalogResponse('core')));
-  checks.push(describeToolRequests(seen, lastToolCallAt()));
+  // 7. The failure that looks exactly like success: ChatGPT connects, this app
+  //    answers, and the model is still not allowed to call anything.
+  checks.push(developerMode(seen, lastToolCallAt()));
 
   const broken = checks.filter((c) => c.status === 'fail');
   const incomplete = checks.filter((c) => c.status === 'not-run');

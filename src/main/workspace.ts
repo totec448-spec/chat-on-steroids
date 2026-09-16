@@ -32,6 +32,7 @@ import path from 'node:path';
 import { rawPromises as fs } from './rawfs.js';
 import type { Root } from '../shared/types.js';
 import { currentCall } from './mcp/call-context.js';
+import { isSkillPath } from './skill-access.js';
 
 /** How long a learned workspace survives without being used or renewed. */
 const WORKSPACE_TTL_MS = 12 * 60 * 60 * 1000;
@@ -98,6 +99,7 @@ export function currentWorkspace(): Workspace | null {
 
 /** Sets the workspace for an explicit key. Used by resume and by worker inheritance. */
 export function setWorkspaceFor(key: string, workspace: Omit<Workspace, 'at'>): void {
+  if (isSkillPath(workspace.real)) return;
   workspaces.set(key, { ...workspace, at: Date.now() });
   prune();
 }
@@ -304,6 +306,7 @@ export async function projectFolderOf(
  * already proven it can reach.
  */
 export async function learnWorkspace(resolved: { real: string; virtual: string; root: Root }): Promise<void> {
+  if (isSkillPath(resolved.real)) return;
   if (!workspaceKey()) return;
   let rootReal: string;
   try {

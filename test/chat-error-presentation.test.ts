@@ -74,9 +74,12 @@ it('only an exact completed boundary supersedes the error guidance', () => {
   const failed = error('Thinking failed');
   const end: SessionEvent = { seq: 3, time: 110, source: 'extension', kind: 'turn_end', turnId: 'turn-a', outcome: 'completed' };
   expect(chatErrorPresentation(failed, [failed, end]).next).toContain('later completed');
+  expect(chatErrorPresentation(failed, [failed, end])).toMatchObject({ title: 'Recovered after interruption', resolved: true });
   expect(chatErrorPresentation(failed, [failed, { ...end, turnId: 'turn-b' }]).next).not.toContain('later completed');
   expect(chatErrorPresentation(failed, [failed, { ...end, outcome: 'stopped' }]).next).not.toContain('later completed');
   const reopened: SessionEvent = { seq: 4, time: 120, source: 'app', kind: 'turn_start', turnId: 'turn-a' };
   expect(chatErrorPresentation(failed, [failed, end, reopened]).next).toContain('Work continued');
+  expect(chatErrorPresentation(failed, [failed, end, reopened]).resolved).toBe(false);
+  expect(chatErrorPresentation(failed, [failed, { ...end, turnId: 'turn-b' }]).resolved).toBe(false);
   expect(chatErrorPresentation(failed, [failed, { ...reopened, turnId: 'turn-b' }]).next).not.toContain('Work continued');
 });

@@ -21,7 +21,6 @@ const allCapabilities = (): Capabilities => ({
   move: true,
   deleteFile: true,
   command: true,
-  saveArtifact: true,
   screen: true,
   control: true,
   clipboardRead: true,
@@ -43,7 +42,7 @@ describe('cross-platform product surface', () => {
     expect(surfaceIsUseful('desktop', switchedOn.capabilities, 'darwin', '21.4.0')).toBe(true);
   });
 
-  it('keeps Core fully usable while omitting Desktop on Linux', () => {
+  it('keeps Core and extension browser control usable on Linux without native desktop input', () => {
     const config = defaultConfig('linux');
     expect(config.capabilities).toMatchObject({
       browse: true,
@@ -55,22 +54,22 @@ describe('cross-platform product surface', () => {
       move: true,
       deleteFile: true,
       command: true,
-      screen: false,
-      control: false,
+      screen: true,
+      control: true,
       clipboardRead: false,
       clipboardWrite: false
     });
     expect(surfaceIsUseful('core', config.capabilities, 'linux')).toBe(true);
-    expect(surfaceIsUseful('desktop', allCapabilities(), 'linux')).toBe(false);
+    expect(surfaceIsUseful('desktop', allCapabilities(), 'linux')).toBe(true);
   });
 
-  it('masks stored Windows Desktop grants at runtime without deleting the stored choices', () => {
+  it('masks native clipboard grants on Linux while retaining browser screen/control grants', () => {
     const stored = allCapabilities();
     const config = { ...defaultConfig('linux'), capabilities: stored };
     const live = effectiveCapabilities(config, 'linux');
 
-    expect(live.screen).toBe(false);
-    expect(live.control).toBe(false);
+    expect(live.screen).toBe(true);
+    expect(live.control).toBe(true);
     expect(live.clipboardRead).toBe(false);
     expect(live.clipboardWrite).toBe(false);
     expect(live.command).toBe(true);
@@ -115,7 +114,7 @@ describe('cross-platform product surface', () => {
     expect(instructions).toContain(platform === 'darwin' ? 'Host: macOS.' : 'Host: Linux.');
     expect(instructions).toContain('normal POSIX shell');
     expect(instructions).not.toMatch(/PowerShell|Get-ChildItem|Windows desktop|Native Windows paths/);
-    expect(instructions.includes('Chat On Steroids Desktop')).toBe(platform === 'darwin');
+    expect(instructions).toContain('Chat On Steroids Desktop');
   });
 
   it('retains the Windows-specific shell guidance on Windows', () => {

@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import sharp from 'sharp';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { initSessionStore } from '../src/main/session/store.js';
@@ -44,4 +45,18 @@ it('prunes only expired unreferenced staging while durable input members survive
   await stageInputAttachment({ text: 'new' }, new Set([keep.id]));
   await validateInputAttachments([keep]);
   await expect(validateInputAttachments([discard])).rejects.toThrow();
+});
+it('releases thumbnail source files so expired image originals can be pruned immediately', async () => {
+  const bytes = await sharp({ create: { width: 12, height: 12, channels: 3, background: '#437b79' } }).webp().toBuffer();
+  const cachedFiles = sharp.cache().files.current;
+  const image = await stageInputAttachment({ name: 'reference.webp', bytes }, new Set());
+  expect(image.preview).toMatch(/^data:image\/webp;base64,/);
+  expect(sharp.cache().files.current).toBe(cachedFiles);
+  expect(Buffer.from(await readInputAttachmentChunk(image, 0), 'base64')).toEqual(bytes);
+  const original = path.join(directory, 'input-attachments', image.id);
+  const old = new Date(Date.now() - 48 * 3600000);
+  await fs.utimes(original, old, old);
+  await stageInputAttachment({ text: 'next draft' }, new Set());
+  await expect(fs.stat(original)).rejects.toMatchObject({ code: 'ENOENT' });
+  await expect(fs.stat(original + '.json')).rejects.toMatchObject({ code: 'ENOENT' });
 });

@@ -1,187 +1,191 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {
   importSkillFile,
-  initSkills,
-  isSafeSkillId,
+  initSkillsPath,
   listSkills,
-  MAX_SKILL_BYTES,
-  MAX_SKILL_DIRECTORY_ENTRIES,
   readSkill,
-  removeSkill,
-  skillsDirectory,
+  skillCatalogInstructions,
+  skillsDirectory
 } from '../src/main/skills.js';
-import { DIR_LINK, makeTempDir, removeTempDir } from './helpers.js';
+import { MAX_SKILL_BYTES, MAX_SKILLS } from '../src/shared/skills.js';
 
-let root: string;
+let userData = '';
+let sources = '';
 
 beforeEach(async () => {
-  root = await makeTempDir('cos-skills-');
-  await initSkills(root);
+  userData = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'cos-skills-')));
+  sources = path.join(userData, 'sources');
+  await fs.mkdir(sources);
+  await initSkillsPath(userData);
 });
 
 afterEach(async () => {
-  await removeTempDir(root);
+  if (userData) await fs.rm(userData, { recursive: true, force: true });
 });
 
-it('initializes an empty library with no builtin skills', async () => {
-  expect(skillsDirectory()).toBe(path.join(root, 'skills'));
-  expect(await fs.readdir(path.join(root, 'skills'))).toEqual([]);
-  expect(await listSkills()).toEqual({ directory: path.join(root, 'skills'), skills: [], errors: [] });
-});
+async function sourceFile(relative: string, contents: string | Buffer): Promise<string> {
+  const filename = path.join(sources, relative);
+  await fs.mkdir(path.dirname(filename), { recursive: true });
+  await fs.writeFile(filename, contents);
+  return filename;
+}
 
-it('imports, parses and rereads quoted and folded frontmatter without executing metadata', async () => {
-  const source = path.join(root, 'selected.md');
-  const text = [
-    '---',
-    'name: "Deploy Notes"',
-    'description: >-',
-    '  Safe guidance for',
-    '  release checks.',
-    'hook: $(Write-Output should-never-run)',
-    '---',
-    '# Instructions',
-    'Run the checks described here.',
-    '',
-  ].join('\n');
-  await fs.writeFile(source, text, 'utf8');
-
-  expect(await importSkillFile(source)).toEqual({
-    id: 'deploy-notes',
-    name: 'Deploy Notes',
-    description: 'Safe guidance for release checks.',
+describe('managed Skills store', () => {
+  it('starts empty and publishes only the managed path contract', async () => {
+    expect(skillsDirectory()).toBe(path.join(userData, 'skills'));
+    expect(await listSkills()).toEqual([]);
+    const instructions = skillCatalogInstructions();
+    expect(instructions).toContain('# Installed skills');
+    expect(instructions).toContain(JSON.stringify(path.join(userData, 'skills')));
+    expect(instructions).toContain('No skills are installed');
+    expect(instructions).toContain('existing filesystem and command capabilities');
   });
-  expect(await readSkill('deploy-notes')).toEqual({
-    id: 'deploy-notes',
-    name: 'Deploy Notes',
-    description: 'Safe guidance for release checks.',
-    text,
+
+  it('imports exact text exclusively and uses simple inert frontmatter metadata', async () => {
+    const text = [
+      '---',
+      'name: Doubt Driven Development',
+      'description: Challenge assumptions before implementing.',
+      'license: MIT',
+      '---',
+      '# Fallback title',
+      '',
+      'Fallback description.',
+      '',
+      '## Procedure',
+      'Use the entire file.'
+    ].join('\r\n');
+    const source = await sourceFile(path.join('doubt-driven-development', 'SKILL.md'), text);
+    const summary = await importSkillFile(source);
+    expect(summary).toEqual({
+      id: 'doubt-driven-development',
+      name: 'Doubt Driven Development',
+      description: 'Challenge assumptions before implementing.',
+      path: '/skills/doubt-driven-development/SKILL.md'
+    });
+    expect(await listSkills()).toEqual([summary]);
+    expect(await readSkill(summary.id)).toEqual({ summary, text });
+    expect(await fs.readFile(path.join(userData, 'skills', summary.id, 'SKILL.md'), 'utf8')).toBe(text);
+    const advertised = skillCatalogInstructions();
+    expect(advertised).toContain(JSON.stringify(summary));
+    expect(advertised).not.toContain('Use the entire file');
+    expect(advertised).toContain(JSON.stringify(path.join(userData, 'skills')));
   });
-  expect((await listSkills()).skills).toEqual([
-    { id: 'deploy-notes', name: 'Deploy Notes', description: 'Safe guidance for release checks.' },
-  ]);
-});
 
-it('accepts plain Markdown/text, persists source-name fallback, and keeps the selected text whole', async () => {
-  const markdown = path.join(root, 'guide.md');
-  await fs.writeFile(markdown, '# Better Guide\n\nDo this carefully.\n', 'utf8');
-  expect(await importSkillFile(markdown)).toEqual({ id: 'better-guide', name: 'Better Guide', description: 'Do this carefully.' });
-  expect((await readSkill('better-guide')).text).toBe('# Better Guide\n\nDo this carefully.\n');
-
-  const plain = path.join(root, 'My Plain Skill.txt');
-  const original = 'Use this exact instruction text.\nSecond line stays here.\n';
-  await fs.writeFile(plain, original, 'utf8');
-  expect(await importSkillFile(plain)).toEqual({
-    id: 'my-plain-skill',
-    name: 'My Plain Skill',
-    description: 'Use this exact instruction text. Second line stays here.',
+  it('falls back to heading and prose when relevant frontmatter is not simple scalar metadata', async () => {
+    const source = await sourceFile('review.md', [
+      '---',
+      'name: [not, a, scalar]',
+      'description: |',
+      '  hidden multiline metadata',
+      '---',
+      '# Evidence Review',
+      '',
+      'Read the evidence before changing code.',
+      'Keep exact ownership.'
+    ].join('\n'));
+    expect(await importSkillFile(source)).toEqual({
+      id: 'review',
+      name: 'Evidence Review',
+      description: 'Read the evidence before changing code. Keep exact ownership.',
+      path: '/skills/review/SKILL.md'
+    });
   });
-  const installed = await readSkill('my-plain-skill');
-  expect(installed.name).toBe('My Plain Skill');
-  expect(installed.text).toContain(original);
-  expect(installed.text.endsWith(original)).toBe(true);
-});
 
-it('refreshes directly from disk and refuses collisions instead of overwriting', async () => {
-  const skillDir = path.join(root, 'skills', 'disk-skill');
-  await fs.mkdir(skillDir);
-  await fs.writeFile(path.join(skillDir, 'SKILL.md'), '---\nname: Disk Skill\ndescription: Fresh from disk\n---\nBody\n');
-  expect((await listSkills()).skills).toEqual([
-    { id: 'disk-skill', name: 'Disk Skill', description: 'Fresh from disk' },
-  ]);
+  it('derives a stable ID from a plain text filename and refuses duplicate publication', async () => {
+    const one = await sourceFile('My useful skill.txt', 'Plain instructions without a heading.\nContinue here.');
+    const two = await sourceFile('my-useful-skill.md', '# Replacement\n\nMust not replace the first file.');
+    expect((await importSkillFile(one)).id).toBe('my-useful-skill');
+    await expect(importSkillFile(two)).rejects.toThrow(/already exists/i);
+    expect(await listSkills()).toHaveLength(1);
+    expect((await readSkill('my-useful-skill')).text).toBe('Plain instructions without a heading.\nContinue here.');
+  });
 
-  const source = path.join(root, 'Disk Skill.md');
-  await fs.writeFile(source, '# Disk Skill\nreplacement');
-  await expect(importSkillFile(source)).rejects.toThrow(/already exists/);
-  expect((await fs.readFile(path.join(skillDir, 'SKILL.md'), 'utf8'))).toContain('Fresh from disk');
-});
+  it('serializes concurrent imports so an ID is published exactly once', async () => {
+    const source = await sourceFile('same.md', '# Same\n\nOne copy.');
+    const results = await Promise.allSettled([importSkillFile(source), importSkillFile(source)]);
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter(result => result.status === 'rejected')).toHaveLength(1);
+    expect(await listSkills()).toHaveLength(1);
+    expect(await fs.readdir(path.join(userData, 'skills'))).toEqual(['same']);
+  });
 
-it('reserves safe ids and rejects binary, invalid UTF-8 and oversized imports', async () => {
-  expect(isSafeSkillId('good-skill')).toBe(true);
-  expect(isSafeSkillId('prompt')).toBe(false);
-  expect(isSafeSkillId('../escape')).toBe(false);
-  expect(isSafeSkillId('CON')).toBe(false);
+  it('rejects binary, NUL, oversized, invalid source and reserved IDs without residue', async () => {
+    const binary = await sourceFile('binary.md', Buffer.from([0xff, 0xfe, 0xfd]));
+    const nul = await sourceFile('zero.md', 'before\0after');
+    const oversized = await sourceFile('large.md', Buffer.alloc(MAX_SKILL_BYTES + 1, 0x61));
+    const tooManyCharacters = await sourceFile('characters.md', 'a'.repeat(96_001));
+    const invalid = await sourceFile('...txt', 'text');
+    const prompt = await sourceFile('prompt.md', 'reserved alias');
+    const windows = await sourceFile('con.txt', 'reserved device');
+    const windowsExt = await sourceFile('LPT1.notes.md', 'reserved device with extension');
+    const folder = path.join(sources, 'folder.md');
+    await fs.mkdir(folder);
+    await expect(importSkillFile(binary)).rejects.toThrow(/UTF-8 text/i);
+    await expect(importSkillFile(nul)).rejects.toThrow(/text/i);
+    await expect(importSkillFile(oversized)).rejects.toThrow(/128,000 bytes/i);
+    await expect(importSkillFile(tooManyCharacters)).rejects.toThrow(/96,000 characters/i);
+    await expect(importSkillFile(invalid)).rejects.toThrow(/skill id/i);
+    await expect(importSkillFile(prompt)).rejects.toThrow(/reserved/i);
+    await expect(importSkillFile(windows)).rejects.toThrow(/reserved/i);
+    await expect(importSkillFile(windowsExt)).rejects.toThrow(/reserved/i);
+    await expect(importSkillFile(folder)).rejects.toThrow(/file/i);
+    expect(await listSkills()).toEqual([]);
+    expect(await fs.readdir(path.join(userData, 'skills'))).toEqual([]);
+  });
 
-  const reserved = path.join(root, 'prompt.md');
-  await fs.writeFile(reserved, '# prompt\n');
-  await expect(importSkillFile(reserved)).rejects.toThrow(/safe skill id/);
+  it('discovers complete direct files while ignoring links, temp files and unrelated layouts', async () => {
+    const root = path.join(userData, 'skills');
+    await fs.mkdir(path.join(root, 'external'));
+    await fs.writeFile(path.join(root, 'external', 'SKILL.md'), '# External\n\nFound on the next scan.');
+    await fs.writeFile(path.join(root, 'loose.md'), '# Loose');
+    await fs.mkdir(path.join(root, '.import-stale'));
+    await fs.mkdir(path.join(root, 'nested'));
+    await fs.mkdir(path.join(root, 'nested', 'deeper'));
+    await fs.writeFile(path.join(root, 'nested', 'deeper', 'SKILL.md'), '# Too deep');
+    const outsideDirectory = path.join(sources, 'linked-source');
+    await fs.mkdir(outsideDirectory);
+    await fs.writeFile(path.join(outsideDirectory, 'SKILL.md'), '# Outside\n\nMust not follow a link.');
+    await fs.symlink(outsideDirectory, path.join(root, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
+    expect(await listSkills()).toEqual([{
+      id: 'external',
+      name: 'External',
+      description: 'Found on the next scan.',
+      path: '/skills/external/SKILL.md'
+    }]);
+    await expect(readSkill('nested')).rejects.toThrow(/not found/i);
+  });
 
-  const binary = path.join(root, 'binary.md');
-  await fs.writeFile(binary, Buffer.from([0x23, 0x20, 0x78, 0x0a, 0x00, 0x01]));
-  await expect(importSkillFile(binary)).rejects.toThrow(/binary|control/);
+  it('fails closed instead of silently omitting a valid 65th skill', async () => {
+    const root = path.join(userData, 'skills');
+    for (let index = 0; index <= MAX_SKILLS; index++) {
+      const id = `skill-${String(index).padStart(2, '0')}`;
+      await fs.mkdir(path.join(root, id));
+      await fs.writeFile(path.join(root, id, 'SKILL.md'), `# ${id}\n\nInstruction ${index}.`);
+    }
+    await expect(listSkills()).rejects.toThrow(/64 skills/i);
+  });
 
-  const invalidUtf8 = path.join(root, 'invalid.md');
-  await fs.writeFile(invalidUtf8, Buffer.from([0x23, 0x20, 0x78, 0x0a, 0xc3, 0x28]));
-  await expect(importSkillFile(invalidUtf8)).rejects.toThrow(/UTF-8/);
+  it('bounds unrelated directory enumeration instead of scanning an arbitrary library', async () => {
+    const root = path.join(userData, 'skills');
+    await Promise.all(Array.from({ length: 257 }, (_, index) =>
+      fs.writeFile(path.join(root, `.unrelated-${String(index).padStart(3, '0')}`), 'x')));
+    await expect(listSkills()).rejects.toThrow(/too many entries/i);
+  });
 
-  const oversized = path.join(root, 'large.md');
-  await fs.writeFile(oversized, Buffer.alloc(MAX_SKILL_BYTES + 1, 0x61));
-  await expect(importSkillFile(oversized)).rejects.toThrow(/exceeds/);
-});
-
-it('reports malformed on-disk skills instead of silently losing them', async () => {
-  const invalid = path.join(root, 'skills', 'Bad Name');
-  const missing = path.join(root, 'skills', 'missing-file');
-  const binary = path.join(root, 'skills', 'binary-skill');
-  await fs.mkdir(invalid);
-  await fs.mkdir(missing);
-  await fs.mkdir(binary);
-  await fs.writeFile(path.join(binary, 'SKILL.md'), Buffer.from([0x00, 0x01]));
-
-  const library = await listSkills();
-  expect(library.skills).toEqual([]);
-  expect(library.errors.join('\n')).toMatch(/Bad Name/);
-  expect(library.errors.join('\n')).toMatch(/missing SKILL\.md/);
-  expect(library.errors.join('\n')).toMatch(/binary|control/);
-});
-
-it('rejects a skill directory link that escapes the managed library for list, read and remove', async () => {
-  const outside = path.join(root, 'outside-skill');
-  await fs.mkdir(outside);
-  await fs.writeFile(path.join(outside, 'SKILL.md'), '# Outside\n');
-  const linked = path.join(root, 'skills', 'linked-skill');
-  await fs.symlink(outside, linked, DIR_LINK);
-
-  expect((await listSkills()).errors.join('\n')).toMatch(/linked-skill.*unsafe/i);
-  await expect(readSkill('linked-skill')).rejects.toThrow(/unsafe/);
-  await expect(removeSkill('linked-skill')).rejects.toThrow(/unsafe/);
-  expect(await fs.readFile(path.join(outside, 'SKILL.md'), 'utf8')).toBe('# Outside\n');
-});
-
-it('keeps the initialized directory path pinned but rejects a later root link replacement', async () => {
-  const directory = path.join(root, 'skills');
-  const original = path.join(root, 'skills-original');
-  const replacement = path.join(root, 'replacement');
-  await fs.rename(directory, original);
-  await fs.mkdir(replacement);
-  await fs.symlink(replacement, directory, DIR_LINK);
-
-  expect(skillsDirectory()).toBe(directory);
-  expect((await listSkills()).errors.join('\n')).toMatch(/directory is unsafe|changed on disk/i);
-  await expect(readSkill('anything')).rejects.toThrow(/directory is unsafe|changed on disk/i);
-});
-
-it('removes only SKILL.md and preserves unexpected supporting files', async () => {
-  const directory = path.join(root, 'skills', 'with-support');
-  await fs.mkdir(directory);
-  await fs.writeFile(path.join(directory, 'SKILL.md'), '# With Support\nMain text\n');
-  await fs.writeFile(path.join(directory, 'notes.txt'), 'keep me');
-
-  await removeSkill('with-support');
-  await expect(fs.stat(path.join(directory, 'SKILL.md'))).rejects.toThrow();
-  expect(await fs.readFile(path.join(directory, 'notes.txt'), 'utf8')).toBe('keep me');
-  expect((await listSkills()).errors.join('\n')).toMatch(/with-support.*missing SKILL\.md/i);
-});
-
-it('bounds directory enumeration and reports that unscanned entries exist', async () => {
-  const directory = path.join(root, 'skills');
-  await Promise.all(
-    Array.from({ length: MAX_SKILL_DIRECTORY_ENTRIES + 1 }, (_, index) =>
-      fs.mkdir(path.join(directory, `entry-${String(index).padStart(4, '0')}`)),
-    ),
-  );
-  const library = await listSkills();
-  expect(library.skills).toEqual([]);
-  expect(library.errors.join('\n')).toMatch(new RegExp(`more than ${MAX_SKILL_DIRECTORY_ENTRIES} entries`));
+  it('rejects an app-managed root redirected through a symlink', async () => {
+    const otherUserData = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-skills-link-'));
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-skills-outside-'));
+    try {
+      await fs.symlink(outside, path.join(otherUserData, 'skills'), process.platform === 'win32' ? 'junction' : 'dir');
+      await expect(initSkillsPath(otherUserData)).rejects.toThrow(/managed skills folder/i);
+    } finally {
+      await initSkillsPath(userData);
+      await fs.rm(otherUserData, { recursive: true, force: true });
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
 });

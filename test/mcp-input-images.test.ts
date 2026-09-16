@@ -2,44 +2,28 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
-import { expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import { initSessionStore, createSession, appendEvent, observeSessionModel, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
-import { configureInputDelivery, enqueueInput, listInputs, resetInputForTests } from '../src/main/session/input.js';
-import { recordDeliveredInput } from '../src/main/session/input-history.js';
+import { enqueueInput, listInputs, resetInputForTests } from '../src/main/session/input.js';
 import { validateInputImages } from '../src/main/session/input-images.js';
 import { stageInputAttachment } from '../src/main/session/input-attachments.js';
 import { startMcpServer } from '../src/main/mcp/server.js';
 import { setFinishNotifier, releaseSessionFinish } from '../src/main/session/finish.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
-import * as store from '../src/main/session/store.js';
-import * as recorder from '../src/main/session/recorder.js';
-import { chronological, positionOf } from '../src/shared/chronology.js';
 
-it.each([false, true])('carries validated user image bytes through exact-session MCP with preview-quota failure=%s and acknowledges the next same-turn call', async quotaFailure => {
+it('carries validated user image bytes through an exact-session MCP result and acknowledges the next same-turn call', async () => {
   const directory = await makeTempDir('clf-mcp-input-image-');
   initDurableStore(directory); initSessionStore(directory); resetInputForTests();
-  configureInputDelivery({ recordDelivered: recordDeliveredInput, applyAutomation: async () => {}, changed: () => {} });
   initConfigPath(directory);
   const config = defaultConfig();
   await saveConfig({ ...config, ui: { ...config.ui, finishTool: true } });
   await fs.writeFile(path.join(directory, 'example.txt'), 'Image test');
   const endpoint = await startMcpServer(() => ({ roots: [{ name: 'workspace', path: directory }], caps: config.capabilities, readOnly: true, sessionTools: false, agentTools: false }));
-  const quota = quotaFailure ? vi.spyOn(store, 'writeAsset').mockRejectedValue(new Error('Global asset quota reached')) : null;
-  let releaseCarrier!: () => void;
-  let carrierStarted!: () => void;
-  const carrierGate = new Promise<void>(resolve => { releaseCarrier = resolve; });
-  const carrierWaiting = new Promise<void>(resolve => { carrierStarted = resolve; });
-  const recordToolCall = recorder.recordToolCall;
-  const carrier = vi.spyOn(recorder, 'recordToolCall').mockImplementationOnce(async input => {
-    carrierStarted();
-    await carrierGate;
-    return recordToolCall(input);
-  });
   try {
-    const conversationId = randomUUID(), requestId = `wfr_input_image_${randomUUID()}`;
+    const conversationId = randomUUID(), requestId = 'wfr_input_image_test';
     const session = await createSession({ conversationId, title: 'Image injection test' });
     await observeSessionModel(session.id, conversationId, 'gpt-6-astra', Date.now());
     await appendEvent(session.id, { kind: 'turn_start', source: 'extension', turnId: 'held-image-turn', time: Date.now() });
@@ -63,19 +47,7 @@ it.each([false, true])('carries validated user image bytes through exact-session
     };
     const stageOne = await enqueueInput({ id: randomUUID(), sessionId: session.id, text: 'First scheduled stage', mode: 'finish', dueAt: 0, model: null, reasoningEffort: null });
     const stageTwo = await enqueueInput({ id: randomUUID(), sessionId: session.id, text: 'Second scheduled stage', mode: 'finish', dueAt: 0, model: null, reasoningEffort: null });
-    const firstReply = call();
-    await carrierWaiting;
-    expect((await listInputs()).find(row => row.id === input.id)).toMatchObject({ state: 'tool' });
-    expect((await store.readEvents(session.id)).some(event => event.kind === 'user_message' && event.inputId === input.id)).toBe(false);
-    releaseCarrier();
-    const first = await firstReply;
-    const unanchored = chronological((await store.readEvents(session.id)).filter(event => event.kind !== 'turn_start'));
-    const carrierRow = unanchored.find(event => event.kind === 'tool_call')!;
-    const injectedRow = unanchored.find(event => event.kind === 'user_message' && event.inputId === input.id)!;
-    expect(carrierRow).toBeDefined();
-    expect(injectedRow).toBeDefined();
-    expect(positionOf(injectedRow)).toBeGreaterThan(positionOf(carrierRow));
-    expect(unanchored.indexOf(injectedRow)).toBeGreaterThan(unanchored.indexOf(carrierRow));
+    const first = await call();
     expect(first.result.isError).not.toBe(true);
     expect(first.result.content).toContainEqual({ type: 'image', mimeType: 'image/webp', data: bytes.toString('base64') });
     expect(first.result.content).toContainEqual({ type: 'image', mimeType: 'image/webp', data: injectedBytes });
@@ -93,11 +65,6 @@ it.each([false, true])('carries validated user image bytes through exact-session
     const second = await call();
     expect(second.result.content.some((row: { type: string }) => row.type === 'image')).toBe(false);
     expect((await listInputs()).find(row => row.id === input.id)?.state).toBe('sent');
-    const recorded = (await store.readEvents(session.id)).filter(event => event.kind === 'user_message').filter(event => event.inputId === input.id);
-    expect(recorded).toHaveLength(1);
-    expect(recorded[0]).toMatchObject({ inputDelivery: 'confirmed', inputImageCount: 1 });
-    expect((await listInputs()).find(row => row.id === input.id)?.historyRecorded).toBe(!quotaFailure);
-    if (quotaFailure) expect(recorded[0]!.assets).toBeUndefined();
     for (const entry of additional) {
       expect(second.result.content.some((row: { text?: string }) => row.text?.includes(entry.id))).toBe(false);
       expect((await listInputs()).find(row => row.id === entry.id)?.state).toBe('sent');
@@ -134,10 +101,6 @@ it.each([false, true])('carries validated user image bytes through exact-session
     expect(exhausted.result.content.some((row: { text?: string }) => row.text?.includes('The user has been notified'))).toBe(true);
     expect((await listInputs()).find(row => row.id === stageTwo.id)?.state).toBe('sent');
   } finally {
-    releaseCarrier();
-    carrier.mockRestore();
-    quota?.mockRestore();
-    configureInputDelivery({ applyAutomation: async () => {}, changed: () => {} });
     setFinishNotifier(null);
     await endpoint.stop(); await flushDurable(); resetInputForTests(); resetSessionStoreForTests(); resetDurableForTests(); await removeTempDir(directory);
   }

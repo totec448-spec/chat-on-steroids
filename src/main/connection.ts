@@ -134,7 +134,7 @@ function describeSurfaces(): SurfaceStatus[] {
 
 function desktopUnavailableDetail(id: SurfaceId): string {
   if (id === 'desktop' && !desktopAutomationSupported()) {
-    return 'Desktop automation requires Windows or macOS; Linux is not yet supported. Core files, terminal, sessions and sub-agents remain available.';
+    return 'Enable screen or input access for browser control through the companion extension. Native desktop input requires Windows or supported macOS.';
   }
   return id === 'desktop'
     ? 'Turn on "See the screen", "Control mouse and keyboard" or a clipboard permission to use this connector.'
@@ -155,8 +155,7 @@ function toolsFor(id: SurfaceId): string[] {
   if (!caps.command && caps.search) tools.push('find');
   if (caps.create || caps.edit || caps.move || caps.deleteFile) tools.push('apply_patch');
   if (caps.command) tools.push('exec_command', 'write_stdin');
-  if (caps.saveArtifact) tools.push('download_artifact');
-  if (config.sessions.record) tools.push('session');
+  if (config.sessions.record) tools.push('update_plan');
   if (config.multiAgent.enabled) tools.push('agents');
   return tools;
 }
