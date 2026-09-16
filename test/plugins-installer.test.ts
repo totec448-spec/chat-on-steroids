@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { zipSync, strToU8 } from 'fflate';
@@ -75,4 +75,27 @@ it('rejects ambiguous Python pins and pins attached to a different source kind',
     [{ package: 'some-sdk', version: '1.0.0' }, { package: 'Some_Sdk', version: '2.0.0' }],
   ]) await expect(installSource({ kind: 'python', package: 'mcp-server-fetch', version: '2025.4.7', dependencies }, path.join(dir, 'install'))).rejects.toThrow('repeat or replace');
   await expect(installSource({ kind: 'npm', package: 'fixture', version: '1.0.0', dependencies: [{ package: 'mcp', version: '1.30.0' }] }, path.join(dir, 'install'))).rejects.toThrow('Python source');
+});
+
+it.skipIf(process.platform === 'win32')('keeps npm package materialization inside its generation when an ancestor is an npm project', async () => {
+  const ancestor = path.join(dir, 'home-project');
+  const generation = path.join(ancestor, 'plugins', 'plugin-id', 'g-test');
+  const fakeBin = path.join(dir, 'bin');
+  await fs.mkdir(path.join(ancestor, 'node_modules'), { recursive: true });
+  await fs.mkdir(fakeBin, { recursive: true });
+  await fs.writeFile(path.join(ancestor, 'package.json'), JSON.stringify({ name: 'ancestor-project' }));
+
+  const npm = path.join(fakeBin, 'npm');
+  await fs.writeFile(npm, `#!${process.execPath}\nconst fs = require('node:fs');\nconst path = require('node:path');\nconst args = process.argv.slice(2);\nconst prefixAt = args.indexOf('--prefix');\nlet prefix = prefixAt >= 0 ? args[prefixAt + 1] : process.cwd();\nif (prefixAt < 0) {\n  while (path.dirname(prefix) !== prefix && !fs.existsSync(path.join(prefix, 'package.json')) && !fs.existsSync(path.join(prefix, 'node_modules'))) prefix = path.dirname(prefix);\n}\nconst packageDir = path.join(prefix, 'node_modules', 'fixture-mcp');\nfs.mkdirSync(packageDir, { recursive: true });\nfs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ version: '1.2.3', license: 'MIT', bin: 'server.js' }));\nfs.writeFileSync(path.join(packageDir, 'server.js'), '');\n`);
+  await fs.chmod(npm, 0o700);
+
+  vi.stubEnv('PATH', `${fakeBin}${path.delimiter}${path.dirname(process.execPath)}`);
+  try {
+    const launch = await installSource({ kind: 'npm', package: 'fixture-mcp', version: '1.2.3' }, generation);
+    expect(launch.version).toBe('1.2.3');
+    expect(launch.args[0]).toBe(path.join(generation, 'node_modules', 'fixture-mcp', 'server.js'));
+    await expect(fs.stat(path.join(ancestor, 'node_modules', 'fixture-mcp'))).rejects.toThrow();
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });
