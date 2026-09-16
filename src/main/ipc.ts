@@ -44,6 +44,7 @@ import {
   type AppState,
   type Config
 } from '../shared/types.js';
+import type { BrowserUseBounds } from '../shared/browser-use.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS } from './config.js';
@@ -97,6 +98,19 @@ import { tokenPressure } from '../shared/session.js';
 import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
 import { openInPreferredBrowser } from './browser.js';
+import {
+  browserUseHistory,
+  browserUseState,
+  closeBrowserUseTab,
+  hideBrowserUsePanel,
+  layoutBrowserUsePanel,
+  navigateBrowserUseTab,
+  noteBrowserUseUserTakeover,
+  openBrowserUseTab,
+  selectBrowserUseTab,
+  settleBrowserUsePermission,
+  showBrowserUsePanel
+} from './browser-use.js';
 import { markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
 import {
   getMacOSDesktopAccess,
@@ -910,6 +924,71 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { factor } = z.object({ factor: z.number().min(0.75).max(1.5) }).parse(payload);
     getWindow()?.webContents.setZoomFactor(factor * UI_BASE_ZOOM);
     return factor;
+  });
+
+  const browserUseBoundsSchema = z.object({
+    x: z.number().finite().min(0).max(100_000),
+    y: z.number().finite().min(0).max(100_000),
+    width: z.number().finite().positive().max(100_000),
+    height: z.number().finite().positive().max(100_000)
+  }).strict();
+  const scaleBrowserUseBounds = (value: BrowserUseBounds): BrowserUseBounds => {
+    const win = getWindow();
+    const zoom = win?.webContents.getZoomFactor() ?? UI_BASE_ZOOM;
+    return {
+      x: Math.round(value.x * zoom),
+      y: Math.round(value.y * zoom),
+      width: Math.max(1, Math.round(value.width * zoom)),
+      height: Math.max(1, Math.round(value.height * zoom))
+    };
+  };
+  ipcMain.on('browserUse:layout', (_event, payload: unknown) => {
+    const parsed = browserUseBoundsSchema.safeParse(payload);
+    if (!parsed.success) return;
+    layoutBrowserUsePanel(scaleBrowserUseBounds(parsed.data));
+  });
+  ipcMain.on('browserUse:layoutSync', (event, payload: unknown) => {
+    const parsed = browserUseBoundsSchema.safeParse(payload);
+    if (!parsed.success) {
+      event.returnValue = false;
+      return;
+    }
+    try {
+      layoutBrowserUsePanel(scaleBrowserUseBounds(parsed.data));
+      event.returnValue = true;
+    } catch {
+      event.returnValue = false;
+    }
+  });
+  handle('browserUse:panel', async (payload) => {
+    const request = z.discriminatedUnion('action', [
+      z.object({ action: z.literal('query') }).strict(),
+      z.object({ action: z.literal('show'), bounds: browserUseBoundsSchema }).strict(),
+      z.object({ action: z.literal('hide') }).strict(),
+      z.object({ action: z.literal('create'), url: z.string().max(4096).optional() }).strict(),
+      z.object({ action: z.literal('select'), tabId: z.number().int().positive() }).strict(),
+      z.object({ action: z.literal('close'), tabId: z.number().int().positive() }).strict(),
+      z.object({ action: z.literal('navigate'), tabId: z.number().int().positive(), url: z.string().min(1).max(4096) }).strict(),
+      z.object({ action: z.literal('back'), tabId: z.number().int().positive() }).strict(),
+      z.object({ action: z.literal('forward'), tabId: z.number().int().positive() }).strict(),
+      z.object({ action: z.literal('reload'), tabId: z.number().int().positive() }).strict(),
+      z.object({ action: z.literal('approve'), id: z.string().uuid(), decision: z.enum(['once', 'always', 'deny']) }).strict()
+    ]).parse(payload);
+    if (request.action === 'query') return browserUseState();
+    if (request.action === 'hide' || request.action === 'create' || request.action === 'select' || request.action === 'close' ||
+        request.action === 'navigate' || request.action === 'back' || request.action === 'forward' || request.action === 'reload') {
+      noteBrowserUseUserTakeover();
+    }
+    if (request.action === 'hide') return hideBrowserUsePanel();
+    if (request.action === 'create') return openBrowserUseTab(request.url, 'user');
+    if (request.action === 'select') return selectBrowserUseTab(request.tabId);
+    if (request.action === 'close') return closeBrowserUseTab(request.tabId);
+    if (request.action === 'navigate') return navigateBrowserUseTab(request.tabId, request.url, 'user');
+    if (request.action === 'back' || request.action === 'forward' || request.action === 'reload') {
+      return browserUseHistory(request.tabId, request.action, 'user');
+    }
+    if (request.action === 'approve') return settleBrowserUsePermission(request.id, request.decision);
+    return showBrowserUsePanel(scaleBrowserUseBounds(request.bounds));
   });
 
   handle('sessions:openChat', async (payload) => {

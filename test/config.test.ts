@@ -394,6 +394,7 @@ describe('shipped defaults', () => {
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
     const loaded = await loadConfig();
     expect(loaded.capabilities.command).toBe(false);
+    expect(loaded.capabilities.browserUse).toBe(false);
     expect(loaded.capabilities.control).toBe(false);
     expect(loaded.multiAgent.enabled).toBe(false);
     expect(loaded.multiAgent.allowUnattributedCalls).toBe(false);
@@ -406,6 +407,7 @@ describe('shipped defaults', () => {
     const loaded = await loadConfig();
     expect(loaded.readOnly).toBe(true);
     expect(loaded.capabilities.command).toBe(false);
+    expect(loaded.capabilities.browserUse).toBe(false);
     expect(loaded.capabilities.control).toBe(false);
     expect(loaded.multiAgent.enabled).toBe(false);
   });

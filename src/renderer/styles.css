@@ -3004,11 +3004,58 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .agent-panel-body :is(.ev-tool_call, .ev-page_tool, .ev-agent_message) { margin: 0; }
 .agent-panel-body .ev-body { min-width: 0; }
 .agent-panel-body .said > b { display: none; }
-.app[data-screen='settings'] #agentPanelToggle { display: none; }
-@media (max-width: 850px) { [data-panel='chat'].has-agent-panel { grid-template-columns: minmax(0, 1fr); } .has-agent-panel > .is-session { display: none; } }
+.app[data-screen='settings'] :is(#agentPanelToggle, #browserUseToggle) { display: none; }
+@media (max-width: 850px) {
+  [data-panel='chat'].has-agent-panel, [data-panel='chat'].has-browser-panel { grid-template-columns: minmax(0, 1fr); }
+  .has-agent-panel > .is-session, .has-browser-panel > .is-session { display: none; }
+  .work-panel-resize { display: none; }
+}
 
 .app[data-screen='settings'] [data-panel='chat'].has-agent-panel { grid-template-columns: minmax(0, 1fr); }
 .app[data-screen='settings'] .agent-panel { display: none; }
+.app[data-screen='settings'] [data-panel='chat'].has-browser-panel { grid-template-columns: minmax(0, 1fr); }
+.app[data-screen='settings'] .browser-use-panel { display: none; }
+
+/* Browser Use is a separate native WebContentsView workspace. Only its chrome lives in DOM. */
+[data-panel='chat'].has-browser-panel { grid-template-columns: minmax(0, 1fr) var(--work-panel-width, minmax(340px, 42%)); }
+.browser-use-panel { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--page); overflow: visible; }
+.browser-use-tabbar { flex: 0 0 35px; min-width: 0; display: flex; align-items: stretch; overflow: hidden; border-bottom: 1px solid var(--line); }
+.browser-use-tabs-viewport { flex: 1 1 0; width: 0; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; scroll-behavior: smooth; overscroll-behavior-inline: contain; }
+.browser-use-tabs-viewport::-webkit-scrollbar { display: none; }
+.browser-use-tabs-viewport.is-dragging { cursor: grabbing; scroll-behavior: auto; user-select: none; }
+.browser-use-tabbar.has-overflow .browser-use-tabs-viewport { cursor: grab; }
+.browser-use-tabs { width: max-content; min-width: 100%; min-height: 34px; display: flex; align-items: stretch; gap: 2px; padding: 4px 3px 0 5px; }
+.browser-use-tab-actions { position: relative; z-index: 1; flex: 0 0 auto; display: flex; align-items: center; gap: 1px; padding: 3px 4px 3px 2px; background: var(--page); }
+.browser-use-tab-actions .btn { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; padding: 0; border-radius: 7px; line-height: 1; }
+.browser-use-tab-actions .ico { width: 14px; height: 14px; margin: 0; }
+.browser-use-close { color: var(--faint); }
+.browser-use-tab { flex: 0 0 112px; width: 112px; min-width: 112px; max-width: 112px; height: 30px; display: flex; align-items: center; gap: 5px; padding: 0 4px 0 9px; border: 1px solid transparent; border-radius: 7px 7px 0 0; color: var(--soft); cursor: pointer; }
+.browser-use-tab:hover { background: var(--hover); color: var(--ink); }
+.browser-use-tab[aria-selected='true'] { border-color: var(--line); border-bottom-color: var(--page); background: var(--page); color: var(--ink); }
+.browser-use-tab.is-loading .browser-use-tab-title::after { content: '…'; color: var(--blue); }
+.browser-use-tab-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; }
+.browser-use-tab-close { width: 20px; height: 20px; flex: 0 0 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--faint); font: inherit; cursor: pointer; }
+.browser-use-tab-close .ico { width: 11px; height: 11px; margin: 0; }
+.browser-use-tab-close:hover { background: var(--hover); color: var(--ink); }
+.browser-use-nav { flex: 0 0 auto; min-height: 42px; display: flex; align-items: center; gap: 3px; padding: 5px 7px; border-bottom: 1px solid var(--line); }
+.browser-use-nav .btn { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; padding: 0; border-radius: 7px; line-height: 1; }
+.browser-use-nav .btn .ico { width: 14px; height: 14px; margin: 0; }
+.browser-use-back .ico { transform: rotate(180deg); }
+.browser-use-nav .btn:disabled { opacity: .3; }
+.browser-use-address { min-width: 0; flex: 1; height: 30px; padding: 0 9px; border: 1px solid var(--edge); border-radius: 7px; background: var(--sunk); color: var(--ink); font: inherit; font-size: 10.5px; }
+.browser-use-address:focus { outline: 2px solid var(--accent-edge); outline-offset: 1px; }
+.browser-use-permission { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 7px 8px 7px 11px; border-bottom: 1px solid var(--line); background: var(--accent-wash); }
+.browser-use-permission[hidden] { display: none; }
+.browser-use-permission-text { min-width: 0; flex: 1; overflow-wrap: anywhere; color: var(--ink); font-size: 10px; line-height: 1.35; }
+.browser-use-permission .btn { flex: 0 0 auto; padding: 5px 7px; font-size: 9.5px; }
+.browser-use-surface { position: relative; min-width: 0; min-height: 0; flex: 1; overflow: hidden; background: var(--page); }
+.work-panel-resize { position: absolute; z-index: 8; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; touch-action: none; }
+.work-panel-resize.is-native-boundary { background: transparent; outline: 0; }
+.work-panel-resize-rail { position: absolute; top: 0; right: 4px; bottom: 0; width: 8px; pointer-events: none; }
+.work-panel-resize.is-native-boundary:hover .work-panel-resize-rail,
+.work-panel-resize.is-native-boundary:focus-visible .work-panel-resize-rail,
+.is-resizing-work-panel .work-panel-resize.is-native-boundary .work-panel-resize-rail { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-edge); }
+.is-resizing-work-panel, .is-resizing-work-panel * { cursor: col-resize !important; user-select: none !important; }
 
 .agent-plan { min-width: 0; border-bottom: 1px solid var(--edge); color: var(--soft); font-size: 13px; overflow: hidden; }
 .agent-plan[hidden], .app[data-screen='settings'] .agent-plan { display: none; }

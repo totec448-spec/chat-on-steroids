@@ -6,6 +6,7 @@ import { el } from './dom.js';
 export function createAgentPanel(options: {
   host: HTMLElement;
   toggle: HTMLButtonElement;
+  onShow?: () => void;
   load: (id: string) => Promise<{ events: SessionEvent[] } | null>;
   render: (events: SessionEvent[], id: string, current: () => boolean) => HTMLElement[];
   openMain: (id: string) => void;
@@ -27,6 +28,7 @@ export function createAgentPanel(options: {
     options.host.classList.remove('has-agent-panel'); options.toggle.setAttribute('aria-expanded', 'false');
   }
   function show(): void {
+    options.onShow?.();
     pane.hidden = false; options.host.classList.add('has-agent-panel'); options.toggle.setAttribute('aria-expanded', 'true');
   }
   function list(): void {
@@ -68,6 +70,7 @@ export function createAgentPanel(options: {
   });
   options.toggle.onclick = () => { if (pane.hidden) { show(); list(); } else hide(); };
   return {
+    hide,
     open,
     update(id: string | null, next: SessionSummary[]): void {
       if (parent !== id) { hide(); parent = id; }
