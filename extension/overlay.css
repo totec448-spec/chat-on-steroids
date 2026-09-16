@@ -735,7 +735,9 @@
   display: flex;
   flex-direction: column;
   gap: 0.16rem;
-  margin: 0.08rem auto 0.5rem;
+  /* Native message layout already separates authored blocks. Do not add a second
+     bottom margin to every tool chunk before the next public interim message. */
+  margin: 0.08rem auto 0;
   width: 100%;
   max-width: var(--thread-content-max-width, 48rem);
   min-width: 0;
@@ -778,6 +780,19 @@
 }
 
 .clf-stream-progress .clf-stream-icon {
+  display: none;
+}
+
+/* Public interim prose is projected only while the exact completed Worked fold hides its native
+   preamble nodes. It stays plain selectable text: no tool/status icon and no cloned native HTML. */
+.clf-stream-assistant_message {
+  align-items: flex-start;
+  margin: 0.2rem 0 0.3rem;
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.clf-stream-assistant_message .clf-stream-icon {
   display: none;
 }
 
@@ -832,16 +847,19 @@
 }
 
 /* Native disclosures keep tool rows usable with a keyboard without a second UI state store. */
-.clf-stream-tool-disclosure > summary {
+.clf-stream-tool-disclosure > summary,
+.clf-stream-tool-group > summary {
   cursor: pointer;
   list-style: none;
 }
 
-.clf-stream-tool-disclosure > summary::-webkit-details-marker {
+.clf-stream-tool-disclosure > summary::-webkit-details-marker,
+.clf-stream-tool-group > summary::-webkit-details-marker {
   display: none;
 }
 
-.clf-stream-tool-disclosure > summary::after {
+.clf-stream-tool-disclosure > summary::after,
+.clf-stream-tool-group > summary::after {
   content: '';
   width: 0.35rem;
   height: 0.35rem;
@@ -852,11 +870,13 @@
   flex-shrink: 0;
 }
 
-.clf-stream-tool-disclosure[open] > summary::after {
+.clf-stream-tool-disclosure[open] > summary::after,
+.clf-stream-tool-group[open] > summary::after {
   transform: rotate(45deg);
 }
 
-.clf-stream-tool-disclosure > summary:focus-visible {
+.clf-stream-tool-disclosure > summary:focus-visible,
+.clf-stream-tool-group > summary:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 3px;
 }
@@ -867,6 +887,58 @@
   line-height: 1.55;
   overflow-wrap: anywhere;
   opacity: 0.8;
+}
+
+.clf-stream-group-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.55rem;
+  width: fit-content;
+  max-width: 100%;
+  font-size: 0.86rem;
+  line-height: 1.42;
+  opacity: 0.7;
+}
+
+.clf-stream-group-head .clf-stream-icon {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.clf-stream-group-body {
+  display: none;
+  flex-direction: column;
+  gap: 0.16rem;
+  padding: 0.16rem 0 0 1rem;
+}
+
+.clf-stream-tool-group[open] > .clf-stream-group-body {
+  display: flex;
+}
+
+.clf-stream-recorded-detail {
+  margin-top: 0.45rem;
+}
+
+.clf-stream-recorded-detail h4 {
+  margin: 0.45rem 0 0.15rem;
+  font: inherit;
+  font-weight: 600;
+}
+
+.clf-stream-recorded-detail pre {
+  max-width: 100%;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.clf-stream-detail-note {
+  margin-top: 0.2rem;
+  opacity: 0.72;
 }
 
 .clf-stream-tool-change {

@@ -12,19 +12,19 @@ separate secret tokenized local paths.
 
 | Connector | Purpose | Possible tools |
 | --- | --- | --- |
-| **Chat On Steroids Core** | Approved files, patches, terminal, ChatGPT file saving, recorded-session lookup, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `download_artifact`, `session`, `agents` |
+| **Chat On Steroids Core** | Approved files, patches, terminal, task plans, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `update_plan`, `agents` |
 | **Chat On Steroids Desktop** | **Windows/macOS:** screen, windows, mouse/keyboard and clipboard | `observe`, `computer` |
 
 The Desktop connector is optional on Windows/macOS. Core is the main connector everywhere.
 
-On a fresh current config, Core permissions except saving ChatGPT files are enabled, along with
-session recording and multi-agent mode; read-only mode is off. Saving ChatGPT files is opt-in. Windows also enables Desktop permissions; macOS starts them off and the user switches them on. Linux masks
+On a fresh current config, Core permissions are enabled, along with
+session recording and multi-agent mode; read-only mode is off. Windows also enables Desktop permissions; macOS starts them off and the user switches them on. Linux masks
 Desktop permissions off at runtime while preserving stored choices for a config later reopened on
 Windows or macOS. Existing configs keep explicit choices during upgrades; missing legacy permissions are
 not silently widened.
 
 With fresh defaults, Core advertises `read`, `view_image`, `apply_patch`, `exec_command`,
-`write_stdin`, `session`, and `agents`. Enabling file saving adds `download_artifact`.
+`write_stdin`, `update_plan`, and `agents`.
 `find` is the search fallback for a snapshot where search is enabled and command execution is
 unavailable. Tool exposure is monotonic within a running connector instance, so a permission
 changed mid-conversation can leave a previously exposed name listed; its handler still enforces
@@ -79,35 +79,11 @@ poll returns as soon as the process produces output rather than holding the full
 anything that arrives afterwards stays buffered for the next poll. A non-empty write keeps
 Codex's collection-window behaviour so one interactive response is gathered whole.
 
-### `download_artifact`
+### `update_plan`
 
-Saves a native file reference into an approved folder. The schema requests ChatGPT
-injection through `_meta` `openai/fileParams`; availability requires live provider
-verification. The capability starts off and the default per-file limit is 20 MiB.
-Only HTTPS `files.oaiusercontent.com` sources and redirects are accepted. Destination
-parents must already exist; an existing destination is refused. Directory and partial
-file identity are rechecked before publication, with portable Node path I/O rather
-than a directory-handle-pinned race guarantee. Signed file credentials are omitted
-from recorded tool arguments.
-
-### `session`
-
-Available while session recording is enabled. It has exactly two actions:
-
-- `search` lists the 30 newest recordings when `query` is omitted, or searches titles, exact
-  authored messages, errors, agent messages and recorded tool arguments/results across sessions.
-  Its ordinary response is bounded to roughly 3,000 estimated tokens and continues by cursor.
-- `read` requires an explicit `session_id`. It returns exact user/assistant text, compact tool
-  headlines with short session-local `T…` references, and selected errors/agent messages. Read
-  pages and expanded tool calls are bounded to roughly 5,000 estimated tokens and continue
-  losslessly by cursor; authored messages are never summarized or ellipsized.
-
-`read` also returns an `update_cursor`. Passing that cursor later returns only activity recorded
-after the reader's checkpoint. An unfinished assistant message that only grew returns its exact
-new suffix; a real rewrite is labeled as a replacement. Session lookup never guesses the calling
-chat and never waits for browser identity evidence. Calls to `session` itself remain durably
-auditable but are omitted from this projection so reading or polling a recording cannot recursively
-copy its previous transcript result into the next one.
+Available while recording is enabled. Replaces the exact caller’s displayed progress plan; it does
+not execute queued work. Local history continues recording messages and real tool results for the
+app transcript and continuation. There is no model-facing recording search/read tool.
 
 Compact & Resume is app/browser orchestration. There is no model-visible `save_handoff` or
 `resume_session` tool.

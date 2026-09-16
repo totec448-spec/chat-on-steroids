@@ -1,5 +1,6 @@
 import { el } from './dom.js';
 import { t, ui } from './i18n.js';
+import { initToolApprovalNotice } from './tool-approval.js';
 
 type Callout = { text: string; at: [number, number]; box: [number, number, number, number] };
 type Shot = { src: string; title: string; portrait?: boolean; notes: Callout[] };
@@ -87,6 +88,7 @@ function screenshot(shot: Shot): HTMLElement {
 
 /** All instructions stay visible together; each figure can open in a native larger view. */
 export function initSetupGuide(): void {
+  initToolApprovalNotice(window.api?.onToolApprovalNotice);
   const dialog = document.createElement('dialog');
   dialog.className = 'setup-image-dialog';
   ui(dialog, 'aria-label', () => t('Setup screenshot'));

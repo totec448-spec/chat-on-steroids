@@ -40,7 +40,7 @@ it('switches the observed Work surface to Chat once without relying on translate
   expect(await api.prepareChatModelSurface()).toBe(true); expect(click).toHaveBeenCalledTimes(1);
   expect(await api.prepareChatModelSurface()).toBe(true); expect(click).toHaveBeenCalledTimes(1);
 });
-function fixture() {
+function fixture(versionCaption = '', closeDelay: number | null = 0) {
   page = new JSDOM('<form><div id="prompt-textarea" contenteditable="true"></div><div data-testid="composer-trailing-actions"><button type="button" aria-haspopup="menu">Denkaufwand</button><button data-testid="send-button">Senden</button></div></form>', { url: 'https://chatgpt.com/', runScripts: 'outside-only' });
   const win = page.window, doc = win.document;
   Object.defineProperty(win.HTMLElement.prototype, 'getClientRects', { value() { return this.hidden ? [] : [{}]; } });
@@ -57,7 +57,6 @@ function fixture() {
   (trigger as any).__reactFiber$test = { memoizedProps: props, return: null };
   const actions = vi.fn();
   let frozen = false;
-  let decorateVersionRow: ((row: HTMLElement, version: typeof versions[number]) => void) | undefined;
   const render = () => {
     let panel = doc.querySelector('[data-testid="composer-intelligence-picker-content"]') as HTMLElement;
     if (!panel) { panel = doc.createElement('div'); panel.dataset.testid = 'composer-intelligence-picker-content'; doc.body.append(panel); }
@@ -66,8 +65,10 @@ function fixture() {
     panel.querySelector('[aria-expanded]')!.addEventListener('click', () => {
       panel.innerHTML = '';
       for (const version of versions) {
-        const row = doc.createElement('div'); row.setAttribute('role', 'menuitemradio'); row.textContent = version.displayTextForIntelligence;
-        decorateVersionRow?.(row, version);
+        const row = doc.createElement('div'); row.setAttribute('role', 'menuitemradio');
+        const content = doc.createElement('div'), heading = doc.createElement('div'), name = doc.createElement('div');
+        name.textContent = version.displayTextForIntelligence; heading.append(name); content.append(heading); row.append(content);
+        if (versionCaption) { const caption = doc.createElement('div'); caption.textContent = versionCaption; content.append(caption); }
         row.addEventListener('keydown', event => { if (event.key !== 'Enter') return; actions('version'); if (frozen) return;
           state.selectedVersionEntry = version; state.bucketSelections = selections[versions.indexOf(version)]!;
           state.currentBucket = state.bucketSelections[0]!.bucket; state.currentSelection = state.bucketSelections[0]!; render(); }); panel.append(row);
@@ -82,12 +83,51 @@ function fixture() {
   };
   trigger.addEventListener('keydown', event => {
     if (event.key === 'Enter') render();
-    if (event.key === 'Escape') doc.querySelector('[data-testid="composer-intelligence-picker-content"]')?.remove();
+  });
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || closeDelay === null) return;
+    const close = () => doc.querySelector('[data-testid="composer-intelligence-picker-content"]')?.remove();
+    if (closeDelay) win.setTimeout(close, closeDelay); else close();
   });
   win.eval(fiberSource); win.eval(domSource);
-  return { api: (win as any).CLF_DOM, state, props, selections, actions, freeze: () => { frozen = true; },
-    decorateVersionRows: (decorate: NonNullable<typeof decorateVersionRow>) => { decorateVersionRow = decorate; } };
+  return { api: (win as any).CLF_DOM, state, props, selections, actions, freeze: () => { frozen = true; } };
 }
+it('waits for the model picker to close before allowing composer insertion', async () => {
+  const f = fixture('', 30);
+  expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(true);
+  expect(page.window.document.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
+});
+it('refuses selection success when the picker retains its focus trap', async () => {
+  const f = fixture('', null);
+  expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(false);
+  expect(page.window.document.querySelector('[data-testid="composer-intelligence-picker-content"]')).not.toBeNull();
+});
+it('does not publish a discovered catalog before the picker closes', async () => {
+  const f = fixture('', null), failure = vi.fn();
+  expect(await f.api.inspectModelSettings(() => true, failure)).toBeNull();
+  expect(failure).toHaveBeenCalledWith('picker_close_failed');
+});
+it('sends Escape inside the picker dialog and waits for its delayed focus-trap removal', async () => {
+  const f = fixture('', 10), doc = page.window.document;
+  doc.querySelector('button')!.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter' }));
+  const panel = doc.querySelector('[data-testid="composer-intelligence-picker-content"]')!;
+  const dialog = doc.createElement('div'); dialog.setAttribute('role', 'dialog'); dialog.tabIndex = -1;
+  doc.body.append(dialog); dialog.append(panel); dialog.focus();
+  const escaped = vi.fn();
+  dialog.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    escaped(); page.window.setTimeout(() => dialog.remove(), 40);
+  });
+  expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(true);
+  expect(escaped).toHaveBeenCalledTimes(1);
+  expect(dialog.isConnected).toBe(false);
+});
+it('withdraws a confirmed selection if navigation invalidates its picker-close wait', async () => {
+  const f = fixture('', 30), doc = page.window.document;
+  let current = true;
+  doc.addEventListener('keydown', event => { if (event.key === 'Escape') current = false; });
+  expect(await f.api.selectModelSettings('future-model', 'ultra', () => current)).toBe(false);
+});
 it('reads localized nested models and future efforts from account state, excludes locked choices, and restores selection', async () => {
   const f = fixture();
   expect(await f.api.inspectModelSettings()).toEqual([
@@ -97,6 +137,34 @@ it('reads localized nested models and future efforts from account state, exclude
   expect(f.state.selectedVersionEntry.id).toBe('latest'); expect(f.state.currentBucket).toBe(2);
   // Only restore the original High once; discovery never sweeps every power level.
   expect(f.actions.mock.calls.filter(([action]) => action === 'effort')).toHaveLength(1);
+});
+it('discovers and selects version rows with the native retirement subtitle, restoring the original power', async () => {
+  const f = fixture('Leaving on October 14');
+  expect(await f.api.inspectModelSettings()).toHaveLength(2);
+  expect(f.state.selectedVersionEntry.id).toBe('latest');
+  expect(f.state.currentBucket).toBe(2);
+  expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(true);
+  expect(f.state.currentSelection).toMatchObject({ modelSlug: 'future-model', thinkingEffort: 'ultra' });
+});
+it('keeps catalog identity when an effort-only label replaces the category short name', async () => {
+  const f = fixture();
+  for (const choice of f.selections[0]!.slice(0, 2)) {
+    choice.category.shortLabel = 'High';
+    (choice as any).modelConfig = { title: 'GPT-5.6 Sol' };
+  }
+  expect(await f.api.inspectModelSettings()).toContainEqual({ id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] });
+});
+it('does not select a different model whose subtitle contains the requested model name', async () => {
+  const f = fixture('Neues Modell'), doc = page.window.document;
+  doc.addEventListener('click', () => {
+    for (const row of doc.querySelectorAll('[role="menuitemradio"]')) {
+      const name = row.firstElementChild?.firstElementChild?.firstElementChild;
+      if (name?.textContent === 'Neues Modell') name.textContent = 'Different model';
+    }
+  });
+  expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(false);
+  expect(f.state.currentSelection.modelSlug).toBe('gpt-5-6-thinking');
+  expect(f.state.currentBucket).toBe(2);
 });
 it.each([true, false])('discovers 5.6 Pro outside Latest through the content workflow only when available (%s)', async available => {
   const f = fixture();
@@ -341,130 +409,4 @@ it('retains the Chat max-to-xhigh mapping without a Work owner flag', async () =
   f.state.currentSelection.thinkingEffort = 'max';
   expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'xhigh')).toBe(true);
   expect(f.state.currentSelection.thinkingEffort).toBe('max');
-});
-function observePicker() {
-  const win = page.window;
-  const nonce = win.crypto.randomUUID();
-  return new Promise<void>(resolve => {
-    const receive = (event: MessageEvent) => {
-      if (event.data?.source !== 'clf-picker-reply' || event.data.nonce !== nonce) return;
-      win.removeEventListener('message', receive as any); resolve();
-    };
-    win.addEventListener('message', receive as any);
-    win.postMessage({ source: 'clf-picker-ask', nonce }, win.location.origin);
-  });
-}
-
-it('hotfix: discovers and selects a native version with a retirement caption', async () => {
-  const f = fixture(), doc = page.window.document;
-  f.decorateVersionRows((row, version) => {
-    if (version.id !== 'future') return;
-    row.textContent = '';
-    const primary = doc.createElement('span'); primary.textContent = version.displayTextForIntelligence;
-    const caption = doc.createElement('span'); caption.textContent = 'Leaving on October 14';
-    const check = doc.createElement('span'); check.setAttribute('aria-hidden', 'true'); check.textContent = '✓';
-    const labels = doc.createElement('div'); labels.append(primary, caption); row.append(check, labels);
-  });
-  expect(await f.api.inspectModelSettings()).toHaveLength(2);
-  expect(f.state.selectedVersionEntry.id).toBe('latest'); expect(f.state.currentBucket).toBe(2);
-  expect(doc.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
-  expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(true);
-  expect(f.state.currentSelection).toMatchObject({ modelSlug: 'future-model', thinkingEffort: 'ultra' });
-});
-
-it('hotfix: never treats a model name mentioned only in a row caption as its primary label', async () => {
-  const f = fixture(), doc = page.window.document, failure = vi.fn();
-  f.decorateVersionRows((row, version) => {
-    if (version.id !== 'future') return;
-    row.textContent = '';
-    const primary = doc.createElement('span'); primary.textContent = 'A different model';
-    const caption = doc.createElement('span'); caption.textContent = version.displayTextForIntelligence;
-    row.append(primary, caption);
-  });
-  expect(await f.api.inspectModelSettings(() => true, failure)).toBeNull();
-  expect(failure).toHaveBeenCalledWith('model_unconfirmed');
-  expect(f.state.selectedVersionEntry.id).toBe('latest'); expect(f.state.currentBucket).toBe(2);
-});
-
-it.each(['', 'Medium', 'High', 'Extra High', undefined])('hotfix: missing or effort-only family labels do not invalidate account choices (%s)', async shortLabel => {
-  const f = fixture();
-  for (const choice of f.selections[0]!.slice(0, 2)) {
-    Object.assign(choice.category, { shortLabel, modelVersion: '5.6' });
-    (choice as any).modelConfig = { title: 'GPT-5.6 Sol' };
-  }
-  expect(await f.api.inspectModelSettings()).toContainEqual({ id: '5.6', label: 'GPT-5.6 Sol',
-    efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] });
-  expect(f.state.currentBucket).toBe(2);
-  expect(await f.api.selectModelSettings('gpt-5.6-sol', 'high')).toBe(true);
-  expect(await f.api.selectModelSettings('High', 'high')).toBe(false);
-  expect(f.state.currentSelection).toMatchObject({ modelSlug: 'gpt-5-6-thinking', thinkingEffort: 'extended' });
-});
-
-it('hotfix: absent display titles fall back to the observed slug, never to an invented model or entitlement', async () => {
-  const f = fixture();
-  for (const choice of f.selections[0]!) delete (choice.category as any).shortLabel;
-  const models = await f.api.inspectModelSettings();
-  expect(models).toContainEqual({ id: 'gpt-5-6-thinking', label: 'gpt-5-6-thinking',
-    efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] });
-  expect(models.some((model: any) => model.id === 'gpt-6-pro')).toBe(false);
-  expect(await f.api.selectModelSettings('gpt-6-pro', 'pro')).toBe(false);
-  f.state.currentSelection.modelSlug = 'invalid execution id';
-  expect(await f.api.inspectModelSettings()).toBeNull();
-});
-
-it.each([
-  ['6 Pro', 'gpt-6-pro', 'pro'], ['6Pro', 'gpt-6-pro', 'pro'],
-  ['5.6 High', 'gpt-5-6-thinking', 'high'], ['5.6High', 'gpt-5-6-thinking', 'high'],
-  ['Medium', 'gpt-5-6-thinking', 'medium'], ['High', 'gpt-5-6-thinking', 'high'],
-  ['Extra High', 'gpt-5-6-thinking', 'xhigh']
-])('hotfix: passively observes the closed %s label without opening a menu', async (label, model, reasoningEffort) => {
-  const f = fixture(), doc = page.window.document, trigger = doc.querySelector('button')!;
-  (trigger as any).__reactFiber$test = { memoizedProps: { currentModelId: model }, return: null };
-  trigger.textContent = label;
-  doc.querySelector('#prompt-textarea')!.textContent = 'Keep this unsent draft';
-  await observePicker();
-  expect(f.api.visibleModelSelection()).toEqual({ model, reasoningEffort });
-  expect(f.actions).not.toHaveBeenCalled();
-  expect(doc.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
-  expect(doc.querySelector('#prompt-textarea')!.textContent).toBe('Keep this unsent draft');
-  page.window.history.pushState({}, '', '/c/another');
-  expect(f.api.visibleModelSelection()).toBeNull();
-});
-
-it.each(['Pro', '6 Pro'])('hotfix: a known unavailable %s selection cannot fall through to closed-trigger proof', async label => {
-  const f = fixture(), trigger = page.window.document.querySelector('button')!, pro = f.selections[0]![2]!;
-  Object.assign(f.state, { currentBucket: pro.bucket, currentSelection: pro });
-  trigger.textContent = label;
-  (trigger as any).__reactFiber$test = { memoizedProps: {
-    currentModelId: 'gpt-6-pro', dropdownContent: { props: f.props }
-  }, return: null };
-  await observePicker(); expect(f.api.visibleModelSelection()).toBeNull();
-  pro.availability.status = 'available';
-  await observePicker(); expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-pro', reasoningEffort: 'pro' });
-  (f.props.modelSwitcherDenialsBySlug as any)['gpt-6-pro'] = { reason: 'workspace_policy' };
-  await observePicker(); expect(f.api.visibleModelSelection()).toBeNull();
-  expect(f.actions).not.toHaveBeenCalled();
-});
-
-it.each([
-  ['6 Pro', 'gpt-5-6-pro'], ['6 Pro', 'gpt-6-astra-wm'],
-  ['5.6 High', 'gpt-6-thinking'], ['5.6 High', 'gpt-5-6-pro']
-])('hotfix: a visible %s label cannot invent or contradict execution identity %s', async (label, model) => {
-  const f = fixture(), trigger = page.window.document.querySelector('button')!;
-  trigger.textContent = label;
-  (trigger as any).__reactFiber$test = { memoizedProps: { currentModelId: model }, return: null };
-  await observePicker();
-  expect(f.api.visibleModelSelection()).toBeNull(); expect(f.actions).not.toHaveBeenCalled();
-});
-
-it('hotfix: duplicate version primary labels remain ambiguous even with different captions', async () => {
-  const f = fixture(), doc = page.window.document, failure = vi.fn();
-  f.decorateVersionRows((row, version) => {
-    if (version.id !== 'future') return;
-    const duplicate = row.cloneNode(true) as HTMLElement;
-    doc.querySelector('[data-testid="composer-intelligence-picker-content"]')!.append(duplicate);
-  });
-  expect(await f.api.inspectModelSettings(() => true, failure)).toBeNull();
-  expect(failure).toHaveBeenCalledWith('model_unconfirmed');
-  expect(f.state.selectedVersionEntry.id).toBe('latest'); expect(f.state.currentBucket).toBe(2);
 });

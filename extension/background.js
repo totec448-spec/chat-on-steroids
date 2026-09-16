@@ -40,7 +40,7 @@ const MODEL_REQUEST_TIMEOUT_MS = 190_000;
 /** The reason a deadline aborts with, so it is a fact the caller can act on rather than prose. */
 const TIMED_OUT = 'the app took too long to answer';
 /** Bumped only when the request/response shape changes; the app compares it. */
-const BRIDGE_PROTOCOL = 13;
+const BRIDGE_PROTOCOL = 14;
 
 /**
  * Journal caps. The byte figure is what actually matters — chrome.storage.session has a
@@ -1019,6 +1019,7 @@ function forgetPort() {
  */
 async function latchAppDisconnect() {
   closeWakeSocket();
+  void getBrowserController().then(controller => controller?.revoke()).catch(() => undefined);
   token = null;
   disconnected = true;
   await persist();
@@ -2163,6 +2164,25 @@ function inspectRequestedModels(request) {
 let maintenanceFlight = null;
 let maintenanceAgain = false;
 let wakeSocket = null;
+// Load the independent browser backend only on hosts exposing Chrome's debugger API.
+// Credentials stay in call(); pages/content scripts cannot submit browser commands.
+let browserController;
+function getBrowserController() {
+  if (!globalThis.chrome?.debugger) return Promise.resolve(null);
+  browserController ||= import('./browser-control.js').then(({ createBrowserControl }) => createBrowserControl(chrome, call,
+    (tabId, url, caller) => {
+      const conversation = conversationFromUrl(url);
+      return Boolean(conversation && (conversation === caller || discardProtectedTabs[String(tabId)] === true));
+    }));
+  return browserController;
+}
+function pumpBrowserControl() { return getBrowserController().then(controller => controller?.pump()); }
+globalThis.chrome?.debugger?.onEvent.addListener((source, method, params) => {
+  void getBrowserController().then(controller => controller?.event(source, method, params)).catch(() => undefined);
+});
+globalThis.chrome?.debugger?.onDetach.addListener(source => {
+  void getBrowserController().then(controller => controller?.detached(source)).catch(() => undefined);
+});
 function closeWakeSocket() {
   const previous = wakeSocket; wakeSocket = null;
   if (previous) previous.close();
@@ -2182,7 +2202,11 @@ function connectWakeSocket() {
   connection.onmessage = (event) => {
     if (wakeSocket !== connection) return;
     if (event.data === 'ping') connection.send('pong');
-    else if (event.data === 'wake') void maintain(true).catch(() => undefined);
+    else if (event.data === 'browser-control') void pumpBrowserControl().catch(() => undefined);
+    else if (event.data === 'wake') {
+      void pumpBrowserControl().catch(() => undefined);
+      void maintain(true).catch(() => undefined);
+    }
   };
   connection.onerror = () => connection.close();
   connection.onclose = () => { if (wakeSocket === connection) wakeSocket = null; };
@@ -2228,7 +2252,14 @@ async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
   const keeper = new Map();
   for (const tab of ordered) if (owned(tab) && !keeper.has(conversationForTab(tab))) keeper.set(conversationForTab(tab), tab.id);
   const activity = policy.conversationActivityAt || {};
-  // Evict by model work/turn completion, never by which browser tab was selected.
+  // Order by model work. Recent user access separately vetoes ordinary idle closure;
+  // reading an old chat must not make its model work look active or change reuse policy.
+  const reading = tab => {
+    if (tab.active) return true;
+    const age = Date.now() - tab.lastAccessed;
+    return Number.isFinite(tab.lastAccessed) && tab.lastAccessed > 0 && age >= 0 &&
+      Number.isFinite(policy.idleCloseAfterMs) && policy.idleCloseAfterMs > 0 && age < policy.idleCloseAfterMs;
+  };
   const candidates = ordered.filter(owned).sort((a, b) =>
     Number(keeper.get(conversationForTab(b)) !== b.id) - Number(keeper.get(conversationForTab(a)) !== a.id) ||
     (activity[conversationForTab(a)] || 0) - (activity[conversationForTab(b)] || 0) || a.id - b.id);
@@ -2239,10 +2270,10 @@ async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
     const duplicate = keeper.get(conversationId) !== tab.id && remaining.some(other => other.id !== tab.id && conversationForTab(other) === conversationId);
     if (protectedChats.has(conversationId)) continue;
     // App policy can release an idle page without retiring its durable worker/chat.
-    // Keep the selected page for reading; terminal/duplicate cleanup keeps its own rules.
+    // Keep a selected or recently read page; terminal/duplicate cleanup keeps its own rules.
     if (!duplicate && !retired.has(conversationId) && !closable.has(conversationId)) continue;
     const idlePage = !duplicate && !retired.has(conversationId);
-    if (idlePage && tab.active) continue;
+    if (idlePage && reading(tab)) continue;
     const source = { tab: tab.id, documentId: tabDocuments[String(tab.id)], navigationEpoch: tabEpochs[String(tab.id)] };
     if (!ownsDocument(source) || journalCountForConversation(conversationId) > 0) continue;
     const cancelledClaims = (Array.isArray(policy.cancelledDecisionClaims) ? policy.cancelledDecisionClaims : [])
@@ -2252,13 +2283,13 @@ async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
     if (cancelledClaims.length && !cancelledDecisions.length) continue;
     try {
       const current = await chrome.tabs.get(tab.id);
-      if (current.pinned || (idlePage && current.active) || conversationFromUrl(current.url) !== conversationId || current.pendingUrl) continue;
+      if (current.pinned || (idlePage && reading(current)) || conversationFromUrl(current.url) !== conversationId || current.pendingUrl) continue;
 
       const proof = await tabReply(tab.id, { type: 'clf-tab-close-check', conversationId,
         ...(cancelledDecisions.length ? { cancelledDecisions } : {}) }, { documentId: source.documentId });
       if (proof?.safe !== true || proof.conversationId !== conversationId || proof.navigationEpoch !== source.navigationEpoch || !ownsDocument(source)) continue;
       const latest = await chrome.tabs.get(tab.id);
-      if (latest.pinned || (idlePage && latest.active) || latest.pendingUrl || conversationFromUrl(latest.url) !== conversationId || !ownsDocument(source) || journalCountForConversation(conversationId) > 0) continue;
+      if (latest.pinned || (idlePage && reading(latest)) || latest.pendingUrl || conversationFromUrl(latest.url) !== conversationId || !ownsDocument(source) || journalCountForConversation(conversationId) > 0) continue;
 
       await chrome.tabs.remove(tab.id);
       remaining = remaining.filter(other => other.id !== tab.id);
@@ -2287,6 +2318,7 @@ async function maintainOnce() {
   const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations }) });
   if (!reply.ok || !reply.data) return;
   connectWakeSocket();
+  void pumpBrowserControl().catch(() => undefined);
   // Quoted back exactly as they arrived. A token names the handout being answered, so that a
   // receipt this pass sends late cannot close a repair the app has since raised for a different
   // turn. An entry missing either half is not actionable and is dropped rather than guessed at.
@@ -2642,6 +2674,34 @@ function serializeTab(tab, operation) {
   return tracked;
 }
 
+async function currentConversationDocument(source, conversationId) {
+  if (!conversationId || !ownsDocument(source)) return false;
+  const tab = await chrome.tabs.get(source.tab).catch(() => null);
+  return Boolean(tab && !tab.pendingUrl && ownsDocument(source) && conversationFromUrl(tab.url) === conversationId);
+}
+
+/** Bind the exact accepted opening before any path can publish its first recorder evidence. */
+async function bindPendingInputProject(message, source, conversationId) {
+  const claim = message.projectInput;
+  if (!claim) return { ok: true, projectBound: undefined };
+  const ownerPrefix = `${source.tab}:${source.documentId}:`;
+  if (!conversationId || !/^[a-f0-9-]{36}$/i.test(String(claim.id || '')) ||
+      typeof claim.owner !== 'string' || !claim.owner.startsWith(ownerPrefix)) {
+    return { ok: false, error: 'project_binding_pending' };
+  }
+  // A fresh Send legitimately promotes the same document from no route to /c/<id> and its
+  // navigation epoch can advance. The stable document plus the input ledger's exact owner is
+  // the authority; re-read Chrome around the app await so a later document/route cannot inherit it.
+  if (!(await currentConversationDocument(source, conversationId))) return { ok: false, error: 'project_binding_pending' };
+  const bound = await call('/input/bind', {
+    method: 'POST', body: JSON.stringify({ id: claim.id, owner: claim.owner, conversationId })
+  });
+  if (!bound.ok || bound.data?.ok !== true || !(await currentConversationDocument(source, conversationId))) {
+    return { ok: false, error: 'project_binding_pending' };
+  }
+  return { ok: true, projectBound: claim.id };
+}
+
 const HANDLERS = {
   async plugin_refresh(message, _sender, source) {
     if (!ownsDocument(source) || !/^[a-f0-9-]{36}$/i.test(String(message.id || ''))) return { ok: false };
@@ -2782,6 +2842,7 @@ const HANDLERS = {
   async unpair() {
     await load();
     closeWakeSocket();
+    if (browserController) await (await browserController).revoke();
     // Invalidate any `/pair` already on the wire before changing the visible/persisted state.
     connectionEpoch++;
     token = null;
@@ -2907,21 +2968,12 @@ const HANDLERS = {
   async events(message, _sender, source) {
     await load();
     if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
-    if (message.projectInput) {
-      const claim = message.projectInput;
-      const tab = await chrome.tabs.get(source.tab);
-      const conversationId = conversationFromUrl(tab.url);
-      const prefix = `${source.tab}:${_sender.documentId}:`;
-      if (!conversationId || message.conversationId !== conversationId ||
-          !/^[a-f0-9-]{36}$/i.test(String(claim.id || '')) ||
-          typeof claim.owner !== 'string' || !claim.owner.startsWith(prefix) || !ownsDocument(source)) {
-        return { ok: false, error: 'project_binding_pending' };
-      }
-      const bound = await call('/input/bind', { method: 'POST', body: JSON.stringify({ id: claim.id, owner: claim.owner, conversationId }) });
-      if (!bound.ok || bound.data?.ok !== true || !ownsDocument(source)) return { ok: false, error: 'project_binding_pending' };
-    }
+    const conversationId = cleanConversationId(message.conversationId);
+    const binding = await bindPendingInputProject(message, source, conversationId);
+    if (!binding.ok) return binding;
     await noteTabConversation(source, message.conversationId);
-    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    if (!ownsDocument(source) || (binding.projectBound && !await currentConversationDocument(source, conversationId)))
+      return { ok: false, error: 'stale_document' };
     const key = tabKey(source);
     const entries = (Array.isArray(message.entries) ? message.entries : []).map((entry) =>
       entry && !entry.conversationId ? { ...entry, provisional: key } : entry
@@ -2934,11 +2986,13 @@ const HANDLERS = {
     }
     const stored = await persistJournal();
     if (ackBound > 0) await persistLive();
-    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    if (!ownsDocument(source) || (binding.projectBound && !await currentConversationDocument(source, conversationId)))
+      return { ok: false, error: 'stale_document' };
     if (ackBound > 0) await drainCommandAcks();
     const result = await drain();
-    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
-    return { ok: true, pending: result.pending, durable: stored, projectBound: message.projectInput?.id };
+    if (!ownsDocument(source) || (binding.projectBound && !await currentConversationDocument(source, conversationId)))
+      return { ok: false, error: 'stale_document' };
+    return { ok: true, pending: result.pending, durable: stored, projectBound: binding.projectBound };
   },
 
   /**
@@ -2981,15 +3035,20 @@ const HANDLERS = {
     if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
     const conversationId = cleanConversationId(message.conversationId);
     if (!conversationId) return { ok: false, error: 'bad_conversation_id' };
+    const binding = await bindPendingInputProject(message, source, conversationId);
+    if (!binding.ok) return binding;
     await noteTabConversation(source, conversationId);
-    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    if (!(await currentConversationDocument(source, conversationId))) return { ok: false, error: 'stale_document' };
     const calls = Array.isArray(message.calls) ? message.calls : [];
     if (calls.length === 0) return { ok: false, error: 'bad_request_evidence' };
     const result = await call('/correlations', {
       method: 'POST',
       body: JSON.stringify({ conversationId, calls })
     });
-    return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
+    if (!(await currentConversationDocument(source, conversationId))) return { ok: false, error: 'stale_document' };
+    return binding.projectBound && result.data && typeof result.data === 'object'
+      ? { ...result, data: { ...result.data, projectBound: binding.projectBound } }
+      : result;
   },
   async activity(message, _sender, source) {
     await load();
@@ -3013,6 +3072,35 @@ const HANDLERS = {
       await placeSuccessorChat(result.data.placement, source.tab);
     }
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
+  },
+  /** Reads one already-recorded call only for the exact currently bound page document. */
+  async activity_detail(message, _sender, source) {
+    await load();
+    const conversationId = cleanConversationId(message.conversationId);
+    const callId = typeof message.callId === 'string' && message.callId.length > 0 && message.callId.length <= 200
+      ? message.callId
+      : null;
+    const detailRevision = Number.isSafeInteger(message.detailRevision) && message.detailRevision > 0
+      ? message.detailRevision
+      : null;
+    if (!conversationId || !callId || detailRevision === null) {
+      return { ok: false, status: 400, error: 'bad_activity_detail' };
+    }
+    const current = async () => {
+      if (!ownsDocument(source) || cleanConversationId(tabConversations[String(source.tab)]) !== conversationId) return false;
+      const tab = await chrome.tabs.get(source.tab).catch(() => null);
+      return Boolean(
+        tab && !tab.pendingUrl && tab.status !== 'loading' && ownsDocument(source) &&
+        cleanConversationId(tabConversations[String(source.tab)]) === conversationId &&
+        conversationFromUrl(tab.url) === conversationId
+      );
+    };
+    if (!(await current())) return { ok: false, error: 'stale_document' };
+    const result = await call('/activity/detail', {
+      method: 'POST',
+      body: JSON.stringify({ conversationId, callId, detailRevision })
+    });
+    return await current() ? result : { ok: false, error: 'stale_document' };
   },
   /** Reinstall the least-trusted MAIN-world reader when a live content script loses it. */
   async repair_fiber(_message, _sender, source) {
@@ -3336,6 +3424,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'events',
     'bind',
     'activity',
+    'activity_detail',
     'correlate',
     'closed',
     'compact',

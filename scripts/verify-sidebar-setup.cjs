@@ -10,6 +10,7 @@ app.whenReady().then(async () => {
   const { createServer } = await import('vite');
   const fixture = `
     localStorage.removeItem('chat-on-steroids.sidebar-order');
+    localStorage.removeItem('cos.ui.language');
     const config = {
       roots: [{name:'demo',path:'C:/demo'}], readOnly:true,
       capabilities: {browse:true,search:true,read:true,metadata:true,create:false,edit:false,move:false,deleteFile:false,command:false,screen:false,control:false,clipboardRead:false,clipboardWrite:false},
@@ -61,7 +62,39 @@ app.whenReady().then(async () => {
     await win.loadURL(server.resolvedUrls.local[0]+'fixture.html');
     win.webContents.setZoomFactor(1);
     const js = code=>win.webContents.executeJavaScript(code);
+    const screenshot = async name => {
+      await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});
+      await new Promise(r=>setTimeout(r,200));
+      fs.writeFileSync(path.join(output,name),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
+    };
     for(let i=0;i<100 && !(await js('!!window.fixtureReady && document.querySelectorAll(".project-group > .sess").length === 5'));i++) await new Promise(r=>setTimeout(r,25));
+    await js(`window.disclosureEvents=[]; for(const type of ['keydown','keypress','keyup','click']) document.addEventListener(type,e=>window.disclosureEvents.push({type,key:e.key,tag:e.target.tagName,cls:e.target.className,open:document.querySelector('.project-group')?.open}),true)`);
+    // Project groups start closed. Exercise native summary activation before the
+    // existing visible-row geometry, drag ordering and pagination checks.
+    assert.equal(await js(`document.querySelector('.project-group').open`), false);
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    const headingPoint = await js(`(() => {const r=document.querySelector('.project-heading').getBoundingClientRect();return {x:Math.round(r.left+35),y:Math.round(r.top+r.height/2)}})()`);
+    const expectDisclosure = async open => {
+      for (let i=0;i<100;i++) {
+        if (await js(`document.querySelector('.project-group').open === ${open}`)) return;
+        await new Promise(r=>setTimeout(r,10));
+      }
+      assert.equal(await js(`document.querySelector('.project-group').open`),open,
+        JSON.stringify(await js(`({focus:document.activeElement.outerHTML.slice(0,250),events:window.disclosureEvents.slice(-12)})`)));
+    };
+    win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...headingPoint});
+    win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...headingPoint});
+    await expectDisclosure(true);
+    await js(`document.querySelector('.project-heading').focus()`);
+    for (const keyCode of ['Space','Enter']) {
+      win.webContents.sendInputEvent({type:'keyDown',keyCode});
+      // Enter's native summary activation uses the character event. Electron's
+      // low-level keyDown/keyUp pair does not synthesize that part of typing.
+      if (keyCode === 'Enter') win.webContents.sendInputEvent({type:'char',keyCode:'\r'});
+      win.webContents.sendInputEvent({type:'keyUp',keyCode});
+      await expectDisclosure(keyCode === 'Enter');
+    }
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     const geometry = await js(`(() => { const group=document.querySelector('.project-group');
       const title=group.querySelector('.project-name').getBoundingClientRect(), chat=group.querySelector('.sess-top b').getBoundingClientRect();
       return {title:title.left,chat:chat.left,count:group.querySelectorAll(':scope > .sess').length,color:getComputedStyle(document.getElementById('newChat')).color,
@@ -81,21 +114,26 @@ app.whenReady().then(async () => {
     assert.deepEqual(moved,['task-1','task-2','task-0','task-3','task-4']);
     assert.equal(await js(`document.querySelector('.sess.is-sel') === null`),true);
     await new Promise(r=>setTimeout(r,200));
-    fs.writeFileSync(path.join(output,'sidebar.png'),(await win.webContents.capturePage()).toPNG());
+    await screenshot('sidebar.png');
+    win.webContents.setZoomFactor(1.17);
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'),true);
+    await screenshot('sidebar-base-zoom.png');
+    win.webContents.setZoomFactor(1);
     await js(`document.querySelector('.project-show-more').click()`);
     assert.equal(await js(`document.querySelectorAll('.project-group > .sess').length`),13);
     await js(`document.querySelector('[data-tab="setup"]').click(); document.getElementById('wizExpand').click()`);
     assert.equal(await js(`document.getElementById('wizard').classList.contains('is-tidy')`),true);
     assert.equal(await js(`document.querySelector('[data-panel="setup"]').classList.contains('is-active')`),true);
     await new Promise(r=>setTimeout(r,200));
-    fs.writeFileSync(path.join(output,'setup-collapsed.png'),(await win.webContents.capturePage()).toPNG());
+    await screenshot('setup-collapsed.png');
     await js(`document.getElementById('wizExpand').click()`);
     assert.equal(await js(`document.getElementById('wizard').classList.contains('is-tidy')`),false);
     assert.equal(await js(`document.querySelector('[data-panel="setup"]').contains(document.getElementById('setupProfile'))`),false);
     await new Promise(r=>setTimeout(r,100));
-    fs.writeFileSync(path.join(output,'setup-clean.png'),(await win.webContents.capturePage()).toPNG());
+    await screenshot('setup-clean.png');
     await js(`document.getElementById('chatSettingsBtn').click(); document.getElementById('uiLanguage').scrollIntoView({block:'center'});`);
-    for(const [width,zoom] of [[1100,1],[800,1],[1100,1.5]]) {
+    for(const [width,zoom] of [[1100,1],[800,1],[1100,1.17],[800,1.17],[1100,1.5]]) {
       win.setSize(width,900); win.webContents.setZoomFactor(zoom);
       await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
       await js(`document.getElementById('setupProfile').scrollIntoView({block:'center'});document.getElementById('setupProfile').click()`);
@@ -129,6 +167,6 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('[data-remove-profile-id="default"]').click()`);
     for(let i=0;i<100 && await js(`document.querySelectorAll('[data-remove-profile-id]').length!==1`);i++) await new Promise(r=>setTimeout(r,25));
     assert.equal(await js(`document.querySelector('[data-remove-profile-id]').disabled`),true);
-    console.log(JSON.stringify({geometry,drag:moved,showMore:13,collapse:true,profileLayout:true,output}));
+    console.log(JSON.stringify({projectDisclosure:{initiallyCollapsed:true,pointer:true,space:true,enter:true},geometry,drag:moved,showMore:13,collapse:true,profileLayout:true,output}));
   } finally { win?.destroy(); await server.close(); app.quit(); }
 }).catch(error=>{console.error(error);app.exit(1)});

@@ -16,7 +16,6 @@ import { pluginCatalog, reviewedPluginLicense } from './catalog.js';
 import sharp from 'sharp';
 import { pluginExposure } from './exposure.js';
 import { PluginOAuth, PluginNeedsAuth, PluginOAuthSetupError, clearPluginOAuth } from './oauth.js';
-import { SURFACE_LIST } from '../mcp/surfaces.js';
 export { PLUGIN_MAX_TOOLS, PLUGIN_MAX_SCHEMA_BYTES } from './exposure.js';
 
 interface RecordEntry extends Omit<PluginView, 'tools'> {
@@ -785,6 +784,7 @@ export class PluginManager {
       onOutcome?.(outcome);
       return this.redactResult({ isError: true, content: [{ type: 'text', text }] });
     };
+    const refused = (reason: string) => errorResult(`${reason} This call was not dispatched.`, 'tool_rejected');
     let startupFailed = false;
     let acquired: { row: RecordEntry; live: Live; tool: Tool } | undefined;
     try {
@@ -805,26 +805,36 @@ export class PluginManager {
         live.users++;
         return { row, live, tool };
       });
-    } catch { return errorResult('PLUGIN_START_FAILED: The plugin server could not start. Check its settings and application.'); }
+    } catch {
+      const reason = this.closing
+        ? 'PLUGIN_UNAVAILABLE: Plugins are shutting down.'
+        : 'PLUGIN_START_FAILED: The plugin server could not start. Check its settings and application.';
+      return refused(reason);
+    }
     if (!acquired) {
-      if (startupFailed) return errorResult('PLUGIN_START_FAILED: The plugin server could not start. Check its settings and application.');
-      // Retained declarations explain a refused cached call but never grant execution.
-      // A connector refresh cannot restart a failed server or authenticate its account.
+      if (this.closing)
+        return refused('PLUGIN_UNAVAILABLE: Plugins are shutting down.');
+      if (startupFailed)
+        return refused('PLUGIN_START_FAILED: The plugin server could not start. Check its settings and application.');
+      // Explain refusal from the same retained catalog/exposure projection that owns
+      // publication. Diagnostics never reconnect, authenticate, refresh, or choose a
+      // claimant; they only describe why this exact call was not admitted.
       const candidates = this.records.filter(row => row.catalog.some(tool => tool.name === name));
+      const exposure = this.exposure();
+      const issue = candidates.map(row => exposure.issues.get(row.id)?.get(name)).find((value): value is string => !!value);
       const row = candidates.length === 1 ? candidates[0] : undefined;
-      let reason = 'PLUGIN_DISABLED: This plugin tool is unavailable, conflicted or disabled. Check its status in Plugins; refresh the connector after resolving its availability.';
-      if (!candidates.length && !this.closing) {
-        const builtin = SURFACE_LIST.find(surface => surface.id !== 'plugins' && surface.tools.includes(name));
-        reason = 'PLUGIN_TOOL_UNAVAILABLE: The Plugins connector has no current plugin for this tool. The request may use a stale catalog or the wrong connector.' +
-          (builtin ? ` Use the ${builtin.connectorName} connector for its built-in ${name} tool.` : ' Refresh the Plugins connector after checking which plugin provides it.');
-      }
-      if (row && !this.closing) {
+      let reason: string;
+      if (issue) reason = `PLUGIN_NOT_EXPOSED: ${issue}`;
+      else if (!candidates.length)
+        reason = 'UNKNOWN_TOOL: This tool name is not in the current Plugins catalog. It may be stale or belong to another connector. Check the current Plugins tool list.';
+      else if (row) {
         if (!row.enabled || row.disabledTools.includes(name)) reason = 'PLUGIN_DISABLED: Enable this plugin and tool in Plugins before calling it.';
         else if (row.status === 'needs-auth') reason = 'PLUGIN_NEEDS_AUTH: Sign in to this plugin in Plugins before calling it.';
         else if (row.status === 'authenticating') reason = 'PLUGIN_AUTHENTICATING: Finish the current sign-in for this plugin before calling it.';
         else if (row.status === 'error') reason = 'PLUGIN_UNAVAILABLE: The plugin server is in an error state. Check its application and settings, then Restart this plugin in Plugins. Inspect any earlier failed operation before retrying; it may already have completed.';
-      }
-      return errorResult(`${reason} This call was not dispatched.`, 'tool_rejected');
+        else reason = 'PLUGIN_UNAVAILABLE: This tool is not currently available from its plugin. Check its status in Plugins.';
+      } else reason = 'PLUGIN_UNAVAILABLE: This tool is not currently available from its plugin. Check its status in Plugins.';
+      return refused(reason);
     }
     const { row, live, tool } = acquired;
     try {

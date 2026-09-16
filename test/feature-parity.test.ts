@@ -29,7 +29,7 @@ describe('portable browser-backed feature parity', () => {
     }
   );
 
-  it('keeps the bridge required for either independently viable browser feature', () => {
+  it('keeps the recording bridge required regardless of legacy feature flags', () => {
     const config = defaultConfig('darwin');
 
     expect(
@@ -49,7 +49,7 @@ describe('portable browser-backed feature parity', () => {
         sessions: { ...config.sessions, record: false },
         multiAgent: { ...config.multiAgent, enabled: false }
       })
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('ships the complete Core/browser product plus native Desktop automation on macOS', () => {
@@ -64,8 +64,6 @@ describe('portable browser-backed feature parity', () => {
       'apply_patch',
       'exec_command',
       'write_stdin',
-      'download_artifact',
-      'session',
       'update_plan',
       'agents',
       'session_finish',

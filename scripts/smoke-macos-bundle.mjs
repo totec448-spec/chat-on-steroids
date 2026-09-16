@@ -58,6 +58,11 @@ for (const [key, expected] of Object.entries(expectedPlist)) {
   if (actual !== expected) throw new Error(`Info.plist ${key}=${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`);
 }
 
+const packagedPlist = JSON.parse(run('plutil', ['-convert', 'json', '-o', '-', plist]).stdout);
+for (const key of ['NSCameraUsageDescription', 'NSMicrophoneUsageDescription', 'NSAudioCaptureUsageDescription']) {
+  if (Object.hasOwn(packagedPlist, key)) throw new Error(`Info.plist unexpectedly contains unused media privacy key ${key}`);
+}
+
 function requireFile(file) {
   if (!statSync(file).isFile()) throw new Error(`Missing packaged file: ${file}`);
   return file;

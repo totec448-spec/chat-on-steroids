@@ -80,11 +80,12 @@ it('binds a claimed fresh input before evidence without acknowledging delivery o
   expect(await bindBrowserInputProject(entry.id, 'document', 'conversation-one')).toBe(true);
   const bound = (await listInputs()).find(row => row.id === entry.id)!;
   expect(bound.state).toBe('browser');
-  expect((await getSession(bound.deliveredSessionId!))?.projectId).toBe(project.id);
+  expect(bound.deliveredSessionId).toBeUndefined();
+  expect((await getSession(bound.sessionId!))?.projectId).toBe(project.id);
   resetInputForTests();
   expect(await bindBrowserInputProject(entry.id, 'document', 'conversation-one')).toBe(true);
   expect(await bindBrowserInputProject(entry.id, 'document', 'conversation-two')).toBe(false);
-  expect(await rebindSession(bound.deliveredSessionId!, 'conversation-one', 'conversation-replacement')).toBe(true);
+  expect(await rebindSession(bound.sessionId!, 'conversation-one', 'conversation-replacement')).toBe(true);
   expect(await bindBrowserInputProject(entry.id, 'document', 'conversation-one')).toBe(false);
 });
 

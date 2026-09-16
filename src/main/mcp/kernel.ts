@@ -1,4 +1,4 @@
-import { offerToolInput, acknowledgeToolInput, TOOL_INPUT_HEADER, type ToolInputBatch } from '../session/input.js';
+import { offerToolInput, acknowledgeToolInput, TOOL_INPUT_HEADER } from '../session/input.js';
 import { pluginManager } from '../plugins/manager.js';
 import { WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-computer.js';
 /**
@@ -34,14 +34,13 @@ import { toolSchema } from './tool-declarations.js';
 import {
   SandboxError,
   isAbsoluteVirtualPath,
-  isContained,
   isNativeWindowsPath,
   resolvePath,
   type Resolved
 } from '../sandbox.js';
 import { currentWorkspace, learnWorkspace, setCurrentWorkspace } from '../workspace.js';
-import { skillsDirectory } from '../skills.js';
 import { getSessionProject } from '../projects.js';
+import { firstTaskRoot } from '../skill-access.js';
 import { ExecError } from '../exec.js';
 import { ComputerError } from '../computer/index.js';
 import { getConfig } from '../config.js';
@@ -836,7 +835,7 @@ async function dispatchTracked(
     await recordAgentMessage(message, 'delivered', context.caller.conversationId);
   }
   // Inbox messages are part of the MCP result ChatGPT actually receives. Build the delivered
-  // result before recording so session(action=read, tool_call=T…) is genuine wire forensics rather than a
+  // result before recording so the app transcript retains the delivered wire value rather than a
   // subtly earlier internal value that omits the worker report most likely to matter later.
   // The Plugins handler owns validation/redaction of external results. A dispatcher refusal
   // never visited that owner and therefore needs its own single redaction pass.
@@ -848,11 +847,10 @@ async function dispatchTracked(
   );
   // Ordinary tools carry direct user input, but only the explicit finish signal
   // advances a planned stage. Successful work is not evidence that a stage is done.
-  const userInput: ToolInputBatch = nested ? { messages: [], reminder: '' } : await offerToolInput(context.caller.sessionId, context.caller.conversationId, context.caller.requestId, startedAt, name === 'session_finish' && !result.isError, true).catch(() => {
+  const userInput = nested ? { messages: [], reminder: '' } : await offerToolInput(context.caller.sessionId, context.caller.conversationId, context.caller.requestId, startedAt, name === 'session_finish' && !result.isError).catch(() => {
     logWarn('User input could not be attached; the completed tool result is preserved');
     return { messages: [], reminder: '' };
   });
-  try {
   if (userInput.messages.length) {
     const attachments: ToolResult['content'] = [];
     for (const [index, message] of userInput.messages.entries()) {
@@ -920,9 +918,6 @@ async function dispatchTracked(
   if (callerRunId) releaseQuiescentRun({}, callerRunId);
   markTiming('recorder', true);
   return delivered;
-  } finally {
-    await userInput.recordHistory?.().catch(() => logWarn('User input history will be retried from its retained delivery receipt'));
-  }
 }
 
 /** Whether this handler must know which chat it is before resolving its paths. */
@@ -1020,10 +1015,7 @@ export async function resolveIn(
   });
   // Absolute only: a workspace learned from a relative path would let one loose resolution
   // decide where the next loose resolution points. See workspace.ts.
-  // Loading shared skill instructions must not move the chat away from its project.
-  const skillDirectory = skillsDirectory();
-  const isSkill = resolved.root.name === 'skills' || (skillDirectory !== null && isContained(skillDirectory, resolved.real));
-  if (!isSkill && (isAbsoluteVirtualPath(requested) || isNativeWindowsPath(requested))) await learnWorkspace(resolved);
+  if (isAbsoluteVirtualPath(requested) || isNativeWindowsPath(requested)) await learnWorkspace(resolved);
   return resolved;
 }
 
@@ -1054,7 +1046,8 @@ export async function resolveCwd(ctx: ToolContext, virtualPath: string | undefin
       'WORKSPACE_REQUIRED: this multi-agent chat has no proven workspace. Supply an explicit approved workdir before running a command.'
     );
   }
-  const target = provided ? virtualPath : (workspace?.virtual ?? (ctx.roots[0] ? `/${ctx.roots[0].name}` : ''));
+  const fallback = firstTaskRoot(ctx.roots);
+  const target = provided ? virtualPath : (workspace?.virtual ?? (fallback ? `/${fallback.name}` : ''));
   if (!target) throw new SandboxError('No folder is approved, so there is nowhere to run');
   const resolved = await resolveIn(ctx.roots, target);
   const stat = await fs.stat(resolved.real);
@@ -1119,8 +1112,7 @@ export interface SurfaceRegistrar {
       annotations?: ToolAnnotations;
       /**
        * Opaque host metadata advertised verbatim in tools/list.
-       * Used once by download_artifact for {"openai/fileParams": ["file"]},
-       * which tells ChatGPT to inject the native file value. Never interpreted here.
+       * Never interpreted here.
        */
       _meta?: Record<string, unknown>;
     },

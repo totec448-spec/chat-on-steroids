@@ -11,10 +11,12 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
+import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APP_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
 import { userPromptText } from '../src/shared/user-prompt.js';
 import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
+import { browserControl } from '../src/main/browser-control.js';
 import { foldProgress, type SessionEvent } from '../src/shared/session.js';
 import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
 import type { SwarmSnapshot } from '../src/main/agents.js';
@@ -96,9 +98,11 @@ const {
   resetGoalStateForTests,
   setGoalObjective
 } = await import('../src/main/goal.js');
-const { createSession, deleteSession, findSessionByConversation, getSession, initSessionStore, readEvents, resetSessionStoreForTests } = await import(
+const { completeProcessCall, createSession, deleteSession, findSessionByConversation, getSession,
+  initSessionStore, readEvents, recordProcessCall, resetSessionStoreForTests } = await import(
   '../src/main/session/store.js'
 );
+const sessionStoreModule = await import('../src/main/session/store.js');
 const { closeConversation, liveConversations, noteChatOrigin, recordChatObservations, recordProgress, recordToolCall, REQUEST_ID_GRACE_MS, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { resetBlockedChatsForTests, setChatBlocked } = await import('../src/main/session/blocked-chats.js');
 const {
@@ -320,7 +324,7 @@ async function redeem(id?: string, client = 'tab-1'): Promise<any> {
     id = new URL(opened[index]!).searchParams.get('clf')!;
   }
   const reply = await request('POST', '/commands/redeem', { body: { id, client } });
-  expect(reply.status, `redeem ${id} failed`).toBe(200);
+  expect(reply.status, `redeem ${id} failed: ${JSON.stringify(reply.body)}`).toBe(200);
   return reply.body.command;
 }
 
@@ -386,6 +390,47 @@ beforeEach(async () => {
 });
 
 // ------------------------------------------------------------------ origin
+
+describe('direct browser control over the paired bridge', () => {
+  it('requires extension authentication and transfers each exact command once', async () => {
+    browserControl.reset();
+    const browserId = randomUUID();
+    const poll = { action:'poll',browserId,name:'Fixture',enabled:true };
+    expect((await request('POST','/browser-control',{auth:null,body:poll})).status).toBe(401);
+    await pair();
+    expect((await request('POST','/browser-control',{origin:'https://example.test',body:poll})).status).toBe(403);
+    const hello = await request('POST','/browser-control',{body:poll});expect(hello.status).toBe(200);
+    const result = browserControl.execute('browser_snapshot',{tabId:`${browserId}:12`},'session:browser-fixture',null,async()=>true);
+    try {
+      const list = await request('POST','/browser-control',{body:poll});
+      const claim = {action:'claim',browserId,id:list.body.requests[0],epoch:hello.body.epoch};
+      const claimed = await request('POST','/browser-control',{body:claim});
+      expect(claimed.body.command).toMatchObject({owner:'session:browser-fixture',args:{tabId:12}});
+      expect((await request('POST','/browser-control',{body:claim})).status).toBe(409);
+      const receipt = {...claim,action:'result',result:{value:{text:'fixture DOM'}}};
+      expect((await request('POST','/browser-control',{body:{...receipt,browserId:randomUUID()}})).status).toBe(409);
+      expect((await request('POST','/browser-control',{body:receipt})).status).toBe(200);
+      expect(await result).toEqual(receipt.result);
+      expect((await request('POST','/browser-control',{body:receipt})).status).toBe(409);
+    } finally {browserControl.reset();await result;}
+  });
+
+  it('projects read-only policy and rechecks permission after handout', async () => {
+    browserControl.reset();await pair();
+    await saveConfig({...suiteConfig,readOnly:false,capabilities:{...suiteConfig.capabilities,screen:true,control:true}});
+    const browserId=randomUUID(),poll={action:'poll',browserId,name:'Fixture',enabled:true};
+    const hello=await request('POST','/browser-control',{body:poll});
+    const result=browserControl.execute('browser_action',{tabId:`${browserId}:12`,pageId:'p',action:'click'},'session:browser-fixture',null,async()=>!getConfig().readOnly);
+    try {
+      const list=await request('POST','/browser-control',{body:poll});
+      const command={browserId,id:list.body.requests[0],epoch:hello.body.epoch};
+      expect((await request('POST','/browser-control',{body:{...command,action:'claim'}})).status).toBe(200);
+      await saveConfig({...getConfig(),readOnly:true});
+      expect((await request('POST','/browser-control',{body:poll})).body.policy).toEqual({read:true,write:false});
+      expect((await request('POST','/browser-control',{body:{...command,action:'check'}})).body.allowed).toBe(false);
+    } finally {browserControl.reset();await result;}
+  });
+});
 
 describe('who is allowed to talk to it', () => {
   it('pushes newly detected incompatible extension versions without granting browser presence', async () => {
@@ -751,6 +796,24 @@ describe('authorisation', () => {
 // ------------------------------------------------------------------ events
 
 describe('observations', () => {
+  it('persists bounded native reactions on the exact canonical user message and preserves sparse replays', async () => {
+    await pair();
+    const conversationId = 'f0f00003-1111-4111-8111-111111111119';
+    const user = { kind: 'user_message', time: Date.now(), text: 'Question', messageId: 'reaction-user' };
+    const send = (events: unknown[]) => request('POST', '/events', { body: { conversationId, events } });
+    const first = await send([user, { ...user, messageId: 'other-user' }]);
+    const before = (await readEvents(first.body.sessionId, { kinds: ['user_message'] }))[0]!;
+    await send([{ ...user, reaction: '😂' }]);
+    await send([user, { ...user, reaction: '<script>' }, { ...user, reaction: '😂'.repeat(100) }]);
+    let rows = await readEvents(first.body.sessionId, { kinds: ['user_message'] });
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ messageId: user.messageId, reaction: '😂', origin: before.seq, time: before.time });
+    expect(rows[1]).not.toHaveProperty('reaction');
+    await send([{ ...user, reaction: null }]);
+    rows = await readEvents(first.body.sessionId, { kinds: ['user_message'] });
+    expect(rows[0]).toMatchObject({ reaction: null, origin: before.seq });
+  });
+
   it('refuses anything that is not a conversation id', async () => {
     await pair();
     for (const conversationId of ['', 'not a uuid', '../../etc', 'x'.repeat(100)]) {
@@ -827,6 +890,104 @@ describe('observations', () => {
     expect(first.body.stored).toBe(1);
     expect(second.body.stored).toBe(0);
     expect(await readEvents(first.body.sessionId, { kinds: ['user_message'] })).toHaveLength(1);
+  });
+
+  it('anchors and independently enriches multiple exact native generated images without activity effects', async () => {
+    await pair();
+    const conversationId = '21111111-2222-4333-8444-555555555555';
+    const make = async (color: string, width: number, height: number) => {
+      const bytes = await sharp({ create: { width, height, channels: 3, background: color } }).webp().toBuffer();
+      return `data:image/webp;base64,${bytes.toString('base64')}`;
+    };
+    const messageId = '3150f756-bf2d-45fa-ac0f-45010b2239fb';
+    const images = [
+      { providerAssetId: 'file_000000005f2c823085a542762d1de785', previewWidth: 12, previewHeight: 8, previewDataUrl: await make('#0055ff', 12, 8) },
+      { providerAssetId: 'file_00000000dc58821198efef946a9ade33', previewWidth: 9, previewHeight: 11, previewDataUrl: await make('#ff6600', 9, 11) }
+    ];
+    const reply = await request('POST', '/events', { body: { conversationId, events: images.flatMap((image, index) => [
+      { kind: 'native_image', time: 1789552000000 + index, messageId, providerAssetId: image.providerAssetId,
+        providerRole: 'tool', providerChannel: 'final', providerStatus: 'finished_successfully', width: 1254, height: 1254, previewStatus: 'pending' },
+      { kind: 'native_image', time: 1789552000100 + index, messageId, providerAssetId: image.providerAssetId,
+        providerRole: 'tool', providerChannel: 'final', providerStatus: 'finished_successfully', width: 1254, height: 1254, previewStatus: 'available',
+        previewWidth: image.previewWidth, previewHeight: image.previewHeight, previewDataUrl: image.previewDataUrl,
+        src: 'https://chatgpt.com/backend-api/estuary/content?id=must-not-persist&sig=private' }
+    ]) } });
+
+    expect(reply.status).toBe(200);
+    const stored = await readEvents(reply.body.sessionId, { kinds: ['native_image'] });
+    expect(stored).toHaveLength(2);
+    expect(stored.map(event => event.kind === 'native_image' && event.providerAssetId)).toEqual(images.map(image => image.providerAssetId));
+    expect(stored.every(event => event.kind === 'native_image' && event.previewStatus === 'available' && event.asset?.mimeType === 'image/webp')).toBe(true);
+    expect(JSON.stringify(stored)).not.toContain('estuary');
+    expect(JSON.stringify(stored)).not.toContain('private');
+    const feed = await request('GET', `/activity?conversationId=${conversationId}&since=0`);
+    expect(feed.body.entries).toEqual([]);
+    expect(feed.body.stream.filter((entry: any) => entry.kind === 'native_image')).toEqual([]);
+
+    const oversized = await request('POST', '/events', { body: { conversationId, events: [{
+      kind: 'native_image', time: 1789552000200, messageId,
+      providerAssetId: 'file_00000000000000000000000000000099', providerRole: 'tool', providerChannel: 'final',
+      providerStatus: 'finished_successfully', width: 30_000, height: 30_000, previewStatus: 'available',
+      previewWidth: 12, previewHeight: 8, previewDataUrl: await make('#ffffff', 12, 8)
+    }] } });
+    expect(oversized.status).toBe(200);
+    const oversizedRow = (await readEvents(reply.body.sessionId, { kinds: ['native_image'] }))
+      .find(event => event.kind === 'native_image' && event.providerAssetId.endsWith('99'));
+    expect(oversizedRow).toMatchObject({ width: 30_000, height: 30_000, previewStatus: 'unavailable', previewError: 'oversized' });
+    expect(oversizedRow && oversizedRow.kind === 'native_image' ? oversizedRow.asset : undefined).toBeUndefined();
+
+    const quotaWrite = vi.spyOn(sessionStoreModule, 'writeAsset').mockRejectedValueOnce(new Error('Global session asset quota exceeded'));
+    try {
+      const quota = await request('POST', '/events', { body: { conversationId, events: [{
+        kind: 'native_image', time: 1789552000300, messageId,
+        providerAssetId: 'file_00000000000000000000000000000098', providerRole: 'tool', providerChannel: 'final',
+        providerStatus: 'finished_successfully', width: 1254, height: 1254, previewStatus: 'available',
+        previewWidth: 12, previewHeight: 8, previewDataUrl: await make('#aaaaaa', 12, 8)
+      }] } });
+      expect(quota.status).toBe(200);
+    } finally {
+      quotaWrite.mockRestore();
+    }
+    const quotaRow = (await readEvents(reply.body.sessionId, { kinds: ['native_image'] }))
+      .find(event => event.kind === 'native_image' && event.providerAssetId.endsWith('98'));
+    expect(quotaRow).toMatchObject({ previewStatus: 'unavailable', previewError: 'quota' });
+    expect(quotaRow && quotaRow.kind === 'native_image' ? quotaRow.asset : undefined).toBeUndefined();
+  });
+
+  it('retains native-image metadata but refuses preview bytes before final provider status', async () => {
+    await pair();
+    const conversationId = '21111111-2222-4333-8444-666666666666';
+    const messageId = '4150f756-bf2d-45fa-ac0f-45010b2239fb';
+    const bytes = await sharp({ create: { width: 12, height: 8, channels: 3, background: '#4477aa' } }).webp().toBuffer();
+    const previewDataUrl = `data:image/webp;base64,${bytes.toString('base64')}`;
+    const events = [
+      { providerAssetId: 'file_00000000000000000000000000000081', providerStatus: 'in_progress' },
+      { providerAssetId: 'file_00000000000000000000000000000082' }
+    ].map((image, index) => ({
+      kind: 'native_image', time: 1789552000400 + index, messageId,
+      providerAssetId: image.providerAssetId, providerRole: 'tool', providerChannel: 'final',
+      ...(image.providerStatus ? { providerStatus: image.providerStatus } : {}),
+      width: 1254, height: 1254, previewStatus: 'available', previewWidth: 12, previewHeight: 8, previewDataUrl
+    }));
+
+    const reply = await request('POST', '/events', { body: { conversationId, events } });
+    expect(reply.status).toBe(200);
+    const rows = (await readEvents(reply.body.sessionId, { kinds: ['native_image'] }))
+      .filter(event => event.kind === 'native_image');
+    expect(rows).toHaveLength(2);
+    expect(rows.map(row => ({ id: row.providerAssetId, status: row.providerStatus, preview: row.previewStatus, asset: row.asset }))).toEqual([
+      { id: events[0]!.providerAssetId, status: 'in_progress', preview: 'pending', asset: undefined },
+      { id: events[1]!.providerAssetId, status: undefined, preview: 'pending', asset: undefined }
+    ]);
+
+    const final = await request('POST', '/events', { body: { conversationId, events: [{
+      ...events[0], time: 1789552000500, providerStatus: 'finished_successfully'
+    }] } });
+    expect(final.status).toBe(200);
+    const enriched = (await readEvents(reply.body.sessionId, { kinds: ['native_image'] }))
+      .find(event => event.kind === 'native_image' && event.providerAssetId === events[0]!.providerAssetId);
+    expect(enriched).toMatchObject({ providerStatus: 'finished_successfully', previewStatus: 'available',
+      asset: { mimeType: 'image/webp', bytes: bytes.length } });
   });
 
   it('refuses an over-sized body with an answer, not a reset connection', async () => {
@@ -936,6 +1097,48 @@ describe('activity feed', () => {
       attributionMethod: 'request_id'
     });
   });
+  it('keeps bind, first correlation and ACK on the reserved opening session', async () => {
+    await pair();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    await writeDurableNow('session-input', []);
+    const id = randomUUID();
+    const owner = '31:fresh-opening-document:0';
+    const conversationId = '24242424-4646-4848-8a8a-626262626262';
+    const requestId = 'wfr_reserved_opening_first_call';
+    try {
+      const row = await input.enqueueInput({ id, sessionId: null, text: 'Open the exact reserved task', mode: 'auto',
+        dueAt: Date.now(), model: null, reasoningEffort: null });
+      expect(row).toMatchObject({ id, sessionId: id, opening: true, conversationId: null });
+      expect((await request('POST', '/input/claim', { body: {
+        id, owner, conversationId: null, requiresAuthorization: true
+      } })).body.input).toMatchObject({ id, owner, opening: true });
+      expect((await request('POST', '/input/claim', { body: {
+        id, owner, conversationId: null, authorize: true
+      } })).body).toEqual({ ok: true });
+
+      expect((await request('POST', '/input/bind', { body: { id, owner, conversationId } })).body).toEqual({ ok: true });
+      const mapped = await request('POST', '/correlations', { body: { conversationId, calls: [{
+        messageId: 'reserved-opening-call', tool: 'read', order: 0, answered: false,
+        requestId, createTime: Date.now() / 1000
+      }] } });
+      expect(mapped.body).toMatchObject({ ok: true, sessionId: id, confirmed: [requestId], complete: true });
+      expect((await request('POST', '/input/ack', { body: {
+        id, owner, conversationId, messageId: 'reserved-opening-user'
+      } })).body).toEqual({ ok: true });
+
+      expect(await findSessionByConversation(conversationId, { requireUnique: true })).toMatchObject({
+        id, conversationId, title: 'Open the exact reserved task'
+      });
+      expect(await getSession(id)).toMatchObject({ conversationId, chatIds: [conversationId] });
+      expect((await input.listInputs()).find(entry => entry.id === id)).toMatchObject({
+        state: 'sent', deliveredSessionId: id, conversationId, messageId: 'reserved-opening-user'
+      });
+    } finally {
+      await writeDurableNow('session-input', []);
+      input.resetInputForTests();
+    }
+  });
   it('registers a request id the page could not yet name a tool for', async () => {
     await pair();
     const conversationId = '16161616-3838-6060-8282-949494949494';
@@ -1040,6 +1243,34 @@ describe('activity feed', () => {
     expect(secondCalls).toEqual([]);
   });
 
+  it('preserves complete logical message identities and projects their exact provider aliases', async () => {
+    await pair();
+    const conversationId = '99999999-8888-7777-6666-555555555551';
+    const prefix = 'assistant:' + 'a'.repeat(179);
+    const ids = [prefix + 'x', prefix + 'y'];
+    expect(ids[0]).toHaveLength(190);
+    const providers = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+    const result = await request('POST', '/events', { body: { conversationId, events: [
+      ...ids.map((messageId, index) => ({ kind: 'assistant_message', messageId, providerMessageId: providers[index],
+        time: Date.now(), text: `Message ${index}`, state: 'streaming' })),
+      { kind: 'assistant_message', messageId: ids[0] + 'overflow', time: Date.now(), text: 'Must not alias' }
+    ] } });
+    const first = await readEvents(result.body.sessionId, { kinds: ['assistant_message'] });
+    expect(first.map(event => event.kind === 'assistant_message' && event.messageId)).toEqual(ids);
+    const origin = first[0]!.seq;
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'assistant_message', messageId: 'renamed-logical-message', providerMessageId: providers[0],
+        time: Date.now(), text: 'Updated through exact provider identity', state: 'streaming' }
+    ] } });
+    const reply = await request('GET', `/activity?conversationId=${conversationId}&since=0`);
+    const messages = reply.body.stream.filter((row: any) => row.kind === 'assistant_message');
+    expect(messages).toHaveLength(2);
+    expect(messages.find((row: any) => row.providerMessageId === providers[0])).toMatchObject({
+      messageId: ids[0], origin, text: 'Updated through exact provider identity'
+    });
+    expect(messages.find((row: any) => row.providerMessageId === providers[1])).toMatchObject({ messageId: ids[1] });
+  });
+
   it('hands back an app-owned render stream plus legacy tool summaries, with no raw tool I/O', async () => {
     await pair();
     const conversationId = '99999999-8888-7777-6666-555555555555';
@@ -1103,7 +1334,190 @@ describe('activity feed', () => {
     });
     expect(reply.body.stream[2]).not.toHaveProperty('args');
     expect(reply.body.stream[2]).not.toHaveProperty('result');
+    expect(reply.body.stream[2].detailRevision).toBeGreaterThan(0);
+    expect(reply.body.stream[2].displayOutcome).toEqual({ code: 'completed', label: 'completed' });
     expect(reply.body.generating).toBe(true);
+
+    const detail = await request('POST', '/activity/detail', { body: {
+      conversationId, callId: reply.body.stream[2].callId, detailRevision: reply.body.stream[2].detailRevision
+    } });
+    expect(detail.status).toBe(200);
+    expect(detail.body).toMatchObject({ ok: true, conversationId, callId: reply.body.stream[2].callId,
+      detailRevision: reply.body.stream[2].detailRevision, tool: 'apply_patch',
+      outcome: { code: 'completed', label: 'completed' },
+      args: { truncated: false }, result: { text: 'edited', truncated: false } });
+    expect(detail.body.args.text).toContain('*** Begin Patch');
+    expect(detail.body).not.toHaveProperty('requestId');
+    expect(JSON.stringify(detail.body)).not.toMatch(/assetId|assets/);
+  });
+
+  it('returns only one bounded redacted readable call preview and refuses cross-conversation disclosure', async () => {
+    await pair();
+    const conversationId = '78787878-6767-5656-4545-343434343434';
+    const otherConversation = '89898989-7878-6767-5656-454545454545';
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time: Date.now(), turnId: 'detail-turn' }
+    ] } });
+    await recordToolCall({
+      tool: 'plugin_fixture',
+      args: { query: 'visible', secret: 'DETAIL_SECRET_SENTINEL', payload: 'q'.repeat(9_000) },
+      content: [{ type: 'text', text: `Readable plugin text data:image/png;base64,${'C'.repeat(300)}` }],
+      protocolResult: { content: [
+        { type: 'text', text: 'Readable plugin text' },
+        { type: 'resource', resource: { text: 'Readable resource text' } },
+        { type: 'image', data: 'A'.repeat(2_000), mimeType: 'image/png' }
+      ] },
+      outcome: 'ok', durationMs: 4, startedAt: Date.now(), requestId: 'wfr_detail_projection', conversationId
+    });
+    await recordToolCall({
+      tool: 'plugin_fixture',
+      // This field is longer than the bounded stored prefix, so the preview ends inside the
+      // quoted binary body without a closing quote.
+      args: { dataBase64: 'B'.repeat(9_000) },
+      content: [{ type: 'text', text: 'binary args fixture' }],
+      outcome: 'ok', durationMs: 2, startedAt: Date.now(), requestId: 'wfr_detail_truncated_binary', conversationId
+    });
+    const feed = await request('GET', `/activity?conversationId=${conversationId}&since=0`);
+    const rows = feed.body.stream.filter((entry: any) => entry.kind === 'tool_call');
+    const row = rows[0];
+    expect(row).toBeTruthy();
+    expect(row).not.toHaveProperty('args');
+    expect(row).not.toHaveProperty('result');
+
+    const detail = await request('POST', '/activity/detail', { body: {
+      conversationId, callId: row.callId, detailRevision: row.detailRevision
+    } });
+    expect(detail.body.ok).toBe(true);
+    expect(detail.body.args.text.length).toBeLessThanOrEqual(8_000);
+    expect(detail.body.args).toMatchObject({ truncated: true, chars: expect.any(Number) });
+    expect(detail.body.result.text).toContain('Readable plugin text');
+    expect(detail.body.result.text).toContain('Readable resource text');
+    expect(detail.body.result.text).toContain('binary payload omitted');
+    expect(detail.body.args.text).toContain('q'.repeat(256));
+    const serialized = JSON.stringify(detail.body);
+    expect(serialized).not.toContain('DETAIL_SECRET_SENTINEL');
+    expect(serialized).not.toContain('A'.repeat(128));
+    expect(serialized).not.toMatch(/assetId|assets|more characters stored in full as/);
+
+    const binaryArgs = await request('POST', '/activity/detail', { body: {
+      conversationId, callId: rows[1].callId, detailRevision: rows[1].detailRevision
+    } });
+    expect(binaryArgs.body.args.text).toContain('binary payload omitted');
+    expect(binaryArgs.body.args.text).not.toContain('B'.repeat(128));
+    expect(JSON.stringify(binaryArgs.body)).not.toMatch(/assetId|more characters stored in full as/);
+
+    await request('POST', '/events', { body: { conversationId: otherConversation, events: [
+      { kind: 'turn_start', time: Date.now(), turnId: 'other-detail-turn' }
+    ] } });
+    await request('GET', `/activity?conversationId=${otherConversation}&since=0`);
+    const foreign = await request('POST', '/activity/detail', { body: {
+      conversationId: otherConversation, callId: row.callId, detailRevision: row.detailRevision
+    } });
+    expect(foreign.body).toEqual({ ok: false, error: 'call_not_available' });
+    expect((await request('POST', '/activity/detail', { body: {
+      conversationId, callId: [row.callId], detailRevision: row.detailRevision
+    } })).status).toBe(400);
+  });
+
+  it('keeps existing details and records new history after a legacy writer proposes recording off', async () => {
+    await pair();
+    const conversationId = '67676767-5656-4545-3434-232323232323';
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time: Date.now(), turnId: 'recorded-before-off' }
+    ] } });
+    await recordToolCall({
+      tool: 'read_file', args: { path: '/project/already-recorded.ts' },
+      content: [{ type: 'text', text: 'recorded result' }], outcome: 'ok', durationMs: 2,
+      startedAt: Date.now(), requestId: 'wfr_recorded_before_off', conversationId
+    });
+    const feed = await request('GET', `/activity?conversationId=${conversationId}&since=0`);
+    const row = feed.body.stream.find((entry: any) => entry.kind === 'tool_call');
+    const before = await readEvents(feed.body.sessionId);
+    const previous = getConfig();
+    try {
+      await saveConfig({ ...previous, sessions: { ...previous.sessions, record: false } });
+      expect(getConfig().sessions).toMatchObject({ record: true, retainDays: 0 });
+      const detail = await request('POST', '/activity/detail', { body: {
+        conversationId, callId: row.callId, detailRevision: row.detailRevision
+      } });
+      expect(detail.body).toMatchObject({ ok: true, callId: row.callId,
+        args: { text: expect.stringContaining('already-recorded.ts') },
+        result: { text: 'recorded result' } });
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'turn_start', time: Date.now() + 1, turnId: 'recorded-after-legacy-off' }
+      ] } });
+      const after = await readEvents(feed.body.sessionId);
+      expect(after).toHaveLength(before.length + 1);
+      expect(after.at(-1)).toMatchObject({ kind: 'turn_start', turnId: 'recorded-after-legacy-off' });
+    } finally {
+      await saveConfig(previous);
+    }
+  });
+
+  it('projects pending and completed process outcomes from canonical completion evidence', async () => {
+    await pair();
+    const conversationId = '69696969-5858-4747-3636-252525252525';
+    const opened = await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time: Date.now(), turnId: 'outcome-turn' }
+    ] } });
+    const baseCall = (callId: string, process: { sessionId: string; completedAt?: number; exitCode?: number | null; durationMs?: number }) => ({
+      kind: 'tool_call' as const, source: 'mcp' as const, time: 100, turnId: 'outcome-turn', call: {
+        callId, conversationId, requestId: `request-${callId}`, attribution: 'request_id' as const,
+        attributionMethod: 'request_id' as const, tool: 'exec_command',
+        args: { text: '{}', chars: 2, truncated: false }, result: { text: 'initial', chars: 7, truncated: false },
+        durationMs: 5, outcome: 'ok' as const, process,
+        summary: { kind: 'run' as const, tone: 'neutral' as const, title: 'Started fixture', metric: 'running' }
+      }
+    });
+    await recordProcessCall(opened.body.sessionId, baseCall('pending', { sessionId: '1' }));
+    await recordProcessCall(opened.body.sessionId, baseCall('zero', { sessionId: '2' }));
+    await recordProcessCall(opened.body.sessionId, baseCall('nonzero', { sessionId: '3' }));
+    await recordProcessCall(opened.body.sessionId, baseCall('unknown', { sessionId: '4' }));
+    await recordProcessCall(opened.body.sessionId, baseCall('legacy-missing', {
+      sessionId: '5', completedAt: 200, durationMs: 30
+    }));
+    await completeProcessCall(opened.body.sessionId, 'zero', { completedAt: 200, durationMs: 20, exitCode: 0 });
+    await completeProcessCall(opened.body.sessionId, 'nonzero', { completedAt: 200, durationMs: 21, exitCode: 7 });
+    await completeProcessCall(opened.body.sessionId, 'unknown', { completedAt: 200, durationMs: 22, exitCode: null });
+
+    const feed = await request('GET', `/activity?conversationId=${conversationId}&since=0`);
+    const rows = new Map(feed.body.stream.filter((entry: any) => entry.kind === 'tool_call')
+      .map((entry: any) => [entry.callId, entry]));
+    expect(rows.get('pending')).toMatchObject({ displayOutcome: { code: 'started', label: 'started' }, durationMs: 5 });
+    expect(rows.get('zero')).toMatchObject({ displayOutcome: { code: 'completed', label: 'completed', exitCode: 0 }, durationMs: 20 });
+    expect(rows.get('nonzero')).toMatchObject({ displayOutcome: { code: 'failed', label: 'failed · exit 7', exitCode: 7 }, durationMs: 21 });
+    expect(rows.get('unknown')).toMatchObject({ displayOutcome: { code: 'finished', label: 'finished · exit unknown', exitCode: null }, durationMs: 22 });
+    expect(rows.get('legacy-missing')).toMatchObject({ displayOutcome: { code: 'finished', label: 'finished · exit unknown', exitCode: null }, durationMs: 30 });
+  });
+
+  it('projects every current non-process outcome without making the content script reinterpret it', async () => {
+    await pair();
+    const conversationId = '56565656-4545-3434-2323-121212121212';
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time: Date.now(), turnId: 'outcome-enums' }
+    ] } });
+    const cases = [
+      ['ok', 'completed', 'completed'],
+      ['process_exit_nonzero', 'failed', 'failed · exit 4'],
+      ['tool_rejected', 'refused', 'refused'],
+      ['tool_execution_error', 'failed', 'failed'],
+      ['tool_internal_error', 'internal_error', 'internal error']
+    ] as const;
+    for (const [outcome] of cases) {
+      await recordToolCall({
+        tool: 'exec_command', args: { command: `fixture-${outcome}` },
+        content: [{ type: 'text', text: `result-${outcome}` }], outcome, durationMs: 3,
+        startedAt: Date.now(), requestId: `wfr_enum_${outcome}`, conversationId,
+        evidence: { changes: [], assets: [], count: null, detail: null,
+          exitCode: outcome === 'process_exit_nonzero' ? 4 : null, timedOut: false,
+          durationMs: null, running: null, processSessionId: null }
+      });
+    }
+    const feed = await request('GET', `/activity?conversationId=${conversationId}&since=0`);
+    const rows = new Map(feed.body.stream.filter((entry: any) => entry.kind === 'tool_call')
+      .map((entry: any) => [entry.outcome, entry.displayOutcome]));
+    for (const [outcome, code, label] of cases) expect(rows.get(outcome)).toEqual({ code, label,
+      ...(outcome === 'process_exit_nonzero' ? { exitCode: 4 } : {}) });
   });
 
   /**

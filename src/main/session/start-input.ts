@@ -13,7 +13,7 @@ async function ready(signal?: AbortSignal): Promise<void> {
   await connect();
   signal?.throwIfAborted();
   // startTunnel returns a lifecycle handle before OpenAI /readyz or cloudflared's URL.
-  // Await that existing status authority for this operation; never publish input early.
+  // Await the existing status authority before browser work; local admission is already durable.
   await new Promise<void>((resolve, reject) => {
     let unsubscribe = () => {};
     const timer = setTimeout(() => { unsubscribe(); signal?.removeEventListener('abort', abort); reject(new Error('The connector did not become ready. Check its connection status and try again.')); }, 65000);
@@ -29,7 +29,9 @@ async function ready(signal?: AbortSignal): Promise<void> {
     };
     unsubscribe = onStatusChange(inspect); inspect();
   });
-  if (!await startBridge()) throw new Error('The browser bridge could not start. Your message has not been queued.');
+  signal?.throwIfAborted();
+  if (!await startBridge()) throw new Error('The browser bridge could not start.');
+  signal?.throwIfAborted();
 }
 async function deliver(entry: InputEntry, retry = false): Promise<InputEntry> {
   try {
@@ -39,33 +41,66 @@ async function deliver(entry: InputEntry, retry = false): Promise<InputEntry> {
     return await noteInputStartupError(entry.id, `Message queued. Browser startup failed: ${(error as Error).message}`) ?? entry;
   }
 }
-// Only in-progress pre-publication work lives here; durable outbox state owns delivery.
+// Only transient startup work lives here; the outbox owns accepted messages.
 const starting = new Map<string, AbortController>();
+let stopped = false;
 export async function cancelDesktopInput(id: string): Promise<boolean> {
   const start = starting.get(id);
-  if (start) { start.abort(new Error('Input cancelled')); return true; }
-  return cancelInput(id);
+  start?.abort(new Error('Input cancelled'));
+  return await cancelInput(id) || !!start;
 }
-export async function sendDesktopInput(input: InputArgs): Promise<InputEntry> {
-  if (input.mode === 'finish') return enqueueInput(input);
-  if (starting.has(input.id)) throw new Error('Input already starting');
-  const controller = new AbortController(); starting.set(input.id, controller);
+async function startAcceptedInput(entry: InputEntry, controller: AbortController): Promise<void> {
   try {
     await ready(controller.signal);
     controller.signal.throwIfAborted();
+    const current = (await listInputs()).find(row => row.id === entry.id);
+    controller.signal.throwIfAborted();
+    if (current?.state === 'queued') await deliver(current);
+  } catch (error) {
+    if (!controller.signal.aborted) await noteInputStartupError(entry.id,
+      'Message queued. Browser startup failed: ' + (error as Error).message);
+  } finally {
+    if (starting.get(entry.id) === controller) starting.delete(entry.id);
+  }
+}
+export async function sendDesktopInput(input: InputArgs): Promise<InputEntry> {
+  if (stopped) throw new Error('The app is shutting down');
+  if (input.mode === 'finish' || starting.has(input.id)) return enqueueInput(input);
+  const controller = new AbortController(); starting.set(input.id, controller);
+  try {
     const entry = await enqueueInput(input);
-    // Cancellation can arrive while the durable enqueue is committing.
     if (controller.signal.aborted) { await cancelInput(input.id); controller.signal.throwIfAborted(); }
-    starting.delete(input.id);
-    if (entry.state !== 'queued' || entry.attachmentDelivery === 'tool') return entry;
-    return deliver(entry);
-  } finally { if (starting.get(input.id) === controller) starting.delete(input.id); }
+    if (entry.state !== 'queued' || entry.transportIntent === 'tool' || entry.attachmentDelivery === 'tool') {
+      starting.delete(input.id); return entry;
+    }
+    // Return after durable admission, not after connection startup or native delivery.
+    void startAcceptedInput(entry, controller).catch(() => undefined);
+    return entry;
+  } catch (error) {
+    if (starting.get(input.id) === controller) starting.delete(input.id);
+    throw error;
+  }
+}
+export function stopInputStartup(): void {
+  stopped = true;
+  for (const controller of starting.values()) controller.abort(new Error('The app is shutting down'));
+  starting.clear();
 }
 export async function retryQueuedInputBrowser(id: string): Promise<InputEntry | null> {
-  const eligible = (entry: InputEntry | undefined): entry is InputEntry => !!entry && entry.state === 'queued' && entry.purpose !== 'decision' && !!entry.error?.startsWith('Message queued. Browser startup failed:');
-  if (!eligible((await listInputs()).find(entry => entry.id === id))) return null;
-  await ready();
-  const entry = (await listInputs()).find(row => row.id === id);
-  return eligible(entry) ? deliver(entry, true) : null;
+  if (stopped || starting.has(id)) return null;
+  const eligible = (entry: InputEntry | undefined): entry is InputEntry => !!entry && entry.state === 'queued' && entry.purpose !== 'decision' && !!(entry.error?.startsWith('Message queued. Browser startup failed:') || entry.error?.startsWith('Local chat setup failed:'));
+  if (!eligible((await listInputs()).find(entry => entry.id === id)) || stopped || starting.has(id)) return null;
+  const controller = new AbortController(); starting.set(id, controller);
+  try {
+    const repaired = await noteInputStartupError(id, null);
+    if (repaired?.error?.startsWith('Local chat setup failed:')) return repaired;
+    await ready(controller.signal);
+    const entry = (await listInputs()).find(row => row.id === id);
+    controller.signal.throwIfAborted();
+    return entry?.state === 'queued' ? await deliver(entry, true) : null;
+  } catch (error) {
+    if (controller.signal.aborted) return null;
+    return await noteInputStartupError(id, 'Message queued. Browser startup failed: ' + (error as Error).message);
+  } finally { if (starting.get(id) === controller) starting.delete(id); }
 }
-export function resetInputStartupForTests(): void { resetBrowserStartupForTests(); starting.clear(); }
+export function resetInputStartupForTests(): void { stopInputStartup(); stopped = false; resetBrowserStartupForTests(); }

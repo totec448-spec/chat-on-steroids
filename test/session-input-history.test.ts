@@ -3,45 +3,78 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
-import { appendEvent, createSession, getSession, initSessionStore, observeSessionModel, readEvents, resetSessionStoreForTests, upsertMessageEvent, writeAsset } from '../src/main/session/store.js';
+import { appendEvent, createSession, getSession, initSessionStore, observeSessionModel, readEvents, resetSessionStoreForTests, upsertMessageEvent, upsertNativeImageEvent, writeAsset } from '../src/main/session/store.js';
 import { recordDeliveredInput, recordedInputImage } from '../src/main/session/input-history.js';
 import type { InputEntry } from '../src/main/session/input.js';
 import { chronological } from '../src/shared/chronology.js';
 import * as store from '../src/main/session/store.js';
+import { initDurableStore, readDurable, writeDurableNow, flushDurable } from '../src/main/durable.js';
+import { configureInputDelivery, listInputs, resetInputForTests, claimBrowserInput } from '../src/main/session/input.js';
 
 let directory: string;
 beforeEach(async () => { directory = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-input-history-')); initSessionStore(directory); });
-afterEach(async () => { vi.restoreAllMocks(); resetSessionStoreForTests(); await fs.rm(directory, { recursive: true, force: true }); });
+afterEach(async () => { vi.restoreAllMocks(); resetInputForTests(); await flushDurable(); resetSessionStoreForTests(); await fs.rm(directory, { recursive: true, force: true }); });
 
-it('keeps image handouts in place through quota failure, acknowledgement, restart and successful preview retry', async () => {
-  const session = await createSession({ title: 'Quota delivery' });
-  const bytes = await sharp({ create: { width: 3, height: 2, channels: 3, background: '#507040' } }).webp({ lossless: true }).toBuffer();
-  const entry: InputEntry = { id: 'quota-image', sessionId: session.id, text: 'Check this picture', state: 'tool',
-    mode: 'auto', dueAt: 0, createdAt: 100, offeredAt: 200, owner: 'first-call',
-    model: null, reasoningEffort: null, conversationId: null,
-    images: [{ name: 'reference.webp', dataUrl: `data:image/webp;base64,${bytes.toString('base64')}` }] };
-  const write = vi.spyOn(store, 'writeAsset').mockRejectedValue(new Error('Global asset quota reached'));
-  await expect(recordDeliveredInput(entry)).rejects.toThrow('Global asset quota reached');
+it('commits the image handout before quota failure, retries without decoding again, and enriches its original row', async () => {
+  const session = await createSession({ conversationId: 'image-handout', title: 'Image handout' });
+  const bytes = await sharp({ create: { width: 7, height: 5, channels: 3, background: '#13579b' } }).webp().toBuffer();
+  const image = { name: 'fixture.webp', dataUrl: `data:image/webp;base64,${bytes.toString('base64')}` };
+  const entry = { id: 'image-handout', sessionId: session.id, state: 'tool', owner: 'request', offeredAt: 200,
+    text: 'Inspect pixels', images: [image] } as InputEntry;
+  const asset = vi.spyOn(store, 'writeAsset').mockRejectedValue(new Error('Global session asset quota exceeded'));
+  const stats = vi.spyOn(sharp.prototype, 'stats');
+  const committed = vi.fn();
+  await expect(recordDeliveredInput(entry, committed)).rejects.toThrow('quota');
+  expect(committed).toHaveBeenCalledTimes(1);
   const first = (await readEvents(session.id)).find(event => event.kind === 'user_message')!;
-  expect(first).toMatchObject({ time: 200, inputId: entry.id, inputImageCount: 1, inputDelivery: 'offered', authoredText: entry.text });
-  await appendEvent(session.id, { kind: 'progress', source: 'extension', time: 300, message: { text: 'Later work', chars: 10, truncated: false } });
-  const confirmed: InputEntry = { ...entry, state: 'sent', messageId: `input:${entry.id}`, deliveredAt: 400 };
-  await expect(recordDeliveredInput(confirmed)).rejects.toThrow('Global asset quota reached');
-  const afterFailure = (await readEvents(session.id)).find(event => event.kind === 'user_message')!;
-  expect(afterFailure).toMatchObject({ time: 200, origin: first.origin ?? first.seq, inputDelivery: 'confirmed', inputImageCount: 1 });
-  const logPath = path.join(directory, 'sessions', session.id, 'events.jsonl');
-  const count = (await fs.stat(logPath)).size;
-  await expect(recordDeliveredInput(confirmed)).rejects.toThrow('Global asset quota reached');
-  expect((await fs.stat(logPath)).size).toBe(count);
-  resetSessionStoreForTests(); initSessionStore(directory);
-  write.mockRestore();
-  expect(await recordDeliveredInput(confirmed)).toBe(true);
-  const messages = (await readEvents(session.id)).filter(event => event.kind === 'user_message');
-  expect(messages).toHaveLength(1);
-  expect(messages[0]).toMatchObject({ time: 200, origin: first.origin ?? first.seq, inputDelivery: 'confirmed', inputImageCount: 1 });
-  expect(await recordedInputImage(session.id, messages[0]!.assets![0]!.id)).toBe(entry.images![0]!.dataUrl);
-  expect(chronological(await readEvents(session.id)).findIndex(event => event.kind === 'user_message'))
-    .toBeLessThan(chronological(await readEvents(session.id)).findIndex(event => event.kind === 'progress'));
+  expect(first).toMatchObject({ time: 200, inputDelivery: 'offered', inputId: entry.id });
+  await appendEvent(session.id, { source: 'app', time: 250, kind: 'note', message: { text: 'Later', chars: 5, truncated: false } });
+  const confirmed = { ...entry, state: 'sent' as const, messageId: `input:${entry.id}`, deliveredAt: 300 };
+  await expect(recordDeliveredInput(confirmed)).rejects.toThrow('quota');
+  await expect(recordDeliveredInput(confirmed)).rejects.toThrow('quota');
+  expect(stats).toHaveBeenCalledTimes(1);
+  asset.mockRestore();
+  await recordDeliveredInput(confirmed);
+  const rows = chronological(await readEvents(session.id));
+  expect(rows[0]).toMatchObject({ kind: 'user_message', time: 200, origin: first.origin ?? first.seq, inputDelivery: 'confirmed' });
+  const message = rows.find(event => event.kind === 'user_message')!;
+  expect(message.kind === 'user_message' && message.assets).toHaveLength(1);
+});
+
+it('repairs a legacy off-tail image receipt across cold restore while retaining bytes and never reopening delivery', async () => {
+  initDurableStore(directory);
+  const session = await createSession({ conversationId: 'legacy-images', title: 'Legacy images' });
+  const bytes = await sharp({ create: { width: 9, height: 3, channels: 3, background: '#2468ac' } }).webp().toBuffer();
+  const row: InputEntry = { id: '10000000-0000-4000-8000-000000000001', sessionId: session.id, text: 'Old image', mode: 'auto',
+    model: null, reasoningEffort: null, dueAt: 100, createdAt: 100, state: 'sent', owner: null, conversationId: 'legacy-images',
+    messageId: 'input:10000000-0000-4000-8000-000000000001', offeredAt: 200, deliveredAt: 400, historyRecorded: false,
+    toolImages: [{ name: 'legacy.webp', dataUrl: `data:image/webp;base64,${bytes.toString('base64')}` }] };
+  await upsertMessageEvent(session.id, { kind: 'user_message', source: 'app', time: 200, messageId: row.messageId!, inputId: row.id,
+    message: { text: row.text, chars: row.text.length, truncated: false } });
+  const first = (await readEvents(session.id)).find(event => event.kind === 'user_message')!;
+  for (let i = 0; i < 170; i++) await appendEvent(session.id, { kind: 'note', source: 'app', time: 500 + i,
+    message: { text: `later ${i}`, chars: 10, truncated: false } });
+  await writeDurableNow('session-input', [row]);
+  await flushDurable(); resetSessionStoreForTests(); initSessionStore(directory); resetInputForTests();
+  const asset = vi.spyOn(store, 'writeAsset').mockRejectedValue(new Error('Session asset quota exceeded'));
+  configureInputDelivery({ recordDelivered: recordDeliveredInput, changed: () => {}, applyAutomation: async () => {} });
+  const repaired = (await listInputs())[0]!;
+  expect(repaired).toMatchObject({ historyAnchored: true, historyRecorded: false, toolImages: row.toolImages });
+  expect((await readDurable<InputEntry[]>('session-input'))![0]).toMatchObject({ historyAnchored: true, historyRecorded: false });
+  expect((await readEvents(session.id)).find(event => event.kind === 'user_message')).toMatchObject({ origin: first.origin ?? first.seq, time: 200 });
+  expect(await claimBrowserInput(row.id, 'different-page', 'legacy-images')).toBeNull();
+  asset.mockRestore();
+  expect((await listInputs())[0]).toMatchObject({ historyAnchored: true, historyRecorded: true });
+  const message = (await readEvents(session.id)).find(event => event.kind === 'user_message')!;
+  expect(message).toMatchObject({ origin: first.origin ?? first.seq, time: 200 });
+  expect(message.kind === 'user_message' && await recordedInputImage(session.id, message.assets![0]!.id)).toBe(row.toolImages![0]!.dataUrl);
+});
+
+it('uses original handout time when the first canonical publication happens after its receipt', async () => {
+  const session = await createSession({ title: 'Late history' });
+  await recordDeliveredInput({ id: 'late', sessionId: session.id, state: 'sent', messageId: 'input:late',
+    deliveredAt: 300, offeredAt: 100, text: 'Late' } as InputEntry);
+  expect((await readEvents(session.id)).find(event => event.kind === 'user_message')).toMatchObject({ time: 100 });
 });
 
 it('does not republish an inherited finish task model as a new picker observation', async () => {
@@ -79,6 +112,50 @@ it('serves real recorded tool PNG pixels and refuses unreferenced or invalid ima
     expect(readFile.mock.calls.some(args => String(args[0]) === assetPath)).toBe(false);
   } finally { readFile.mockRestore(); }
   await writeAsset(other.id, bytes, 'image/png');
+  expect(await recordedInputImage(other.id, asset.id)).toBeNull();
+});
+
+it('anchors each native generated image before preview enrichment and authorizes only its exact session asset', async () => {
+  const session = await createSession({ conversationId: 'generated-images', title: 'Generated images' });
+  const other = await createSession({ title: 'Other' });
+  const first = await upsertNativeImageEvent(session.id, {
+    time: 200, source: 'extension', kind: 'native_image', messageId: '3150f756-bf2d-45fa-ac0f-45010b2239fb',
+    providerAssetId: 'file_00000000000000000000000000000001', providerRole: 'tool', providerChannel: 'final',
+    providerStatus: 'in_progress', width: 1254, height: 1254, previewStatus: 'pending',
+    turnId: 'turn-one', agent: 'worker-a'
+  });
+  await appendEvent(session.id, { time: 250, source: 'app', kind: 'note', message: { text: 'Later', chars: 5, truncated: false } });
+  const bytes = await sharp({ create: { width: 12, height: 8, channels: 3, background: '#123456' } }).webp().toBuffer();
+  const asset = await writeAsset(session.id, bytes, 'image/webp');
+  const enriched = await upsertNativeImageEvent(session.id, {
+    time: 300, source: 'extension', kind: 'native_image', messageId: first.event.messageId,
+    providerAssetId: first.event.providerAssetId, providerRole: 'tool', providerChannel: 'final', turnId: 'remounted-turn',
+    providerStatus: 'finished_successfully', width: 1254, height: 1254, agent: 'worker-a',
+    previewStatus: 'available', previewWidth: 12, previewHeight: 8, asset
+  });
+  await upsertNativeImageEvent(session.id, {
+    time: 210, source: 'extension', kind: 'native_image', messageId: first.event.messageId,
+    providerAssetId: 'file_00000000000000000000000000000002', providerRole: 'tool', providerChannel: 'final',
+    width: 1024, height: 768, previewStatus: 'unavailable', previewError: 'not_loaded'
+  });
+  // A later document-local turn hint cannot move an exact provider tuple; the canonical
+  // owner stays put while the same image is still allowed to finish preview enrichment.
+  const { seq: _seq, origin: _origin, ...enrichedInput } = enriched.event;
+  const conflict = await upsertNativeImageEvent(session.id, { ...enrichedInput, time: 400, turnId: 'turn-two' });
+  const agentConflict = await upsertNativeImageEvent(session.id, { ...enrichedInput, time: 401, agent: 'worker-b' });
+
+  const rows = (await readEvents(session.id)).filter(event => event.kind === 'native_image');
+  expect(rows).toHaveLength(2);
+  expect(rows[0]).toMatchObject({ origin: first.event.origin ?? first.event.seq, time: 200, turnId: 'turn-one',
+    providerStatus: 'finished_successfully', previewStatus: 'available', asset });
+  expect(rows[1]).toMatchObject({ providerAssetId: 'file_00000000000000000000000000000002', previewStatus: 'unavailable' });
+  expect(conflict.changed).toBe(false);
+  expect(agentConflict.changed).toBe(false);
+  await flushDurable(); resetSessionStoreForTests(); initSessionStore(directory);
+  const restored = (await readEvents(session.id)).filter(event => event.kind === 'native_image');
+  expect(restored).toHaveLength(2);
+  expect(restored[0]).toMatchObject({ origin: first.event.origin ?? first.event.seq, previewStatus: 'available', asset });
+  expect(await recordedInputImage(session.id, asset.id)).toBe(`data:image/webp;base64,${bytes.toString('base64')}`);
   expect(await recordedInputImage(other.id, asset.id)).toBeNull();
 });
 

@@ -25,6 +25,26 @@ afterAll(async () => {
 });
 
 describe('settings migration', () => {
+  it('drops removed file-saving settings without changing other saved choices', async () => {
+    const config = defaultConfig();
+    config.readOnly = true;
+    config.capabilities.command = false;
+    const legacy = {
+      ...config,
+      capabilities: { ...config.capabilities, saveArtifact: true },
+      artifacts: { maxFileBytes: 20 * 1024 * 1024 }
+    };
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    const loaded = await loadConfig();
+    expect(loaded).toMatchObject(config);
+    expect(loaded).not.toHaveProperty('artifacts');
+    expect(loaded.capabilities).not.toHaveProperty('saveArtifact');
+    await saveConfig(loaded);
+    const stored = JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8'));
+    expect(stored).not.toHaveProperty('artifacts');
+    expect(stored.capabilities).not.toHaveProperty('saveArtifact');
+  });
+
   it('defaults background chats on for fresh and omitted settings while preserving saved choices', async () => {
     expect(defaultConfig().ui.backgroundChats).toBe(true);
     expect((await loadConfig()).ui.backgroundChats).toBe(true);
@@ -61,24 +81,21 @@ describe('settings migration', () => {
       expect((await loadConfig()).goal).toMatchObject({ backend, loopBackend: 'api' });
     }
   });
-  it('never leaves Goal enabled while session recording is off', async () => {
-    const impossible = {
+  it('normalizes every writer and legacy file to recording on with no age expiry', async () => {
+    const legacy = {
       ...defaultConfig(),
-      sessions: { ...defaultConfig().sessions, record: false },
+      sessions: { ...defaultConfig().sessions, record: false, retainDays: 30 },
       goal: { ...defaultConfig().goal, enabled: true }
     };
 
-    // Every writer goes through saveConfig/updateConfig, including the renderer and extension.
-    const saved = await saveConfig(impossible);
-    expect(saved.sessions.record).toBe(false);
-    expect(saved.goal.enabled).toBe(false);
+    const saved = await saveConfig(legacy);
+    expect(saved.sessions).toMatchObject({ record: true, retainDays: 0 });
+    expect(saved.goal.enabled).toBe(true);
 
-    // Hand-edited or older persisted state gets the same privacy-preserving repair on load:
-    // Goal turns off rather than silently turning recording back on.
-    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(impossible), 'utf8');
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
     const loaded = await loadConfig();
-    expect(loaded.sessions.record).toBe(false);
-    expect(loaded.goal.enabled).toBe(false);
+    expect(loaded.sessions).toMatchObject({ record: true, retainDays: 0 });
+    expect(loaded.goal.enabled).toBe(true);
   });
 
   it('preserves old settings when new safe-default capabilities and UI prefs are added', async () => {
@@ -113,8 +130,6 @@ describe('settings migration', () => {
     expect(loaded.capabilities.create).toBe(true);
     expect(loaded.capabilities.clipboardRead).toBe(false);
     expect(loaded.capabilities.clipboardWrite).toBe(false);
-    expect(loaded.capabilities.saveArtifact).toBe(false);
-    expect(loaded.artifacts.maxFileBytes).toBe(defaultConfig().artifacts.maxFileBytes);
     // A config written before custom providers existed keeps OpenRouter with no URL:
     // an upgrade never moves a running Goal loop onto an endpoint nobody chose.
     expect(loaded.goal.provider).toEqual({ kind: 'openrouter', baseUrl: '' });
@@ -347,13 +362,14 @@ describe('settings migration', () => {
 
 /** Fresh-install defaults, while migrations above prove existing choices stay narrow. */
 describe('shipped defaults', () => {
-  // Windows alone starts the Desktop group on. macOS has the backend but starts it off; the
-  // user switches it on and grants Screen Recording / Accessibility. Linux has no backend.
+  // Windows starts the group on; Linux starts its extension browser capabilities on.
+  // macOS preserves its existing off default and separate native OS consent.
   const expectedFreshCapability = (capability: Capability, platform: NodeJS.Platform): boolean =>
-    platform === 'win32' || !DESKTOP_CAPABILITIES.includes(capability);
+    platform === 'win32' || !DESKTOP_CAPABILITIES.includes(capability) ||
+    (platform !== 'darwin' && (capability === 'screen' || capability === 'control'));
 
   it('records sessions from first launch', () => {
-    expect(defaultConfig().sessions.record).toBe(true);
+    expect(defaultConfig().sessions).toMatchObject({ record: true, retainDays: 0 });
   });
 
   it('loads a genuinely missing config with every portable Core capability enabled', async () => {
@@ -410,15 +426,12 @@ describe('shipped defaults', () => {
     expect(loaded.multiAgent.enabled).toBe(false);
   });
 
-  /**
-   * The default moved after this app had already shipped with recording off. Turning it on
-   * underneath somebody who switched it off would be changing a privacy setting on their
-   * behalf, so the new default is for configs that do not have the key at all.
-   */
-  it('leaves an existing choice to record alone', async () => {
+  it('does not persist obsolete recording-off or age-retention choices', async () => {
     const config = defaultConfig();
-    await saveConfig({ ...config, sessions: { ...config.sessions, record: false } });
-    expect((await loadConfig()).sessions.record).toBe(false);
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: false, retainDays: 3650 } });
+    expect((await loadConfig()).sessions).toMatchObject({ record: true, retainDays: 0 });
+    const stored = JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8'));
+    expect(stored.sessions).toMatchObject({ record: true, retainDays: 0 });
   });
 
   it('applies the new default to a config written before the setting existed', async () => {

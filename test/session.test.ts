@@ -10,6 +10,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import sharp from 'sharp';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { lineDelta, formatDelta } from '../src/main/diffstat.js';
@@ -1766,7 +1767,7 @@ describe('handoff storage', () => {
     }
   }, 90_000);
 
-  it('never prunes the session holding the newest handoff', async () => {
+  it('never age-prunes closed recordings, including sessions without a handoff', async () => {
     const stale = await createSession({ title: 'stale' });
     const kept = await createSession({ title: 'kept' });
     await saveHandoff(handoff(kept.id, '2026-01-03-cccccccc', Date.now()));
@@ -1791,16 +1792,14 @@ describe('handoff storage', () => {
     }
 
     const removed = await pruneSessions(30);
-    expect(removed).toBeGreaterThanOrEqual(1);
-    // Retention is not the UI's first 200 rows. Check durable existence directly so this
-    // invariant stays valid even when the retained handoff is intentionally old in a large
-    // test history.
+    expect(removed).toBe(0);
     expect(await getSession(kept.id)).not.toBeNull();
-    expect(await getSession(stale.id)).toBeNull();
+    expect(await getSession(stale.id)).not.toBeNull();
+    await deleteSession(stale.id);
     await deleteSession(kept.id);
   }, 90_000);
 
-  it('prunes an expired session beyond the old 5,000-folder maintenance prefix', async () => {
+  it('does not scan or remove even an expired recording when asked through the legacy prune seam', async () => {
     const seed = await createSession({ title: 'retention catalog seed' });
     const seedSummary = await getSession(seed.id);
     expect(seedSummary).not.toBeNull();
@@ -1869,8 +1868,8 @@ describe('handoff storage', () => {
     );
 
     try {
-      expect(await pruneSessions(30)).toBe(1);
-      expect(removed).toEqual([targetId]);
+      expect(await pruneSessions(30)).toBe(0);
+      expect(removed).toEqual([]);
     } finally {
       rmSpy.mockRestore();
       statSpy.mockRestore();
@@ -1879,8 +1878,8 @@ describe('handoff storage', () => {
       resetSessionStoreForTests();
       await deleteSession(seed.id);
     }
-  // Match the adjacent full-catalog tests: Windows metadata I/O under the parallel
-  // suite can exceed the ordinary 30-second budget. Keep all 5,001 entries exercised.
+  // Keep the former pathological catalogue shape: the invariant is that no reader or remover
+  // is touched at all, regardless of how much expired history exists.
   }, 90_000);
 
   it('splits a long brief on blank lines and keeps every character', () => {
@@ -1970,6 +1969,44 @@ describe('canonical recorder 1.8', () => {
     await upsertMessageEvent(opened.id, revision(60000));
     await upsertMessageEvent(opened.id, revision(60000));
     expect(await getSession(opened.id)).toMatchObject({ estimatedTokens: 15000, contextTokens: 15000 });
+  });
+
+  it('refuses rejected native-image owners before writing preview assets', async () => {
+    const conversationId = `conv-native-image-owner-${Date.now()}`;
+    const messageId = '5150f756-bf2d-45fa-ac0f-45010b2239fb';
+    const providerAssetId = 'file_00000000000000000000000000000071';
+    const preview = async (color: string) => {
+      const bytes = await sharp({ create: { width: 12, height: 8, channels: 3, background: color } }).webp().toBuffer();
+      return `data:image/webp;base64,${bytes.toString('base64')}`;
+    };
+    const first = await recordChatObservations(conversationId, [{
+      kind: 'native_image', time: 100, messageId, providerAssetId, providerRole: 'tool',
+      providerChannel: 'final', providerStatus: 'in_progress', width: 1254, height: 1254,
+      previewStatus: 'pending'
+    }], 'worker-a');
+    const sessionId = first.sessionId!;
+
+    const roleConflict = await recordChatObservations(conversationId, [{
+      kind: 'native_image', time: 200, messageId, providerAssetId, providerRole: 'assistant',
+      providerChannel: 'final', providerStatus: 'finished_successfully', width: 1254, height: 1254,
+      previewStatus: 'available', previewWidth: 12, previewHeight: 8, previewDataUrl: await preview('#0044ff')
+    }], 'worker-a');
+    const agentConflict = await recordChatObservations(conversationId, [{
+      kind: 'native_image', time: 300, messageId, providerAssetId, providerRole: 'tool',
+      providerChannel: 'final', providerStatus: 'finished_successfully', width: 1254, height: 1254,
+      previewStatus: 'available', previewWidth: 12, previewHeight: 8, previewDataUrl: await preview('#ff6600')
+    }], 'worker-b');
+
+    expect(roleConflict.stored).toBe(0);
+    expect(agentConflict.stored).toBe(0);
+    const rows = await readEvents(sessionId, { kinds: ['native_image'] });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ providerRole: 'tool', agent: 'worker-a', providerStatus: 'in_progress', previewStatus: 'pending' });
+    const assets = await fs.readdir(path.join(sessionsRoot(), sessionId, 'assets')).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    });
+    expect(assets).toEqual([]);
   });
 
   it('lets the store deduplicate repeated recorder assets instead of shadow-counting the same bytes toward quota', async () => {

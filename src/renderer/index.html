@@ -482,14 +482,9 @@
                        given as copyable text rather than described. -->
                   <div class="connectors" id="connectorCards"></div>
                   <div class="plugin-permission-step">
-                    <strong>Check that Core actions loaded</strong>
-                    <p>Open the Core plugin's Actions list in ChatGPT. Check for read, and for exec_command when command access is enabled in CoS. An empty list needs attention even when the tunnel says Connected.</p>
-                    <p>For an empty list, check the Core Tunnel ID and the selected ChatGPT workspace, then refresh this plugin's actions. If it stays empty, reconnect the affected tunnel in CoS when no task is running, refresh the plugin again, and use Home → Run checks. Core, Desktop and Plugins each use their own tunnel ID.</p>
-                  </div>
-                  <div class="plugin-permission-step">
                     <strong>Before you start: choose “Allow all actions”</strong>
                     <p>In ChatGPT, open Settings → Plugins, select this plugin, and set its action permissions to <b>Allow all actions</b>. Repeat for the Desktop plugin if you added it.</p>
-                    <p>When available for your account, this option reduces per-action prompts. ChatGPT may still ask for approval. Review the requested permissions; your folder and tool permissions in CoS still apply.</p>
+                    <p>This lets ChatGPT use the plugin without asking for each action. Otherwise, approval prompts can pause Goal, Loop and agent tasks. Your folder and tool permissions in this app still apply.</p>
                   </div>
                   <div class="step-actions">
                     <span class="chosen" id="wizChatgpt"></span>
@@ -574,18 +569,7 @@
                 <label class="inline"><input type="checkbox" id="developerMode" /> Developer mode: show turn boundaries and recovery events</label>
               </div>
             </details>
-
-            <aside class="chatgpt-permission-setup-notice" aria-labelledby="chatgptPermissionSetupTitle">
-              <h3 id="chatgptPermissionSetupTitle">Important: ChatGPT may be waiting for approval</h3>
-              <p>After your first Chat On Steroids tool call, open the ChatGPT window created by CoS. A tool approval prompt may be waiting there, with choices such as Allow once, Always allow or Deny.</p>
-              <p>Goal, Loop and agents can appear stuck while ChatGPT is waiting for your decision. Review the requested action and choose in ChatGPT.</p>
-              <p>If tools disappear, try disconnecting and reconnecting the affected Chat On Steroids plugin, then make one tool call and check for approval again.</p>
-              <p>Understood dismisses only this CoS reminder. It does not grant tool access or answer an approval prompt in ChatGPT.</p>
-              <figure class="chatgpt-permission-example">
-                <img src="./setup-images/tool-approval-example.svg" alt="Illustrative ChatGPT tool approval showing Deny, Allow once, and Always allow" aria-label="Illustrative ChatGPT tool approval showing Deny, Allow once, and Always allow" />
-                <figcaption>Illustrative example. ChatGPT’s appearance may vary.</figcaption>
-              </figure>
-            </aside>
+            <div id="toolApprovalSetup"></div>
           </div>
         </section>
 
@@ -692,7 +676,7 @@
                 <div class="pane">
                   <label class="setting"><span class="setting-text"><b>Plan generation</b><em>Create staged tasks. ChatGPT uses the Goal, Loop and Plan model above; API uses the model and reasoning in API provider settings.</em></span><select id="planBackend"><option value="chatgpt">ChatGPT</option><option value="api">API provider</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Session finish</b><em>Ask Astra to keep the turn open for your next instruction. With Automatic plugin refresh enabled, tool changes refresh the connector after 20 seconds.</em></span><input id="finishTool" type="checkbox" /></label>
-                  <div class="setting"><span class="setting-text"><b>When ChatGPT is wrapping up</b><em>Automatic follow-ups use your Loop instructions and selected Loop source.</em></span><select id="finishAction"><option value="notify">Notify me · Write or Generate Goal</option><option value="goal">Generate and inject Goal</option></select></div>
+                  <div class="setting"><span class="setting-text"><b>When ChatGPT is wrapping up</b><em>When Goal or Loop is enabled for this chat, finishing generates a follow-up using your Loop instructions and source. When Off, you receive a notification.</em></span></div>
                   <div class="setting"><span class="setting-text"><b>Requested notice</b><em>A request to the model, not a guaranteed countdown.</em></span><select id="finishLeadMinutes"><option value="3">3 minutes</option><option value="5">5 minutes</option></select></div>
                   </div>
                 <h2 class="settings-section-title">Browser & history</h2>
@@ -705,14 +689,6 @@
                   <label class="setting"><span class="setting-text"><b>Overwrite ChatGPT tool rows</b><em>Show recorded local activity in the ChatGPT page.</em></span><input id="browserOverwrite" type="checkbox" disabled /></label>
                   <label class="setting"><span class="setting-text"><b>Show durations in ChatGPT</b><em>Uses the same preference as the extension popup.</em></span><input id="browserDurations" type="checkbox" disabled /></label>
                   <div class="setting"><span class="setting-text"><b>Browser preferences</b><em id="browserPreferencesStatus" role="status">Refresh to read the browser's current preferences.</em></span><button id="browserPreferencesRefresh" class="btn" type="button">Refresh browser preferences</button></div>
-                  <div class="setting">
-                    <span class="setting-text">
-                      <b>Keep recordings</b>
-                      <em>Then delete them. 0 keeps everything. Recording itself is a permission.</em>
-                    </span>
-                    <input id="sessRetain" class="num" type="number" min="0" max="3650" step="1" />
-                    <span class="unit">days</span>
-                  </div>
                   <div class="setting">
                     <span class="setting-text">
                       <b>Compact automatically</b>
@@ -863,15 +839,16 @@
             </div>
             <div class="composer-dock" id="composerDock"><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div>
             <form class="composer" id="composer">
+              <div id="skillPicker" class="skill-picker" aria-label="Skills" hidden></div>
               <label class="sr-only" for="chatInput">Message ChatGPT</label>
-              <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" placeholder="Ask anything…" aria-autocomplete="list"></textarea><div id="skillAutocomplete" class="skill-autocomplete" role="listbox" aria-label="Skills" hidden></div>
+              <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" placeholder="Ask anything…"></textarea>
               <div class="composer-toolbar">
                 <details class="composer-menu" id="attachmentMenu">
                   <summary aria-label="Add attachments" title="Add attachments"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></summary>
                   <div class="composer-popover">
                     <button id="attachImages" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-image" /></svg>Add photos &amp; files</button>
                     <button id="composerFolder" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-folder" /></svg>Share a folder</button>
-                    <button id="composerSkills" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>Skills</button>
+                    <button id="composerSkills" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg>Skills</button>
                   </div>
                 </details>
                 <div class="composer-options">
@@ -920,9 +897,10 @@
                   <div class="send-options" id="sendOptions" hidden>
                     <div class="delivery-choices" role="radiogroup" aria-label="Message delivery">
                       <button type="button" role="radio" aria-checked="true" data-delivery="auto"><span id="immediateDeliveryLabel">Send</span><svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
+                      <button type="button" role="radio" aria-checked="false" data-delivery="tool"><span>Inject now</span><svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
                       <button type="button" role="radio" aria-checked="false" data-delivery="after-turn"><span id="afterTurnLabel">After this turn</span><svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
                     </div>
-                    <select id="sendMode" aria-label="Message delivery" hidden><option value="auto">Send</option><option value="after-turn">After this turn</option></select>
+                    <select id="sendMode" aria-label="Message delivery" hidden><option value="auto">Send</option><option value="tool">Inject now</option><option value="after-turn">After this turn</option></select>
                   </div>
                   <button class="send-button" id="chatSend" type="submit" aria-label="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
                 </div>
@@ -966,43 +944,6 @@
       <!-- --------------------------------------------------------------- nav -->
 
     </div>
-
-    <dialog id="skillsDialog" class="skills-dialog" aria-labelledby="skillsDialogTitle">
-      <div class="skills-dialog-head">
-        <div><h2 id="skillsDialogTitle">Skills</h2><p>Use reusable text instructions in this message.</p></div>
-        <button class="btn btn-icon" id="skillsClose" type="button" aria-label="Close skills"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg></button>
-      </div>
-      <div class="skills-dialog-body">
-        <label class="skills-search" for="skillsSearch"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search" /></svg><input id="skillsSearch" type="search" autocomplete="off" placeholder="Search skills" /></label>
-        <p id="skillsStatus" class="skills-status" role="status"></p>
-        <div id="skillsList" class="skills-list"></div>
-      </div>
-      <div class="skills-dialog-actions">
-        <button class="btn" id="skillsImport" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg>Import skill file</button>
-        <button class="btn" id="skillsOpenFolder" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder" /></svg>Open skill directory</button>
-      </div>
-    </dialog>
-
-    <dialog id="chatgptPermissionNotice" class="chatgpt-permission-dialog" aria-labelledby="chatgptPermissionNoticeTitle" aria-describedby="chatgptPermissionNoticeCopy">
-      <div class="chatgpt-permission-dialog-head">
-        <h2 id="chatgptPermissionNoticeTitle">Important: ChatGPT may be waiting for approval</h2>
-        <button class="btn btn-icon" id="chatgptPermissionClose" type="button" aria-label="Close and acknowledge"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg></button>
-      </div>
-      <div class="chatgpt-permission-dialog-body" id="chatgptPermissionNoticeCopy">
-        <p>After your first Chat On Steroids tool call, open the ChatGPT window created by CoS. A tool approval prompt may be waiting there, with choices such as Allow once, Always allow or Deny.</p>
-        <p>Goal, Loop and agents can appear stuck while ChatGPT is waiting for your decision. Review the requested action and choose in ChatGPT.</p>
-        <p>If tools disappear, try disconnecting and reconnecting the affected Chat On Steroids plugin, then make one tool call and check for approval again.</p>
-        <p>Understood dismisses only this CoS reminder. It does not grant tool access or answer an approval prompt in ChatGPT.</p>
-        <figure class="chatgpt-permission-example">
-          <img src="./setup-images/tool-approval-example.svg" alt="Illustrative ChatGPT tool approval showing Deny, Allow once, and Always allow" aria-label="Illustrative ChatGPT tool approval showing Deny, Allow once, and Always allow" />
-          <figcaption>Illustrative example. ChatGPT’s appearance may vary.</figcaption>
-        </figure>
-        <p class="chatgpt-permission-status" id="chatgptPermissionStatus" role="alert" aria-live="polite"></p>
-      </div>
-      <div class="chatgpt-permission-dialog-actions">
-        <button class="btn btn-solid" id="chatgptPermissionUnderstand" type="button">Understood</button>
-      </div>
-    </dialog>
 
     <dialog id="setupProfileDialog" class="setup-profile-dialog" aria-labelledby="setupProfileDialogTitle">
       <form id="setupProfileForm">

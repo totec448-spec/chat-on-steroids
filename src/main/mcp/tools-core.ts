@@ -124,7 +124,6 @@ import { repairPrimeFromResumeShadow } from '../session/continuation.js';
 import {
   currentCall,
   currentCaller,
-  noteChange,
   noteChanges,
   noteCount,
   noteDetail,
@@ -153,10 +152,6 @@ import {
   type SurfaceRegistrar,
   type ToolResult
 } from './kernel.js';
-import { registerSessionTool as registerSessionSearchReadTool } from './session-tool.js';
-import { ArtifactFetchError } from './artifact-fetch.js';
-import { ArtifactTargetError } from './artifact-target.js';
-import { downloadArtifactFile } from './artifact-download.js';
 
 /** Entries one `read` of a directory returns before it says it stopped. */
 const MAX_DIR_ENTRIES = 200;
@@ -641,7 +636,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               'WORKSPACE_REQUIRED: this multi-agent chat has no proven workspace. Use an absolute path in another tool first so the approved project can be learned.'
             );
           }
-          const baseVirtual = workspace?.virtual ?? (ctx.roots[0] ? `/${ctx.roots[0].name}` : null);
+          const fallback = firstTaskRoot(ctx.roots);
+          const baseVirtual = workspace?.virtual ?? (fallback ? `/${fallback.name}` : null);
           if (baseVirtual === null) {
             return fail('No folder is approved, so there is nowhere to apply the patch.');
           }
@@ -990,81 +986,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
     );
   }
 
-  // ------------------------------------------------------- download_artifact
-
-  // Requests ChatGPT native-file injection. The gateway still validates the reference,
-  // exact host and sandbox destination; metadata alone is not provenance proof.
-  if (exposedCaps.saveArtifact) {
-    reg.register(
-      'download_artifact',
-      toolDeclaration('download_artifact', () => ({
-        title: 'Save ChatGPT file',
-        description:
-          'Save one file ChatGPT generated or attached to a path inside an approved folder. ' +
-          'The file value is supplied by ChatGPT itself — never invent download_url or file_id values. ' +
-          'The destination must not already exist and its parent folder must already exist. ' +
-          'Use for images, PDFs, archives and other files ChatGPT produces; never recreate such files with apply_patch or exec_command.',
-        inputSchema: z
-          .object({
-            file: z
-              .strictObject({
-                download_url: z.string(),
-                file_id: z.string(),
-                mime_type: z.string().nullable().optional(),
-                file_name: z.string().nullable().optional(),
-                name: z.string().nullable().optional(),
-                size: z.number().int().nonnegative().nullable().optional()
-              })
-              .describe('Native file value injected by ChatGPT.'),
-            path: pathArg.describe(
-              'Destination inside an approved folder: a virtual /<root>/... path or an absolute native path. ' +
-                'Relative paths resolve against this chat\'s folder. The destination must name a file that does not already exist.'
-            )
-          })
-          .strict(),
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-        _meta: { 'openai/fileParams': ['file'] }
-      })),
-      async ({ file, path: requestedPath }) =>
-        guard('download_artifact', async () => {
-          if (!caps.saveArtifact) {
-            return fail(
-              'TOOL_DISABLED: download_artifact is disabled by the current Chat On Steroids permissions. Ask the user to enable saving ChatGPT files in the app.'
-            );
-          }
-          try {
-            const saved = await downloadArtifactFile(ctx.roots, requestedPath, file, {
-              maxFileBytes: getConfig().artifacts.maxFileBytes
-            });
-            noteChange({ path: saved.virtual, added: 0, removed: 0, approximate: true });
-            logInfo(`tool download_artifact ${saved.virtual} (${formatBytes(saved.size)}, ${saved.sha256})`);
-            return {
-              content: [
-                {
-                  type: 'text' as const,
-                  text: `Saved ${saved.virtual} (${formatBytes(saved.size)}, ${saved.sha256}).`
-                }
-              ],
-              structuredContent: { path: saved.virtual, size: saved.size, sha256: saved.sha256 }
-            };
-          } catch (error) {
-            if (
-              error instanceof ArtifactFetchError ||
-              error instanceof ArtifactTargetError ||
-              error instanceof SandboxError
-            ) {
-              return fail(`download_artifact failed: ${error.message}`);
-            }
-            throw error;
-          }
-        })
-    );
-  }
-
-  // ---------------------------------------------------------------- session
+  // ------------------------------------------------------- plan and finish
 
   if (reg.sessionToolsExposed) {
-    registerSessionSearchReadTool(reg);
     registerPlanTool(reg);
   }
   if (reg.ctx.exposedFinishTool ?? getConfig().ui.finishTool === true) {
@@ -1472,15 +1396,6 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               : info.state;
         const asleep = state.agents.filter((info) => info.state === 'sleeping' && info.revivable);
         const slots = status.freeWorkerSlots;
-        // The recording id is what `session action=read` wants, and a prime that lacks it
-        // searches recordings by the task text instead — a hundred such searches in the 50
-        // most recent recorded sessions, each answering with the prime's own chat as well.
-        const recordings = new Map<string, string>();
-        for (const info of state.agents) {
-          if (info.id === me.id || !info.conversationId) continue;
-          const summary = await findSessionByConversation(info.conversationId, { requireUnique: true }).catch(() => null);
-          if (summary) recordings.set(info.id, summary.id);
-        }
         return {
           content: [
             {
@@ -1493,15 +1408,11 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                       `${info.id}  ${info.role}  ${shown(info)}  waiting ${info.pending}  ${info.label}` +
                       (info.model ? `  model ${info.model}` : '') +
                       (info.reasoningEffort ? `  reasoning ${info.reasoningEffort}` : '') +
-                      (recordings.has(info.id) ? `\n    recording: ${recordings.get(info.id)}` : '') +
                       (info.result
                         ? `\n    ${info.state === 'failed' ? 'failure' : info.state === 'finished' ? 'result' : 'latest result'}: ${info.result.slice(0, 300)}`
                         : '')
                   )
                   .join('\n') +
-                (recordings.size > 0
-                  ? '\n\nTo see what a worker is doing, session action=read with its recording id; pass the update_cursor from that read next time to get only what is new.'
-                  : '') +
                 (me.id === PRIME_ID
                   ? `\n\n${slots} of your worker slots ${slots === 1 ? 'is' : 'are'} free.` +
                     (asleep.length > 0
@@ -2366,3 +2277,4 @@ function boundedNumberedRead(
 }
 
 export type { ToolResult };
+import { firstTaskRoot } from '../skill-access.js';

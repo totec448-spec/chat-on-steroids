@@ -901,7 +901,9 @@ export function goalSwitchFor(conversationId: string): { enabled: boolean; mode:
 
 /** One authority for finish generation and the lifetime of its queued instruction. */
 export function automaticFinishEnabled(conversationId: string): boolean {
-  return getConfig().ui.finishAction === 'goal' || goalSwitchFor(conversationId).enabled;
+  // Finish is another boundary of this chat's Goal/Loop, not a separate grant.
+  // A legacy global finish action must never arm a chat whose effective mode is Off.
+  return goalSwitchFor(conversationId).enabled;
 }
 
 /** Chat identity, not a user preference: helper transcripts must never become Goal sources. */
@@ -986,13 +988,14 @@ export async function setGoalSwitchNow(
       afterTurn: afterTurn ?? before?.afterTurn ?? false, at: Date.now() });
     try {
       await writeDurableNow(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
-      return { enabled: next.enabled, mode: next.mode };
     } catch (error) {
       goalSwitches.delete(conversationId);
       if (before) goalSwitches.set(conversationId, before);
       writeDurableSoon(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
       throw error;
     }
+    notifyGoalChange();
+    return { enabled: next.enabled, mode: next.mode };
   });
 }
 

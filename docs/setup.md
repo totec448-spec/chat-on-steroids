@@ -45,12 +45,6 @@ History is stored locally, with recording on and 30-day retention by default. Cr
 
 [Security policy](../SECURITY.md) · [Tool reference](tool-surface.md) · [Architecture](../AGENTS.md)
 
-## Skills
-
-Open **+ → Skills** to import a `.md` or `.txt` instruction file, browse installed skills or open their folder. Type **/** in the composer to autocomplete a skill command. Skills start empty and use existing Core file tools; they do not install additional tools. See the [skills guide](skills.md) for the file format and model-assisted installation.
-
-Opening a chat in a project includes its exact virtual folder in the model's main instructions, even without an AGENTS.md file. It is the default working folder; the model can work elsewhere when your task needs it and existing permissions allow it. Selected skills remain complete ahead of optional AGENTS.md content.
-
 ## Sessions, workers and Astra
 
 **Session history** belongs to the local session, not a particular ChatGPT tab. The companion records messages and the actual local tool results so the app and the model can read earlier work.
@@ -65,20 +59,16 @@ Opening a chat in a project includes its exact virtual folder in the model's mai
 
 ## Troubleshooting
 
-- **Connected tunnel, empty Core Actions:** open the Core plugin's Actions list in ChatGPT and check for `read` (and `exec_command` when local command access is enabled). Check the saved Core Tunnel ID and matching ChatGPT workspace, then refresh that plugin's actions. If the list remains empty, reconnect the affected tunnel in CoS when no task is running, refresh the plugin again, and use **Home → Run checks**. Each of Core, Desktop and Plugins uses its own tunnel ID. Extension pairing, tunnel health, a received HTTP request, and a nonempty tools/list response are separate checks.
-- **Missing or stale tools:** refresh the relevant CoS app in ChatGPT. Reloading the Chrome extension is a separate action. Workspace-published apps can retain a reviewed tool snapshot until an administrator updates it; see [OpenAI's MCP app guidance](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt).
+- **Missing or stale tools:** refresh the relevant CoS app in ChatGPT. Reloading the Chrome extension is a separate action.
 - **Tunnel rejects the API key or tunnel ID:** check the saved tunnel ID, the selected setup profile, and that its key has Tunnels Read + Use for that tunnel. Extension pairing does not authenticate the tunnel. If Platform offers no matching ChatGPT workspace, retain the exact error for an access investigation; a different tunnel does not establish account eligibility.
 - **ChatGPT blocks a tool for safety:** local permission alone does not prove that ChatGPT accepted or dispatched the call. Inspect the local tool history for the exact request. If no result exists, execution is unconfirmed; do not replay a potentially executed operation or route it through another connector. Keep the task's progress and report the provider's error, selected Chat/Work surface, and app/extension versions without credentials or private content. A plan label alone does not diagnose a provider refusal.
 - **CoS returns `TOOL_DISABLED`:** check Read-only and the named local capability. `CALLER_IDENTITY_REQUIRED` or `WORKER_IDENTITY_LOST` instead concerns exact caller ownership; neither proves that command execution is globally disabled.
-- **A single `read` reports `PLUGIN_DISABLED` or `PLUGIN_TOOL_UNAVAILABLE`:** check which connector received it. Core's built-in file reader belongs to **Chat On Steroids Core**. A stale request on **Plugins** can name `read` even though no installed external plugin currently provides it. CoS refuses the call and explains the correct surface; it does not forward it or change permissions. A real disabled external plugin named `read` still requires that plugin to be enabled.
 - **Extension version mismatch:** reload the unpacked companion after updating CoS, then reload the ChatGPT page.
 - **Models missing:** use **Reload ChatGPT models**. The picker reflects availability in your signed-in account.
 - **`UNIDENTIFIED_CALLER`:** use that conversation in the paired browser so the extension can prove its request identity. CoS does not guess from the active tab.
 - **`COMPACTION_IN_PROGRESS`:** let the source chat finish its handoff. Work continues in the replacement conversation.
 - **Linux credential storage unavailable:** unlock GNOME Keyring or KWallet, then restart CoS.
 - **A chat will not stop:** **Block** revokes local tools for that exact conversation. It does not claim to cancel the provider's generation.
-
-Image injections travel as image blocks in the active tool response. The local transcript distinguishes an offered response from a later confirmed receipt. A failure to save an optional image preview does not prevent delivery or leave its message permanently in the composer dock; CoS retains the preview for a history retry. The actual tool result remains the evidence of what was sent.
 
 The MCP connector uses ChatGPT's Developer mode and tunnel interfaces. The companion also observes and automates the browser UI; this is not a public ChatGPT automation API. Your account's [terms and policies](https://openai.com/policies/) apply. Do not use it to evade limits or safety controls.
 
@@ -110,11 +100,3 @@ Build on the target OS. The release workflow uses native runners for all six tar
 ---
 
 [MIT licensed](../LICENSE). Not affiliated with or endorsed by OpenAI. ChatGPT and Codex are OpenAI trademarks.
-
-## Important: ChatGPT may be waiting for approval
-
-After your first Chat On Steroids tool call, open the ChatGPT window created by CoS. A tool approval prompt may be waiting there, with choices such as **Allow once**, **Always allow** or **Deny**. Goal, Loop and agents can appear stuck while ChatGPT is waiting for your decision. Review the requested action and choose in ChatGPT.
-
-If tools disappear, try disconnecting and reconnecting the affected Chat On Steroids plugin in ChatGPT. Then make one tool call and check the opened window for approval again. This is a troubleshooting step, not a guarantee that permissions caused the missing tools.
-
-CoS shows this reminder on the first explicit model-discovery opening and retains it until you acknowledge it. **Understood** dismisses the reminder; it does not grant tool access or answer the ChatGPT approval prompt. The setup notice stays available afterward.

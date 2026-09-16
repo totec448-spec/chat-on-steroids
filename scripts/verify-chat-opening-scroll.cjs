@@ -24,6 +24,7 @@ app.whenReady().then(async () => {
   await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
   await win.webContents.executeJavaScript(`(() => {
     const ok = data => Promise.resolve({ok:true, data});
+    let sessionChanged = null;
     const rows = (id, count) => Array.from({length:count}, (_, i) => ({seq:i+1, time:1+i,
       source:'extension', kind:'user_message', messageId:id+'-'+i,
       message:{text:('Message '+i+' in '+id+'\\n\\n').repeat(i === 0 ? 400 : 4), truncated:false, chars:100}}));
@@ -31,12 +32,24 @@ app.whenReady().then(async () => {
     const sessions = Object.keys(history).map(id => ({id, title:'Chat '+id, conversationId:id,
       chatIds:[id], startedAt:1, updatedAt:1, endedAt:null, events:history[id].length, userMessages:1,
       toolCalls:0, errors:0, estimatedTokens:0, contextTokens:0, agents:[], origin:null}));
+    const reads=[];
+    window.fixture={history,sessions,reads,
+      addLive:()=>{const seq=history.a.length+1;history.a.push({seq,time:seq,source:'extension',kind:'assistant_message',
+        messageId:'a-live',message:{text:'New live row',truncated:false,chars:12},state:'final',final:true});
+        const summary=sessions.find(row=>row.id==='a');summary.events=history.a.length;summary.updatedAt++;},
+      signal:()=>{if(!sessionChanged)throw new Error('onSessionChanged was not registered');sessionChanged();}};
     window.api = new Proxy({
       listSessions: () => ok({sessions, activeId:null, blocked:[], pressure:[]}),
       listProjects: () => ok([]), listInputs: () => ok([]), listPausedHelpers: () => ok([]),
-      getSession: (id, options) => ok({summary:sessions.find(s=>s.id===id), total:history[id].length,
-        events:history[id].filter(e=>e.seq >= (options?.from ?? 0)), nextFrom:history[id].length+1})
+      onSessionChanged:handler=>{sessionChanged=handler;return()=>{if(sessionChanged===handler)sessionChanged=null;}},
+      getSession: (id, options) => {reads.push({id,options});return ok({summary:sessions.find(s=>s.id===id), total:history[id].length,
+        events:history[id].filter(e=>e.seq >= (options?.from ?? 0)), nextFrom:history[id].length+1});}
     }, {get:(target,key) => target[key] ?? (()=>ok(null))});
+    window.waitFor=async predicate=>{
+      const deadline=performance.now()+5000;
+      while(performance.now()<deadline){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,25));}
+      throw new Error('Timed out waiting for synthetic session refresh');
+    };
   })()`);
   await win.webContents.executeJavaScript(code);
   const results = await win.webContents.executeJavaScript(`(async () => {
@@ -58,8 +71,12 @@ app.whenReady().then(async () => {
       await select('a');
     }
     pane.scrollTop=700;
-    chat.chatVisible(true); await frame();
-    return {observations, readerAfterRefresh:pane.scrollTop};
+    await frame();
+    const readBefore=fixture.reads.length;fixture.addLive();fixture.signal();
+    await waitFor(()=>fixture.reads.length>readBefore&&[...document.querySelectorAll('.ev-assistant_message')].some(row=>row.textContent.includes('New live row')));
+    await frame();
+    return {observations, readerAfterRefresh:pane.scrollTop,readBefore,readAfter:fixture.reads.length,
+      inserted:[...document.querySelectorAll('.ev-assistant_message')].some(row=>row.textContent.includes('New live row'))};
   })()`);
   console.log(JSON.stringify(results, null, 2));
   assert.ok(results.observations[0].height > 10000, 'Fixture must exercise a long chat');
@@ -67,6 +84,8 @@ app.whenReady().then(async () => {
     assert.ok(row.viewport > 0, 'Chat must have visible geometry');
     assert.ok(row.gap <= 1, `${row.id} must open at the bottom, got gap ${row.gap}`);
   }
+  assert.ok(results.readAfter > results.readBefore, 'Live refresh must perform a session read');
+  assert.equal(results.inserted, true, 'Live refresh must render the inserted assistant row');
   assert.equal(results.readerAfterRefresh, 700, 'Live refresh preserves deliberate reading');
   console.log('Chat opening passed: initial open, three A/B/A cycles, long first message and live reader position.');
   win.destroy(); app.exit(0);

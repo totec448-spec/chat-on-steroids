@@ -2,14 +2,15 @@ import { GOAL_MARKER_INSTRUCTION } from '../src/shared/goal-templates.js';
 import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
 import { prependUserPrompt, userPromptText } from '../src/shared/user-prompt.js';
 import { finishInstruction } from '../src/shared/finish.js';
+import { initSkillsPath } from '../src/main/skills.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { addProject, assignSessionProject } from '../src/main/projects.js';
-import { initSkills, removeSkill } from '../src/main/skills.js';
 import { APP_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
 import * as browserWake from '../src/main/browser-wake.js';
+import * as browserStartup from '../src/main/browser-startup.js';
 type Handler = (event: unknown, payload: unknown) => Promise<any>;
 const handlers = new Map<string, Handler>();
 vi.mock('electron', () => ({
@@ -50,7 +51,6 @@ async function post(route: string, body: unknown) {
 beforeAll(async () => {
   directory = await makeTempDir('clf-input-integration-');
   initConfigPath(directory); initSecretsPath(directory); initDurableStore(directory); initSessionStore(directory);
-  await initSkills(directory);
   await saveConfig(defaultConfig());
   registerIpc(() => ({ isDestroyed: () => false, webContents: { send: pushed } }) as never, () => undefined);
   await startBridge();
@@ -132,8 +132,39 @@ it('refreshes account models after an owned picker failure without authorizing a
   expect((await post('/input/fail', { ...failure, owner: 'picker-page' })).body.ok).toBe(true);
   expect(catalog.pendingChatModelRequest()).toMatchObject({ allowOpen: false });
   expect(pushed).toHaveBeenCalledWith('chatModels:changed', expect.objectContaining({ state: 'pending' }));
+  expect(pushed.mock.calls.some(([channel]) => channel === 'setup:toolApprovalNotice')).toBe(false);
   expect((await input.listInputs()).find(input => input.id === row.id)?.state).toBe('failed');
   catalog.resetChatModelsForTests();
+});
+
+it('exposes bounded image-storage accounting and rejects an unknown cleanup mode', async () => {
+  const storage = await handlers.get('sessions:imageStorage')!(null, undefined);
+  expect(storage).toMatchObject({ ok: true, data: { usedBytes: expect.any(Number), limitBytes: 2 * 1024 * 1024 * 1024 } });
+  expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'automatic' })).toMatchObject({ ok: false });
+});
+
+it('shows the approval reminder only after an authorized discovery handoff succeeds', async () => {
+  const catalog = await import('../src/main/chat-models.js');
+  const wake = vi.spyOn(browserStartup, 'wakeBrowserUrl').mockResolvedValue(undefined);
+  const notices = () => pushed.mock.calls.filter(([channel]) => channel === 'setup:toolApprovalNotice');
+  try {
+    catalog.resetChatModelsForTests();
+    await catalog.startChatModelDiscovery(false);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(wake).not.toHaveBeenCalled();
+    expect(notices()).toHaveLength(0);
+
+    catalog.resetChatModelsForTests();
+    wake.mockRejectedValueOnce(new Error('test handoff failed'));
+    await catalog.startChatModelDiscovery(true);
+    await vi.waitFor(() => expect(catalog.getChatModels().state).toBe('unavailable'));
+    expect(notices()).toHaveLength(0);
+
+    catalog.resetChatModelsForTests();
+    await catalog.startChatModelDiscovery(true);
+    await vi.waitFor(() => expect(notices()).toHaveLength(1));
+    expect(wake).toHaveBeenLastCalledWith(expect.stringContaining('https://chatgpt.com/?cos-model-catalog='), true, true);
+  } finally { wake.mockRestore(); catalog.resetChatModelsForTests(); }
 });
 
 it.each([false, true])('collects an exact recorded helper final across document loss (final before ACK: %s)', async finalBeforeAck => {
@@ -956,10 +987,10 @@ it('freezes image injection from staged originals with replay, receipt, and brow
     { kind: 'model_selection', model: 'gpt-6-astra', time: Date.now() },
     { kind: 'turn_start', turnId: 'image-turn', time: Date.now() }
   ] });
-  const authored = { ...message(session.id, 'off'), mode: 'auto' as const, attachments: [attachment], attachmentDelivery: 'tool' as const };
+  const authored = { ...message(session.id, 'off'), mode: 'auto' as const, attachments: [attachment], delivery: 'tool' as const };
   const result = await handlers.get('sessions:send')!(null, authored);
   expect(result.ok).toBe(true);
-  expect(result.data).toMatchObject({ attachments: [attachment], attachmentDelivery: 'tool', transportIntent: 'tool' });
+  expect(result.data).toMatchObject({ attachments: [attachment], delivery: 'tool', transportIntent: 'tool', toolTurnId: 'image-turn' });
   const dataUrl = result.data.toolImages[0].dataUrl;
   expect(await sharp(Buffer.from(dataUrl.split(',')[1], 'base64')).metadata()).toMatchObject({ width: 1600, height: 800 });
   input.resetInputForTests();
@@ -1001,7 +1032,7 @@ it('rejects image admission when the session changes during normalization', asyn
   const normalize = attachments.normalizeInputAttachments;
   const held = vi.spyOn(attachments, 'normalizeInputAttachments').mockImplementation(async files => { await gate; return normalize(files); });
   try {
-    const pending = input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', attachments: [file], attachmentDelivery: 'tool' });
+    const pending = input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', attachments: [file], delivery: 'tool' });
     const rejected = expect(pending).rejects.toThrow('active chat changed');
     await vi.waitFor(() => expect(held).toHaveBeenCalled());
     await rebindSession(session.id, conversationId, randomUUID());
@@ -1032,7 +1063,6 @@ it('revokes a claimed send via IPC, fences pre-send authorization and records a 
   expect((await handlers.get('sessions:cancelInput')!(null, { id: row.id })).ok).toBe(true);
   expect((await post('/input/claim', { id: row.id, owner: 'page', conversationId: null, authorize: true })).body.ok).toBe(false);
   const conversationId = randomUUID();
-  await createSession({ title: 'Late receipt', conversationId });
   expect((await post('/input/ack', { id: row.id, owner: 'page', conversationId, messageId: 'native-late' })).body.ok).toBe(true);
   expect((await input.listInputs())[0]).toMatchObject({ state: 'cancelled', historyRecorded: true, messageId: 'native-late' });
 });
@@ -1055,6 +1085,78 @@ afterAll(async () => {
 });
 const message = (sessionId: string | null, automation: 'off' | 'goal' | 'loop') => ({
   id: randomUUID(), sessionId, automation, text: 'Complete this request', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null
+});
+
+it('bounds an explicit next-tool delivery to four recorded images', async () => {
+  const { default: sharp } = await import('sharp');
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Four-image injection', conversationId });
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() },
+    { kind: 'turn_start', turnId: 'tool-free-turn', time: Date.now() }
+  ] });
+  const dataUrl = `data:image/webp;base64,${(await sharp({ create: { width: 2, height: 2, channels: 3, background: '#abcdef' } }).webp().toBuffer()).toString('base64')}`;
+  const images = Array.from({ length: 4 }, (_, index) => ({ name: `image-${index}.webp`, dataUrl }));
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', delivery: 'tool', images });
+  expect(row).toMatchObject({ state: 'queued', transportIntent: 'tool', toolTurnId: 'tool-free-turn' });
+  expect(await input.pendingBrowserInputs()).toEqual([]);
+  expect((await input.offerToolInput(session.id, conversationId, 'first-tool', Date.now())).messages[0]?.images).toHaveLength(4);
+  await expect(input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', delivery: 'tool', images: [...images, images[0]!] }))
+    .rejects.toThrow();
+});
+it('freezes selected skills before workflow wrapping and reuses exact delivery after the file is removed', async () => {
+  const userData = path.join(directory, 'skill-delivery');
+  await initSkillsPath(userData);
+  const skillFolder = path.join(userData, 'skills', 'audit');
+  await fs.mkdir(skillFolder);
+  const skillFile = path.join(skillFolder, 'SKILL.md');
+  await fs.writeFile(skillFile, '# Audit\n\nCOMPLETE_SELECTED_SKILL');
+  const objective = '/prompt audit\nImplement every original requirement';
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', objective, authoredSource: 'objective',
+    text: 'Start implementation', stages: ['Verify every requirement'] });
+  const first = await input.claimBrowserInput(row.id, 'skill-owner', null, true);
+  expect(first?.text).toContain('COMPLETE_SELECTED_SKILL');
+  expect(first?.text).toContain(objective);
+  expect(first?.text).toContain('Verify every requirement');
+  expect(first!.text.indexOf('# Selected skill')).toBeLessThan(first!.text.indexOf('Original user request:'));
+  await fs.unlink(skillFile);
+  input.resetInputForTests();
+  expect((await input.claimBrowserInput(row.id, 'skill-owner', null, true))?.text).toBe(first?.text);
+  expect((await input.listInputs()).find(item => item.id === row.id)?.text).toBe('Start implementation');
+  await input.cancelInput(row.id);
+  // A new selection must fail explicitly; the old frozen claim alone owns the old bytes.
+  const next = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: '/audit New request' });
+  await expect(input.claimBrowserInput(next.id, 'new-skill-owner', null, true)).rejects.toThrow(/not found|invalid/);
+});
+it.each([false, true])('selects skills from the current composer, never an unrelated saved objective (existing=%s)', async existing => {
+  const userData = path.join(directory, 'skill-provenance');
+  await initSkillsPath(userData);
+  await fs.mkdir(path.join(userData, 'skills/review'), { recursive: true });
+  await fs.writeFile(path.join(userData, 'skills/review/SKILL.md'), '# Review\n\nCURRENT_SELECTION');
+  const session = existing ? await createSession({ title: 'Skill source', conversationId: randomUUID() }) : null;
+  const selected = await input.enqueueInput({ ...message(session?.id ?? null, 'off'), mode: 'auto', text: '/review Current correction', objective: 'Unrelated saved objective' });
+  const first = await input.claimBrowserInput(selected.id, 'selection-owner', session?.conversationId ?? null, true);
+  expect(first?.text).toContain('CURRENT_SELECTION');
+  await input.cancelInput(selected.id);
+  const plain = await input.enqueueInput({ ...message(session?.id ?? null, 'off'), mode: 'auto', text: 'Plain correction', objective: '/missing Old objective' });
+  const next = await input.claimBrowserInput(plain.id, 'plain-owner', session?.conversationId ?? null, true);
+  expect(next?.text).not.toContain('# Selected skill');
+  expect(next?.text).toContain('Plain correction');
+  await input.cancelInput(plain.id);
+});
+it('keeps generated slash-leading checkpoints literal until the user explicitly edits one', async () => {
+  const config = defaultConfig();
+  await saveConfig({ ...config, ui: { ...config.ui, finishTool: true } });
+  const session = await createSession({ title: 'Generated checkpoint', conversationId: randomUUID() });
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'finish', text: 'First check', stages: ['/missing Generated check'] });
+  const checkpoint = (await input.listInputs()).find(item => item.id !== row.id && item.sessionId === session.id)!;
+  expect(checkpoint.authoredSource).toBe('none');
+  await input.cancelInput(row.id);
+  const offered = await input.offerToolInput(session.id, session.conversationId, 'checkpoint-tool', Date.now(), true);
+  expect(offered.messages.map(item => item.text).join('\n')).toContain('/missing Generated check');
+  const editable = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'finish', text: '/missing Generated check', authoredSource: 'none' });
+  expect(await input.editQueuedInput(editable.id, '/missing Human-selected correction')).toBe(true);
+  expect((await input.listInputs()).find(item => item.id === editable.id)?.authoredSource).toBe('text');
 });
 it('freezes the complete current prompt for each new chat and leaves the authored input intact', async () => {
   const config = defaultConfig();
@@ -1083,50 +1185,6 @@ it.each(['off', 'goal', 'loop'] as const)('does not repeat setup in an existing 
   expect(claim?.text).toBe('Continue the original work');
   input.resetInputForTests();
   expect((await input.claimBrowserInput(row.id, 'followup-page', conversationId, true))?.text).toBe(claim?.text);
-});
-
-it('freezes selected skills from a planned original request through browser claim and restart', async () => {
-  const id = `review-${randomUUID()}`;
-  const skillDirectory = path.join(directory, 'skills', id);
-  await fs.mkdir(skillDirectory);
-  await fs.writeFile(path.join(skillDirectory, 'SKILL.md'), `---\nname: Review\ndescription: Review code changes\n---\nSKILL_FROZEN_BODY 🐱`);
-  const objective = `/${id}\nOriginal constraints must survive.`;
-  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto',
-    text: `/${id}\nImplement the whole task.`, objective, stages: ['Verify all behavior.'] });
-  const claim = await input.claimBrowserInput(row.id, 'skills-browser-page', null, true);
-  expect(claim).not.toBeNull();
-  expect(claim!.text.match(/SKILL_FROZEN_BODY/g)).toHaveLength(1);
-  expect(claim!.text.indexOf('# Selected skills')).toBeGreaterThan(claim!.text.indexOf('# Local tools'));
-  expect(userPromptText(claim!.text)).toContain(objective);
-  expect(userPromptText(claim!.text)).toContain('Verify all behavior.');
-  expect(userPromptText(claim!.text)).not.toContain('SKILL_FROZEN_BODY');
-  expect(claim!.text.length).toBeLessThanOrEqual(96000);
-  await removeSkill(id);
-  input.resetInputForTests();
-  expect((await input.claimBrowserInput(row.id, 'skills-browser-page', null, true))!.text).toBe(claim!.text);
-  expect((await input.listInputs()).find(entry => entry.id === row.id)!.text).toBe(row.text);
-});
-
-it('freezes explicit follow-up skills for MCP delivery while preserving authored text and avoiding repeated setup', async () => {
-  const id = `followup-${randomUUID()}`;
-  const skillDirectory = path.join(directory, 'skills', id);
-  await fs.mkdir(skillDirectory);
-  await fs.writeFile(path.join(skillDirectory, 'SKILL.md'), `---\nname: Follow-up\ndescription: Explain an implementation\n---\nFOLLOWUP_SKILL_ORIGINAL`);
-  const session = await createSession({ title: 'Skill follow-up', conversationId: randomUUID() });
-  const text = `/prompt ${id}\nExplain the current changes.`;
-  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text });
-  const offered = await input.offerToolInput(session.id, session.conversationId, 'skill-offer', 0);
-  expect(offered.messages).toHaveLength(1);
-  const prepared = offered.messages[0]!.text;
-  expect(prepared).toContain('FOLLOWUP_SKILL_ORIGINAL');
-  expect(prepared).not.toContain('# Local tools');
-  expect(userPromptText(prepared)).toBe(text);
-  await fs.writeFile(path.join(skillDirectory, 'SKILL.md'), '# Changed\nFOLLOWUP_SKILL_CHANGED');
-  input.resetInputForTests();
-  const retry = await input.offerToolInput(session.id, session.conversationId, 'skill-offer-retry', 0);
-  expect(retry.messages[0]!.text).toBe(prepared);
-  expect((await input.listInputs()).find(entry => entry.id === row.id)!.text).toBe(text);
-  await removeSkill(id);
 });
 
 it('delivers only the selected project AGENTS.md, freezes claims across restart, and budgets the Astra appendix before cutting', async () => {
@@ -1459,7 +1517,7 @@ describe('IPC input delivery and Goal control integration', () => {
     const claim = await post('/input/claim', { id: request.id, owner: 'document-owner', conversationId: null });
     expect(claim.body.input.automation).toBe('goal');
     const conversationId = randomUUID();
-    const session = await createSession({ title: 'New input', conversationId });
+    const session = { id: request.id }; // admission reserved this exact local owner
     pushed.mockClear();
     const payload = { id: request.id, owner: 'document-owner', conversationId };
     expect((await post('/input/ack', payload)).body.ok).toBe(true);
@@ -1480,7 +1538,6 @@ describe('IPC input delivery and Goal control integration', () => {
     await post('/input/claim', { id: request.id, owner: 'off-before-ack', conversationId: null });
     expect(await input.setInputAutomation(request.id, 'off')).toBe(true);
     const conversationId = randomUUID();
-    await createSession({ title: 'Off before first receipt', conversationId });
     const ack = { id: request.id, owner: 'off-before-ack', conversationId };
     expect((await post('/input/ack', ack)).body.ok).toBe(true);
     expect(goal.goalObjectiveFor(conversationId)).toBe(objective);
@@ -1538,10 +1595,10 @@ it('retires a late-confirmed cancelled desktop send after two minutes even as th
     const after = (await post('/status', { openConversations: [conversationId] })).body;
     expect(after.retiredConversations).toContain(conversationId);
     expect(after.closableConversations).toContain(conversationId);
-    const session = await createSession({ conversationId, title: 'Resumed conversation' });
+    const session = { id: row.sessionId! };
     const previous = (await input.listInputs()).find(item => item.id === row.id)!;
     await writeDurableNow('session-input', [previous, { ...previous, id: randomUUID(), sessionId: session.id,
-      state: 'sent', createdAt: now + 121_000, deliveredAt: now + 121_000, historyRecorded: true }]);
+      opening: undefined, state: 'sent', createdAt: now + 121_000, deliveredAt: now + 121_000, historyRecorded: true }]);
     input.resetInputForTests(); clock.mockReturnValue(now + 242_001);
     const resumed = (await post('/status', { openConversations: [conversationId] })).body;
     expect(resumed.retiredConversations).not.toContain(conversationId);

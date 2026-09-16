@@ -60,10 +60,10 @@ export function chatErrorPresentation(error: ChatError, history: readonly Sessio
     if (event.source === 'app' && event.kind === 'progress' && event.progressId?.startsWith('browser-repair:') &&
         (question || !event.turnId || (!!error.turnId && event.turnId === error.turnId))) repair = event;
   }
-  if (completed > continued) return { title, message, next: t('This turn later completed. You can continue with a new message.') };
-  if (continued) return { title, message, next: t('Work continued after this notice. Automatic continuation waits for work to settle; the failed page alone does not trigger another message.') };
+  if (completed > continued) return { title: t('Recovered after interruption'), message, resolved: true, next: t('This turn later completed. You can continue with a new message.') };
+  if (continued) return { title, message, resolved: false, next: t('Work continued after this notice. Automatic continuation waits for work to settle; the failed page alone does not trigger another message.') };
   if (repair && error.blocking !== true) next = `${repair.message.text} ${thinking
     ? t('You can send a follow-up. After a confirmed refresh, automatic continuation waits five minutes and checks for new work before sending.')
     : t('Queued messages still wait until sending is safe. If the chat stays stuck, open ChatGPT and check the page before retrying.')}`;
-  return { title, message, next };
+  return { title, message, next, resolved: false };
 }

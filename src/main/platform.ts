@@ -33,9 +33,8 @@ export function hostPlatformInfo(
 }
 
 /**
- * Linux does not yet have a native Desktop backend. Keep stored choices intact so a config moved
- * to Windows or macOS does not lose them, but make the live capability projection incapable of
- * advertising or executing those tools on unsupported hosts.
+ * Keep browser screen/control portable while masking unsupported native clipboard access.
+ * Native registrars check backend availability separately; stored grants are never erased.
  */
 export function capabilitiesForPlatform(
   capabilities: Capabilities,
@@ -44,6 +43,8 @@ export function capabilitiesForPlatform(
 ): Capabilities {
   if (desktopAutomationSupported(platform, release)) return capabilities;
   const next = { ...capabilities };
-  for (const capability of DESKTOP_CAPABILITIES) next[capability] = false;
+  // Screen/control also govern the Chromium extension on every OS. Only native
+  // clipboard capabilities disappear here; native tool registration checks its backend.
+  for (const capability of DESKTOP_CAPABILITIES) if (capability !== 'screen' && capability !== 'control') next[capability] = false;
   return next;
 }

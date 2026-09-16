@@ -1,7 +1,6 @@
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
-import { prepareFollowupPrompt, prepareSessionPrompt } from './session/prompt.js';
-import { importSkillFile, isSafeSkillId, listSkills, removeSkill } from './skills.js';
-import { acknowledgeChatgptPermissionNotice, getChatgptPermissionNotice, requestChatgptPermissionNotice } from './chatgpt-permission-notice.js';
+import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js';
+import { importSkillFile, listSkills } from './skills.js';
 import { noteChatOrigin } from './session/recorder.js';
 import { REASONING_EFFORTS } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
@@ -37,6 +36,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } fr
 import { z } from 'zod';
 import {
   CAPABILITIES,
+  browserExtensionRequired,
   CHAT_BROWSERS,
   GOAL_MODES,
   GOAL_PROVIDERS,
@@ -75,7 +75,9 @@ import { extensionDir } from './extension-path.js';
 import { extensionDownloadUrl } from './version.js';
 import {
   deleteSession,
+  clearImageStorage,
   getSession,
+  getImageStorage,
   listSessionPage,
   findSessionByConversation,
   readEvents,
@@ -395,26 +397,6 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
-  handle('skills:list', async () => listSkills());
-  handle('skills:import', async () => {
-    const chosen = await dialog.showOpenDialog({ title: 'Import a skill', properties: ['openFile'],
-      filters: [{ name: 'Text skills', extensions: ['md', 'txt'] }] });
-    if (chosen.canceled) return null;
-    if (chosen.filePaths.length !== 1) throw new Error('Choose one skill file.');
-    await importSkillFile(chosen.filePaths[0]!);
-    return listSkills();
-  });
-  handle('skills:openFolder', async () => {
-    const library = await listSkills();
-    if (!library.directory) throw new Error('The skills library is not ready.');
-    const error = await shell.openPath(library.directory);
-    if (error) throw new Error('Could not open the skills folder.');
-  });
-  handle('skills:remove', async payload => {
-    const { id } = z.object({ id: z.string().max(64).refine(isSafeSkillId, 'Invalid skill id') }).strict().parse(payload);
-    await removeSkill(id);
-    return listSkills();
-  });
   handle('setup:profile', async payload => {
     const request = z.discriminatedUnion('action', [
       z.object({ action: z.literal('add'), name: z.string().trim().min(1).max(80) }),
@@ -512,12 +494,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         authorityPersistError = error instanceof Error ? error : new Error(String(error));
       }
     }
-    // The extension bridge serves both features: recording needs it to observe the
-    // chat, and multi-agent mode needs it to open worker tabs. Either one being on is
-    // enough, and this must match the startup rule in index.ts exactly — a bridge that
-    // runs at startup but not after a settings save is the worst of both.
-    if (next.sessions.record || next.multiAgent.enabled) await startBridge();
+    // Recording, workers and direct browser tools share the same extension transport.
+    // Startup and settings saves use one eligibility rule.
+    if (browserExtensionRequired(next)) await startBridge();
     else await stopBridge();
+    if (before.capabilities.screen !== next.capabilities.screen || before.capabilities.control !== next.capabilities.control || before.readOnly !== next.readOnly) wakeBrowserWork('browser-control');
     // Permissions and the second tunnel id both decide whether the optional Desktop
     // connector should be published. Without this, enabling desktop access or pasting its
     // tunnel id left the connector unpublished until the user happened to reconnect, with
@@ -566,6 +547,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('projects:list', () => listProjects());
+  handle('skills:list', () => listSkills());
+  handle('skills:import', async () => {
+    const window = getWindow();
+    if (!window) throw new Error('No window');
+    const result = await dialog.showOpenDialog(window, { title: 'Import skill', properties: ['openFile'],
+      filters: [{ name: 'Skill instructions', extensions: ['md', 'txt'] }] });
+    return result.canceled || !result.filePaths[0] ? null : importSkillFile(result.filePaths[0]);
+  });
   handle('projects:remove', async (payload) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(payload);
     const project = await removeProject(id);
@@ -792,6 +781,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id, assetId } = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), assetId: z.string().max(100).regex(/^[a-f0-9]{8,64}\.(?:bin|png|jpg)$/) }).parse(payload);
     return recordedInputImage(id, assetId);
   });
+  handle('sessions:imageStorage', async () => getImageStorage());
+  handle('sessions:clearImageStorage', async (payload) => {
+    const { mode } = z.object({ mode: z.enum(['oldest-gib', 'all']) }).parse(payload);
+    const result = await clearImageStorage(mode);
+    push('session:changed');
+    return result;
+  });
   handle('sessions:events', async (payload) => {
     const { id, from, before, limit } = z
       .object({
@@ -856,12 +852,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return requestSessionFinishGoal(id, expectedTurnId);
   });
   handle('chatModels:get', async () => getChatModels());
-  handle('chatgptPermissionNotice:get', async () => getChatgptPermissionNotice());
-  handle('chatgptPermissionNotice:ack', async () => {
-    const notice = await acknowledgeChatgptPermissionNotice();
-    push('chatgptPermissionNotice:changed', notice);
-    return notice;
-  });
   handle('browser:preferences', async (payload) => requestBrowserPreferences(payload));
   handle('chatModels:request', async () => startChatModelDiscovery());
   handle('sessions:controls', async (payload) => sessionControlsFor(sessionIdArg.parse(payload).id));
@@ -1090,7 +1080,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       await noteChatOrigin(conversationId, { kind: 'helper', fromSessionId, agentId: null, task: '' });
     },
     changed: () => push('session:changed'),
-    recordDelivered: (entry) => getConfig().sessions.record ? recordDeliveredInput(entry) : Promise.resolve(true),
+    recordDelivered: (entry, anchorCommitted) => getConfig().sessions.record ? recordDeliveredInput(entry, anchorCommitted) : Promise.resolve(true),
     prepareText: async (entry, limits, authored) => {
       const control = entry.conversationId ? goalSwitchFor(entry.conversationId) : getConfig().goal;
       const mode = entry.automation ?? (control.enabled ? control.mode : 'off');
@@ -1098,10 +1088,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         ? entry.text + GOAL_MARKER_INSTRUCTION : entry.text;
       // Only the opening user input owns executor setup. Existing chats, queued
       // checkpoints and automatic continuations already have their instructions.
-      const opening = !entry.sessionId && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish';
-      const skillCommands = [authored?.text ?? entry.text, ...(opening && authored?.objective ? [authored.objective] : [])];
-      return opening ? prepareSessionPrompt(text, { ...entry, skillCommands }, limits)
-        : prepareFollowupPrompt(text, skillCommands, limits);
+      return (entry.opening || !entry.sessionId) && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish'
+        ? prepareSessionPrompt(text, entry, limits, authored)
+        : !entry.finishOwner && entry.purpose !== 'decision' ? prepareSkillFollowup(text, authored, limits) : text;
     },
     applyAutomation: async (conversationId, automation, phase, objective, loopAfterTurn) => {
       // This message supersedes the old final; never pick that old final up merely
@@ -1152,7 +1141,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!await startBridge()) throw new Error('The browser bridge could not start');
     if (allowOpen) {
       await wakeBrowserUrl(`https://chatgpt.com/?cos-model-catalog=${nonce}`, true, true);
-      push('chatgptPermissionNotice:changed', await requestChatgptPermissionNotice());
+      push('setup:toolApprovalNotice');
     }
   } });
   onUpdateChange(pushState);

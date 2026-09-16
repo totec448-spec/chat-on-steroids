@@ -23,11 +23,14 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { isProModel } from '../../shared/chat-models.js';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type {
   AssetRef,
   Handoff,
+  ImageStorageClearMode,
+  ImageStorageClearResult,
+  ImageStorageInfo,
   NewSessionEvent,
   ReasoningEffort,
   SessionEvent,
@@ -120,6 +123,9 @@ export function initSessionStore(userDataDir: string): void {
   root = path.join(userDataDir, 'sessions');
   sessionAssetUsage.clear();
   globalAssetUsage = null;
+  assetMutationEpoch = 0;
+  assetWrittenEpoch.clear();
+  removedAssetEpoch.clear();
   missingCurrentConversations.clear();
   attachmentCatalog = null;
   attachmentCatalogLoading = null;
@@ -198,14 +204,51 @@ export const MAX_GLOBAL_ASSET_BYTES = 2 * 1024 * 1024 * 1024;
 const sessionAssetUsage = new Map<string, number>();
 let globalAssetUsage: number | null = null;
 let assetWriteQueue = Promise.resolve();
+let assetMutationEpoch = 0;
+const assetWrittenEpoch = new Map<string, number>();
+const removedAssetEpoch = new Map<string, number>();
+
+function enqueueAssetOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const work = assetWriteQueue.then(operation);
+  assetWriteQueue = work.then(() => undefined, () => undefined);
+  return work;
+}
+
+function localAssetKey(sessionId: string, assetId: string): string {
+  return `${sessionId}\u0000${assetId}`;
+}
+
+function admittedAssets(sessionId: string, assets: readonly AssetRef[] | undefined): AssetRef[] | undefined {
+  if (!assets) return undefined;
+  const kept = assets.filter((asset) => {
+    const key = localAssetKey(sessionId, asset.id);
+    const writtenAt = assetWrittenEpoch.get(key);
+    const removedAt = removedAssetEpoch.get(key);
+    return writtenAt === undefined || removedAt === undefined || writtenAt >= removedAt;
+  });
+  return kept.length ? kept : undefined;
+}
+
+function deniedAssetIds(sessionId: string, assets: readonly AssetRef[] | undefined): string[] {
+  if (!assets) return [];
+  const admitted = new Set(admittedAssets(sessionId, assets)?.map((asset) => asset.id));
+  return assets.filter((asset) => !admitted.has(asset.id)).map((asset) => asset.id);
+}
+
+function mergedRetiredAssetIds(...groups: Array<readonly string[] | undefined>): string[] | undefined {
+  const ids = [...new Set(groups.flatMap((group) => group ?? []))];
+  return ids.length ? ids : undefined;
+}
 
 type MessageEvent = Extract<SessionEvent, { kind: 'user_message' | 'assistant_message' }>;
-type CanonicalEvent = MessageEvent | Extract<SessionEvent, { kind: 'tool_call' }>;
+type NativeImageEvent = Extract<SessionEvent, { kind: 'native_image' }>;
+type CanonicalEvent = MessageEvent | NativeImageEvent | Extract<SessionEvent, { kind: 'tool_call' }>;
 type NewMessageEvent = MessageEvent extends infer Event
   ? Event extends MessageEvent
     ? Omit<Event, 'seq'>
     : never
   : never;
+type NewNativeImageEvent = Omit<NativeImageEvent, 'seq' | 'origin'>;
 
 /** Internal checkpoint field persisted beside the public summary projection. */
 const META_HISTORY_SEQ = '__historySeq';
@@ -226,8 +269,10 @@ interface MetaCheckpoint {
   activityBoundaryMissing: boolean;
 }
 
-function messageKey(event: SessionEvent | Omit<MessageEvent, 'seq'>): string | null {
+function messageKey(event: SessionEvent | Omit<MessageEvent, 'seq'> | NewNativeImageEvent): string | null {
   if (event.kind === 'tool_call') return event.call?.callId ? `tool_call\u0000${event.call.callId}` : null;
+  if (event.kind === 'native_image') return event.messageId && event.providerAssetId
+    ? `native_image\u0000${event.messageId}\u0000${event.providerAssetId}` : null;
   return (event.kind === 'user_message' || event.kind === 'assistant_message') && event.messageId
     ? `${event.kind}\u0000${event.messageId}` : null;
 }
@@ -392,12 +437,22 @@ async function flushSessionEntry(entry: OpenSession): Promise<void> {
 // ----------------------------------------------------------------- create
 
 export async function createSession(options: {
+  /** Reserved by an accepted opening outbox row; never supplied by model tools. */
+  reservedId?: string;
   title?: string;
   titleSource?: SessionSummary['titleSource'];
   conversationId?: string | null;
   origin?: SessionOrigin | null;
 }): Promise<SessionSummary> {
-  const id = `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
+  const id = options.reservedId ?? `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
+  assertSessionId(id);
+  if (options.reservedId) {
+    const existing = await getSession(id);
+    if (existing) {
+      if (existing.origin?.kind !== 'desktop') throw new Error('Reserved opening session belongs to different work');
+      return existing;
+    }
+  }
   const summary = emptySummary(id, options.title?.trim() || 'ChatGPT session', options.conversationId ?? null);
   summary.origin = options.origin ?? null;
   if (options.titleSource) summary.titleSource = options.titleSource;
@@ -424,7 +479,11 @@ export async function createSession(options: {
   try {
     await fs.mkdir(sessionDir(id), { recursive: true });
     await fs.writeFile(path.join(sessionDir(id), 'events.jsonl'), '', { flag: 'a' });
-    await fs.writeFile(path.join(sessionDir(id), 'messages.json'), '{}', { flag: 'a' });
+    // A reserved opening can retry after its shard was created but meta publication failed.
+    // Never append another object or overwrite already-recorded canonical messages.
+    await fs.writeFile(path.join(sessionDir(id), 'messages.json'), '{}', { flag: 'wx' }).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    });
     await writeMeta(entry);
     publishAttachmentSummary(entry.summary);
   } catch (error) {
@@ -506,7 +565,7 @@ async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void):
     for (const [key, value] of Object.entries(parsed)) {
       if (!value || typeof value !== 'object') continue;
       const event = value as CanonicalEvent;
-      if ((event.kind !== 'user_message' && event.kind !== 'assistant_message' && event.kind !== 'tool_call') || typeof event.seq !== 'number') continue;
+      if ((event.kind !== 'user_message' && event.kind !== 'assistant_message' && event.kind !== 'native_image' && event.kind !== 'tool_call') || typeof event.seq !== 'number') continue;
       const expected = messageKey(event);
       if (!expected || expected !== key) continue;
       out.set(key, event);
@@ -977,7 +1036,23 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
     // Keep the append-only journal authoritative: nothing in memory advances until the line
     // is on disk.
     const write = entry.queue.then(async () => {
-      const full = { ...event, seq: entry.nextSeq } as SessionEvent;
+      let admitted = event;
+      if (event.kind === 'tool_call') {
+        const denied = deniedAssetIds(sessionId, event.call.assets);
+        admitted = { ...event, call: {
+          ...event.call,
+          assets: admittedAssets(sessionId, event.call.assets),
+          ...(denied.length ? { retiredImageAssetIds: mergedRetiredAssetIds(event.call.retiredImageAssetIds, denied) } : {})
+        } };
+      } else if (event.kind === 'user_message') {
+        const denied = deniedAssetIds(sessionId, event.assets);
+        admitted = {
+          ...event,
+          assets: admittedAssets(sessionId, event.assets),
+          ...(denied.length ? { retiredImageAssetIds: mergedRetiredAssetIds(event.retiredImageAssetIds, denied) } : {})
+        };
+      }
+      const full = { ...admitted, seq: entry.nextSeq } as SessionEvent;
       const line = `${JSON.stringify(full)}\n`;
       if (Buffer.byteLength(line, 'utf8') > MAX_LINE_BYTES) {
         throw new Error('Session event is too large to store');
@@ -1097,15 +1172,25 @@ export function upsertMessageEvent(
           : previous?.kind === 'user_message' && event.kind === 'user_message'
             ? { ...event, inputId: event.inputId ?? previous.inputId,
                 authoredText: event.authoredText ?? previous.authoredText,
+                reaction: event.reaction === undefined ? previous.reaction : event.reaction,
                 // App-owned originals/previews retain their outbox identity when the
                 // provider later observes different native attachment ids for that send.
                 attachments: previous.inputId ? previous.attachments ?? event.attachments : event.attachments ?? previous.attachments,
                 inputDelivery: previous.inputDelivery === 'confirmed' ? 'confirmed' : event.inputDelivery ?? previous.inputDelivery,
-                inputImageCount: event.inputImageCount ?? previous.inputImageCount,
                 model: event.model ?? previous.model,
                 reasoningEffort: event.reasoningEffort ?? previous.reasoningEffort,
-                assets: event.assets ?? previous.assets }
-            : event;
+                retiredImageAssetIds: mergedRetiredAssetIds(previous.retiredImageAssetIds,
+                  deniedAssetIds(sessionId, event.assets ?? previous.assets)),
+                assets: admittedAssets(sessionId,
+                  retainedAssets(event.assets ?? previous.assets, previous.retiredImageAssetIds)) }
+            : event.kind === 'user_message'
+              ? {
+                  ...event,
+                  retiredImageAssetIds: mergedRetiredAssetIds(event.retiredImageAssetIds,
+                    deniedAssetIds(sessionId, event.assets)),
+                  assets: admittedAssets(sessionId, event.assets)
+                }
+              : event;
       // A canonical assistant message belongs to exactly one generation permanently. Ownership
       // may still be *promoted* from "not known yet" to a durable generation id when the
       // recorder learns it late, but a settled assistant answer may never move to another turn.
@@ -1139,7 +1224,7 @@ export function upsertMessageEvent(
             previous.goalEligible === nextEvent.goalEligible &&
             previous.providerMessageId === nextEvent.providerMessageId)) &&
         (nextEvent.kind !== 'user_message' || previous.kind !== 'user_message' ||
-          (nextEvent.inputId === previous.inputId && nextEvent.authoredText === previous.authoredText && nextEvent.inputDelivery === previous.inputDelivery && nextEvent.inputImageCount === previous.inputImageCount && JSON.stringify(nextEvent.assets) === JSON.stringify(previous.assets) && JSON.stringify(nextEvent.attachments) === JSON.stringify(previous.attachments))) &&
+          (nextEvent.reaction === previous.reaction && nextEvent.inputId === previous.inputId && nextEvent.authoredText === previous.authoredText && nextEvent.inputDelivery === previous.inputDelivery && JSON.stringify(nextEvent.assets) === JSON.stringify(previous.assets) && JSON.stringify(nextEvent.retiredImageAssetIds) === JSON.stringify(previous.retiredImageAssetIds) && JSON.stringify(nextEvent.attachments) === JSON.stringify(previous.attachments))) &&
         (previous.turnId ?? undefined) === settledTurnId &&
         (nextEvent.agent === undefined || previous.agent === nextEvent.agent) &&
         (!preferTime || previous.time === nextEvent.time)
@@ -1154,7 +1239,10 @@ export function upsertMessageEvent(
               // Old records do not distinguish a content revision from an HTML update.
               // Keep their first anchor until genuinely new final content is observed.
               ? previous.finalContentSeq ?? previous.origin ?? previous.seq
-              : entry.nextSeq }
+              : entry.nextSeq,
+              finalObservedAt: sameMessage && previous?.kind === 'assistant_message' &&
+                (previous.final === true || previous.state === 'final')
+                ? previous.finalObservedAt : Date.now() }
           : {}),
         // First appearance is chronology; current seq is delivery cursor/revision.
         // A page-model authored timestamp is stronger than a DOM first-sight timestamp. The
@@ -1204,13 +1292,129 @@ export function upsertMessageEvent(
   });
 }
 
+/**
+ * Creates or enriches one ChatGPT-native generated image by exact provider tuple.
+ *
+ * Metadata is canonical before preview capture starts. A later asset revision advances the
+ * sequence cursor while retaining the first origin/time and never contributes completion,
+ * Goal, tool-call, or activity facts. Local turn ownership may strengthen once from unknown;
+ * later document-local turn hints are ignored because reload remints them, while a conflicting
+ * durable agent owner still fails closed.
+ */
+export function upsertNativeImageEvent(
+  sessionId: string,
+  event: NewNativeImageEvent
+): Promise<{ event: NativeImageEvent; changed: boolean; accepted: boolean }> {
+  const key = messageKey(event);
+  if (!key) throw new Error('Canonical native image requires provider message and asset ids');
+  return ensureOpen(sessionId).then((entry) => {
+    const write = entry.queue.then(async () => {
+      const candidate = entry.messages.get(key);
+      const previous = candidate?.kind === 'native_image' ? candidate : undefined;
+      if (candidate && !previous) throw new Error('Canonical native image identity collision');
+      if (
+        previous &&
+        (previous.providerRole !== event.providerRole ||
+          (previous.agent && event.agent && previous.agent !== event.agent))
+      ) return { event: previous, changed: false, accepted: false };
+      // Explicit image-storage cleanup is a durable decision for this exact provider tuple.
+      // A later tab reload may rediscover and re-encode the same native image; accepting it
+      // would silently refill storage immediately after the user cleared it.
+      if (previous?.previewError === 'removed' && !previous.asset) {
+        return { event: previous, changed: false, accepted: false };
+      }
+
+      const incomingAsset = event.asset ? admittedAssets(sessionId, [event.asset])?.[0] : undefined;
+      const staleAsset = Boolean(event.asset && !incomingAsset);
+      const asset = previous?.asset ?? incomingAsset;
+      const previewError = previous?.previewError === 'quota' && !asset
+        ? 'quota'
+        : staleAsset
+          ? 'removed'
+          : event.previewError ?? previous?.previewError;
+      const previewStatus = asset
+        ? 'available'
+        : previewError
+          ? 'unavailable'
+          : event.previewStatus;
+      const next: NewNativeImageEvent = {
+        ...event,
+        time: previous?.time ?? event.time,
+        ...(previous?.turnId ? { turnId: previous.turnId } : event.turnId ? { turnId: event.turnId } : {}),
+        ...(previous?.agent && !event.agent ? { agent: previous.agent } : {}),
+        providerChannel: previous?.providerChannel ?? event.providerChannel,
+        providerStatus: previous?.providerStatus === 'finished_successfully'
+          ? previous.providerStatus : event.providerStatus ?? previous?.providerStatus,
+        width: previous?.width ?? event.width,
+        height: previous?.height ?? event.height,
+        asset: undefined,
+        previewStatus,
+        previewError,
+        ...(asset ? {
+          asset,
+          previewStatus: 'available',
+          previewWidth: previous?.previewWidth ?? event.previewWidth,
+          previewHeight: previous?.previewHeight ?? event.previewHeight,
+          previewError: undefined
+        } : {})
+      };
+      if (previous) {
+        const unchanged =
+          previous.turnId === next.turnId && previous.agent === next.agent &&
+          previous.providerChannel === next.providerChannel && previous.providerStatus === next.providerStatus &&
+          previous.width === next.width && previous.height === next.height &&
+          previous.previewWidth === next.previewWidth && previous.previewHeight === next.previewHeight &&
+          previous.previewStatus === next.previewStatus && previous.previewError === next.previewError &&
+          previous.asset?.id === next.asset?.id && previous.asset?.mimeType === next.asset?.mimeType &&
+          previous.asset?.bytes === next.asset?.bytes;
+        if (unchanged) return { event: previous, changed: false, accepted: true };
+      }
+      const full: NativeImageEvent = {
+        ...next,
+        origin: previous?.origin ?? previous?.seq ?? entry.nextSeq,
+        seq: entry.nextSeq
+      };
+      await writeCanonicalMessage(sessionId, key, full);
+      entry.messages.set(key, full);
+      entry.nextSeq += 1;
+      entry.historySeq = full.seq;
+      if (!previous) applyToSummary(entry.summary, full);
+      scheduleMeta(entry);
+      return { event: full, changed: true, accepted: true };
+    });
+    entry.queue = write.then(
+      () => undefined,
+      (err: Error) => logError(`session native image upsert failed: ${err.message}`)
+    );
+    return write;
+  });
+}
+
+function retainedAssets(assets: readonly AssetRef[] | undefined, retired: readonly string[] | undefined): AssetRef[] | undefined {
+  if (!assets) return undefined;
+  if (!retired?.length) return [...assets];
+  const denied = new Set(retired);
+  const kept = assets.filter((asset) => !denied.has(asset.id));
+  return kept.length ? kept : undefined;
+}
+
 /** Canonical background launch: the call UUID owns its later process status. */
 export async function recordProcessCall(sessionId: string, event: Omit<Extract<SessionEvent, { kind: 'tool_call' }>, 'seq'>): Promise<void> {
   const entry = await ensureOpen(sessionId);
   await enqueueSessionOperation(entry, 'process call', async () => {
     const key = messageKey({ ...event, seq: 0 })!;
     if (entry.messages.has(key)) throw new Error('Process call identity already recorded');
-    const full = { ...event, seq: entry.nextSeq, origin: entry.nextSeq };
+    const denied = deniedAssetIds(sessionId, event.call.assets);
+    const full = {
+      ...event,
+      call: {
+        ...event.call,
+        assets: admittedAssets(sessionId, event.call.assets),
+        retiredImageAssetIds: mergedRetiredAssetIds(event.call.retiredImageAssetIds, denied)
+      },
+      seq: entry.nextSeq,
+      origin: entry.nextSeq
+    };
     await writeCanonicalMessage(sessionId, key, full);
     entry.messages.set(key, full);
     entry.nextSeq += 1;
@@ -1375,6 +1579,49 @@ export async function readLatestUserMessage(sessionId: string): Promise<Extract<
   return message?.kind === 'user_message' ? message : undefined;
 }
 
+/** Canonical completion evidence shared by activity retirement and input eligibility.
+ * No turn is manufactured: an unowned reply must follow the latest recorded question.
+ * A concurrent write/rebind invalidates this snapshot instead of authorizing stale work. */
+export async function readCompletedFinal(sessionId: string, conversationId: string, turnId?: string | null): Promise<{
+  messageId: string; turnId: string | null; completedAt: number; contentSeq: number;
+} | null> {
+  const entry = await ensureOpen(sessionId);
+  await flushSession(sessionId);
+  const revision = entry.nextSeq, queue = entry.queue;
+  if (entry.summary.conversationId !== conversationId) return null;
+  const [recent, questions] = await Promise.all([
+    readRecentEventsFromDisk(sessionId, 256, { kinds: ['turn_start', 'turn_end', 'user_message', 'assistant_message', 'tool_call', 'page_tool'] }),
+    readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true })
+  ]);
+  if (entry.nextSeq !== revision || entry.queue !== queue || entry.summary.conversationId !== conversationId) return null;
+  const final = recent.findLast(event => event.kind === 'assistant_message' && event.final === true &&
+    !!event.message.text.trim() && !!event.messageId && (!turnId || event.turnId === turnId ||
+      (turnId.startsWith('reply:') && event.messageId === turnId.slice(6))));
+  if (!final || final.kind !== 'assistant_message' || !final.messageId) return null;
+  const seq = final.finalContentSeq ?? positionOf(final);
+  const completedAt = final.finalObservedAt ?? final.time;
+  const question = questions[0];
+  const correction = (event: SessionEvent) => event.kind === 'user_message' && !!event.inputId &&
+    !!final.turnId && event.turnId === final.turnId && positionOf(event) < seq;
+  if (question && positionOf(question) >= positionOf(final) && !correction(question)) return null;
+  // With no generation identity, require an actual preceding authored boundary.
+  if (!final.turnId && (!question || question.time > final.time)) return null;
+  if (entry.summary.activeTurnId && entry.summary.activeTurnId !== final.turnId) return null;
+  const boundaries = recent.filter(event => event.kind === 'turn_start' || event.kind === 'turn_end').sort((a, b) => a.seq - b.seq);
+  const last = boundaries.at(-1), prior = boundaries.at(-2);
+  const nativeReopen = !!final.providerMessageId && last?.kind === 'turn_start' && last.source === 'app' &&
+    last.turnId === final.turnId && prior?.kind === 'turn_end' && prior.turnId === final.turnId && prior.outcome === 'completed';
+  if (recent.some(event => {
+    if (event === final || workSequence(event) <= seq) return false;
+    if (event.kind === 'tool_call') return event.time > completedAt;
+    if (event.kind === 'turn_end') return event.turnId !== final.turnId || event.outcome !== 'completed';
+    if (event.kind === 'turn_start') return !(nativeReopen && event === last);
+    if (event.kind === 'user_message') return !correction(event);
+    return event.kind === 'assistant_message' || event.kind === 'page_tool';
+  })) return null;
+  return { messageId: final.messageId, turnId: final.turnId ?? null, completedAt, contentSeq: seq };
+}
+
 /** Recorded local execution, not a native tool label or a request-id sighting alone. */
 export async function turnHasMcpCall(sessionId: string, conversationId: string, turnId: string): Promise<boolean> {
   assertSessionId(sessionId);
@@ -1417,7 +1664,8 @@ async function readRecentEventsFromDisk(
   const cap = Math.max(1, Math.min(MAX_EVENT_TAIL, Math.floor(limit)));
   const active = open.get(sessionId);
   const needsMessages =
-    !options.kinds || options.kinds.includes('user_message') || options.kinds.includes('assistant_message') || options.kinds.includes('tool_call');
+    !options.kinds || options.kinds.includes('user_message') || options.kinds.includes('assistant_message') ||
+    options.kinds.includes('native_image') || options.kinds.includes('tool_call');
   const messages = needsMessages ? active?.messages ?? (await readCanonicalMessages(sessionId)) : new Map<string, CanonicalEvent>();
   const canonicalKeys = new Set(messages.keys());
   // Pre-canonical sessions could append every streaming revision of one stable website
@@ -1557,6 +1805,41 @@ export async function readActivityEvents(sessionId: string, since: number, limit
     const resumeBoundary = resumeUserMessage ? resumeUserMessage.origin ?? resumeUserMessage.seq : 0;
     return { events: chronological(selected), reset: reset || (cursor === 0 && candidates.length > cap), resumeBoundary,
       openingUserMessage, resumeUserMessage };
+  });
+}
+
+/**
+ * Reads one exact tool record that the browser's bounded activity projection has already
+ * hydrated. This is deliberately not a history lookup: opening a disclosure must never open a
+ * session, scan its journal, or resolve an overflow asset independently of `/activity`.
+ */
+export async function readHydratedActivityCall(
+  sessionId: string,
+  conversationId: string,
+  callId: string,
+  detailRevision: number
+): Promise<Extract<SessionEvent, { kind: 'tool_call' }> | null> {
+  const entry = open.get(sessionId);
+  if (!entry || !entry.activityHydrated || entry.summary.conversationId !== conversationId) return null;
+  return enqueueSessionOperation(entry, 'activity call detail', async () => {
+    // The entry may have been closed/replaced while this read waited behind an accepted write.
+    if (open.get(sessionId) !== entry || !entry.activityHydrated || entry.summary.conversationId !== conversationId) return null;
+    const exact = (event: SessionEvent | undefined): event is Extract<SessionEvent, { kind: 'tool_call' }> =>
+      event?.kind === 'tool_call' &&
+      event.seq === detailRevision &&
+      event.call.callId === callId &&
+      event.call.conversationId === conversationId;
+
+    // Canonical background-process revisions supersede every ordinary copy. A stale requested
+    // revision therefore fails closed here instead of falling back to the launch in `tail`.
+    const canonical = entry.messages.get(`tool_call\u0000${callId}`);
+    if (canonical) return exact(canonical) ? canonical : null;
+
+    // `tail` is already the bounded in-memory suffix owned by readActivityEvents(). Its public
+    // ordering is chronology/origin based, so choose the greatest canonical revision explicitly.
+    const newest = entry.tail.reduce<Extract<SessionEvent, { kind: 'tool_call' }> | null>((held, event) =>
+      event.kind === 'tool_call' && event.call.callId === callId && (!held || event.seq > held.seq) ? event : held, null);
+    return newest && exact(newest) ? newest : null;
   });
 }
 
@@ -2436,7 +2719,7 @@ export async function setSessionOrigin(id: string, origin: SessionOrigin, title:
  */
 export async function rebindSession(
   id: string,
-  fromConversationId: string,
+  fromConversationId: string | null,
   toConversationId: string,
   committedResumeHandoffId?: string
 ): Promise<boolean> {
@@ -2452,7 +2735,9 @@ export async function rebindSession(
     // use short symbolic ids and reuse them across retained temp sessions; ownership safety
     // applies to the real identity domain rather than manufacturing a test-only collision.
     if (/^[0-9a-f-]{8,64}$/i.test(toConversationId)) {
-      const target = await findSessionByConversation(toConversationId, { requireUnique: true });
+      // Any existing owner is a collision witness. A unique-only lookup also returns
+      // null for duplicate owners and would incorrectly admit a third local session.
+      const target = await findSessionByConversation(toConversationId);
       if (target && target.id !== id) {
         logWarn(`session ${id} cannot move to ${toConversationId}: that chat already belongs to ${target.id}`);
         return false;
@@ -2552,12 +2837,17 @@ export async function writeAsset(
           ? '.txt'
           : '.bin';
   const id = `${hash}${extension}`;
-  const write = assetWriteQueue.then(async () => {
+  // Invocation time, rather than queue execution time, decides which side of an explicit
+  // cleanup this write belongs to. A write already admitted when cleanup starts may finish,
+  // but its late reference cannot resurrect the retired file.
+  const admittedAt = assetMutationEpoch;
+  return enqueueAssetOperation(async () => {
     const dir = path.join(sessionDir(sessionId), 'assets');
     await fs.mkdir(dir, { recursive: true });
     const target = path.join(dir, id);
     try {
       await fs.stat(target);
+      assetWrittenEpoch.set(localAssetKey(sessionId, id), admittedAt);
       return { id, mimeType, bytes: data.length };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
@@ -2573,13 +2863,9 @@ export async function writeAsset(
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
     }
+    assetWrittenEpoch.set(localAssetKey(sessionId, id), admittedAt);
     return { id, mimeType, bytes: data.length };
   });
-  assetWriteQueue = write.then(
-    () => undefined,
-    () => undefined
-  );
-  return write;
 }
 
 async function directoryFileBytes(dir: string): Promise<number> {
@@ -2620,7 +2906,6 @@ async function globalAssetBytesOnDisk(): Promise<number> {
     for await (const entry of handle) {
       if (!entry.isDirectory() || !/^[0-9a-z-]{8,64}$/i.test(entry.name)) continue;
       total += await sessionAssetBytesOnDisk(entry.name);
-      if (total > MAX_GLOBAL_ASSET_BYTES) break;
     }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
@@ -2629,6 +2914,332 @@ async function globalAssetBytesOnDisk(): Promise<number> {
   }
   globalAssetUsage = total;
   return total;
+}
+
+interface StoredImageFile {
+  sessionId: string;
+  assetId: string;
+  bytes: number;
+  mtimeMs: number;
+  dev: number;
+  ino: number;
+}
+
+interface VerifiedAssetsDirectory {
+  path: string;
+  realPath: string;
+}
+
+function imageHeader(header: Buffer): boolean {
+  return (
+    (header.length >= 8 && header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) ||
+    (header.length >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) ||
+    (header.length >= 12 && header.subarray(0, 4).toString('ascii') === 'RIFF' && header.subarray(8, 12).toString('ascii') === 'WEBP')
+  );
+}
+
+function sameFilesystemPath(left: string, right: string): boolean {
+  const normalize = (value: string): string => {
+    const resolved = path.resolve(value);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  return normalize(left) === normalize(right);
+}
+
+async function verifiedAssetsDirectory(sessionId: string): Promise<VerifiedAssetsDirectory | null> {
+  const expectedSession = sessionDir(sessionId);
+  const expectedAssets = path.join(expectedSession, 'assets');
+  try {
+    const rootStat = await fs.lstat(root);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return null;
+    const rootReal = await fs.realpath(root);
+    const sessionStat = await fs.lstat(expectedSession);
+    if (!sessionStat.isDirectory() || sessionStat.isSymbolicLink()) return null;
+    const sessionReal = await fs.realpath(expectedSession);
+    if (!sameFilesystemPath(path.dirname(sessionReal), rootReal) || path.basename(sessionReal) !== sessionId) return null;
+    const assetsStat = await fs.lstat(expectedAssets);
+    if (!assetsStat.isDirectory() || assetsStat.isSymbolicLink()) return null;
+    const assetsReal = await fs.realpath(expectedAssets);
+    if (!sameFilesystemPath(path.dirname(assetsReal), sessionReal) || path.basename(assetsReal) !== 'assets') return null;
+    return { path: expectedAssets, realPath: assetsReal };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+interface VerifiedAssetFile {
+  bytes: number;
+  mtimeMs: number;
+  dev: number;
+  ino: number;
+  image: boolean;
+}
+
+async function inspectVerifiedAssetFile(directory: VerifiedAssetsDirectory, name: string): Promise<VerifiedAssetFile | null> {
+  const target = path.join(directory.path, name);
+  let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
+  try {
+    const before = await fs.lstat(target);
+    if (!before.isFile() || before.isSymbolicLink()) return null;
+    const real = await fs.realpath(target);
+    if (!sameFilesystemPath(path.dirname(real), directory.realPath) || path.basename(real) !== name) return null;
+    handle = await fs.open(target, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.dev !== before.dev || stat.ino !== before.ino) return null;
+    const header = Buffer.alloc(12);
+    const { bytesRead } = await handle.read(header, 0, header.length, 0);
+    const image = imageHeader(header.subarray(0, bytesRead));
+    const after = await fs.lstat(target);
+    if (!after.isFile() || after.isSymbolicLink() || after.dev !== stat.dev || after.ino !== stat.ino || after.size !== stat.size) return null;
+    return { bytes: stat.size, mtimeMs: stat.mtimeMs, dev: stat.dev, ino: stat.ino, image };
+  } catch (error) {
+    if (['ENOENT', 'ELOOP'].includes((error as NodeJS.ErrnoException).code ?? '')) return null;
+    throw error;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+/** Exact physical quota inventory. Directory entries, not caller paths, define the scope. */
+async function imageStorageInventory(): Promise<{ usedBytes: number; images: StoredImageFile[] }> {
+  assertReady();
+  let usedBytes = 0;
+  const images: StoredImageFile[] = [];
+  const usage = new Map<string, number>();
+  let sessions: Awaited<ReturnType<typeof fs.opendir>> | null = null;
+  try {
+    const rootStat = await fs.lstat(root);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+      sessionAssetUsage.clear();
+      globalAssetUsage = 0;
+      return { usedBytes: 0, images: [] };
+    }
+    sessions = await fs.opendir(root);
+    for await (const session of sessions) {
+      if (!session.isDirectory() || !/^[0-9a-z-]{8,64}$/i.test(session.name)) continue;
+      const assetsDir = await verifiedAssetsDirectory(session.name);
+      if (!assetsDir) continue;
+      let entries: Awaited<ReturnType<typeof fs.opendir>> | null = null;
+      let sessionBytes = 0;
+      try {
+        entries = await fs.opendir(assetsDir.path);
+        for await (const entry of entries) {
+          // Symlinks and other special files neither consume the app's quota nor become cleanup targets.
+          if (!entry.isFile() || !/^[0-9a-f]{8,64}\.(?:bin|png|jpg|txt)$/i.test(entry.name)) continue;
+          const file = await inspectVerifiedAssetFile(assetsDir, entry.name);
+          if (!file) continue;
+          sessionBytes += file.bytes;
+          if (file.image) {
+            const { image: _image, ...stored } = file;
+            images.push({ sessionId: session.name, assetId: entry.name, ...stored });
+          }
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      } finally {
+        await entries?.close().catch(() => undefined);
+      }
+      usage.set(session.name, sessionBytes);
+      usedBytes += sessionBytes;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  } finally {
+    await sessions?.close().catch(() => undefined);
+  }
+  sessionAssetUsage.clear();
+  for (const [sessionId, bytes] of usage) sessionAssetUsage.set(sessionId, bytes);
+  globalAssetUsage = usedBytes;
+  return { usedBytes, images };
+}
+
+function sameStoredImage(file: StoredImageFile, observed: VerifiedAssetFile): boolean {
+  return observed.image && observed.dev === file.dev && observed.ino === file.ino && observed.bytes === file.bytes;
+}
+
+/**
+ * Atomically moves the selected directory entry aside, then verifies the moved object before
+ * unlinking it. A path replacement can therefore make cleanup abstain, but cannot make it
+ * delete the replacement. The app's asset queue excludes legitimate writers throughout.
+ */
+async function deleteSelectedImage(file: StoredImageFile): Promise<number> {
+  const directory = await verifiedAssetsDirectory(file.sessionId);
+  if (!directory) return 0;
+  const observed = await inspectVerifiedAssetFile(directory, file.assetId);
+  if (!observed || !sameStoredImage(file, observed)) return 0;
+  const currentDirectory = await verifiedAssetsDirectory(file.sessionId);
+  if (!currentDirectory || !sameFilesystemPath(currentDirectory.realPath, directory.realPath)) return 0;
+  const target = path.join(currentDirectory.path, file.assetId);
+  const quarantineName = `.cleanup-${process.pid}-${randomUUID()}.tmp`;
+  const quarantine = path.join(currentDirectory.path, quarantineName);
+  try {
+    await fs.rename(target, quarantine);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+    throw error;
+  }
+  try {
+    const movedDirectory = await verifiedAssetsDirectory(file.sessionId);
+    if (!movedDirectory || !sameFilesystemPath(movedDirectory.realPath, currentDirectory.realPath)) return 0;
+    const moved = await inspectVerifiedAssetFile(movedDirectory, quarantineName);
+    if (!moved || !sameStoredImage(file, moved)) return 0;
+    await fs.unlink(quarantine);
+    return moved.bytes;
+  } finally {
+    // A replacement is never deleted. Restore the selected directory entry when possible;
+    // otherwise leave the quarantined file as forensic evidence outside future inventories.
+    try {
+      await fs.lstat(quarantine);
+      try { await fs.lstat(target); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') await fs.rename(quarantine, target);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+}
+
+function referencedAssetIds(event: SessionEvent): readonly AssetRef[] {
+  if (event.kind === 'native_image') return event.asset ? [event.asset] : [];
+  if (event.kind === 'user_message') return event.assets ?? [];
+  if (event.kind === 'tool_call') return event.call.assets ?? [];
+  return [];
+}
+
+function retireImageReferences(event: CanonicalEvent, selected: ReadonlySet<string>): CanonicalEvent | null {
+  if (event.kind === 'native_image') {
+    if (!event.asset || !selected.has(event.asset.id)) return null;
+    const { asset: _asset, ...withoutAsset } = event;
+    return { ...withoutAsset, previewStatus: 'unavailable', previewError: 'removed' };
+  }
+  if (event.kind === 'user_message') {
+    const removed = (event.assets ?? []).filter((asset) => selected.has(asset.id));
+    if (!removed.length) return null;
+    const retiredImageAssetIds = [...new Set([...(event.retiredImageAssetIds ?? []), ...removed.map((asset) => asset.id)])];
+    return { ...event, assets: retainedAssets(event.assets, retiredImageAssetIds), retiredImageAssetIds };
+  }
+  if (event.kind !== 'tool_call') return null;
+  const removed = (event.call.assets ?? []).filter((asset) => selected.has(asset.id));
+  if (!removed.length) return null;
+  const retiredImageAssetIds = [...new Set([...(event.call.retiredImageAssetIds ?? []), ...removed.map((asset) => asset.id)])];
+  return { ...event, call: { ...event.call, assets: retainedAssets(event.call.assets, retiredImageAssetIds), retiredImageAssetIds } };
+}
+
+/**
+ * Retires every durable reference before physical deletion. Canonical shards overlay ordinary
+ * journal tool rows, so history remains immutable while future reads cannot claim a removed file
+ * is available. Unsupported unkeyed references veto deletion for their exact asset.
+ */
+async function retireSessionImages(sessionId: string, selected: ReadonlySet<string>): Promise<Set<string>> {
+  const events = await readEvents(sessionId);
+  const safe = new Set(selected);
+  const keyed = new Map<string, CanonicalEvent>();
+  for (const event of events) {
+    if (!referencedAssetIds(event).some((asset) => selected.has(asset.id))) continue;
+    const key = messageKey(event);
+    if (!key || !['user_message', 'native_image', 'tool_call'].includes(event.kind)) {
+      for (const asset of referencedAssetIds(event)) safe.delete(asset.id);
+      continue;
+    }
+    keyed.set(key, event as CanonicalEvent);
+  }
+  const entry = await ensureOpen(sessionId);
+  await enqueueSessionOperation(entry, 'image storage cleanup', async () => {
+    for (const [key, observed] of keyed) {
+      const current = entry.messages.get(key) ?? observed;
+      const retired = retireImageReferences(current, safe);
+      if (!retired) continue;
+      const full = { ...retired, origin: retired.origin ?? retired.seq, seq: entry.nextSeq } as CanonicalEvent;
+      await writeCanonicalMessage(sessionId, key, full);
+      entry.messages.set(key, full);
+      entry.nextSeq += 1;
+      entry.historySeq = full.seq;
+    }
+    if (keyed.size) scheduleMeta(entry);
+  });
+  return safe;
+}
+
+export function getImageStorage(): Promise<ImageStorageInfo> {
+  return enqueueAssetOperation(async () => {
+    const { usedBytes } = await imageStorageInventory();
+    return { usedBytes, limitBytes: MAX_GLOBAL_ASSET_BYTES };
+  });
+}
+
+/** Explicit user cleanup. No automatic eviction and no alternate cache can bypass the 2 GiB cap. */
+export async function clearImageStorage(mode: ImageStorageClearMode): Promise<ImageStorageClearResult> {
+  assertReady();
+  // This synchronous edge separates already-admitted writers from writes initiated after the
+  // explicit cleanup request, including callers that are still waiting on the asset queue.
+  const cleanupEpoch = ++assetMutationEpoch;
+  let announceSelection!: (files: StoredImageFile[]) => void;
+  let rejectSelection!: (error: unknown) => void;
+  let finishRetirement!: (files: Set<string>) => void;
+  let rejectRetirement!: (error: unknown) => void;
+  const selection = new Promise<StoredImageFile[]>((resolve, reject) => {
+    announceSelection = resolve; rejectSelection = reject;
+  });
+  const retirement = new Promise<Set<string>>((resolve, reject) => {
+    finishRetirement = resolve; rejectRetirement = reject;
+  });
+
+  // Claim the existing asset queue before inspecting disk. Prior writes finish first; later writes
+  // wait until references are retired and selected files are gone.
+  const cleanup = enqueueAssetOperation(async () => {
+    try {
+      const inventory = await imageStorageInventory();
+      const ordered = [...inventory.images].sort((left, right) =>
+        left.mtimeMs - right.mtimeMs || left.sessionId.localeCompare(right.sessionId) || left.assetId.localeCompare(right.assetId));
+      const chosen: StoredImageFile[] = [];
+      let chosenBytes = 0;
+      for (const file of ordered) {
+        if (mode === 'oldest-gib' && chosenBytes >= 1024 * 1024 * 1024) break;
+        chosen.push(file);
+        chosenBytes += file.bytes;
+      }
+      for (const file of chosen) removedAssetEpoch.set(localAssetKey(file.sessionId, file.assetId), cleanupEpoch);
+      announceSelection(chosen);
+      const deletable = await retirement;
+      let freedBytes = 0;
+      let removedFiles = 0;
+      for (const file of chosen) {
+        const identity = `${file.sessionId}\u0000${file.assetId}`;
+        if (!deletable.has(identity)) continue;
+        const removed = await deleteSelectedImage(file);
+        if (!removed) continue;
+        freedBytes += removed;
+        removedFiles += 1;
+      }
+      sessionAssetUsage.clear();
+      globalAssetUsage = null;
+      const after = await imageStorageInventory();
+      return { freedBytes, removedFiles, usedBytes: after.usedBytes, limitBytes: MAX_GLOBAL_ASSET_BYTES };
+    } catch (error) {
+      rejectSelection(error);
+      throw error;
+    }
+  });
+
+  try {
+    const chosen = await selection;
+    const bySession = new Map<string, Set<string>>();
+    for (const file of chosen) {
+      const ids = bySession.get(file.sessionId) ?? new Set<string>();
+      ids.add(file.assetId);
+      bySession.set(file.sessionId, ids);
+    }
+    const deletable = new Set<string>();
+    for (const [sessionId, ids] of bySession) {
+      for (const assetId of await retireSessionImages(sessionId, ids)) deletable.add(`${sessionId}\u0000${assetId}`);
+    }
+    finishRetirement(deletable);
+  } catch (error) {
+    rejectRetirement(error);
+  }
+  return cleanup;
 }
 
 function invalidateAssetUsage(sessionId: string): void {
@@ -2732,34 +3343,11 @@ export async function latestHandoff(): Promise<Handoff | null> {
 // ------------------------------------------------------------------ prune
 
 /**
- * Deletes sessions older than the retention window.
- *
- * A session that holds the newest handoff is kept regardless: deleting the thing a
- * fresh conversation is about to resume from would be the one unrecoverable mistake
- * this store can make.
+ * Compatibility seam for older callers. Age-based recording deletion was removed: only the
+ * explicit delete-session and confirmed image-storage cleanup paths may remove history now.
  */
-export async function pruneSessions(retainDays: number): Promise<number> {
-  if (retainDays <= 0) return 0;
-  const cutoff = Date.now() - retainDays * 24 * 60 * 60 * 1000;
-  // Retention is a completeness contract, not a UI query. Reuse the uncapped process-lifetime
-  // catalog so an arbitrary `readdir()` prefix can never make session 5,001 immortal.
-  const sessions = await readEverySummary();
-  const newestHandoff = await latestHandoff();
-  let removed = 0;
-  for (const summary of sessions) {
-    if (summary.updatedAt >= cutoff) continue;
-    if (open.has(summary.id)) continue;
-    if (newestHandoff && newestHandoff.sessionId === summary.id) continue;
-    try {
-      await fs.rm(sessionDir(summary.id), { recursive: true, force: true });
-      invalidateAssetUsage(summary.id);
-      publishAttachmentRemoval(summary.id);
-      removed++;
-    } catch (err) {
-      logWarn(`could not remove old session ${summary.id}: ${(err as Error).message}`);
-    }
-  }
-  return removed;
+export async function pruneSessions(_retainDays: number): Promise<number> {
+  return 0;
 }
 
 export async function deleteSession(id: string): Promise<void> {
@@ -2783,6 +3371,9 @@ export function resetSessionStoreForTests(): void {
   reconciling.clear();
   sessionAssetUsage.clear();
   globalAssetUsage = null;
+  assetMutationEpoch = 0;
+  assetWrittenEpoch.clear();
+  removedAssetEpoch.clear();
   missingCurrentConversations.clear();
   attachmentCatalog = null;
   attachmentCatalogLoading = null;
@@ -2794,6 +3385,9 @@ export function unsetSessionRootForTests(): void {
   root = '';
   sessionAssetUsage.clear();
   globalAssetUsage = null;
+  assetMutationEpoch = 0;
+  assetWrittenEpoch.clear();
+  removedAssetEpoch.clear();
   missingCurrentConversations.clear();
   attachmentCatalog = null;
   attachmentCatalogLoading = null;

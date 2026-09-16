@@ -18,7 +18,8 @@ vi.mock('../src/main/mcp/call-context.js', async (importOriginal) => ({
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSessionStore, createSession, getSession, rebindSession, appendEvent, readRecentEvents, flushSessions, resetSessionStoreForTests, observeSessionModel } = await import('../src/main/session/store.js');
 const { resetRecorderForTests } = await import('../src/main/session/recorder.js');
-const { announceSessionFinish: announceTransport, sessionFinishDeadline, settleSessionFinishForTests, requestSessionFinishGoal, sessionFinishWaiting, setFinishNotifier, releaseSessionFinish, sessionFinishHeld } = await import('../src/main/session/finish.js');
+const { announceSessionFinish: announceTransport, sessionFinishDeadline, settleSessionFinishForTests, requestSessionFinishGoal, sessionFinishWaiting, setFinishNotifier, releaseSessionFinish, sessionFinishHeld, getSessionFinishDraft } = await import('../src/main/session/finish.js');
+const { setGoalSwitchNow, automaticFinishEnabled, snapshotGoalSwitches, restoreGoalSwitches, registerGoalDecisionChat } = await import('../src/main/goal.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 async function announceSessionFinish(sessionId: string, summary: string): Promise<string> {
   const result = await announceTransport(sessionId, summary);
@@ -38,7 +39,7 @@ beforeEach(async () => {
   hooks.enqueue.mockReset().mockImplementation(async (input, owner) => ({ ...input, finishOwner: owner, state: 'queued' }));
   notify.mockReset(); setFinishNotifier(notify);
   await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal' },
-    goal: { ...defaultConfig().goal, includeToolCalls: true } });
+    goal: { ...defaultConfig().goal, enabled: true, includeToolCalls: true } });
   const conversationId = randomUUID();
   const session = await createSession({ conversationId, title: 'Finish test' });
   sessionId = session.id;
@@ -53,6 +54,72 @@ afterEach(() => {
 });
 afterAll(async () => { setFinishNotifier(null); resetSessionStoreForTests(); await removeTempDir(directory); });
 describe('session finish turn identity', () => {
+  it.each(['goal', 'loop'] as const)('honours explicit chat %s Off over the global automatic finish default, including restore', async mode => {
+    await setGoalSwitchNow(hooks.caller.conversationId, mode, true);
+    await setGoalSwitchNow(hooks.caller.conversationId, mode, false);
+    restoreGoalSwitches(snapshotGoalSwitches());
+    const visibleDrafts: unknown[] = [];
+    notify.mockImplementation(() => { visibleDrafts.push(getSessionFinishDraft(sessionId, 'turn-one')); });
+    const result = await announceSessionFinish(sessionId, 'Wrapping up with automation off');
+    await announceSessionFinish(sessionId, 'Still waiting for the user');
+    expect(automaticFinishEnabled(hooks.caller.conversationId)).toBe(false);
+    expect(result).not.toContain('Automatic Goal generation');
+    expect(hooks.followup).not.toHaveBeenCalled();
+    expect(hooks.enqueue).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(visibleDrafts).toEqual([null]);
+  });
+  it('does not let the global automatic finish default arm a decision helper', async () => {
+    await registerGoalDecisionChat(hooks.caller.conversationId);
+    expect(automaticFinishEnabled(hooks.caller.conversationId)).toBe(false);
+    await announceSessionFinish(sessionId, 'Helper is not an executor');
+    expect(hooks.followup).not.toHaveBeenCalled();
+    expect(hooks.enqueue).not.toHaveBeenCalled();
+  });
+  it('aborts an in-flight finish decision only when its own chat switches Off, even if re-enabled before a late reply', async () => {
+    let complete!: (text: string) => void;
+    let signal!: AbortSignal;
+    hooks.followup.mockImplementationOnce((_id, currentSignal) => {
+      signal = currentSignal;
+      return new Promise<string>(resolve => { complete = resolve; });
+    });
+    await announceTransport(sessionId, 'Wrapping up');
+    await vi.waitFor(() => expect(complete).toBeTypeOf('function'));
+    try {
+      expect(getSessionFinishDraft(sessionId, 'turn-one')?.stage).toBe('sending');
+      expect(getSessionFinishDraft('another-session', 'turn-one')).toBeNull();
+      await setGoalSwitchNow(randomUUID(), 'goal', false);
+      expect(signal.aborted).toBe(false);
+      await setGoalSwitchNow(hooks.caller.conversationId, 'goal', false);
+      const abortedWhileOff = signal.aborted;
+      await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
+      complete('A late reply from the revoked request');
+      await settleSessionFinishForTests();
+      expect(abortedWhileOff).toBe(true);
+      expect(hooks.enqueue).not.toHaveBeenCalled();
+      expect(getSessionFinishDraft(sessionId, 'turn-one')).toBeNull();
+    } finally {
+      complete('Release the test provider');
+      await settleSessionFinishForTests();
+    }
+  });
+  it('cancels a pending finish retry when its chat switches Off despite the global automatic default', async () => {
+    let fail!: (error: Error) => void;
+    hooks.followup.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    await announceTransport(sessionId, 'Wrapping up');
+    await vi.waitFor(() => expect(fail).toBeTypeOf('function'));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      fail(new TaskRequestError('http_503: busy', true));
+      await vi.advanceTimersByTimeAsync(0);
+      await setGoalSwitchNow(hooks.caller.conversationId, 'goal', false);
+      await vi.advanceTimersByTimeAsync(15_000);
+    } finally { vi.useRealTimers(); }
+    await settleSessionFinishForTests();
+    expect(hooks.followup).toHaveBeenCalledTimes(1);
+    expect(hooks.enqueue).not.toHaveBeenCalled();
+    expect(getSessionFinishDraft(sessionId, 'turn-one')).toBeNull();
+  });
   it('spends only the remaining ingress budget after late identity resolution', async () => {
     hooks.hasInput = false;
     let complete!: (text: string) => void;
@@ -131,6 +198,7 @@ describe('session finish turn identity', () => {
   });
   it('notifies once with exact turn identity and supports a user-requested Goal in notify mode', async () => {
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'notify' } });
+    await setGoalSwitchNow(hooks.caller.conversationId, 'goal', false);
     await announceSessionFinish(sessionId, 'Ready');
     await announceSessionFinish(sessionId, 'Again');
     expect(notify).toHaveBeenCalledTimes(1);
@@ -194,7 +262,7 @@ describe('session finish turn identity', () => {
   });
   it('does not bill another decision for tool output excluded from the actual provider context', async () => {
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal' },
-      goal: { ...defaultConfig().goal, includeToolCalls: false } });
+      goal: { ...defaultConfig().goal, enabled: true, includeToolCalls: false } });
     await announceSessionFinish(sessionId, 'First check');
     await appendEvent(sessionId, { source: 'mcp', kind: 'tool_call', turnId: 'turn-one', time: 3000,
       call: { callId: randomUUID(), tool: 'read', attribution: 'request_id', requestId: 'tool-context', conversationId: hooks.caller.conversationId, attributionMethod: 'request_id', args: { text: '{}', chars: 2, truncated: false },

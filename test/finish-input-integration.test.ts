@@ -38,10 +38,12 @@ describe('finish producer to durable injection integration', () => {
     expect(await pendingBrowserInputs()).toEqual([expect.objectContaining({ id: head.id })]);
   });
 
-  it.each(['goal', 'loop'] as const)('Notify with armed %s produces and retains one real tool injection', async mode => {
+  it.each([
+    ['notify', 'goal'], ['notify', 'loop'], ['goal', 'goal'], ['goal', 'loop']
+  ] as const)('%s finish default with armed %s produces and retains one real tool injection until chat Off', async (finishAction, mode) => {
     directory = await makeTempDir('clf-finish-input-');
     initConfigPath(directory); initDurableStore(directory); initSessionStore(directory);
-    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'notify' } });
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, finishTool: true, finishAction } });
     const conversationId = randomUUID();
     const session = await createSession({ conversationId, title: 'Finish integration' });
     hooks.caller = { sessionId: session.id, conversationId };
@@ -62,5 +64,9 @@ describe('finish producer to durable injection integration', () => {
     expect(notify).not.toHaveBeenCalled();
     await setGoalSwitchNow(conversationId, mode, false);
     expect((await listInputs())[0]!.state).toBe('cancelled');
+    await flushDurable(); resetInputForTests();
+    await setGoalSwitchNow(conversationId, mode, true);
+    expect((await listInputs())[0]!.state).toBe('cancelled');
+    expect((await offerToolInput(session.id, conversationId, randomUUID(), Date.now() + 20)).messages).toEqual([]);
   });
 });

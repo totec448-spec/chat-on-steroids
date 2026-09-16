@@ -46,7 +46,7 @@ it('searches whole settings sections without empty headings, orphaned controls o
   filterSettingsSections(view, '  SESSION FINISH  ');
   expect(sections.filter(section => !section.hidden).map(section => section.textContent)).toEqual(['Keep the turn open']);
   for (const section of sections) expect((section.nextElementSibling as HTMLElement).hidden).toBe(section.hidden);
-  expect(document.getElementById('finishAction')!.closest('.pane')!.hasAttribute('hidden')).toBe(false);
+  expect(document.getElementById('finishTool')!.closest('.pane')!.hasAttribute('hidden')).toBe(false);
   expect(document.getElementById('goalKey')!.closest('.pane')!.hasAttribute('hidden')).toBe(true);
   filterSettingsSections(view, 'no-such-setting-123');
   expect(sections.every(section => section.hidden)).toBe(true);
@@ -423,10 +423,12 @@ describe('the settings sheet', () => {
   it('asks for a single compaction threshold', () => {
     const pane = document.querySelector('.view[data-view="settings"]')!;
     const numbers = [...pane.querySelectorAll('input[type="number"]')].map((input) => input.id);
-    expect(numbers).toEqual(['maWorkers', 'sessRetain', 'autoCompactTokens']);
-    for (const id of ['sessAdvisory', 'sessLimit']) {
+    expect(numbers).toEqual(['maWorkers', 'autoCompactTokens']);
+    for (const id of ['sessRecord', 'sessRetain', 'sessAdvisory', 'sessLimit']) {
       expect(document.getElementById(id), `#${id} is back`).toBeNull();
     }
+    expect(document.querySelector('[data-group="recording"]')).toBeNull();
+    expect(pane.textContent).not.toContain('Keep recordings');
   });
 
   /**

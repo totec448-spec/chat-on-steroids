@@ -5,7 +5,7 @@ import { validateInputImages } from './input-images.js';
 import sharp from 'sharp';
 
 /** Project a tool handout or proven delivery into history, never the enqueue intent. */
-export async function recordDeliveredInput(entry: Readonly<InputEntry>): Promise<boolean> {
+export async function recordDeliveredInput(entry: Readonly<InputEntry>, anchorCommitted?: () => void): Promise<boolean> {
   const sessionId = entry.sessionId ?? entry.deliveredSessionId;
   const offered = entry.state === 'tool' && !!entry.owner && Number.isFinite(entry.offeredAt);
   const confirmed = ['sent', 'cancelled'].includes(entry.state) && !!entry.messageId && Number.isFinite(entry.deliveredAt);
@@ -22,13 +22,13 @@ export async function recordDeliveredInput(entry: Readonly<InputEntry>): Promise
   if (!messageId.startsWith('input:') && selection.model && entry.conversationId) {
     await observeSessionModel(sessionId, entry.conversationId, selection.model, entry.deliveredAt!, selection.reasoningEffort ?? undefined);
   }
-  const event = {
+  const message = {
     time, source: 'app' as const, kind: 'user_message' as const,
     // Browser delivery uses its exact native key, so a later page echo updates this row.
     // Tool delivery has no native user row and keeps the stable input id as its key.
     messageId, inputId: entry.id, inputDelivery: offered ? 'offered' as const : 'confirmed' as const, authoredText: entry.text,
-    ...(images.length ? { inputImageCount: images.length } : {}),
-    ...(entry.attachments?.length && entry.attachmentDelivery !== 'tool' ? { attachments: entry.attachments } : {}),
+    ...(messageId.startsWith('input:') && entry.toolTurnId ? { turnId: entry.toolTurnId } : {}),
+    ...(entry.attachments?.length && entry.transportIntent !== 'tool' ? { attachments: entry.attachments } : {}),
     // Injection does not change the running model. Only the native send path verifies
     // picker selection before delivery; a later sparse browser echo keeps this evidence.
     ...(!messageId.startsWith('input:') && selection.model
@@ -36,22 +36,26 @@ export async function recordDeliveredInput(entry: Readonly<InputEntry>): Promise
       : {}),
     message: { text, chars: text.length, truncated: false }
   };
-  // Optional image storage must never erase or delay the canonical delivery row.
-  // Failures retain historyRecorded=false for content-addressed outbox retries.
-  await upsertMessageEvent(sessionId, event);
-  await validateInputImages(images);
-  const assets = [];
-  for (const image of images) {
-    assets.push(await writeAsset(sessionId, Buffer.from(image.dataUrl.split(',')[1]!, 'base64'), 'image/webp'));
+  // Delivery and its chronology do not depend on optional preview storage. This
+  // stable row survives a quota failure; retry only enriches the same origin.
+  await upsertMessageEvent(sessionId, message);
+  anchorCommitted?.();
+  if (images.length) {
+    await validateInputImages(images);
+    const assets = [];
+    for (const image of images) {
+      assets.push(await writeAsset(sessionId, Buffer.from(image.dataUrl.split(',')[1]!, 'base64'), 'image/webp'));
+    }
+    await upsertMessageEvent(sessionId, { ...message, assets });
   }
-  if (assets.length) await upsertMessageEvent(sessionId, { ...event, assets });
   return true;
 }
 
 /** Recorded membership, not a supplied filename, grants the renderer image access. */
 export async function recordedInputImage(sessionId: string, assetId: string): Promise<string | null> {
-  const events = await readEvents(sessionId, { kinds: ['user_message', 'tool_call'] });
+  const events = await readEvents(sessionId, { kinds: ['user_message', 'native_image', 'tool_call'] });
   const referenced = events.flatMap(event => event.kind === 'user_message' ? event.assets ?? [] :
+    event.kind === 'native_image' ? event.asset ? [event.asset] : [] :
     event.kind === 'tool_call' ? event.call.assets ?? [] : [])
     .find(asset => asset.id === assetId && ['image/png', 'image/jpeg', 'image/webp'].includes(asset.mimeType));
   if (!referenced) return null;
