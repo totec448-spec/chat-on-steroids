@@ -1597,6 +1597,10 @@ blind Send. Automatic tickets can wait indefinitely before the request was sent 
 six-hour sent-request window; manual transport is shorter (ten minutes). Pickup budgets depend
 on phase: unsent 2m×5, writing 5m×3, opening 15m×3. These are bounded recovery of one obligation,
 not fresh compaction attempts. Re-observe the exact page before advancing its state.
+A manual ticket whose frozen source selection is Pro instead gets a one-hour deadline while the
+brief is being written: Pro reasoning is not visible transcript, so it produces no text growth
+to renew the ordinary clock, and a healthy long Pro generation used to be swept as "took too
+long". Captured/claimed phases and an unobserved selection keep the ordinary ten minutes.
 
 The continuation WAL freezes the source's confirmed model and reasoning selection when its
 session and selection both name A. Placement and bootstrap project that one intent; B's native
