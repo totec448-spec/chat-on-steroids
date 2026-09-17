@@ -9,7 +9,7 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## [2.1.14] — dead to openai/anthropic. JOIN THE RESISTANCE @dummerspast39 on x
+## [2.1.2] — dead to openai/anthropic. JOIN THE RESISTANCE @dummerspast39 on x
 
 - Add the optional animated Tur Tur Sahur desktop companion.
 - Show normal and unattributed reload warnings only in the last 30 seconds; retain the five-minute Pro warning.
