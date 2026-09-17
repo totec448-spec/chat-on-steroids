@@ -131,6 +131,16 @@ describe('cross-platform packaging targets', () => {
     expect(smoke).toContain('runtime.electron !== expectedElectronVersion');
   });
 
+  it('refuses linked dependency trees and smoke-tests every locally packaged target', () => {
+    const packaging = readFileSync(path.join(root, 'scripts', 'package.mjs'), 'utf8');
+
+    expect(packaging).toContain("import { realpathSync } from 'node:fs';");
+    expect(packaging).toContain('Packaging requires a real node_modules directory in this worktree.');
+    expect(packaging).toContain('electron-builder can otherwise omit transitive production dependencies.');
+    expect(packaging).toContain("run(node, ['-e', \"require('electron')\"]);");
+    expect(packaging).toContain("run(node, ['scripts/smoke-packaged-runtime.mjs', ...targetArgs]);");
+  });
+
   it('grants sandbox read access only to the Windows install tree and fails on ACL errors', () => {
     const config = yamlFile('electron-builder.yml');
     const installer = readFileSync(path.join(root, 'scripts/windows-installer-acl.nsh'), 'utf8');
