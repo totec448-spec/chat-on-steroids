@@ -6048,7 +6048,7 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
     result.push(wait > Date.now() || !pickup ? {
       kind: recovery.silenceBoundary.nativeBusy ? 'native-busy' : 'post-reload',
       deadline: wait || Date.now(), next: 'continue'
-    } : { kind: 'pickup', deadline: pickup.dueAt, next: 'continue' });
+    } : { kind: 'pickup', deadline: pickup.dueAt, visibleAt: pickup.dueAt - 30_000, next: 'continue' });
     return result;
   }
   const pendingGoal = goalActiveFor(conversationId) ? goalPendingReplyFor(conversationId) : null;
@@ -6059,17 +6059,18 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
     if ((pendingGoal.listenUntil ?? 0) > Date.now())
       return [{ kind: 'native-busy', deadline: pendingGoal.listenUntil!, next }];
     const pickup = pickupWatch.get(conversationId);
-    if (pickup) return [{ kind: 'pickup', deadline: pickup.dueAt, next }];
+    if (pickup) return [{ kind: 'pickup', deadline: pickup.dueAt, visibleAt: pickup.dueAt - 30_000, next }];
   }
   if (browserPresent()) {
     const deadlines = [...unattributedIncidents.values()].flatMap(incident => {
       if (incident.pass >= 2) return [];
       const suspect = pendingSuspects(incident).find(candidate => candidate.sessionId === sessionId && candidate.conversationId === conversationId);
       if (!suspect || (session.activeTurnId ?? null) !== suspect.turnId) return [];
-      // Keep the whole original cohort visible until the existing incident ends,
-      // even without another unknown call. This watch does not authorize a retry.
+      // Retain the original cohort, but reveal its watch only in the last
+      // thirty seconds. Presentation never authorizes or postpones a retry.
+      const deadline = incident.pass === 0 ? incident.firstDueAt : incident.startedAt + UNATTRIBUTED_FINAL_WINDOW_MS;
       return [{ kind: incident.pass === 0 ? 'unattributed' as const : 'unattributed-wait' as const,
-        deadline: incident.pass === 0 ? incident.firstDueAt : incident.startedAt + UNATTRIBUTED_FINAL_WINDOW_MS }];
+        deadline, visibleAt: deadline - 30_000 }];
     });
     const earliest = deadlines.sort((a, b) => a.deadline - b.deadline)[0];
     if (earliest) result.push(earliest);
@@ -6083,19 +6084,12 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
   const repair = repairsInFlight.get(conversationId);
   const confirmed = repair?.reason === 'silence' && repair.state === 'done' && repair.sessionId === sessionId;
   const owned = grant?.sessionId === sessionId && grant.turnId === source;
-  // A native completion without the canonical final is an immediately visible
-  // recovery wait. New accepted work advances this same grant (or reopens the
-  // turn), restoring normal hidden/timed visibility without a second flag.
-  if (owned && !grant.thinkingFailed && !confirmed && !session.activeTurnId &&
-      boundary?.kind === 'turn_end' && boundary.outcome === 'completed' && grant.evidenceAt <= boundary.time &&
-      (recoveryInputAllowed(sessionId, conversationId) || tabRecoveryWanted(conversationId) || loopAfterTurnFor(conversationId) || queuedAfterTurn)) {
-    result.push({ kind: 'silence', deadline: grant.until });
-    return result;
-  }
+  // One presentation window for active and incompletely ended turns. The work
+  // owner keeps its actual deadline; native completion cannot reveal it early.
   if (owned && !grant.thinkingFailed && !confirmed &&
       (recoveryInputAllowed(sessionId, conversationId) || tabRecoveryWanted(conversationId) || loopAfterTurnFor(conversationId) || queuedAfterTurn)) {
     result.push({ kind: 'silence', deadline: grant.until,
-      ...(grant.model === 'pro' ? { visibleAt: grant.evidenceAt + PRO_SILENCE_MS / 2 } : {}) });
+      visibleAt: grant.until - (grant.model === 'pro' ? 300_000 : 30_000) });
     return result;
   }
   // A confirmed reload's listening deadline is not fresh work. Real activity

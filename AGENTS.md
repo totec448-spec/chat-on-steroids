@@ -2199,18 +2199,18 @@ using the existing visible-chat clock; zero says checking/pending, never sent/re
 work or attribution removes the relevant countdown, and native busy projects the same owner's
 extended deadline. Pro silence becomes visible after five minutes without work and counts
 down to the existing ten-minute deadline; fresh work hides it for the next five minutes.
-The eligible normal two-minute silence clock is visible immediately above the composer; genuine
-new work moves its deadline. Native-only chats have no automatic-silence countdown. A confirmed
-reload reveals the one-minute listening countdown. A completed page boundary without a canonical final immediately
-reveals the existing normal/Pro silence deadline in app and browser. New MCP activity removes this
-special early visibility for Pro and restores its five-minute reveal delay; it does not create a second
-countdown authority. `visibleAt` lets the existing renderer clock reveal a Pro row without a
+The normal two-minute silence clock appears only in its final thirty seconds above the composer;
+Pro appears five minutes before its reload. Unattributed and pickup watches also appear only
+in their final thirty seconds. Genuine new work moves the same deadline and hides an early row.
+Native-only chats have no automatic-silence countdown. A confirmed reload reveals the listening
+countdown. A completed page boundary without a canonical final uses the same delayed reveal
+in app and browser; it cannot expose the countdown early. `visibleAt` lets the existing renderer clock reveal a row without a
 new backend scheduler. Selection generations fence delayed controls and clear old-chat timers.
 Listening rows name the next existing step: queued input takes priority, otherwise the active
 Goal or Loop obligation. This is a projection of delivery ownership, never another trigger.
 After attribution's first attempt, every still-unproven member of its original cohort keeps
 the countdown to the incident's existing five-minute end, even without another unknown call.
-That row says awaiting attribution/check, since the existing retry conditions still govern
+That row appears only in the final thirty seconds and says awaiting attribution/check, since the existing retry conditions still govern
 whether another reload is allowed. Exact MCP proof removes only its chat; later chats stay out.
 
 Session metadata owns `titleSource` (authored fallback, provider, manual). The preview uses only
