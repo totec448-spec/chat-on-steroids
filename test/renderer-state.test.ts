@@ -422,6 +422,34 @@ async function mountChat(
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+it('reports renderer memory structure without copying drafts or data URLs into diagnostics', async () => {
+  const recordRendererMemory = vi.fn(async (_sample: unknown) => ({ ok: true, data: false }));
+  const mounted = await mountChat({}, [], { recordRendererMemory });
+  await vi.waitFor(() => expect(recordRendererMemory).toHaveBeenCalled());
+  const first = recordRendererMemory.mock.calls[0]![0] as any;
+  expect(first).toMatchObject({
+    hidden: false,
+    counters: expect.objectContaining({ domNodes: expect.any(Number), eventRows: expect.any(Number) })
+  });
+
+  const privateDraft = 'PRIVATE-DRAFT-MUST-NOT-LEAVE-THE-RENDERER';
+  const input = mounted.window.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = privateDraft;
+  const privateImage = 'data:image/png;base64,PRIVATE_IMAGE_BYTES';
+  const image = mounted.window.document.createElement('img');
+  image.src = privateImage;
+  mounted.window.document.body.append(image);
+
+  const { rendererMemoryCounters } = await import('../src/renderer/chat.js');
+  const snapshot = rendererMemoryCounters();
+  expect(snapshot.inputDraftChars).toBeGreaterThanOrEqual(privateDraft.length);
+  expect(snapshot.imageElements).toBeGreaterThan(0);
+  expect(snapshot.dataUrlImageChars).toBeGreaterThanOrEqual(privateImage.length);
+  const serialized = JSON.stringify(snapshot);
+  expect(serialized).not.toContain(privateDraft);
+  expect(serialized).not.toContain('PRIVATE_IMAGE_BYTES');
+});
+
 it('always offers setup collapse and preserves the choice across incomplete status updates', async () => {
   const mounted = await mountChat();
   const doc = mounted.window.document;

@@ -95,10 +95,12 @@ losing the project, history, workers or queued instructions when a chat grows to
   create another opening attempt. Transfer opening authority when it is handed out.
 - Waiting chats and sleeping workers retain their durable history and identity, not an
   indefinite browser tab. Settled app-owned pages become eligible for New Chat reuse after
-  two minutes without work and automatic closure after five. Fresh document/draft/generation
-  checks remain mandatory; selected Chrome tabs veto idle closure, and pins veto closure and
-  New Chat reuse. Terminal, blocked, cancelled, superseded and duplicate cleanup retains its
-  separate authority. Unknown/personal ownership, live work and pending delivery are not idle.
+  two minutes without work and automatic closure after five; under host physical-memory
+  pressure (20% or less free), closure collapses to that same two-minute reuse boundary. Fresh
+  document/draft/generation checks remain mandatory; selected Chrome tabs veto idle closure,
+  and pins veto closure and New Chat reuse. Terminal, blocked, cancelled, superseded and
+  duplicate cleanup retains its separate authority. Unknown/personal ownership, live work and
+  pending delivery are not idle.
 - Unknown identity fails closed where a wrong choice could mutate, attribute or message the
   wrong owner. Presentation can degrade visibly; execution must not guess.
 - Every async result proves its original owner and epoch still apply. A → B → A navigation

@@ -34,7 +34,8 @@ import {
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
 import { $, ago, el, icon, run, shortAgo, toast } from './dom.js';
-import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatView } from './chat.js';
+import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatView, rendererMemoryCounters } from './chat.js';
+import { RENDERER_MEMORY_SAMPLE_INTERVAL_MS } from '../shared/renderer-memory.js';
 
 declare global {
   interface Window {
@@ -1378,9 +1379,37 @@ function paintClock(): void {
       ? t("no handshake yet")
       : t("verified {0}", [ago(status.handshakeAt)])
     : '');
+
+  sampleRendererMemory();
 }
 
 window.setInterval(paintClock, 1000);
+
+let lastRendererMemorySampleAt = 0;
+
+/**
+ * One coarse privacy-preserving sample, piggybacked on the existing UI clock rather than adding
+ * another scheduler. `performance.memory` is Chromium-only and may be unavailable; native
+ * private/working-set metrics are added by main, so a missing JS heap never suppresses capture.
+ */
+function sampleRendererMemory(): void {
+  const now = Date.now();
+  if (now - lastRendererMemorySampleAt < RENDERER_MEMORY_SAMPLE_INTERVAL_MS) return;
+  lastRendererMemorySampleAt = now;
+  const memory = (performance as Performance & {
+    memory?: { usedJSHeapSize?: number; totalJSHeapSize?: number; jsHeapSizeLimit?: number };
+  }).memory;
+  const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  const jsHeap = memory && finite(memory.usedJSHeapSize) && finite(memory.totalJSHeapSize) && finite(memory.jsHeapSizeLimit)
+    ? { usedBytes: memory.usedJSHeapSize, totalBytes: memory.totalJSHeapSize, limitBytes: memory.jsHeapSizeLimit }
+    : null;
+  void api.recordRendererMemory({
+    at: now,
+    hidden: document.hidden,
+    jsHeap,
+    counters: rendererMemoryCounters()
+  }).catch(() => undefined);
+}
 
 function step(name: string): HTMLElement {
   return document.querySelector<HTMLElement>(`[data-step="${name}"]`)!;

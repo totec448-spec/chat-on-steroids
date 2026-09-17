@@ -22,6 +22,7 @@ import { injectableAttachments } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
 import type { TaskProgress } from '../shared/task-progress.js';
+import type { RendererMemoryCounters } from '../shared/renderer-memory.js';
 /**
  * Desktop chat workspace: recorded prose/tool truth, exact-session controls and a composer.
  * The extension remains the ChatGPT transport; main owns permissions, delivery, Goal and
@@ -1796,6 +1797,54 @@ function eventTextCost(event: SessionEvent): number {
     default:
       return 128;
   }
+}
+
+/**
+ * Numeric-only renderer diagnostics for the memory flight recorder.
+ *
+ * Counts and byte/character totals are intentionally the whole contract. Never add titles,
+ * message text, ids, paths, URLs, model output, file names or attachment data here: a memory
+ * incident must not create a second transcript or credential-bearing diagnostic store.
+ */
+export function rendererMemoryCounters(): RendererMemoryCounters {
+  const drafts = new Map([...inputDrafts].map(([key, value]) => [key, value.length]));
+  drafts.set(draftKey(), $<HTMLTextAreaElement>('chatInput').value.length);
+  let inputDraftChars = 0;
+  for (const chars of drafts.values()) inputDraftChars += chars;
+
+  let attachmentDrafts = 0;
+  let attachmentDraftBytes = 0;
+  for (const files of imageDrafts.values()) {
+    attachmentDrafts += files.length;
+    for (const file of files) {
+      if ('dataUrl' in file) attachmentDraftBytes += file.dataUrl.length;
+      else attachmentDraftBytes += Math.max(0, file.size) + (file.preview?.length ?? 0);
+    }
+  }
+
+  let dataUrlImageChars = 0;
+  for (const image of document.images) if (image.src.startsWith('data:')) dataUrlImageChars += image.src.length;
+
+  return {
+    domNodes: document.getElementsByTagName('*').length,
+    imageElements: document.images.length,
+    dataUrlImageChars,
+    sessionRows: sessions.length,
+    eventRows: events.length,
+    renderedTimelineRows: $('timeline').querySelectorAll('[data-timeline-key]').length,
+    rowCacheEntries: rowCache.size,
+    toolGroups: toolGroups.size,
+    openTools: openTools.size,
+    eventTextChars: events.reduce((sum, event) => sum + eventTextCost(event), 0),
+    inputDrafts: drafts.size,
+    inputDraftChars,
+    attachmentDrafts,
+    attachmentDraftBytes,
+    startingInputs: startingInputs.size,
+    pendingInputs: pendingComposerInputs.length,
+    taskPlans: taskPlans.size,
+    goalModels: goalModels.length
+  };
 }
 
 /** Eviction follows the measured reader viewport, not an arbitrary half-page.
