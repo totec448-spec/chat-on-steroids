@@ -45,6 +45,16 @@ disabled-permission guidance from [#146](https://github.com/totec448-spec/chat-o
 The claim release was strengthened with durable command/document ownership; this does not
 incorporate the rest of the native Desktop proposal.
 
+The September 17 integration also adapts [@Maximapple](https://github.com/Maximapple)'s
+failed-turn compaction ([#275](https://github.com/totec448-spec/chat-on-steroids/pull/275)),
+missing-recorder repair ([#276](https://github.com/totec448-spec/chat-on-steroids/pull/276)),
+locale-aware usage assertions ([#277](https://github.com/totec448-spec/chat-on-steroids/pull/277))
+and handoff tab protection ([#278](https://github.com/totec448-spec/chat-on-steroids/pull/278)).
+The resume-timeout reproduction from [#274](https://github.com/totec448-spec/chat-on-steroids/pull/274)
+is retained with an exclusive-send regression: an unnamed resume keeps its dispatch custody
+instead of reporting success or automatically resending after a transport banner. The original
+banner-driven resend and process-local retry counter were not incorporated.
+
 ## Reports, review and proposed work
 
 [@raxy24](https://github.com/raxy24)'s report in

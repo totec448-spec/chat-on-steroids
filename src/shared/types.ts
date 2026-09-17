@@ -327,6 +327,7 @@ export interface Config {
 
 export type ConnectionState =
   | 'disconnected'
+  | 'disconnecting'
   | 'starting-server'
   | 'connecting-tunnel'
   | 'connected'

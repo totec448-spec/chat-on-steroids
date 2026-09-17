@@ -465,6 +465,7 @@
     const logicalIds = new Set();
     const thoughtParents = new Map();
     if (!Array.isArray(messages)) return out;
+    const terminalId = turnEndMessageId(messages);
     for (const candidate of messages) {
       if (thoughtMessage(candidate)) thoughtParents.set(str(candidate.id), candidate);
     }
@@ -479,7 +480,9 @@
       if (analysisMessage(message)) continue;
       const id = str(message.id);
       const rawText = budgetedText(authoredText(message), budget, MAX_RENDERED_TEXT);
-      if (!id || !rawText) continue;
+      // A native final can be textless (for example after generated images).
+      // Preserve its exact end_turn proof through the normal message pipeline.
+      if (!id || (!rawText && id !== terminalId)) continue;
       if (seen.has(id)) continue;
       seen.add(id);
       const meta = message.metadata && typeof message.metadata === 'object' ? message.metadata : null;

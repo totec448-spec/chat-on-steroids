@@ -76,3 +76,13 @@ it('projects the conditional Continue deadline and never claims delivery at zero
   expect(host.textContent).toContain('Preparing Continue…');
   expect(host.textContent).not.toContain('sent');
 });
+
+it('shows the existing ticket pickup deadline after the native busy wait', () => {
+  const countdown = { kind: 'pickup' as const, next: 'continue' as const, deadline: 120_000 };
+  renderRecoveryCountdowns(host, [countdown], 0);
+  expect(host.textContent).toContain('Waiting for delivery · next: Automatic Continue');
+  expect(host.textContent).toContain('Reload in 2:00');
+  renderRecoveryCountdowns(host, [countdown], 120_000);
+  expect(host.textContent).toContain('Reload pending…');
+  expect(host.textContent).not.toContain('sent');
+});

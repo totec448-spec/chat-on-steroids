@@ -3458,6 +3458,10 @@ describe('exec sessions belong to the chat that opened them', () => {
     const replay = await asChat(requestId, 'read', { paths: ['/workspace/src/app.ts'] });
     expect(textOf(replay)).toContain('transport-replay');
     expect(unifiedExecManager.exitedUnread(new Set([id]))).toHaveLength(1);
+    // Receipts require a strictly later invocation timestamp. Fast CI can receive both
+    // HTTP responses in one millisecond, which is intentionally not a receipt boundary.
+    const replayReceivedAt = Date.now();
+    await vi.waitFor(() => expect(Date.now()).toBeGreaterThan(replayReceivedAt));
     const receipt = await asChat(requestId, 'read', { paths: ['/workspace/src/app.ts'] });
     expect(textOf(receipt)).not.toContain('transport-replay');
     expect(unifiedExecManager.exitedUnread(new Set([id]))).toEqual([]);

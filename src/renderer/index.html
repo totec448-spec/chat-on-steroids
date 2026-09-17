@@ -159,11 +159,13 @@
               <div class="connection-popover-card">
                 <div class="connection-popover-row">
                   <span>ChatGPT</span>
-                  <span id="connectionPopoverConnector">Not connected</span>
+                  <span id="connectionPopoverConnector" class="sr-only">Not connected</span>
+                  <i aria-hidden="true"></i>
                 </div>
                 <div class="connection-popover-row">
                   <span>Browser companion</span>
-                  <span id="connectionPopoverBrowser">Not seen</span>
+                  <span id="connectionPopoverBrowser" class="sr-only">Not seen</span>
+                  <i aria-hidden="true"></i>
                 </div>
               </div>
               <details class="connection-advanced" id="connectionAdvanced">
@@ -175,11 +177,11 @@
 
                   <div class="connection-advanced-caption"><span>Session capture</span><span id="connectionPopoverExtension">—</span></div>
                   <div class="connection-advanced-card">
-                    <div class="connection-advanced-row" id="connectionAdvancedTab"><span>ChatGPT tab</span><span class="meta">—</span><i></i></div>
-                    <div class="connection-advanced-row" id="connectionAdvancedRecording"><span>Recording this chat</span><span class="meta">—</span><i></i></div>
-                    <div class="connection-advanced-row" id="connectionAdvancedChat"><span>Chat ID</span><button class="meta copy" type="button">—</button><i></i></div>
-                    <div class="connection-advanced-row" id="connectionAdvancedRequest"><span>Current request</span><button class="meta copy" type="button">—</button><i></i></div>
-                    <div class="connection-advanced-row" id="connectionAdvancedApp"><span>Reaching the app</span><span class="meta">—</span><i></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedTab"><span>ChatGPT tab</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedRecording"><span>Recording this chat</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedChat"><button class="copy" type="button">Chat ID</button><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedRequest"><button class="copy" type="button">Current request</button><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedApp"><span>Reaching the app</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
                   </div>
 
                   <details class="connection-runtime" id="connectionRuntime"><summary>Runtime diagnostics</summary>
@@ -745,7 +747,7 @@
                   <label class="setting">
                     <span class="setting-text">
                       <b>Automatically continue interrupted responses</b>
-                      <em>Only when Goal and Loop are off. Reload after 2 minutes without progress (Pro: 10), then continue if idle. If still generating, allow 1 more minute (Pro: 5); stop only if still active, reload and continue. A final answer or your Stop cancels recovery.</em>
+                      <em>Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered tickets share reload intervals of 2, 5, 10 and 15 minutes.</em>
                     </span>
                     <input id="autoContinue" type="checkbox" />
                   </label>

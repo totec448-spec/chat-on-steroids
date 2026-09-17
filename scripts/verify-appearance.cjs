@@ -63,7 +63,17 @@ app.whenReady().then(async () => {
     await win.loadURL(server.resolvedUrls.local[0]+'fixture.html');
     win.webContents.setZoomFactor(1);
     const js = code=>win.webContents.executeJavaScript(code);
+    const verifyPopoverPalette = async () => {
+      const mismatch = await js(`(() => {
+        const sidebar = getComputedStyle(document.querySelector('.sidebar'));
+        const popup = getComputedStyle(document.getElementById('connectionPopover'));
+        return ['background', 'backdrop-filter', '--ink', '--soft', '--faint', '--edge', '--hover', '--accent', '--accent-edge']
+          .filter(key => sidebar.getPropertyValue(key) !== popup.getPropertyValue(key));
+      })()`);
+      assert.deepEqual(mismatch, [], 'Connection popover must share the live sidebar palette');
+    };
     const screenshot = async name => {
+      await verifyPopoverPalette();
       await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});
       await new Promise(r=>setTimeout(r,200));
       fs.writeFileSync(path.join(output,name),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
@@ -93,6 +103,7 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.getElementById('appearance-sidebar-hex').value`),'#35234C');
     await js(`document.getElementById('appearanceTranslucent').click()`);
     assert.equal(await js(`getComputedStyle(document.querySelector('.sidebar')).backdropFilter`),'none');
+    await verifyPopoverPalette();
     await js(`document.getElementById('appearanceTranslucent').click()`);
     assert.ok((await js(`getComputedStyle(document.querySelector('.sidebar')).backdropFilter`)).includes('blur'));
     // Dirty HEX edits survive status pushes; invalid text cannot reach storage.

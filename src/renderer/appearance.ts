@@ -28,7 +28,7 @@ export function applyAppearance(theme: AppearanceTheme, settings?: AppearanceSet
   // Glass is composed inside the window: a colored backdrop and translucent layer.
   // No native transparent window, desktop capture, or platform permission is needed.
   const sidebarBackground = value.translucentSidebar ? mixColor(palette.sidebar, palette.background, .13) : palette.sidebar;
-  for (const element of document.querySelectorAll<HTMLElement>('.sidebar, .app-topbar, .appearance-preview-sidebar')) {
+  for (const element of document.querySelectorAll<HTMLElement>('.sidebar, .app-topbar, .appearance-preview-sidebar, .connection-popover')) {
     tokens(element, paletteTokens(sidebarBackground, palette.accent, palette.contrast));
   }
   for (const listener of appearanceListeners) listener();

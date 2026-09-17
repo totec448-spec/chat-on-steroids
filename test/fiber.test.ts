@@ -1063,7 +1063,7 @@ describe('the calls a turn says it made', () => {
     image.content = { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer', asset_pointer: 'image-test' }] };
     const { turns } = await scan([], [{ id: 'turn-image', messages: [image] }]);
     expect(turns[0]?.endMessageId).toBe('image-final');
-    expect(turns[0]?.messages).toEqual([]);
+    expect(turns[0]?.messages).toEqual([expect.objectContaining({ rawMessageId: 'image-final', rawText: '', role: 'assistant' })]);
   });
 
   it('owns multiple generated images by exact provider message and sediment asset identity', async () => {

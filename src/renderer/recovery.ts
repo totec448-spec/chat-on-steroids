@@ -11,7 +11,7 @@ export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly
       const row = el('div', 'recovery-notice');
       const label = el('span', 'queue-label', () => {
         if (countdown.next) {
-          const reason = countdown.kind === 'post-reload' ? t('Reloaded') :
+          const reason = countdown.kind === 'pickup' ? t('Waiting for delivery') : countdown.kind === 'post-reload' ? t('Reloaded') :
             countdown.kind === 'thinking-failed' ? t('Thinking failed') : t('ChatGPT still generating');
           const next = countdown.next === 'continue' ? t('Automatic Continue') : countdown.next === 'queue' ? t('Queued message') : countdown.next === 'goal' ? t('Goal') : t('Loop');
           return t('{0} · next: {1}', [reason, next]);
@@ -29,7 +29,7 @@ export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly
         : countdown.kind === 'unattributed'
         ? t('This chat is a possible source. An attributed MCP call cancels its reload.')
         : countdown.kind === 'silence' ? t('New activity cancels this countdown.')
-        : t('New activity cancels recovery. If ChatGPT is still busy when checked, the wait extends by five minutes.'));
+        : t('New activity cancels recovery. The countdown shows the next check or delivery attempt.'));
       const timer = el('span', 'recovery-countdown');
       timer.setAttribute('role', 'timer');
       timer.setAttribute('aria-live', 'off');
@@ -44,7 +44,9 @@ export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly
     timer.closest<HTMLElement>('.recovery-notice')!.hidden = (countdown.visibleAt ?? 0) > now;
     const seconds = Math.max(0, Math.ceil((countdown.deadline - now) / 1000));
     const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-    const text = countdown.next === 'continue'
+    const text = countdown.kind === 'pickup'
+      ? seconds ? t('Reload in {0}', [time]) : t('Reload pending…')
+      : countdown.next === 'continue'
       ? seconds ? t('Continue in {0}', [time]) : t('Preparing Continue…')
       : countdown.kind === 'unattributed' || countdown.kind === 'silence'
       ? seconds ? t('Reload in {0}', [time]) : t('Reload pending…')
