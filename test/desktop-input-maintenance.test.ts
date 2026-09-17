@@ -142,12 +142,13 @@ it('carries the direct-turn offer only to the elected existing conversation', as
 });
 
 type Tab = { id: number; url?: string; pendingUrl?: string; windowId?: number; active?: boolean; pinned?: boolean };
-async function worker(inputs: Array<{ id: string; conversationId: string | null; directTurn?: { id: string; startedAt: number }; supersededConversationId?: string }>, modelCatalogRequest?: { nonce: string; expiresAt: number }, priorLocal: Record<string, unknown> = {}) {
+async function worker(inputs: Array<{ id: string; conversationId: string | null; directTurn?: { id: string; startedAt: number }; supersededConversationId?: string }>, modelCatalogRequest?: { nonce: string; expiresAt: number }, priorLocal: Record<string, unknown> = {}, priorSession: Record<string, unknown> = {}) {
   const tabs: Tab[] = [];
   const event = { addListener: () => {} };
+  const tabUpdated = { addListener: vi.fn() };
   const localSaved: Record<string, unknown> = { port: 8765, token: 'test-pairing', ...priorLocal };
   const local = { get: async () => ({ ...localSaved }), set: vi.fn(async (value: object) => { Object.assign(localSaved, value); }), remove: async () => {} };
-  const saved: Record<string, unknown> = {};
+  const saved: Record<string, unknown> = { ...priorSession };
   const session = { get: async () => ({ ...saved }), set: async (value: object) => { Object.assign(saved, value); }, remove: async (key: string) => { delete saved[key]; } };
   const create = vi.fn(async ({ url, windowId }: { url: string; windowId?: number }) => {
     const tab = { id: tabs.length + 1, pendingUrl: url, windowId }; tabs.push(tab); return tab;
@@ -161,7 +162,9 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   const query = vi.fn(async () => [...tabs]);
   const reload = vi.fn(async (_id: number) => {});
   const sendMessage = vi.fn(async (_id: number, _message: any): Promise<{ ok: boolean; ready?: boolean }> => ({ ok: true, ready: true }));
-  const update = vi.fn(async (id: number, patch: Partial<Tab>) => { const tab = tabs.find(tab => tab.id === id)!; Object.assign(tab, patch); delete tab.pendingUrl; return tab; });
+  // tabs.update only clears the pending URL when the call itself navigates the tab;
+  // policy flips like autoDiscardable leave a still-loading page's target intact.
+  const update = vi.fn(async (id: number, patch: Partial<Tab>) => { const tab = tabs.find(tab => tab.id === id)!; Object.assign(tab, patch); if (patch.url !== undefined) delete tab.pendingUrl; return tab; });
   const fetch = vi.fn(async (input: string, _init?: RequestInit): Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }> => ({
     ok: true, status: 200,
     json: async () => new URL(input).pathname === '/hello'
@@ -173,7 +176,7 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
       storage: { local, session },
       windows,
       runtime: { getManifest: () => ({ version: '2.0.5' }), onMessage: event, onInstalled: event, onStartup: event },
-      tabs: { query, get: async (id: number) => tabs.find(tab => tab.id === id), remove, reload, create, update, sendMessage, onCreated: event, onUpdated: event, onRemoved: event },
+      tabs: { query, get: async (id: number) => tabs.find(tab => tab.id === id), remove, reload, create, update, sendMessage, onCreated: event, onUpdated: tabUpdated, onRemoved: event },
       alarms: { onAlarm: event, create: () => {}, clear: async () => true },
       scripting: { executeScript: async () => [], insertCSS: async () => {} }
     },
@@ -183,11 +186,102 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   const api = context.testMaintenance as { releaseTab(...args: any[]): Promise<any>; serializeTab(tab: number, operation: () => Promise<any>): Promise<any>; noteTabConversation(source: any, conversationId: string): Promise<any>; applyRequestedBrowserPreferences(request: object): Promise<void>; authorizeDocument(sender: unknown, message: unknown): Promise<any>; catalog(message: unknown, sender: unknown, source: unknown): Promise<any>; load(): Promise<void>; maintain(): Promise<void>; createChatTab(url: string, background: boolean): Promise<Tab> };
   await api.load();
   Object.assign(api, { query });
+  const updated = (id: number, change: object) => tabUpdated.addListener.mock.calls[0]![0](id, change);
   vm.runInContext('Object.assign(testMaintenance, { offerStopTurns, noteTabConversation, ackCommand })', context);
-  return { ...api, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
+  return { ...api, updated, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
 }
 
 describe('one browser maintenance flight per desktop outbox publication', () => {
+  it('reoffers unclaimed input when its elected page finishes loading without waiting for the alarm', async () => {
+    const h = await worker([{ id: firstId, conversationId: secondId }]);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    h.sendMessage.mockResolvedValue({ ok: false }); // Registration beat page readiness.
+    await h.maintain();
+    const offers = () => h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-desktop-input');
+    expect(offers()).toHaveLength(1);
+    h.sendMessage.mockResolvedValue({ ok: true });
+    h.updated(7, { status: 'complete' });
+    await vi.waitFor(() => expect(offers()).toHaveLength(2));
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.reload).not.toHaveBeenCalled();
+    expect(h.localSaved.inputOpenings).toMatchObject({ [firstId]: { tab: 7 } });
+  });
+
+  it('a load-complete wake rereads cancelled input and ignores unrelated tab updates', async () => {
+    const inputs = [{ id: firstId, conversationId: secondId }];
+    const h = await worker(inputs);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    await h.maintain();
+    h.fetch.mockClear(); h.sendMessage.mockClear();
+    h.updated(8, { status: 'complete' });
+    h.updated(7, { title: 'Updated title' });
+    await Promise.resolve();
+    expect(h.fetch).not.toHaveBeenCalled();
+    inputs.splice(0);
+    h.updated(7, { status: 'complete' });
+    await vi.waitFor(() => expect(h.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/status')).toBe(true));
+    await h.maintain();
+    expect(h.sendMessage.mock.calls.some(([, message]) => message.type === 'clf-desktop-input')).toBe(false);
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it('coalesces a burst of load-complete events into one follow-up pass', async () => {
+    const h = await worker([{ id: firstId, conversationId: secondId }]);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    await h.maintain();
+    const original = h.fetch.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let passes = 0;
+    h.fetch.mockImplementation(async (url, init) => {
+      if (new URL(url).pathname === '/status' && ++passes === 1) await held;
+      return original(url, init);
+    });
+    h.updated(7, { status: 'complete' });
+    await vi.waitFor(() => expect(passes).toBe(1));
+    for (let i = 0; i < 20; i++) h.updated(7, { status: 'complete' });
+    // Let every event join the held flight, without advancing an alarm or a retry timer.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const flight = h.maintain();
+    release();
+    await flight;
+    expect(passes).toBe(2);
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.reload).not.toHaveBeenCalled();
+  });
+
+  it('retains an unready input for later ordinary maintenance after the extra load wake', async () => {
+    const h = await worker([{ id: firstId, conversationId: secondId }]);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    h.sendMessage.mockResolvedValue({ ok: false });
+    await h.maintain();
+    h.updated(7, { status: 'complete' });
+    const offers = () => h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-desktop-input');
+    await vi.waitFor(() => expect(offers()).toHaveLength(2));
+    h.sendMessage.mockResolvedValue({ ok: true });
+    await h.maintain(); // The unchanged alarm/wake path when readiness arrives later.
+    expect(offers()).toHaveLength(3);
+    expect(offers().every(([tab]) => tab === 7)).toBe(true);
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['same', 'document', 'epoch', 'url', 'nonce'])('recovers model observation custody across MV3 restart only for the exact original owner (%s)', async change => {
+    const first = await worker([]);
+    const url = `https://chatgpt.com/?cos-model-catalog=${firstId}`;
+    first.tabs.push({ id: 7, url });
+    const sender = { tab: { id: 7 }, documentId: 'catalog-document', frameId: 0, url };
+    const source = await first.authorizeDocument(sender, { navigationEpoch: 1 });
+    first.saved.modelCatalogOwner = { nonce: firstId, tab: 7 };
+    first.saved.modelCatalogTarget = { tab: 7, nonce: change === 'nonce' ? secondId : firstId,
+      url: change === 'url' ? 'https://chatgpt.com/' : url,
+      documentId: change === 'document' ? 'different-document' : sender.documentId, navigationEpoch: change === 'epoch' ? 2 : 1 };
+    const restarted = await worker([], undefined, {}, first.saved);
+    restarted.tabs.push({ id: 7, url });
+    const result = await restarted.catalog({ nonce: firstId, models: null, error: 'picker_unavailable' }, sender, source);
+    expect(result.ok).toBe(change === 'same');
+    expect(restarted.fetch.mock.calls.some(([input]) => new URL(input).pathname === '/models')).toBe(change === 'same');
+    expect(restarted.create).not.toHaveBeenCalled();
+  });
   it('moves a queued checkpoint to its existing compacted successor once, including legacy elections', async () => {
     const input = { id: firstId, conversationId: secondId, supersededConversationId: firstId };
     const h = await worker([input], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready' } } });

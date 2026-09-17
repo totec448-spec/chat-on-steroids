@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { ago, parseClientStatus, parsePollHealth, readMetric } from '../src/main/tunnel/health.js';
 import {
   describeNetworkError,
+  isBenignHarpoonChannelEvent,
   isUnreachableError,
   NO_OUTAGE,
   outageConfirmed,
@@ -22,6 +23,16 @@ import { commonBinaryDirsForPlatform, locateBinary, tunnelExecutableName } from 
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 describe('cross-platform tunnel executable discovery', () => {
+  it('filters only the exact optional channel while retaining contradictory or unrelated errors', () => {
+    expect(isBenignHarpoonChannelEvent('ERROR', 'dispatcher received unsupported channel', { channel: 'harpoon' })).toBe(true);
+    expect(isBenignHarpoonChannelEvent('WARN', 'failed to process polled command: unsupported channel "harpoon"')).toBe(true);
+    expect(isBenignHarpoonChannelEvent('ERROR', 'dispatcher received unsupported channel "harpoon"')).toBe(true);
+    for (const event of [{ channel: 'main' }, { channel: 'main', diagnostic: 'previous harpoon attempt' }, { diagnostic: 'harpoon' }])
+      expect(isBenignHarpoonChannelEvent('ERROR', 'dispatcher received unsupported channel', event)).toBe(false);
+    expect(isBenignHarpoonChannelEvent('ERROR', 'dispatcher received unsupported channel "harpoon"', { channel: 'main' })).toBe(false);
+    expect(isBenignHarpoonChannelEvent('FATAL', 'dispatcher received unsupported channel "harpoon"')).toBe(false);
+    expect(isBenignHarpoonChannelEvent('ERROR', 'permission denied', { channel: 'harpoon' })).toBe(false);
+  });
   it('uses the platform executable suffix', () => {
     expect(tunnelExecutableName('tunnel-client', 'win32')).toBe('tunnel-client.exe');
     expect(tunnelExecutableName('tunnel-client', 'darwin')).toBe('tunnel-client');

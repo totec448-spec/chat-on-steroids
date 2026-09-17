@@ -20,6 +20,17 @@ beforeEach(async () => {
 });
 afterEach(() => vi.restoreAllMocks());
 describe('passive usage limits and canonical token totals', () => {
+  it('counts only the outer code-mode exchange while retaining ordinary calls sharing its request', async () => {
+    const time = new Date(2026, 8, 5, 12).getTime();
+    const call = (callId: string, nested = false) => ({ kind: 'tool_call', time, call: {
+      callId, nested, requestId: 'same-generation', conversationId: 'chat',
+      args: { text: 'aaaa' }, result: nested ? { text: 'preview', truncated: true, chars: 80_000 } : { text: 'bbbb' }, summary: { title: '' }
+    } });
+    store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 4, estimatedTokens: 999 }]);
+    store.readEvents.mockResolvedValue([call('child-a', true), call('child-b', true), call('outer'), call('direct')]);
+    // Four context tokens, two real exchanges. Children add neither text nor billing calls.
+    expect((await usage.usageOverview()).tokens).toBe(4);
+  });
   it('keeps shared windows distinct and does not manufacture model-specific counts', async () => {
     usage.observeUsage([limit(), limit({ windowSeconds: 604800, remainingPercent: 70 }), limit({ model: 'gpt-example', scope: 'model', remaining: 3, remainingPercent: null })]);
     const result = await usage.usageOverview();
@@ -201,7 +212,7 @@ describe('passive usage limits and canonical token totals', () => {
     expect(await usage.usageOverview()).toMatchObject({ contextTokenCap: 256_000, tokens: 128_000 });
     expect(store.readEvents).toHaveBeenCalledTimes(1);
   });
-  it.each([4, 5, 6])('rebuilds old cache version %i and reuses the corrected cache after restart', async (version) => {
+  it.each([4, 5, 6, 7])('rebuilds old cache version %i and reuses the corrected cache after restart', async (version) => {
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     durable.readDurable.mockResolvedValue({ version, rows: [{ id: 'one', revision: `${timezone}:1:1:2000000`, days: [['2026-09-05', [{ model: 'gpt-6-pro', reasoningEffort: null, assumed: false, tokens: 1_000_000 }]]] }] });
     store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 1, estimatedTokens: 2_000_000 }]);
@@ -209,7 +220,7 @@ describe('passive usage limits and canonical token totals', () => {
     expect((await usage.usageOverview()).tokens).toBe(128_000);
     expect(store.readEvents).toHaveBeenCalledTimes(1);
     const persisted = durable.writeDurableSoon.mock.calls.at(-1)![1];
-    expect(persisted.version).toBe(7);
+    expect(persisted.version).toBe(8);
     vi.resetModules(); durable.readDurable.mockResolvedValue(persisted); store.readEvents.mockClear();
     usage = await import('../src/main/session/usage.js');
     expect((await usage.usageOverview()).tokens).toBe(128_000);

@@ -70,6 +70,46 @@ export async function deriveNewContentsFromChunks(
   return { originalContents, newContents };
 }
 
+/** Diagnostics only: never retry a replacement at a different location. */
+function matchFailure(
+  heading: string,
+  lines: readonly string[],
+  pattern: readonly string[],
+  start: number,
+  mode: ApplyPatchFileUpdateMode,
+  contextIndex: number | null = null
+): ApplyPatchError {
+  const clip = (line: string): string => line.length > 240 ? `${line.slice(0, 240)}…` : line;
+  const earlier = start > 0 ? seekSequence(lines, pattern, 0, false, mode) : null;
+  const outOfOrder = earlier !== null && earlier < start;
+  const guidance = outOfOrder
+    ? `Matching text exists at line ${earlier + 1}, before the current search position at line ${start + 1}. Put edits in file order and avoid overlapping hunks.`
+    : 'Use the current file text as patch context; do not reconstruct or reformat the old lines.';
+  const expected = pattern.slice(0, 8).map(clip).join('\n') + (pattern.length > 8 ? '\n… (expected text truncated)' : '');
+
+  // A matched @@ context or a unique literal anchor can locate a useful excerpt. Never
+  // choose a vaguely similar block or dump the file start when there is no reliable anchor.
+  let anchor = outOfOrder ? earlier : contextIndex;
+  if (anchor === null) {
+    for (const candidate of pattern.slice(0, 12)) {
+      const text = candidate.trim();
+      if (text.length < 8) continue;
+      const first = lines.findIndex(line => line.trim() === text);
+      if (first !== -1 && !lines.some((line, index) => index > first && line.trim() === text)) {
+        anchor = first;
+        break;
+      }
+    }
+  }
+  let sourceContext: string | undefined;
+  if (anchor !== null) {
+    const from = Math.max(0, anchor - 2);
+    const excerpt = lines.slice(from, from + 8).map((line, index) => `${from + index + 1}\t${clip(line)}`);
+    sourceContext = `Source excerpt from the patch verification snapshot (line numbers are not file content):\n${excerpt.join('\n')}`;
+  }
+  return ApplyPatchError.computeReplacements(`${heading}\n${guidance}\nExpected text:\n${expected}`, sourceContext);
+}
+
 /**
  * Compute a list of replacements needed to transform `originalLines` into the new lines, given
  * the patch `chunks`. Each replacement is returned as `[startIndex, oldLength, newLines]`.
@@ -84,14 +124,16 @@ function computeReplacements(
   let lineIndex = 0;
 
   for (const chunk of chunks) {
+    let contextIndex: number | null = null;
     // If a chunk has a `changeContext`, we use seekSequence to find it, then adjust our
     // `lineIndex` to continue from there.
     if (chunk.changeContext !== null) {
       const contextLine = chunk.changeContext;
       const index = seekSequence(originalLines, [contextLine], lineIndex, false, updateFileMode);
       if (index === null) {
-        throw ApplyPatchError.computeReplacements(`Failed to find context '${contextLine}' in ${path}`);
+        throw matchFailure(`Failed to find context in ${path}:`, originalLines, [contextLine], lineIndex, updateFileMode);
       }
+      contextIndex = index;
       lineIndex = index + 1;
     }
 
@@ -124,9 +166,7 @@ function computeReplacements(
     }
 
     if (found === null) {
-      throw ApplyPatchError.computeReplacements(
-        `Failed to find expected lines in ${path}:\n${chunk.oldLines.join('\n')}`
-      );
+      throw matchFailure(`Failed to find expected lines in ${path}:`, originalLines, pattern, lineIndex, updateFileMode, contextIndex);
     }
 
     const startIndex = found;

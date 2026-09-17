@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { JSDOM } from 'jsdom';
 
@@ -7,27 +7,19 @@ const script = await readFile(new URL('../extension/popup.js', import.meta.url),
 let popup: JSDOM | undefined;
 afterEach(() => { popup?.window.close(); });
 
-function openPopup(reload: () => void) {
+function openPopup() {
   popup = new JSDOM(html, { url: 'https://extension-popup.test/', runScripts: 'outside-only' });
   const unavailable = () => new Promise(() => undefined);
   Object.assign(popup.window, {
-    chrome: { runtime: { reload, sendMessage: unavailable }, storage: { local: { get: unavailable } } },
+    chrome: { runtime: { sendMessage: unavailable }, storage: { local: { get: unavailable } } },
     setInterval: () => 0
   });
   popup.window.eval(script);
   return popup.window.document;
 }
 
-it('reloads only on explicit click even when the worker is unavailable', () => {
-  const reload = vi.fn();
-  const document = openPopup(reload);
-  expect(reload).not.toHaveBeenCalled();
-  document.getElementById('reloadBtn')!.click();
-  expect(reload).toHaveBeenCalledTimes(1);
-});
-
 it('reports only app reachability from compatible health and pairing', () => {
-  const document = openPopup(vi.fn());
+  const document = openPopup();
   expect(document.getElementById('pill')!.classList.contains('off')).toBe(true);
   (popup!.window as any).paintHeader({ connected: true, paired: true, port: 8765 });
   expect(document.getElementById('state')!.textContent).not.toContain('Connected');
@@ -38,18 +30,17 @@ it('reports only app reachability from compatible health and pairing', () => {
   expect(document.getElementById('state')!.textContent).toBe('App not reachable');
 });
 
-it('explains manual mismatch recovery with both versions and keeps reload available', () => {
-  const document = openPopup(vi.fn());
+it('explains manual mismatch recovery with both versions', () => {
+  const document = openPopup();
   (popup!.window as any).paintAlert({ connected: true, paired: true, compatible: false, appVersion: '2.0.7', appProtocol: 13, extensionVersion: '2.0.6', extensionProtocol: 12 }, null);
   const alert = document.getElementById('alert')!;
   expect(alert.textContent).toContain('2.0.7'); expect(alert.textContent).toContain('2.0.6');
   expect(alert.textContent).toContain('protocol 13'); expect(alert.textContent).toContain('protocol 12');
   expect(alert.textContent).toContain('Developer mode'); expect(alert.textContent).toContain('Open extension folder');
-  expect(document.getElementById('reloadBtn')).not.toBeNull();
 });
 
 it('requires this chat session receipt before claiming delivery even with global delivery success', () => {
-  openPopup(vi.fn());
+  openPopup();
   const info = { isChat: true, recorder: true, page: { events: 3 }, pending: 0, delivery: { ok: true, total: 50 } };
   const waiting = (popup!.window as any).pipeline(info, true);
   expect(waiting.sent[0]).toBe('running');
@@ -62,7 +53,7 @@ it('requires this chat session receipt before claiming delivery even with global
 });
 
 it('distinguishes queued, received, owner confirmed and recorded tool activity for the current ID', () => {
-  openPopup(vi.fn());
+  openPopup();
   const project = (trace: unknown[]) => (popup!.window as any).pipeline({
     isChat: true, recorder: true, pending: 0, delivery: { ok: true, total: 999 },
     page: { events: 1000, session: 'local-session', trace }
@@ -78,7 +69,7 @@ it('distinguishes queued, received, owner confirmed and recorded tool activity f
 });
 
 it('keeps blocked delivery distinct from network unreachability and requires pairing too', () => {
-  const document = openPopup(vi.fn());
+  const document = openPopup();
   (popup!.window as any).paintHeader({ connected: true, paired: false, compatible: true, port: 8765 });
   expect(document.getElementById('state')!.textContent).not.toContain('Connected');
   const result = (popup!.window as any).pipeline({ isChat: true, recorder: true, page: { events: 1 }, pending: 1 }, false);

@@ -192,7 +192,10 @@ const unifiedExecOutputSchema = z
     session_id: z
       .number()
       .optional()
-      .describe('Session identifier to pass to write_stdin when the process is still running.'),
+      .describe('Session ID while running.'),
+    completed_session_id: z.number().optional().describe('Use as write_stdin session_id to reread completed output.'),
+    benign_exit: z.boolean().optional().describe('Non-zero exit is an expected result, not a failure.'),
+    output_replayed: z.boolean().optional().describe('Retained output; command was not run again.'),
     original_token_count: z.number().optional().describe('Approximate token count before output truncation.'),
     output: z.string().describe('Command output text, possibly truncated.'),
     supplemental_context: z.string().optional().describe('App context, not process output.')
@@ -805,6 +808,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             forgetExecOwner(processId);
 
             const output = await unifiedExecManager.execCommand({
+              classifyExit: (exitCode, rawOutput) => {
+                if (!batch) return nonZeroExitIsBenign(boundCommand, exitCode, rawOutput);
+                const sections = parseCommandBatchSections(rawOutput, batch.marker);
+                const nonzero = sections.filter(section => section.exitCode !== 0);
+                return exitCode !== null && exitCode !== 0 && sections.length === rawCommands.length && nonzero.length > 0 &&
+                  nonzero.every(section => nonZeroExitIsBenign(boundCommands[section.index - 1] ?? '', section.exitCode, section.text));
+              },
               batchMarker: batch?.marker,
               command,
               shellType: shell.shellType,
@@ -820,11 +830,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             });
             // Which durable local session may later write to this process id. The frontend
             // conversation is replaceable during Compact & Resume; the local session is not.
-            if (output.processId === null) {
-              forgetExecOwner(processId);
-            } else {
-              noteExecOwner(output.processId, owner);
-            }
+            noteExecOwner(output.processId ?? output.completedSessionId ?? null, owner);
             const responseText = execCommandResponseText(output);
             // A search that found nothing exits 1 and has not failed. Recording it as an
             // error made a session's error count meaningless; see exec-hints.ts for why this
@@ -839,13 +845,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // cannot let an unseen real failure pass as benign.
             const batchSections = batch ? parseCommandBatchSections(output.rawOutput.toString('utf8'), batch.marker) : [];
             const nonZeroSections = batchSections.filter((section) => section.exitCode !== 0);
-            const benign = isBatch
-              ? batchSections.length === rawCommands.length &&
-                nonZeroSections.length > 0 &&
-                nonZeroSections.every((section) =>
-                  nonZeroExitIsBenign(boundCommands[section.index - 1] ?? '', section.exitCode, section.text)
-                )
-              : nonZeroExitIsBenign(boundCommand, output.exitCode, responseText);
+            const benign = output.benignExit === true;
             noteExec({
               completion: output.completion,
               ...(output.processId === null ? {} : { id: String(output.processId) }),
@@ -957,16 +957,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               maxOutputTokens: undefined,
               truncationPolicy: EXEC_OUTPUT_CEILING_POLICY
             });
-            if (output.processId === null) forgetExecOwner(input.session_id);
-            else noteExecAttended(input.session_id);
+            noteExecAttended(input.session_id);
             noteExec({
               ...(output.processId === null ? {} : { id: String(output.processId) }),
               running: output.processId !== null,
               exitCode: output.exitCode,
               timedOut: false,
-              // No `benignExit` here on purpose: a status this drains belongs to the child, is
-              // recorded as `process_exit_nonzero`, and is already outside the reliability
-              // numerator. Exempting it would relabel a failed test run `ok`.
+              benignExit: output.benignExit,
               durationMs: output.wallTimeMs
             });
             logInfo(`tool write_stdin ${input.session_id} (${(input.chars ?? '').length} chars)`);
@@ -1515,7 +1512,10 @@ async function callerNow(startedAt: number, options: { exact?: boolean } = {}): 
 // apply_patch adapter helpers
 // ---------------------------------------------------------------------------
 
-function applyPatchErrorText(error: unknown): string {
+function applyPatchErrorText(error: unknown, includeSourceContext = false): string {
+  if (error instanceof ApplyPatchError && includeSourceContext && error.sourceContext) {
+    return `${error.message}\n\n${error.sourceContext}`;
+  }
   return error instanceof PatchParseError || error instanceof ApplyPatchError ? error.message : friendlyError(error);
 }
 
@@ -1714,7 +1714,7 @@ async function runParsedPatch(
     );
   } catch (error) {
     return {
-      result: fail(`apply_patch verification failed: ${safePatchOutput(applyPatchErrorText(error), resolution)}`),
+      result: fail(`apply_patch verification failed: ${safePatchOutput(applyPatchErrorText(error, caps?.read === true), resolution)}`),
       content: null,
       exitCode: null
     };

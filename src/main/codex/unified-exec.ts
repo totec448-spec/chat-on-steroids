@@ -233,6 +233,8 @@ export interface SpawnParams {
 
 const EARLY_EXIT_GRACE_PERIOD_MS = 150;
 const POST_EXIT_CLOSE_WAIT_CAP_MS = 50;
+export const MAX_COMPLETED_EXEC_RESULTS = 64;
+export const COMPLETED_EXEC_OUTPUT_BYTES = 256 * 1024;
 
 /** Applies `UNIFIED_EXEC_ENV` over the caller's environment, as `apply_unified_exec_env`. */
 export function applyUnifiedExecEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -258,13 +260,16 @@ function quoteWindowsArgument(argument: string): string {
  *
  * The output buffer is *drained* by whoever polls it, which is the property the whole design
  * rests on: a chunk is delivered to exactly one call, so two consecutive `write_stdin` polls
- * never see the same bytes twice and never silently drop them either.
+ * see new bytes while work runs. Once completed delivery is acknowledged, the manager's
+ * bounded history permits explicitly labeled rereads without executing the command again.
  */
 class UnifiedExecProcess {
+  readonly identity = {};
   private readonly startedAt = Date.now();
   private resolveCompletion!: (value: ProcessCompletion) => void;
   readonly completion = new Promise<ProcessCompletion>(resolve => { this.resolveCompletion = resolve; });
   private buffer = new HeadTailBuffer();
+  private readonly history = new HeadTailBuffer(COMPLETED_EXEC_OUTPUT_BYTES);
   private displayBuffer: HeadTailBuffer | undefined;
   private readonly batchDisplay: CommandBatchDisplay | undefined;
   readonly outputNotify = new Notify();
@@ -423,6 +428,7 @@ class UnifiedExecProcess {
 
   private pushChunk(chunk: Buffer): void {
     if (chunk.length === 0) return;
+    this.history.pushChunk(chunk);
     this.buffer.pushChunk(chunk);
     if (this.batchDisplay) this.displayBuffer!.pushChunk(this.batchDisplay.push(chunk));
     this.outputNotify.notifyWaiters();
@@ -465,6 +471,17 @@ class UnifiedExecProcess {
   completedOutput(): Buffer | null {
     return this.hasExited() && this.outputClosed
       ? (this.displayBuffer ?? this.buffer).toBytesWithOmissionMarker() : null;
+  }
+
+  /** Independent of the unread cursor: explicit rereads include earlier delivered chunks. */
+  retainedOutput(): Buffer {
+    return this.history.toBytesWithOmissionMarker();
+  }
+
+  benignExit(classify: ExecCommandRequest['classifyExit']): boolean {
+    // An omitted diagnostic or still-open stream cannot prove a non-zero result benign.
+    return this.hasExited() && this.outputClosed && this.history.omittedBytes() === 0 &&
+      (classify?.(this.exitCode(), this.retainedOutput().toString('utf8')) ?? false);
   }
 
   hasExited(): boolean {
@@ -548,12 +565,16 @@ function sleep(ms: number): Promise<void> {
 // --------------------------------------------------------------------------- tool output
 
 export interface ProcessCompletion {
+  benignExit?: boolean;
   exitCode: number | null;
   completedAt: number;
   durationMs: number;
 }
 
 export interface ExecCommandToolOutput {
+  completedSessionId?: number;
+  replayed?: boolean;
+  benignExit?: boolean;
   /** Exact process lifetime for recording; never serialized into the MCP response. */
   completion?: Promise<ProcessCompletion>;
   chunkId: string;
@@ -601,6 +622,9 @@ export function execCommandResponseText(output: ExecCommandToolOutput): string {
   sections.push(`Wall time: ${(output.wallTimeMs / 1000).toFixed(4)} seconds`);
   if (output.exitCode !== null) sections.push(`Process exited with code ${output.exitCode}`);
   if (output.processId !== null) sections.push(`Process running with session ID ${output.processId}`);
+  if (output.completedSessionId !== undefined) sections.push(`Completed session ID: ${output.completedSessionId}`);
+  if (output.replayed) sections.push('Retained output (already completed; command was not run again):');
+  if (output.benignExit) sections.push('This non-zero exit is an expected command result, not a failure.');
   if (output.originalTokenCount !== null) sections.push(`Original token count: ${output.originalTokenCount}`);
   sections.push('Output:');
   sections.push(truncatedOutput(output, modelOutputMaxTokens(output)));
@@ -614,6 +638,9 @@ export function execCommandStructuredOutput(output: ExecCommandToolOutput): Reco
     wall_time_seconds: output.wallTimeMs / 1000,
     ...(output.exitCode === null ? {} : { exit_code: output.exitCode }),
     ...(output.processId === null ? {} : { session_id: output.processId }),
+    ...(output.completedSessionId === undefined ? {} : { completed_session_id: output.completedSessionId }),
+    ...(output.benignExit ? { benign_exit: true } : {}),
+    ...(output.replayed ? { output_replayed: true } : {}),
     ...(output.originalTokenCount === null ? {} : { original_token_count: output.originalTokenCount }),
     // This adapter emits structuredContent beside the text result, so both representations
     // must obey the same policy/default budget. Returning the retained raw buffer here made
@@ -625,6 +652,7 @@ export function execCommandStructuredOutput(output: ExecCommandToolOutput): Reco
 // --------------------------------------------------------------------------- manager
 
 export interface ExecCommandRequest {
+  classifyExit?: (exitCode: number | null, rawOutput: string) => boolean;
   batchMarker?: string;
   command: string[];
   shellType: ShellType;
@@ -658,6 +686,8 @@ export interface BackgroundTerminalInfo {
 }
 
 interface ProcessEntry {
+  classifyExit?: ExecCommandRequest['classifyExit'];
+  batchMarker?: string;
   process: UnifiedExecProcess;
   processId: number;
   cwd: string;
@@ -691,6 +721,8 @@ export interface BackgroundExecState {
 
 export class UnifiedExecProcessManager {
   private readonly processes = new Map<number, ProcessEntry>();
+  private readonly completed = new Map<number, Pick<ExecCommandToolOutput, 'rawOutput' | 'displayOutput' | 'exitCode' | 'benignExit'> & { identity: object }>();
+  private releaseListener?: (processId: number) => void;
   private readonly reservedProcessIds = new Set<number>();
   private readonly maxWriteStdinYieldTimeMs: number;
 
@@ -698,11 +730,16 @@ export class UnifiedExecProcessManager {
     this.maxWriteStdinYieldTimeMs = Math.max(maxWriteStdinYieldTimeMs, MIN_EMPTY_YIELD_TIME_MS);
   }
 
+  /** The custody registry drops ownership only when this manager really discards an id. */
+  setProcessReleaseListener(listener: (processId: number) => void): void {
+    this.releaseListener = listener;
+  }
+
   /** `rand::rng().random_range(1_000..100_000)`, retried against the reservations. */
   allocateProcessId(): number {
     for (;;) {
       const processId = 1_000 + Math.floor(Math.random() * (100_000 - 1_000));
-      if (this.reservedProcessIds.has(processId)) continue;
+      if (this.reservedProcessIds.has(processId) || this.completed.has(processId)) continue;
       this.reservedProcessIds.add(processId);
       return processId;
     }
@@ -711,6 +748,22 @@ export class UnifiedExecProcessManager {
   releaseProcessId(processId: number): void {
     this.reservedProcessIds.delete(processId);
     this.processes.delete(processId);
+    this.completed.delete(processId);
+    this.releaseListener?.(processId);
+  }
+
+  private retainCompleted(entry: ProcessEntry): void {
+    const rawOutput = Buffer.from(entry.process.retainedOutput());
+    const exitCode = entry.process.exitCode();
+    this.processes.delete(entry.processId);
+    this.reservedProcessIds.delete(entry.processId);
+    this.completed.set(entry.processId, {
+      identity: entry.process.identity,
+      rawOutput, exitCode,
+      ...(entry.batchMarker ? { displayOutput: new CommandBatchDisplay(entry.batchMarker).push(rawOutput, true) } : {}),
+      benignExit: entry.process.benignExit(entry.classifyExit)
+    });
+    while (this.completed.size > MAX_COMPLETED_EXEC_RESULTS) this.releaseProcessId(this.completed.keys().next().value!);
   }
 
   async execCommand(request: ExecCommandRequest): Promise<ExecCommandToolOutput> {
@@ -752,7 +805,8 @@ export class UnifiedExecProcessManager {
         cwd: request.displayCwd,
         hookCommand: request.hookCommand,
         tty: request.tty,
-        initialExecCommandActive: true
+        initialExecCommandActive: true,
+        classifyExit: request.classifyExit, batchMarker: request.batchMarker
       });
     }
 
@@ -786,13 +840,24 @@ export class UnifiedExecProcessManager {
         throw UnifiedExecError.unknownProcessId(request.processId);
       }
     } else {
-      this.releaseProcessId(request.processId);
+      this.retainCompleted({ process, processId: request.processId, cwd: request.displayCwd,
+        hookCommand: request.hookCommand, tty: request.tty, initialExecCommandActive: false,
+        classifyExit: request.classifyExit, batchMarker: request.batchMarker });
       responseProcessId = null;
       exitCode = process.exitCode();
     }
 
     const response = {
-      ...(responseProcessId === null ? {} : { completion: process.completion }),
+      ...(responseProcessId === null ? { completedSessionId: request.processId } : {
+        completion: process.completion.then(async completion => {
+          if (!process.outputClosed) {
+            const closed = process.outputClosedNotify.notified();
+            try { await raceWithTimeout([closed], POST_EXIT_CLOSE_WAIT_CAP_MS); } finally { closed.dispose(); }
+          }
+          return { ...completion, benignExit: process.benignExit(request.classifyExit) };
+        })
+      }),
+      benignExit: process.benignExit(request.classifyExit),
       chunkId,
       wallTimeMs,
       rawOutput,
@@ -812,6 +877,17 @@ export class UnifiedExecProcessManager {
   }
 
   async writeStdin(request: WriteStdinRequest): Promise<ExecCommandToolOutput> {
+    const replay = (identity?: object): ExecCommandToolOutput | null => {
+      const saved = this.completed.get(request.processId);
+      if (!saved) return null;
+      if (identity && saved.identity !== identity) throw UnifiedExecError.unknownProcessId(request.processId);
+      if (request.input !== '') throw UnifiedExecError.processFailed('Process already completed; no input was sent. Use empty chars to read its retained output.');
+      return { ...saved, chunkId: generateChunkId(), wallTimeMs: 0, processId: null,
+        completedSessionId: request.processId, replayed: true, originalTokenCount: approxTokenCount((saved.displayOutput ?? saved.rawOutput).toString('utf8')),
+        outputOmittedBytes: null, truncationPolicy: request.truncationPolicy, maxOutputTokens: request.maxOutputTokens };
+    };
+    const saved = replay();
+    if (saved) return saved;
     const entry = this.processes.get(request.processId);
     if (!entry) throw UnifiedExecError.unknownProcessId(request.processId);
     const locked = entry.process;
@@ -819,12 +895,15 @@ export class UnifiedExecProcessManager {
     // Reads and writes against one session must not overlap: they share a draining buffer.
     const release = await locked.interactionLock.lock();
     try {
+      const saved = replay(locked.identity);
+      if (saved) return saved;
       const current = this.processes.get(request.processId);
       if (!current || current.process !== locked) throw UnifiedExecError.unknownProcessId(request.processId);
       const { process, tty } = { process: current.process, tty: current.tty };
 
       let statusAfterWrite: ProcessStatus | null = null;
       if (request.input !== '') {
+        if (process.hasExited()) throw UnifiedExecError.processFailed('Process already completed; no input was sent. Use empty chars to read its retained output.');
         if (!tty) {
           if (request.input === INTERRUPT) {
             await process.interrupt();
@@ -904,6 +983,8 @@ export class UnifiedExecProcessManager {
       }
 
       return {
+        ...(responseProcessId === null ? { completedSessionId: request.processId } : {}),
+        benignExit: process.benignExit(current.classifyExit),
         chunkId,
         wallTimeMs,
         rawOutput,
@@ -975,7 +1056,7 @@ export class UnifiedExecProcessManager {
         if (output === null) continue;
         entry.delivery = { offset: offered.end };
         if (offered.end >= output.length) {
-          this.releaseProcessId(id);
+          this.retainCompleted(entry);
           retired.push(id);
         }
       } finally { release(); }
@@ -1033,6 +1114,8 @@ export class UnifiedExecProcessManager {
 
   async terminateAllProcesses(): Promise<void> {
     const entries = [...this.processes.values()];
+    for (const id of new Set([...this.reservedProcessIds, ...this.completed.keys()])) this.releaseListener?.(id);
+    this.completed.clear();
     this.processes.clear();
     this.reservedProcessIds.clear();
     // App shutdown is the caller that matters, so this has to behave like `terminateProcess`
@@ -1049,7 +1132,7 @@ export class UnifiedExecProcessManager {
     if (!entry) return { kind: 'unknown' };
     const exitCode = entry.process.exitCode();
     if (entry.process.hasExited()) {
-      this.releaseProcessId(processId);
+      this.retainCompleted(entry);
       return { kind: 'exited', exitCode };
     }
     return { kind: 'alive', exitCode, processId: entry.processId };

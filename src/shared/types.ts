@@ -128,6 +128,8 @@ export const CHAT_BROWSERS = ['chrome', 'edge', 'brave'] as const;
 export type ChatBrowser = (typeof CHAT_BROWSERS)[number];
 
 export interface UiPrefs {
+  /** Recover an unfinished silent executor turn only while Goal and Loop are both off. */
+  autoContinue?: boolean;
   /** Maintenance may reuse existing tabs but cannot open helpers or missing chats. */
   browserOnly?: boolean;
   backgroundChats?: boolean;
@@ -149,6 +151,7 @@ export interface UiPrefs {
   chatBrowser?: ChatBrowser;
   /** Explicit choice, never inherited from the OS: the window looks how you left it. */
   theme: 'light' | 'dark';
+  appearance?: import('./appearance.js').AppearanceSettings;
 }
 
 /**
@@ -471,6 +474,92 @@ export interface BridgeStatus {
    * this app process, which is why "no extension version" never means "outdated extension".
    */
   extensionVersion: string | null;
+}
+
+/**
+ * Read-only companion diagnostics mirrored from the browser extension's own popup.
+ *
+ * This is deliberately diagnostics-only: ids, counters and transport state. It never
+ * carries transcript prose, page text, credentials or file contents. The extension popup
+ * reads the same underlying status/page projections; the desktop popover merely gives that
+ * otherwise-hidden UI a native home inside the app.
+ */
+export interface CompanionDiagnostics {
+  capturedAt: number;
+  status: {
+    connected: boolean;
+    port: number | null;
+    paired: boolean;
+    disconnected: boolean;
+    pending: number;
+    pendingCommandAcks: number;
+    compatible: boolean | null;
+    appVersion: string | null;
+    appProtocol: number | null;
+    extensionVersion: string | null;
+    extensionProtocol: number | null;
+    pairError: { error: string; message: string } | null;
+  };
+  preferences: {
+    overwrite: boolean;
+    durations: boolean;
+  };
+  tab: CompanionTabDiagnostics | null;
+}
+
+export interface CompanionTraceEntry {
+  requestId: string;
+  read: boolean;
+  sent: boolean;
+  confirmed: boolean;
+  app: string | null;
+  tool: string | null;
+}
+
+export interface CompanionPageDiagnostics {
+  recorderVersion: number | null;
+  runId: string | null;
+  conversationId: string | null;
+  generating: boolean;
+  turnId: string | null;
+  generations: number;
+  queued: number;
+  queueBytes: number;
+  requestId: string | null;
+  trace: CompanionTraceEntry[];
+  overwrite: boolean;
+  painted: boolean;
+  events: number;
+  calls: number;
+  sends: number;
+  failures: number;
+  session: string | null;
+  lastError: { at: number; text: string } | null;
+  blocked: string | null;
+}
+
+export interface CompanionTabDiagnostics {
+  tab: number | null;
+  isChat: boolean;
+  conversationId: string | null;
+  bound: boolean;
+  epoch: number | null;
+  terminal: boolean;
+  recorder: boolean;
+  page: CompanionPageDiagnostics | null;
+  chatTabs: number;
+  pending: number;
+  pendingAll: number;
+  pendingCloses: number;
+  pendingCommandAcks: number;
+  delivery: {
+    at: number;
+    ok: boolean | null;
+    events: number;
+    total: number;
+    status: number;
+    error: string | null;
+  };
 }
 
 /**

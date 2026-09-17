@@ -568,6 +568,8 @@
   }
   let stallReported = false;
   let userStopped = false;
+  let recoveryStopping = false;
+  let recoveryReloadCheck = null;
   /**
    * Final public ChatGPT message that already terminalised the local turn while the page's
    * Stop control was still mounted. A stale Stop must not reopen the same finished turn on
@@ -1844,6 +1846,7 @@
    */
   function endOutcome(turn, nativeFinal = false) {
     if (userStopped) return { outcome: 'stopped' };
+    if (recoveryStopping && !nativeFinal) return { outcome: 'interrupted', detail: 'Automatic Continue stopped an unchanged silent turn.' };
     // Only this turn's failures. An error inside another turn's section is that turn's,
     // and a toast still on screen from an earlier failure was already on screen when this
     // turn began — neither says anything about how this one ended.
@@ -10237,7 +10240,7 @@
 
   const noteStopClick = (event) => {
     const stop = CLF_DOM.stopButton();
-    if (stop && event.target instanceof Node && stop.contains(event.target)) userStopped = true;
+    if (stop && event.target instanceof Node && stop.contains(event.target) && (!recoveryStopping || event.isTrusted)) userStopped = true;
   };
   listen(document, 'click', noteStopClick, true);
 
@@ -10531,8 +10534,38 @@
       (!message.directTurn || sendAttempted || (CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id === sourceUser &&
         (!turnId || turnId === sourceTurn)));
     if (!onTarget()) return false;
+    if (message.recovery && (!sourceUser || sourceUser !== message.recovery.questionId || userStopped)) return false;
     if (silencePickup && CLF_DOM.generating() && !await confirmedProviderTerminal()) {
       if (!onTarget()) return false;
+      if (message.recovery?.stop === true) {
+        desktopInputBusy = true;
+        let input = null;
+        try {
+          const safe = () => onTarget() && !userStopped && pendingTools === 0 &&
+            CLF_DOM.composerVisible() && !(CLF_DOM.composer()?.textContent || '').trim() &&
+            !CLF_DOM.hasComposerAttachments() && !CLF_DOM.errors().some(error => error.blocking === true);
+          if (!safe()) return false;
+          const claim = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true });
+          input = claim?.data?.input;
+          if (!input?.recovery || !safe()) return false;
+          const permit = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, recoveryAction: 'stop' });
+          if (permit?.data?.ok !== true || !safe() || await confirmedProviderTerminal() || !safe()) return false;
+          recoveryStopping = true;
+          if (CLF_DOM.generating() && !CLF_DOM.stopGeneration(safe)) return false;
+          const idle = await waitPageView(() => !CLF_DOM.generating(), safe, INTERRUPT_WAIT_MS);
+          if (!idle || !safe()) return false;
+          if (generating) finishGeneration(currentAssistantTurn(), { outcome: 'interrupted', detail: 'Automatic Continue stopped an unchanged silent turn.' }, false);
+          await flush();
+          if (!safe()) return false;
+          recoveryReloadCheck = { id: input.id, owner: input.owner, safe: () => safe() && !CLF_DOM.generating() };
+          const reload = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, recoveryAction: 'stopped' });
+          return reload?.data?.ok === true;
+        } finally {
+          recoveryReloadCheck = null;
+          recoveryStopping = false;
+          desktopInputBusy = false;
+        }
+      }
       await ask({ type: 'desktop_input', id: message.id, conversationId: target, silenceBusyTurnId: message.silenceTurnId });
       return false;
     }
@@ -10920,6 +10953,11 @@
       if (message.type === 'clf-prepare-desktop-input') {
         void prepareDesktopInputPage(message).then(sendResponse).catch(() => sendResponse({ ready: false }));
         return true;
+      }
+      if (message.type === 'clf-recovery-reload-check') {
+        sendResponse({ safe: recoveryReloadCheck?.id === message.id && recoveryReloadCheck?.owner === message.owner &&
+          recoveryReloadCheck.safe() === true });
+        return false;
       }
       if (message.type === 'clf-desktop-input') {
         void acceptDesktopInput(message).then((ok) => sendResponse({ ok })).catch(() => sendResponse({ ok: false }));

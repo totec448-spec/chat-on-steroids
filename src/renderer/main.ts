@@ -4,7 +4,10 @@ import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
+import { initConnectionAdvanced } from './connection-popover.js';
 import { initSetupGuide } from './setup-guide.js';
+import { initAppearance } from './appearance.js';
+import type { AppearanceSettings } from '../shared/appearance.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
  *
@@ -45,6 +48,10 @@ declare global {
 const api = window.api;
 initLanguage();
 initSetupGuide();
+// Escape the translucent sidebar's backdrop-filter containing block.
+document.body.append($('connectionPopover'));
+const connectionAdvanced = initConnectionAdvanced();
+const appearance = initAppearance(patch => { void save(patch); });
 
 /** Same shape the platform uses; mirrored here only to grey out step 2 until it is valid. */
 const TUNNEL_ID_PATTERN = /^tunnel_[0-9a-f]{32}$/;
@@ -120,10 +127,12 @@ let setupKeySave: Promise<boolean> = Promise.resolve(true);
 // ------------------------------------------------------------------- tabs
 
 function showTab(name: string): void {
-  const settings = name !== 'chat';
-  document.querySelector<HTMLElement>('.app')!.dataset.screen = settings ? 'settings' : 'chat';
+  const settings = name !== 'chat' && name !== 'plugins';
+  document.querySelector<HTMLElement>('.app')!.dataset.screen = name === 'plugins' ? 'library' : settings ? 'settings' : 'chat';
   document.querySelector<HTMLElement>('.sidebar-brand')!.hidden = settings;
-  $('workspaceSettings').hidden = settings;
+  $('sidebarPrimary').hidden = settings;
+  $('workspaceSettings').hidden = false;
+  $('workspaceSettings').classList.toggle('is-sel', settings);
   if (name === 'usage') void refreshUsage();
   $('tabs').hidden = !settings;
   $('backToChat').hidden = !settings;
@@ -135,6 +144,7 @@ function showTab(name: string): void {
   for (const tab of document.querySelectorAll<HTMLElement>('nav button')) {
     tab.classList.toggle('is-sel', tab.dataset.tab === name);
   }
+  for (const item of document.querySelectorAll<HTMLElement>('[data-sidebar-page]')) item.classList.toggle('is-sel', item.dataset.sidebarPage === name);
   for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
     panel.classList.toggle('is-active', panel.dataset.panel === (name === 'settings' ? 'chat' : name));
   }
@@ -147,11 +157,47 @@ function showTab(name: string): void {
   for (const id of FEEDS) stickToNewest(id);
 }
 
+function setConnectionPopover(open: boolean): void {
+  const popover = $('connectionPopover');
+  const trigger = $('sidebarConnection');
+  popover.hidden = !open;
+  trigger.setAttribute('aria-expanded', String(open));
+  if (open) {
+    $<HTMLDetailsElement>('connectionAdvanced').open = false;
+    $<HTMLDetailsElement>('connectionRuntime').open = false;
+    positionConnectionPopover();
+    paintClock();
+    connectionAdvanced.refreshIfOpen();
+  }
+}
+
+/** Keep this diagnostic surface anchored to the status button and inside the viewport. */
+function positionConnectionPopover(): void {
+  const popover = $('connectionPopover');
+  if (popover.hidden) return;
+  const trigger = $('sidebarConnection').getBoundingClientRect();
+  const margin = 12;
+  const width = popover.getBoundingClientRect().width;
+  const preferredLeft = trigger.left + trigger.width / 2 - width / 2;
+  const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+  popover.style.left = `${Math.min(Math.max(margin, preferredLeft), maxLeft)}px`;
+  popover.style.bottom = `${Math.max(margin, window.innerHeight - trigger.top + 8)}px`;
+}
+
+window.addEventListener('resize', () => positionConnectionPopover());
+
 $('backToChat').addEventListener('click', () => showTab('chat'));
 $('workspaceSettings').addEventListener('click', () => showTab('home'));
+$('sidebarConnection').addEventListener('click', () => {
+  setConnectionPopover(Boolean($('connectionPopover').hidden));
+});
 $('chatSettingsBtn').addEventListener('click', () => showTab('settings'));
-$('sessionList').addEventListener('click', () => showTab('chat'));
+$('sessionList').addEventListener('click', event => {
+  if ((event.target as HTMLElement).closest('[data-id], [data-new-project]')) showTab('chat');
+}, { capture: true });
 $('newChat').addEventListener('click', () => showTab('chat'));
+$('sidebarPlugins').addEventListener('click', () => showTab('plugins'));
+$('addProject').addEventListener('click', () => showTab('chat'));
 $('composerFolder').addEventListener('click', () => $('addProject').click());
 let zoomFactor = 1;
 let zoomEdited = false;
@@ -399,7 +445,7 @@ function toolsOn(next: AppState): number {
 let settingsSaveQueue: Promise<void> = Promise.resolve();
 let requestedSettings: SettingsPatch | null = null;
 
-function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Promise<void> {
+function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?: AppearanceSettings } = {}): Promise<void> {
   if (applying || !state) return Promise.resolve();
 
   const previous: AppState['config'] = requestedSettings
@@ -430,11 +476,13 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
       binaryPath: $<HTMLInputElement>('binaryPath').value.trim()
     },
     ui: {
+      ...previous.ui,
       chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       finishTool: $<HTMLInputElement>('finishTool').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
       backgroundChats: $<HTMLInputElement>('backgroundChats').checked,
+      autoContinue: $<HTMLInputElement>('autoContinue').checked,
       browserOnly: $<HTMLInputElement>('browserOnly').checked,
       autoRefreshPlugins: $<HTMLInputElement>('autoRefreshPlugins').checked,
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
@@ -442,7 +490,8 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
       minimizeToTray: $<HTMLInputElement>('minimizeToTray').checked,
       developerMode: $<HTMLInputElement>('developerMode').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
-      theme: over.theme ?? previous.ui.theme
+      theme: over.theme ?? previous.ui.theme,
+      appearance: over.appearance ?? previous.ui.appearance
     },
     ...chatPatch
   };
@@ -479,6 +528,8 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     goal: previous.goal
   };
   const next = await run(api.saveSettings(patch, base));
+  // Retire this request before repaint, while a newer queued preference still wins.
+  if (requestedSettings === patch) requestedSettings = null;
   if (next) {
     apply(next);
     if (previous.multiAgent.enabled && !patch.multiAgent.enabled) {
@@ -489,8 +540,6 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
       toast(t("Tools changed. Start a new ChatGPT conversation to guarantee the new tool list is loaded."));
     }
   } else await refresh();
-  // Do not erase the desired state of a newer queued save when an older one completes.
-  if (requestedSettings === patch) requestedSettings = null;
 }
 
 // ---------------------------------------------------------------- helpers
@@ -925,17 +974,25 @@ function apply(next: AppState): void {
   const missing = missingStep(next);
 
   // ---- theme
-  const dark = config.ui.theme === 'dark';
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  $('themeIcon').setAttribute('href', dark ? '#i-sun' : '#i-moon');
-  ui($('themeBtn'), 'title', () => dark ? t("Switch to light mode") : t("Switch to dark mode"));
+  const appearanceUi = requestedSettings?.ui ?? config.ui;
+  appearance.apply(appearanceUi);
 
-  // ---- header
-  const live = $('live');
-  live.className = `live${
-    connected ? ' is-connected' : offline ? ' is-offline' : busy ? ' is-busy' : failed ? ' is-error' : ''
-  }`;
-  ui($('liveState'), 'textContent', () => t(STATUS_TEXT[status.state]));
+  const headerConnect = $<HTMLButtonElement>('headerConnect');
+  const wasVisible = !headerConnect.hidden;
+  headerConnect.hidden = connected;
+  headerConnect.disabled = busy;
+  ui(headerConnect, 'textContent', () => busy ? t('Connecting…') : t('Connect'));
+  if (connected && wasVisible && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) $('sidebarConnection').animate([
+    { boxShadow: '0 0 0 0 var(--green)' }, { boxShadow: '0 0 0 12px transparent' }
+  ], { duration: 850, iterations: 2 });
+
+  // ---- global connection surface
+  const connectionTone = connected ? 'is-connected' : offline ? 'is-offline' : busy ? 'is-busy' : failed ? 'is-error' : '';
+  const sidebarConnection = $('sidebarConnection');
+  sidebarConnection.className = `sidebar-connection${connectionTone ? ` ${connectionTone}` : ''}`;
+  const connectionPopover = $('connectionPopover');
+  connectionPopover.className = `connection-popover scroll${connectionTone ? ` ${connectionTone}` : ''}`;
+  ui($('connectionPopoverTitle'), 'textContent', () => t(STATUS_TEXT[status.state]));
 
   const id = config.tunnel.tunnelId;
   ui($('headerSub'), 'textContent', () => config.tunnel.kind === 'openai'
@@ -944,11 +1001,14 @@ function apply(next: AppState): void {
         : t("No tunnel yet")
       : (status.publicUrl ?? status.localUrl ?? config.tunnel.kind));
 
-  const connectBtn = $<HTMLButtonElement>('connectBtn');
-  connectBtn.classList.toggle('is-running', running);
-  ui($('connectLabel'), 'textContent', () => running ? t("Disconnect") : t("Connect"));
+  const connectBtn = $<HTMLButtonElement>('connectionPopoverToggle');
+  ui(connectBtn, 'textContent', () => running ? t("Disconnect") : t("Connect"));
   connectBtn.disabled = !running && missing !== null;
   connectBtn.title = !running && missing ? missing.text : '';
+
+  ui($('connectionPopoverExtension'), 'textContent', () => next.bridge.extensionVersion
+    ? `v${next.bridge.extensionVersion}`
+    : t("Not reported"));
 
   // ---- out of date, app or extension
   paintUpdate(next);
@@ -999,6 +1059,7 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
+  applyChecked($<HTMLInputElement>('autoContinue'), config.ui.autoContinue !== false, previousState?.config.ui.autoContinue);
   applyChecked($<HTMLInputElement>('browserOnly'), config.ui.browserOnly === true, previousState?.config.ui.browserOnly);
   applyChecked($<HTMLInputElement>('autoRefreshPlugins'), config.ui.autoRefreshPlugins === true, previousState?.config.ui.autoRefreshPlugins);
   $('startAtLoginRow').hidden = next.loginStartupAvailable !== true;
@@ -1320,7 +1381,7 @@ function facts(next: AppState): HTMLElement[] {
  */
 function paintClock(): void {
   if (!state) return;
-  const { status } = state;
+  const { status, bridge } = state;
   const running = isRunning(status.state);
   const connected = status.state === 'connected';
 
@@ -1332,11 +1393,33 @@ function paintClock(): void {
   request.textContent = shortAgo(status.lastRequestAt);
   request.className = status.lastRequestAt === null ? 'is-cold' : '';
 
-  ui($('liveNote'), 'textContent', () => running
+  const core = status.surfaces.find((surface) => surface.id === 'core');
+  ui($('connectionPopoverConnector'), 'textContent', () => !running
+    ? t("Not connected")
+    : core?.lastRequestAt
+      ? t("Reached")
+      : connected
+        ? t("Waiting for ChatGPT")
+        : t(STATUS_TEXT[status.state]));
+  ui($('connectionPopoverBrowser'), 'textContent', () => bridge.present
+    ? t("Connected")
+    : bridge.paired ? t("Paired · not active") : t("Not connected"));
+
+  ui($('connectionPopoverConnector'), 'title', () => core?.lastRequestAt ? t("Reached {0}", [ago(core.lastRequestAt)]) : $('connectionPopoverConnector').textContent ?? '');
+  ui($('connectionPopoverBrowser'), 'title', () => bridge.lastSeenAt ? t("Seen {0}", [ago(bridge.lastSeenAt)]) : $('connectionPopoverBrowser').textContent ?? '');
+  $('connectionPopoverVerified').hidden = connected;
+  ui($('connectionPopoverTitle'), 'title', () => status.handshakeAt !== null ? t("verified {0}", [ago(status.handshakeAt)]) : t("no handshake yet"));
+  ui($('connectionPopoverVerified'), 'textContent', () => running
     ? status.handshakeAt === null
       ? t("no handshake yet")
       : t("verified {0}", [ago(status.handshakeAt)])
-    : '');
+    : t("Connection is off"));
+
+  const triggerText = status.handshakeAt !== null && running
+    ? `${t(STATUS_TEXT[status.state])} · ${t("verified {0}", [ago(status.handshakeAt)])}`
+    : t(STATUS_TEXT[status.state]);
+  ui($('sidebarConnection'), 'aria-label', () => triggerText);
+  ui($('sidebarConnection'), 'title', () => triggerText);
 }
 
 window.setInterval(paintClock, 1000);
@@ -1592,18 +1675,6 @@ $('closeChecks').addEventListener('click', () => {
   $('checksBox').hidden = true;
 });
 
-$('themeBtn').addEventListener('click', () => {
-  if (!state) return;
-  // A save can still be waiting on main-process lifecycle work. Toggle from the latest
-  // requested value, not merely the last acknowledged state, or two quick clicks both choose
-  // the same target and behave like one click.
-  const current = requestedSettings?.ui.theme ?? state.config.ui.theme;
-  const next = current === 'dark' ? 'light' : 'dark';
-  // Applied immediately so the click feels instant; the save confirms it.
-  document.documentElement.dataset.theme = next;
-  void save({ theme: next });
-});
-
 $('readOnlyBtn').addEventListener('click', () => {
   if (!state) return;
   const current = requestedSettings?.readOnly ?? state.config.readOnly;
@@ -1661,7 +1732,15 @@ function installUpdate(): void {
 
 $('updateInstall').addEventListener('click', installUpdate);
 $('installUpdate').addEventListener('click', installUpdate);
-$('connectBtn').addEventListener('click', () => void toggleConnection());
+$('headerConnect').addEventListener('click', async () => {
+  if (!state) return;
+  if (missingStep(state)) { showTab('setup'); return; }
+  if (isRunning(state.status.state)) {
+    const disconnected = await run(api.disconnect()); if (!disconnected) return; apply(disconnected);
+  }
+  const connected = await run(api.connect()); if (connected) apply(connected);
+});
+$('connectionPopoverToggle').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
 
 $('pickBinary').addEventListener('click', async () => {
@@ -1730,8 +1809,15 @@ for (const id of [
 }
 
 document.addEventListener('click', (event) => {
-  const link = (event.target as HTMLElement).closest<HTMLElement>('[data-link]');
+  const target = event.target as HTMLElement;
+  if (!target.closest('.connection-anchor') && !$('connectionPopover').contains(target) && !$('connectionPopover').hidden) setConnectionPopover(false);
+  const link = target.closest<HTMLElement>('[data-link]');
   if (link?.dataset.link) void run(api.openLink(link.dataset.link));
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || $('connectionPopover').hidden) return;
+  setConnectionPopover(false);
+  $('sidebarConnection').focus();
 });
 
 $('bridgeDownload').addEventListener('click', () => void run(api.downloadExtension()));

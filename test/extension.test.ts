@@ -499,7 +499,7 @@ function loadWorker(options: {
   fetch?: (input: string, init?: Record<string, unknown>) => Promise<ReturnType<typeof response>>;
   tabsGet?: (tabId: number) => Promise<{ id?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean }>;
   tabsQuery?: () => Promise<
-    Array<{ id?: number; windowId?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean; active?: boolean }>
+    Array<{ id?: number; windowId?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean; active?: boolean; discarded?: boolean; frozen?: boolean }>
   >;
   tabsSendMessage?: (tabId: number, message: Record<string, unknown>) => Promise<unknown>;
   windowsGet?: (windowId: number) => Promise<{ focused?: boolean }>;
@@ -735,7 +735,62 @@ function journalOf(session: FakeStorageArea): any[] {
   return Array.isArray(value) ? value : [];
 }
 
+it.each(['discarded', 'frozen', 'woke', 'navigated', 'loading', 'closed', 'missing'])(
+  'rechecks suspended-tab recovery at the browser action (%s)', async state => {
+    const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const tab = { id: 71, url: `https://chatgpt.com/c/${conversationId}`, discarded: state !== 'frozen', frozen: state === 'frozen' };
+    const reload = vi.fn();
+    const create = vi.fn();
+    const call = vi.fn(async () => ({ ok: true }));
+    const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+      backgroundSource.indexOf('\nfunction conversationStillOpen('));
+    const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+      tabConversations: { '71': conversationId }, tabDocuments: { '71': 'suspended-document' },
+      conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
+      createChatTab: create, call,
+      chrome: { tabs: {
+        query: async () => state === 'missing' ? [] : [tab], reload,
+        get: async () => {
+          if (state === 'closed') throw new Error('Tab closed');
+          return { ...tab, discarded: state !== 'woke' && state !== 'frozen',
+            ...(state === 'navigated' ? { url: 'https://example.com/' } : {}),
+            ...(state === 'loading' ? { pendingUrl: tab.url } : {}) };
+        }
+      } }, CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+    });
+    await repair([{ conversationId, token: 'suspension', suspended: true }], {});
+    expect(reload).toHaveBeenCalledTimes(state === 'discarded' || state === 'frozen' ? 1 : 0);
+    expect(create).not.toHaveBeenCalled();
+  }
+);
+
 describe('accepted helper tab cleanup', () => {
+  it('shares pending diagnostic reads and discards a result after disconnect', async () => {
+    const source = backgroundSource.slice(backgroundSource.indexOf('function publishCompanionDiagnostics()'),
+      backgroundSource.indexOf('\nchrome.runtime.onMessage.addListener', backgroundSource.indexOf('function publishCompanionDiagnostics()')));
+    let complete!: (value: unknown) => void;
+    const snapshot = vi.fn(() => new Promise(resolve => { complete = resolve; }));
+    const call = vi.fn(async () => ({ ok: true }));
+    const context = vm.createContext({ token: 'fixture-token', disconnected: false, connectionEpoch: 1, port: 8765,
+      companionDiagnosticsFlight: null, discover: async () => ({ port: 8765 }), companionDiagnosticSnapshot: snapshot, call });
+    const publish = vm.runInContext(`${source}\npublishCompanionDiagnostics`, context);
+    const first = publish();
+    const second = publish();
+    expect(first).toBe(second);
+    await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(1));
+    context.connectionEpoch++;
+    context.disconnected = true;
+    complete({ capturedAt: 1 });
+    await first;
+    expect(call).not.toHaveBeenCalled();
+    context.disconnected = false;
+    const third = publish();
+    await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2));
+    complete({ capturedAt: 2 });
+    await third;
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
   for (const outcome of ['accepted', 'rejected', 'navigated', 'pinned', 'busy', 'draft', 'pinned-during-proof'] as const) {
     it(`closes only the exact accepted helper document (${outcome})`, async () => {
       const helper = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -768,6 +823,47 @@ describe('accepted helper tab cleanup', () => {
       else expect(worker.tabsRemove).not.toHaveBeenCalled();
     });
   }
+});
+
+describe('automatic Continue reload custody', () => {
+  it.each(['accepted', 'draft', 'navigated', 'rejected'] as const)('reloads only the authorized stopped document (%s)', async outcome => {
+    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    let url = `https://chatgpt.com/c/${chat}`;
+    const actions: string[] = [];
+    let consumed = false;
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      tabsGet: async () => ({ id: 1, url }),
+      tabsSendMessage: async (_id, message) => {
+        if (message.type === 'clf-recovery-reload-check') return { safe: outcome !== 'draft' };
+        return { ok: true };
+      },
+      fetch: async (address, init) => {
+        const route = new URL(address).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/input/claim') {
+          const body = JSON.parse(String(init?.body)); actions.push(body.recoveryAction);
+          if (body.recoveryAction === 'stopped') {
+            if (outcome === 'navigated') url = 'https://chatgpt.com/';
+            const allowed = !consumed && outcome !== 'rejected'; consumed = true;
+            return response(200, { ok: allowed });
+          }
+          return response(200, { ok: true });
+        }
+        return response(200, {});
+      }
+    });
+    await worker.registerTab(1);
+    const message = { type: 'desktop_input', id: 'ffffffff-1111-4222-8333-444444444444',
+      owner: '1:document-1-0:0', conversationId: chat, recoveryAction: 'stopped' };
+    await worker.send(message);
+    expect(worker.tabsReload).toHaveBeenCalledTimes(outcome === 'accepted' ? 1 : 0);
+    expect(actions.includes('reloaded')).toBe(outcome === 'accepted');
+    if (outcome === 'accepted') {
+      await worker.send(message);
+      expect(worker.tabsReload).toHaveBeenCalledTimes(1);
+    }
+  });
 });
 
 /**
@@ -1239,6 +1335,66 @@ describe('active agent tab discard protection', () => {
     live = false;
     await worker.fireAlarm();
     expect(worker.tabsUpdate).not.toHaveBeenCalled();
+  });
+
+  it('reports discarded and frozen shells separately from genuinely open conversations', async () => {
+    const DISCARDED = 'bbbbbbbb-cccc-4ddd-8eee-111111111111';
+    const FROZEN = 'cccccccc-dddd-4eee-8fff-222222222222';
+    const posted: Array<{ openConversations?: string[]; stalledConversations?: string[] }> = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') {
+          posted.push(JSON.parse(String(init?.body || '{}')));
+          return response(200, { ok: true, repairs: [] });
+        }
+        return response(404, {});
+      }),
+      tabsQuery: async () => [
+        { id: 1, windowId: 7, url: `https://chatgpt.com/c/${DISCARDED}`, discarded: true },
+        { id: 2, windowId: 7, url: `https://chatgpt.com/c/${FROZEN}`, frozen: true },
+        { id: 3, windowId: 7, url: `https://chatgpt.com/c/${CHAT}`, status: 'complete' }
+      ]
+    });
+
+    await worker.fireAlarm();
+
+    // The shells keep their URLs and stay inside openConversations — the app decides what a
+    // dead page means — while stalledConversations names the ones that cannot record or receive.
+    expect(posted.at(-1)?.openConversations).toEqual([DISCARDED, FROZEN, CHAT]);
+    expect(posted.at(-1)?.stalledConversations).toEqual([DISCARDED, FROZEN]);
+  });
+
+  it('protects a newly created input tab until its conversation binds', async () => {
+    const inputId = 'ffffffff-1111-4222-8333-444444444444';
+    const session = new FakeStorageArea();
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session,
+      fetch: vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') {
+          return response(200, { ok: true, repairs: [], inputs: [{ id: inputId }], inputOpeningIds: [inputId] });
+        }
+        return response(404, {});
+      })
+    });
+
+    await worker.fireAlarm();
+
+    expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
+    expect(worker.tabsUpdate).toHaveBeenCalledWith(99, { autoDiscardable: false });
+    expect(session.data.discardProtectedTabs).toEqual({ '99': true });
+
+    // The cos-input marker holds the protection across later passes; release belongs to the
+    // app's policy set once a real conversation binds, not to a sweep that cannot see one yet.
+    await worker.fireAlarm();
+    expect(worker.tabsUpdate).not.toHaveBeenCalledWith(99, { autoDiscardable: true });
+    expect(session.data.discardProtectedTabs).toEqual({ '99': true });
   });
 });
 
@@ -2029,6 +2185,42 @@ describe('extension revival delivery', () => {
     await worker.fireAlarm();
 
     await worker.fireAlarm();
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+  });
+
+  it('reloads a discarded exact tab and offers the revival to its reloaded document', async () => {
+    let discarded = true;
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea({ recoveryMonitoring: true }),
+      fetch: app(),
+      tabsQuery: async () => [
+        { id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}`, ...(discarded ? { discarded: true } : { status: 'complete' }) }
+      ],
+      tabsGet: async id => ({ id, url: `https://chatgpt.com/c/${CHAT}`, discarded }),
+      tabsSendMessage: liveRecorder
+    });
+
+    await worker.fireAlarm();
+
+    // A discarded shell can never answer the ping or accept an injection. Reloading it is the
+    // exact repair; creating a second tab for the same conversation is the failure this
+    // prevents.
+    expect(worker.tabsReload).toHaveBeenCalledWith(4);
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+    expect(worker.tabsSendMessage.mock.calls.some(([id, message]) => id === 4 && message.type === 'clf-run-command')).toBe(false);
+
+    // The reloaded document registers, and that registration re-enters this exact flow.
+    discarded = false;
+    await worker.registerTab(4, 'document-4-reloaded');
+    await vi.waitFor(() =>
+      expect(worker.tabsSendMessage).toHaveBeenCalledWith(4, {
+        type: 'clf-run-command',
+        id: revival.id,
+        conversationId: CHAT,
+        deferredRecovery: true
+      })
+    );
     expect(worker.tabsCreate).not.toHaveBeenCalled();
   });
 

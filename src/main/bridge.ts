@@ -18,7 +18,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, deferSilenceInput, revokeSilenceInputs } from './session/input.js';
+import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, deferSilenceInput, revokeSilenceInputs } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -43,9 +43,9 @@ import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindB
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
-import type { BridgeStatus } from '../shared/types.js';
+import type { BridgeStatus, CompanionDiagnostics, CompanionPageDiagnostics, CompanionTabDiagnostics, CompanionTraceEntry } from '../shared/types.js';
 import { positionOf } from '../shared/chronology.js';
-import { CHAT_SILENCE_MS, CONTINUATION_MARKER, isReasoningEffort, normalizedToolOutcome, toolCallSummary,
+import { CHAT_ACTIVE_MS, CHAT_SILENCE_MS, CONTINUATION_MARKER, isReasoningEffort, normalizedToolOutcome, toolCallSummary,
   type ReasoningEffort, type SessionEvent, type SessionOrigin, type StoredText, type ToolCallRecord } from '../shared/session.js';
 import { isChatBlocked, chatBlockedAt } from './session/blocked-chats.js';
 export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
@@ -559,6 +559,172 @@ let requestWindow = { start: Date.now(), count: 0 };
 const listeners = new Set<() => void>();
 let extensionVersion: string | null = null;
 let versionWarned = false;
+let latestCompanionDiagnostics: CompanionDiagnostics | null = null;
+let companionDiagnosticsRevision = 0;
+const companionDiagnosticsWaiters = new Set<() => void>();
+
+function diagnosticObject(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function diagnosticString(value: unknown, max = 512): string | null {
+  return typeof value === 'string' ? value.slice(0, max) : null;
+}
+
+function diagnosticNumber(value: unknown, max = Number.MAX_SAFE_INTEGER): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(max, value)) : 0;
+}
+
+function diagnosticNullableNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function diagnosticTrace(value: unknown): CompanionTraceEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 16).flatMap((entry) => {
+    const row = diagnosticObject(entry);
+    const requestId = diagnosticString(row?.requestId, 160);
+    if (!row || !requestId) return [];
+    return [{
+      requestId,
+      read: row.read === true,
+      sent: row.sent === true,
+      confirmed: row.confirmed === true,
+      app: diagnosticString(row.app, 80),
+      tool: diagnosticString(row.tool, 160)
+    }];
+  });
+}
+
+function diagnosticPage(value: unknown): CompanionPageDiagnostics | null {
+  const page = diagnosticObject(value);
+  if (!page) return null;
+  const lastError = diagnosticObject(page.lastError);
+  return {
+    recorderVersion: diagnosticNullableNumber(page.recorderVersion),
+    runId: diagnosticString(page.runId, 160),
+    conversationId: diagnosticString(page.conversationId, 200),
+    generating: page.generating === true,
+    turnId: diagnosticString(page.turnId, 200),
+    generations: diagnosticNumber(page.generations, 1_000_000),
+    queued: diagnosticNumber(page.queued, 1_000_000),
+    queueBytes: diagnosticNumber(page.queueBytes, 64 * 1024 * 1024),
+    requestId: diagnosticString(page.requestId, 160),
+    trace: diagnosticTrace(page.trace),
+    overwrite: page.overwrite === true,
+    painted: page.painted === true,
+    events: diagnosticNumber(page.events, 10_000_000),
+    calls: diagnosticNumber(page.calls, 10_000_000),
+    sends: diagnosticNumber(page.sends, 10_000_000),
+    failures: diagnosticNumber(page.failures, 10_000_000),
+    session: diagnosticString(page.session, 160),
+    lastError: lastError && typeof lastError.at === 'number' && Number.isFinite(lastError.at)
+      ? { at: lastError.at, text: diagnosticString(lastError.text, 500) ?? '' }
+      : null,
+    blocked: diagnosticString(page.blocked, 160)
+  };
+}
+
+function diagnosticTab(value: unknown): CompanionTabDiagnostics | null {
+  const tab = diagnosticObject(value);
+  if (!tab) return null;
+  const delivery = diagnosticObject(tab.delivery);
+  return {
+    tab: diagnosticNullableNumber(tab.tab),
+    isChat: tab.isChat === true,
+    conversationId: diagnosticString(tab.conversationId, 200),
+    bound: tab.bound === true,
+    epoch: diagnosticNullableNumber(tab.epoch),
+    terminal: tab.terminal === true,
+    recorder: tab.recorder === true,
+    page: diagnosticPage(tab.page),
+    chatTabs: diagnosticNumber(tab.chatTabs, 10_000),
+    pending: diagnosticNumber(tab.pending, 1_000_000),
+    pendingAll: diagnosticNumber(tab.pendingAll, 1_000_000),
+    pendingCloses: diagnosticNumber(tab.pendingCloses, 1_000_000),
+    pendingCommandAcks: diagnosticNumber(tab.pendingCommandAcks, 1_000_000),
+    delivery: {
+      at: diagnosticNumber(delivery?.at),
+      ok: delivery?.ok === true ? true : delivery?.ok === false ? false : null,
+      events: diagnosticNumber(delivery?.events, 1_000_000),
+      total: diagnosticNumber(delivery?.total, 100_000_000),
+      status: diagnosticNumber(delivery?.status, 999),
+      error: diagnosticString(delivery?.error, 200)
+    }
+  };
+}
+
+function sanitiseCompanionDiagnostics(value: unknown): CompanionDiagnostics | null {
+  const root = diagnosticObject(value);
+  const status = diagnosticObject(root?.status);
+  const preferences = diagnosticObject(root?.preferences);
+  if (!root || !status || !preferences) return null;
+  const pairError = diagnosticObject(status.pairError);
+  return {
+    capturedAt: diagnosticNumber(root.capturedAt),
+    status: {
+      connected: status.connected === true,
+      port: diagnosticNullableNumber(status.port),
+      paired: status.paired === true,
+      disconnected: status.disconnected === true,
+      pending: diagnosticNumber(status.pending, 1_000_000),
+      pendingCommandAcks: diagnosticNumber(status.pendingCommandAcks, 1_000_000),
+      compatible: status.compatible === true ? true : status.compatible === false ? false : null,
+      appVersion: diagnosticString(status.appVersion, 32),
+      appProtocol: diagnosticNullableNumber(status.appProtocol),
+      extensionVersion: diagnosticString(status.extensionVersion, 32),
+      extensionProtocol: diagnosticNullableNumber(status.extensionProtocol),
+      pairError: pairError
+        ? { error: diagnosticString(pairError.error, 160) ?? '', message: diagnosticString(pairError.message, 500) ?? '' }
+        : null
+    },
+    preferences: {
+      overwrite: preferences.overwrite !== false,
+      durations: preferences.durations === true
+    },
+    tab: diagnosticTab(root.tab)
+  };
+}
+
+function recordCompanionDiagnostics(value: unknown): void {
+  const next = sanitiseCompanionDiagnostics(value);
+  if (!next) return;
+  latestCompanionDiagnostics = next;
+  companionDiagnosticsRevision += 1;
+  for (const waiter of companionDiagnosticsWaiters) waiter();
+}
+
+/** Ask the companion for a fresh popup-equivalent snapshot, but keep a bounded wait. */
+export function companionDiagnostics(): Promise<CompanionDiagnostics | null> {
+  const before = companionDiagnosticsRevision;
+  wakeBrowserWork();
+  if (!browserPresent()) return Promise.resolve(latestCompanionDiagnostics ? structuredClone(latestCompanionDiagnostics) : null);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      companionDiagnosticsWaiters.delete(onUpdate);
+      resolve(latestCompanionDiagnostics ? structuredClone(latestCompanionDiagnostics) : null);
+    };
+    const onUpdate = (): void => {
+      if (companionDiagnosticsRevision > before) finish();
+    };
+    const timer = setTimeout(finish, 2500);
+    timer.unref?.();
+    companionDiagnosticsWaiters.add(onUpdate);
+    if (companionDiagnosticsRevision > before) finish();
+  });
+}
+
+function clearCompanionDiagnostics(): void {
+  latestCompanionDiagnostics = null;
+  companionDiagnosticsRevision++;
+  for (const waiter of companionDiagnosticsWaiters) waiter();
+}
 
 export function onBridgeChange(listener: () => void): () => void {
   listeners.add(listener);
@@ -625,6 +791,7 @@ export async function unpair(): Promise<void> {
   // This impossible-as-a-token sentinel preserves the user's explicit intent across both
   // the extension's next poll and an app restart.
   await setSecret('bridgeToken', BROWSER_DISCONNECTED);
+  clearCompanionDiagnostics();
   browserWake?.revoke();
   browserControl.reset();
   logInfo('bridge: browser disconnected');
@@ -1548,6 +1715,12 @@ function goalActiveFor(id: string): boolean {
   return goalArmedFor(id);
 }
 
+/** Policy gate only: the live silence grant files the outbox's exact recovery claim. */
+export function recoveryInputAllowed(sessionId: string, id: string): boolean {
+  return getConfig().ui.autoContinue !== false && !goalActiveFor(id) && !goalFencedChat(id) &&
+    !isChatBlocked(id) && !stopRequestedFor(id) && !continuationForSession(sessionId);
+}
+
 // -------------------------------------------------------------------- routes
 
 /**
@@ -1743,17 +1916,36 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
   }
 
+  if (route === '/diagnostics' && req.method === 'POST') {
+    recordCompanionDiagnostics(await readBody(req));
+    return json(res, 200, { ok: true }, origin);
+  }
+
   if (route === '/status') {
     const live = liveConversations();
     let openConversations: string[] = [];
+    let stalledConversations: string[] = [];
     if (req.method === 'POST') {
-      const body = await readBody(req) as { openConversations?: unknown };
+      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown };
       if (!Array.isArray(body?.openConversations) || body.openConversations.length > 10_000 || body.openConversations.some(id => !conversationId(id))) {
         return json(res, 400, { error: 'invalid_open_conversations' }, origin);
       }
       openConversations = body.openConversations as string[];
+      if (body.stalledConversations !== undefined &&
+          (!Array.isArray(body.stalledConversations) || body.stalledConversations.length > 10_000 || body.stalledConversations.some(id => !conversationId(id)))) {
+        return json(res, 400, { error: 'invalid_stalled_conversations' }, origin);
+      }
+      stalledConversations = (body.stalledConversations ?? []) as string[];
     }
-    const tabPolicy = await browserTabPolicy(new Set(openConversations));
+    const openSet = new Set(openConversations);
+    const tabPolicy = await browserTabPolicy(openSet);
+    // A discarded or frozen tab still answers the extension's tab query, so neither the close
+    // path nor the silence sweep ever fires for it — while its page can neither record nor
+    // receive. Each stalled report runs the missing-tab decision minus the close side effects,
+    // before this same response hands the due repair out.
+    for (const stalledId of stalledConversations) {
+      if (openSet.has(stalledId)) await queueStalledTabRecovery(stalledId);
+    }
     // The extension's maintenance pass, and the whole conversation about repairs: `repaired`
     // reports the one handout it was last given and has now carried out, and `repairs` is every
     // chat now due one — the chats whose local tool calls stopped being attributable to them,
@@ -1865,6 +2057,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const target = body.conversationId === null ? null : conversationId(body.conversationId);
     if (body.conversationId !== null && !target) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    if (body.recoveryAction === 'stop' || body.recoveryAction === 'stopped' || body.recoveryAction === 'reloaded') {
+      const ok = !!target && recoveryInputAllowed((await findSessionByConversation(target))?.id ?? '', target) &&
+        await advanceRecoveryInput(body.id, body.owner, target, body.recoveryAction);
+      if (ok) changed();
+      return json(res, 200, { ok }, origin);
+    }
     if (typeof body.silenceBusyTurnId === 'string') {
       const deferred = !!target && await deferSilenceInput(body.id, target, body.silenceBusyTurnId);
       if (deferred) changed();
@@ -3102,7 +3300,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (await goalInputPriority(id, sessionId, turnId))
       return goalJson(res, 409, { error: 'user_input_pending', retryable: true }, origin);
     if (await chatStillWorking(id, turnId, sessionId)) {
-      if (await extendedSilenceWindowFor(id, sessionId)) {
+      // Unknown now uses the ordinary recovery clock, but still is not proof
+      // of a completed normal-model turn for a provisional Goal obligation.
+      const work = activeUntil.get(id);
+      if (work?.sessionId === sessionId && work.model !== 'other') {
         return goalJson(res, 409, { error: 'chat_still_working', retryable: true }, origin);
       }
       // Owed, but not yet: the turn the page reported ended is still open here, or still
@@ -4535,6 +4736,7 @@ export async function stopBridge(): Promise<void> {
     // A stopped listener cannot currently see the extension. Require one fresh authenticated
     // request after the next start rather than carrying a recent sighting across bridge lifetimes.
     lastSeenAt = null;
+    clearCompanionDiagnostics();
     for (const command of commands) {
       if (command.timer) clearTimeout(command.timer);
       command.timer = null;
@@ -5444,12 +5646,9 @@ const compactionFilings = new Set<string>();
  */
 const lastAttributedCallAt = new Map<string, number>();
 export const GOAL_QUIET_MS = 60_000;
-/** Conservative unknown-model lifetime retained for compatibility; known Pro has its own policy. */
-export const PRO_SILENCE_RETIRE_MS = 5 * 60_000;
 export const PRO_SILENCE_MS = 10 * 60_000;
 const SILENCE_RELOAD_LISTEN_MS = 60_000;
 export const PRO_ACTIVITY_MS = 10 * 60_000;
-const activityLifetime = (grant: ActivityGrant): number => grant.model === 'pro' ? PRO_ACTIVITY_MS : PRO_SILENCE_RETIRE_MS;
 
 /** Runtime presentation of the same exact Pro work grant that owns silence recovery. */
 export function sessionInputActivity(summary: SessionSummary): InputActivity {
@@ -5472,12 +5671,12 @@ export function sessionActivityExpiresAt(summary: SessionSummary): number | null
   // An abandoned open recorder turn is not fresh work, even if a later picker selection
   // differs from the model that owned the retired grant.
   if (!grant || grant.sessionId !== summary.id || grant.thinkingFailed) return null;
-  return grant.model !== 'other' ? grant.evidenceAt + activityLifetime(grant) : undefined;
+  return grant.evidenceAt + (grant.model === 'pro' ? PRO_ACTIVITY_MS : CHAT_ACTIVE_MS);
 }
 
 async function extendedSilenceWindowFor(conversationId: string, sessionId?: string): Promise<boolean> {
   const grant = activeUntil.get(conversationId);
-  return Boolean(grant && (!sessionId || grant.sessionId === sessionId) && grant.model !== 'other');
+  return Boolean(grant && (!sessionId || grant.sessionId === sessionId) && grant.model === 'pro');
 }
 
 /** Silence requires this exact turn's recorded MCP work and eligible model/Loop policy. */
@@ -5488,7 +5687,7 @@ async function silenceContinuationAllowed(conversationId: string, sessionId?: st
   const pending = goalPendingReplyFor(conversationId);
   if (pending?.silencePro && !loopAfterTurnFor(conversationId)) return false;
   const sourceTurnId = pending ? pending.silenceSourceTurnId :
-    grant?.sessionId === session.id && (grant.model === 'other' || (grant.model === 'pro' && loopAfterTurnFor(conversationId))) ? grant.turnId : null;
+    grant?.sessionId === session.id && (grant.model !== 'pro' || loopAfterTurnFor(conversationId)) ? grant.turnId : null;
   if (!sourceTurnId) return false;
   const starts = await readRecentEvents(session.id, 1, { kinds: ['turn_start'] });
   const start = starts[0];
@@ -5651,7 +5850,7 @@ async function fileSilenceTickets(spent: readonly string[], now: number): Promis
       if (!grant?.turnId || start?.turnId !== grant.turnId) continue;
     } else if (!await silenceContinuationAllowed(conversationId, session.id)) continue;
     if (!grant || activeUntil.get(conversationId) !== grant ||
-        (grant.model !== 'other' && !(grant.model === 'pro' && (handledOnly || loopAfterTurnFor(conversationId)) && (grant.thinkingFailed || now - grant.evidenceAt >= PRO_SILENCE_MS)))) continue;
+        (grant.model === 'pro' && !((handledOnly || loopAfterTurnFor(conversationId)) && (grant.thinkingFailed || now - grant.evidenceAt >= PRO_SILENCE_MS)))) continue;
     if (goalPendingReplyFor(conversationId) || runningToolCalls(conversationId) > 0) continue;
     if (continuationForSession(session.id)) continue;
     // Canonical message replacement leaves sequence gaps; the summary count is not a cursor.
@@ -5666,7 +5865,7 @@ async function fileSilenceTickets(spent: readonly string[], now: number): Promis
         sessionId: session.id,
         silenceSourceTurnId: grant.turnId ?? undefined,
         silencePro: grant.model === 'pro',
-        ...(grant.thinkingFailed || grant.model === 'other' ? { listenUntil: grant.until } : {}),
+        ...(grant.thinkingFailed || grant.model !== 'pro' ? { listenUntil: grant.until } : {}),
         replyId: `silence:${held.token}`,
         turnId,
         eventSeq: boundary.seq,
@@ -5690,7 +5889,7 @@ async function fileSilenceTickets(spent: readonly string[], now: number): Promis
 async function fileSilenceInputTicket(conversationId: string, now: number, listenUntil?: number): Promise<boolean> {
   const grant = activeUntil.get(conversationId);
   const repair = repairsInFlight.get(conversationId);
-  if (!grant?.turnId || (!grant.thinkingFailed && now - grant.evidenceAt < (grant.model === 'other' ? CHAT_SILENCE_MS : PRO_SILENCE_MS)) ||
+  if (!grant?.turnId || (!grant.thinkingFailed && now - grant.evidenceAt < (grant.model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS)) ||
       repair?.reason !== 'silence' || repair.state !== 'done' || repair.sessionId !== grant.sessionId) return false;
   const current = () => activeUntil.get(conversationId) === grant && repairsInFlight.get(conversationId) === repair &&
     !stopRequestedFor(conversationId) && !isChatBlocked(conversationId) &&
@@ -5699,8 +5898,11 @@ async function fileSilenceInputTicket(conversationId: string, now: number, liste
     // publish its existing listening deadline while an unrelated chat is recording;
     // grant identity and the outbox's source/work checks still fence renewed work.
     (observationWritesInFlight === 0 || (grant.thinkingFailed === true && repair.progress?.turnId === grant.turnId));
-  return fileSilenceInput(grant.sessionId, conversationId, grant.turnId, current,
-    grant.thinkingFailed || grant.model === 'other' ? grant.until : listenUntil);
+  if (await fileSilenceInput(grant.sessionId, conversationId, grant.turnId, current,
+    grant.thinkingFailed || grant.model !== 'pro' ? grant.until : listenUntil)) return true;
+  return !grant.thinkingFailed && recoveryInputAllowed(grant.sessionId, conversationId) &&
+    fileRecoveryInput(grant.sessionId, conversationId, grant.turnId, grant.model === 'pro', current,
+      grant.evidenceAt + (grant.model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS) * 1.5);
 }
 
 /**
@@ -5832,6 +6034,13 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
   if (session?.conversationId !== conversationId || isChatBlocked(conversationId) || stopRequestedFor(conversationId) ||
       continuationForSession(sessionId) || supersededSourceConversations().includes(conversationId)) return [];
   const result: import('../shared/recovery.js').RecoveryCountdown[] = [];
+  const recovery = rows.find(row => row.sessionId === sessionId && row.recovery &&
+    (row.state === 'queued' || row.state === 'browser') && row.silenceBoundary);
+  if (recovery?.silenceBoundary && recoveryInputAllowed(sessionId, conversationId)) {
+    result.push({ kind: recovery.silenceBoundary.nativeBusy ? 'native-busy' : 'post-reload',
+      deadline: recovery.silenceBoundary.listenUntil ?? Date.now(), next: 'continue' });
+    return result;
+  }
   if (browserPresent()) {
     const deadlines = [...unattributedIncidents.values()].flatMap(incident => {
       if (incident.pass >= 2) return [];
@@ -5858,19 +6067,19 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
   // turn), restoring normal hidden/timed visibility without a second flag.
   if (owned && !grant.thinkingFailed && !confirmed && !session.activeTurnId &&
       boundary?.kind === 'turn_end' && boundary.outcome === 'completed' && grant.evidenceAt <= boundary.time &&
-      (tabRecoveryWanted(conversationId) || loopAfterTurnFor(conversationId) || queuedAfterTurn)) {
+      (recoveryInputAllowed(sessionId, conversationId) || tabRecoveryWanted(conversationId) || loopAfterTurnFor(conversationId) || queuedAfterTurn)) {
     result.push({ kind: 'silence', deadline: grant.until });
     return result;
   }
   if (owned && !grant.thinkingFailed && grant.model === 'pro' && !confirmed &&
-      (tabRecoveryWanted(conversationId) || loopAfterTurnFor(conversationId) || queuedAfterTurn)) {
+      (recoveryInputAllowed(sessionId, conversationId) || tabRecoveryWanted(conversationId) || loopAfterTurnFor(conversationId) || queuedAfterTurn)) {
     result.push({ kind: 'silence', deadline: grant.until, visibleAt: grant.evidenceAt + PRO_SILENCE_MS / 2 });
     return result;
   }
   // A confirmed reload's listening deadline is not fresh work. Real activity
   // replaces the grant and retires the receipt, withdrawing this row immediately.
   const normalReloadDeadline = confirmed ? (lastBrowserRecoveryAt.get(conversationId) ?? 0) + SILENCE_RELOAD_LISTEN_MS : undefined;
-  const postReloadDeadline = owned && confirmed && !grant.thinkingFailed && grant.model === 'other' &&
+  const postReloadDeadline = owned && confirmed && !grant.thinkingFailed && grant.model !== 'pro' &&
     grant.until === normalReloadDeadline ? grant.until : undefined;
   if (owned && !grant.thinkingFailed && !postReloadDeadline && grant.until > Date.now()) return result;
   const queued = rows.find(row => row.sessionId === sessionId && row.state === 'queued' && row.purpose !== 'decision' &&
@@ -5905,7 +6114,7 @@ interface Repair {
   state: 'queued' | 'handed' | 'done';
   /** Stable identity of the failure/inactivity episode. A new activity stamp mints a new one. */
   episode: string;
-  reason: 'unattributed' | 'assistant-error' | 'no-tab' | 'silence' | 'goal' | 'compaction';
+  reason: 'unattributed' | 'assistant-error' | 'no-tab' | 'silence' | 'goal' | 'compaction' | 'stalled';
   /** Cooldown boundary. The browser is never asked before this instant. */
   notBefore: number;
   /**
@@ -6120,9 +6329,9 @@ async function noteRecoveryObservations(
   // chats on every recovery reload. Only the recorder's per-event acceptance verdict may move
   // this clock. A just-authored opening row covers the narrow pre-turn_start fresh-chat window;
   // replayed/history rows explicitly do not.
-  // A turn may reach the recorder before its picker observation. Unknown is absence
-  // of evidence, not a model choice to pin forever. Resolve it from this exact chat
-  // without treating picker/presence updates as new work or changing a known model.
+  // The picker reports changes, not one selection per turn or transport batch.
+  // Reuse its recorded exact-chat selection and resolve late evidence without
+  // renewing the work clock or changing an already known turn's model.
   const recorded = sessionId ? await getSession(sessionId) : null;
   const ended = observations.findLast(item => item.kind === 'turn_end');
   const thinkingFailed = ended?.outcome === 'failed' && ended.reason === 'thinking_failed' &&
@@ -6138,13 +6347,18 @@ async function noteRecoveryObservations(
     repaired.progress.turnId === ended.turnId && confirmedAt !== undefined ? repaired : null;
   const selected = recorded?.selectedModel;
   const provenModel = selected?.conversationId === conversationId
-    ? isProModel(selected.model, selected.reasoningEffort) ? 'pro' as const : 'unknown' as const
+    ? isProModel(selected.model, selected.reasoningEffort) ? 'pro' as const : 'other' as const
     : 'unknown' as const;
   const unresolved = activeUntil.get(conversationId);
   if (!activity.terminal && unresolved?.model === 'unknown' && unresolved.sessionId === sessionId &&
       recorded?.conversationId === conversationId && recorded.activeTurnId === unresolved.turnId && provenModel !== 'unknown') {
-    grantActivity(conversationId, sessionId!, unresolved.evidenceAt, CHAT_SILENCE_MS,
-      { turnId: unresolved.turnId, model: provenModel });
+    unresolved.model = provenModel;
+    // Enrich identity, not activity. In particular, a replacement page's picker
+    // must not spend or restart the listening window of its acknowledged reload.
+    if (!(repaired?.reason === 'silence' && repaired.state === 'done' && repaired.sessionId === sessionId)) {
+      unresolved.until = unresolved.evidenceAt + (provenModel === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS);
+      armSilenceSweep();
+    }
   }
   if (sessionId && !activity.terminal && activity.toolStartedAt !== undefined) {
     await revokeSilenceInputs(sessionId);
@@ -6187,8 +6401,8 @@ async function noteRecoveryObservations(
           turn = { turnId: item.turnId ?? null, model: selection?.kind === 'model_selection' && selection.model ?
             isProModel(selection.model, selection.reasoningEffort) ? 'pro' : 'other' : provenModel };
         }
-        // A batched journal can contain multiple turns; one picker observation proves only
-        // the next start, never a later turn whose own picker was unavailable.
+        // A batch-local selection applies to its next start. Later starts reuse
+        // the retained session selection, just as separate transport batches do.
         if (item.kind === 'turn_start') selection = undefined;
       }
       grantActivity(conversationId, sessionId, Math.min(Date.now(), activity.at ?? Date.now()), CHAT_SILENCE_MS, turn);
@@ -6215,9 +6429,10 @@ async function noteRecoveryObservations(
   }
   const proTerminal = terminalGrant?.model === 'pro' && (activity.endedTurnId === terminalGrant.turnId ||
     (activity.terminal && !observations.some(item => item.kind === 'turn_end')));
-  const awaitingSilenceRefresh = !!lastEnd &&
-    ['stalled', 'failed', 'unknown', 'interrupted', 'error'].includes(lastEnd) &&
-    !!sessionId && (loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(sessionId));
+  const awaitingSilenceRefresh = !!lastEnd && !!sessionId &&
+    ((lastEnd === 'completed' && recoveryInputAllowed(sessionId, conversationId)) ||
+      (['stalled', 'failed', 'unknown', 'interrupted', 'error'].includes(lastEnd) &&
+        (recoveryInputAllowed(sessionId, conversationId) || loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(sessionId))));
   const mcpTerminal = !thinkingFailed && !terminalGrant?.thinkingFailed && terminalGrant?.turnId && activity.endedTurnId === terminalGrant.turnId && sessionId && activity.terminal &&
     lastEnd !== 'stopped' && await turnHasMcpCall(sessionId, conversationId, terminalGrant.turnId);
   const finalTurn = activity.endedTurnId ?? terminalGrant?.turnId;
@@ -6228,6 +6443,19 @@ async function noteRecoveryObservations(
     (item.state === 'final' || item.final === true));
   const completedFinal = (activity.terminal || observedFinal) && sessionId &&
     await readCompletedFinal(sessionId, conversationId, finalTurn);
+  // A short native generation can start and end in one accepted batch. That is
+  // still owed work when no canonical final arrived; the terminal UI flag must
+  // not prevent the same silence grant that a separately delivered start earns.
+  if (!completedFinal && !terminalGrant && sessionId && ended?.turnId && lastEnd !== 'stopped' &&
+      !thinkingFailed && activity.working && activity.terminal && activity.endedTurnId === ended.turnId &&
+      recoveryInputAllowed(sessionId, conversationId)) {
+    const [work] = await readRecentEvents(sessionId, 1, { kinds: ['user_message', 'assistant_message', 'tool_call', 'page_tool', 'turn_start'] });
+    if (work && (await getSession(sessionId))?.conversationId === conversationId && !activeUntil.has(conversationId)) {
+      grantActivity(conversationId, sessionId, Math.min(Date.now(), work.time), CHAT_SILENCE_MS,
+        { turnId: ended.turnId, model: provenModel });
+      terminalGrant = activeUntil.get(conversationId);
+    }
+  }
   // The ten-/two-minute budget is silence recovery only. Final response evidence
   // consumes it even if a local call is still draining; runningToolCalls separately
   // guards actual send/compaction. Replayed finals cannot consume newer work.
@@ -6238,7 +6466,7 @@ async function noteRecoveryObservations(
     // A completed tool-only response can still acquire its missing final text.
     // Give that accepted completion the ordinary two-minute recovery window;
     // historical replay and the replacement page cannot renew a spent reload.
-    if (lastEnd === 'completed' && terminalGrant.model === 'other' && ended &&
+    if (lastEnd === 'completed' && terminalGrant.model !== 'pro' && ended &&
         !(repaired?.reason === 'silence' && repaired.state === 'done')) {
       terminalGrant.evidenceAt = Math.max(terminalGrant.evidenceAt, Math.min(Date.now(), ended.time));
       terminalGrant.until = terminalGrant.evidenceAt + CHAT_SILENCE_MS;
@@ -6247,7 +6475,7 @@ async function noteRecoveryObservations(
   }
   if (!completedFinal && !thinkingFailed && !mcpTerminal && !awaitingSilenceRefresh && (proTerminal || (activity.terminal && terminalGrant?.model !== 'pro'))) {
     if (proTerminal) endActivity(conversationId);
-    else if (lastEnd === 'unknown' && sessionId && await extendedSilenceWindowFor(conversationId, sessionId)) {
+    else if (lastEnd === 'unknown' && terminalGrant?.model === 'unknown' && terminalGrant.sessionId === sessionId) {
       // Loss of browser completion evidence does not change the last meaningful-work clock.
     } else if (lastEnd === 'failed' && sessionId) grantActivity(conversationId, sessionId, Math.min(Date.now(), activity.at ?? Date.now()));
     else endActivity(conversationId);
@@ -6477,7 +6705,7 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     if (compacting.has(conversationId)) continue;
     if (grant.until > now) continue;
     const pro = await extendedSilenceWindowFor(conversationId, grant.sessionId);
-    const afterTurn = loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(grant.sessionId);
+    const afterTurn = recoveryInputAllowed(grant.sessionId, conversationId) || loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(grant.sessionId);
     if (activeUntil.get(conversationId) !== grant) continue;
     if (afterTurn && runningToolCalls(conversationId) > 0) {
       grant.until = now + GOAL_QUIET_MS;
@@ -6493,10 +6721,10 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
       spent.push(conversationId);
       continue;
     }
-    // Recovery and queued delivery share the same model clock. Missing selection
-    // is not evidence of a normal model, even when no follow-up input is queued.
+    // Only positively identified Pro work earns the longer recovery clock.
+    // Unknown models use two minutes plus one minute after the confirmed refresh.
     // Thinking failed keeps its separately proven immediate refresh authority.
-    if ((afterTurn || tabRecoveryWanted(conversationId)) && grant.model !== 'other' && !grant.thinkingFailed && now < grant.evidenceAt + PRO_SILENCE_MS) {
+    if ((afterTurn || tabRecoveryWanted(conversationId)) && grant.model === 'pro' && !grant.thinkingFailed && now < grant.evidenceAt + PRO_SILENCE_MS) {
       grant.until = grant.evidenceAt + PRO_SILENCE_MS;
       deferred = true;
       continue;
@@ -6504,8 +6732,8 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     // Not a chat the user wants brought back: its silence is spent the same way, without the
     // reload that would otherwise be its one chance.
     if (!grant.thinkingFailed && !tabRecoveryWanted(conversationId) && !afterTurn) {
-      if (pro && now < grant.evidenceAt + activityLifetime(grant)) {
-        grant.until = grant.evidenceAt + activityLifetime(grant);
+      if (pro && now < grant.evidenceAt + PRO_ACTIVITY_MS) {
+        grant.until = grant.evidenceAt + PRO_ACTIVITY_MS;
         deferred = true;
         continue;
       }
@@ -6514,8 +6742,8 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     }
     const held = repairsInFlight.get(conversationId);
     if (held?.state === 'done' && !TURN_SCOPED_REPAIRS.has(held.reason)) {
-      if (!grant.thinkingFailed && pro && now < grant.evidenceAt + activityLifetime(grant)) {
-        grant.until = grant.evidenceAt + activityLifetime(grant);
+      if (!grant.thinkingFailed && pro && now < grant.evidenceAt + PRO_ACTIVITY_MS) {
+        grant.until = grant.evidenceAt + PRO_ACTIVITY_MS;
         deferred = true;
         continue;
       }
@@ -6543,7 +6771,7 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     if (queueBrowserRecovery(conversationId, grant.sessionId, `silence:${grant.until}`, 'silence', 0, now)) {
       queued = true;
       logInfo(
-        `bridge: active chat silent for ${grant.model === 'other' ? 'two' : 'ten'} minutes — asking the browser to reload ${conversationId} once`
+        `bridge: active chat silent for ${grant.model === 'pro' ? 'ten' : 'two'} minutes — asking the browser to reload ${conversationId} once`
       );
     }
   }
@@ -6900,6 +7128,50 @@ async function queueMissingTab(conversationId: string, working: boolean, now = D
   const wentAt = agent?.detachedAt ?? session.endedAt ?? now;
   if (queueBrowserRecovery(conversationId, session.id, `no-tab:${wentAt}`, 'no-tab', 0, now)) {
     logInfo(`bridge: ${name} has no tab — asking the browser to open the exact chat once`);
+  } else {
+    declined('a browser action for it is already pending');
+  }
+}
+
+/**
+ * One stalled-tab report from the extension: a tab Chrome discarded (Memory Saver) or froze
+ * (Energy Saver) while keeping its URL, so it answers every tab query with a page that is gone
+ * or suspended.
+ *
+ * The decision is the missing-tab one minus the close side effects: the shell stays open, no
+ * run ends, and nothing is marked ended. The service worker reloads the exact tab — an action
+ * Chrome performs from the worker regardless of the page's state — which is also why this
+ * repair, and not prevention, is the answer: `autoDiscardable` covers discarding only, and no
+ * extension API exempts a tab from freezing. A compaction source is owed the reload on its
+ * ticket's own evidence, exactly like its ordinary pickups. Chat-scoped like `no-tab`: real
+ * activity from the revived page retires it, and the shared per-conversation cooldown bounds a
+ * tab Chrome keeps re-suspending.
+ */
+async function queueStalledTabRecovery(conversationId: string, now = Date.now()): Promise<void> {
+  const agent = agentInfoForOwnedConversation(conversationId);
+  const session = await findSessionByConversation(conversationId, { requireUnique: true });
+  const name = agent?.id ?? conversationId;
+  const declined = (why: string): void => {
+    logInfo(`bridge: ${name} is a stalled browser tab — not reloaded: ${why}`);
+  };
+  // A chat with no session is not this app's chat; its tab sleeping is nobody's business here.
+  if (!session) return;
+  const compacting = pendingContinuations().some((entry) => entry.from === conversationId);
+  if (!compacting && !tabRecoveryWanted(conversationId)) return declined('tab recovery is off for this chat');
+  if (agent && agent.state !== 'detached' && agent.state !== 'active' && agent.state !== 'waking') {
+    return declined(`its ${agent.role} slot is ${agent.state}, not working`);
+  }
+  if (!agent && !compacting && !goalActiveFor(conversationId) && (session.toolCalls ?? 0) === 0) {
+    return declined('it has never called a tool');
+  }
+  const working =
+    liveConversations().some((entry) => entry.conversationId === conversationId && (entry.generating || Boolean(entry.activeTurnId))) ||
+    (activeUntil.get(conversationId)?.until ?? 0) > now;
+  if (!working && !compacting && agent?.role !== 'worker' && !(goalActiveFor(conversationId) && goalPendingReplyFor(conversationId))) {
+    return declined('no turn is running in it');
+  }
+  if (queueBrowserRecovery(conversationId, session.id, `stalled:${now}`, 'stalled', 0, now)) {
+    logInfo(`bridge: ${name} is a stalled browser tab — asking the browser to reload the exact chat once`);
   } else {
     declined('a browser action for it is already pending');
   }
@@ -7325,11 +7597,11 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | nu
       if (repair.reason === 'silence') {
         const failedGrant = activeUntil.get(conversationId);
         if (failedGrant?.thinkingFailed) failedGrant.until = Date.now() + 5 * 60_000;
-        else if (failedGrant?.model === 'other') failedGrant.until = Date.now() + SILENCE_RELOAD_LISTEN_MS;
+        else if (failedGrant && failedGrant.model !== 'pro') failedGrant.until = Date.now() + SILENCE_RELOAD_LISTEN_MS;
         // Persist the next existing instruction as soon as this exact refresh is
         // acknowledged. Native readiness and the normal Send receipt still gate delivery.
         const inputFiled = await fileSilenceInputTicket(conversationId, Date.now());
-        if (!inputFiled && (loopAfterTurnFor(conversationId) || failedGrant?.model === 'other')) await fileSilenceTickets([conversationId], Date.now());
+        if (!inputFiled && (loopAfterTurnFor(conversationId) || (failedGrant && failedGrant.model !== 'pro'))) await fileSilenceTickets([conversationId], Date.now());
         // Ordinary models listen for one minute from the confirmed refresh;
         // failed views retain five minutes. These reuse the same grant and tickets.
         // Worker retirement retains its separate recovery rules below.
@@ -7339,7 +7611,7 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | nu
           armSilenceSweep();
         } else if (pro) {
           if (grant && activeUntil.get(conversationId) === grant) {
-            grant.until = Math.max(Date.now(), grant.evidenceAt + activityLifetime(grant));
+            grant.until = Math.max(Date.now(), grant.evidenceAt + PRO_ACTIVITY_MS);
             armSilenceSweep();
           }
         } else if (grant && (goalActiveFor(conversationId) || inputFiled || !goalWorkerChat(conversationId))) {
@@ -7392,6 +7664,7 @@ function repairReason(repair: Repair): string {
     unattributed: 'missing connector attribution',
     'assistant-error': 'an interrupted response',
     'no-tab': 'a missing browser tab',
+    stalled: 'a suspended browser tab',
     silence: 'an unresponsive open turn',
     goal: 'a goal reply nothing collected',
     compaction: 'an uncollected compaction ticket'
@@ -8405,6 +8678,7 @@ export async function restoreCommands(): Promise<void> {
 
 /** Test seam. */
 export function resetBridgeForTests(): void {
+  clearCompanionDiagnostics();
   for (const command of commands) if (command.timer) clearTimeout(command.timer);
   if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
   browserPresenceTimer = null;

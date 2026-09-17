@@ -17951,3 +17951,60 @@ describe('stable final eligibility during compaction custody', () => {
     if (busy) expect(live.sent.filter(message => message.type === 'goal_draft')).toEqual([]);
   });
 });
+
+describe('ordinary Continue native recovery', () => {
+  const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const id = '11111111-2222-4333-8444-555555555555';
+  const text = 'Continue until fully finished. Tur Tur Sahur.';
+  it.each(['busy', 'idle', 'draft', 'revoked', 'became-idle'] as const)('uses Stop only for an unchanged active page (%s)', async scenario => {
+    live = await harness(`https://chatgpt.com/c/${chat}`, {
+      desktop_input: async message => {
+        if (message.recoveryAction === 'stop' && scenario === 'became-idle') stopGenerating(live!.document);
+        if (message.recoveryAction === 'stopped') {
+          expect(await live!.runtimeMessage({ type: 'clf-recovery-reload-check', id, owner: 'input-owner' })).toEqual({ safe: true });
+          expect(await live!.runtimeMessage({ type: 'clf-recovery-reload-check', id, owner: 'different-owner' })).toEqual({ safe: false });
+        }
+        return { ok: true, data: message.recoveryAction || message.authorize || message.ack || message.fail
+          ? { ok: !(message.recoveryAction === 'stop' && scenario === 'revoked') }
+          : { input: { id, owner: 'input-owner', text, model: null, reasoningEffort: null,
+              recovery: { questionId: 'm-source', phase: 'ready' }, silenceBoundary: { turnId: 'source-turn' } } } };
+      }
+    });
+    userTurn(live.document, 'source', 'Complete the task');
+    if (scenario !== 'idle') startGenerating(live.document, { send: false });
+    live.hook.observe(); await settle();
+    const stop = vi.fn(() => stopGenerating(live!.document));
+    const stopButton = live.document.querySelector('[data-testid="stop-button"]');
+    if (stopButton) {
+      Object.defineProperty(stopButton, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
+      stopButton.addEventListener('click', stop);
+    }
+    const send = vi.fn(() => {
+      userTurn(live!.document, 'continued', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', send);
+    if (scenario === 'draft') live.document.querySelector('#prompt-textarea')!.textContent = 'Keep my draft';
+    await live.runtimeMessage({ type: 'clf-desktop-input', id, conversationId: chat, silenceTurnId: 'source-turn',
+      recovery: { questionId: 'm-source', stop: true } });
+    expect(stop).toHaveBeenCalledTimes(scenario === 'busy' ? 1 : 0);
+    expect(send).toHaveBeenCalledTimes(scenario === 'idle' ? 1 : 0);
+    expect(live.sent.filter(message => message.recoveryAction === 'stopped')).toHaveLength(
+      scenario === 'busy' || scenario === 'became-idle' ? 1 : 0);
+    if (scenario === 'busy') expect(emitted(live.sent, 'turn_end').some(row => row.event.outcome === 'stopped')).toBe(false);
+    if (scenario === 'draft') expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe('Keep my draft');
+  });
+
+  it('asks for the extra wait without stopping a still-active initial offer', async () => {
+    live = await harness(`https://chatgpt.com/c/${chat}`, { desktop_input: () => ({ ok: true, data: { ok: true } }) });
+    userTurn(live.document, 'source', 'Complete the task');
+    startGenerating(live.document, { send: false });
+    live.hook.observe(); await settle();
+    const stop = vi.fn(); live.document.querySelector('[data-testid="stop-button"]')!.addEventListener('click', stop);
+    await live.runtimeMessage({ type: 'clf-desktop-input', id, conversationId: chat, silenceTurnId: 'source-turn',
+      recovery: { questionId: 'm-source', stop: false } });
+    expect(stop).not.toHaveBeenCalled();
+    expect(live.sent).toContainEqual(expect.objectContaining({ type: 'desktop_input', silenceBusyTurnId: 'source-turn' }));
+  });
+});

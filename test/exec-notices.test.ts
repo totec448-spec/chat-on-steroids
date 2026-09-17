@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const processes = vi.hoisted(() => new Map<number, number | null>());
 vi.mock('../src/main/codex/manager.js', () => ({ unifiedExecManager: {
+  setProcessReleaseListener: () => {},
   backgroundState: (owned: Set<number>) => ({
     running: [...processes].filter(([id, exit]) => owned.has(id) && exit === null).map(([id]) => id),
     exitedUnread: [...processes].filter(([id, exit]) => owned.has(id) && exit !== null).map(([processId, exitCode]) => ({ processId, exitCode }))

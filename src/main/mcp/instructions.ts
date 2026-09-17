@@ -12,7 +12,9 @@
 
 import { LAUNCHES_WINDOWS_POWERSHELL_5 } from '../codex/tool-specs.js';
 import { CODING_INSTRUCTIONS } from './coding-instructions.js';
-import { listSkills, skillCatalogInstructions } from '../skills.js';
+import { skillCatalogInstructions } from '../skills.js';
+import { listSkillLibrary, skillLibraryInstructions } from '../skill-library.js';
+import type { SkillLibrary } from '../../shared/skills.js';
 import { withManagedSkills } from '../skill-access.js';
 import { canAddCodeMode, CODE_MODE_INSTRUCTIONS } from './code-mode-tool.js';
 import { pluginManager } from '../plugins/manager.js';
@@ -24,10 +26,11 @@ import { surfaceDefinition, type SurfaceId } from './surfaces.js';
 export function serverInstructions(
   ctx: ToolContext,
   surface: SurfaceId = 'core',
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  skills = skillCatalogInstructions()
 ): string {
   if (surface === 'plugins') return 'External MCP tools enabled by the user in Chat On Steroids. Each tool retains its upstream schema and annotations. External servers run with their own operating-system or service permissions; CoS approved folders do not sandbox them. Use only for the user\'s requested task. A failed or disconnected call may already have taken effect: never automatically retry a mutation after an ambiguous failure. Disabled tools require the user to re-enable them in Settings. Core and Desktop are separate connectors.' + (canAddCodeMode(pluginManager.tools()) ? '\n\n' + CODE_MODE_INSTRUCTIONS : '');
-  return surface === 'desktop' ? [browserInstructions(), ...(platform === 'win32' || platform === 'darwin' ? [desktopInstructions(ctx, platform)] : [`Files, patches and shell commands live in the separate "${surfaceDefinition('core').connectorName}" connector.`, CODE_MODE_INSTRUCTIONS, ...userInstructions()])].join('\n\n') : coreInstructions(ctx, platform);
+  return surface === 'desktop' ? [browserInstructions(), ...(platform === 'win32' || platform === 'darwin' ? [desktopInstructions(ctx, platform)] : [`Files, patches and shell commands live in the separate "${surfaceDefinition('core').connectorName}" connector.`, CODE_MODE_INSTRUCTIONS, ...userInstructions()])].join('\n\n') : coreInstructions(ctx, platform, skills);
 }
 
 function browserInstructions(): string {
@@ -43,11 +46,11 @@ function browserInstructions(): string {
 }
 
 /** Same complete source as MCP initialization, evaluated when a user send is prepared. */
-export async function currentCoreInstructions(): Promise<string> {
-  await listSkills();
+export async function currentCoreInstructions(library?: SkillLibrary): Promise<string> {
+  const skills = library ?? await listSkillLibrary();
   const config = getConfig();
   return serverInstructions(withManagedSkills({ roots: config.roots, caps: effectiveCapabilities(config),
-    readOnly: config.readOnly, privacyScreenshots: config.ui.privacyScreenshots }), 'core', process.platform);
+    readOnly: config.readOnly, privacyScreenshots: config.ui.privacyScreenshots }), 'core', process.platform, skillLibraryInstructions(skills));
 }
 
 /**
@@ -67,7 +70,7 @@ function userInstructions(): string[] {
   return ['', "The user's own standing instructions for this connector:", text.slice(0, MAX_MCP_INSTRUCTIONS_CHARS)];
 }
 
-function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
+function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: string): string {
   const config = getConfig();
   const sessionTools = ctx.sessionTools ?? config.sessions.record;
   const agentTools = ctx.agentTools ?? config.multiAgent.enabled;
@@ -80,7 +83,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     : 'None yet.';
   const lines = [
     CODING_INSTRUCTIONS,
-    skillCatalogInstructions(),
+    skills,
     '',
     '# Local tools',
     `Use the connected tools as needed: ${surfaceDefinition('core').connectorName} for files, terminal, plans and workers` +
@@ -88,7 +91,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     `; ${surfaceDefinition('plugins').connectorName} for enabled external apps and services.`,
     `Host: ${host}. Roots: ${roots}`,
     ctx.readOnly ? 'The local tools are read-only.' : 'Use the tools listed in this conversation.',
-    'Report the specific tool failure, not an inferred global restriction. Missing chat identity, an unavailable process session_id, or an output limit does not establish Read-only mode. Successful patches and commands remain completed work; continue other authorized work and never rerun a completed job just to recover its terminal.',
+    'Report the specific tool failure. Missing identity, an unavailable session_id or an output limit does not mean Read-only mode. Successful patches and commands stay complete; continue without replaying work to recover a terminal.',
     'An approved root may be the parent of the project. Use the exact project path and keep every intermediate folder; do not guess a missing project level.',
     'Paths may be virtual under the roots above or absolute native paths inside them. Once this chat has a project, later paths may be relative to it. Use a full path to select another project.',
   ];
@@ -99,14 +102,14 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
   if (caps.read) lines.push('view_image inspects a local image. Use it when visual evidence matters.');
   if (caps.command) {
     lines.push(
-      'Use rg or rg --files for repository searches; if unavailable, use the next best tool.',
-      'exec_command runs git, builds, tests and shell commands. Batch related checks with exec_command cmds: [...]; they run sequentially in one shell with per-command output and exit codes.',
-      'Set workdir to the project. workdir accepts virtual paths; paths inside cmd are not translated, so use paths relative to workdir or native filesystem paths.',
-      'A running command returns a session_id. Continue that same process with write_stdin; inspect its terminal result before reporting completion. After a transient wait failure, keep the same session instead of starting replacement work.',
-      'Output is capped. When truncated, narrow the command or read the relevant region rather than repeating the same request.'
+      'Use rg or rg --files for searches; if unavailable, use the next best tool. Prefer rg -g \'*.ts\' src over shell globs.',
+      'exec_command runs shell commands. Batch related checks with exec_command cmds: [...]: sequentially in one shell, with per-command output and exit codes.',
+      'Set workdir to the project. Virtual paths work there, not inside cmd; use relative or native paths inside cmd.',
+      'write_stdin accepts session_id (running) or completed_session_id (finished). Completed reads replay retained output without rerunning work. Inspect exit/output: failed tests are program feedback; benign_exit marks a proven expected non-zero result.',
+      'If output is truncated, narrow the command or read the relevant region.'
     );
     if (windows) lines.push(
-      'PowerShell does not expand * or ? for native programs: pass ripgrep filename patterns as -g \'*.go\', and expand other globs with Get-ChildItem.',
+      'PowerShell does not expand * or ? for native programs. Regex \\x22 matches a double quote. Use script files for complex JavaScript; nested -Command/-e can corrupt quotes or expand variables. Pipe loops as @(foreach (...) { ... }) | Format-Table.',
       'Bare rg/ripgrep is bound to the app’s bundled ripgrep. In Windows PowerShell, omit 2>&1 on native programs: stderr is already captured and that redirect can leave $? false after exit 0.',
       ...(LAUNCHES_WINDOWS_POWERSHELL_5 ? ['This is Windows PowerShell 5.1, without && or ||. Use cmds or A; if ($?) { B }.'] : [])
     );
@@ -128,7 +131,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     '',
     '# Workers',
     'Use agents for independent subtasks while continuing useful work yourself. Reuse a sleeping worker for related follow-up work before spawning a replacement. Only terminal workers whose context is full need replacing.',
-    'When spawning workers, omit model and reasoning_effort unless the user explicitly requests an override for that setting. The app applies the user\'s saved worker defaults automatically; you do not need their concrete values and must not ask the user to choose or confirm them before spawning.',
+    'When spawning workers, omit model and reasoning_effort unless the user explicitly requests an override. The app uses saved worker defaults; do not ask the user to choose or confirm them.',
     'A worker sees only what you send it. In spawn, put shared repository/folder instructions, constraints and validation requirements in context once; put the objective and assigned files in each task. Explicitly say what each worker may change. Do not repeat the shared context in every task.',
     'Use action=message to steer a worker; batch messages when sending several. Worker reports arrive with tool results. Check their findings and changes before relying on them.',
     'Workers communicate with the prime, keep working while replies are pending, and use action=finish when done with RESULT / CHANGES / VALIDATION / BLOCKERS. A finished reusable worker sleeps and can be messaged again.'

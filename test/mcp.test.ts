@@ -2074,6 +2074,30 @@ describe('apply_patch', () => {
     ctx.caps = withCaps({ create: true, edit: true, move: true, deleteFile: true });
   });
 
+  it.each([true, false])('returns mismatch guidance with source excerpts only under Read permission (%s)', async read => {
+    ctx.caps = withCaps({ read, edit: true });
+    const original = 'uniqueAnchor();\nactualSourceOnly();\n';
+    await fs.writeFile(path.join(approved, 'diagnostic.txt'), original);
+    await fs.writeFile(path.join(approved, 'unchanged.txt'), 'before\n');
+    const reply = await core('tools/call', {
+      name: 'apply_patch',
+      arguments: { patch: [
+        '*** Begin Patch', '*** Update File: /workspace/unchanged.txt', '@@', '-before', '+after',
+        '*** Update File: /workspace/diagnostic.txt', '@@', ' uniqueAnchor();', '-guessedSource();', '+replacement();',
+        '*** End Patch'
+      ].join('\n') }
+    });
+    expect(reply.body.result?.isError).toBe(true);
+    const text = textOf(reply);
+    expect(text).toContain('Use the current file text as patch context');
+    expect(text).toContain('/workspace/diagnostic.txt');
+    expect(text).not.toContain(approved);
+    expect(text.includes('actualSourceOnly();')).toBe(read);
+    expect(text.includes('Source excerpt from the patch verification snapshot')).toBe(read);
+    expect(await fs.readFile(path.join(approved, 'diagnostic.txt'), 'utf8')).toBe(original);
+    expect(await fs.readFile(path.join(approved, 'unchanged.txt'), 'utf8')).toBe('before\n');
+  });
+
   it('resolves later hunks against files created earlier in the same patch', async () => {
     const reply = await core('tools/call', {
       name: 'apply_patch',
@@ -3374,6 +3398,24 @@ describe('exec sessions belong to the chat that opened them', () => {
     const after = await asChat('wfr_background_owner', 'read', { paths: ['/workspace/src/app.ts'] });
     expect(textOf(after)).not.toContain(`Background session ${sessionId}`);
     expect(unifiedExecManager.exitedUnread(owned)).toEqual([]);
+    const reread = await asChat('wfr_background_owner', 'write_stdin', { session_id: sessionId, chars: '' });
+    expect(failed(reread), textOf(reread)).toBe(false);
+    expect(textOf(reread)).toContain('Retained output');
+    expect(textOf(reread)).toContain('background-e2e-once');
+    expect(textOf(reread)).toContain('Process exited with code 7');
+    const forbidden = await asChat('wfr_background_other', 'write_stdin', { session_id: sessionId, chars: '' });
+    expect(failed(forbidden)).toBe(true);
+    expect(textOf(forbidden)).not.toContain('background-e2e-once');
+    const direct = await asChat('wfr_background_owner', 'exec_command', {
+      cmd: IS_WINDOWS ? "Write-Output 'direct-result'; exit 0" : "printf '%s\\n' direct-result",
+      workdir: '/workspace', yield_time_ms: 10000
+    });
+    expect(failed(direct), textOf(direct)).toBe(false);
+    const completedId = Number(textOf(direct).match(/Completed session ID: (\d+)/)?.[1]);
+    expect(Number.isInteger(completedId)).toBe(true);
+    const directRead = await asChat('wfr_background_owner', 'write_stdin', { session_id: completedId, chars: '' });
+    expect(failed(directRead), textOf(directRead)).toBe(false);
+    expect(textOf(directRead)).toContain('direct-result');
   });
 
   it('reoffers completed output after the real HTTP connection closes before publication', async () => {

@@ -66,3 +66,13 @@ it.each(['queue', 'goal', 'loop'] as const)('names %s as the next step without c
   expect(host.textContent).toContain(`Reloaded · next: ${next === 'queue' ? 'Queued message' : next === 'goal' ? 'Goal' : 'Loop'}`);
   expect(host.textContent).toContain('Check in 1:00');
 });
+
+it('projects the conditional Continue deadline and never claims delivery at zero', () => {
+  const countdown = { kind: 'native-busy' as const, next: 'continue' as const, deadline: 60_000 };
+  renderRecoveryCountdowns(host, [countdown], 0);
+  expect(host.textContent).toContain('Automatic Continue');
+  expect(host.textContent).toContain('Continue in 1:00');
+  renderRecoveryCountdowns(host, [countdown], 60_000);
+  expect(host.textContent).toContain('Preparing Continue…');
+  expect(host.textContent).not.toContain('sent');
+});

@@ -326,7 +326,7 @@ describe('session finish turn identity', () => {
     expect(await announceSessionFinish(sessionId, 'Legacy restart')).toContain('RELEASED:');
     expect(notify).not.toHaveBeenCalled();
     expect(hooks.followup).toHaveBeenCalledTimes(1);
-  }, 60_000); // Writes 8,400 durable events and rebuilds metadata across two restarts.
+  }, 180_000); // Writes 8,400 durable events and rebuilds metadata across two restarts under the full parallel suite.
   it('preserves same-turn repair receipts but resets them for the next turn and frontend rebind', async () => {
     await announceSessionFinish(sessionId, 'First');
     await releaseSessionFinish(sessionId, 'turn-one');

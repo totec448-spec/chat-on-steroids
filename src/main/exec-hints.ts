@@ -452,6 +452,9 @@ export function statusDeterminingProgram(command: string): string {
  */
 const SHELL_REFUSED = new RegExp(
   [
+    // zsh can return 1 before rg starts (unmatched glob/redirection). A path-qualified
+    // search alone therefore cannot prove that exit 1 means "no matches" on POSIX.
+    String.raw`^\s*(?:[^\s:]*\/)?(?:-?bash|-?zsh|dash|ksh|sh):`,
     String.raw`^\s*At line:\d+ char:\d+`,
     String.raw`The token '[^']*' is not a valid statement separator`,
     String.raw`ParserError`,
@@ -777,7 +780,7 @@ function bashDoubleQuotedRegions(command: string): QuotedRegion[] | null {
 }
 
 /**
- * Re-quotes a bash-style escaped-quote argument into the one form that survives PowerShell.
+ * Repairs narrow bash-style escaped-quote arguments for PowerShell.
  *
  * The measured failure, twice in one session: a model writes
  * `rg -n "a|state === \"starting" src`, PowerShell reads the backslash as an ordinary
@@ -790,12 +793,10 @@ function bashDoubleQuotedRegions(command: string): QuotedRegion[] | null {
  * then corrupt the argument on its way to a native program. Measured on this machine, passing
  * an argument written with a doubled quote reaches the child as one argument with the quote
  * dropped and the following argument swallowed: `argc=1, arg[0]=<state === starting second>`.
- * Windows PowerShell 5.1 does not re-escape an embedded quote when it builds a child's command
- * line, so the only spelling that arrives intact is a literal backslash-quote in the argument
- * text, which CommandLineToArgvW then unescapes on the other side. The caller's backslash-quote
- * was therefore already right; only the quotes around it were wrong. So this changes the
- * enclosing double quotes to single quotes and leaves the body byte for byte, doubling any
- * apostrophe inside it because that is how a single-quoted PowerShell string spells one.
+ * Re-quoting with single quotes and retaining backslash-quote works for some native arguments,
+ * but Windows PowerShell 5.1 can still split them when whitespace follows the embedded quote.
+ * Proven ripgrep regex patterns therefore spell that quote as \x22;
+ * fixed strings and PCRE quoted regions do not acquire regex escapes.
  *
  * It acts only where all three of these hold, and does nothing at all otherwise:
  *
@@ -825,17 +826,42 @@ export function repairPowerShellQuoting(cmd: string, shellType: ShellType): Norm
   const regions = bashDoubleQuotedRegions(cmd);
   if (regions === null) return { cmd, notes: [] };
 
+  // Same offsets and bash-intended quote boundaries, for inspecting flags with the
+  // small PowerShell tokenizer. Escaped quotes in another pattern must not conceal
+  // a later -F, and a pipeline's Select-Object -First must not look like rg's -F.
+  const shapeParts: string[] = [];
+  let shapeCursor = 0;
+  for (const region of regions) {
+    shapeParts.push(cmd.slice(shapeCursor, region.open + 1), region.body.replace(/\\"/g, '__'));
+    shapeCursor = region.close;
+  }
+  shapeParts.push(cmd.slice(shapeCursor));
+  const shellShape = shapeParts.join('');
+
   let out = '';
   let cursor = 0;
   let repaired = 0;
+  let regexQuotes = false;
   for (const region of regions) {
     if (!region.body.includes('\\"')) continue;
     if (powerShellBalanced && !isRipgrepPatternRegion(cmd, region)) continue;
     // Interpolation, an escape this reading does not model, or a backslash whose meaning
     // differs between the two shells. Any of them makes the move lossy; leave it to the hint.
     if (/[$`]|\\\\/.test(region.body)) continue;
+    // PowerShell 5.1 can still split a single-quoted native argument at whitespace
+    // AFTER an embedded \". Merely changing the outer quotes does not repair it.
+    // In rg's proven regex slot, \x22 denotes the same literal quote without a
+    // native quote round trip (and works with modern pwsh too). Fixed-string mode
+    // may appear after the pattern; never substitute regex syntax in that mode.
+    const suffix = splitTopLevel(shellShape.slice(region.close + 1), [';', '|', '&&', '||', '\n'])[0] ?? '';
+    const patternCommand = `${bashSegmentPrefix(shellShape, region.open) ?? ''} ${suffix}`;
+    const regexPattern = isRipgrepPatternRegion(cmd, region) && !/\\[QE]/.test(region.body) &&
+      !/[`$#]/.test(patternCommand) &&
+      !tokenize(patternCommand).some(token => token.value === '--fixed-strings' || /^-[^-]*F/.test(token.value));
+    const body = regexPattern ? region.body.replace(/\\"/g, '\\x22') : region.body;
+    regexQuotes ||= regexPattern;
     out += cmd.slice(cursor, region.open);
-    out += `'${region.body.replace(/'/g, "''")}'`;
+    out += `'${body.replace(/'/g, "''")}'`;
     cursor = region.close + 1;
     repaired++;
   }
@@ -846,15 +872,9 @@ export function repairPowerShellQuoting(cmd: string, shellType: ShellType): Norm
   return {
     cmd: out,
     notes: [
-      'A backslash does not escape a quote in PowerShell, only a backtick does, so the ' +
-        'double-quoted argument ended at that backslash and would have been split, parsed as ' +
-        'PowerShell code, or sent to the native program with a corrupted value. The argument ' +
-        'was re-quoted with single quotes, ' +
-        'which is the spelling that works here. The backslash before the quote is correct and ' +
-        'has been kept: a literal quote only survives the trip to a native program if it ' +
-        'arrives backslash-escaped, and the two escapes PowerShell accepts inside double ' +
-        'quotes deliver it stripped and swallow the argument after it. Write patterns ' +
-        'containing quotes in single quotes.'
+      'PowerShell does not use backslash to escape quotes. Re-quoted the affected argument with single quotes.' +
+        (regexQuotes ? ' In ripgrep regex patterns, literal double quotes use \\x22 to preserve one native argument on Windows PowerShell and pwsh.' :
+          ' Native embedded-quote handling also depends on the shell; use a script file for complex code arguments.')
     ]
   };
 }
@@ -1423,6 +1443,13 @@ export function execRecoveryHints(
   const powershell = shellType === 'powershell';
   const cmd = shellType === 'cmd';
 
+  if (shellType === 'zsh' && /^\s*(?:[^\s:]*\/)?-?zsh:(?:\d+:)?\s*no matches found:/im.test(outputText)) {
+    hints.push(
+      'zsh rejected an unmatched filename glob before launching that command. For ripgrep, use ' +
+      '`rg -g \'<glob>\' <existing-directory>` so rg handles the filter. Earlier statements may already have run.'
+    );
+  }
+
   if (/fatal: not a git repository/i.test(outputText)) {
     hints.push(
       'That folder is not a git repository, so no git command that needs one will work there. ' +
@@ -1487,8 +1514,8 @@ export function execRecoveryHints(
     hints.push(
       'PowerShell ended the double-quoted argument at the backslash-quote inside it — a backslash escapes nothing in ' +
         'PowerShell — and handed the rest of the text to the cmdlet as extra positional arguments, which it refused. ' +
-        'Put a pattern that contains a quote in single quotes, doubling any apostrophe; keep the backslash before the ' +
-        'quote only when a native program should receive it.'
+        'For an rg regex, use single quotes and \\x22 for the literal double quote; double any apostrophe. ' +
+        'Use a script file for complex native arguments: embedded-quote handling differs between PowerShell versions.'
     );
   }
 
@@ -1496,11 +1523,9 @@ export function execRecoveryHints(
     hints.push(
       'PowerShell refused that line at a quote and ran none of it, including any earlier ' +
         'statement on the same line. A backslash is not an escape character in PowerShell, so ' +
-        'a backslash-quote inside a double-quoted argument ends the argument there. Put a ' +
-        'pattern that contains a quote in single quotes and keep the backslash before the ' +
-        'quote, doubling any apostrophe: a literal quote reaches a native program only when it ' +
-        'arrives backslash-escaped. Passing each alternative as its own -e argument avoids the ' +
-        'question entirely.'
+        'a backslash-quote inside a double-quoted argument ends the argument there. For an rg regex, ' +
+        'use single quotes and \\x22 for the literal double quote; double any apostrophe. ' +
+        'Use a script file for complex native arguments: embedded-quote handling differs between PowerShell versions.'
     );
   }
 
