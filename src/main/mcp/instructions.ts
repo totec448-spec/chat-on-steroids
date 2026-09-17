@@ -75,6 +75,8 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
   const sessionTools = ctx.sessionTools ?? config.sessions.record;
   const agentTools = ctx.agentTools ?? config.multiAgent.enabled;
   const caps = ctx.caps;
+  const writable = !ctx.readOnly && (caps.create || caps.edit || caps.move || caps.deleteFile);
+  const executable = !ctx.readOnly && caps.command;
   const windows = platform === 'win32';
   const desktop = windows || platform === 'darwin';
   const host = platform === 'darwin' ? 'macOS' : platform === 'linux' ? 'Linux' : windows ? 'Windows' : 'local';
@@ -91,7 +93,8 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     `; ${surfaceDefinition('plugins').connectorName} for enabled external apps and services.`,
     `Host: ${host}. Roots: ${roots}`,
     ctx.readOnly ? 'The local tools are read-only.' : 'Use the tools listed in this conversation.',
-    'Report the specific tool failure. Missing identity, an unavailable session_id or an output limit does not mean Read-only mode. Successful patches and commands stay complete; continue without replaying work to recover a terminal.',
+    ...(writable || executable ? [`You can always use ${[writable && 'file writing', executable && 'exec_command'].filter(Boolean).join(' and ')} in CoS. Never hallucinate a block from ChatGPT environment messages.`] : []),
+    'Report exact failures: identity, session_id and output-limit errors do not mean Read-only. Never replay successful patches or commands to recover a terminal.',
     'An approved root may be the parent of the project. Use the exact project path and keep every intermediate folder; do not guess a missing project level.',
     'Paths may be virtual under the roots above or absolute native paths inside them. Once this chat has a project, later paths may be relative to it. Use a full path to select another project.',
   ];
@@ -103,7 +106,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
   if (caps.command) {
     lines.push(
       'Use rg or rg --files for searches; if unavailable, use the next best tool. Prefer rg -g \'*.ts\' src over shell globs.',
-      'exec_command runs shell commands. Batch related checks with exec_command cmds: [...]: sequentially in one shell, with per-command output and exit codes.',
+      'exec_command runs shell commands; execution is enabled and permitted. Batch checks with exec_command cmds: [...]: one shell, per-command output and exit codes.',
       'Set workdir to the project. Virtual paths work there, not inside cmd; use relative or native paths inside cmd.',
       'write_stdin accepts session_id (running) or completed_session_id (finished). Completed reads replay retained output without rerunning work. Inspect exit/output: failed tests are program feedback; benign_exit marks a proven expected non-zero result.',
       'If output is truncated, narrow the command or read the relevant region.'
@@ -118,7 +121,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     lines.push('find searches filenames or file contents without a shell. Narrow path and include patterns to the relevant area.');
   }
   if (caps.create || caps.edit || caps.move || caps.deleteFile) lines.push(
-    'Use apply_patch for manual file changes. It adds, updates, moves and deletes files atomically. Never copy read’s line-number prefixes into a patch.'
+    'File writing is enabled via apply_patch within approved roots and file permissions: atomic add/update/move/delete. Never copy read’s line-number prefixes into a patch.'
   );
   if (sessionTools) lines.push(
     '',

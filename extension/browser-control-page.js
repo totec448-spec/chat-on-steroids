@@ -7,18 +7,21 @@ export function browserPage(operation, args) {
     state = globalThis[key] = { pageId: args.pageId, refs: new Map(), next: 0, overlay };
   }
   const compact = (value, max = 200) => String(value ?? '').slice(0, max * 4).replace(/\s+/g, ' ').trim().slice(0, max);
-  const textOf = element => {
+  const textOf = (element, excludeControls = false) => {
     if (!element) return '';
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     let text = '', node, count = 0;
-    while (text.length < 800 && count++ < 100 && (node = walker.nextNode())) text += node.nodeValue.slice(0, 800 - text.length);
+    while (text.length < 800 && count++ < 100 && (node = walker.nextNode())) {
+      if (excludeControls && node.parentElement?.closest('select,textarea')) continue;
+      text += node.nodeValue.slice(0, 800 - text.length);
+    }
     return compact(text);
   };
   const fail = message => { throw new Error(message); };
-  const visible = element => {
+  const visible = (element, subtree = false) => {
     const style = getComputedStyle(element);
     return !element.closest('[inert]') && style.display !== 'none' && style.visibility !== 'hidden' &&
-      element.getClientRects().length > 0;
+      (element.getClientRects().length > 0 || subtree && style.display === 'contents');
   };
   const resolve = ref => {
     const element = state.refs.get(ref);
@@ -30,7 +33,7 @@ export function browserPage(operation, args) {
     const ids = compact(element.getAttribute('aria-labelledby'), 500).split(' ').filter(Boolean);
     const labelled = ids.map(id => textOf(element.getRootNode().getElementById?.(id))).join(' ');
     return compact(element.getAttribute('aria-label') || labelled ||
-      (element.labels ? Array.from(element.labels).slice(0, 5).map(textOf).join(' ') : '') ||
+      (element.labels ? Array.from(element.labels).slice(0, 5).map(node => textOf(node, true)).join(' ') : '') ||
       element.getAttribute('alt') || element.getAttribute('title') || element.getAttribute('placeholder') ||
       (element.tagName === 'INPUT' && ['button','submit','reset'].includes(element.type) ? element.value : '') || textOf(element));
   };
@@ -52,8 +55,12 @@ export function browserPage(operation, args) {
     // An explicit new snapshot replaces refs, preventing ref reuse after node replacement.
     state.refs.clear();
     const lines = []; let chars = 0, visited = 0, emitted = 0, truncated = false;
+    const append = line => {
+      if (emitted >= args.maxNodes || chars + line.length + 1 > args.maxChars) { truncated = true; return false; }
+      lines.push(line); chars += line.length + 1; emitted++; return true;
+    };
     const filter = (args.filter || '').toLocaleLowerCase();
-    const implicit = { A: 'link', BUTTON: 'button', TEXTAREA: 'textbox', SELECT: 'combobox', IMG: 'img', H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', SUMMARY: 'button' };
+    const implicit = { A: 'link', BUTTON: 'button', TEXTAREA: 'textbox', SELECT: 'combobox', CANVAS: 'canvas', IMG: 'img', H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', SUMMARY: 'button' };
     const stack = [{ node: document.body || document.documentElement, depth: 0, namedParent: false }];
     while (stack.length) {
       if (++visited > 15000 || emitted >= args.maxNodes || chars >= args.maxChars) { truncated = true; break; }
@@ -63,29 +70,48 @@ export function browserPage(operation, args) {
         const text = compact(node.nodeValue, 500);
         if (text && (!filter || text.toLocaleLowerCase().includes(filter))) {
           const line = `${'  '.repeat(Math.min(depth, 16))}${text}`;
-          if (chars + line.length + 1 > args.maxChars) { truncated = true; break; }
-          lines.push(line); chars += line.length + 1; emitted++;
+          if (!append(line)) break;
         }
         continue;
       }
       if (node.nodeType !== Node.ELEMENT_NODE || node === state.overlay ||
-          ['SCRIPT','STYLE','NOSCRIPT','TEMPLATE','HEAD'].includes(node.tagName) || !visible(node)) continue;
+          ['SCRIPT','STYLE','NOSCRIPT','TEMPLATE','HEAD'].includes(node.tagName) || !visible(node, true)) continue;
       let role = compact(node.getAttribute('role'), 50) || implicit[node.tagName];
       if (node.tagName === 'INPUT') role = ({ checkbox: 'checkbox', radio: 'radio', range: 'slider', button: 'button', submit: 'button' })[node.type] || 'textbox';
-      if (!role && (node.isContentEditable || node.tabIndex >= 0 || node.hasAttribute('onclick'))) role = node.isContentEditable ? 'textbox' : 'interactive';
+      const editingHost = node.isContentEditable && !node.parentElement?.isContentEditable;
+      if (!role && (editingHost || node.tabIndex >= 0 || node.hasAttribute('onclick'))) role = editingHost ? 'textbox' : 'interactive';
       const named = role && ['button','link','textbox','checkbox','radio','combobox','slider','img','heading','interactive'].includes(role);
+      let name = '';
       if (role) {
-        const name = label(node);
-        if (!filter || `${role} ${name}`.toLocaleLowerCase().includes(filter)) {
+        name = label(node);
+        // Native option popups need no DOM visibility or individual ref: select
+        // consumes the parent ref and exact values. Bound discovery at its owner.
+        const options = [];
+        if (node.tagName === 'SELECT') {
+          for (let i = 0; i < Math.min(node.options.length, 200); i++) {
+            const option = node.options[i];
+            const flags = [option.selected ? 'selected' : '', node.disabled || option.disabled || option.parentElement?.disabled ? 'disabled' : ''].filter(Boolean);
+            // Values are opaque input identifiers: whitespace must survive exactly.
+            if (option.value.length > 1000) { flags.push('value truncated'); truncated = true; }
+            options.push(`option ${JSON.stringify(compact(option.label))} value=${JSON.stringify(option.value.slice(0, 1000))}${flags.length ? ` (${flags.join(', ')})` : ''}`);
+          }
+          if (node.options.length > options.length) truncated = true;
+        }
+        const matches = !filter || `${role} ${name}`.toLocaleLowerCase().includes(filter);
+        if (matches || options.some(option => option.toLocaleLowerCase().includes(filter))) {
           const id = `${args.pageId}:${args.frameId}:e${++state.next}`;
           const flags = [node.matches(':disabled,[aria-disabled="true"]') ? 'disabled' : '', node.checked ? 'checked' : '', node.getAttribute('aria-expanded') ? `expanded=${node.getAttribute('aria-expanded')}` : '', document.activeElement === node ? 'focused' : ''].filter(Boolean);
           const value = ['INPUT','TEXTAREA','SELECT'].includes(node.tagName) && node.type !== 'password' ? compact(node.value, 200) : '';
           const href = node.tagName === 'A' ? compact(node.getAttribute('href'), 300) : '';
           const line = `${'  '.repeat(Math.min(depth, 16))}[${id}] ${role} ${JSON.stringify(name)}${value ? ` value=${JSON.stringify(value)}` : ''}${href ? ` href=${JSON.stringify(href)}` : ''}${flags.length ? ` (${flags.join(', ')})` : ''}`;
-          if (chars + line.length + 1 > args.maxChars) { truncated = true; break; }
-          state.refs.set(id, node); lines.push(line); chars += line.length + 1; emitted++;
+          if (!append(line)) break;
+          state.refs.set(id, node);
+          for (const option of options) {
+            if ((matches || option.toLocaleLowerCase().includes(filter)) && !append(`${'  '.repeat(Math.min(depth + 1, 16))}${option}`)) break;
+          }
         }
       }
+      if (node.tagName === 'SELECT') continue; // Options were emitted with their owning ref above.
       // Named containers (headings, cards, comboboxes) can contain independently
       // actionable links/editors. Traverse them without duplicating their label text.
       if (depth >= 40) { truncated = true; continue; }
@@ -93,7 +119,10 @@ export function browserPage(operation, args) {
       const roots = node.shadowRoot ? [node, node.shadowRoot] : [node];
       for (const root of roots) {
         let child = root.lastChild, count = 0;
-        while (child && stack.length < 15000 && count++ < 15000) { stack.push({ node: child, depth: depth + (role ? 1 : 0), namedParent: namedParent || !!named }); child = child.previousSibling; }
+        // A name supplied by ARIA/labels does not include the container's body.
+        // Only suppress text actually represented by a short content-derived name.
+        const consumesText = named && ['button','link','heading','img'].includes(role) && name === textOf(node) && name.length < 200;
+        while (child && stack.length < 15000 && count++ < 15000) { stack.push({ node: child, depth: depth + (role ? 1 : 0), namedParent: namedParent || !!consumesText }); child = child.previousSibling; }
         if (child) truncated = true;
       }
     }
@@ -161,32 +190,33 @@ export function browserPage(operation, args) {
 
 /** Bounded serialization runs at the producer, before CDP copies a value into the worker. */
 export function boundedBrowserValue(value) {
-  let budget = 20000;
+  let budget = 20000, truncated = false;
   const seen = new WeakSet();
   const read = (v, depth) => {
-    if (budget <= 0) return '[truncated]';
+    if (budget <= 0) { truncated = true; return '[truncated]'; }
     if (v === null || typeof v === 'boolean' || typeof v === 'number') { budget -= 20; return v; }
-    if (typeof v === 'string') { const result = v.slice(0, Math.max(0, Math.min(budget, 12000))); budget -= result.length; return result.length < v.length ? result + '…[truncated]' : result; }
+    if (typeof v === 'string') { const result = v.slice(0, Math.max(0, Math.min(budget, 12000))); budget -= result.length; if (result.length < v.length) { truncated = true; return result + '…[truncated]'; } return result; }
     if (typeof v !== 'object') return String(v).slice(0, 100);
     if (seen.has(v)) return '[circular]';
-    if (depth >= 5) return '[depth limit]';
+    if (depth >= 5) { truncated = true; return '[depth limit]'; }
     seen.add(v);
     if (v instanceof Node) return { node: v.nodeName, text: read(v.nodeValue?.slice(0,1000), depth + 1) };
     const result = Array.isArray(v) ? [] : Object.create(null);
     let count = 0;
     for (const key in v) {
       if (!Object.prototype.hasOwnProperty.call(v,key)) continue;
-      if (++count > 100 || budget <= 0) { result[Array.isArray(v) ? result.length : '__truncated'] = true; break; }
+      if (++count > 100 || budget <= 0) { truncated = true; result[Array.isArray(v) ? result.length : '__truncated'] = true; break; }
       const descriptor = Object.getOwnPropertyDescriptor(v,key);
       budget -= key.length + 4;
       const item = descriptor && 'value' in descriptor ? read(descriptor.value, depth + 1) : '[accessor]';
       // Never assign an attacker-controlled sparse array index (JSON would expand its holes).
       if (Array.isArray(result)) result.push(item);
-      else result[key.slice(0,200)] = item;
+      else { if (key.length > 200) truncated = true; result[key.slice(0,200)] = item; }
     }
     return result;
   };
-  return { value: read(value,0), truncated: budget <= 0 };
+  const result = read(value,0);
+  return { value: result, truncated: truncated || budget <= 0 };
 }
 
 /** Called on the actual iframe element in its parent's isolated world. */

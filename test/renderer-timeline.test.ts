@@ -8,6 +8,7 @@ import type { Handoff, SessionEvent, SessionSummary } from '../src/shared/sessio
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import type { LocalProject } from '../src/shared/projects.js';
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({ update: vi.fn() }) }));
+vi.mock('../src/renderer/pet.js', () => ({ initPet: () => () => {} }));
 import { positionOf } from '../src/shared/chronology.js';
 
 /**

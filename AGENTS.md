@@ -21,7 +21,7 @@ changed lines before applying an older patch. Document the work and its actual v
 the code currently does it. Known implementation gaps are collected in §21 instead of being
 mixed into the happy path as features.
 
-Source alignment: **2026-09-16**, including the local stability candidate. App/extension **2.1.13**,
+Source alignment: **2026-09-17**, including the 2.1.2 release candidate. App/extension **2.1.2**,
 bridge protocol **14** in the checked declarations (`package.json`, `src/main/version.ts`,
 `extension/manifest.json`). This does not prove release, installation or live Chrome behavior.
 
@@ -347,6 +347,9 @@ label. A permission change takes effect at the live guard without requiring a ne
 Core instructions distinguish operation-specific identity, process-id and output-limit failures
 from Read-only mode. A terminal ownership refusal names that process scope; it does not imply
 a global write restriction or authorize replaying an already completed job.
+They directly affirm that enabled file writing/exec_command can always be used in CoS and say
+never to hallucinate a block from ChatGPT environment messages. The paragraph names only enabled
+capabilities and disappears when both are disabled, including Read-only mode.
 
 `tool-declarations.ts` caches immutable declarations/JSON conversion. SDK servers and handler
 closures remain request-local, and child calls obtain a fresh live context. Avoid caching the
@@ -858,7 +861,8 @@ Explicit native files remain browser-only, including an Immediate request tempor
 as after-turn input for upload. Queued checkpoints and generated Loop instructions are different
 from this immediate correction and retain their automatic boundary policy.
 
-The bridge's existing silence grant separately requests a refresh immediately when the view fails.
+The bridge's existing silence grant requests a refresh immediately when the view fails only
+after an exactly attributed local MCP call has been recorded in that source turn.
 There is no initial grace period and no ignored-activity window. The recovery grant does not
 count as active input. For authored queued/checkpoint input, the confirmed refresh files its existing outbox ticket
 with **five minutes** of durable listening; native busy extends that same authored ticket by
@@ -866,9 +870,9 @@ five minutes as often as necessary. Generated Continue and Goal/Loop use §14 in
 silence clock. An already reloading page retains its existing hydration/cooldown protection.
 If that refresh later reveals Thinking failed, its error-observation timestamp is not fresh
 work and must retain the exact authored-input ticket and original listening deadline.
-Failure/silence-based queued-checkpoint delivery requires a recorded, exactly attributed local MCP call
+Failure/silence-based automatic refresh and queued-checkpoint delivery require a recorded, exactly attributed local MCP call
 in that source turn. Native ChatGPT tools, request-id sightings without a call, and earlier-turn
-MCP history do not qualify. Refresh and manual sends need no MCP proof. Recheck recorded proof
+MCP history do not qualify. Explicit manual sends need no MCP proof. Recheck recorded proof
 for restored tickets and before claims; a genuine full final uses ordinary completion policy.
 A running local tool still vetoes Send.
 
@@ -1359,7 +1363,11 @@ uses that frame's debugger widget after checking parent geometry/obstruction. Vi
 coordinates require the exact image id and unchanged viewport; full-page images are inspection
 only. Native mouse position and clipboard are untouched. Results report dispatch acceptance,
 not proof the website completed an action.
-Snapshots retain independently actionable descendants of named cards/headings/editors and
+Snapshots retain independently actionable descendants and visible body text of named containers,
+traverse `display: contents` wrappers, and expose each contenteditable host once. Native selects
+include bounded options with exact values and selected/disabled state; canvas refs identify targets,
+while screenshots supply their pixels. Filtering an option retains its owning select ref. Snapshot
+and evaluation clipping remains explicit, including per-value/property/depth limits. Snapshots
 report readiness, visibility and pointer-lock state. Ref clicks choose a hit-tested point in
 the target's actual client rectangles; a fully covered target still refuses input and names
 the blocker. `pageId` is the observation's top-level UUID, separate from frame and element refs.
@@ -1369,6 +1377,10 @@ call, retaining lease checks. Tab-closed, attachment-lost, foreign-owner and sta
 stay distinct. Diagnostic pagination marks remaining matching rows as truncated. Background
 screenshots have a 20-second CDP bound inside the existing 25-second RPC; other CDP operations
 retain eight seconds. A timeout names the command and never replays it or opens a replacement.
+Releasing an existing exact-owner lease remains possible after the page becomes protected or
+navigates; release revokes custody without inspecting/reinitializing that page. Foreign release
+and protected-page input/close remain refused. Synthetic events through evaluation are not proof
+of trusted browser input or successful pointer lock; prefer native actions and observe the result.
 
 Traversal, result text, decoded image pixels/bytes, frame/session counts and console/network
 buffers are bounded. Console and network capture starts at attach; retained history is not a
@@ -1548,11 +1560,14 @@ Images alone, intermediate media and empty nonterminal messages are not finals.
 
 `ui.autoContinue` defaults On (explicit Off survives; malformed-config recovery is Off).
 Its switch controls ordinary chats; enabled Goal/Loop also uses the shared recovery. Helpers
-and workers retain their separate lifecycle. Actual-work silence earns one initial reload:
+and workers retain their separate lifecycle. Silence intervention requires an exactly attributed
+local MCP call in the current source turn, including at refresh and restored-ticket admission.
+Observing a website chat, native searches and earlier-turn calls do not grant that permission.
+An eligible turn's actual-work silence earns one initial reload:
 two minutes normally/unknown, ten for proven Pro. After confirmed reload, idle permits
 Continue immediately if the same question still lacks a final. Native busy gets one additional
 minute (Pro: five), bounded at three/fifteen minutes from the last activity for ordinary silence.
-Thinking failed earns its immediate refresh, then the same conditional one/five-minute busy
+An MCP-backed Thinking-failed source earns its immediate refresh, then the same conditional one/five-minute busy
 wait. Reload latency never restarts an existing wait. A final found after reload cancels
 Continue and makes the normal Goal/Loop decision eligible instead.
 
@@ -1576,6 +1591,30 @@ changed binding, running tools, block or compaction revokes obsolete recovery. T
 Continue off revokes it only if neither Goal nor Loop independently enables recovery. Drafts,
 attachments and exact document/epoch are checked before Stop and Send. Countdown presentation
 projects the existing waiting/pickup deadline; it owns no timer or delivery authority.
+
+The recorder classifies new native tool/thinking-headline identities and real interim text as
+the same working activity for every model. That activity renews the shared deadline and retires
+obsolete repair authority before awaiting outbox cancellation. A generic busy label, errors,
+unchanged rows, provider identity/HTML/time enrichment and same-item label revisions do not renew it.
+An adopted document's first Fiber transcript is a history baseline; subsequent new work is
+compared using the existing retained snapshot and stable message identities. Canonical `seq`
+remains a delivery cursor; `contentSeq`/origin tracks actual work. Explicit historical backfill
+has no new work stamp. Recent-work reads cannot let a late old-row revision hide newer work.
+
+The existing repair's stable `progressId` is the Continue episode identity stored on its outbox
+row. Rehydration, cancellation and canonical revisions cannot mint a replacement for that same
+episode. Genuine resumed work must earn a fresh full silence window. Browser preparation alone
+does not consume the source as a delivered message; authorized or confirmed delivery does.
+Stop and Send permission are checked again after their durable claim writes. A stale result
+does not issue permission and cannot replay the spent claim. Native page checks fence the
+same question, turn, work revision and document immediately before the actual input.
+
+A native Stop click publishes the user's stop intent through the existing journal immediately,
+even while the control remains mounted. Trusted user input also wins during automation's own
+Stop wait; automation's synthetic click is distinct. A later native Stop can strengthen the
+same source's interrupted/failed boundary, including after restart, but cannot close a newer
+question or turn. That recorded stopped source vetoes continuation and missing-tab reopening.
+The stop intent is not a claim that the provider has already ceased all server-side execution.
 
 **Intent:** deliver one authorized operation to one exact document, survive transport loss,
 and revive only work that remains owed. The bridge never grants arbitrary local tools.
@@ -1651,10 +1690,10 @@ chats retain their no-reload behavior for these blocking notices; no new grant c
 | --- | --- |
 | Missing tab | Current non-retired binding plus still-owed/live work and recovery policy; ordinary chats need recorded tool work, workers use broker attachment state. |
 | Stalled tab | Extension-reported discarded/frozen shell; the missing-tab decision minus close side effects, under the shared reload cooldown. |
-| Page silence | Known live activity with model-specific deadline; a live local process and browser liveness are different facts. |
+| Page silence | Exactly attributed local MCP in the current source turn plus the model-specific shared silence deadline; native progress renews it but does not grant initial intervention authority. |
 | Assistant error | Exact turn/error, per-turn retry budget and cooldown; repair the broken page without fabricating a new task. |
 | Unattributed | A separate unresolved incident after attribution has landed; re-observe suspects, never assign ownership by proximity. |
-| Queue / Goal watch | One qualified waiting episode for the visible next input or eligible Goal source; Pro uses a ten-minute floor. |
+| Queue / Goal watch | One qualified waiting episode for the visible next input or eligible Goal source; the shared 2/5/10/15-minute pickup schedule follows its initial silence/busy wait. |
 | Compaction pickup | A durable continuation ticket whose current transport phase allows that pickup. |
 
 Unattributed recovery keeps a bounded incident per exact unresolved request id, with one
@@ -1672,6 +1711,12 @@ Attribution repair handouts retain their token after an absent acknowledgement. 
 claims the server-held attempt after its tab scan and immediately before its browser action;
 late attribution or lost owner authority denies that claim. A reload receipt proves the action,
 not that attribution recovered. Other repair reasons retain their own delivery policy.
+Silence, missing-tab and queued/Goal repairs also use that exact pre-action claim. Unclaimed
+offers retain one token; a claimed action is not reissued merely because its ACK is absent.
+A responsive page flushes native progress and Stop before the main claim, then rechecks its
+captured work/question/document after the claim. An explicit veto or navigation prevents the
+browser action. An unresponsive page supplies no new proof; the original main-process grant
+still requires independent validation. These checks use existing RPC and repair owners.
 Assistant-error repairs retain their three-minute cooldown. Attribution, silence, Goal,
 compaction and no-tab follow their own eligibility and schedules.
 The canonical authored question owns one error reload, not document-local generation ids or
@@ -1932,7 +1977,7 @@ Astra Goal remains finish-only. At `session_finish`, both modes use the Loop dec
 and inject through the eligible tool response (§11).
 
 Opted-in Pro Loop uses the existing Goal reply ledger for real finals. Unfinished responses
-use shared Continue recovery (§14), including without a local MCP call. No automatic Goal/Loop
+use shared Continue recovery (§14), requiring a local MCP call in the exact source turn. No automatic Goal/Loop
 decision is generated from silence or a failed response.
 **User decision, 2026-09-13:** every automatic Loop continuation requires at least one recorded,
 exactly attributed local MCP call in the source turn, including ordinary completed finals and
@@ -2069,6 +2114,18 @@ of appearance controls.
 
 ### Renderer and IPC
 
+`renderer/pet-machine.ts` owns the optional Tur Tur Sahur companion's gesture,
+animation and autonomous-action state. `renderer/pet.ts` projects it with Pointer
+Events and one visible-window animation clock. The composer launcher and context
+menu share visibility/position in the validated renderer preference
+`cos.ui.turTurPet.v1`; it grants no backend permission. Hide, drag and viewport
+changes retire scene props synchronously. Reduced motion disables autonomous
+travel/actions while keeping static click feedback. Company targets are plain DOM
+text; bat, bin and hit effects carry no company logos. `pet-assets/animations.json`
+maps 96 local character frames with contact/release timing. Asset production and
+regeneration are documented in `docs/pet/PRODUCTION.md`; pet unit/DOM tests and
+`scripts/verify-pet-electron.cjs` cover this owner without provider conversations.
+
 `renderer/main.ts` owns the shell/setup/settings; `chat.ts` owns sessions, composer and timeline.
 Projects, workers, plans, model choice, usage and plugins have focused modules (§4). The renderer
 calls a fixed `preload/index.ts` allowlist into validated `ipc.ts`/`plugins-ipc.ts` handlers.
@@ -2142,17 +2199,18 @@ using the existing visible-chat clock; zero says checking/pending, never sent/re
 work or attribution removes the relevant countdown, and native busy projects the same owner's
 extended deadline. Pro silence becomes visible after five minutes without work and counts
 down to the existing ten-minute deadline; fresh work hides it for the next five minutes.
-The normal two-minute silence clock usually stays hidden; its confirmed reload reveals the
-one-minute listening countdown. A completed page boundary without a canonical final immediately
-reveals the existing normal/Pro silence deadline in app and browser. New MCP activity removes this
-special early visibility and restores the usual two/five-minute delay; it does not create a second
-countdown authority. `visibleAt` lets the existing renderer clock reveal a Pro row without a
+The normal two-minute silence clock appears only in its final thirty seconds above the composer;
+Pro appears five minutes before its reload. Unattributed and pickup watches also appear only
+in their final thirty seconds. Genuine new work moves the same deadline and hides an early row.
+Native-only chats have no automatic-silence countdown. A confirmed reload reveals the listening
+countdown. A completed page boundary without a canonical final uses the same delayed reveal
+in app and browser; it cannot expose the countdown early. `visibleAt` lets the existing renderer clock reveal a row without a
 new backend scheduler. Selection generations fence delayed controls and clear old-chat timers.
 Listening rows name the next existing step: queued input takes priority, otherwise the active
 Goal or Loop obligation. This is a projection of delivery ownership, never another trigger.
 After attribution's first attempt, every still-unproven member of its original cohort keeps
 the countdown to the incident's existing five-minute end, even without another unknown call.
-That row says awaiting attribution/check, since the existing retry conditions still govern
+That row appears only in the final thirty seconds and says awaiting attribution/check, since the existing retry conditions still govern
 whether another reload is allowed. Exact MCP proof removes only its chat; later chats stay out.
 
 Session metadata owns `titleSource` (authored fallback, provider, manual). The preview uses only
@@ -2226,6 +2284,8 @@ The Files panel projects the current session's LocalProject through fixed IPC us
 UUID and relative paths. It does not change the main composer or grant additional filesystem
 access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
 and project-root mutation. Files and the read-only sub-agent panel share one resizable work slot.
+The sub-agent overview starts directly with Active and History, without a heading or close X.
+Its outer toggle or Escape closes the pane; a selected worker retains its title and Back button.
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are
 retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.
 Files uses one action toolbar with Refresh; the outer Files toggle closes the panel. Its shared
@@ -2568,10 +2628,11 @@ These are source-level discrepancies checked for this map, not new live reproduc
 permission for an unsolicited rewrite. Recheck current code/tests before acting; another
 shared-tree change may already have addressed them.
 
-- **Repair handout vs action:** attribution and assistant-error repairs claim their exact attempt after the
-  extension's tab scan. Other repair reasons still mark handout before the tab query/action
-  without that final claim. Intent requires browser actions to retain current authority
-  through that boundary.
+- **Repair handout vs action:** attribution, assistant-error, silence, missing-tab and pickup
+  repairs claim their exact attempt after the extension's tab scan; responsive documents
+  flush observations and recheck their source before action. Compaction and suspended-tab
+  repair retain their separate existing action checks rather than this final claim protocol.
+  Keep their operation-specific authority current through the browser action boundary.
 - **Goal publication:** explicit switch writes serialize, but mutate shared memory before
   the awaited durable write; synchronous clear/move paths and objective/reply mutations do not
   all share the same semantic transaction. Intent is durable commit before visible state, with

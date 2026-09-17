@@ -9,6 +9,17 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.2] — dead to openai/anthropic. JOIN THE RESISTANCE @dummerspast39 on x
+
+- Add the optional animated Tur Tur Sahur desktop companion.
+- Show normal and unattributed reload warnings only in the last 30 seconds; retain the five-minute Pro warning.
+- Improve automatic Continue, queued-message recovery, native Stop handling and recorded turn ownership.
+- Improve browser snapshots, select controls and safe tab release.
+- Refine the project workspace, Skills picker, appearance, connection controls and worker overview.
+- Preserve completed terminal output and improve tool-permission guidance.
+
+Reload the companion extension and refresh all CoS plugins in ChatGPT after updating.
+
 ## [2.1.13] — i am very sad. openai theatend to ban my account for whatever reason. anthropic support blocks me. money tight.
 
 refreh your extension and all CoS plugins in chatgpt

@@ -1103,7 +1103,7 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
 export function upsertMessageEvent(
   sessionId: string,
   event: NewMessageEvent,
-  options: { preferTime?: boolean } = {}
+  options: { preferTime?: boolean; work?: boolean } = {}
 ): Promise<{ event: MessageEvent; changed: boolean; contentChanged: boolean }> {
   const directKey = messageKey(event as MessageEvent);
   if (!directKey) throw new Error('Canonical message update requires ChatGPT messageId');
@@ -1233,6 +1233,13 @@ export function upsertMessageEvent(
       }
       const full = {
         ...nextEvent,
+        // Cursor revisions publish richer markup/identity without manufacturing work.
+        // A changed interim or the first final still advances this durable content stamp.
+        contentSeq: options.work === false && nextEvent.kind === 'assistant_message' && !nextEvent.final
+          ? previous ? workSequence(previous) : 0
+          : sameMessage && previous && (nextEvent.kind !== 'assistant_message' ||
+          (previous.kind === 'assistant_message' && (previous.final === true || previous.state === 'final') === nextEvent.final))
+          ? workSequence(previous) : entry.nextSeq,
         ...(nextEvent.kind === 'assistant_message' && nextEvent.final
           ? { finalContentSeq: sameMessage && previous?.kind === 'assistant_message' &&
                 (previous.final === true || previous.state === 'final')
@@ -1679,7 +1686,7 @@ async function readRecentEventsFromDisk(
   const forward = options.after !== undefined;
   let replaced = 0;
   let reachedStart = false;
-  const scanning = () => !reachedStart && (forward || rawTail.length < cap);
+  const scanning = () => !reachedStart;
   let damaged = 0;
   // Explicit history navigation may seek beyond the recent-tail budget. It streams backwards
   // in fixed chunks and retains only this page, never materializing the complete journal.
@@ -1702,6 +1709,11 @@ async function readRecentEventsFromDisk(
       damaged += 1;
       return;
     }
+    // A late label/status revision can have an old work sequence. Filling the
+    // row cap with it is not proof that we reached the newest actual work.
+    const oldest = !forward && rawTail.length === cap
+      ? rawTail.reduce((a, b) => sequence(a) < sequence(b) ? a : b) : undefined;
+    if (oldest && parsed.seq < sequence(oldest)) { reachedStart = true; return; }
     // Journal sequence is append ordered. Canonical revisions are joined below;
     // crossing the forward origin boundary retires this backwards scan.
     if (forward && parsed.seq <= options.after!) { reachedStart = true; return; }
@@ -1718,7 +1730,8 @@ async function readRecentEventsFromDisk(
       }
     }
     if (rawTail.length < cap) rawTail.push(parsed);
-    else rawTail[replaced++ % cap] = parsed;
+    else if (forward) rawTail[replaced++ % cap] = parsed;
+    else if (oldest && sequence(parsed) > sequence(oldest)) rawTail[rawTail.indexOf(oldest)] = parsed;
   };
 
   const file = path.join(sessionDir(sessionId), 'events.jsonl');

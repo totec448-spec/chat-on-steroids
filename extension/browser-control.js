@@ -247,6 +247,9 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       error('BROWSER_TAB_NOT_OWNED: the tab still exists but has no live attachment. Chrome may have ended debugging or the extension restarted. Explicitly attach this same tab, then take a fresh observation. Do not open a replacement.');
     }
     if (state.owner !== command.owner) error('BROWSER_TAB_OWNED: another conversation owns this tab. Choose an unclaimed tab.');
+    // Releasing only revokes this caller's existing lease. Do not inspect or
+    // reinitialize a page that became protected, navigated, or closed meanwhile.
+    if (command.tool === 'browser_tabs' && command.args.action === 'release') { alive(state,command); return state; }
     await currentTab(state,command);
     if (!state.initialized) {
       try { await initialize(state); } catch { await release(state); error('BROWSER_DETACHED: Chrome ended this debugger attachment. Attach again deliberately.'); }
