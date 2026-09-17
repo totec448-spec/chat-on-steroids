@@ -194,8 +194,10 @@ export const ATTRIBUTION_LABELS: Record<CallAttribution, string> = {
 };
 
 export interface ToolCallRecord {
+  /** Internal code-mode invocation: retained for audit, never a separate model exchange. */
+  nested?: boolean;
   /** Child lifetime, independent of the initial tool response and output delivery. */
-  process?: { sessionId: string; completedAt?: number; exitCode?: number | null; durationMs?: number };
+  process?: { sessionId: string; completedAt?: number; exitCode?: number | null; durationMs?: number; benignExit?: boolean };
   /** Recorded model evidence, when known; absence is not the current picker selection. */
   model?: string;
   reasoningEffort?: ReasoningEffort;
@@ -913,6 +915,7 @@ export function eventTokens(event: SessionEvent): number {
       // most likely to need compacting — the multi-agent ones.
       return storedTextTokens(event.message);
     case 'tool_call':
+      if (event.call.nested === true) return 0;
       return (
         storedTextTokens(event.call.args) +
         Math.min(MAX_TOOL_RESULT_TOKENS, storedTextTokens(event.call.result)) +

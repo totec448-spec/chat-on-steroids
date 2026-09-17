@@ -18,7 +18,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, deferSilenceInput, revokeSilenceInputs } from './session/input.js';
+import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, deferSilenceInput, revokeSilenceInputs } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -43,9 +43,10 @@ import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindB
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
-import type { BridgeStatus } from '../shared/types.js';
+import type { BridgeStatus, CompanionDiagnostics, CompanionPageDiagnostics, CompanionTabDiagnostics, CompanionTraceEntry } from '../shared/types.js';
 import { positionOf } from '../shared/chronology.js';
-import { CHAT_SILENCE_MS, CONTINUATION_MARKER, isReasoningEffort, normalizedToolOutcome, toolCallSummary,
+import { recoveryBusyMs } from '../shared/recovery.js';
+import { CHAT_ACTIVE_MS, CHAT_SILENCE_MS, CONTINUATION_MARKER, isReasoningEffort, normalizedToolOutcome, toolCallSummary,
   type ReasoningEffort, type SessionEvent, type SessionOrigin, type StoredText, type ToolCallRecord } from '../shared/session.js';
 import { isChatBlocked, chatBlockedAt } from './session/blocked-chats.js';
 export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
@@ -57,6 +58,7 @@ import {
   loopAfterTurnFor,
   loopReplyHasAuthority,
   deferSilenceGoalReplyNow,
+  claimGoalRecoveryStopNow,
   ackGoalDraftNow,
   applyGoalSwitch,
   beginGoalDraft,
@@ -559,6 +561,172 @@ let requestWindow = { start: Date.now(), count: 0 };
 const listeners = new Set<() => void>();
 let extensionVersion: string | null = null;
 let versionWarned = false;
+let latestCompanionDiagnostics: CompanionDiagnostics | null = null;
+let companionDiagnosticsRevision = 0;
+const companionDiagnosticsWaiters = new Set<() => void>();
+
+function diagnosticObject(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function diagnosticString(value: unknown, max = 512): string | null {
+  return typeof value === 'string' ? value.slice(0, max) : null;
+}
+
+function diagnosticNumber(value: unknown, max = Number.MAX_SAFE_INTEGER): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(max, value)) : 0;
+}
+
+function diagnosticNullableNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function diagnosticTrace(value: unknown): CompanionTraceEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 16).flatMap((entry) => {
+    const row = diagnosticObject(entry);
+    const requestId = diagnosticString(row?.requestId, 160);
+    if (!row || !requestId) return [];
+    return [{
+      requestId,
+      read: row.read === true,
+      sent: row.sent === true,
+      confirmed: row.confirmed === true,
+      app: diagnosticString(row.app, 80),
+      tool: diagnosticString(row.tool, 160)
+    }];
+  });
+}
+
+function diagnosticPage(value: unknown): CompanionPageDiagnostics | null {
+  const page = diagnosticObject(value);
+  if (!page) return null;
+  const lastError = diagnosticObject(page.lastError);
+  return {
+    recorderVersion: diagnosticNullableNumber(page.recorderVersion),
+    runId: diagnosticString(page.runId, 160),
+    conversationId: diagnosticString(page.conversationId, 200),
+    generating: page.generating === true,
+    turnId: diagnosticString(page.turnId, 200),
+    generations: diagnosticNumber(page.generations, 1_000_000),
+    queued: diagnosticNumber(page.queued, 1_000_000),
+    queueBytes: diagnosticNumber(page.queueBytes, 64 * 1024 * 1024),
+    requestId: diagnosticString(page.requestId, 160),
+    trace: diagnosticTrace(page.trace),
+    overwrite: page.overwrite === true,
+    painted: page.painted === true,
+    events: diagnosticNumber(page.events, 10_000_000),
+    calls: diagnosticNumber(page.calls, 10_000_000),
+    sends: diagnosticNumber(page.sends, 10_000_000),
+    failures: diagnosticNumber(page.failures, 10_000_000),
+    session: diagnosticString(page.session, 160),
+    lastError: lastError && typeof lastError.at === 'number' && Number.isFinite(lastError.at)
+      ? { at: lastError.at, text: diagnosticString(lastError.text, 500) ?? '' }
+      : null,
+    blocked: diagnosticString(page.blocked, 160)
+  };
+}
+
+function diagnosticTab(value: unknown): CompanionTabDiagnostics | null {
+  const tab = diagnosticObject(value);
+  if (!tab) return null;
+  const delivery = diagnosticObject(tab.delivery);
+  return {
+    tab: diagnosticNullableNumber(tab.tab),
+    isChat: tab.isChat === true,
+    conversationId: diagnosticString(tab.conversationId, 200),
+    bound: tab.bound === true,
+    epoch: diagnosticNullableNumber(tab.epoch),
+    terminal: tab.terminal === true,
+    recorder: tab.recorder === true,
+    page: diagnosticPage(tab.page),
+    chatTabs: diagnosticNumber(tab.chatTabs, 10_000),
+    pending: diagnosticNumber(tab.pending, 1_000_000),
+    pendingAll: diagnosticNumber(tab.pendingAll, 1_000_000),
+    pendingCloses: diagnosticNumber(tab.pendingCloses, 1_000_000),
+    pendingCommandAcks: diagnosticNumber(tab.pendingCommandAcks, 1_000_000),
+    delivery: {
+      at: diagnosticNumber(delivery?.at),
+      ok: delivery?.ok === true ? true : delivery?.ok === false ? false : null,
+      events: diagnosticNumber(delivery?.events, 1_000_000),
+      total: diagnosticNumber(delivery?.total, 100_000_000),
+      status: diagnosticNumber(delivery?.status, 999),
+      error: diagnosticString(delivery?.error, 200)
+    }
+  };
+}
+
+function sanitiseCompanionDiagnostics(value: unknown): CompanionDiagnostics | null {
+  const root = diagnosticObject(value);
+  const status = diagnosticObject(root?.status);
+  const preferences = diagnosticObject(root?.preferences);
+  if (!root || !status || !preferences) return null;
+  const pairError = diagnosticObject(status.pairError);
+  return {
+    capturedAt: diagnosticNumber(root.capturedAt),
+    status: {
+      connected: status.connected === true,
+      port: diagnosticNullableNumber(status.port),
+      paired: status.paired === true,
+      disconnected: status.disconnected === true,
+      pending: diagnosticNumber(status.pending, 1_000_000),
+      pendingCommandAcks: diagnosticNumber(status.pendingCommandAcks, 1_000_000),
+      compatible: status.compatible === true ? true : status.compatible === false ? false : null,
+      appVersion: diagnosticString(status.appVersion, 32),
+      appProtocol: diagnosticNullableNumber(status.appProtocol),
+      extensionVersion: diagnosticString(status.extensionVersion, 32),
+      extensionProtocol: diagnosticNullableNumber(status.extensionProtocol),
+      pairError: pairError
+        ? { error: diagnosticString(pairError.error, 160) ?? '', message: diagnosticString(pairError.message, 500) ?? '' }
+        : null
+    },
+    preferences: {
+      overwrite: preferences.overwrite !== false,
+      durations: preferences.durations === true
+    },
+    tab: diagnosticTab(root.tab)
+  };
+}
+
+function recordCompanionDiagnostics(value: unknown): void {
+  const next = sanitiseCompanionDiagnostics(value);
+  if (!next) return;
+  latestCompanionDiagnostics = next;
+  companionDiagnosticsRevision += 1;
+  for (const waiter of companionDiagnosticsWaiters) waiter();
+}
+
+/** Ask the companion for a fresh popup-equivalent snapshot, but keep a bounded wait. */
+export function companionDiagnostics(): Promise<CompanionDiagnostics | null> {
+  const before = companionDiagnosticsRevision;
+  wakeBrowserWork();
+  if (!browserPresent()) return Promise.resolve(latestCompanionDiagnostics ? structuredClone(latestCompanionDiagnostics) : null);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      companionDiagnosticsWaiters.delete(onUpdate);
+      resolve(latestCompanionDiagnostics ? structuredClone(latestCompanionDiagnostics) : null);
+    };
+    const onUpdate = (): void => {
+      if (companionDiagnosticsRevision > before) finish();
+    };
+    const timer = setTimeout(finish, 2500);
+    timer.unref?.();
+    companionDiagnosticsWaiters.add(onUpdate);
+    if (companionDiagnosticsRevision > before) finish();
+  });
+}
+
+function clearCompanionDiagnostics(): void {
+  latestCompanionDiagnostics = null;
+  companionDiagnosticsRevision++;
+  for (const waiter of companionDiagnosticsWaiters) waiter();
+}
 
 export function onBridgeChange(listener: () => void): () => void {
   listeners.add(listener);
@@ -625,6 +793,7 @@ export async function unpair(): Promise<void> {
   // This impossible-as-a-token sentinel preserves the user's explicit intent across both
   // the extension's next poll and an app restart.
   await setSecret('bridgeToken', BROWSER_DISCONNECTED);
+  clearCompanionDiagnostics();
   browserWake?.revoke();
   browserControl.reset();
   logInfo('bridge: browser disconnected');
@@ -1548,6 +1717,12 @@ function goalActiveFor(id: string): boolean {
   return goalArmedFor(id);
 }
 
+/** Policy gate only: the live silence grant files the outbox's exact recovery claim. */
+export function recoveryInputAllowed(sessionId: string, id: string): boolean {
+  return (goalActiveFor(id) || getConfig().ui.autoContinue !== false) && !goalFencedChat(id) &&
+    !isChatBlocked(id) && !stopRequestedFor(id) && !continuationForSession(sessionId);
+}
+
 // -------------------------------------------------------------------- routes
 
 /**
@@ -1743,17 +1918,36 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
   }
 
+  if (route === '/diagnostics' && req.method === 'POST') {
+    recordCompanionDiagnostics(await readBody(req));
+    return json(res, 200, { ok: true }, origin);
+  }
+
   if (route === '/status') {
     const live = liveConversations();
     let openConversations: string[] = [];
+    let stalledConversations: string[] = [];
     if (req.method === 'POST') {
-      const body = await readBody(req) as { openConversations?: unknown };
+      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown };
       if (!Array.isArray(body?.openConversations) || body.openConversations.length > 10_000 || body.openConversations.some(id => !conversationId(id))) {
         return json(res, 400, { error: 'invalid_open_conversations' }, origin);
       }
       openConversations = body.openConversations as string[];
+      if (body.stalledConversations !== undefined &&
+          (!Array.isArray(body.stalledConversations) || body.stalledConversations.length > 10_000 || body.stalledConversations.some(id => !conversationId(id)))) {
+        return json(res, 400, { error: 'invalid_stalled_conversations' }, origin);
+      }
+      stalledConversations = (body.stalledConversations ?? []) as string[];
     }
-    const tabPolicy = await browserTabPolicy(new Set(openConversations));
+    const openSet = new Set(openConversations);
+    const tabPolicy = await browserTabPolicy(openSet);
+    // A discarded or frozen tab still answers the extension's tab query, so neither the close
+    // path nor the silence sweep ever fires for it — while its page can neither record nor
+    // receive. Each stalled report runs the missing-tab decision minus the close side effects,
+    // before this same response hands the due repair out.
+    for (const stalledId of stalledConversations) {
+      if (openSet.has(stalledId)) await queueStalledTabRecovery(stalledId);
+    }
     // The extension's maintenance pass, and the whole conversation about repairs: `repaired`
     // reports the one handout it was last given and has now carried out, and `repairs` is every
     // chat now due one — the chats whose local tool calls stopped being attributable to them,
@@ -1790,6 +1984,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         browserWorkArea: currentBrowserWorkArea(),
         browserWindowBounds: browserWindowBounds(),
         commands: commands.length,
+        // Rendering custody follows the actual command ledger, including its retirement.
+        commandIds: commands.map(command => command.id),
         revival,
         placement: pendingBrowserPlacement(null),
         // A failure report closes this request. Reissuing the repair in the same response would
@@ -1865,6 +2061,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const target = body.conversationId === null ? null : conversationId(body.conversationId);
     if (body.conversationId !== null && !target) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    if (body.recoveryAction === 'stop' || body.recoveryAction === 'stopped' || body.recoveryAction === 'reloaded') {
+      const ok = !!target && recoveryInputAllowed((await findSessionByConversation(target))?.id ?? '', target) &&
+        await advanceRecoveryInput(body.id, body.owner, target, body.recoveryAction);
+      if (ok) changed();
+      return json(res, 200, { ok }, origin);
+    }
     if (typeof body.silenceBusyTurnId === 'string') {
       const deferred = !!target && await deferSilenceInput(body.id, target, body.silenceBusyTurnId);
       if (deferred) changed();
@@ -3057,17 +3259,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // page retried every fifteen seconds, alive the whole time; the watchdog only saw a reply
     // still owed after two minutes and reloaded the chat twice for a page that was never dead.
     // A reload cannot fix a rate limit, so each request pushes the reload out instead.
-    if (id) noteGoalWatchActivity(id);
+    if (id && body['nativeBusy'] !== true) notePickupActivity(id);
     const clientId = typeof body['clientId'] === 'string' ? body['clientId'].slice(0, 100) : '';
     if (!id) return goalJson(res, 400, { error: 'bad_conversation_id' }, origin);
     if (!turnId) return goalJson(res, 400, { error: 'bad_turn_id' }, origin);
     const astraSession = await findSessionByConversation(id, { requireUnique: true });
     if (astraSession && await astraFinishOnly(astraSession.id, id)) return goalJson(res, 409, { error: 'astra_finish_only', retryable: false }, origin);
-    if (body['nativeBusy'] === true && loopAfterTurnFor(id)) {
-      const deferred = await deferSilenceGoalReplyNow(id, turnId);
-      if (deferred) changed();
-      return goalJson(res, 409, { error: deferred ? 'chat_still_working' : 'goal_reply_not_pending', retryable: deferred }, origin);
-    }
     if (turnId.startsWith('g-silence-') && goalPendingReplyFor(id)?.turnId !== turnId) {
       return goalJson(res, 409, { error: 'goal_reply_not_pending', retryable: false }, origin);
     }
@@ -3101,27 +3298,26 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     if (await goalInputPriority(id, sessionId, turnId))
       return goalJson(res, 409, { error: 'user_input_pending', retryable: true }, origin);
+    if (body['nativeBusy'] === true) {
+      const pro = await extendedSilenceWindowFor(id, sessionId);
+      const pending = goalPendingReplyFor(id);
+      const final = await readCompletedFinal(sessionId, id, turnId);
+      const current = () => goalPendingReplyFor(id)?.replyId === pending?.replyId &&
+        goalPendingReplyFor(id)?.acceptedAt === pending?.acceptedAt && goalActiveFor(id) &&
+        !isChatBlocked(id) && !stopRequestedFor(id) && runningToolCalls(id) === 0 && !continuationForSession(sessionId);
+      if (!pending || pending.turnId !== turnId || !final || !await loopReplyHasAuthority(sessionId, id, turnId) || !current())
+        return goalJson(res, 409, { error: 'goal_final_not_confirmed', retryable: false }, origin);
+      if (!pending.listenUntil) {
+        await deferSilenceGoalReplyNow(id, turnId, Date.now() + recoveryBusyMs(pro));
+        changed();
+      }
+      const stop = current() && await claimGoalRecoveryStopNow(id, pending.replyId, pending.acceptedAt) &&
+        !!await readCompletedFinal(sessionId, id, turnId) && current();
+      return goalJson(res, 200, { recovery: { stop, listenUntil: goalPendingReplyFor(id)?.listenUntil } }, origin);
+    }
     if (await chatStillWorking(id, turnId, sessionId)) {
-      if (await extendedSilenceWindowFor(id, sessionId)) {
-        return goalJson(res, 409, { error: 'chat_still_working', retryable: true }, origin);
-      }
-      // Owed, but not yet: the turn the page reported ended is still open here, or still
-      // running tools. The
-      // obligation is filed so a replacement page collects it; the draft itself waits for the
-      // quiet minute, and the page asks again on its next pull.
-      try {
-        await acceptGoalReplyNow({
-          conversationId: id,
-          sessionId,
-          replyId: `turn:${turnId}`.slice(0, 200),
-          turnId,
-          eventSeq: 0,
-          blocked: false
-        });
-      } catch (err) {
-        logWarn(`bridge: Goal turn ${turnId} for ${id} is not durable yet — ${err instanceof Error ? err.message : String(err)}`);
-        return goalJson(res, 503, { error: 'goal_reply_not_durable', retryable: true }, origin);
-      }
+      // An unfinished turn belongs to Continue. Only canonical completion files
+      // an automatic Goal/Loop obligation; a page request cannot invent one.
       return json(
         res,
         409,
@@ -3222,7 +3418,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         const session = await findSessionByConversation(id, { requireUnique: true });
         const selection = session?.selectedModel;
         const pro = (selection?.conversationId === id && isProModel(selection.model, selection.reasoningEffort)) || await extendedSilenceWindowFor(id);
-        const deferred = await deferSilenceGoalReplyNow(id, draft.turnId, Date.now() + (pro ? 5 * 60_000 : 2 * 60_000), { token, clientId });
+        const deferred = await deferSilenceGoalReplyNow(id, draft.turnId, Date.now() + recoveryBusyMs(pro), { token, clientId });
         return goalJson(res, 200, { acknowledged: false, deferred,
           ...(deferred ? { listenUntil: goalPendingReplyFor(id)?.listenUntil } : {}) }, origin);
       }
@@ -4166,12 +4362,10 @@ async function durableQuiescence(conversationId: string, now: number): Promise<D
  */
 export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
   const silent = await inspectSilentChats(now);
-  // A Goal/Loop chat that is spent is not abandoned: the loop owes it the next message.
+  // An unfinished source files Continue; only a canonical final files Goal/Loop.
   await fileSilenceTickets(silent.spent, now);
-  // Beside the silence pass rather than inside it: they measure the same quiet from opposite
-  // ends of a turn — one an answer that never arrived, one an answer that arrived and was never
-  // picked up — and a chat can only ever be in one of those states.
-  const goalsQueued = await inspectOwedGoals(now);
+  // All undelivered tickets share this pass, including Continue filed by the silence pass.
+  const goalsQueued = await inspectOwedPickups(now);
   const compactionsQueued = await inspectOwedCompactions(now);
 
   const silenceChanged = silent.queued || silent.spent.length > 0 || goalsQueued || compactionsQueued;
@@ -4489,8 +4683,8 @@ async function startBridgeOnce(epoch: number): Promise<number | null> {
       setCallAttributionListener(noteCallAttribution);
       // Restored obligations get their first pickup grace from serving startup,
       // not module evaluation. Their durable acceptance still owns expiry.
-      goalWatchFloor = Date.now();
-      compactionWatchFloor = goalWatchFloor;
+      pickupWatchFloor = Date.now();
+      compactionWatchFloor = pickupWatchFloor;
       bridgeRecovering = false;
       // Anything restored from the previous run goes out now rather than waiting for a
       // browser to come and ask.
@@ -4535,6 +4729,7 @@ export async function stopBridge(): Promise<void> {
     // A stopped listener cannot currently see the extension. Require one fresh authenticated
     // request after the next start rather than carrying a recent sighting across bridge lifetimes.
     lastSeenAt = null;
+    clearCompanionDiagnostics();
     for (const command of commands) {
       if (command.timer) clearTimeout(command.timer);
       command.timer = null;
@@ -5444,12 +5639,9 @@ const compactionFilings = new Set<string>();
  */
 const lastAttributedCallAt = new Map<string, number>();
 export const GOAL_QUIET_MS = 60_000;
-/** Conservative unknown-model lifetime retained for compatibility; known Pro has its own policy. */
-export const PRO_SILENCE_RETIRE_MS = 5 * 60_000;
 export const PRO_SILENCE_MS = 10 * 60_000;
 const SILENCE_RELOAD_LISTEN_MS = 60_000;
 export const PRO_ACTIVITY_MS = 10 * 60_000;
-const activityLifetime = (grant: ActivityGrant): number => grant.model === 'pro' ? PRO_ACTIVITY_MS : PRO_SILENCE_RETIRE_MS;
 
 /** Runtime presentation of the same exact Pro work grant that owns silence recovery. */
 export function sessionInputActivity(summary: SessionSummary): InputActivity {
@@ -5472,12 +5664,12 @@ export function sessionActivityExpiresAt(summary: SessionSummary): number | null
   // An abandoned open recorder turn is not fresh work, even if a later picker selection
   // differs from the model that owned the retired grant.
   if (!grant || grant.sessionId !== summary.id || grant.thinkingFailed) return null;
-  return grant.model !== 'other' ? grant.evidenceAt + activityLifetime(grant) : undefined;
+  return grant.evidenceAt + (grant.model === 'pro' ? PRO_ACTIVITY_MS : CHAT_ACTIVE_MS);
 }
 
 async function extendedSilenceWindowFor(conversationId: string, sessionId?: string): Promise<boolean> {
   const grant = activeUntil.get(conversationId);
-  return Boolean(grant && (!sessionId || grant.sessionId === sessionId) && grant.model !== 'other');
+  return Boolean(grant && (!sessionId || grant.sessionId === sessionId) && grant.model === 'pro');
 }
 
 /** Silence requires this exact turn's recorded MCP work and eligible model/Loop policy. */
@@ -5486,9 +5678,12 @@ async function silenceContinuationAllowed(conversationId: string, sessionId?: st
   if (!session || session.conversationId !== conversationId) return false;
   const grant = activeUntil.get(conversationId);
   const pending = goalPendingReplyFor(conversationId);
+  // Historical automatic silence decisions are replaced by the shared Continue
+  // outbox. Only a deliberate activation can still collect a retained Off source.
+  if (pending && !pending.explicitActivation) return false;
   if (pending?.silencePro && !loopAfterTurnFor(conversationId)) return false;
   const sourceTurnId = pending ? pending.silenceSourceTurnId :
-    grant?.sessionId === session.id && (grant.model === 'other' || (grant.model === 'pro' && loopAfterTurnFor(conversationId))) ? grant.turnId : null;
+    grant?.sessionId === session.id && (grant.model !== 'pro' || loopAfterTurnFor(conversationId)) ? grant.turnId : null;
   if (!sourceTurnId) return false;
   const starts = await readRecentEvents(session.id, 1, { kinds: ['turn_start'] });
   const start = starts[0];
@@ -5594,22 +5789,40 @@ async function chatStillWorking(conversationId: string, turnId: string, sessionI
  * (`chatIsWorking`), a worker or blocked chat never (`goalFencedChat`), and a session already
  * carrying a continuation is not given a second.
  */
-async function considerAutomaticCompaction(conversationId: string, sessionId: string): Promise<void> {
+/** An exact failed current turn can earn compaction; a historical banner cannot. */
+async function failedCompactionTurnCurrent(conversationId: string, sessionId: string, turnId: string): Promise<boolean> {
+  const before = await getSession(sessionId);
+  if (!before || before.conversationId !== conversationId || before.activeTurnId) return false;
+  const [last] = await readRecentEvents(sessionId, 1, {
+    kinds: ['turn_start', 'turn_end', 'user_message', 'assistant_message', 'tool_call', 'page_tool']
+  });
+  if (last?.kind !== 'turn_end' || last.turnId !== turnId || last.outcome !== 'failed') return false;
+  if (await readCompletedFinal(sessionId, conversationId, turnId)) return false;
+  const after = await getSession(sessionId);
+  return !!after && after.conversationId === conversationId && !after.activeTurnId && after.events === before.events;
+}
+
+async function considerAutomaticCompaction(conversationId: string, sessionId: string, failedTurn?: string): Promise<void> {
   if (!getConfig().compaction.auto || compactionFilings.has(conversationId)) return;
-  if (goalFencedChat(conversationId) || continuationForSession(sessionId) || !chatIsWorking(conversationId)) return;
+  if (goalFencedChat(conversationId) || continuationForSession(sessionId) || stopRequestedFor(conversationId)) return;
+  if (!failedTurn && !chatIsWorking(conversationId)) return;
   compactionFilings.add(conversationId);
   try {
     const summary = await getSession(sessionId).catch(() => null);
     if (!summary || summary.conversationId !== conversationId || !autoCompactionReady(summary)) return;
     if (await conversationWasSuperseded(conversationId)) return;
+    if (failedTurn && !await failedCompactionTurnCurrent(conversationId, sessionId, failedTurn)) return;
     // Re-read after the awaits: the turn may have ended, or a page may have filed by hand.
-    if (!chatIsWorking(conversationId) || continuationForSession(sessionId) || goalFencedChat(conversationId) ||
-        !automaticCompactionAllowed(await getSession(sessionId))) return;
+    const current = await getSession(sessionId);
+    if (!current || current.conversationId !== conversationId || !autoCompactionReady(current)) return;
+    if (failedTurn && !await failedCompactionTurnCurrent(conversationId, sessionId, failedTurn)) return;
+    if ((!failedTurn && !chatIsWorking(conversationId)) || continuationForSession(sessionId) || goalFencedChat(conversationId) ||
+        stopRequestedFor(conversationId) || !getConfig().compaction.auto || !automaticCompactionAllowed(current)) return;
     const opened = await openContinuationNow(sessionId, conversationId, true);
     rememberToken(sessionId, opened.token);
     changed();
     logInfo(
-      `bridge: ${conversationId} is working at ${summary.contextTokens} context tokens — filed auto-compaction ticket ${opened.token.slice(0, 8)}`
+      `bridge: ${conversationId} ${failedTurn ? 'lost its current turn' : 'is working'} at ${current.contextTokens} context tokens — filed auto-compaction ticket ${opened.token.slice(0, 8)}`
     );
   } catch (err) {
     logWarn(`bridge: could not file the auto-compaction ticket for ${conversationId} — ${err instanceof Error ? err.message : String(err)}`);
@@ -5618,23 +5831,14 @@ async function considerAutomaticCompaction(conversationId: string, sessionId: st
   }
 }
 
-/**
- * Files the Goal ticket for a Goal/Loop chat whose silence reload brought nothing back.
- *
- * The prime stopped writing with no final answer, exhausted its model's silence window, and
- * the reload showed the same dead turn. The loop treats
- * that exactly as it treats a finished answer — the chat is owed the next user message — and
- * files the same crash-durable obligation a finished answer would have, under a turn of its
- * own. The page collects it on its next pull like any other pending reply (the same pickup a
- * reload restores), drafts, and sends; the reply that starts is attributed by its own request
- * id, so a prime whose page was lost for one turn carries on in the next. A stop the user
- * pressed never gets here: it ends the chat's activity, and a chat without activity is never
- * silent.
- */
+/** File the shared outbox ticket, retaining only handled Off sources for explicit activation. */
 async function fileSilenceTickets(spent: readonly string[], now: number): Promise<void> {
   for (const conversationId of spent) {
     // An existing user instruction takes this boundary before a synthesized Goal reply.
     if (await fileSilenceInputTicket(conversationId, now)) continue;
+    // Unfinished automatic work belongs to Continue, never a Goal decision. Keep
+    // only the historical Off source below for deliberate user reactivation.
+    if (goalActiveFor(conversationId)) continue;
     if (goalWorkerChat(conversationId) || isChatBlocked(conversationId)) continue;
     // Only after a silence reload that was carried out and answered by nothing. A grant spent
     // for any other reason — not a chat the user wants brought back, say — earned no reload
@@ -5645,13 +5849,10 @@ async function fileSilenceTickets(spent: readonly string[], now: number): Promis
     const session = await getSession(held.sessionId);
     if (!session || session.conversationId !== conversationId) continue;
     if (await inputBeforeGoal(session.id, grant?.turnId ?? undefined)) continue;
-    const handledOnly = !goalActiveFor(conversationId) || (grant?.model === 'pro' && !loopAfterTurnFor(conversationId));
-    if (handledOnly) {
-      const [start] = await readRecentEvents(session.id, 1, { kinds: ['turn_start'] });
-      if (!grant?.turnId || start?.turnId !== grant.turnId) continue;
-    } else if (!await silenceContinuationAllowed(conversationId, session.id)) continue;
+    const [start] = await readRecentEvents(session.id, 1, { kinds: ['turn_start'] });
+    if (!grant?.turnId || start?.turnId !== grant.turnId || goalActiveFor(conversationId)) continue;
     if (!grant || activeUntil.get(conversationId) !== grant ||
-        (grant.model !== 'other' && !(grant.model === 'pro' && (handledOnly || loopAfterTurnFor(conversationId)) && (grant.thinkingFailed || now - grant.evidenceAt >= PRO_SILENCE_MS)))) continue;
+        (grant.model === 'pro' && !grant.thinkingFailed && now - grant.evidenceAt < PRO_SILENCE_MS)) continue;
     if (goalPendingReplyFor(conversationId) || runningToolCalls(conversationId) > 0) continue;
     if (continuationForSession(session.id)) continue;
     // Canonical message replacement leaves sequence gaps; the summary count is not a cursor.
@@ -5666,20 +5867,20 @@ async function fileSilenceTickets(spent: readonly string[], now: number): Promis
         sessionId: session.id,
         silenceSourceTurnId: grant.turnId ?? undefined,
         silencePro: grant.model === 'pro',
-        ...(grant.thinkingFailed || grant.model === 'other' ? { listenUntil: grant.until } : {}),
+        ...(grant.thinkingFailed || grant.model !== 'pro' ? { listenUntil: grant.until } : {}),
         replyId: `silence:${held.token}`,
         turnId,
         eventSeq: boundary.seq,
         blocked: false,
-        ...(handledOnly ? { handledOnly: true as const } : {}),
+        handledOnly: true,
         current: () => activeUntil.get(conversationId) === grant && repairsInFlight.get(conversationId) === held &&
-          runningToolCalls(conversationId) === 0 && !stopRequestedFor(conversationId)
+          runningToolCalls(conversationId) === 0 && !stopRequestedFor(conversationId) && !goalActiveFor(conversationId)
       });
       if (activeUntil.get(conversationId) !== grant || runningToolCalls(conversationId) > 0) {
         const pending = goalPendingReplyFor(conversationId);
         if (pending?.turnId === turnId) await withdrawSilenceGoalReplyNow(conversationId, pending.replyId);
       }
-      logInfo(`bridge: ${conversationId} stayed silent after its reload — ${handledOnly ? 'retaining the handled source for explicit activation' : 'filing a Goal ticket so the loop writes the next message'}`);
+      logInfo(`bridge: ${conversationId} stayed silent after its reload — retaining the handled source for explicit activation`);
     } catch (err) {
       logWarn(`bridge: could not file the Goal ticket for ${conversationId} — ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -5690,7 +5891,7 @@ async function fileSilenceTickets(spent: readonly string[], now: number): Promis
 async function fileSilenceInputTicket(conversationId: string, now: number, listenUntil?: number): Promise<boolean> {
   const grant = activeUntil.get(conversationId);
   const repair = repairsInFlight.get(conversationId);
-  if (!grant?.turnId || (!grant.thinkingFailed && now - grant.evidenceAt < (grant.model === 'other' ? CHAT_SILENCE_MS : PRO_SILENCE_MS)) ||
+  if (!grant?.turnId || (!grant.thinkingFailed && now - grant.evidenceAt < (grant.model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS)) ||
       repair?.reason !== 'silence' || repair.state !== 'done' || repair.sessionId !== grant.sessionId) return false;
   const current = () => activeUntil.get(conversationId) === grant && repairsInFlight.get(conversationId) === repair &&
     !stopRequestedFor(conversationId) && !isChatBlocked(conversationId) &&
@@ -5699,8 +5900,12 @@ async function fileSilenceInputTicket(conversationId: string, now: number, liste
     // publish its existing listening deadline while an unrelated chat is recording;
     // grant identity and the outbox's source/work checks still fence renewed work.
     (observationWritesInFlight === 0 || (grant.thinkingFailed === true && repair.progress?.turnId === grant.turnId));
-  return fileSilenceInput(grant.sessionId, conversationId, grant.turnId, current,
-    grant.thinkingFailed || grant.model === 'other' ? grant.until : listenUntil);
+  if (await fileSilenceInput(grant.sessionId, conversationId, grant.turnId, current,
+    grant.thinkingFailed || grant.model !== 'pro' ? grant.until : listenUntil)) return true;
+  return recoveryInputAllowed(grant.sessionId, conversationId) &&
+    fileRecoveryInput(grant.sessionId, conversationId, grant.turnId, grant.model === 'pro', current,
+      grant.thinkingFailed ? (lastBrowserRecoveryAt.get(conversationId) ?? now) + recoveryBusyMs(grant.model === 'pro') :
+        grant.evidenceAt + (grant.model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS) * 1.5);
 }
 
 /**
@@ -5832,6 +6037,27 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
   if (session?.conversationId !== conversationId || isChatBlocked(conversationId) || stopRequestedFor(conversationId) ||
       continuationForSession(sessionId) || supersededSourceConversations().includes(conversationId)) return [];
   const result: import('../shared/recovery.js').RecoveryCountdown[] = [];
+  const recovery = rows.find(row => row.sessionId === sessionId && row.recovery &&
+    (row.state === 'queued' || row.state === 'browser') && row.silenceBoundary);
+  if (recovery?.silenceBoundary && recoveryInputAllowed(sessionId, conversationId)) {
+    const wait = recovery.silenceBoundary.listenUntil ?? 0;
+    const pickup = pickupWatch.get(conversationId);
+    result.push(wait > Date.now() || !pickup ? {
+      kind: recovery.silenceBoundary.nativeBusy ? 'native-busy' : 'post-reload',
+      deadline: wait || Date.now(), next: 'continue'
+    } : { kind: 'pickup', deadline: pickup.dueAt, next: 'continue' });
+    return result;
+  }
+  const pendingGoal = goalActiveFor(conversationId) ? goalPendingReplyFor(conversationId) : null;
+  if (pendingGoal && !pendingGoal.silenceSourceTurnId && runningToolCalls(conversationId) === 0 &&
+      await readCompletedFinal(sessionId, conversationId, pendingGoal.turnId) &&
+      goalPendingReplyFor(conversationId)?.acceptedAt === pendingGoal.acceptedAt) {
+    const next = goalModeFor(conversationId);
+    if ((pendingGoal.listenUntil ?? 0) > Date.now())
+      return [{ kind: 'native-busy', deadline: pendingGoal.listenUntil!, next }];
+    const pickup = pickupWatch.get(conversationId);
+    if (pickup) return [{ kind: 'pickup', deadline: pickup.dueAt, next }];
+  }
   if (browserPresent()) {
     const deadlines = [...unattributedIncidents.values()].flatMap(incident => {
       if (incident.pass >= 2) return [];
@@ -5858,19 +6084,19 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
   // turn), restoring normal hidden/timed visibility without a second flag.
   if (owned && !grant.thinkingFailed && !confirmed && !session.activeTurnId &&
       boundary?.kind === 'turn_end' && boundary.outcome === 'completed' && grant.evidenceAt <= boundary.time &&
-      (tabRecoveryWanted(conversationId) || loopAfterTurnFor(conversationId) || queuedAfterTurn)) {
+      (recoveryInputAllowed(sessionId, conversationId) || tabRecoveryWanted(conversationId) || loopAfterTurnFor(conversationId) || queuedAfterTurn)) {
     result.push({ kind: 'silence', deadline: grant.until });
     return result;
   }
   if (owned && !grant.thinkingFailed && grant.model === 'pro' && !confirmed &&
-      (tabRecoveryWanted(conversationId) || loopAfterTurnFor(conversationId) || queuedAfterTurn)) {
+      (recoveryInputAllowed(sessionId, conversationId) || tabRecoveryWanted(conversationId) || loopAfterTurnFor(conversationId) || queuedAfterTurn)) {
     result.push({ kind: 'silence', deadline: grant.until, visibleAt: grant.evidenceAt + PRO_SILENCE_MS / 2 });
     return result;
   }
   // A confirmed reload's listening deadline is not fresh work. Real activity
   // replaces the grant and retires the receipt, withdrawing this row immediately.
   const normalReloadDeadline = confirmed ? (lastBrowserRecoveryAt.get(conversationId) ?? 0) + SILENCE_RELOAD_LISTEN_MS : undefined;
-  const postReloadDeadline = owned && confirmed && !grant.thinkingFailed && grant.model === 'other' &&
+  const postReloadDeadline = owned && confirmed && !grant.thinkingFailed && grant.model !== 'pro' &&
     grant.until === normalReloadDeadline ? grant.until : undefined;
   if (owned && !grant.thinkingFailed && !postReloadDeadline && grant.until > Date.now()) return result;
   const queued = rows.find(row => row.sessionId === sessionId && row.state === 'queued' && row.purpose !== 'decision' &&
@@ -5905,7 +6131,7 @@ interface Repair {
   state: 'queued' | 'handed' | 'done';
   /** Stable identity of the failure/inactivity episode. A new activity stamp mints a new one. */
   episode: string;
-  reason: 'unattributed' | 'assistant-error' | 'no-tab' | 'silence' | 'goal' | 'compaction';
+  reason: 'unattributed' | 'assistant-error' | 'no-tab' | 'silence' | 'goal' | 'compaction' | 'stalled';
   /** Cooldown boundary. The browser is never asked before this instant. */
   notBefore: number;
   /**
@@ -6120,9 +6346,9 @@ async function noteRecoveryObservations(
   // chats on every recovery reload. Only the recorder's per-event acceptance verdict may move
   // this clock. A just-authored opening row covers the narrow pre-turn_start fresh-chat window;
   // replayed/history rows explicitly do not.
-  // A turn may reach the recorder before its picker observation. Unknown is absence
-  // of evidence, not a model choice to pin forever. Resolve it from this exact chat
-  // without treating picker/presence updates as new work or changing a known model.
+  // The picker reports changes, not one selection per turn or transport batch.
+  // Reuse its recorded exact-chat selection and resolve late evidence without
+  // renewing the work clock or changing an already known turn's model.
   const recorded = sessionId ? await getSession(sessionId) : null;
   const ended = observations.findLast(item => item.kind === 'turn_end');
   const thinkingFailed = ended?.outcome === 'failed' && ended.reason === 'thinking_failed' &&
@@ -6138,13 +6364,18 @@ async function noteRecoveryObservations(
     repaired.progress.turnId === ended.turnId && confirmedAt !== undefined ? repaired : null;
   const selected = recorded?.selectedModel;
   const provenModel = selected?.conversationId === conversationId
-    ? isProModel(selected.model, selected.reasoningEffort) ? 'pro' as const : 'unknown' as const
+    ? isProModel(selected.model, selected.reasoningEffort) ? 'pro' as const : 'other' as const
     : 'unknown' as const;
   const unresolved = activeUntil.get(conversationId);
   if (!activity.terminal && unresolved?.model === 'unknown' && unresolved.sessionId === sessionId &&
       recorded?.conversationId === conversationId && recorded.activeTurnId === unresolved.turnId && provenModel !== 'unknown') {
-    grantActivity(conversationId, sessionId!, unresolved.evidenceAt, CHAT_SILENCE_MS,
-      { turnId: unresolved.turnId, model: provenModel });
+    unresolved.model = provenModel;
+    // Enrich identity, not activity. In particular, a replacement page's picker
+    // must not spend or restart the listening window of its acknowledged reload.
+    if (!(repaired?.reason === 'silence' && repaired.state === 'done' && repaired.sessionId === sessionId)) {
+      unresolved.until = unresolved.evidenceAt + (provenModel === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS);
+      armSilenceSweep();
+    }
   }
   if (sessionId && !activity.terminal && activity.toolStartedAt !== undefined) {
     await revokeSilenceInputs(sessionId);
@@ -6168,7 +6399,7 @@ async function noteRecoveryObservations(
     }
     if (!sameFailedRepair && (!activity.terminal || !observations.some(item => item.kind === 'turn_end' && item.outcome === 'stalled')))
       noteRecoveryActivity(conversationId);
-    noteGoalWatchActivity(conversationId);
+    notePickupActivity(conversationId);
     // A current-turn interim can push an existing deadline; historical transcript/page rows
     // never enter this verdict and therefore cannot keep a confirmed reload alive.
     if (sessionId && !activity.terminal && (activity.working || (activeUntil.has(conversationId) && !activeUntil.get(conversationId)?.thinkingFailed))) {
@@ -6187,8 +6418,8 @@ async function noteRecoveryObservations(
           turn = { turnId: item.turnId ?? null, model: selection?.kind === 'model_selection' && selection.model ?
             isProModel(selection.model, selection.reasoningEffort) ? 'pro' : 'other' : provenModel };
         }
-        // A batched journal can contain multiple turns; one picker observation proves only
-        // the next start, never a later turn whose own picker was unavailable.
+        // A batch-local selection applies to its next start. Later starts reuse
+        // the retained session selection, just as separate transport batches do.
         if (item.kind === 'turn_start') selection = undefined;
       }
       grantActivity(conversationId, sessionId, Math.min(Date.now(), activity.at ?? Date.now()), CHAT_SILENCE_MS, turn);
@@ -6215,9 +6446,10 @@ async function noteRecoveryObservations(
   }
   const proTerminal = terminalGrant?.model === 'pro' && (activity.endedTurnId === terminalGrant.turnId ||
     (activity.terminal && !observations.some(item => item.kind === 'turn_end')));
-  const awaitingSilenceRefresh = !!lastEnd &&
-    ['stalled', 'failed', 'unknown', 'interrupted', 'error'].includes(lastEnd) &&
-    !!sessionId && (loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(sessionId));
+  const awaitingSilenceRefresh = !!lastEnd && !!sessionId &&
+    ((lastEnd === 'completed' && recoveryInputAllowed(sessionId, conversationId)) ||
+      (['stalled', 'failed', 'unknown', 'interrupted', 'error'].includes(lastEnd) &&
+        (recoveryInputAllowed(sessionId, conversationId) || loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(sessionId))));
   const mcpTerminal = !thinkingFailed && !terminalGrant?.thinkingFailed && terminalGrant?.turnId && activity.endedTurnId === terminalGrant.turnId && sessionId && activity.terminal &&
     lastEnd !== 'stopped' && await turnHasMcpCall(sessionId, conversationId, terminalGrant.turnId);
   const finalTurn = activity.endedTurnId ?? terminalGrant?.turnId;
@@ -6228,6 +6460,19 @@ async function noteRecoveryObservations(
     (item.state === 'final' || item.final === true));
   const completedFinal = (activity.terminal || observedFinal) && sessionId &&
     await readCompletedFinal(sessionId, conversationId, finalTurn);
+  // A short native generation can start and end in one accepted batch. That is
+  // still owed work when no canonical final arrived; the terminal UI flag must
+  // not prevent the same silence grant that a separately delivered start earns.
+  if (!completedFinal && !terminalGrant && sessionId && ended?.turnId && lastEnd !== 'stopped' &&
+      !thinkingFailed && activity.working && activity.terminal && activity.endedTurnId === ended.turnId &&
+      recoveryInputAllowed(sessionId, conversationId)) {
+    const [work] = await readRecentEvents(sessionId, 1, { kinds: ['user_message', 'assistant_message', 'tool_call', 'page_tool', 'turn_start'] });
+    if (work && (await getSession(sessionId))?.conversationId === conversationId && !activeUntil.has(conversationId)) {
+      grantActivity(conversationId, sessionId, Math.min(Date.now(), work.time), CHAT_SILENCE_MS,
+        { turnId: ended.turnId, model: provenModel });
+      terminalGrant = activeUntil.get(conversationId);
+    }
+  }
   // The ten-/two-minute budget is silence recovery only. Final response evidence
   // consumes it even if a local call is still draining; runningToolCalls separately
   // guards actual send/compaction. Replayed finals cannot consume newer work.
@@ -6238,7 +6483,7 @@ async function noteRecoveryObservations(
     // A completed tool-only response can still acquire its missing final text.
     // Give that accepted completion the ordinary two-minute recovery window;
     // historical replay and the replacement page cannot renew a spent reload.
-    if (lastEnd === 'completed' && terminalGrant.model === 'other' && ended &&
+    if (lastEnd === 'completed' && terminalGrant.model !== 'pro' && ended &&
         !(repaired?.reason === 'silence' && repaired.state === 'done')) {
       terminalGrant.evidenceAt = Math.max(terminalGrant.evidenceAt, Math.min(Date.now(), ended.time));
       terminalGrant.until = terminalGrant.evidenceAt + CHAT_SILENCE_MS;
@@ -6247,7 +6492,7 @@ async function noteRecoveryObservations(
   }
   if (!completedFinal && !thinkingFailed && !mcpTerminal && !awaitingSilenceRefresh && (proTerminal || (activity.terminal && terminalGrant?.model !== 'pro'))) {
     if (proTerminal) endActivity(conversationId);
-    else if (lastEnd === 'unknown' && sessionId && await extendedSilenceWindowFor(conversationId, sessionId)) {
+    else if (lastEnd === 'unknown' && terminalGrant?.model === 'unknown' && terminalGrant.sessionId === sessionId) {
       // Loss of browser completion evidence does not change the last meaningful-work clock.
     } else if (lastEnd === 'failed' && sessionId) grantActivity(conversationId, sessionId, Math.min(Date.now(), activity.at ?? Date.now()));
     else endActivity(conversationId);
@@ -6308,6 +6553,8 @@ async function noteRecoveryObservations(
     ) {
       logInfo(`bridge: assistant transport failure — asking the browser to recover ${conversationId}`);
     }
+    if (sessionId && item.turnId && source?.turnId === item.turnId && !source.completed)
+      await considerAutomaticCompaction(conversationId, sessionId, item.turnId);
     break;
   }
 }
@@ -6450,7 +6697,7 @@ function tabRecoveryWanted(conversationId: string): boolean {
 
 /** The active agent chats for which the browser must keep asking the app for recovery work. */
 function browserRecoveryMonitoring(): boolean {
-  if (repairsInFlight.size > 0 || activeUntil.size > 0 || goalWatch.size > 0 || compactionWatch.size > 0) return true;
+  if (repairsInFlight.size > 0 || activeUntil.size > 0 || pickupWatch.size > 0 || compactionWatch.size > 0) return true;
   return swarmState().agents.some(
     (agent) =>
       Boolean(agent.conversationId) &&
@@ -6477,7 +6724,7 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     if (compacting.has(conversationId)) continue;
     if (grant.until > now) continue;
     const pro = await extendedSilenceWindowFor(conversationId, grant.sessionId);
-    const afterTurn = loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(grant.sessionId);
+    const afterTurn = recoveryInputAllowed(grant.sessionId, conversationId) || loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(grant.sessionId);
     if (activeUntil.get(conversationId) !== grant) continue;
     if (afterTurn && runningToolCalls(conversationId) > 0) {
       grant.until = now + GOAL_QUIET_MS;
@@ -6493,10 +6740,10 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
       spent.push(conversationId);
       continue;
     }
-    // Recovery and queued delivery share the same model clock. Missing selection
-    // is not evidence of a normal model, even when no follow-up input is queued.
+    // Only positively identified Pro work earns the longer recovery clock.
+    // Unknown models use two minutes plus one minute after the confirmed refresh.
     // Thinking failed keeps its separately proven immediate refresh authority.
-    if ((afterTurn || tabRecoveryWanted(conversationId)) && grant.model !== 'other' && !grant.thinkingFailed && now < grant.evidenceAt + PRO_SILENCE_MS) {
+    if ((afterTurn || tabRecoveryWanted(conversationId)) && grant.model === 'pro' && !grant.thinkingFailed && now < grant.evidenceAt + PRO_SILENCE_MS) {
       grant.until = grant.evidenceAt + PRO_SILENCE_MS;
       deferred = true;
       continue;
@@ -6504,8 +6751,8 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     // Not a chat the user wants brought back: its silence is spent the same way, without the
     // reload that would otherwise be its one chance.
     if (!grant.thinkingFailed && !tabRecoveryWanted(conversationId) && !afterTurn) {
-      if (pro && now < grant.evidenceAt + activityLifetime(grant)) {
-        grant.until = grant.evidenceAt + activityLifetime(grant);
+      if (pro && now < grant.evidenceAt + PRO_ACTIVITY_MS) {
+        grant.until = grant.evidenceAt + PRO_ACTIVITY_MS;
         deferred = true;
         continue;
       }
@@ -6514,8 +6761,8 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     }
     const held = repairsInFlight.get(conversationId);
     if (held?.state === 'done' && !TURN_SCOPED_REPAIRS.has(held.reason)) {
-      if (!grant.thinkingFailed && pro && now < grant.evidenceAt + activityLifetime(grant)) {
-        grant.until = grant.evidenceAt + activityLifetime(grant);
+      if (!grant.thinkingFailed && pro && now < grant.evidenceAt + PRO_ACTIVITY_MS) {
+        grant.until = grant.evidenceAt + PRO_ACTIVITY_MS;
         deferred = true;
         continue;
       }
@@ -6543,7 +6790,7 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     if (queueBrowserRecovery(conversationId, grant.sessionId, `silence:${grant.until}`, 'silence', 0, now)) {
       queued = true;
       logInfo(
-        `bridge: active chat silent for ${grant.model === 'other' ? 'two' : 'ten'} minutes — asking the browser to reload ${conversationId} once`
+        `bridge: active chat silent for ${grant.model === 'pro' ? 'ten' : 'two'} minutes — asking the browser to reload ${conversationId} once`
       );
     }
   }
@@ -6558,14 +6805,14 @@ function finishSilentChats(conversationIds: readonly string[]): void {
     // Keep the existing exact receipt until genuine activity retires it. A large
     // replacement page can report Thinking failed after this maintenance pass.
     const repair = repairsInFlight.get(conversationId);
-    if (repair?.reason !== 'unattributed' && (repair?.reason !== 'silence' || repair.state !== 'done' || !repair.progress?.turnId))
+    if (repair?.reason !== 'goal' && repair?.reason !== 'unattributed' && (repair?.reason !== 'silence' || repair.state !== 'done' || !repair.progress?.turnId))
       repairsInFlight.delete(conversationId);
   }
   if (conversationIds.length) changed();
 }
 
 /**
- * When a chat that owes a Goal decision is reloaded, measured from its last sign of life.
+ * When a chat with an undelivered input or Goal/Loop decision is reloaded, measured from its last sign of life.
  *
  * The first number is the silence window over again, and deliberately the same one: two minutes
  * with nothing arriving is this app's standing definition of a chat that has stopped, and a
@@ -6576,10 +6823,10 @@ function finishSilentChats(conversationIds: readonly string[]): void {
  */
 // Asserted non-empty: the opening gap is read unconditionally when a schedule is armed, and a
 // schedule with no first step would be a watchdog that never starts.
-const GOAL_WATCH_BACKOFF_MS = [2, 2, 5, 10, 15].map((minutes) => minutes * 60_000) as [number, ...number[]];
+const PICKUP_BACKOFF_MS = [2, 5, 10, 15].map((minutes) => minutes * 60_000) as [number, ...number[]];
 
 /**
- * One reload schedule per chat that still owes a Goal decision.
+ * One reload schedule per chat that still owes input or a Goal/Loop decision.
  *
  * Attempts advance through the backoff, then retain the fifteen-minute cadence.
  * Activity postpones a pickup without resetting its backoff. The original durable
@@ -6588,7 +6835,7 @@ const GOAL_WATCH_BACKOFF_MS = [2, 2, 5, 10, 15].map((minutes) => minutes * 60_00
  * The row is keyed to the exact `replyId` it was armed for. A newer final answer is a different
  * obligation and gets its own schedule; a discharged one takes its schedule with it.
  */
-const goalWatch = new Map<string, { replyId: string; dueAt: number; attempts: number; pro: boolean; expiresAt: number }>();
+const pickupWatch = new Map<string, { replyId: string; dueAt: number; attempts: number; expiresAt: number }>();
 const PICKUP_WATCH_LIFETIME_MS = 12 * 60 * 60_000;
 
 /**
@@ -6666,33 +6913,20 @@ function forgetGoalWatch(conversationId: string): void {
  * obligations survive restart, but receive their normal first grace period on startup.
  * Their original expiry remains authoritative; history alone creates no obligation.
  */
-let goalWatchFloor: number | null = null;
+let pickupWatchFloor: number | null = null;
 let compactionWatchFloor: number | null = null;
 
 /** Any sign of life pushes the next reload out by the gap this chat is currently on. */
-function noteGoalWatchActivity(conversationId: string): void {
-  const watch = goalWatch.get(conversationId);
+function notePickupActivity(conversationId: string): void {
+  const watch = pickupWatch.get(conversationId);
   if (!watch) return;
-  const gap = GOAL_WATCH_BACKOFF_MS[Math.min(watch.attempts, GOAL_WATCH_BACKOFF_MS.length - 1)]!;
-  watch.dueAt = Date.now() + Math.max(gap, watch.pro ? PRO_SILENCE_MS : 0);
+  const gap = PICKUP_BACKOFF_MS[Math.min(watch.attempts, PICKUP_BACKOFF_MS.length - 1)]!;
+  watch.dueAt = Date.now() + gap;
 }
 
-/**
- * Reloads chats whose finished reply nothing ever came to collect.
- *
- * The Goal loop has exactly one trigger and it lives in the page: a content script sees a turn
- * end and asks the app for a draft. That is the right place for it — only the page knows what is
- * on screen — but it means the loop's liveness is the page's liveness, and a document that dies
- * between the final answer and the request takes the whole loop down with it silently. The
- * obligation is on file, correctly marked pending, and nobody is left alive to redeem it.
- *
- * So this is the other half: the app watching its own ledger. It asks nothing about turns and
- * nothing about drafts, only whether a decision is owed and whether the chat has gone quiet, and
- * its answer is the same reload the page would have got from any other recovery path. A reload
- * republishes `goal.pending` to the replacement script, which asks for the draft the dead one
- * never asked for — which is also why a goal that failed once retries: the next reload is a new
- * request, and the obligation was never discharged by the failure.
- */
+/** One pickup tree for authored input, unfinished Continue and final-driven Goal/Loop.
+ * Their durable owners retain text/decision debt; this projection elects one source per
+ * chat and shares its reload budget. A reload never generates a second obligation. */
 async function owedPickups(now: number): Promise<Map<string, { conversationId: string; sessionId: string; replyId: string; acceptedAt: number; listenUntil: number; pro: boolean; queued: boolean }>> {
   const owed = new Map<string, { conversationId: string; sessionId: string; replyId: string; acceptedAt: number; listenUntil: number; pro: boolean; queued: boolean }>();
   for (const reply of pendingGoalReplies(now)) {
@@ -6720,15 +6954,15 @@ async function owedPickups(now: number): Promise<Map<string, { conversationId: s
   return owed;
 }
 
-async function inspectOwedGoals(now: number): Promise<boolean> {
-  const floor = goalWatchFloor;
+async function inspectOwedPickups(now: number): Promise<boolean> {
+  const floor = pickupWatchFloor;
   if (floor === null) return false;
   const owed = await owedPickups(now);
-  if (goalWatchFloor !== floor) return false;
+  if (pickupWatchFloor !== floor) return false;
   // Keep the spent episode while its source is absent: cancellation/reordering must not
   // refund retries if another queue item or Goal later uses that same boundary.
-  for (const [conversationId, watch] of goalWatch) {
-    if (now >= watch.expiresAt) goalWatch.delete(conversationId);
+  for (const [conversationId, watch] of pickupWatch) {
+    if (now >= watch.expiresAt) pickupWatch.delete(conversationId);
     if (now < watch.expiresAt && owed.get(conversationId)?.replyId === watch.replyId) continue;
     const repair = repairsInFlight.get(conversationId);
     if (repair?.reason === 'goal' && (now >= watch.expiresAt || repair.state !== 'handed' || owed.has(conversationId))) repairsInFlight.delete(conversationId);
@@ -6739,18 +6973,17 @@ async function inspectOwedGoals(now: number): Promise<boolean> {
     if (session?.conversationId !== reply.conversationId || isChatBlocked(reply.conversationId) ||
         stopRequestedFor(reply.conversationId) || await conversationWasSuperseded(reply.conversationId) ||
         continuationForSession(reply.sessionId)) continue;
-    if (goalWatchFloor !== floor) return queued;
-    let watch = goalWatch.get(reply.conversationId);
+    if (pickupWatchFloor !== floor) return queued;
+    let watch = pickupWatch.get(reply.conversationId);
     if (!watch || watch.replyId !== reply.replyId) {
-      watch = { replyId: reply.replyId, attempts: 0, pro: reply.pro,
+      watch = { replyId: reply.replyId, attempts: 0,
         expiresAt: reply.acceptedAt + PICKUP_WATCH_LIFETIME_MS,
-        dueAt: Math.max(reply.acceptedAt, floor) + Math.max(GOAL_WATCH_BACKOFF_MS[0], reply.pro ? PRO_SILENCE_MS : 0) };
-      goalWatch.set(reply.conversationId, watch);
+        dueAt: Math.max(reply.acceptedAt, floor) + PICKUP_BACKOFF_MS[0] };
+      pickupWatch.set(reply.conversationId, watch);
     }
-    watch.pro = reply.pro;
     if (now < watch.dueAt || now < reply.listenUntil) continue;
     if (!reply.queued && goalDraftBusy(reply.conversationId)) {
-      noteGoalWatchActivity(reply.conversationId);
+      notePickupActivity(reply.conversationId);
       continue;
     }
     const held = repairsInFlight.get(reply.conversationId);
@@ -6759,9 +6992,9 @@ async function inspectOwedGoals(now: number): Promise<boolean> {
     if (!queueBrowserRecovery(reply.conversationId, reply.sessionId,
       `goal:${reply.replyId}:${watch.attempts}`, 'goal', 0, now)) continue;
     watch.attempts += 1;
-    watch.dueAt = now + Math.max(GOAL_WATCH_BACKOFF_MS[Math.min(watch.attempts, GOAL_WATCH_BACKOFF_MS.length - 1)]!, reply.pro ? PRO_SILENCE_MS : 0);
+    watch.dueAt = now + PICKUP_BACKOFF_MS[Math.min(watch.attempts, PICKUP_BACKOFF_MS.length - 1)]!;
     queued = true;
-    logInfo(`bridge: next queued/Goal step uncollected in ${reply.conversationId} — reload ${watch.attempts}`);
+    logInfo(`bridge: next automation/input step uncollected in ${reply.conversationId} — reload ${watch.attempts}`);
   }
   return queued;
 }
@@ -6900,6 +7133,50 @@ async function queueMissingTab(conversationId: string, working: boolean, now = D
   const wentAt = agent?.detachedAt ?? session.endedAt ?? now;
   if (queueBrowserRecovery(conversationId, session.id, `no-tab:${wentAt}`, 'no-tab', 0, now)) {
     logInfo(`bridge: ${name} has no tab — asking the browser to open the exact chat once`);
+  } else {
+    declined('a browser action for it is already pending');
+  }
+}
+
+/**
+ * One stalled-tab report from the extension: a tab Chrome discarded (Memory Saver) or froze
+ * (Energy Saver) while keeping its URL, so it answers every tab query with a page that is gone
+ * or suspended.
+ *
+ * The decision is the missing-tab one minus the close side effects: the shell stays open, no
+ * run ends, and nothing is marked ended. The service worker reloads the exact tab — an action
+ * Chrome performs from the worker regardless of the page's state — which is also why this
+ * repair, and not prevention, is the answer: `autoDiscardable` covers discarding only, and no
+ * extension API exempts a tab from freezing. A compaction source is owed the reload on its
+ * ticket's own evidence, exactly like its ordinary pickups. Chat-scoped like `no-tab`: real
+ * activity from the revived page retires it, and the shared per-conversation cooldown bounds a
+ * tab Chrome keeps re-suspending.
+ */
+async function queueStalledTabRecovery(conversationId: string, now = Date.now()): Promise<void> {
+  const agent = agentInfoForOwnedConversation(conversationId);
+  const session = await findSessionByConversation(conversationId, { requireUnique: true });
+  const name = agent?.id ?? conversationId;
+  const declined = (why: string): void => {
+    logInfo(`bridge: ${name} is a stalled browser tab — not reloaded: ${why}`);
+  };
+  // A chat with no session is not this app's chat; its tab sleeping is nobody's business here.
+  if (!session) return;
+  const compacting = pendingContinuations().some((entry) => entry.from === conversationId);
+  if (!compacting && !tabRecoveryWanted(conversationId)) return declined('tab recovery is off for this chat');
+  if (agent && agent.state !== 'detached' && agent.state !== 'active' && agent.state !== 'waking') {
+    return declined(`its ${agent.role} slot is ${agent.state}, not working`);
+  }
+  if (!agent && !compacting && !goalActiveFor(conversationId) && (session.toolCalls ?? 0) === 0) {
+    return declined('it has never called a tool');
+  }
+  const working =
+    liveConversations().some((entry) => entry.conversationId === conversationId && (entry.generating || Boolean(entry.activeTurnId))) ||
+    (activeUntil.get(conversationId)?.until ?? 0) > now;
+  if (!working && !compacting && agent?.role !== 'worker' && !(goalActiveFor(conversationId) && goalPendingReplyFor(conversationId))) {
+    return declined('no turn is running in it');
+  }
+  if (queueBrowserRecovery(conversationId, session.id, `stalled:${now}`, 'stalled', 0, now)) {
+    logInfo(`bridge: ${name} is a stalled browser tab — asking the browser to reload the exact chat once`);
   } else {
     declined('a browser action for it is already pending');
   }
@@ -7048,7 +7325,7 @@ function noteCallAttribution(
     grantActivity(conversationId, sessionId, continuingMcp ? Date.now() : pro ? Math.min(Date.now(), startedAt) : Date.now(), CHAT_SILENCE_MS,
       { turnId: sourceTurnId, model: pro ? 'pro' : previous?.model ?? 'unknown', mcpBacked: true });
     noteRecoveryActivity(conversationId);
-    noteGoalWatchActivity(conversationId);
+    notePickupActivity(conversationId);
     // Scoped to the repair this fact is evidence about. An attributed call proves the request-id
     // join, which is the whole of what an `unattributed` repair exists to restore. It proves
     // nothing about the answer stream a page lost, and the live trace is why that distinction is
@@ -7190,16 +7467,16 @@ async function takePendingRepairs(
   now = Date.now()
 ): Promise<Array<{ conversationId: string; token: string; reason: Repair['reason']; focus: boolean }>> {
   retireSpentRepairs();
-  const pickupFloor = goalWatchFloor;
+  const pickupFloor = pickupWatchFloor;
   const owed = await owedPickups(now);
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.reason !== 'goal') continue;
     const pickup = owed.get(conversationId);
-    const watch = goalWatch.get(conversationId);
+    const watch = pickupWatch.get(conversationId);
     // A handler/claim/listening transition can temporarily hide the owed head. Preserve
     // a handed token so its late receipt still settles; absence never authorizes a retry.
     if (repair.state === 'handed' && watch && now < watch.expiresAt && (!pickup || pickup.replyId === watch.replyId)) continue;
-    if (!pickup || pickup.replyId !== watch?.replyId || goalWatchFloor === null ||
+    if (!pickup || pickup.replyId !== watch?.replyId || pickupWatchFloor === null ||
         now < pickup.listenUntil || continuationForSession(pickup.sessionId) || (!pickup.queued && goalDraftBusy(conversationId)))
       repairsInFlight.delete(conversationId);
   }
@@ -7260,7 +7537,7 @@ async function takePendingRepairs(
     // acknowledgement keeps custody and cannot authorize a second browser action.
     if (repair.reason === 'goal') {
       const current = (await owedPickups(Date.now())).get(conversationId);
-      if (goalWatchFloor !== pickupFloor || !current || current.replyId !== goalWatch.get(conversationId)?.replyId || Date.now() < current.listenUntil ||
+      if (pickupWatchFloor !== pickupFloor || !current || current.replyId !== pickupWatch.get(conversationId)?.replyId || Date.now() < current.listenUntil ||
           continuationForSession(current.sessionId) || (!current.queued && goalDraftBusy(conversationId))) {
         if (repairsInFlight.get(conversationId) === repair) repairsInFlight.delete(conversationId);
         continue;
@@ -7325,11 +7602,11 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | nu
       if (repair.reason === 'silence') {
         const failedGrant = activeUntil.get(conversationId);
         if (failedGrant?.thinkingFailed) failedGrant.until = Date.now() + 5 * 60_000;
-        else if (failedGrant?.model === 'other') failedGrant.until = Date.now() + SILENCE_RELOAD_LISTEN_MS;
+        else if (failedGrant && failedGrant.model !== 'pro') failedGrant.until = Date.now() + SILENCE_RELOAD_LISTEN_MS;
         // Persist the next existing instruction as soon as this exact refresh is
         // acknowledged. Native readiness and the normal Send receipt still gate delivery.
         const inputFiled = await fileSilenceInputTicket(conversationId, Date.now());
-        if (!inputFiled && (loopAfterTurnFor(conversationId) || failedGrant?.model === 'other')) await fileSilenceTickets([conversationId], Date.now());
+        if (!inputFiled && (loopAfterTurnFor(conversationId) || (failedGrant && failedGrant.model !== 'pro'))) await fileSilenceTickets([conversationId], Date.now());
         // Ordinary models listen for one minute from the confirmed refresh;
         // failed views retain five minutes. These reuse the same grant and tickets.
         // Worker retirement retains its separate recovery rules below.
@@ -7339,7 +7616,7 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | nu
           armSilenceSweep();
         } else if (pro) {
           if (grant && activeUntil.get(conversationId) === grant) {
-            grant.until = Math.max(Date.now(), grant.evidenceAt + activityLifetime(grant));
+            grant.until = Math.max(Date.now(), grant.evidenceAt + PRO_ACTIVITY_MS);
             armSilenceSweep();
           }
         } else if (grant && (goalActiveFor(conversationId) || inputFiled || !goalWorkerChat(conversationId))) {
@@ -7392,8 +7669,9 @@ function repairReason(repair: Repair): string {
     unattributed: 'missing connector attribution',
     'assistant-error': 'an interrupted response',
     'no-tab': 'a missing browser tab',
+    stalled: 'a suspended browser tab',
     silence: 'an unresponsive open turn',
-    goal: 'a goal reply nothing collected',
+    goal: 'an undelivered follow-up',
     compaction: 'an uncollected compaction ticket'
   }[repair.reason];
 }
@@ -8405,6 +8683,7 @@ export async function restoreCommands(): Promise<void> {
 
 /** Test seam. */
 export function resetBridgeForTests(): void {
+  clearCompanionDiagnostics();
   for (const command of commands) if (command.timer) clearTimeout(command.timer);
   if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
   browserPresenceTimer = null;
@@ -8419,13 +8698,13 @@ export function resetBridgeForTests(): void {
   activeUntil.clear();
   awaitingReturn.clear();
   lastAttributedCallAt.clear();
-  goalWatch.clear();
+  pickupWatch.clear();
   compactionWatch.clear();
   // Re-armed rather than cleared: the seam stands in for a process that has just started
   // serving, which is exactly what the fence measures. Clearing it would leave the watchdog
   // permanently off in every suite that starts the bridge once and resets between tests.
-  goalWatchFloor = Date.now();
-  compactionWatchFloor = goalWatchFloor;
+  pickupWatchFloor = Date.now();
+  compactionWatchFloor = pickupWatchFloor;
   resetContinuationsForTests();
   sessionTokens.clear();
   openInBrowser = null;

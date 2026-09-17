@@ -1,3 +1,4 @@
+vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({ update: vi.fn() }) }));
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
@@ -16,6 +17,7 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
+  w.HTMLElement.prototype.animate = vi.fn() as any;
   Object.assign(globalThis, {
     window: w,
     document: w.document,
@@ -172,6 +174,7 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
+  w.HTMLElement.prototype.animate = vi.fn() as any;
   Object.assign(globalThis, {
     window: w,
     document: w.document,
@@ -275,13 +278,13 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   pending.shift()!({ ok: true, data: current });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  // Theme has the same no-form-control shape. Two rapid clicks must request dark then light,
+  // Appearance changes must request dark then light in order,
   // even though the first dark save has not answered yet.
-  const theme = w.document.getElementById('themeBtn') as HTMLButtonElement;
-  theme.click();
+  const theme = w.document.getElementById('appearanceTheme') as HTMLSelectElement;
+  theme.value = 'dark'; theme.dispatchEvent(new w.Event('change', { bubbles: true }));
   await vi.waitFor(() => expect(calls).toHaveLength(4));
   expect(calls[3].ui.theme).toBe('dark');
-  theme.click();
+  theme.value = 'light'; theme.dispatchEvent(new w.Event('change', { bubbles: true }));
   expect(calls).toHaveLength(4);
 
   current = appState({ ...baseConfig, readOnly: false, ui: { ...baseConfig.ui, autoConnect: true, theme: 'dark' } });
@@ -320,6 +323,7 @@ async function mountChat(
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
+  w.HTMLElement.prototype.animate = vi.fn() as any;
   Object.assign(globalThis, { Event: w.Event });
   Object.assign(globalThis, {
     window: w,
@@ -500,6 +504,152 @@ it('keeps project keyboard focus across activity repaint without taking composer
   chatVisible(false); chatVisible(true);
   await settle();
   expect(listSessions).toHaveBeenCalledTimes(reads + 1);
+});
+
+it('keeps global connection controls in a compact sidebar popover', async () => {
+  const mounted = await mountChat({ hasApiKey: true });
+  const doc = mounted.window.document;
+  const now = Date.now();
+  const connected = structuredClone(mounted.state) as any;
+  connected.status = {
+    state: 'connected', detail: 'Connected.', publicUrl: null, localUrl: 'http://127.0.0.1:1234',
+    handshakeAt: now - 5_000, lastRequestAt: now - 3_000, lastToolCallAt: now - 2_000, health: null,
+    surfaces: [{ id: 'core', connectorName: 'Core', description: '', cardSummary: '', optional: false,
+      available: true, localUrl: 'http://127.0.0.1:1234', publicUrl: null, tools: ['read'], state: 'live',
+      detail: '', lastRequestAt: now - 3_000, lastToolCallAt: now - 2_000 }]
+  };
+  connected.bridge = { running: true, port: 8765, paired: true, present: true,
+    lastSeenAt: now - 1_000, extensionVersion: '2.1.13' };
+  mounted.push(connected);
+
+  const trigger = doc.getElementById('sidebarConnection') as HTMLButtonElement;
+  const popover = doc.getElementById('connectionPopover') as HTMLElement;
+  expect(doc.querySelector('#chatTitle')!.closest('header')!.querySelector('#connectBtn')).toBeNull();
+  expect(trigger.closest('.sidebar-bottom')).not.toBeNull();
+  expect(trigger.textContent?.trim()).toBe('');
+  expect(trigger.getAttribute('aria-label')).toMatch(/Connected.*verified/i);
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+
+  Object.defineProperty(mounted.window, 'innerWidth', { configurable: true, value: 800 });
+  Object.defineProperty(mounted.window, 'innerHeight', { configurable: true, value: 760 });
+  vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
+    x: 200, y: 700, left: 200, top: 700, right: 236, bottom: 736, width: 36, height: 36,
+    toJSON: () => ({})
+  } as DOMRect);
+  vi.spyOn(popover, 'getBoundingClientRect').mockReturnValue({ width: 160 } as DOMRect);
+  trigger.click();
+  expect(popover.hidden).toBe(false);
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  expect(popover.style.left).toBe('138px');
+  expect(popover.parentElement).toBe(doc.body);
+  expect(doc.getElementById('connectionPopoverSettings')).toBeNull();
+  const advanced = doc.getElementById('connectionAdvanced') as HTMLDetailsElement;
+  const runtime = doc.getElementById('connectionRuntime') as HTMLDetailsElement;
+  advanced.open = runtime.open = true;
+  trigger.click(); trigger.click();
+  expect(advanced.open).toBe(false);
+  expect(runtime.open).toBe(false);
+  expect(doc.getElementById('connectionPopoverConnector')!.textContent).toMatch(/Reached/i);
+  expect(doc.getElementById('connectionPopoverBrowser')!.textContent).toBe('Connected');
+  expect(doc.getElementById('connectionPopoverBrowser')!.parentElement!.title).toMatch(/Seen/i);
+  expect(doc.getElementById('connectionPopoverBrowser')!.classList.contains('sr-only')).toBe(true);
+  expect(doc.getElementById('connectionPopoverBrowser')!.parentElement!.dataset.tone).toBe('ok');
+  expect(doc.getElementById('connectionPopoverVerified')!.hidden).toBe(true);
+  expect(doc.getElementById('connectionPopoverTitle')!.title).toMatch(/verified/i);
+  expect(doc.getElementById('connectionPipeline')!.closest('details')).toBe(runtime);
+  expect(doc.getElementById('connectionPopoverExtension')!.textContent).toBe('v2.1.13');
+  expect((doc.getElementById('connectionPopoverToggle') as HTMLButtonElement).textContent).toBe('Disconnect');
+
+  doc.body.dispatchEvent(new mounted.window.MouseEvent('click', { bubbles: true }));
+  expect(popover.hidden).toBe(true);
+});
+
+it('keeps the Settings footer action visible while settings are open', async () => {
+  const mounted = await mountChat({ hasApiKey: true });
+  const doc = mounted.window.document;
+  const settings = doc.getElementById('workspaceSettings') as HTMLButtonElement;
+
+  expect(settings.hidden).toBe(false);
+  settings.click();
+  expect(settings.hidden).toBe(false);
+  expect(settings.classList.contains('is-sel')).toBe(true);
+  (doc.getElementById('backToChat') as HTMLButtonElement).click();
+  expect(settings.hidden).toBe(false);
+  expect(settings.classList.contains('is-sel')).toBe(false);
+});
+
+it('renders companion diagnostics in the native Advanced connection drawer', async () => {
+  const now = Date.now();
+  const diagnostics = {
+    capturedAt: now - 2_000,
+    status: {
+      connected: true, port: 8765, paired: true, disconnected: false,
+      pending: 0, pendingCommandAcks: 0, compatible: true,
+      appVersion: '2.1.13', appProtocol: 14, extensionVersion: '2.1.13', extensionProtocol: 14,
+      pairError: null
+    },
+    preferences: { overwrite: true, durations: false },
+    tab: {
+      tab: 17, isChat: true, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      bound: true, epoch: 4, terminal: false, recorder: true,
+      page: {
+        recorderVersion: 13, runId: 'run-live', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        generating: true, turnId: 'turn-current-long-id', generations: 2, queued: 0, queueBytes: 0,
+        requestId: 'wfr_1234567890abcdef',
+        trace: [{ requestId: 'wfr_1234567890abcdef', read: true, sent: true, confirmed: true, app: 'request_id', tool: 'read' }],
+        overwrite: true, painted: true, events: 21, calls: 3, sends: 8, failures: 1,
+        session: 'session-live', lastError: null, blocked: null
+      },
+      chatTabs: 2, pending: 0, pendingAll: 0, pendingCloses: 0, pendingCommandAcks: 0,
+      delivery: { at: now - 1_000, ok: true, events: 4, total: 42, status: 200, error: null }
+    }
+  };
+  const mounted = await mountChat({}, [], {
+    companionDiagnostics: () => Promise.resolve({ ok: true, data: diagnostics }),
+    browserPreferences: () => Promise.resolve({ ok: true, data: { overwrite: true, durations: false } })
+  });
+  const doc = mounted.window.document;
+  const details = doc.getElementById('connectionAdvanced') as HTMLDetailsElement;
+  details.open = true;
+  details.dispatchEvent(new mounted.window.Event('toggle'));
+
+  await vi.waitFor(() => expect(doc.getElementById('connectionAdvancedGrid')!.textContent).toContain('session-live'));
+  expect(doc.getElementById('connectionAdvancedTab')!.classList.contains('is-ok')).toBe(true);
+  expect(doc.getElementById('connectionAdvancedRequest')!.textContent).toContain('wfr_12345…cdef');
+  expect(doc.getElementById('connectionAdvancedApp')!.textContent).toContain('tool matched');
+  expect(doc.getElementById('connectionPipelineOwner')!.classList.contains('is-done')).toBe(true);
+  expect(doc.getElementById('connectionAdvancedGrid')!.textContent).toContain('companion browser');
+  expect(doc.getElementById('connectionAdvancedGrid')!.textContent).toContain('fiber v13 · run run-live');
+});
+
+it('uses Internal Chromium as the host source when the optional #237 API is present', async () => {
+  const mounted = await mountChat({}, [], {
+    internalBrowser: () => Promise.resolve({
+      ok: true,
+      data: {
+        open: false,
+        ready: true,
+        tabId: 3,
+        tabs: [
+          { id: 1, active: false, status: 'complete', title: 'ChatGPT', url: 'https://chatgpt.com/' },
+          { id: 3, active: true, status: 'complete', title: 'Current chat · ChatGPT',
+            url: 'https://chatgpt.com/c/6aaa1c34-6bd0-83e9-9677-183c1030b86f' }
+        ]
+      }
+    }),
+    companionDiagnostics: () => Promise.resolve({ ok: true, data: null }),
+    browserPreferences: () => Promise.resolve({ ok: true, data: { overwrite: true, durations: false } })
+  });
+  const doc = mounted.window.document;
+  const details = doc.getElementById('connectionAdvanced') as HTMLDetailsElement;
+  details.open = true;
+  details.dispatchEvent(new mounted.window.Event('toggle'));
+
+  await vi.waitFor(() => expect(doc.getElementById('connectionAdvancedGrid')!.textContent).toContain('Internal Chromium · ready'));
+  expect(doc.getElementById('connectionAdvancedTab')!.textContent).toContain('#3 · complete');
+  expect(doc.getElementById('connectionAdvancedRecording')!.textContent).toContain('companion pending');
+  expect(doc.getElementById('connectionAdvancedChat')!.textContent).toContain('6aaa1c34…b86f');
+  expect(doc.getElementById('connectionPipelineWhy')!.textContent).toContain('Internal Chromium is live');
 });
 
 it('always offers setup collapse and preserves the choice across incomplete status updates', async () => {
@@ -787,7 +937,7 @@ it('guides rootless setup from the capabilities that actually need a filesystem 
   ];
 
   mounted.push(mixed);
-  const connect = mounted.window.document.getElementById('connectBtn') as HTMLButtonElement;
+  const connect = mounted.window.document.getElementById('connectionPopoverToggle') as HTMLButtonElement;
   expect(connect.disabled).toBe(true);
   expect(connect.title).toContain('Choose a folder');
   expect(mounted.window.document.querySelector('[data-step="folder"]')?.classList.contains('is-current')).toBe(true);

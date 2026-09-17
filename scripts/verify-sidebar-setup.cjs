@@ -132,7 +132,7 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.querySelector('[data-panel="setup"]').contains(document.getElementById('setupProfile'))`),false);
     await new Promise(r=>setTimeout(r,100));
     await screenshot('setup-clean.png');
-    await js(`document.getElementById('chatSettingsBtn').click(); document.getElementById('uiLanguage').scrollIntoView({block:'center'});`);
+    await js(`document.querySelector('[data-tab="appearance"]').click(); document.getElementById('uiLanguage').scrollIntoView({block:'center'});`);
     for(const [width,zoom] of [[1100,1],[800,1],[1100,1.17],[800,1.17],[1100,1.5]]) {
       win.setSize(width,900); win.webContents.setZoomFactor(zoom);
       await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');

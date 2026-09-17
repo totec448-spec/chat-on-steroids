@@ -28,9 +28,12 @@ it('commits the image handout before quota failure, retries without decoding aga
   expect(committed).toHaveBeenCalledTimes(1);
   const first = (await readEvents(session.id)).find(event => event.kind === 'user_message')!;
   expect(first).toMatchObject({ time: 200, inputDelivery: 'offered', inputId: entry.id });
+  expect(committed).toHaveBeenCalledWith(first.seq);
   await appendEvent(session.id, { source: 'app', time: 250, kind: 'note', message: { text: 'Later', chars: 5, truncated: false } });
   const confirmed = { ...entry, state: 'sent' as const, messageId: `input:${entry.id}`, deliveredAt: 300 };
-  await expect(recordDeliveredInput(confirmed)).rejects.toThrow('quota');
+  committed.mockClear();
+  await expect(recordDeliveredInput(confirmed, committed)).rejects.toThrow('quota');
+  expect(committed).toHaveBeenCalledWith(first.origin ?? first.seq);
   await expect(recordDeliveredInput(confirmed)).rejects.toThrow('quota');
   expect(stats).toHaveBeenCalledTimes(1);
   asset.mockRestore();
@@ -68,6 +71,25 @@ it('repairs a legacy off-tail image receipt across cold restore while retaining 
   const message = (await readEvents(session.id)).find(event => event.kind === 'user_message')!;
   expect(message).toMatchObject({ origin: first.origin ?? first.seq, time: 200 });
   expect(message.kind === 'user_message' && await recordedInputImage(session.id, message.assets![0]!.id)).toBe(row.toolImages![0]!.dataUrl);
+});
+
+it('leaves legacy recorded receipts and their canonical text untouched without republishing or resending', async () => {
+  initDurableStore(directory);
+  const session = await createSession({ conversationId: 'recorded-receipt', title: 'Recorded receipt' });
+  const row: InputEntry = { id: '10000000-0000-4000-8000-000000000002', sessionId: session.id, text: 'Recorded correction', mode: 'auto',
+    model: null, reasoningEffort: null, dueAt: 100, createdAt: 100, state: 'sent', owner: null, conversationId: 'recorded-receipt',
+    messageId: 'input:10000000-0000-4000-8000-000000000002', offeredAt: 200, deliveredAt: 400, historyRecorded: true, historyAnchored: true };
+  await recordDeliveredInput(row);
+  const original = (await readEvents(session.id)).find(event => event.kind === 'user_message')!;
+  await writeDurableNow('session-input', [row]);
+  const record = vi.fn(recordDeliveredInput);
+  configureInputDelivery({ recordDelivered: record, changed: () => {}, applyAutomation: async () => {} });
+  expect((await listInputs())[0]).toMatchObject({ historyRecorded: true, historyAnchored: true });
+  expect((await readDurable<InputEntry[]>('session-input'))![0]).toMatchObject({ historyRecorded: true, historyAnchored: true });
+  await listInputs();
+  expect(record).not.toHaveBeenCalled();
+  expect(await claimBrowserInput(row.id, 'other-page', 'recorded-receipt')).toBeNull();
+  expect((await readEvents(session.id)).filter(event => event.kind === 'user_message')).toEqual([original]);
 });
 
 it('uses original handout time when the first canonical publication happens after its receipt', async () => {

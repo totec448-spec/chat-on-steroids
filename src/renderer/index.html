@@ -20,10 +20,12 @@
           />
         </g>
         <g id="i-bolt"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" /></g>
+        <g id="i-skill"><path d="m12 3 7 4v10l-7 4-7-4V7Z" /><path d="m5 7 7 4 7-4M12 11v10" /></g>
         <g id="i-home"><path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1Z" /></g>
         <g id="i-steps"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" /></g>
         <g id="i-pulse"><path d="M3 12h4l3 8 4-16 3 8h4" /></g>
         <g id="i-folder"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z" /></g>
+        <g id="i-file"><path d="M6 3.5h8l4 4V20.5H6Z" /><path d="M14 3.5v4h4" /></g>
         <g id="i-image"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m4 17 5-5 4 4 3-3 4 4"/></g>
         <g id="i-plus"><path d="M12 5v14M5 12h14" /></g>
         <g id="i-eye">
@@ -35,6 +37,8 @@
           <rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M9 20h6M12 16v4" />
         </g>
         <g id="i-globe"><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><path d="M3 12h18M5 7h14M5 17h14" /></g>
+        <g id="i-target"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></g>
+        <g id="i-loop"><path d="M4 8a8 8 0 1 1-1 7M4 3v5h5"/></g>
         <g id="i-terminal">
           <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M13 15h4" />
         </g>
@@ -59,7 +63,6 @@
           <circle cx="12" cy="12" r="4" />
           <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4" />
         </g>
-        <g id="i-moon"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" /></g>
         <g id="i-chat">
           <path d="M4 5.5h16a1 1 0 0 1 1 1v8.5a1 1 0 0 1-1 1h-8.5L7 19.5V16H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1Z" />
         </g>
@@ -86,13 +89,15 @@
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
         <button class="btn" id="backToChat" type="button" hidden>← Back to chat</button>
         <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong></div>
-        <button class="btn new-chat" id="newChat" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pencil" /></svg>New chat</button>
+        <div class="sidebar-primary" id="sidebarPrimary">
+          <button class="btn new-chat" id="newChat" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pencil" /></svg>New chat</button>
+          <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>Plugins</button>
+        </div>
       <nav id="tabs" aria-label="Settings navigation" hidden>
         <button class="is-sel" data-tab="home" type="button">
           <svg class="ico" viewBox="0 0 24 24"><use href="#i-home" /></svg>Workspace
         </button>
         <button data-tab="usage" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Usage</button>
-        <button data-tab="plugins" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>Plugins</button>
 <button data-tab="setup" type="button">
           <svg class="ico" viewBox="0 0 24 24"><use href="#i-steps" /></svg>Setup
           <span class="badge" id="setupBadge" hidden></span>
@@ -100,57 +105,129 @@
         <button data-tab="settings" type="button">
           <svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg>Agents &amp; automation
         </button>
+        <button data-tab="appearance" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-sun" /></svg>Appearance</button>
         <button data-tab="activity" type="button">
           <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Activity
         </button>
-      </nav>          <section class="sidebar-sessions">
-            <h2>
-              Conversations
-              <span class="acts">
-                <button class="btn" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button>
-                <button class="btn" id="chatRefresh" type="button">
-                  <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Refresh
-                </button>
-              </span>
-            </h2>
-            <div class="scroll">
-              <div id="sessionList"><p class="empty" role="status">Loading conversations…</p></div>
-              <p class="empty" id="sessionsEmpty" hidden>
-                Nothing recorded yet. Turn on recording in Settings, pair the Chrome extension,
-                and this fills up as you work in ChatGPT.
-              </p>
+      </nav>
+        <section class="sidebar-sessions">
+          <div class="scroll">
+            <div id="sessionList">
+              <details class="sidebar-session-section" id="projectsSection" open>
+                <summary class="sidebar-session-heading">
+                  <span class="sidebar-session-label"><svg class="ico sidebar-section-chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev" /></svg>Projects</span>
+                  <span class="acts"><button class="btn" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button></span>
+                </summary>
+                <div id="projectList"><p class="empty" role="status">Loading projects…</p></div>
+                <p class="empty sidebar-section-empty" id="projectsEmpty" hidden>No projects yet.</p>
+              </details>
+              <details class="sidebar-session-section" id="chatsSection" open>
+                <summary class="sidebar-session-heading">
+                  <span class="sidebar-session-label"><svg class="ico sidebar-section-chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev" /></svg>Chats</span>
+                  <span class="acts"><button class="btn" id="chatRefresh" type="button" title="Refresh chats" aria-label="Refresh chats"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Refresh</button></span>
+                </summary>
+                <div id="chatList"><p class="empty" role="status">Loading chats…</p></div>
+                <p class="empty sidebar-section-empty" id="sessionsEmpty" hidden>No chats outside projects yet.</p>
+              </details>
             </div>
-          </section>
+          </div>
+        </section>
 
-        <div class="sidebar-bottom"><button class="btn" id="workspaceSettings" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg>Settings</button></div>
+        <div class="sidebar-bottom">
+          <button class="btn" id="workspaceSettings" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg>Settings</button>
+          <div class="connection-anchor">
+            <button
+              class="sidebar-connection"
+              id="sidebarConnection"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="connectionPopover"
+              aria-label="Not connected"
+              title="Not connected"
+            >
+              <span class="sidebar-connection-dot" aria-hidden="true"></span>
+            </button>
+            <section class="connection-popover scroll" id="connectionPopover" role="dialog" aria-label="Connection" hidden>
+              <div class="connection-popover-head">
+                <div>
+                  <strong id="connectionPopoverTitle">Not connected</strong>
+                  <span id="connectionPopoverVerified" hidden>Connection is off</span>
+                </div>
+                <span class="connection-popover-status-dot" aria-hidden="true"></span>
+              </div>
+              <div class="connection-popover-card">
+                <div class="connection-popover-row">
+                  <span>ChatGPT</span>
+                  <span id="connectionPopoverConnector" class="sr-only">Not connected</span>
+                  <i aria-hidden="true"></i>
+                </div>
+                <div class="connection-popover-row">
+                  <span>Browser companion</span>
+                  <span id="connectionPopoverBrowser" class="sr-only">Not seen</span>
+                  <i aria-hidden="true"></i>
+                </div>
+              </div>
+              <details class="connection-advanced" id="connectionAdvanced">
+                <summary aria-label="Advanced" title="Advanced">
+                  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg>
+                </summary>
+                <div class="connection-advanced-body">
+                  <p class="connection-advanced-alert" id="connectionAdvancedAlert" hidden></p>
+
+                  <div class="connection-advanced-caption"><span>Session capture</span><span id="connectionPopoverExtension">—</span></div>
+                  <div class="connection-advanced-card">
+                    <div class="connection-advanced-row" id="connectionAdvancedTab"><span>ChatGPT tab</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedRecording"><span>Recording this chat</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedChat"><button class="copy" type="button">Chat ID</button><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedRequest"><button class="copy" type="button">Current request</button><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
+                    <div class="connection-advanced-row" id="connectionAdvancedApp"><span>Reaching the app</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
+                  </div>
+
+                  <details class="connection-runtime" id="connectionRuntime"><summary>Runtime diagnostics</summary>
+                  <span class="connection-advanced-age" id="connectionAdvancedAge">Runtime diagnostics</span>
+                  <div class="connection-pipeline" id="connectionPipeline">
+                    <div class="connection-pipeline-stage" id="connectionPipelineRead"><i></i><span>Request ID found</span><em></em></div>
+                    <div class="connection-pipeline-stage" id="connectionPipelineSent"><i></i><span>Sent to app</span><em></em></div>
+                    <div class="connection-pipeline-stage" id="connectionPipelineOwner"><i></i><span>Owner confirmed</span><em></em></div>
+                    <p id="connectionPipelineWhy"></p>
+                    <div class="connection-pipeline-calls" id="connectionPipelineCalls"></div>
+                  </div>
+
+                  <dl class="connection-advanced-grid" id="connectionAdvancedGrid"></dl>
+                  <div class="connection-advanced-actions">
+                    <button class="btn" id="connectionAdvancedCopy" type="button">Copy</button>
+                    <button class="btn" id="connectionAdvancedRefresh" type="button">Refresh</button>
+                  </div></details>
+                </div>
+              </details>
+              <div class="connection-popover-actions">
+                <button class="btn btn-solid" id="connectionPopoverToggle" type="button">Connect</button>
+              </div>
+            </section>
+          </div>
+        </div>
       </aside>
       <!-- ------------------------------------------------------------ header -->
       <header>
         <span id="chatTitle">New chat</span>
+        <span id="chatProjectContext" class="chat-project-context" hidden>
+          <span aria-hidden="true">/</span>
+          <span id="chatProjectName"></span>
+        </span>
         <span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>
         <span class="title">
           Chat On Steroids
           <span id="headerSub">Not set up yet</span>
         </span>
         <span class="state">
-          <button class="btn btn-icon" id="themeBtn" type="button" title="Switch to dark mode">
-            <svg class="ico" viewBox="0 0 24 24"><use href="#i-moon" id="themeIcon" /></svg>
-          </button>
+          <button class="btn connect-prompt" id="headerConnect" type="button" hidden>Connect</button>
           <!-- Only ever visible with a downloaded, digest-checked update waiting. This app
                lives in the tray and is closed to it, so "installs the next time you start it"
                can mean days. This is the press that means now. -->
           <button class="btn btn-install" id="installUpdate" type="button" hidden>
             <svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>
             <span>Install update</span>
-          </button>
-          <span class="live" id="live">
-            <span class="dot"></span>
-            <span id="liveState">Not connected</span>
-            <em id="liveNote"></em>
-          </span>
-          <button class="power off" id="connectBtn" type="button">
-            <svg class="ico" viewBox="0 0 24 24"><use href="#i-power" /></svg>
-            <span id="connectLabel">Connect</span>
           </button>
         </span>
       </header>
@@ -174,6 +251,43 @@
       </div>
 
       <main>
+
+        <section class="panel appearance-panel scroll" data-panel="appearance" id="appearancePanel" aria-labelledby="appearanceTitle">
+          <div class="appearance-content">
+            <div class="settings-heading"><h1 id="appearanceTitle">Appearance</h1><p>Make this workspace yours. Changes appear immediately.</p></div>
+            <div class="appearance-preview" aria-label="Appearance preview">
+              <div class="appearance-preview-sidebar"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg><span></span><span class="is-selected"></span><span></span></div>
+              <div class="appearance-preview-chat"><p>How will your next idea look?</p><div class="appearance-preview-answer">A little color. Your kind of workspace.</div><div class="appearance-preview-composer"><span>Ask anything…</span><b aria-hidden="true">↑</b></div></div>
+            </div>
+            <div class="pane">
+              <label class="setting"><span class="setting-text"><b>Theme</b><em>Light and dark keep their own colors.</em></span><select id="appearanceTheme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
+
+              <div class="setting"><label class="setting-text" for="appearance-accent"><b>Accent color</b></label><div class="appearance-color"><input id="appearance-accent" type="color" data-color="accent" aria-label="Accent color" /><input id="appearance-accent-hex" type="text" data-hex="accent" aria-label="Accent color HEX" pattern="#[0-9a-fA-F]{6}" maxlength="7" spellcheck="false" autocomplete="off" /></div></div>
+              <div class="setting"><label class="setting-text" for="appearance-background"><b>Background color</b></label><div class="appearance-color"><input id="appearance-background" type="color" data-color="background" aria-label="Background color" /><input id="appearance-background-hex" type="text" data-hex="background" aria-label="Background color HEX" pattern="#[0-9a-fA-F]{6}" maxlength="7" spellcheck="false" autocomplete="off" /></div></div>
+              <div class="setting"><label class="setting-text" for="appearance-sidebar"><b>Sidebar color</b></label><div class="appearance-color"><input id="appearance-sidebar" type="color" data-color="sidebar" aria-label="Sidebar color" /><input id="appearance-sidebar-hex" type="text" data-hex="sidebar" aria-label="Sidebar color HEX" pattern="#[0-9a-fA-F]{6}" maxlength="7" spellcheck="false" autocomplete="off" /></div></div>
+              <label class="setting"><span class="setting-text"><b>Contrast</b><em>Adjust the separation between surfaces and text.</em></span><span class="appearance-range"><input id="appearanceContrast" type="range" min="0" max="100" aria-label="Contrast" /><output id="appearanceContrastValue" for="appearanceContrast"></output></span></label>
+              <label class="setting"><span class="setting-text"><b>Translucent sidebar</b><em>Blend your sidebar color softly into the background.</em></span><input id="appearanceTranslucent" type="checkbox" /></label>
+            </div>
+            <h2 class="settings-section-title">Typography</h2>
+            <div class="pane">
+              <label class="setting"><span class="setting-text"><b>Font</b></span><select id="appearanceFont"><option value="system">System default</option><option value="sans">Sans serif</option><option value="serif">Serif</option><option value="mono">Monospace</option></select></label>
+              <label class="setting"><span class="setting-text"><b>Text size</b></span><span class="appearance-range"><input id="appearanceSize" type="range" min="12" max="18" aria-label="Text size" /><output id="appearanceSizeValue" for="appearanceSize"></output></span></label>
+            </div>
+            <div class="appearance-reset"><button class="btn" id="appearanceReset" type="button">Reset appearance</button></div>
+                            <h2 class="settings-section-title">Preferences</h2>
+                <div class="pane">
+                  <label class="setting" for="uiLanguage"><span class="setting-text"><b>Language</b><em>Changes the app interface immediately. Your messages stay as written.</em></span><select id="uiLanguage" class="language-select" translate="no"><option value="en" lang="en">English</option><option value="es" lang="es">Español</option><option value="zh-CN" lang="zh-CN">简体中文</option><option value="zh-TW" lang="zh-TW">繁體中文</option></select></label>
+                  <div class="setting setup-profile-setting">
+                    <span class="setting-text"><b id="setupProfileLabel">Setup profile</b></span>
+                    <div class="setup-profile-controls">
+                      <button class="btn" id="setupProfile" type="button" popovertarget="setupProfileMenu" aria-labelledby="setupProfileLabel setupProfileCurrent"><span id="setupProfileCurrent" translate="no">Default</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4" /></svg></button>
+                      <button class="btn" id="setupProfileAdd" type="button" title="Add profile" aria-label="Add profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button>
+                    </div>
+                    <div id="setupProfileMenu" popover aria-labelledby="setupProfileLabel"></div>
+                  </div>
+                </div>
+          </div>
+        </section>
         <section class="panel plugins-panel" data-panel="plugins">
           <div class="plugins-content">
           <header class="plugin-page-head"><div><h1>Plugins</h1><p>Bring your favorite tools into the conversation.</p></div><div class="plugin-search-actions"><label class="plugin-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search" /></svg><input id="pluginsSearch" type="search" placeholder="Search plugins" aria-label="Search plugins" /></label><button class="btn plugin-add" id="pluginsAdd" type="button" aria-label="Add a plugin" title="Add a plugin"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button></div></header>
@@ -310,7 +424,9 @@
             <div class="setup-heading">
               <div class="settings-heading"><h1>Setup</h1><p>Connect your workspace to ChatGPT.</p></div>
               <div class="language-tabs" role="group" aria-label="Language">
+                <button type="button" data-language="zh-TW" lang="zh-TW" translate="no" aria-pressed="false"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#fe0000" d="M0 0h60v40H0z"/><path fill="#000095" d="M0 0h30v20H0z"/><path fill="#fff" d="m15 2 1.1 3.7 2.9-2.6-.9 3.8 3.8-.9-2.6 2.9L23 10l-3.7 1.1 2.6 2.9-3.8-.9.9 3.8-2.9-2.6L15 18l-1.1-3.7-2.9 2.6.9-3.8-3.8.9 2.6-2.9L7 10l3.7-1.1-2.6-2.9 3.8.9-.9-3.8 2.9 2.6z"/><circle cx="15" cy="10" r="4.5" fill="#000095"/><circle cx="15" cy="10" r="3.5" fill="#fff"/></svg>繁體中文</button>
                 <button type="button" data-language="en" lang="en" translate="no" aria-pressed="true"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#012169" d="M0 0h60v40H0z"/><path stroke="#fff" stroke-width="8" d="m0 0 60 40M60 0 0 40"/><path stroke="#c8102e" stroke-width="3" d="m0 0 60 40M60 0 0 40"/><path stroke="#fff" stroke-width="13" d="M30 0v40M0 20h60"/><path stroke="#c8102e" stroke-width="7" d="M30 0v40M0 20h60"/></svg>English</button>
+                <button type="button" data-language="es" lang="es" translate="no" aria-pressed="false"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#aa151b" d="M0 0h60v40H0z"/><path fill="#f1bf00" d="M0 10h60v20H0z"/></svg>Español</button>
                 <button type="button" data-language="zh-CN" lang="zh-CN" translate="no" aria-pressed="false"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#de2910" d="M0 0h60v40H0z"/><g fill="#ffde00"><path d="m10 5 1.8 5.5h5.7l-4.6 3.4 1.8 5.4-4.7-3.4-4.7 3.4 1.8-5.4-4.6-3.4h5.7z"/><path id="language-star" d="m20 3 .7 2.1h2.2l-1.8 1.3.7 2.1L20 7.2l-1.8 1.3.7-2.1-1.8-1.3h2.2z"/><use href="#language-star" transform="translate(5 5)"/><use href="#language-star" transform="translate(5 12)"/><use href="#language-star" transform="translate(0 17)"/></g></svg>简体中文</button>
               </div>
             </div>
@@ -628,6 +744,13 @@
                 <p id="settingsSearchEmpty" class="muted" role="status" hidden>No settings match your search.</p>
                 <h2 class="settings-section-title">Continuation sources</h2>
                 <div class="pane">
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Automatically continue interrupted responses</b>
+                      <em>Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered tickets share reload intervals of 2, 5, 10 and 15 minutes.</em>
+                    </span>
+                    <input id="autoContinue" type="checkbox" />
+                  </label>
                   <div class="setting"><span class="setting-text"><b>Goal response source</b><em>API is the most reliable. Offline uses completion markers and 200 prepared messages.</em></span><select id="goalBackend"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Loop response source</b><em>Loop keeps going until you switch it off.</em></span><select id="loopBackend"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
@@ -823,23 +946,13 @@
                   </div>
 
                   </div>
-                <h2 class="settings-section-title">Appearance</h2>
-                <div class="pane">
-                  <label class="setting" for="uiLanguage"><span class="setting-text"><b>Language</b><em>Changes the app interface immediately. Your messages stay as written.</em></span><select id="uiLanguage" class="language-select" translate="no"><option value="en" lang="en">English</option><option value="zh-CN" lang="zh-CN">简体中文</option></select></label>
-                  <div class="setup-profile-setting">
-                    <span id="setupProfileLabel">Setup profile</span>
-                    <div class="setup-profile-controls">
-                      <button class="btn" id="setupProfile" type="button" popovertarget="setupProfileMenu" aria-labelledby="setupProfileLabel setupProfileCurrent"><span id="setupProfileCurrent" translate="no">Default</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4" /></svg></button>
-                      <button class="btn" id="setupProfileAdd" type="button" title="Add profile" aria-label="Add profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button>
-                    </div>
-                    <div id="setupProfileMenu" popover aria-labelledby="setupProfileLabel"></div>
-                  </div>
-                </div>
+
               </div>
             </div>
             <div class="composer-dock" id="composerDock"><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div>
             <form class="composer" id="composer">
-              <div id="skillPicker" class="skill-picker" aria-label="Skills" hidden></div>
+              <div id="skillPicker" class="skill-autocomplete" aria-label="Skills" hidden></div>
+              <div id="composerSelectedSkills" class="composer-selected-skills" aria-label="Selected skills" hidden></div>
               <label class="sr-only" for="chatInput">Message ChatGPT</label>
               <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" placeholder="Ask anything…"></textarea>
               <div class="composer-toolbar">
@@ -848,7 +961,10 @@
                   <div class="composer-popover">
                     <button id="attachImages" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-image" /></svg>Add photos &amp; files</button>
                     <button id="composerFolder" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-folder" /></svg>Share a folder</button>
-                    <button id="composerSkills" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg>Skills</button>
+                    <div class="composer-skills-row">
+                      <button id="composerSkills" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-skill" /></svg>Skills</button>
+                      <button id="composerAddSkill" type="button" aria-label="Add Skills" title="Add Skills"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button>
+                    </div>
                   </div>
                 </details>
                 <div class="composer-options">

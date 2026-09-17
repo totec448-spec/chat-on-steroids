@@ -13,6 +13,11 @@ files:
   - package.json
   - '!node_modules/@img/sharp-*/**/*'
   - '!node_modules/@img/sharp-libvips-*/**/*'
+  # PDF.js is bundled into the renderer (including its worker). Its optional @napi-rs/canvas
+  # dependency is a Node-only fallback and is neither imported nor needed by the Electron UI.
+  - '!node_modules/pdfjs-dist/**/*'
+  - '!node_modules/@napi-rs/canvas/**/*'
+  - '!node_modules/@napi-rs/canvas-*/**/*'
   # node-pty prefers build/Release over prebuilds. npm may leave a host-native build there,
   # which would silently override the target prebuild in a cross-arch package.
   - '!node_modules/node-pty/build/**/*'

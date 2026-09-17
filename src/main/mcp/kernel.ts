@@ -885,6 +885,7 @@ async function dispatchTracked(
   const durationMs = recorderStartedAt - startedAt;
   markTiming('delivery');
   const recording = recordToolCall({
+    nested,
     tool: name,
     args: surface === 'plugins' ? pluginManager.redact(args) : args,
     content: delivered.content,

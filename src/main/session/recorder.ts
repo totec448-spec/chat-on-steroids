@@ -1131,6 +1131,8 @@ export interface ToolContentPart {
 }
 
 export interface ToolCallInput {
+  /** Proven by dispatcher nesting, never inferred from request ids or timing. */
+  nested?: boolean;
   tool: string;
   args: unknown;
   content: readonly ToolContentPart[];
@@ -1351,6 +1353,7 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     }
 
     const call: ToolCallRecord = {
+      ...(input.nested === true ? { nested: true } : {}),
       ...(target.attribution === 'request_id' && target.conversationId && evidence.processCompletion && evidence.processSessionId && input.tool === 'exec_command'
         ? { process: { sessionId: evidence.processSessionId } } : {}),
       ...callModel,

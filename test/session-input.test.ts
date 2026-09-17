@@ -556,8 +556,8 @@ describe('durable user input ownership', () => {
     expect(record).toHaveBeenCalledTimes(calls);
   });
   it.each([false, true])('retains canonical commitment independently of optional image failure (committed=%s)', async committed => {
-    const record = vi.fn(async (_entry: Readonly<InputEntry>, anchor: () => void) => {
-      if (committed) anchor();
+    const record = vi.fn(async (_entry: Readonly<InputEntry>, anchor: (seq: number) => void) => {
+      if (committed) anchor(1);
       throw new Error(committed ? 'asset quota' : 'message write failed');
       return true;
     });
@@ -573,8 +573,8 @@ describe('durable user input ownership', () => {
     expect(retained.historyAnchored === true).toBe(committed);
     expect(await claimBrowserInput(row.id, 'other-page', binding.conversationId)).toBeNull();
     expect(await offerToolInput(sessionId, binding.conversationId, 'later', ++now)).toEqual([]);
-    record.mockImplementation(async (_entry, anchor) => { anchor(); return true; });
-    expect((await listInputs())[0]).toMatchObject({ historyAnchored: true, historyRecorded: true });
+    record.mockImplementation(async (_entry, anchor) => { anchor(1); return true; });
+    expect((await listInputs())[0]).toMatchObject({ historyAnchored: true, historyRecorded: true, historySeq: 1 });
   });
   it('anchors both companion receipts through their one combined canonical message', async () => {
     const root: InputEntry = { ...input(), state: 'sent', owner: 'page', createdAt: now, deliveredAt: now,
@@ -583,10 +583,10 @@ describe('durable user input ownership', () => {
     root.companionInputId = companion.id;
     await writeDurableNow('session-input', [root, companion]);
     resetInputForTests();
-    const record = vi.fn(async (entry: Readonly<InputEntry>, anchor: () => void) => {
+    const record = vi.fn(async (entry: Readonly<InputEntry>, anchor: (seq: number) => void) => {
       expect(entry.id).toBe(root.id);
       expect(entry.text).toContain('Companion');
-      anchor();
+      anchor(1);
       throw new Error('optional asset failed');
       return true;
     });
@@ -594,7 +594,7 @@ describe('durable user input ownership', () => {
     const rows = await listInputs();
     expect(record).toHaveBeenCalledTimes(1);
     expect(rows).toHaveLength(2);
-    for (const row of rows) expect(row).toMatchObject({ historyAnchored: true });
+    for (const row of rows) expect(row).toMatchObject({ historyAnchored: true, historySeq: 1 });
     for (const row of (await readDurable<InputEntry[]>('session-input'))!) expect(row.historyRecorded).not.toBe(true);
   });
   it('reprojects a wrapped recorded receipt after restart without reopening delivery', async () => {

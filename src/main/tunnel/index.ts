@@ -126,6 +126,15 @@ export function isUnreachableError(raw: string): boolean {
   return CONTROL_PLANE_POLL.test(text) && UNREACHABLE_NETWORK.test(text);
 }
 
+/** Filter the optional channel's exact diagnostic, never an unrelated substring in a log. */
+export function isBenignHarpoonChannelEvent(level: string, message: string, event?: Record<string, unknown>): boolean {
+  if (!['WARN', 'ERROR'].includes(String(level).toUpperCase())) return false;
+  const named = /^(?:failed to process polled command:\s*unsupported channel|dispatcher received unsupported channel)\s*["']([^"']+)["']$/i.exec(message);
+  const explicit = typeof event?.channel === 'string' ? event.channel.toLowerCase() : null;
+  if (named) return named[1]!.toLowerCase() === 'harpoon' && (explicit === null || explicit === 'harpoon');
+  return /^dispatcher received unsupported channel$/i.test(message) && explicit === 'harpoon';
+}
+
 export async function startTunnel(opts: TunnelStartOptions): Promise<TunnelHandle> {
   switch (opts.settings.kind) {
     case 'openai':
@@ -561,6 +570,7 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
         ) {
           return;
         }
+        if (isBenignHarpoonChannelEvent(level, message, event)) return;
         if (level === 'ERROR' || level === 'FATAL' || level === 'WARN') {
           const errText = event['error'] ? String(event['error']) : '';
           run.lastError = `${level} ${message}${errText ? `: ${errText}` : ''}`.slice(0, 400);
