@@ -134,16 +134,20 @@ export async function resolveClaudePtyCommand(
   fileExists: (file: string) => Promise<boolean> = exists
 ): Promise<string | null> {
   if (platform !== 'win32') return 'claude';
-  const candidates = [path.join(home, '.local', 'bin', 'claude.exe')];
+  // The explicit platform argument owns path semantics too. Tests and recovery code may
+  // resolve a Windows install while running on another OS; using the host `path` module here
+  // turns `C:\Users\...` into a mixed-separator path and splits PATH on the wrong delimiter.
+  const windowsPath = path.win32;
+  const candidates = [windowsPath.join(home, '.local', 'bin', 'claude.exe')];
   const pathValue = env.Path ?? env.PATH ?? env.path ?? '';
-  for (const entry of pathValue.split(path.delimiter)) {
+  for (const entry of pathValue.split(windowsPath.delimiter)) {
     const cleaned = entry.trim().replace(/^"|"$/g, '');
     if (!cleaned) continue;
-    candidates.push(path.join(cleaned, 'claude.exe'));
+    candidates.push(windowsPath.join(cleaned, 'claude.exe'));
   }
   const seen = new Set<string>();
   for (const candidate of candidates) {
-    const key = path.resolve(candidate).toLowerCase();
+    const key = windowsPath.resolve(candidate).toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     if (await fileExists(candidate)) return candidate;

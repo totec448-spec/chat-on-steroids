@@ -26,6 +26,7 @@ Run on `integration/cos-2.1.12-memory-convergence-r2-20260917` with the dependen
 - `npm run build`: passed for main, preload and renderer bundles.
 - `git diff --check`: passed.
 - Validation was serialized because this host has 8 GiB physical RAM and the investigation itself demonstrated severe memory pressure. The broad default Vitest fan-out was not used as evidence for this slice.
+- Hosted CI exposed a pre-existing cross-platform Claude attach-path defect outside the memory files: `resolveClaudePtyCommand(..., platform='win32')` still used host path semantics. The resolver now uses `path.win32` for Windows joins, PATH delimiter parsing and normalization, with the regression expectation likewise platform-explicit. Git comparison proved the CLI implementation/test were unchanged from canonical base before this repair.
 
 ## Remaining acceptance
 
