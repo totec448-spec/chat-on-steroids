@@ -74,6 +74,11 @@ const {
   WORKER_BOOTSTRAP_LIMIT_MS,
   WORKER_REDEEM_MS,
   BROWSER_RECOVERY_COOLDOWN_MS,
+  IDLE_PAGE_REUSE_AFTER_MS,
+  IDLE_PAGE_CLOSE_AFTER_MS,
+  IDLE_PAGE_PRESSURE_CLOSE_AFTER_MS,
+  IDLE_PAGE_MEMORY_PRESSURE_FREE_RATIO,
+  idlePageCloseAfterMs,
   DEFAULT_PORTS,
   startBridge,
   stopBridge,
@@ -579,7 +584,18 @@ describe('provisioning', () => {
 });
 
 describe('active agent tab discard projection', () => {
-  it('reuses sleeping workers after two minutes and releases their pages after five without retiring them', async () => {
+  it('shortens only settled-page retention when physical RAM crosses the pressure threshold', () => {
+    const GiB = 1024 ** 3;
+    expect(IDLE_PAGE_MEMORY_PRESSURE_FREE_RATIO).toBe(0.20);
+    expect(idlePageCloseAfterMs(8 * GiB, 2 * GiB)).toBe(IDLE_PAGE_CLOSE_AFTER_MS);
+    expect(idlePageCloseAfterMs(8 * GiB, 1.6 * GiB)).toBe(IDLE_PAGE_PRESSURE_CLOSE_AFTER_MS);
+    expect(idlePageCloseAfterMs(8 * GiB, 1 * GiB)).toBe(IDLE_PAGE_PRESSURE_CLOSE_AFTER_MS);
+    expect(IDLE_PAGE_PRESSURE_CLOSE_AFTER_MS).toBe(IDLE_PAGE_REUSE_AFTER_MS);
+    expect(idlePageCloseAfterMs(0, 0)).toBe(IDLE_PAGE_CLOSE_AFTER_MS);
+    expect(idlePageCloseAfterMs(Number.NaN, 1)).toBe(IDLE_PAGE_CLOSE_AFTER_MS);
+  });
+
+  it('reuses sleeping workers after two minutes and releases pages at the effective retention without retiring them', async () => {
     const previous = getConfig();
     await saveConfig({ ...previous, multiAgent: { ...previous.multiAgent, maxWorkers: 3 }, ui: { ...previous.ui, tabsToKeepOpen: 1 } });
     try {
@@ -590,8 +606,8 @@ describe('active agent tab discard projection', () => {
       finishAgent({ conversationId: chats[0]! }, 'first sleeping');
       finishAgent({ conversationId: chats[1]! }, 'second sleeping');
       const status = (await request('POST', '/status', { body: { openConversations: chats } })).body;
-      expect(status.idleReuseAfterMs).toBe(120000);
-      expect(status.idleCloseAfterMs).toBe(300000);
+      expect(status.idleReuseAfterMs).toBe(IDLE_PAGE_REUSE_AFTER_MS);
+      expect([IDLE_PAGE_PRESSURE_CLOSE_AFTER_MS, IDLE_PAGE_CLOSE_AFTER_MS]).toContain(status.idleCloseAfterMs);
       expect(status.reusableConversations).toEqual([]);
       expect(status.sleepingWorkerConversations).toBeUndefined();
       expect(status.managedConversations).toEqual(expect.arrayContaining(chats));
@@ -602,7 +618,9 @@ describe('active agent tab discard projection', () => {
       try {
         noteAgentAlive(chats[0], 'page'); // periodic page presence must not renew idle work
         const quiet = (await request('POST', '/status', { body: { openConversations: chats } })).body;
-        expect(quiet.closableConversations).toEqual([]);
+        expect(quiet.closableConversations).toEqual(
+          quiet.idleCloseAfterMs === IDLE_PAGE_PRESSURE_CLOSE_AFTER_MS ? chats.slice(0, 2) : []
+        );
         expect(quiet.retiredConversations).toEqual([]);
         expect(quiet.reusableConversations).toEqual(chats.slice(0, 2));
         setChatBlocked(chats[2]!, true);
@@ -2011,7 +2029,9 @@ describe('delivering a bootstrap', () => {
     try {
       const early = (await request('POST', '/status', { body: { openConversations: [settled, personal, working] } })).body;
       expect(early.reusableConversations).toEqual([settled]);
-      expect(early.closableConversations).toEqual([]);
+      expect(early.closableConversations).toEqual(
+        early.idleCloseAfterMs === IDLE_PAGE_PRESSURE_CLOSE_AFTER_MS ? [settled] : []
+      );
       clock.mockReturnValue(now + 301_000);
       const expired = (await request('POST', '/status', { body: { openConversations: [settled, personal, working] } })).body;
       expect(expired.closableConversations).toEqual([settled]);

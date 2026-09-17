@@ -40,6 +40,7 @@ import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindB
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
+import { freemem, totalmem } from 'node:os';
 import type { BridgeStatus } from '../shared/types.js';
 import { positionOf } from '../shared/chronology.js';
 import { CHAT_SILENCE_MS, CONTINUATION_MARKER, isReasoningEffort, toolCallSummary, workSequence, type ReasoningEffort, type SessionEvent, type SessionOrigin } from '../shared/session.js';
@@ -6022,9 +6023,31 @@ function nonDiscardableAgentConversations(): string[] {
     .sort();
 }
 
+export const IDLE_PAGE_REUSE_AFTER_MS = 120_000;
+export const IDLE_PAGE_CLOSE_AFTER_MS = 300_000;
+export const IDLE_PAGE_PRESSURE_CLOSE_AFTER_MS = IDLE_PAGE_REUSE_AFTER_MS;
+export const IDLE_PAGE_MEMORY_PRESSURE_FREE_RATIO = 0.20;
+
+/**
+ * Keep the normal five-minute warm page unless the host has <=20% physical RAM free.
+ * Under pressure, release settled pages as soon as their existing two-minute reuse window ends.
+ * This changes only retention cost: the extension still requires exact no-draft/no-generation
+ * proof and never treats a live or protected chat as closable because memory is scarce.
+ */
+export function idlePageCloseAfterMs(totalBytes = totalmem(), freeBytes = freemem()): number {
+  if (!Number.isFinite(totalBytes) || totalBytes <= 0 || !Number.isFinite(freeBytes) || freeBytes < 0) {
+    return IDLE_PAGE_CLOSE_AFTER_MS;
+  }
+  const boundedFree = Math.min(freeBytes, totalBytes);
+  return boundedFree / totalBytes <= IDLE_PAGE_MEMORY_PRESSURE_FREE_RATIO
+    ? IDLE_PAGE_PRESSURE_CLOSE_AFTER_MS
+    : IDLE_PAGE_CLOSE_AFTER_MS;
+}
+
 /**
  * Idle app-owned pages are a reusable resource, independent of durable chat/worker life.
- * Two minutes gives follow-ups a warm page; five minutes releases an unused renderer.
+ * Two minutes gives follow-ups a warm page; five minutes normally releases an unused renderer,
+ * shortened to that same two-minute boundary while the host is under physical-memory pressure.
  * The extension still proves the exact document has no draft or generation before closing.
  */
 async function browserTabPolicy(openConversations: Set<string>) {
@@ -6116,17 +6139,18 @@ async function browserTabPolicy(openConversations: Set<string>) {
     return row?.activeTurnId === null && Math.max(row.lastTurnEndAt ?? 0, row.lastAssistantFinalAt ?? 0) > 0;
   });
   const quietFor = (id: string, ms: number) => Date.now() - lastActivity.get(id)! >= ms;
-  const idlePages = available.filter(id => quietFor(id, 300_000));
+  const idleCloseAfterMs = idlePageCloseAfterMs();
+  const idlePages = available.filter(id => quietFor(id, idleCloseAfterMs));
   return {
-    idleReuseAfterMs: 120_000,
-    idleCloseAfterMs: 300_000,
+    idleReuseAfterMs: IDLE_PAGE_REUSE_AFTER_MS,
+    idleCloseAfterMs,
     cancelledDecisionClaims: cancelledDecisionClaims.map(row => ({ id: row.id, owner: row.owner, conversationId: row.conversationId })),
     // Only terminal/blocked helpers and superseded sources grant close authority.
     retiredConversations: [...new Set([...idle, ...supersededSourceConversations()])]
       .filter(id => openConversations.has(id) && !protectedChats.has(id)).sort(),
     conversationActivityAt: Object.fromEntries(lastActivity),
     managedConversations: [...managed].sort(),
-    reusableConversations: available.filter(id => quietFor(id, 120_000) && !isGoalDecisionChat(id) &&
+    reusableConversations: available.filter(id => quietFor(id, IDLE_PAGE_REUSE_AFTER_MS) && !isGoalDecisionChat(id) &&
       !supersededSourceConversations().includes(id)).sort(),
     nonDiscardableConversations: [...protectedChats].sort(),
     blockedConversations: blocked.sort(),

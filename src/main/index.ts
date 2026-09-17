@@ -78,6 +78,7 @@ import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
 import { createStartupHealthMonitor, type StartupHealthMonitor, type StartupHealthReport } from './startup-health.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
+import { initRendererMemoryDiagnostics } from './renderer-memory.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -403,6 +404,7 @@ void app.whenReady().then(async () => {
   initSecretsPath(userData);
   initSessionStore(userData);
   initDurableStore(userData);
+  initRendererMemoryDiagnostics(userData);
   await restoreChatModels();
   if (windowActivation.isDisabled()) return;
   await loadConfig();

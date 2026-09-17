@@ -8,6 +8,7 @@ import type { UsageOverview } from '../shared/usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
+import type { RendererMemoryClientSample } from '../shared/renderer-memory.js';
 /**
  * The entire renderer-facing API.
  *
@@ -117,6 +118,7 @@ const api = {
   },
   attachText: (text: string) => call<InputAttachment>('sessions:attachText', { text }),
   getUsage: () => call<UsageOverview>('usage:get'),
+  recordRendererMemory: (sample: RendererMemoryClientSample) => call<boolean>('renderer:memorySample', sample),
   getState: () => call<AppState>('state:get'),
   saveSettings: (patch: SettingsPatch, base: SettingsPatch) => call<AppState>('settings:save', { patch, base }),
   addRoot: () => call<AppState>('roots:add'),

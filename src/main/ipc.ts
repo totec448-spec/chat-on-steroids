@@ -112,6 +112,7 @@ import {
   onMacOSDesktopAccessChange,
   refreshMacOSDesktopAccess
 } from './computer/index.js';
+import { recordRendererMemorySample, rendererMemoryClientSampleSchema } from './renderer-memory.js';
 
 /** Fixed native Settings destinations; authored chat links use the shared web/mail policy. */
 const ALLOWED_LINKS = new Set([
@@ -447,6 +448,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   registerPluginIpc(handle, getWindow);
   handle('usage:get', () => usageOverview());
+  handle('renderer:memorySample', async payload => {
+    const sample = rendererMemoryClientSampleSchema.parse(payload);
+    const owner = getWindow();
+    if (!owner || owner.isDestroyed() || owner.webContents.isDestroyed()) return false;
+    const pid = owner.webContents.getOSProcessId();
+    const metric = app.getAppMetrics().find(candidate => candidate.pid === pid);
+    if (!metric) return false;
+    const captured = await recordRendererMemorySample(sample, {
+      pid,
+      privateKiB: typeof metric.memory.privateBytes === 'number' ? Math.max(0, metric.memory.privateBytes) : null,
+      workingSetKiB: Math.max(0, metric.memory.workingSetSize),
+      peakWorkingSetKiB: Math.max(0, metric.memory.peakWorkingSetSize)
+    }, app.getVersion());
+    if (captured) logInfo('renderer memory flight recorder captured a bounded diagnostic snapshot');
+    return captured;
+  });
   handle('state:get', async () => {
     const state = await buildState();
     // Native package smoke uses this as the end-to-end renderer readiness barrier. Unlike

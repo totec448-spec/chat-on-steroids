@@ -38,7 +38,7 @@ describe('CLI session transcript bridge', () => {
         'win32',
         probe
       )
-    ).resolves.toBe(path.join('C:\\Users\\test', '.local', 'bin', 'claude.exe'));
+    ).resolves.toBe(path.win32.join('C:\\Users\\test', '.local', 'bin', 'claude.exe'));
     expect(checked).toHaveLength(1);
 
     await expect(resolveClaudePtyCommand({}, '/home/test', 'linux', async () => false)).resolves.toBe('claude');
