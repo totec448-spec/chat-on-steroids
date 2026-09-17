@@ -1,22 +1,38 @@
 /**
- * Model-facing access to the local recording.
+ * Model-facing access to local recordings, exact local CLI sessions, and the governed
+ * headless Claude subscription seat.
  *
- * One tool, two operations:
- *  - search discovers recordings and finds which recording contains a term;
- *  - read returns an exact transcript/tool-call view of one explicit recording.
- *
- * No operation guesses the calling ChatGPT conversation. That is deliberate: cross-chat
- * recovery and concurrent-worker observation are the point of this surface, and making either
- * depend on browser identity recreates the 15-second identity wait this contract replaces.
+ * Recording operations omit `provider`; CLI transport uses `provider=claude|codex`; and
+ * `action=invoke` uses `provider=claude` for one bounded headless subscription turn. No
+ * operation guesses the calling ChatGPT conversation.
  */
 
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { SessionEvent, SessionSummary, StoredText } from '../../shared/session.js';
+import {
+  listCliSessions,
+  readCliSession,
+  sendCliSessionMessage,
+  type CliProvider,
+  type CliTranscriptEntry
+} from '../cli-sessions.js';
+import { getConfig } from '../config.js';
+import {
+  HEADLESS_DEFAULT_TIMEOUT_SECONDS,
+  HEADLESS_MAX_PROMPT_CHARS,
+  HEADLESS_MAX_TIMEOUT_SECONDS,
+  HEADLESS_MIN_TIMEOUT_SECONDS,
+  HEADLESS_MODEL_ALIASES,
+  HEADLESS_PROFILES,
+  defaultMaxTurns,
+  formatHeadlessInvocation,
+  invokeHeadlessClaude
+} from '../headless-claude.js';
 import { getSession, indexedSessions, readEvents } from '../session/store.js';
 import { noteCount, noteDetail } from './call-context.js';
 import { toolDeclaration } from './tool-declarations.js';
-import { expandStored, fail, guard, ok, type SurfaceRegistrar, type ToolResult } from './kernel.js';
+import { expandStored, fail, guard, ok, resolveCwd, type SurfaceRegistrar, type ToolResult } from './kernel.js';
 
 const SEARCH_RESULT_TOKENS = 3_000;
 const READ_RESULT_TOKENS = 5_000;
@@ -32,6 +48,7 @@ const CHECKPOINT_HEX = 6;
 const DETAIL_HEX = 8;
 
 const includeKind = z.enum(['user', 'assistant', 'tools', 'errors', 'agents']);
+const cliProvider = z.enum(['claude', 'codex']);
 type IncludeKind = z.infer<typeof includeKind>;
 const DEFAULT_INCLUDE: IncludeKind[] = ['user', 'assistant', 'tools', 'errors', 'agents'];
 
@@ -96,86 +113,261 @@ interface SearchMatch {
   snapshot: number;
 }
 
-const inputSchema = z
-  .object({
-    action: z.enum(['search', 'read']).describe('search discovers recordings; read inspects one explicit recording.'),
-    query: z.string().max(500).optional().describe('search only. Omit to list the 30 newest recordings.'),
-    session_id: z.string().min(8).max(64).optional().describe('read only. Exact id returned by search.'),
-    include: z
-      .array(includeKind)
-      .min(1)
-      .max(5)
-      .refine((values) => new Set(values).size === values.length, 'include entries must be unique')
-      .optional()
-      .describe('read only. Defaults to user, assistant, tools, errors and agents.'),
-    tool_call: z
-      .string()
-      .regex(/^T[0-9A-Z]+$/i)
-      .max(16)
-      .optional()
-      .describe('read only. Expand one short session-local tool reference such as T2F.'),
-    cursor: z
-      .string()
-      .min(1)
-      .max(CURSOR_MAX_CHARS)
-      .optional()
-      .describe(
-        'A short token this tool printed earlier: update_cursor, continuation_cursor, older_cursor, read_cursor or next_cursor. Copy it exactly. With a cursor, omit include, tool_call and query: the token already contains the filters and mode.'
-      )
-  })
-  .superRefine((input, ctx) => {
-    if (input.action === 'search') {
-      for (const field of ['session_id', 'include', 'tool_call'] as const) {
-        if (input[field] !== undefined) {
-          ctx.addIssue({ code: 'custom', path: [field], message: `${field} is only valid with action=read` });
-        }
+const INVOKE_ONLY_FIELDS = ['prompt', 'model', 'profile', 'workdir', 'timeout_seconds', 'allow_model_fallback'] as const;
+const NON_INVOKE_FIELDS = ['query', 'session_id', 'include', 'tool_call', 'cursor', 'message', 'limit'] as const;
+
+const sessionShape = {
+  action: z
+    .enum(['search', 'read', 'send', 'invoke'])
+    .describe('search/read sessions; send an exact CLI message; invoke one headless Claude turn.'),
+  provider: cliProvider
+    .optional()
+    .describe('Omit for ChatGPT history; claude/codex for CLI; invoke requires claude.'),
+  query: z.string().max(500).optional().describe('search only. ChatGPT history term; omit to list newest.'),
+  session_id: z.string().min(8).max(64).optional().describe('read/send only. Exact id.'),
+  include: z
+    .array(includeKind)
+    .min(1)
+    .max(5)
+    .refine((values) => new Set(values).size === values.length, 'include entries must be unique')
+    .optional()
+    .describe('ChatGPT read filter.'),
+  tool_call: z
+    .string()
+    .regex(/^T[0-9A-Z]+$/i)
+    .max(16)
+    .optional()
+    .describe('ChatGPT read: expand one T… tool ref.'),
+  cursor: z
+    .string()
+    .min(1)
+    .max(CURSOR_MAX_CHARS)
+    .optional()
+    .describe('Copy an earlier cursor exactly. ChatGPT cursors already encode their filters/mode; CLI read reuses its returned cursor.'),
+  message: z.string().min(1).max(8_000).optional().describe('send only. Exact-session text.'),
+  limit: z.number().int().min(1).max(30).optional().describe('CLI search only; default 10.'),
+  prompt: z.string().min(1).max(HEADLESS_MAX_PROMPT_CHARS).optional().describe('invoke only. Task.'),
+  model: z.enum(HEADLESS_MODEL_ALIASES).optional().describe('invoke only. Default fable.'),
+  profile: z.enum(HEADLESS_PROFILES).optional().describe('invoke only; default reasoning.'),
+  workdir: z.string().min(1).max(4096).optional().describe('invoke only. Approved folder.'),
+  timeout_seconds: z
+    .number()
+    .int()
+    .min(HEADLESS_MIN_TIMEOUT_SECONDS)
+    .max(HEADLESS_MAX_TIMEOUT_SECONDS)
+    .optional()
+    .describe(`invoke only; default ${HEADLESS_DEFAULT_TIMEOUT_SECONDS}s.`),
+  allow_model_fallback: z.boolean().optional().describe('invoke only; default false.')
+};
+
+type SessionInput = z.output<z.ZodObject<typeof sessionShape>>;
+
+function validateSessionInput(input: SessionInput, ctx: z.RefinementCtx): void {
+  if (input.action === 'invoke') {
+    for (const field of NON_INVOKE_FIELDS) {
+      if (input[field] !== undefined) {
+        ctx.addIssue({ code: 'custom', path: [field], message: `${field} is not valid with action=invoke` });
       }
-      if (input.cursor && input.query !== undefined) {
-        ctx.addIssue({ code: 'custom', path: ['query'], message: 'A search continuation cursor already contains its query' });
+    }
+    if (input.provider !== 'claude') ctx.addIssue({ code: 'custom', path: ['provider'], message: 'provider=claude is required with action=invoke' });
+    if (!input.prompt) ctx.addIssue({ code: 'custom', path: ['prompt'], message: 'prompt is required with action=invoke' });
+    return;
+  }
+
+  for (const field of INVOKE_ONLY_FIELDS) {
+    if (input[field] !== undefined) {
+      ctx.addIssue({ code: 'custom', path: [field], message: `${field} is only valid with action=invoke` });
+    }
+  }
+
+  if (input.action === 'search') {
+    for (const field of ['session_id', 'include', 'tool_call', 'message'] as const) {
+      if (input[field] !== undefined) {
+        ctx.addIssue({ code: 'custom', path: [field], message: `${field} is not valid with action=search` });
       }
+    }
+    if (input.provider) {
+      if (input.query !== undefined) ctx.addIssue({ code: 'custom', path: ['query'], message: 'CLI search currently lists recent sessions; query is for ChatGPT recordings only' });
+      if (input.cursor !== undefined) ctx.addIssue({ code: 'custom', path: ['cursor'], message: 'CLI session listing does not use a cursor' });
       return;
     }
+    if (input.limit !== undefined) ctx.addIssue({ code: 'custom', path: ['limit'], message: 'limit is for CLI session listing only' });
+    if (input.cursor && input.query !== undefined) {
+      ctx.addIssue({ code: 'custom', path: ['query'], message: 'A search continuation cursor already contains its query' });
+    }
+    return;
+  }
 
-    if (!input.session_id) {
-      ctx.addIssue({ code: 'custom', path: ['session_id'], message: 'session_id is required with action=read' });
+  if (!input.session_id) {
+    ctx.addIssue({ code: 'custom', path: ['session_id'], message: `session_id is required with action=${input.action}` });
+  }
+  if (input.action === 'send') {
+    if (!input.provider) ctx.addIssue({ code: 'custom', path: ['provider'], message: 'provider is required with action=send' });
+    if (!input.message?.trim()) ctx.addIssue({ code: 'custom', path: ['message'], message: 'message is required with action=send' });
+    for (const field of ['query', 'include', 'tool_call', 'cursor', 'limit'] as const) {
+      if (input[field] !== undefined) ctx.addIssue({ code: 'custom', path: [field], message: `${field} is not valid with action=send` });
     }
-    if (input.query !== undefined) {
-      ctx.addIssue({ code: 'custom', path: ['query'], message: 'query is only valid with action=search' });
-    }
-    if (input.cursor && (input.include !== undefined || input.tool_call !== undefined)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['cursor'],
-        message: 'A read cursor already contains its filters and mode; do not combine it with include or tool_call'
-      });
-    }
-    if (input.tool_call && input.include !== undefined) {
-      ctx.addIssue({ code: 'custom', path: ['include'], message: 'include cannot be combined with tool_call' });
-    }
+    return;
+  }
+  if (input.message !== undefined) ctx.addIssue({ code: 'custom', path: ['message'], message: 'message is only valid with action=send' });
+  if (input.limit !== undefined) ctx.addIssue({ code: 'custom', path: ['limit'], message: 'limit is only valid with CLI action=search' });
+  if (input.query !== undefined) ctx.addIssue({ code: 'custom', path: ['query'], message: 'query is only valid with action=search' });
+  if (input.provider) {
+    if (input.include !== undefined) ctx.addIssue({ code: 'custom', path: ['include'], message: 'include filters are for ChatGPT recordings only' });
+    if (input.tool_call !== undefined) ctx.addIssue({ code: 'custom', path: ['tool_call'], message: 'tool_call expansion is for ChatGPT recordings only' });
+    return;
+  }
+  if (input.cursor && (input.include !== undefined || input.tool_call !== undefined)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['cursor'],
+      message: 'A read cursor already contains its filters and mode; do not combine it with include or tool_call'
+    });
+  }
+  if (input.tool_call && input.include !== undefined) {
+    ctx.addIssue({ code: 'custom', path: ['include'], message: 'include cannot be combined with tool_call' });
+  }
+}
+
+const invokeInputSchema = z.object(sessionShape).strict().superRefine(validateSessionInput);
+const transportInputSchema = z
+  .object(sessionShape)
+  .omit({ prompt: true, model: true, profile: true, workdir: true, timeout_seconds: true, allow_model_fallback: true })
+  .extend({
+    action: z
+      .enum(['search', 'read', 'send'])
+      .describe('search/read sessions; send an exact CLI message.')
   })
-  .strict();
+  .strict()
+  .superRefine(validateSessionInput);
 
 export function registerSessionTool(reg: SurfaceRegistrar): void {
+  const invokeExposed = reg.headlessClaudeToolsExposed;
+  const description =
+    'Search/read ChatGPT history; provider=claude|codex lists, reads or messages exact local CLI sessions. ' +
+    'Claude send is limited to managed background sessions; Codex uses its exact-thread queue.' +
+    (invokeExposed
+      ? ' invoke with provider=claude runs one bounded subscription turn and returns model, session, usage and result.'
+      : '');
   reg.register(
     'session',
-    toolDeclaration('session', () => ({
-      title: 'Recorded sessions',
-      description:
-        'Search and read this app’s local recordings, including other and concurrently running chats. ' +
-        'action=search lists the 30 newest sessions when query is omitted, or finds recordings containing a term. ' +
-        'action=read requires session_id and returns exact user/assistant text plus compact tool headlines. ' +
-        'To follow a running chat, pass the update_cursor from the previous read and only activity since then comes back. ' +
-        'Pass a short T… reference as tool_call to inspect exact arguments and result. Cursors are short tokens; copy them exactly.',
-      inputSchema,
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-    })),
-    async (input) =>
+    toolDeclaration(
+      'session',
+      () => ({
+        title: 'Recorded sessions',
+        description,
+        inputSchema: invokeExposed ? invokeInputSchema : transportInputSchema,
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: invokeExposed }
+      }),
+      invokeExposed ? 'invoke' : ''
+    ),
+    async (input: SessionInput) =>
       guard('session', async () => {
+        if (input.action === 'invoke') return invokeHeadless(reg, input);
+        if (input.provider) {
+          return reg.guarded('command', 'session', async () => {
+            try {
+              if (input.action === 'search') return cliList(input.provider!, input.limit);
+              if (input.action === 'read') return cliRead(input.provider!, input.session_id!, input.cursor);
+              return cliSend(input.provider!, input.session_id!, input.message!);
+            } catch (error) {
+              return fail(`session CLI bridge failed: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          });
+        }
         if (!reg.sessionToolsLive) return reg.featureDisabled('Session recording', 'Record sessions');
         if (input.action === 'search') return searchSessions(input.query, input.cursor);
+        if (input.action === 'send') return fail('provider=claude or provider=codex is required with action=send');
         return readSession(input.session_id!, input.include, input.tool_call, input.cursor);
       })
   );
+}
+
+/**
+ * One governed headless turn. Every refusal is decided before a child process starts: the
+ * live feature switch, the separate coding-profile consent and the approved working directory.
+ */
+async function invokeHeadless(reg: SurfaceRegistrar, input: SessionInput): Promise<ToolResult> {
+  if (!reg.headlessClaudeToolsLive) {
+    return reg.featureDisabled('Headless Claude invocation', 'Allow headless Claude invocation');
+  }
+  const profile = input.profile ?? 'reasoning';
+  if (profile === 'coding') {
+    if (!getConfig().headlessClaude.allowCodingProfile) {
+      return fail('PROFILE_DISABLED: the coding profile is switched off in Chat On Steroids. Ask the user to enable "Allow the coding profile", or use profile=reasoning.');
+    }
+    if (reg.ctx.readOnly) {
+      return fail('PROFILE_DISABLED: read-only mode is on, so the coding profile cannot edit files. Use profile=reasoning.');
+    }
+    if (!reg.caps.edit || !reg.caps.create) {
+      return fail('PROFILE_DISABLED: the coding profile needs the edit and create file permissions. Use profile=reasoning or ask the user to enable them.');
+    }
+  }
+  const cwd = await resolveCwd(reg.ctx, input.workdir);
+  const invocation = await invokeHeadlessClaude({
+    prompt: input.prompt!,
+    model: input.model ?? 'fable',
+    profile,
+    cwd: cwd.real,
+    maxTurns: defaultMaxTurns(profile),
+    timeoutMs: (input.timeout_seconds ?? HEADLESS_DEFAULT_TIMEOUT_SECONDS) * 1000,
+    allowModelFallback: input.allow_model_fallback ?? false
+  });
+  noteDetail(`${invocation.model.requested} ${invocation.status}`);
+  const text = formatHeadlessInvocation(invocation, cwd.virtual);
+  const structuredContent = { ...invocation, cwd: cwd.virtual, workdir_defaulted: cwd.defaulted };
+  return invocation.ok
+    ? { content: [{ type: 'text', text }], structuredContent }
+    : { content: [{ type: 'text', text }], structuredContent, isError: true };
+}
+
+function cliEntryLine(entry: CliTranscriptEntry): string {
+  return `${entry.at ? `[${entry.at}] ` : ''}${entry.kind.toUpperCase()}: ${entry.text}`;
+}
+
+async function cliList(provider: CliProvider, limit?: number): Promise<ToolResult> {
+  const rows = await listCliSessions(provider, limit ?? 10);
+  noteCount(rows.length);
+  noteDetail(`cli sessions list ${provider}`);
+  const text = rows.length === 0
+    ? `No local ${provider} CLI session transcripts were found.`
+    : rows
+        .map((row) => {
+          const state = row.provider === 'claude'
+            ? row.managed
+              ? `managed-background${row.state ? `/${row.state}` : ''}`
+              : row.state ?? 'transcript-only'
+            : row.writerLock
+              ? 'writer-lock-present'
+              : 'saved';
+          return `${row.sessionId} | ${state} | updated ${new Date(row.updatedAt).toISOString()}${row.name ? ` | ${row.name}` : ''}${row.cwd ? ` | cwd ${row.cwd}` : ''}`;
+        })
+        .join('\n');
+  return { content: [{ type: 'text', text }], structuredContent: { provider, sessions: rows } };
+}
+
+async function cliRead(provider: CliProvider, sessionId: string, cursor?: string): Promise<ToolResult> {
+  const page = await readCliSession(provider, sessionId, cursor);
+  noteCount(page.entries.length);
+  noteDetail(`cli transcript ${provider}`);
+  const body = page.entries.map(cliEntryLine).join('\n\n') || '(No user/assistant/tool activity in this transcript window.)';
+  return {
+    content: [{
+      type: 'text',
+      text: `${body}\n\ncursor: ${page.cursor}\ncaught_up: ${page.caughtUp}\nearlier_omitted: ${page.earlierOmitted}`
+    }],
+    structuredContent: { ...page }
+  };
+}
+
+async function cliSend(provider: CliProvider, sessionId: string, message: string): Promise<ToolResult> {
+  const result = await sendCliSessionMessage(provider, sessionId, message);
+  noteCount(1);
+  noteDetail(`cli message ${provider}`);
+  return {
+    content: [{ type: 'text', text: `DELIVERED ${provider} ${sessionId}: ${result.detail}` }],
+    structuredContent: { ...result }
+  };
 }
 
 async function searchSessions(queryInput?: string, cursorInput?: string): Promise<ToolResult> {

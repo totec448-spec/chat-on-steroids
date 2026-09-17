@@ -86,7 +86,7 @@
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
         <button class="btn" id="backToChat" type="button" hidden>← Back to chat</button>
         <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong></div>
-        <button class="btn new-chat" id="newChat" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>New chat</button>
+        <button class="btn new-chat" id="newChat" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pencil" /></svg>New chat</button>
       <nav id="tabs" aria-label="Settings navigation" hidden>
         <button class="is-sel" data-tab="home" type="button">
           <svg class="ico" viewBox="0 0 24 24"><use href="#i-home" /></svg>Workspace
@@ -316,11 +316,10 @@
             </div>
             <div class="lede">
               <p>
-                Six steps, once. Custom MCP apps need ChatGPT <strong>Developer mode</strong> on the
-                web. Full write/modify MCP is currently available to Business, Enterprise and Edu;
-                Pro custom MCP is limited to read/fetch access.
+                Follow these six steps once. The pictures show where to click. Start with Core;
+                desktop control is optional.
               </p>
-              <button class="btn" id="wizExpand" type="button" hidden>Show all steps</button>
+              <button class="btn" id="wizExpand" type="button" aria-controls="wizard" aria-expanded="true">Hide setup guide</button>
             </div>
 
             <ol class="wizard" id="wizard">
@@ -332,8 +331,7 @@
                 <div class="step-body">
                   <h3>Pick a folder to share</h3>
                   <p>
-                    Nothing outside the folders you approve is reachable. Do this first — the tunnel
-                    will not start with nothing to serve.
+                    Choose the folder you want ChatGPT to work in. You can add more folders later.
                   </p>
                   <div class="step-actions">
                     <button class="btn btn-solid" id="wizAddFolder" type="button">
@@ -352,11 +350,12 @@
                 </div>
                 <div class="step-body">
                   <h3>Create a tunnel</h3>
-                  <p>
-                    Open <strong>Tunnels</strong> on the OpenAI platform and create one. Pick the
-                    <strong>same workspace you use in ChatGPT</strong> — a tunnel in another
-                    workspace will not show up later. Then copy its ID.
-                  </p>
+                  <ol class="setup-instructions">
+                    <li>Open Tunnels and click “Create tunnel” at the top right of the page. Enter a name and description.</li>
+                    <li><strong>At the bottom, select your workspace under ChatGPT workspaces.</strong> Choose the same workspace you use in ChatGPT. You can search by name or workspace ID.</li>
+                    <li>Keep your existing organization selected. Selecting an organization alone does not make the tunnel appear in ChatGPT.</li>
+                    <li>Click Create, copy the new Tunnel ID and paste it below.</li>
+                  </ol>
                   <div class="step-actions">
                     <button
                       class="btn btn-solid"
@@ -366,10 +365,13 @@
                       <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open Tunnels
                     </button>
                   </div>
+                  <div class="setup-guide" data-setup-guide="tunnel"></div>
                   <div class="field">
                     <label for="tunnelId">Tunnel ID — Core connector</label>
                     <input
                       id="tunnelId"
+                      class="setup-required is-empty"
+                      aria-required="true"
                       type="text"
                       spellcheck="false"
                       placeholder="tunnel_0123456789abcdef0123456789abcdef"
@@ -378,20 +380,23 @@
                   <!-- Desktop is a second connector in ChatGPT, so on this method it needs a
                        second tunnel of its own. Hidden unless desktop permissions are on, so
                        nobody is asked to create a tunnel for a feature they never enabled. -->
-                  <div class="field" id="desktopTunnelField" hidden>
-                    <label for="desktopTunnelId">Tunnel ID — Desktop connector <span class="tag">optional</span></label>
-                    <input
-                      id="desktopTunnelId"
-                      type="text"
-                      spellcheck="false"
-                      placeholder="tunnel_0123456789abcdef0123456789abcdef"
-                    />
-                    <p class="hint">
-                      Screen and mouse/keyboard control are a separate connector, so they need a
-                      second tunnel. Create another one and paste its ID here. Leave it empty to
-                      keep desktop control off in ChatGPT.
-                    </p>
-                  </div>
+                  <details class="setup-optional" id="desktopTunnelField" hidden>
+                    <summary>Desktop control <span class="tag is-optional">optional</span></summary>
+                    <div class="field">
+                      <label for="desktopTunnelId">Tunnel ID — Desktop connector</label>
+                      <input
+                        id="desktopTunnelId"
+                        type="text"
+                        spellcheck="false"
+                        placeholder="tunnel_0123456789abcdef0123456789abcdef"
+                      />
+                      <p class="hint">
+                        Screen and mouse/keyboard control are a separate connector, so they need a
+                        second tunnel. Create another one and paste its ID here. Leave it empty to
+                        keep desktop control off in ChatGPT.
+                      </p>
+                    </div>
+                  </details>
                 </div>
               </li>
 
@@ -402,12 +407,12 @@
                 </div>
                 <div class="step-body">
                   <h3>Create an API key</h3>
-                  <p>
-                    Create a key of type <strong>Restricted</strong> and give it only
-                    <strong>Tunnels: Read</strong> and <strong>Tunnels: Use</strong>. Leave
-                    everything else on <em>None</em>. Copy it once — the platform will not show it
-                    again.
-                  </p>
+                  <ol class="setup-instructions">
+                    <li>Open API keys and click “Create new secret key” at the top right of the page.</li>
+                    <li>Leave Owned by set to You. Select your project, for example Default project. A name and expiration are optional.</li>
+                    <li>Under Permissions, choose Restricted. Scroll down to Tunnels and enable Read and Use. Leave everything else at None.</li>
+                    <li>Create the key, copy it and paste it below. You can only copy the secret once.</li>
+                  </ol>
                   <div class="step-actions">
                     <button
                       class="btn btn-solid"
@@ -417,9 +422,10 @@
                       <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open API keys
                     </button>
                   </div>
+                  <div class="setup-guide" data-setup-guide="key"></div>
                   <div class="field">
                     <label for="apiKey">Tunnel API key</label>
-                    <input id="apiKey" type="password" spellcheck="false" placeholder="sk-…" autocomplete="off" />
+                    <input id="apiKey" class="setup-required is-empty" aria-required="true" type="password" spellcheck="false" placeholder="sk-…" autocomplete="off" />
                     <p class="hint" id="apiKeyState"></p>
                     <div class="step-actions">
                       <button class="btn" id="removeApiKey" type="button">Remove stored API key</button>
@@ -435,6 +441,7 @@
                 </div>
                 <div class="step-body">
                   <h3>Start the tunnel</h3>
+                  <p class="setup-important">Click Connect and wait for Connected. The tunnel must be running before you can add the plugin in ChatGPT.</p>
                   <p id="backgroundRunningCopy">
                     Leave it running while you use the connector. It stays available when you close
                     the window.
@@ -454,33 +461,29 @@
                 <div class="step-body">
                   <div class="step-heading">
                     <h3>Add it in ChatGPT</h3>
-                    <button class="btn btn-solid" type="button" data-link="https://chatgpt.com/#settings/Plugins">
+                    <button class="btn btn-solid" type="button" data-link="https://chatgpt.com/plugins">
                       <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open ChatGPT Plugins
                     </button>
                   </div>
-                  <p>
-                    Turn on <strong>Developer mode</strong> in ChatGPT — currently under
-                    <em>Settings → Apps → Advanced settings</em>, with workspace-managed plans
-                    also exposing custom apps from their Apps area. Then create one app per card
-                    below — Core, plus Desktop if you use it. Configure Plugins from the Plugins page. Each
-                    card is a separate app in ChatGPT:
-                  </p>
-                  <ul class="ticks">
-                    <li>Use the exact name and description from the card — copy them, do not invent your own.</li>
+                  <h4 class="setup-subheading">A · Enable Developer mode</h4>
+                  <p>In ChatGPT, open Settings → Security and login and turn on Developer mode.</p>
+                  <div class="setup-guide" data-setup-guide="developer"></div>
+                  <h4 class="setup-subheading">B · Create the Core plugin</h4>
+                  <ol class="setup-instructions">
+                    <li>Open the ChatGPT Plugins page using the button above. Click + at the top right to open New Plugin.</li>
+                    <li>Copy the name and description from the Core card below.</li>
                     <li id="chatgptConn"></li>
-                    <li>
-                      For authentication, scroll to the very bottom and pick
-                      <strong>No authentication</strong>. This app is protected by a secret address,
-                      not by a login.
-                    </li>
-                  </ul>
+                    <li><strong>Under Authentication, choose No Auth.</strong> Do not paste your API key here.</li>
+                    <li>Read and accept the notice, then click Create. Keep the tunnel running while ChatGPT connects.</li>
+                  </ol>
+                  <div class="setup-guide" data-setup-guide="plugin"></div>
                   <!-- One card per connector. The name and description are what ChatGPT matches
                        on when it decides whether to load a connector's tools at all, so both are
                        given as copyable text rather than described. -->
                   <div class="connectors" id="connectorCards"></div>
                   <div class="plugin-permission-step">
                     <strong>Before you start: choose “Allow all actions”</strong>
-                    <p>In ChatGPT, open Settings → Plugins (or Apps), select this plugin, and set its action permissions to <b>Allow all actions</b>. Repeat for the Desktop plugin if you added it.</p>
+                    <p>In ChatGPT, open Settings → Plugins, select this plugin, and set its action permissions to <b>Allow all actions</b>. Repeat for the Desktop plugin if you added it.</p>
                     <p>This lets ChatGPT use the plugin without asking for each action. Otherwise, approval prompts can pause Goal, Loop and agent tasks. Your folder and tool permissions in this app still apply.</p>
                   </div>
                   <div class="step-actions">
@@ -620,39 +623,58 @@
               <div class="view" data-view="settings" hidden>
                 <div class="settings-heading"><h1>Agents &amp; automation</h1><p>Fine-tune your workspace and the way your agents work.</p><label class="sr-only" for="settingsSearch">Search settings</label><input id="settingsSearch" type="search" placeholder="Search settings…" /></div>
                 <p id="settingsSearchEmpty" class="muted" role="status" hidden>No settings match your search.</p>
-                <h2 class="settings-section-title">Appearance</h2>
-                <div class="pane">
-                  <label class="setting" for="uiLanguage"><span class="setting-text"><b>Language</b><em>Changes the app interface immediately. Your messages stay as written.</em></span><select id="uiLanguage" class="language-select" translate="no"><option value="en" lang="en">English</option><option value="zh-CN" lang="zh-CN">简体中文</option></select></label>
-                </div>
                 <h2 class="settings-section-title">Continuation sources</h2>
                 <div class="pane">
                   <div class="setting"><span class="setting-text"><b>Goal response source</b><em>API is the most reliable. Offline uses completion markers and 200 prepared messages.</em></span><select id="goalBackend"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Loop response source</b><em>Loop keeps going until you switch it off.</em></span><select id="loopBackend"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan reasoning</b><em>Used with the ChatGPT model above; independent from API reasoning.</em></span><select id="helperReasoning" aria-label="Goal, Loop and Plan reasoning"></select></div>
-                  <label class="setting"><span class="setting-text"><b>Include tool details in Goal and handoffs</b><em>Goal receives recorded tool arguments and results. Handoff briefs retain tool details.</em></span><input id="goalIncludeToolCalls" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Include tool details in handoffs</b><em>Handoff briefs retain tool details. Goal and Loop use user messages and assistant updates and answers.</em></span><input id="goalIncludeToolCalls" type="checkbox" /></label>
                   </div>
+                <h2 class="settings-section-title">ChatGPT models</h2>
+                <div class="pane">
+                  <div class="setting"><span class="setting-text"><b>Available ChatGPT models</b><em id="chatModelStatus">Read model choices from your account.</em></span><button class="btn" id="refreshChatModels" type="button">Refresh</button></div>
+                  <div class="setting"><span class="setting-text"><b>Default sub-agent model</b><em>Confirmed in ChatGPT before a worker starts.</em></span><select id="workerModel"><option value="" disabled>No observed choices</option></select></div>
+                  <div class="setting"><span class="setting-text"><b>Default sub-agent reasoning</b><em>Selected independently from the model.</em></span><select id="workerReasoning"><option value="" disabled>No observed choices</option></select></div>
+                  </div>
+                <h2 class="settings-section-title">Workers & recovery</h2>
+                <div class="pane">
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Sub-agent workers</b>
+                      <em>Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.</em>
+                    </span>
+                    <input id="maWorkers" class="num" type="number" min="1" max="8" step="1" />
+                    <span class="unit">max</span>
+                  </div>
+
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Allow unattributed calls</b>
+                      <em>Allow tools, including computer use, file editing and JavaScript, without chat attribution. Sub-agents and other chat-owned actions still need an identified chat. Activity appears as Unattributed.</em>
+                    </span>
+                    <input id="allowUnattributedCalls" type="checkbox" />
+                  </label>
+
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Recover other chats’ tabs</b>
+                      <em>Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.</em>
+                    </span>
+                    <input id="recoverAgentTabs" type="checkbox" />
+                  </label>
+
+                  <div id="swarmList"></div>
+                  <div class="step-actions">
+                    <button class="btn" id="swarmReset" type="button">Clear swarm</button>
+                  </div>
+                </div>
                 <h2 class="settings-section-title">Keep the turn open</h2>
                 <div class="pane">
                   <label class="setting"><span class="setting-text"><b>Plan generation</b><em>Create staged tasks. ChatGPT uses the Goal, Loop and Plan model above; API uses the model and reasoning in API provider settings.</em></span><select id="planBackend"><option value="chatgpt">ChatGPT</option><option value="api">API provider</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Session finish</b><em>Ask Astra to keep the turn open for your next instruction. With Automatic plugin refresh enabled, tool changes refresh the connector after 20 seconds.</em></span><input id="finishTool" type="checkbox" /></label>
                   <div class="setting"><span class="setting-text"><b>When ChatGPT is wrapping up</b><em>Automatic follow-ups use your Loop instructions and selected Loop source.</em></span><select id="finishAction"><option value="notify">Notify me · Write or Generate Goal</option><option value="goal">Generate and inject Goal</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Requested notice</b><em>A request to the model, not a guaranteed countdown.</em></span><select id="finishLeadMinutes"><option value="3">3 minutes</option><option value="5">5 minutes</option></select></div>
-                  </div>
-                <h2 class="settings-section-title">Connector instructions</h2>
-                <div class="pane">
-                  <div class="field">
-                    <label for="mcpInstructions">Your own instructions</label>
-                    <textarea dir="auto" id="mcpInstructions" rows="6" maxlength="4000" spellcheck="false" placeholder="e.g. Always run the test suite before saying a change works."></textarea>
-                    <p class="hint">Added to the end of what each connector tells ChatGPT about itself, marked as yours. Kept across app updates. Leave empty for none.</p>
-                  </div>
-                  <p class="muted">ChatGPT reads connector instructions once, when it loads the tools, so a change reaches an existing conversation only after the connector is loaded again.</p>
-                </div>
-                <h2 class="settings-section-title">ChatGPT models</h2>
-                <div class="pane">
-                  <div class="setting"><span class="setting-text"><b>Available ChatGPT models</b><em id="chatModelStatus">Read model choices from your account.</em></span><button class="btn" id="refreshChatModels" type="button">Refresh</button></div>
-                  <div class="setting"><span class="setting-text"><b>Default sub-agent model</b><em>Confirmed in ChatGPT before a worker starts.</em></span><select id="workerModel"><option value="" disabled>No observed choices</option></select></div>
-                  <div class="setting"><span class="setting-text"><b>Default sub-agent reasoning</b><em>Selected independently from the model.</em></span><select id="workerReasoning"><option value="" disabled>No observed choices</option></select></div>
                   </div>
                 <h2 class="settings-section-title">Browser & history</h2>
                 <div class="pane">
@@ -744,14 +766,10 @@
                   <div class="setting">
                     <span class="setting-text">
                       <b>Reasoning</b>
-                      <em>Default lets the provider decide, which is right for nearly every model. The rest cost more and take longer.</em>
+                      <em>Choose a reasoning level supported by the selected API model. Default uses the provider's setting.</em>
                     </span>
                     <select id="goalReasoning">
                       <option value="default">Default</option>
-                      <option value="minimal">Minimal</option>
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
                     </select>
                   </div>
 
@@ -810,37 +828,35 @@
                   </div>
 
                   </div>
-                <h2 class="settings-section-title">Workers & recovery</h2>
+                <h2 class="settings-section-title">Appearance</h2>
                 <div class="pane">
-                  <div class="setting">
-                    <span class="setting-text">
-                      <b>Sub-agent workers</b>
-                      <em>Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.</em>
-                    </span>
-                    <input id="maWorkers" class="num" type="number" min="1" max="8" step="1" />
-                    <span class="unit">max</span>
+                  <label class="setting" for="uiLanguage"><span class="setting-text"><b>Language</b><em>Changes the app interface immediately. Your messages stay as written.</em></span><select id="uiLanguage" class="language-select" translate="no"><option value="en" lang="en">English</option><option value="zh-CN" lang="zh-CN">简体中文</option></select></label>
+                  <div class="setup-profile-setting">
+                    <span id="setupProfileLabel">Setup profile</span>
+                    <div class="setup-profile-controls">
+                      <button class="btn" id="setupProfile" type="button" popovertarget="setupProfileMenu" aria-labelledby="setupProfileLabel setupProfileCurrent"><span id="setupProfileCurrent" translate="no">Default</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4" /></svg></button>
+                      <button class="btn" id="setupProfileAdd" type="button" title="Add profile" aria-label="Add profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button>
+                    </div>
+                    <div id="setupProfileMenu" popover aria-labelledby="setupProfileLabel"></div>
                   </div>
+                </div>
 
+                <h2 class="settings-section-title">Headless Claude</h2>
+                <div class="pane">
                   <label class="setting">
                     <span class="setting-text">
-                      <b>Allow unattributed calls</b>
-                      <em>Allow tools, including computer use, file editing and JavaScript, without chat attribution. Sub-agents and other chat-owned actions still need an identified chat. Activity appears as Unattributed.</em>
+                      <b>Allow headless Claude invocation</b>
+                      <em>Off by default. Adds session action=invoke so ChatGPT can run one bounded Claude prompt through your claude.ai login. Reasoning only: no tools, no MCP, no network for the child model.</em>
                     </span>
-                    <input id="allowUnattributedCalls" type="checkbox" />
+                    <input id="headlessClaudeEnabled" type="checkbox" />
                   </label>
-
                   <label class="setting">
                     <span class="setting-text">
-                      <b>Recover other chats’ tabs</b>
-                      <em>Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.</em>
+                      <b>Allow the coding profile</b>
+                      <em>Lets profile=coding read and edit files inside the invocation’s approved folder. Still no shell, network or MCP for the child model.</em>
                     </span>
-                    <input id="recoverAgentTabs" type="checkbox" />
+                    <input id="headlessClaudeCoding" type="checkbox" />
                   </label>
-
-                  <div id="swarmList"></div>
-                  <div class="step-actions">
-                    <button class="btn" id="swarmReset" type="button">Clear swarm</button>
-                  </div>
                 </div>
 
                 <h2 class="settings-section-title">Remote steering</h2>
@@ -854,7 +870,7 @@
                   <label class="setting">
                     <span class="setting-text">
                       <b>Accept signed remote steering</b>
-                      <em>Off by default. Accepts only short-lived Command Center-signed remote-steering operations: V1 STATUS/MESSAGE and explicit V2 STATUS/MESSAGE/SPAWN for an exact run and allowlist; ordinary agent identity checks stay unchanged.</em>
+                      <em>Off by default. Accepts only short-lived signed STATUS and MESSAGE operations for an exact existing run; ordinary agent identity checks stay unchanged.</em>
                     </span>
                     <input id="remoteSteeringEnabled" type="checkbox" disabled />
                   </label>
@@ -978,6 +994,14 @@
 
     </div>
 
+    <dialog id="setupProfileDialog" class="setup-profile-dialog" aria-labelledby="setupProfileDialogTitle">
+      <form id="setupProfileForm">
+        <h3 id="setupProfileDialogTitle">Add profile</h3>
+        <label for="setupProfileName">Profile name</label>
+        <input id="setupProfileName" type="text" maxlength="80" required autocomplete="off" />
+        <div class="step-actions"><button class="btn" id="setupProfileCancel" type="button">Cancel</button><button class="btn" type="submit">Add profile</button></div>
+      </form>
+    </dialog>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

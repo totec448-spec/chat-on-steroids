@@ -117,8 +117,8 @@ if (iconBytes.length < 8 || iconBytes.toString('ascii', 0, 4) !== 'icns') {
 }
 
 requireThinMachO(mainExecutable, true);
-requireThinMachO(desktopAddon, true, '12.3');
-requireThinMachO(desktopLibrary, true, '12.3');
+requireThinMachO(desktopAddon, true);
+requireThinMachO(desktopLibrary, true);
 requireThinMachO(path.join(ptyDir, 'pty.node'));
 requireThinMachO(path.join(ptyDir, 'spawn-helper'), true);
 requireThinMachO(path.join(nodeModules, 'tree-sitter', 'prebuilds', nativeDir, 'tree-sitter.node'));
@@ -150,8 +150,7 @@ for (const file of walkFiles(contents)) {
   // ZIP integrity alone does not prove POSIX modes survived archive creation/extraction. In
   // particular, Electron's nested Helper.app processes and crashpad handler must remain directly
   // executable. The same bundle audit runs on the unpacked app, mounted DMG and ditto-extracted ZIP.
-  const desktopPayload = file === desktopAddon || file === desktopLibrary;
-  requireThinMachO(file, launched, desktopPayload ? '12.3' : expectedPlist.LSMinimumSystemVersion);
+  requireThinMachO(file, launched);
 }
 if (machOCount < 8) throw new Error(`Only found ${machOCount} Mach-O files in ${app}; bundle audit is unexpectedly shallow`);
 if (launchedMachOCount < 6) {

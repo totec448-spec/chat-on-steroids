@@ -48,8 +48,10 @@
  * `remote-steering-contract.ts`; nothing here may reinterpret a field it defines.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { AgentState } from '../shared/session.js';
 import type { RemoteSteeringPinView } from '../shared/types.js';
+import { isAstraModel } from '../shared/chat-models.js';
 import {
   AgentError,
   activeRunIds,
@@ -103,7 +105,26 @@ import {
   type RemoteSteeringOperationEnvelopeV2,
   type RemoteSteeringOperationV2
 } from './remote-steering-contract-v2.js';
+import {
+  REMOTE_STEERING_ENVELOPE_CONTRACT_V3,
+  REMOTE_STEERING_VERIFIER_CONTRACT_VERSION_V3,
+  canonicalLeaseBytesV3,
+  canonicalOperationBytesV3,
+  remoteSteeringOperationDigestV3,
+  remoteSteeringOperationLeaseMismatchV3,
+  validateRemoteSteeringEnvelopeV3,
+  validateRemoteSteeringSignedLeaseV3,
+  validateRemoteSteeringSignedOperationV3,
+  type RemoteSteeringActionV3,
+  type RemoteSteeringLeaseV3,
+  type RemoteSteeringOperationEnvelopeV3,
+  type RemoteSteeringOperationV3
+} from './remote-steering-contract-v3.js';
 import { recordAgentMessage } from './session/recorder.js';
+import { conversationWasSuperseded, getSession } from './session/store.js';
+import { cancelInput, enqueueInput, listInputs } from './session/input.js';
+import { goalObjectiveFor, goalSwitchFor, setGoalReplyActiveNow, setGoalSwitchNow } from './goal.js';
+import { isChatBlocked } from './session/blocked-chats.js';
 
 // ---------------------------------------------------------------------------
 // Bounds.
@@ -188,6 +209,12 @@ export type RemoteSteeringRefusal =
   | 'REMOTE_STEERING_OPERATION_INDETERMINATE'
   // --- authorized and attempted; recorded once ---
   | 'REMOTE_STEERING_RUN_NOT_FOUND'
+  | 'REMOTE_STEERING_SESSION_NOT_FOUND'
+  | 'REMOTE_STEERING_SESSION_NOT_READY'
+  | 'REMOTE_STEERING_ASTRA_REQUIRED'
+  | 'REMOTE_STEERING_FINISH_HOLD_REQUIRED'
+  | 'REMOTE_STEERING_LONGRUN_REFUSED'
+  | 'REMOTE_STEERING_LOOP_CONTROL_REFUSED'
   | 'REMOTE_STEERING_WORKER_NOT_IN_RUN'
   | 'REMOTE_STEERING_DELIVERY_REFUSED'
   | 'REMOTE_STEERING_SPAWN_REFUSED'
@@ -238,16 +265,41 @@ export interface RemoteSteeringSpawnView {
   readonly taskLength: number;
 }
 
-type RemoteSteeringActionAny = RemoteSteeringAction | RemoteSteeringActionV2;
-type RemoteSteeringLeaseAny = RemoteSteeringLeaseV1 | RemoteSteeringLeaseV2;
-type RemoteSteeringOperationAny = RemoteSteeringOperationV1 | RemoteSteeringOperationV2;
-type RemoteSteeringEnvelopeAny = RemoteSteeringOperationEnvelopeV1 | RemoteSteeringOperationEnvelopeV2;
+/** V3 session projection. No title, transcript, conversation id, objective text or model id leaves CoS. */
+export interface RemoteSteeringSessionView {
+  readonly sessionId: string;
+  readonly found: boolean;
+  readonly activeTurn: boolean;
+  readonly blocked: boolean;
+  readonly superseded: boolean;
+  readonly modelClass: 'astra' | 'other' | 'unknown';
+  readonly loopEnabled: boolean;
+  readonly loopMode: 'goal' | 'loop';
+  readonly objectivePresent: boolean;
+  readonly finishToolEnabled: boolean;
+  readonly pendingUserInput: boolean;
+  readonly pendingLongrunStart: boolean;
+}
+
+/** LONGRUN_START's content-blind queue receipt. */
+export interface RemoteSteeringLongrunView {
+  readonly inputId: string;
+  readonly longrunSha256: string;
+  readonly longrunLength: number;
+  readonly automation: 'loop';
+}
+
+type RemoteSteeringActionAny = RemoteSteeringAction | RemoteSteeringActionV2 | RemoteSteeringActionV3;
+type RemoteSteeringLeaseAny = RemoteSteeringLeaseV1 | RemoteSteeringLeaseV2 | RemoteSteeringLeaseV3;
+type RemoteSteeringOperationAny = RemoteSteeringOperationV1 | RemoteSteeringOperationV2 | RemoteSteeringOperationV3;
+type RemoteSteeringEnvelopeAny = RemoteSteeringOperationEnvelopeV1 | RemoteSteeringOperationEnvelopeV2 | RemoteSteeringOperationEnvelopeV3;
 
 export interface RemoteSteeringOutcome {
   readonly verifierId: typeof REMOTE_STEERING_VERIFIER_ID;
   readonly verifierContractVersion:
     | typeof REMOTE_STEERING_VERIFIER_CONTRACT_VERSION
-    | typeof REMOTE_STEERING_VERIFIER_CONTRACT_VERSION_V2;
+    | typeof REMOTE_STEERING_VERIFIER_CONTRACT_VERSION_V2
+    | typeof REMOTE_STEERING_VERIFIER_CONTRACT_VERSION_V3;
   readonly status: 'accepted' | 'refused';
   readonly reason: RemoteSteeringRefusal | null;
   /** Bounded broker/verifier explanation. Never carries the message text. */
@@ -257,12 +309,15 @@ export interface RemoteSteeringOutcome {
   readonly operationDigest: string | null;
   readonly action: RemoteSteeringActionAny | null;
   readonly runId: string | null;
+  readonly sessionId: string | null;
   /** True when this exact operation had already been decided and nothing was repeated. */
   readonly replay: boolean;
   readonly decidedAt: string;
   readonly delivered: RemoteSteeringDeliveryView | null;
   readonly spawned: RemoteSteeringSpawnView | null;
   readonly run: RemoteSteeringRunView | null;
+  readonly session: RemoteSteeringSessionView | null;
+  readonly longrun: RemoteSteeringLongrunView | null;
 }
 
 /** What the ordinary `agents message` path owes a wake, supplied by its owner in tools-core. */
@@ -493,18 +548,36 @@ function isV2Lease(lease: RemoteSteeringLeaseAny): lease is RemoteSteeringLeaseV
   return lease.contract === 'cc_remote_steering_lease_v2';
 }
 
+function isV3Operation(operation: RemoteSteeringOperationAny): operation is RemoteSteeringOperationV3 {
+  return operation.contract === 'cc_remote_steering_operation_v3';
+}
+
+function isV3Lease(lease: RemoteSteeringLeaseAny): lease is RemoteSteeringLeaseV3 {
+  return lease.contract === 'cc_remote_steering_lease_v3';
+}
+
 function operationDigestAny(operation: RemoteSteeringOperationAny): string {
-  return isV2Operation(operation)
+  return isV3Operation(operation)
+    ? remoteSteeringOperationDigestV3(operation)
+    : isV2Operation(operation)
     ? remoteSteeringOperationDigestV2(operation)
     : remoteSteeringOperationDigest(operation);
 }
 
 function canonicalLeaseBytesAny(lease: RemoteSteeringLeaseAny): Buffer {
-  return isV2Lease(lease) ? canonicalLeaseBytesV2(lease) : canonicalLeaseBytes(lease);
+  return isV3Lease(lease) ? canonicalLeaseBytesV3(lease) : isV2Lease(lease) ? canonicalLeaseBytesV2(lease) : canonicalLeaseBytes(lease);
 }
 
 function canonicalOperationBytesAny(operation: RemoteSteeringOperationAny): Buffer {
-  return isV2Operation(operation) ? canonicalOperationBytesV2(operation) : canonicalOperationBytes(operation);
+  return isV3Operation(operation) ? canonicalOperationBytesV3(operation) : isV2Operation(operation) ? canonicalOperationBytesV2(operation) : canonicalOperationBytes(operation);
+}
+
+function runIdOf(operation: RemoteSteeringOperationAny): string | null {
+  return isV3Operation(operation) ? null : operation.runId;
+}
+
+function sessionIdOf(operation: RemoteSteeringOperationAny): string | null {
+  return isV3Operation(operation) ? operation.sessionId : null;
 }
 
 function outcome(partial: Partial<RemoteSteeringOutcome> & { status: 'accepted' | 'refused' }): RemoteSteeringOutcome {
@@ -517,11 +590,14 @@ function outcome(partial: Partial<RemoteSteeringOutcome> & { status: 'accepted' 
     operationDigest: null,
     action: null,
     runId: null,
+    sessionId: null,
     replay: false,
     decidedAt: new Date().toISOString(),
     delivered: null,
     spawned: null,
     run: null,
+    session: null,
+    longrun: null,
     ...partial
   };
 }
@@ -539,7 +615,8 @@ function refuse(
     operationId: operation?.operationId ?? null,
     operationDigest: operation ? operationDigestAny(operation) : null,
     action: operation?.action ?? null,
-    runId: operation?.runId ?? null
+    runId: operation ? runIdOf(operation) : null,
+    sessionId: operation ? sessionIdOf(operation) : null
   });
 }
 
@@ -561,37 +638,47 @@ function diagnose(
   }
   const record = parsed as Record<string, unknown>;
   const contract = record['contract'];
+  const v3 = contract === REMOTE_STEERING_ENVELOPE_CONTRACT_V3;
   const v2 = contract === REMOTE_STEERING_ENVELOPE_CONTRACT_V2;
-  if (contract !== REMOTE_STEERING_ENVELOPE_CONTRACT && !v2) {
+  if (contract !== REMOTE_STEERING_ENVELOPE_CONTRACT && !v2 && !v3) {
     return { reason: 'REMOTE_STEERING_ENVELOPE_MALFORMED', detail: 'the envelope contract/version is not supported' };
   }
-  const lease = v2
-    ? validateRemoteSteeringSignedLeaseV2(record['lease'])
-    : validateRemoteSteeringSignedLease(record['lease']);
+  const lease = v3
+    ? validateRemoteSteeringSignedLeaseV3(record['lease'])
+    : v2
+      ? validateRemoteSteeringSignedLeaseV2(record['lease'])
+      : validateRemoteSteeringSignedLease(record['lease']);
   if (lease === null) {
     return { reason: 'REMOTE_STEERING_LEASE_MALFORMED', detail: 'the signed lease failed closed-schema validation' };
   }
-  const operation = v2
-    ? validateRemoteSteeringSignedOperationV2(record['operation'])
-    : validateRemoteSteeringSignedOperation(record['operation']);
+  const operation = v3
+    ? validateRemoteSteeringSignedOperationV3(record['operation'])
+    : v2
+      ? validateRemoteSteeringSignedOperationV2(record['operation'])
+      : validateRemoteSteeringSignedOperation(record['operation']);
   if (operation === null) {
     return {
       reason: 'REMOTE_STEERING_ENVELOPE_MALFORMED',
       detail: 'the signed operation failed closed-schema validation'
     };
   }
-  const mismatch = v2
-    ? remoteSteeringOperationLeaseMismatchV2(
+  const mismatch = v3
+    ? remoteSteeringOperationLeaseMismatchV3(
+        operation.payload as RemoteSteeringOperationV3,
+        lease.payload as RemoteSteeringLeaseV3
+      )
+    : v2
+      ? remoteSteeringOperationLeaseMismatchV2(
         operation.payload as RemoteSteeringOperationV2,
         lease.payload as RemoteSteeringLeaseV2
       )
-    : remoteSteeringOperationLeaseMismatch(
+      : remoteSteeringOperationLeaseMismatch(
         operation.payload as RemoteSteeringOperationV1,
         lease.payload as RemoteSteeringLeaseV1
       );
   if (mismatch !== null) return { reason: mismatch, detail: 'the operation is not authorized by its own lease' };
 
-  const envelope = v2 ? validateRemoteSteeringEnvelopeV2(parsed) : validateRemoteSteeringEnvelope(parsed);
+  const envelope = v3 ? validateRemoteSteeringEnvelopeV3(parsed) : v2 ? validateRemoteSteeringEnvelopeV2(parsed) : validateRemoteSteeringEnvelope(parsed);
   if (envelope === null) {
     return {
       reason: 'REMOTE_STEERING_ENVELOPE_MALFORMED',
@@ -625,13 +712,24 @@ function verify(envelopeText: string): { verified: VerifiedEnvelope } | { refusa
       )
     };
   }
+  // V3 is exact-session control and deliberately does not depend on the worker broker. Preserve
+  // V1/V2's old refusal ordering when multi-agent is off: only a structurally recognizable V3
+  // wrapper may pass this gate; malformed/worker-run envelopes still receive the same refusal.
+  let preparsed: unknown = undefined;
   if (!getConfig().multiAgent.enabled) {
-    return {
-      refusal: refuse(
-        'REMOTE_STEERING_MULTI_AGENT_DISABLED',
-        'Multi-agent mode is switched off, so there is no run to steer.'
-      )
-    };
+    if (envelopeText.length <= REMOTE_STEERING_MAX_ENVELOPE_CHARS) {
+      try { preparsed = JSON.parse(envelopeText); } catch { /* preserve the worker-run refusal */ }
+    }
+    const v3 = typeof preparsed === 'object' && preparsed !== null && !Array.isArray(preparsed) &&
+      (preparsed as Record<string, unknown>)['contract'] === REMOTE_STEERING_ENVELOPE_CONTRACT_V3;
+    if (!v3) {
+      return {
+        refusal: refuse(
+          'REMOTE_STEERING_MULTI_AGENT_DISABLED',
+          'Multi-agent mode is switched off, so there is no worker run to steer.'
+        )
+      };
+    }
   }
   const pinned = pin;
   if (!pinned) {
@@ -646,11 +744,13 @@ function verify(envelopeText: string): { verified: VerifiedEnvelope } | { refusa
     return { refusal: refuse('REMOTE_STEERING_ENVELOPE_UNREADABLE', 'the envelope exceeds the accepted size') };
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(envelopeText);
-  } catch {
-    return { refusal: refuse('REMOTE_STEERING_ENVELOPE_UNREADABLE', 'the envelope is not valid JSON') };
+  let parsed: unknown = preparsed;
+  if (parsed === undefined) {
+    try {
+      parsed = JSON.parse(envelopeText);
+    } catch {
+      return { refusal: refuse('REMOTE_STEERING_ENVELOPE_UNREADABLE', 'the envelope is not valid JSON') };
+    }
   }
 
   const diagnosed = diagnose(parsed);
@@ -695,12 +795,12 @@ function verify(envelopeText: string): { verified: VerifiedEnvelope } | { refusa
 }
 
 /** Present-tense authority for an already-authenticated operation after an async boundary. */
-function authorityStillLive(verifiedEpoch: number, signingKeyFingerprint: string): boolean {
+function authorityStillLive(verifiedEpoch: number, signingKeyFingerprint: string, requiresMultiAgent = true): boolean {
   const config = getConfig();
   return (
     authorityEpoch === verifiedEpoch &&
     config.remoteSteering.enabled &&
-    config.multiAgent.enabled &&
+    (!requiresMultiAgent || config.multiAgent.enabled) &&
     pin?.fingerprint === signingKeyFingerprint
   );
 }
@@ -733,7 +833,14 @@ function replayVerdict(verified: VerifiedEnvelope): RemoteSteeringOutcome | null
   // The stored decision verbatim, including the moment it was made. Only the replay flag is
   // added, because "when this app decided" is part of the answer and inventing a fresh
   // timestamp would make a replay look like a second execution.
-  return { ...existing.outcome, spawned: existing.outcome.spawned ?? null, replay: true };
+  return {
+    ...existing.outcome,
+    spawned: existing.outcome.spawned ?? null,
+    sessionId: existing.outcome.sessionId ?? null,
+    session: existing.outcome.session ?? null,
+    longrun: existing.outcome.longrun ?? null,
+    replay: true
+  };
 }
 
 /**
@@ -804,7 +911,14 @@ async function claimReceipt(
         operation
       );
     }
-    return { ...previous.outcome, spawned: previous.outcome.spawned ?? null, replay: true };
+    return {
+      ...previous.outcome,
+      spawned: previous.outcome.spawned ?? null,
+      sessionId: previous.outcome.sessionId ?? null,
+      session: previous.outcome.session ?? null,
+      longrun: previous.outcome.longrun ?? null,
+      replay: true
+    };
   }
   const result = await persistReceipt(operation, digest, 'claimed', null, nowMs);
   if (result.stored) return null;
@@ -893,6 +1007,151 @@ function runView(runId: string, workerAllowlist: readonly string[]): RemoteSteer
   };
 }
 
+/** Content-blind exact-session status used only by signed V3 operations. */
+async function sessionView(sessionId: string): Promise<RemoteSteeringSessionView> {
+  const session = await getSession(sessionId);
+  if (!session) {
+    return {
+      sessionId, found: false, activeTurn: false, blocked: false, superseded: false,
+      modelClass: 'unknown', loopEnabled: false, loopMode: 'goal', objectivePresent: false,
+      finishToolEnabled: getConfig().ui.finishTool === true, pendingUserInput: false, pendingLongrunStart: false
+    };
+  }
+  const conversationId = session.conversationId;
+  const selected = conversationId && session.selectedModel?.conversationId === conversationId ? session.selectedModel : null;
+  const modelClass: RemoteSteeringSessionView['modelClass'] = selected?.model
+    ? isAstraModel(selected.model, selected.reasoningEffort) ? 'astra' : 'other'
+    : 'unknown';
+  const sw = conversationId ? goalSwitchFor(conversationId) : { enabled: false, mode: 'goal' as const, own: false };
+  const inputs = (await listInputs()).filter(entry => entry.sessionId === sessionId && ['queued', 'browser', 'tool'].includes(entry.state));
+  return {
+    sessionId,
+    found: true,
+    activeTurn: Boolean(session.activeTurnId),
+    blocked: Boolean(conversationId && isChatBlocked(conversationId)),
+    superseded: Boolean(conversationId && await conversationWasSuperseded(conversationId)),
+    modelClass,
+    loopEnabled: sw.enabled,
+    loopMode: sw.mode,
+    objectivePresent: Boolean(conversationId && goalObjectiveFor(conversationId)),
+    finishToolEnabled: getConfig().ui.finishTool === true,
+    pendingUserInput: inputs.length > 0,
+    pendingLongrunStart: inputs.some(entry => entry.automation === 'loop')
+  };
+}
+
+/** V3 uses no worker identity. Its lease names the exact session and every act stays inside it. */
+async function steerSessionRemotely(
+  operation: RemoteSteeringOperationV3,
+  lease: RemoteSteeringLeaseV3,
+  operationDigest: string,
+  verifiedEpoch: number,
+  nowMs: number
+): Promise<RemoteSteeringOutcome> {
+  const view = await sessionView(operation.sessionId);
+  if (!view.found) {
+    return settleWithoutEffect(operation, operationDigest,
+      refuse('REMOTE_STEERING_SESSION_NOT_FOUND', 'the exact session named by the V3 lease is not recorded on this machine', operation), nowMs);
+  }
+
+  if (operation.action === 'SESSION_STATUS') {
+    const accepted = outcome({
+      status: 'accepted', verifierContractVersion: operation.verifierContractVersion,
+      operationId: operation.operationId, operationDigest, action: operation.action,
+      sessionId: operation.sessionId, session: view
+    });
+    return settleWithoutEffect(operation, operationDigest, accepted, nowMs);
+  }
+
+  const session = await getSession(operation.sessionId);
+  const conversationId = session?.conversationId ?? null;
+  if (!session || !conversationId || session.origin?.kind === 'worker' || session.origin?.kind === 'helper' || view.blocked || view.superseded) {
+    return settleWithoutEffect(operation, operationDigest,
+      refuse('REMOTE_STEERING_SESSION_NOT_READY', 'the exact session is not an ordinary live prime/solo chat eligible for Longrun control', operation), nowMs);
+  }
+
+  if (operation.action === 'LOOP_OFF') {
+    const claim = await claimReceipt(operation, operationDigest, nowMs);
+    if (claim) return claim;
+    if (!authorityStillLive(verifiedEpoch, operation.signingKeyFingerprint, false)) {
+      return settleWithoutEffect(operation, operationDigest,
+        refuse('REMOTE_STEERING_LOOP_CONTROL_REFUSED', 'remote-steering authority changed before Loop could be disabled', operation), nowMs);
+    }
+    // Safety-first stop: cancel any pending loop-start delivery for this exact session, then
+    // durably disable Loop and revoke a pending Goal reply. A browser-claimed cancel can be
+    // transport-ambiguous, but the per-chat Loop switch is still authoritatively off.
+    const pending = (await listInputs()).filter(entry => entry.sessionId === operation.sessionId &&
+      entry.automation === 'loop' && ['queued', 'browser'].includes(entry.state));
+    for (const entry of pending) await cancelInput(entry.id);
+    await setGoalSwitchNow(conversationId, 'loop', false);
+    await setGoalReplyActiveNow(conversationId, false);
+    const accepted = outcome({
+      status: 'accepted', verifierContractVersion: operation.verifierContractVersion,
+      operationId: operation.operationId, operationDigest, action: operation.action,
+      sessionId: operation.sessionId, session: await sessionView(operation.sessionId)
+    });
+    return settleAfterEffect(operation, operationDigest, accepted, nowMs);
+  }
+
+  if (!getConfig().sessions.record || view.activeTurn || view.pendingUserInput) {
+    return settleWithoutEffect(operation, operationDigest,
+      refuse('REMOTE_STEERING_SESSION_NOT_READY', 'Longrun starts only from an idle recorded session with no pending user input', operation), nowMs);
+  }
+  if (!view.finishToolEnabled) {
+    return settleWithoutEffect(operation, operationDigest,
+      refuse('REMOTE_STEERING_FINISH_HOLD_REQUIRED', 'Session finish is disabled; Longrun requires the same-turn finish/continuation seam', operation), nowMs);
+  }
+  if (view.modelClass !== 'astra') {
+    return settleWithoutEffect(operation, operationDigest,
+      refuse('REMOTE_STEERING_ASTRA_REQUIRED', 'the exact session is not currently recorded as GPT-6 Pro/Astra; V3 never selects a model for the user', operation), nowMs);
+  }
+  if (operation.longrunText === null || operation.longrunSha256 === null || operation.longrunLength === null ||
+      !lease.allowedActions.includes('LONGRUN_START')) {
+    return settleWithoutEffect(operation, operationDigest,
+      refuse('REMOTE_STEERING_LONGRUN_REFUSED', 'the signed V3 start does not contain one authorized Longrun mission', operation), nowMs);
+  }
+
+  const claim = await claimReceipt(operation, operationDigest, nowMs);
+  if (claim) return claim;
+  if (!authorityStillLive(verifiedEpoch, operation.signingKeyFingerprint, false)) {
+    return settleWithoutEffect(operation, operationDigest,
+      refuse('REMOTE_STEERING_LONGRUN_REFUSED', 'remote-steering authority changed before the Longrun mission could be queued', operation), nowMs);
+  }
+  // Recheck the state at the actual mutation boundary. No model is selected or changed here:
+  // the session must already be Astra, and the queue inherits that user-selected model.
+  const latest = await sessionView(operation.sessionId);
+  if (!latest.found || latest.activeTurn || latest.pendingUserInput || latest.blocked || latest.superseded ||
+      latest.modelClass !== 'astra' || !latest.finishToolEnabled) {
+    return settleWithoutEffect(operation, operationDigest,
+      refuse('REMOTE_STEERING_SESSION_NOT_READY', 'the exact session changed before the Longrun queue boundary', operation), nowMs);
+  }
+  const input = await enqueueInput({
+    id: randomUUID(),
+    sessionId: operation.sessionId,
+    text: operation.longrunText,
+    automation: 'loop',
+    objective: operation.longrunText,
+    mode: 'auto',
+    dueAt: Date.now(),
+    model: null,
+    reasoningEffort: null
+  });
+  const accepted = outcome({
+    status: 'accepted', verifierContractVersion: operation.verifierContractVersion,
+    operationId: operation.operationId, operationDigest, action: operation.action,
+    sessionId: operation.sessionId,
+    longrun: {
+      inputId: input.id,
+      longrunSha256: operation.longrunSha256,
+      longrunLength: operation.longrunLength,
+      automation: 'loop'
+    },
+    session: await sessionView(operation.sessionId)
+  });
+  logInfo(`remote steering: operation ${operation.operationId} queued one V3 Longrun mission for exact session ${operation.sessionId}`);
+  return settleAfterEffect(operation, operationDigest, accepted, nowMs);
+}
+
 // ---------------------------------------------------------------------------
 // The one entry point.
 // ---------------------------------------------------------------------------
@@ -944,6 +1203,26 @@ export async function steerRemotely(
       'REMOTE_STEERING_OPERATION_NOT_LIVE',
       `the operation window is ${operation.issuedAt} → ${operation.expiresAt}`,
       operation
+    );
+  }
+
+  if (isV3Operation(operation)) {
+    if (!isV3Lease(lease)) {
+      return settleWithoutEffect(
+        operation,
+        operationDigest,
+        refuse('REMOTE_STEERING_LEASE_MALFORMED', 'a V3 session operation requires a V3 session lease', operation),
+        nowMs
+      );
+    }
+    return steerSessionRemotely(operation, lease, operationDigest, verified.authorityEpoch, nowMs);
+  }
+  if (isV3Lease(lease)) {
+    return settleWithoutEffect(
+      operation,
+      operationDigest,
+      refuse('REMOTE_STEERING_LEASE_MALFORMED', 'a V1/V2 worker operation cannot be carried by a V3 session lease', operation),
+      nowMs
     );
   }
 
@@ -1031,8 +1310,8 @@ export async function steerRemotely(
  * setting, run a command or reach a provider.
  */
 async function deliver(
-  operation: RemoteSteeringOperationAny,
-  lease: RemoteSteeringLeaseAny,
+  operation: RemoteSteeringOperationV1 | RemoteSteeringOperationV2,
+  lease: RemoteSteeringLeaseV1 | RemoteSteeringLeaseV2,
   digest: string,
   primeConversationId: string,
   verifiedAuthorityEpoch: number,
@@ -1286,7 +1565,7 @@ async function spawnRemotely(
     return settleWithoutEffect(
       operation,
       digest,
-      refuse('REMOTE_STEERING_SPAWN_REFUSED', brokerDetailOf(error, 'the broker refused the signed spawn'), operation),
+      refuse('REMOTE_STEERING_SPAWN_REFUSED', detailOf(error, 'the broker refused the signed spawn'), operation),
       nowMs
     );
   }
@@ -1366,12 +1645,6 @@ async function spawnRemotely(
 function detailOf(error: unknown, fallback: string): string {
   const message = error instanceof AgentError || error instanceof Error ? error.message : String(error);
   return (message || fallback).slice(0, 300);
-}
-
-/** Broker errors may include local account-entitlement detail that an unattributed relay does not need. */
-function brokerDetailOf(error: unknown, fallback: string): string {
-  const detail = detailOf(error, fallback);
-  return detail.replace(/\.?\s*Observed model ids and reasoning:.*$/s, '').slice(0, 300);
 }
 
 /** Test seam: drops in-memory pin/receipt state without touching disk. */

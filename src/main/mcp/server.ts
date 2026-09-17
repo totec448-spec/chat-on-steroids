@@ -216,6 +216,7 @@ interface SurfaceExposure {
   sessionTools: boolean;
   agentTools: boolean;
   remoteSteeringTools: boolean;
+  headlessClaudeTools: boolean;
   find: boolean | null;
 }
 
@@ -239,6 +240,7 @@ function exposureFor(surface: SurfaceId): SurfaceExposure {
       sessionTools: false,
       agentTools: false,
       remoteSteeringTools: false,
+      headlessClaudeTools: false,
       find: null
     };
     surfaceExposure.set(surface, state);
@@ -307,20 +309,24 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
     const sessionTools = live.sessionTools ?? config.sessions.record;
     const agentTools = live.agentTools ?? config.multiAgent.enabled;
     const remoteSteeringTools = live.remoteSteeringTools ?? config.remoteSteering.enabled;
+    const headlessClaudeTools = live.headlessClaudeTools ?? config.headlessClaude.enabled;
     exposed.finishTool = exposed.finishTool || config.ui.finishTool === true;
     exposed.sessionTools = exposed.sessionTools || sessionTools;
     exposed.agentTools = exposed.agentTools || agentTools;
     exposed.remoteSteeringTools = exposed.remoteSteeringTools || remoteSteeringTools;
+    exposed.headlessClaudeTools = exposed.headlessClaudeTools || headlessClaudeTools;
     return {
       ...live,
       sessionTools,
       agentTools,
       remoteSteeringTools,
+      headlessClaudeTools,
       exposedCaps: { ...exposed.caps },
       exposedSessionTools: exposed.sessionTools,
       exposedFinishTool: exposed.finishTool,
       exposedAgentTools: exposed.agentTools,
       exposedRemoteSteeringTools: exposed.remoteSteeringTools,
+      exposedHeadlessClaudeTools: exposed.headlessClaudeTools,
       exposedFind: exposed.find
     };
   };

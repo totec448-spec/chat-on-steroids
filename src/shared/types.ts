@@ -97,6 +97,10 @@ export interface Root {
 export type TunnelKind = 'openai' | 'cloudflared' | 'manual';
 
 export interface TunnelSettings {
+  /** Active setup owns these tunnel IDs; inactive setups live in Config.setupProfiles. */
+  profileId?: string;
+  profileName?: string;
+  profileEpoch?: number;
   kind: TunnelKind;
   /**
    * OpenAI tunnel id for the Core connector, format tunnel_<32 hex>. Not a secret.
@@ -191,11 +195,10 @@ export interface CompactionSettings {
 /**
  * The reasoning budget asked of the goal model, in OpenRouter's own vocabulary.
  *
- * `default` sends no `reasoning` block at all, which is what the provider's own default
- * means. Every other value is passed through as `reasoning: { effort }` — a model that has
- * no reasoning mode ignores it, so the setting is safe to leave alone.
+ * `default` omits effort selection; reasoning text is still excluded from driver output.
+ * OpenRouter's model catalogue determines which explicit efforts the UI offers.
  */
-export const GOAL_REASONING_LEVELS = ['default', 'minimal', 'low', 'medium', 'high'] as const;
+export const GOAL_REASONING_LEVELS = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type GoalReasoning = (typeof GOAL_REASONING_LEVELS)[number];
 
 /**
@@ -246,7 +249,7 @@ export interface GoalProviderSettings {
 export interface GoalSettings {
   /** Optional active-turn Goal impulses; zero disables them. */
   impulseMinutes?: number;
-  /** Include bounded recorded tool arguments/results in Goal decision context. */
+  /** Include tool details in handoff briefs only; Goal/Loop always use authored conversation text. */
   includeToolCalls?: boolean;
   helperModel?: string;
   helperReasoning?: ReasoningEffort;
@@ -333,6 +336,19 @@ export interface RemoteSteeringSettings {
 }
 
 /**
+ * Headless Claude invocation through the user's claude.ai subscription.
+ *
+ * `enabled` exposes `session` action=invoke; off on every fresh install and every migration,
+ * because it lets a ChatGPT conversation spend the user's Claude subscription. `allowCodingProfile`
+ * is the second, separate consent: with it off the child model gets no tools at all, with it on
+ * it may read and edit files inside the invocation's approved folder.
+ */
+export interface HeadlessClaudeSettings {
+  enabled: boolean;
+  allowCodingProfile: boolean;
+}
+
+/**
  * What the settings panel knows about the pinned signing key.
  *
  * Public identity only. There is no private half on this side of the bridge, so there is
@@ -348,6 +364,8 @@ export interface RemoteSteeringPinView {
 }
 
 export interface Config {
+  /** Inactive setups only. Keys remain in encrypted secret slots addressed by profile ID. */
+  setupProfiles?: Array<{ id: string; name: string; tunnelId: string; desktopTunnelId: string; pluginsTunnelId: string }>;
   artifacts: ArtifactSettings;
   roots: Root[];
   capabilities: Capabilities;
@@ -358,6 +376,7 @@ export interface Config {
   compaction: CompactionSettings;
   multiAgent: MultiAgentSettings;
   remoteSteering: RemoteSteeringSettings;
+  headlessClaude: HeadlessClaudeSettings;
   goal: GoalSettings;
   mcp: McpSettings;
 }

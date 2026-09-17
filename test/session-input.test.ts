@@ -23,6 +23,7 @@ const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversa
 vi.mock('../src/main/session/store.js', () => ({
   sessionsRoot: () => path.join(directory, 'sessions'),
   listUsageSessions: vi.fn(async () => []),
+  sessionDirectoryMissing: vi.fn(async () => false),
   conversationWasSuperseded: vi.fn(async () => false),
   readRecentEvents: vi.fn(async () => binding.end ? [binding.end] : []),
   turnHasMcpCall: vi.fn(async () => true),
@@ -892,7 +893,7 @@ describe('browser decision lifetime', () => {
   it('rejects a pre-send failure without waiting for timeout', async () => {
     const controller = new AbortController();
     const answer = requestBrowserDecision('Choose one', controller.signal);
-    const rejection = expect(answer).rejects.toThrow('goal_browser_send_failed');
+    const rejection = expect(answer).rejects.toThrow('goal_browser_send_failed: composer missing');
     const row = (await listInputs())[0]!;
     await claimBrowserInput(row.id, 'document', null);
     await failBrowserInput(row.id, 'document', 'composer missing');

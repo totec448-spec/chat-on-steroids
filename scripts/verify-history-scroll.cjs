@@ -1,0 +1,106 @@
+/** Real renderer regression for dense activity paging. Synthetic data only.
+ * node scripts/verify-history-scroll.cjs [--show] */
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+if (!process.versions.electron) {
+  const { spawnSync } = require('node:child_process');
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+  const result = spawnSync(require('electron'), [__filename, ...process.argv.slice(2)], { env, encoding: 'utf8', windowsHide: true });
+  process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr || '');
+  process.exit(result.status ?? 1);
+}
+const { app, BrowserWindow } = require('electron');
+app.whenReady().then(async () => {
+  const root = path.join(__dirname, '..');
+  const code = require('esbuild').buildSync({ entryPoints: [path.join(root, 'src/renderer/chat.ts')],
+    bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'chat' }).outputFiles[0].text;
+  const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*>/g, '')
+    .replace('</head>', `<style>${css}</style></head>`);
+  const show = process.argv.includes('--show');
+  const win = new BrowserWindow({ show, title: 'CoS history scroll verification', width: 1400, height: 1000,
+    webPreferences: { sandbox: true, backgroundThrottling: false, offscreen: !show } });
+  await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  await win.webContents.executeJavaScript(`(() => {
+    const ok = data => Promise.resolve({ok:true, data});
+    const text = value => ({text:value, truncated:false, chars:value.length});
+    const history = [];
+    const add = event => { const seq=history.length+1; history.push({seq,time:seq,source:'extension',...event}); };
+    add({kind:'user_message',messageId:'long-task',message:text(('The full earlier task stays above the recent work.\\n\\n').repeat(120))});
+    for(let i=0;i<200;i++) add({kind:'tool_call',source:'mcp',call:{callId:'tool-'+i,tool:'read',
+      args:text('{}'),result:text('Recorded tool output. '.repeat(50)),outcome:'ok',durationMs:1,
+      attribution:'request_id',summary:{kind:'read',title:'Read file '+i,tone:'neutral'}}});
+    for(let i=0;i<8;i++) add({kind:'assistant_message',messageId:'recent-'+i,message:text('Recent visible message '+i),state:'final',final:true});
+    const session={id:'history-fixture',title:'Dense history fixture',conversationId:'fixture',chatIds:['fixture'],
+      startedAt:1,updatedAt:1,endedAt:null,events:history.length,userMessages:1,toolCalls:200,
+      errors:0,estimatedTokens:0,contextTokens:0,agents:[],origin:null};
+    window.fixture={history,session,reads:[],add};
+    window.api=new Proxy({
+      listSessions:()=>ok({sessions:[session],activeId:null,blocked:[],pressure:[]}),
+      listProjects:()=>ok([]),listInputs:()=>ok([]),listPausedHelpers:()=>ok([]),
+      getSession:(_id,options)=>{
+        fixture.reads.push(options);
+        const eligible=history.filter(e=>(options.from===undefined||e.seq>=options.from)&&(options.before===undefined||e.seq<options.before));
+        const events=options.from===undefined?eligible.slice(-options.limit):eligible.slice(0,options.limit);
+        return ok({summary:session,total:history.length,events,nextFrom:events.reduce((n,e)=>Math.max(n,e.seq+1),options.from??0)});
+      }
+    },{get:(target,key)=>target[key]??(()=>ok(null))});
+    window.frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    window.geometry=()=>{
+      const pane=document.getElementById('chatBody'),timeline=document.getElementById('timeline');
+      const row=[...timeline.querySelectorAll('.ev-assistant_message')].find(e=>e.textContent.includes('Recent visible message 0'));
+      const bounds=pane.getBoundingClientRect();
+      return {top:pane.scrollTop,height:pane.scrollHeight,viewport:pane.clientHeight,
+        readerTop:row?.getBoundingClientRect().top-bounds.top,readerPresent:!!row,
+        groups:timeline.querySelectorAll('.tool-group').length,records:timeline.querySelectorAll('.ev').length,
+        x:Math.round(bounds.right-100),y:Math.round(bounds.top+100)};
+    };
+  })()`);
+  await win.webContents.executeJavaScript(code);
+  await win.webContents.executeJavaScript(`(async()=>{
+    chat.initChat({state:()=>null,save:async()=>{}});chat.chatVisible(true);await frame();
+    document.querySelector('#sessionList [data-id="history-fixture"]').click();
+    for(let i=0;i<120&&!geometry().readerPresent;i++) await frame();
+    await frame();
+  })()`);
+  win.webContents.debugger.attach('1.3');
+  const initial = await win.webContents.executeJavaScript('geometry()');
+  assert.ok(initial.viewport > 0 && initial.height - initial.viewport < 80, 'Initial dense activity should fit the viewport: '+JSON.stringify(initial));
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {type:'mouseWheel',x:initial.x,y:initial.y,deltaY:-100,deltaX:0});
+  await new Promise(resolve=>setTimeout(resolve,250));
+  const older = await win.webContents.executeJavaScript('geometry()');
+  assert.equal(older.readerPresent,true,'Prepending must not evict the messages currently on screen');
+  assert.ok(Math.abs(older.readerTop-initial.readerTop) <= 110, 'One wheel step must not jump to the earlier long task: '+JSON.stringify({initial,older}));
+  assert.ok(older.height > 4000,'Earlier task must actually load above the reader: '+JSON.stringify({initial,older,reads:await win.webContents.executeJavaScript('fixture.reads')}));
+  assert.equal(older.groups,1,'The overlapping activity remains one disclosure');
+  const historicalRefresh=await win.webContents.executeJavaScript('(async()=>{chat.chatVisible(true);await frame();return geometry();})()');
+  assert.equal(historicalRefresh.readerTop,older.readerTop,'Historical repaint preserves the underfilled tail reserve');
+  const observations=[{phase:'initial',...initial},{phase:'older',...older}];
+  for(let cycle=0;cycle<4;cycle++) {
+    const before=await win.webContents.executeJavaScript('geometry()');
+    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',x:before.x,y:before.y,deltaY:cycle%2 ? -100 : 100,deltaX:0});
+    await new Promise(resolve=>setTimeout(resolve,150));
+    const after=await win.webContents.executeJavaScript('geometry()');
+    assert.ok(after.readerPresent && Math.abs(after.readerTop-before.readerTop)<=110,'Direction reversal stays within the wheel distance');
+    assert.ok(after.height > 4000,'Returning to the tail must retain the adjacent long row instead of collapsing the scrollbar');
+    observations.push({phase:'reverse-'+cycle,...after});
+  }
+  const refresh=await win.webContents.executeJavaScript(`(async()=>{
+    const before=geometry();
+    fixture.add({kind:'assistant_message',messageId:'live-new',message:{text:'New live work',truncated:false,chars:13},state:'final',final:true});
+    chat.chatVisible(true);await frame();return {before,after:geometry()};
+  })()`);
+  assert.ok(refresh.after.readerPresent,'Live deltas retain the reader');
+  assert.ok(Math.abs(refresh.after.readerTop-refresh.before.readerTop)<2,'Live refresh must not restore a fixed 160-event tail');
+  const bottomRefresh=await win.webContents.executeJavaScript(`(async()=>{
+    const pane=document.getElementById('chatBody');pane.scrollTop=pane.scrollHeight;await frame();
+    const before=geometry();chat.chatVisible(true);await frame();return {before,after:geometry()};
+  })()`);
+  assert.equal(bottomRefresh.after.readerTop,bottomRefresh.before.readerTop,'An unchanged live repaint cannot consume the tail reserve');
+  console.log(JSON.stringify({observations,refresh},null,2));
+  console.log('Dense history scroll passed: real renderer, native wheel, overlap, reversals, scrollbar continuity and live refresh.');
+  if(show) { win.webContents.debugger.detach(); return; }
+  win.destroy();app.exit(0);
+}).catch(error=>{console.error(error);app.exit(1);});

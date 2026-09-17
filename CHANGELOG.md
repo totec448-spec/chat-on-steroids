@@ -9,6 +9,30 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.12] — Model picker compatibility
+
+- Model discovery tolerates effort-only labels and missing family prefixes in the refreshed ChatGPT picker.
+- Version-menu retirement captions no longer invalidate discovery or selection.
+- Closed-picker observation supports `6 Pro` and checks any visible version against the provider model id.
+- Account availability, exact model/effort confirmation and restoration of the original selection remain required.
+
+**Reload the companion extension and refresh your ChatGPT tabs after updating.**
+
+## [2.1.11] — 2 weeks 6 sol
+
+- Goal/Loop decisions use authored conversation context without recorded tool bodies.
+- API reasoning choices follow the selected OpenRouter model’s supported levels.
+- Reduced renderer memory growth during long-running sessions.
+- Clearer tool-permission and recovered-identity guidance.
+- More reliable plugin discovery, refresh and Windows paths.
+- Deleted conversation history stays deleted after restart.
+
+## [2.1.0] — 6 sol in 2 weeks
+
+- Cleaner setup, compact profiles and better sidebar controls.
+- More reliable Goal/Loop recovery, queued messages and conversation history.
+- Updated runtime, MCP and plugin dependencies.
+
 ## [2.0.9] — they nerfed astra
 
 - Code mode combines local and plugin tools in one JavaScript call, with saved task plans and automatic background command results.

@@ -859,6 +859,58 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsReload).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['unresolved', 'resolved-during-scan', 'claim-unavailable'] as const)(
+    'claims attribution recovery after the tab scan: %s', async (mode) => {
+      let armed = false;
+      let handed = false;
+      let resolved = false;
+      const trace: string[] = [];
+      const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/repairs/claim') {
+          trace.push('claim');
+          expect(init.method).toBe('POST');
+          expect(JSON.parse(String(init.body))).toEqual({ token: 'attribution-attempt' });
+          return mode === 'claim-unavailable' ? response(503, {}) : response(200, { allowed: !resolved });
+        }
+        if (url.pathname === '/status') {
+          if (url.searchParams.has('repaired')) trace.push('repaired');
+          if (armed && !handed) {
+            handed = true;
+            trace.push('handout');
+            return response(200, { repairs: [{ conversationId: CHAT, token: 'attribution-attempt', requiresClaim: true }] });
+          }
+          return response(200, { repairs: [] });
+        }
+        return response(200, {});
+      });
+      const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+        tabsQuery: async () => {
+          if (handed) {
+            trace.push('scan');
+            if (mode === 'resolved-during-scan') resolved = true;
+          }
+          return [{ id: 21, url: `https://chatgpt.com/c/${CHAT}` }];
+        } });
+      await worker.registerTab(21);
+      await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+      await worker.fireAlarm();
+      armed = true;
+      await worker.fireAlarm();
+      expect(trace.indexOf('scan')).toBeGreaterThan(trace.indexOf('handout'));
+      expect(trace.indexOf('claim')).toBeGreaterThan(trace.indexOf('scan'));
+      if (mode === 'unresolved') {
+        expect(worker.tabsReload).toHaveBeenCalledExactlyOnceWith(21);
+        expect(trace).toContain('repaired');
+      } else {
+        expect(worker.tabsReload).not.toHaveBeenCalled();
+        expect(trace).not.toContain('repaired');
+      }
+      expect(worker.tabsCreate).not.toHaveBeenCalled();
+    }
+  );
+
   /**
    * Two tabs of one chat used to end the repair: neither was reloaded and the duplicate stayed
    * open, so the chat was left broken *and* the tab spam was left standing. One chat is one tab,

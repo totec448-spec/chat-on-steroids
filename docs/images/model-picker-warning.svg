@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="260" viewBox="0 0 1600 260" role="img" aria-labelledby="title desc">
+  <title id="title">Model picker warning</title>
+  <desc id="desc">They changed model picker, fix in 2 hours, not at home rn. Models will not load. Bug support: @dummerspast39</desc>
+  <rect width="1600" height="260" fill="transparent"/>
+  <text x="800" y="66" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="900" fill="#ff2020">They changed model picker, fix in 2 hours, not at home rn.</text>
+  <text x="800" y="139" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="66" font-weight="900" fill="#ff2020">Models will not load</text>
+  <text x="800" y="219" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="50" font-weight="900" fill="#ff2020">Bug support: @dummerspast39</text>
+</svg>

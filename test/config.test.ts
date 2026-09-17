@@ -61,6 +61,24 @@ describe('settings migration', () => {
       expect((await loadConfig()).goal).toMatchObject({ backend, loopBackend: 'api' });
     }
   });
+  it('keeps headless Claude off on fresh installs, on recovery, and only ever as an explicit choice', async () => {
+    expect(defaultConfig().headlessClaude).toEqual({ enabled: false, allowCodingProfile: false });
+
+    // A config from before the seat existed loads with it off; nothing widens on upgrade.
+    const legacy = defaultConfig() as unknown as Record<string, unknown>;
+    delete legacy['headlessClaude'];
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).headlessClaude).toEqual({ enabled: false, allowCodingProfile: false });
+
+    // An explicit choice survives a save/load round trip, both switches independently.
+    await saveConfig({ ...defaultConfig(), headlessClaude: { enabled: true, allowCodingProfile: false } });
+    expect((await loadConfig()).headlessClaude).toEqual({ enabled: true, allowCodingProfile: false });
+
+    // A file the app cannot trust is not consent to spend a subscription.
+    await fs.writeFile(path.join(dir, 'config.json'), '{"headlessClaude": {"enabled": true}, "roots": "broken"', 'utf8');
+    expect((await loadConfig()).headlessClaude).toEqual({ enabled: false, allowCodingProfile: false });
+  });
+
   it('never leaves Goal enabled while session recording is off', async () => {
     const impossible = {
       ...defaultConfig(),
@@ -475,11 +493,11 @@ describe('the goal loop settings', () => {
     expect(config.goal.model).toBe('z-ai/glm-5.3');
     expect(config.goal.reasoning).toBe('default');
     expect(config.goal.prompt).toContain('Your job is to prompt ChatGPT');
-    expect(config.goal.prompt).toContain('Nobody handed you a separate goal');
+    expect(config.goal.prompt).toContain('No separate objective is supplied');
     // The driver ships beside the gate rather than staying hardcoded, so a fresh install has
     // both editable instructions on disk and the settings screen has something to paint.
     expect(config.goal.objectivePrompt).toContain('Your job is to prompt ChatGPT');
-    expect(config.goal.objectivePrompt).toContain('they have handed you the wheel');
+    expect(config.goal.objectivePrompt).toContain('Read it together with the original task');
   });
 
   it('keeps the model, reasoning level and system prompt that were chosen', async () => {

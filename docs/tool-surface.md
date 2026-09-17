@@ -12,7 +12,7 @@ separate secret tokenized local paths.
 
 | Connector | Purpose | Possible tools |
 | --- | --- | --- |
-| **Chat On Steroids Core** | Approved files, patches, terminal, ChatGPT file saving, recorded-session lookup, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `download_artifact`, `session`, `agents` |
+| **Chat On Steroids Core** | Approved files, patches, terminal, ChatGPT file saving, recorded/CLI-session lookup and control, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `download_artifact`, `session`, `agents` |
 | **Chat On Steroids Desktop** | **Windows/macOS:** screen, windows, mouse/keyboard and clipboard | `observe`, `computer` |
 
 The Desktop connector is optional on Windows/macOS. Core is the main connector everywhere.
@@ -92,7 +92,11 @@ from recorded tool arguments.
 
 ### `session`
 
-Available while session recording is enabled. It has exactly two actions:
+Available while session recording is enabled for ChatGPT recordings, while Command is enabled
+for CLI-provider actions, or while the operator has switched headless Claude on. Without
+`provider`, it preserves the two recording actions below. With `provider=claude|codex`, it also
+supports exact CLI-session transport; `action=invoke` with `provider=claude` is the separately
+switched one-shot subscription path:
 
 - `search` lists the 30 newest recordings when `query` is omitted, or searches titles, exact
   authored messages, errors, agent messages and recorded tool arguments/results across sessions.
@@ -108,6 +112,39 @@ new suffix; a real rewrite is labeled as a replacement. Session lookup never gue
 chat and never waits for browser identity evidence. Calls to `session` itself remain durably
 auditable but are omitted from this projection so reading or polling a recording cannot recursively
 copy its previous transcript result into the next one.
+
+With `provider=claude|codex`, `search` lists recent provider sessions, `read` returns a bounded
+normalized local transcript with a short follow cursor, and `send` addresses the exact provider
+session. Codex uses its native exact-thread queue. Claude send is deliberately limited to sessions
+owned by `claude --bg` and addressed through `claude attach`; arbitrary foreground Claude terminals
+remain readable but are not keyboard-driven by guesswork. CLI-provider actions require Command and
+introduce no CoS daemon, watcher or replacement authority layer.
+
+- `invoke` is published only while "Allow headless Claude invocation" is on in the app, and
+  refused with `FEATURE_DISABLED` when a cached schema still offers it after it was turned off.
+  It takes `provider=claude`, a `prompt` and an allowlisted `model` alias (`fable` by default,
+  or `opus`, `sonnet`, `haiku`), and runs one headless `claude -p` turn through the user's
+  stored claude.ai subscription login. The working directory is `workdir`, an approved folder,
+  or the chat's proven workspace; a folder outside the approved roots is refused before any
+  process starts. `profile=reasoning` (default) starts the child with no built-in tools, no
+  MCP servers, no skills and no browser, and a permission prompt is denied rather than
+  answered. `profile=coding` needs the separate "Allow the coding profile" switch plus the
+  edit and create permissions with read-only mode off; it confines the child to reading and
+  editing files under that folder, still with no shell or network. `timeout_seconds`
+  (10–600, default 120) bounds the run, and the turn count is fixed at 1 for reasoning and 25
+  for coding.
+
+  The response is one fact per line — `status`, `model_requested`, `model_canonical` (the
+  CLI's own resolution of the alias), `model_resolved` (the model that answered),
+  `model_fallback`, `session_id`, `auth`, `turns`, `usage`, `permission_denials` — followed
+  by the answer, with the same facts as `structuredContent`. Every failure is a status, never a
+  partial answer: `auth_required` when no claude.ai login with a subscription is stored or an
+  API key would be billed instead, `launch_failed` when the CLI is missing, `timeout`,
+  `malformed_output` when stdout is not the expected JSONL stream, `error` for the CLI's own
+  error result, and `model_fallback` when the provider substituted another model — the answer
+  is refused unless the caller passed `allow_model_fallback=true`. The child environment has
+  every `ANTHROPIC_*`, provider-routing and parent-session variable removed first, so there is
+  no fallback to API-key or cloud-provider auth.
 
 Compact & Resume is app/browser orchestration. There is no model-visible `save_handoff` or
 `resume_session` tool.

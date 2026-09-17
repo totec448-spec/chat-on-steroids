@@ -549,6 +549,9 @@
    * budget may. See endOutcome.
    */
   let unwitnessedGeneration = false;
+  // Adoption restores identity, not fresh work. Keep its existing progress revision
+  // so a recovery receipt can distinguish it from activity observed after reload.
+  let adoptedProgressRevision = -1;
   let lastChangeAt = 0;
   let turnProgressRevision = 0; // Distinguish work received within the same millisecond.
   function noteTurnProgress(owner = turnId) {
@@ -935,14 +938,15 @@
   /** The last specific-goal failure, in the app's words, until the next attempt replaces it. */
   let objectiveError = '';
   /**
-   * Goal drafts that this tab has already sent to ChatGPT.
+   * Goal drafts that this tab has already sent or abandoned before Send.
    *
    * Sending and acknowledging are two different network hops. If ChatGPT accepts the message
    * and the following `/goal/ack` misses the app, `/activity` quite correctly offers the same
    * unacknowledged draft again. Treating that as permission to type again duplicates the user's
    * message. Keep a small receipt journal in sessionStorage so the same browser tab also
    * survives a content-script reload between those two hops; a re-offered spent token retries
-   * only its acknowledgement, never the send.
+   * only its acknowledgement, never the send. A `busy:` token retries the native-work
+   * deferral instead of a delivery ACK, preserving the owed continuation after a lost reply.
    */
   const GOAL_SPENT_STORAGE = 'clf-goal-spent-v1';
   const goalSpent = new Set();
@@ -1403,6 +1407,7 @@
     priorMarks = baselineMarks;
     turnStartedAt = Date.now();
     noteTurnProgress();
+    adoptedProgressRevision = turnProgressRevision;
     quietSince = 0;
     quietTurn = null;
     quietOutcome = null;
@@ -1735,6 +1740,13 @@
    * whole point of this batch is that the local session log stops containing those.
    */
   function generationTurn(turns = CLF_DOM.turns()) {
+    // Hydration may remount an old answer with a new node after our baseline.
+    // An adopted generation still belongs after the latest question; DOM novelty
+    // above that boundary cannot establish or retain its assistant owner.
+    if (unwitnessedGeneration) {
+      const question = turns.findLastIndex(turn => turn.role === 'user');
+      if (question >= 0) turns = turns.slice(question + 1);
+    }
     if (genNode) {
       const held = turnForNode(genNode, turns);
       if (held) return held;
@@ -2324,7 +2336,13 @@
     // version that asked only whether *this page load* had journalled the message closed a
     // live turn on every reload, and split every chat's opening turn in two.
     if (generating && newUserMessage) {
-      const ended = quietTurn || generationTurn(observedTurns);
+      // A newly authored question closes the adopted turn before it. If its answer
+      // and this question hydrated together, apply the original-question guard to
+      // that prefix, not to the next turn. Missing exact boundaries stay unowned.
+      const nextQuestion = unwitnessedGeneration ? observedTurns.findIndex(turn =>
+        turn.role === 'user' && CLF_DOM.messagesIn(turn).some(message => message.id === newUserMessage)) : -1;
+      const closingTurns = unwitnessedGeneration ? observedTurns.slice(0, Math.max(0, nextQuestion)) : observedTurns;
+      const ended = quietTurn || generationTurn(closingTurns);
       const fresh = endOutcome(ended);
       const result = quietOutcome && quietOutcome.outcome !== 'unknown' ? quietOutcome : fresh;
       // A new user message is an actual boundary, unlike a disappearing Stop control. Once
@@ -5696,10 +5714,10 @@
    * contract sends the rewrite under `origin`: the repair row that turns from "Trying to
    * reload…" into "Reloaded…" is one row, and the page can only show that if it takes it.
    */
-  const UPSERT_KINDS = new Set(['progress', 'page_tool']);
+  const UPSERT_KINDS = new Set(['progress', 'page_tool', 'tool_call']);
 
   /** What a stream entry currently says, whichever field its kind keeps it in. */
-  const snapshotText = (entry) => (entry ? (entry.kind === 'page_tool' ? entry.label : entry.text) : undefined);
+  const snapshotText = (entry) => (entry ? (entry.kind === 'tool_call' ? JSON.stringify(entry.summary) : entry.kind === 'page_tool' ? entry.label : entry.text) : undefined);
 
   let settingsPulling = false;
 
@@ -5811,6 +5829,7 @@
       const isWork = (entry) =>
         entry &&
         entry.turnId === turnId &&
+        !(entry.kind === 'tool_call' && entry.process && entry.process.completedAt !== undefined) &&
         !(entry.kind === 'assistant_message' && (entry.final === true || entry.state === 'final')) &&
         !(fiberSettled?.reason === 'thinking_failed' && entry.time <= fiberSettled.endedAt) &&
         !browserRepairRow(entry) &&
@@ -5854,7 +5873,7 @@
         // per redraw, and one tool row instead of one per relabel. So a repeat of a seq we
         // hold replaces it rather than being discarded as already seen.
         //
-        // Both kinds, not just progress. `page_tool` supersession was added on the app side
+        // Native labels and process statuses, not just progress. `page_tool` supersession was added on the app side
         // and then dropped here, because a held entry of any other kind fell straight
         // through this guard: `Inspecting files` could never become `Inspected files`.
         const held = streamBySeq.get(seq);
@@ -5877,7 +5896,8 @@
         // Ask for what comes *after* this one next time. Asking from `seq` itself is the
         // bug that made the feed repeat its last entry forever.
         if (seq >= since) since = seq + 1;
-        if (bySeq.has(seq)) continue;
+        const prior = bySeq.get(seq);
+        if (prior && (prior.callId !== entry.callId || snapshotText({ ...prior, kind: 'tool_call' }) === snapshotText({ ...entry, kind: 'tool_call' }))) continue;
         bySeq.set(seq, entry);
         added++;
       }
@@ -5893,13 +5913,17 @@
       appActiveTurnId = typeof data.activeTurnId === 'string' && data.activeTurnId ? data.activeTurnId : null;
       if (!generating && pendingTools > 0 && appActiveTurnId === turnId && fiberSettled?.reason === 'thinking_failed') noteTurnProgress();
       if (resumeIdentityPending) {
+        // Runtime activity can expire while the durable generation still owns
+        // this question. Reload must retain that identity without turning the
+        // expired activity projection into a new user send.
+        const recordedTurnId = typeof data.recordedTurnId === 'string' && data.recordedTurnId ? data.recordedTurnId : appActiveTurnId;
         // A reopened Stop target must prove the original question before adoption
         // can anchor native messages under its old local turn. Hydration may lag
         // this first response; retain the existing gate until proof or expiry.
-        const stopReady = !data.stopTurn || (data.stopTurn.turnId === appActiveTurnId && stopQuestionMatches(data.stopTurn.userMessageId));
-        if (!appActiveTurnId || stopReady) {
+        const stopReady = !data.stopTurn || (data.stopTurn.turnId === recordedTurnId && stopQuestionMatches(data.stopTurn.userMessageId));
+        if (!recordedTurnId || stopReady) {
           resumeIdentityPending = false;
-          if (appActiveTurnId) adoptOpenTurn(appActiveTurnId, data.stopTurn?.userMessageId ?? null);
+          if (recordedTurnId) adoptOpenTurn(recordedTurnId, data.stopTurn?.userMessageId ?? null);
         }
       }
       tokens = Number.isFinite(Number(data.tokens)) ? Number(data.tokens) : 0;
@@ -7711,14 +7735,14 @@
     const dest = backend === 'chatgpt' ? 'ChatGPT helper' : backend === 'templates' ? 'offline templates'
       : goal.provider === 'custom' ? 'custom endpoint' : 'OpenRouter';
     const bar = (at, done = false) => ({ steps: GOAL_STEPS, at, done });
-    const failure = goal.error || (draft && draft.stage === 'failed' ? draft.error || `${dest} did not answer` : '');
+    const failure = goal.error || (draft && draft.stage === 'failed' ? draft.message || draft.error || `${dest} did not answer` : '');
     if (failure) {
       const at = draft && draft.stage === 'failed' ? 2 : (GOAL_STEP_AT[goal.phase] ?? 1);
       if (goal.phase === 'retrying') {
         const seconds = Math.round((goal.retryMs || GOAL_RETRY_MS) / 1000);
         return { stage: `Retrying Goal in ${seconds} seconds`, detail: failure, body: '', kind: 'goal', ...bar(at) };
       }
-      return { stage: 'The goal loop stopped', detail: failure, body: '', kind: 'goal-error', ...bar(at) };
+      return { stage: goal.mode === 'loop' ? 'Loop continuation paused' : 'The goal loop stopped', detail: failure, body: '', kind: 'goal-error', ...bar(at) };
     }
     // A chat opening on a specific goal. There is no answer to read and no turn to settle,
     // so the first two steps of the ordinary run simply did not happen; saying "sending the
@@ -7734,8 +7758,13 @@
       // the reply for the same reason — there was never anything to send.
       return { stage: 'Goal reached', detail: 'nothing was sent', body: '', kind: 'goal-done', ...bar(2, true) };
     }
-    if (goal.phase === 'settling') {
-      return { stage: 'Checking the answer is finished', detail: '', body: '', kind: 'goal', ...bar(0) };
+    if (goal.phase === 'settling' || (!draft && goal.wait)) {
+      const wait = goal.wait;
+      const seconds = wait?.until ? Math.max(0, Math.ceil((wait.until - Date.now()) / 1000)) : 0;
+      const detail = seconds ? `Checking again in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '';
+      const stage = wait?.reason === 'native-busy' ? 'ChatGPT resumed work · waiting before retry' : wait?.reason === 'silence' ? 'Waiting before recovery reload' : wait?.reason === 'quiet' ? 'Waiting for tool inactivity' :
+        wait?.reason === 'tools' ? 'Waiting for running tools' : wait?.reason === 'listening' ? 'Waiting for activity after recovery' : 'Checking the answer is finished';
+      return { stage, detail, body: '', kind: 'goal', ...bar(0) };
     }
     if (goal.phase === 'sending' && draft && draft.reply) {
       return { stage: 'Sending it to ChatGPT', detail: '', body: draft.reply, kind: 'goal', ...bar(3) };
@@ -8801,7 +8830,7 @@
         .finally(() => { goalBusy = false; });
       return;
     }
-    if (goalDraft || (generating && !pending.silencePro) || CLF_DOM.generating()) return;
+    if (goalDraft || (generating && !goalRecoveryReady(pending)) || CLF_DOM.generating()) return;
     if (nativeBusy || (job && job.busy)) return;
     const acceptedAt = Number(pending.acceptedAt);
     const ticketId = `${pending.replyId}:${Number.isFinite(acceptedAt) && acceptedAt > 0 ? acceptedAt : pending.eventSeq}`;
@@ -8866,16 +8895,12 @@
           continue;
         }
         if (Date.now() - stableSince < GOAL_STABLE_MS) continue;
-        // An answer with nothing in it is not an answer to continue from, and asking a model
-        // to write the user's next message about it would be asking it to invent one.
-        // Two dead ends, and until now neither left a mark: the panel simply went away,
-        // which from outside is indistinguishable from a loop that never ran at all. That is
-        // most of "auto goal didn't fire" — it may well have fired, looked at this turn and
-        // declined it without ever saying so. The three exits above stay silent because each
-        // of them means the conversation moved on and there is nothing to report; these two
-        // mean the loop gave up on a turn it was watching, and now say which.
+        // Tool-only completion belongs to the existing app recovery window. The
+        // confirmed reload/listening receipt will supply a synthetic source ticket;
+        // empty final prose neither stops the mode nor authorizes an immediate draft.
         if (!text.trim()) {
-          setGoalPhase('settling', 'that answer had no text to continue from');
+          setGoalPhase('');
+          void pullActivity();
           return;
         }
         await requestGoalDraft(forTurn, current);
@@ -8924,7 +8949,7 @@
     if (goalBusy) return;
     // The conversation moved on while we waited: whatever this loop was going to write is
     // about a turn that is no longer the last one, which is an answer of its own.
-    if (generating || CLF_DOM.generating() || nativeBusy || (job && job.busy)) return void setGoalPhase('');
+    if (goalSourceGenerating() || CLF_DOM.generating() || nativeBusy || (job && job.busy)) return void setGoalPhase('');
     if (!goalUsable()) return void setGoalPhase('');
     goalBusy = true;
     try {
@@ -8937,10 +8962,14 @@
   }
 
   /** Asks the app to draft the next user message. The answer arrives on the activity feed. */
-  function goalSourceGenerating() {
-    const pending = goalConfig?.pending;
-    return generating && !(pending?.silencePro && pending.turnId === goalTurnId &&
-      pending.acceptedAt >= lastChangeAt && pendingTools === 0);
+  function goalRecoveryReady(pending) {
+    return Boolean(pending?.silenceSourceTurnId && (pending.listenUntil ?? 0) <= Date.now() && pendingTools === 0 &&
+      (!generating || (pending.silenceSourceTurnId === turnId &&
+        (pending.acceptedAt >= lastChangeAt || (unwitnessedGeneration && adoptedProgressRevision === turnProgressRevision)))));
+  }
+
+  function goalSourceGenerating(forTurn = goalTurnId) {
+    return generating && !(goalConfig?.pending?.turnId === forTurn && goalRecoveryReady(goalConfig.pending));
   }
 
   async function requestGoalDraft(forTurn, current, terminalRequired = false) {
@@ -9010,6 +9039,23 @@
    * a half-written message is never overwritten; this waits a while for it to be free and
    * then gives up honestly rather than typing over somebody mid-sentence.
    */
+  async function deferGoalDraftForWork(draft) {
+    const target = draft.conversationId, forEpoch = epoch;
+    rememberGoalSpent(target, `busy:${draft.token}`);
+    if (goalDraft?.token === draft.token) goalDraft = null;
+    const wasBusy = goalBusy;
+    goalBusy = true;
+    setGoalPhase('settling');
+    try {
+      const result = await ask({ type: 'goal_ack', conversationId: target, token: draft.token, nativeBusy: true });
+      if (!alive || epoch !== forEpoch || conversationId !== target || !result?.ok) return;
+      if (goalTurnId === draft.turnId) { goalTurnId = null; goalTicketId = null; }
+      setGoalPhase('');
+    } finally {
+      if (alive && epoch === forEpoch && conversationId === target) goalBusy = wasBusy;
+    }
+  }
+
   async function maybeSendGoalReply() {
     const draft = goalDraft;
     if (!draft || !conversationId || draft.conversationId !== conversationId) return;
@@ -9024,6 +9070,7 @@
       await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
       return;
     }
+    if (goalWasSpent(conversationId, `busy:${draft.token}`)) return deferGoalDraftForWork(draft);
     if (goalConfig?.queuePending) return;
     if (!goalUsable()) {
       // Settings are live. Turning Goal Mode off (or removing its key) while OpenRouter is
@@ -9036,7 +9083,7 @@
     }
     if (draft.stage === 'failed') {
       goalDraft = null;
-      const why = draft.error || `${draft.backend === 'chatgpt' ? 'ChatGPT helper' : draft.backend === 'templates' ? 'Offline templates' : goalConfig && goalConfig.provider === 'custom' ? 'custom endpoint' : 'OpenRouter'} did not answer`;
+      const why = draft.message || draft.error || `${draft.backend === 'chatgpt' ? 'ChatGPT helper' : draft.backend === 'templates' ? 'Offline templates' : goalConfig && goalConfig.provider === 'custom' ? 'custom endpoint' : 'OpenRouter'} did not answer`;
       const pending = goalConfig && goalConfig.pending;
       let retrying = draft.retryable === true && goalTurnId === draft.turnId;
       // A reload loses the document-local claim while the app keeps both the failed attempt
@@ -9049,7 +9096,7 @@
         !goalTurnId &&
         pending &&
         pending.turnId === draft.turnId &&
-        !generating &&
+        !goalSourceGenerating(draft.turnId) &&
         !CLF_DOM.generating() &&
         !nativeBusy &&
         !(job && job.busy)
@@ -9077,15 +9124,15 @@
     if (draft.stage !== 'ready' || !draft.reply) return;
     // A turn started while the draft was being written — the user typed, or ChatGPT began
     // something of its own. The draft is about a conversation that has moved on.
-    if (goalSourceGenerating() || CLF_DOM.generating() || nativeBusy || (job && job.busy)) {
-      goalDraft = null;
-      setGoalPhase('');
-      await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
+    const sourceBusy = () => goalSourceGenerating(draft.turnId) || CLF_DOM.generating() || pendingTools > 0 ||
+      nativeBusy || job?.busy || turnProgressRevision !== workRevision;
+    if (sourceBusy()) {
+      await deferGoalDraftForWork(draft);
       return;
     }
     goalBusy = true;
     const composerBefore = CLF_DOM.composer()?.textContent || '';
-    let preparedDraft = null, sendAttempted = false;
+    let preparedDraft = null, sendAttempted = false, workResumed = false;
     try {
       if (goalTypingSince === 0) goalTypingSince = Date.now();
       setGoalPhase('sending');
@@ -9106,13 +9153,17 @@
       preparedDraft = CLF_DOM.captureComposerDraft(CLF_DOM.composer()?.textContent || '', onDocument);
       await sleep(200);
       const current = () => onDocument() && goalUsable() &&
-        (sendAttempted || ((goalConfig?.afterTurn !== true || turnProgressRevision === workRevision) &&
+        (sendAttempted || (((goalConfig?.afterTurn !== true && !goalConfig?.pending?.silenceSourceTurnId) || turnProgressRevision === workRevision) &&
           goalDraft?.token === draft.token && preparedDraft.current()));
       if (!current()) return;
       const sent = await sendSubmittedText(current, true, async sendCurrent => {
         // Off or a replacement task retires this exact token in the app. Re-read it
         // when native Send is ready, including after a delayed React update.
         const authorization = await ask({ type: 'activity', conversationId: target, since });
+        if (onDocument() && (sourceBusy() || authorization?.data?.pendingTools > 0 || authorization?.data?.job?.busy)) {
+          workResumed = true;
+          return false;
+        }
         if (!sendCurrent() || !current() || !authorization?.ok || !authorization.data) return false;
         const allowed = authorization.data.goal;
         const ready = allowed?.draft;
@@ -9144,6 +9195,7 @@
         CLF_DOM.insertPrompt(composerBefore, true);
       preparedDraft?.dispose();
       if (!onDocument()) return;
+      if (!sendAttempted && (workResumed || sourceBusy())) await deferGoalDraftForWork(draft);
       goalBusy = false;
       // Only once the draft is spent. This marks when *this draft* first found the composer
       // in use, and the retry path above measures its two-minute patience against it — so
@@ -9234,7 +9286,7 @@
   function replyError(reply) {
     if (!reply) return '';
     const data = reply.data || {};
-    if (data.message) return String(data.message).slice(0, 160);
+    if (data.message) return String(data.message).slice(0, 600);
     if (data.error === 'session_not_recorded') return 'This chat has no recorded local session yet.';
     if (data.error === 'compaction_running') return 'Another chat is compacting right now.';
     if (data.error === 'turn_still_generating') return 'Wait for this ChatGPT turn to finish first.';
@@ -10160,7 +10212,7 @@
     decision.publishing = true;
     void ask({ type: 'desktop_input', id: decision.id, owner: decision.owner, lifetime: decision.temporary ? 'temporary-planner' : undefined, response: decision.response }).then((reply) => {
       if (reply?.data?.ok === true && desktopDecision === decision && alive && epoch === decision.epoch && CLF_DOM.conversationId() === decision.conversationId) {
-        // Keep this exact temporary receipt until maintenance retires this planner.
+        // Keep the exact receipt if immediate closure was vetoed; maintenance may retire it.
         // Its owner/text proves later safe closure without publishing the answer twice.
         if (decision.temporary) decision.accepted = true;
         else desktopDecision = null;
@@ -10309,7 +10361,7 @@
         CLF_DOM.confirmTemporaryChatIntroduction();
         await waitPageView(() => CLF_DOM.temporaryChatReady(), onTarget, 3000);
       }
-      if (temporary && (!temporaryPlannerPage() || !CLF_DOM.temporaryChatReady())) return fail('Temporary Chat was not confirmed. Open the planner tab and complete its Temporary Chat introduction.');
+      if (temporary && (!temporaryPlannerPage() || !CLF_DOM.temporaryChatReady())) return fail('Temporary Chat was not confirmed. Open the helper tab and complete its Temporary Chat introduction.');
       const providerLimitation = () => CLF_DOM.errors().find(error => error.blocking === true)?.text;
       const limitation = providerLimitation();
       if (limitation) return fail(limitation);
@@ -10378,7 +10430,8 @@
       const accepted = acknowledged?.data?.ok === true;
       if (accepted && deliveredConversation && receipt.user?.id && sendingTarget() &&
           userSendReceipt === witnessedSendReceipt && witnessedSendReceipt?.text === submittedText &&
-          witnessedSendReceipt.conversationId === target &&
+          (witnessedSendReceipt.conversationId === target ||
+            (!target && witnessedSendReceipt.conversationId === deliveredConversation)) &&
           (witnessedSendReceipt.previousMessageId ?? null) === (previousUserId ?? null) &&
           Date.now() - witnessedSendReceipt.at <= USER_SEND_RECEIPT_MS) {
         witnessedSendReceipt.accepted = { messageId: receipt.user.id, conversationId: deliveredConversation, epoch };

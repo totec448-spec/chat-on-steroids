@@ -15,6 +15,7 @@ import { lastRequestAt, startMcpServer, tunnelProbeHeaders, type McpEndpoint } f
 import { lastToolCallAt } from './mcp/tools.js';
 import { SURFACE_LIST, surfaceIsUseful, desktopToolNames, type SurfaceId } from './mcp/surfaces.js';
 import { getSecret } from './secrets.js';
+import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { startTunnel, TunnelError, type TunnelHandle } from './tunnel/index.js';
 import { desktopAutomationSupported } from './platform.js';
 import { publishPluginSurface, unpublishPluginSurface, pluginRefreshPublications } from './plugin-refresh.js';
@@ -30,7 +31,7 @@ const optionalSurfaces: OptionalSurface[] = ['desktop', 'plugins'];
 const optionalTunnelId = (settings: TunnelSettings, id: OptionalSurface): string =>
   (id === 'desktop' ? settings.desktopTunnelId : settings.pluginsTunnelId) ?? '';
 /** Core-affecting transport settings the current run actually started with. */
-let activeCoreTransport: Pick<TunnelSettings, 'kind' | 'tunnelId' | 'binaryPath'> | null = null;
+let activeCoreTransport: Pick<TunnelSettings, 'kind' | 'tunnelId' | 'binaryPath' | 'profileEpoch'> | null = null;
 let status: ConnectionStatus = {
   state: 'disconnected',
   detail: '',
@@ -191,19 +192,20 @@ function surfaceStateForConnection(state: ConnectionStatus['state']): SurfaceSta
  * Irrelevant fields are normalised out too, so editing a hidden OpenAI id while Cloudflare is
  * active does not bounce a perfectly good connection.
  */
-function coreTransport(settings: TunnelSettings): Pick<TunnelSettings, 'kind' | 'tunnelId' | 'binaryPath'> {
+function coreTransport(settings: TunnelSettings): Pick<TunnelSettings, 'kind' | 'tunnelId' | 'binaryPath' | 'profileEpoch'> {
   return {
     kind: settings.kind,
+    profileEpoch: settings.kind === 'openai' ? settings.profileEpoch ?? 0 : 0,
     tunnelId: settings.kind === 'openai' ? settings.tunnelId : '',
     binaryPath: settings.kind === 'manual' ? '' : settings.binaryPath
   };
 }
 
 function sameCoreTransport(
-  left: Pick<TunnelSettings, 'kind' | 'tunnelId' | 'binaryPath'>,
-  right: Pick<TunnelSettings, 'kind' | 'tunnelId' | 'binaryPath'>
+  left: Pick<TunnelSettings, 'kind' | 'tunnelId' | 'binaryPath' | 'profileEpoch'>,
+  right: Pick<TunnelSettings, 'kind' | 'tunnelId' | 'binaryPath' | 'profileEpoch'>
 ): boolean {
-  return left.kind === right.kind && left.tunnelId === right.tunnelId && left.binaryPath === right.binaryPath;
+  return left.profileEpoch === right.profileEpoch && left.kind === right.kind && left.tunnelId === right.tunnelId && left.binaryPath === right.binaryPath;
 }
 
 /**
@@ -273,7 +275,7 @@ async function connectImpl(): Promise<void> {
     if (desktopAutomationSupported() && (caps.screen || caps.control)) void prewarmComputerHelper();
     updateSurface('core', { state: 'starting', detail: 'Connecting…' });
 
-    const apiKey = await getSecret('openaiApiKey');
+    const apiKey = await getSecret(setupApiKeySlot(config.tunnel.profileId));
     if (shutdownRequested || generation !== connectionGeneration) {
       await disconnectImpl(30_000);
       return;
@@ -450,7 +452,7 @@ async function applySettingsImpl(): Promise<void> {
     }
     if (optionalTunnels.get(id)?.tunnelId === optionalTunnelId(config.tunnel, id)) continue;
     await stopOptionalTunnel(id, 'Reconnecting with the new tunnel…');
-    await startOptionalTunnel(id, connectionGeneration, config.tunnel, await getSecret('openaiApiKey'));
+    await startOptionalTunnel(id, connectionGeneration, config.tunnel, await getSecret(setupApiKeySlot(config.tunnel.profileId)));
   }
 }
 

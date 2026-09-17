@@ -52,6 +52,8 @@ import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from '
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
 import { addProject, listProjects, removeProject } from './projects.js';
 import { hasSecret, isEncryptionAvailable, secureStorageStatus, setSecret } from './secrets.js';
+import { setupApiKeySlot } from '../shared/setup-profile.js';
+import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
 import { TUNNEL_ID_PATTERN } from './tunnel/index.js';
 import {
@@ -124,6 +126,8 @@ const settingsPatch = z.object({
   capabilities: capabilityPatch,
   readOnly: z.boolean(),
   tunnel: z.object({
+    profileId: z.string().max(64).optional(),
+    profileEpoch: z.number().int().nonnegative().optional(),
     pluginsTunnelId: z.string().max(128).refine(v => v === '' || TUNNEL_ID_PATTERN.test(v), 'Expected tunnel_ followed by 32 hex characters').optional(),
     kind: z.enum(['openai', 'cloudflared', 'manual']),
     tunnelId: z
@@ -179,6 +183,7 @@ const settingsPatch = z.object({
   // One switch. Scope, run, worker, action and window all live inside the signed envelope,
   // so there is nothing else here for a settings form to disagree with.
   remoteSteering: z.object({ enabled: z.boolean() }).optional(),
+  headlessClaude: z.object({ enabled: z.boolean(), allowCodingProfile: z.boolean() }).optional(),
   goal: z.object({
     impulseMinutes: z.number().int().min(0).max(60).optional(),
     includeToolCalls: z.boolean().optional(),
@@ -235,6 +240,12 @@ type SettingsSnapshot = z.infer<typeof settingsPatch>;
  * the current main-process value. A field that differs was deliberately edited here and wins.
  */
 function mergeSettings(current: Config, base: SettingsSnapshot, wanted: SettingsSnapshot): SettingsSnapshot {
+  const tunnelEdited = (['tunnelId', 'desktopTunnelId', 'pluginsTunnelId'] as const)
+    .some(key => (base.tunnel[key] ?? '') !== (wanted.tunnel[key] ?? ''));
+  if (tunnelEdited && ((base.tunnel.profileId ?? 'default') !== (current.tunnel.profileId ?? 'default') ||
+      (base.tunnel.profileEpoch ?? 0) !== (current.tunnel.profileEpoch ?? 0))) {
+    throw new Error('Setup profile changed. Edit the tunnel ID in the selected profile again.');
+  }
   const pick = <T>(live: T, before: T, next: T): T => (Object.is(before, next) ? live : next);
   const capabilities = Object.fromEntries(
     CAPABILITIES.map((capability) => [
@@ -247,6 +258,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     capabilities,
     readOnly: pick(current.readOnly, base.readOnly, wanted.readOnly),
     tunnel: {
+      ...current.tunnel,
         pluginsTunnelId: wanted.tunnel.pluginsTunnelId === undefined ? current.tunnel.pluginsTunnelId ?? ''
           : pick(current.tunnel.pluginsTunnelId ?? '', base.tunnel.pluginsTunnelId ?? '', wanted.tunnel.pluginsTunnelId),
       kind: pick(current.tunnel.kind, base.tunnel.kind, wanted.tunnel.kind),
@@ -315,6 +327,20 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
           ? pick(current.remoteSteering.enabled, base.remoteSteering.enabled, wanted.remoteSteering.enabled)
           : current.remoteSteering.enabled
     },
+    headlessClaude: {
+      enabled:
+        base.headlessClaude && wanted.headlessClaude
+          ? pick(current.headlessClaude.enabled, base.headlessClaude.enabled, wanted.headlessClaude.enabled)
+          : current.headlessClaude.enabled,
+      allowCodingProfile:
+        base.headlessClaude && wanted.headlessClaude
+          ? pick(
+              current.headlessClaude.allowCodingProfile,
+              base.headlessClaude.allowCodingProfile,
+              wanted.headlessClaude.allowCodingProfile
+            )
+          : current.headlessClaude.allowCodingProfile
+    },
     goal: {
       impulseMinutes: pick(current.goal.impulseMinutes, base.goal.impulseMinutes, wanted.goal.impulseMinutes),
       includeToolCalls: pick(current.goal.includeToolCalls, base.goal.includeToolCalls, wanted.goal.includeToolCalls),
@@ -367,7 +393,7 @@ async function buildState(): Promise<AppState> {
     platform: hostPlatformInfo(),
     loginStartupAvailable: supportsLoginStartup(process.platform, app.isPackaged),
     secureStorage: await secureStorageStatus(),
-    hasApiKey: await hasSecret('openaiApiKey'),
+    hasApiKey: await hasSecret(setupApiKeySlot(config.tunnel.profileId)),
     hasGoalKey: await hasSecret('openRouterApiKey'),
     hasCustomProviderKey: await hasSecret('customProviderApiKey'),
     resolvedBinary: resolvedBinary(config),
@@ -399,6 +425,22 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+  handle('setup:profile', async payload => {
+    const request = z.discriminatedUnion('action', [
+      z.object({ action: z.literal('add'), name: z.string().trim().min(1).max(80) }),
+      z.object({ action: z.literal('select'), id: z.string().min(1).max(64) }),
+      z.object({ action: z.literal('remove'), id: z.string().min(1).max(64) })
+    ]).parse(payload);
+    await updateConfig(config => request.action === 'add'
+      ? addSetupProfile(config, request.name)
+      : request.action === 'remove' ? removeSetupProfile(config, request.id) : switchSetupProfile(config, request.id),
+    async () => {
+      // The committed profile owns the connection even if credential cleanup fails.
+      try { if (request.action === 'remove') await setSecret(setupApiKeySlot(request.id), ''); }
+      finally { await applySettings(); }
+    });
+    return buildState();
+  });
   registerPluginIpc(handle, getWindow);
   handle('usage:get', () => usageOverview());
   handle('state:get', async () => {
@@ -445,7 +487,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       before.goal.provider.kind !== next.goal.provider.kind ||
       before.goal.provider.baseUrl !== next.goal.provider.baseUrl ||
       before.goal.reasoning !== next.goal.reasoning ||
-      before.goal.includeToolCalls !== next.goal.includeToolCalls ||
       before.goal.prompt !== next.goal.prompt ||
       before.goal.objectivePrompt !== next.goal.objectivePrompt ||
       before.goal.loopPrompt !== next.goal.loopPrompt
@@ -466,6 +507,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     }
     if (before.multiAgent.enabled !== next.multiAgent.enabled || before.sessions.record !== next.sessions.record ||
         before.remoteSteering.enabled !== next.remoteSteering.enabled ||
+        before.headlessClaude.enabled !== next.headlessClaude.enabled ||
         before.ui.finishTool !== next.ui.finishTool ||
         JSON.stringify(effectiveCapabilities(before)) !== JSON.stringify(effectiveCapabilities(next))) forgetExposedSurface();
     // Order matters, and it used to be wrong. Pausing the run and withdrawing worker browser
@@ -611,16 +653,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
    * travels inwards. Nothing reads a key back out over IPC; the state carries a boolean.
    */
   handle('secret:set', async (payload) => {
-    const { value, key } = z
+    const { value, key, profileId } = z
       .object({
         value: z.string().max(500),
+        profileId: z.string().min(1).max(64).optional(),
         key: z.enum(['openaiApiKey', 'openRouterApiKey', 'customProviderApiKey']).default('openaiApiKey')
       })
       .parse(payload);
     if (!(await isEncryptionAvailable())) {
       throw new Error('Secure OS credential storage is unavailable, so the key cannot be stored safely.');
     }
-    await setSecret(key, value);
+    const owner = profileId ?? 'default';
+    const config = getConfig();
+    if (key === 'openaiApiKey' && owner !== (config.tunnel.profileId ?? 'default') &&
+        !config.setupProfiles?.some(profile => profile.id === owner)) throw new Error('Setup profile not found');
+    await setSecret(key === 'openaiApiKey' ? setupApiKeySlot(owner) : key, value);
     const activeGoalKey = getConfig().goal.provider.kind === 'custom' ? 'customProviderApiKey' : 'openRouterApiKey';
     if (key === activeGoalKey) retireGoalDrafts();
     const what = key === 'openRouterApiKey' ? 'openrouter key' : key === 'customProviderApiKey' ? 'custom provider key' : 'api key';
@@ -681,7 +728,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('log:json', async () => formatLogAsJson());
   handle('clipboard:write', async (payload) => {
     const { text } = z.object({ text: z.string().max(1_000_000) }).parse(payload);
-    clipboard.writeText(text);
+    await clipboard.writeText(text);
     return true;
   });
 
