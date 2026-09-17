@@ -124,6 +124,8 @@ interface ProgressRecord {
   text: string;
   /** The turn it belongs to, so a re-stamp is only ever matched within its own turn. */
   turnId?: string;
+  /** Semantic work stamp; zero is a historical native row first seen on reload. */
+  contentSeq?: number;
 }
 
 const conversations = new Map<string, LiveConversation>();
@@ -556,6 +558,7 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
             time: event.time,
             updatedAt: event.time,
             text: event.label,
+            contentSeq: event.contentSeq,
             ...(event.turnId ? { turnId: event.turnId } : {})
           });
         } else {
@@ -1837,17 +1840,21 @@ async function recordPageTool(
 
   const event = await appendEvent(sessionId, {
     ...base,
+    ...(held?.turnId ? { turnId: held.turnId } : {}),
     time: held ? held.time : base.time,
     kind: 'page_tool',
     messageId: id,
     label,
+    ...(held?.contentSeq !== undefined ? { contentSeq: held.contentSeq } : item.activeNow === false && !held ? { contentSeq: 0 } : {}),
     ...(held ? { origin: held.seq } : {})
   });
   live.pageTools.set(id, {
     seq: held ? held.seq : event.seq,
     time: held ? held.time : base.time,
     updatedAt: base.time,
-    text: label
+    text: label,
+    turnId: held?.turnId ?? base.turnId,
+    contentSeq: event.kind === 'page_tool' ? event.contentSeq : undefined
   });
   return true;
 }
@@ -1892,7 +1899,7 @@ export function recordChatObservations(
 ): Promise<{
   sessionId: string | null;
   stored: number;
-  activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; toolStartedAt?: number; endedTurnId?: string };
+  activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; endedTurnId?: string };
   goalCandidates: Array<{ replyId: string; turnId: string; eventSeq: number }>;
 }> {
   const hasEvidence = observations.some((item) => item.kind === 'tool_evidence');
@@ -2005,10 +2012,10 @@ async function recordChatObservationsNow(
 ): Promise<{
   sessionId: string | null;
   stored: number;
-  activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; toolStartedAt?: number; endedTurnId?: string };
+  activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; endedTurnId?: string };
   goalCandidates: Array<{ replyId: string; turnId: string; eventSeq: number }>;
 }> {
-  const activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; toolStartedAt?: number; endedTurnId?: string } = { meaningful: false, working: false, terminal: false };
+  const activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; endedTurnId?: string } = { meaningful: false, working: false, terminal: false };
   if (!recordingEnabled()) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
   if (!conversations.has(conversationId)) {
     const lineage = await supersededLineage(conversationId);
@@ -2129,7 +2136,7 @@ async function recordChatObservationsNow(
           final: state === 'final',
           ...(item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
           ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
-        }, { preferTime: item.authoredTime === true });
+        }, { preferTime: item.authoredTime === true, work: item.activeNow === true });
         const canonicalTurn = written.event.turnId;
         // A stopped partial answer stays streaming in history. Re-observing its
         // DOM after restart cannot renew work, nor can an old message borrow a
@@ -2201,14 +2208,18 @@ async function recordChatObservationsNow(
         const newlyObserved = !!live && !!item.messageId && !live.pageTools.has(item.messageId);
         const written = await recordPageTool(sessionId, live, item, base);
         if (!written) continue;
-        if (item.turnId && await reopenThinkingFailure(sessionId, live, item.time, item.turnId)) {
+        if (newlyObserved && item.activeNow !== false && item.turnId && await reopenThinkingFailure(sessionId, live, item.time, item.turnId)) {
           activity.terminal = false;
           activity.working = true;
           activity.meaningful = true;
           activity.at = Math.max(activity.at ?? 0, item.time);
         }
-        if (newlyObserved && item.turnId === live?.turnId && live.turnStartedAt !== null && item.time >= live.turnStartedAt) {
-          activity.toolStartedAt = Math.max(activity.toolStartedAt ?? 0, item.time);
+        if (newlyObserved && item.activeNow !== false && item.turnId === live?.turnId && live.turnStartedAt !== null && item.time >= live.turnStartedAt) {
+          // A new exact native thought/tool row is work for every model. A label
+          // revision or a replay of its stable identity remains presentation only.
+          activity.meaningful = true;
+          activity.working = true;
+          activity.at = Math.max(activity.at ?? 0, item.time);
         }
         break;
       }
@@ -2235,7 +2246,7 @@ async function recordChatObservationsNow(
           ...(typeof item.blocking === 'boolean' ? { blocking: item.blocking } : {}),
           message: await storeText(sessionId, item.text ?? '', 2000)
         });
-        activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
+        activity.meaningful = true;
         break;
       }
       case 'turn_start':
@@ -2267,12 +2278,21 @@ async function recordChatObservationsNow(
         activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
         activity.working = true;
         break;
-      case 'turn_end':
+      case 'turn_end': {
         // An unnamed end closes nothing durable and, worse, used to clear whichever named
         // turn happened to be live. Ignore it. A stale named end is still useful history for
         // the turn it names, but it must not tear down a newer active generation.
         if (!item.turnId) continue;
-        if (live?.knownTurnEnds.has(item.turnId)) continue;
+        const stopOverride = live?.knownTurnEnds.has(item.turnId) && item.outcome === 'stopped';
+        if (live?.knownTurnEnds.has(item.turnId)) {
+          // An explicit Stop can arrive after automation's interrupted end or a
+          // failed view. The latest exact source may strengthen to stopped once;
+          // an old stop must never close a new question or generation.
+          if (!stopOverride || (live.turnId && live.turnId !== item.turnId)) continue;
+          const [latest] = await readRecentEvents(sessionId, 1, { kinds: ['turn_start', 'turn_end', 'user_message'] });
+          if (latest?.kind !== 'turn_end' || latest.turnId !== item.turnId ||
+              latest.outcome === 'stopped' || item.time < latest.time) continue;
+        }
         if (live?.turnId === item.turnId) {
           const [latest] = await readRecentEvents(sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
           // A replay of the pre-reopen end cannot undo newer app-owned work.
@@ -2289,7 +2309,7 @@ async function recordChatObservationsNow(
         // As above, durable journal state owns idempotency; in-memory state follows it.
         if (live) {
           const endedStartedAt = live.turnId === item.turnId ? live.turnStartedAt : null;
-          if (live.turnId === item.turnId) activity.endedTurnId = item.turnId;
+          if (live.turnId === item.turnId || stopOverride) activity.endedTurnId = item.turnId;
           live.knownTurnEnds.add(item.turnId);
           live.openTurns.delete(item.turnId);
           live.lastTurnOutcome = item.outcome ?? 'unknown';
@@ -2313,6 +2333,7 @@ async function recordChatObservationsNow(
           activity.terminal = true;
         }
         break;
+      }
     }
     stored++;
   }

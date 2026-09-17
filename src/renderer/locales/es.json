@@ -1,4 +1,11 @@
 {
+  "Tur Tur Sahur pet": "Mascota Tur Tur Sahur",
+  "Tur Tur Sahur: drag, click, or open the context menu": "Tur Tur Sahur: arrastra, haz clic o abre el menú contextual",
+  "Hide pet": "Ocultar mascota",
+  "Reset position": "Restablecer posición",
+  "OpenAI → ClosedAI": "OpenAI → ClosedAI",
+  "Anthropic → trash": "Anthropic → papelera",
+  "Pet artwork could not be loaded": "No se pudieron cargar las imágenes de la mascota",
   "Projects": "Proyectos",
   "Chats": "Chats",
   "Loading projects…": "Cargando proyectos…",

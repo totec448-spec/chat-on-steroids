@@ -110,6 +110,7 @@ try {
   await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:`(()=>{
     const fixture=document.createElement('section');fixture.id='nestedFixture';
     fixture.innerHTML='<h2><a href="#nested" id="nestedLink">Nested heading link</a></h2><div tabindex="0" aria-label="Editor card"><label>Nested editor<input id="nestedEditor"></label></div><button id="holdTarget">Hold target</button><button id="partialTarget" style="position:relative;width:220px;height:80px">Partial target</button><div id="clickBlocker" style="position:absolute;z-index:100;width:60px;height:40px">Overlay blocker</div>';
+    fixture.innerHTML+='<div tabindex="0" aria-label="Account card"><p>Balance: 42 credits</p></div><div style="display:contents"><div role="textbox" contenteditable="true" aria-label="Composer"><p>First line</p><p>Second line</p></div></div><label>Audit plan<select id="auditPlan"><option value="basic">Basic plan</option><option value="team">Team plan</option><optgroup disabled label="Legacy"><option value="old">Old plan</option></optgroup></select></label><canvas aria-label="Preview canvas"></canvas>';
     document.body.append(fixture);globalThis.fixtureKeys=[];
     document.querySelector('#nestedEditor').onkeydown=e=>fixtureKeys.push({key:e.key,code:e.code,trusted:e.isTrusted});
     const hold=document.querySelector('#holdTarget');hold.onkeydown=()=>globalThis.heldAt=performance.now();hold.onkeyup=()=>globalThis.heldFor=performance.now()-heldAt;
@@ -118,6 +119,13 @@ try {
     return true;
   })()`});
   snap=await snapshot(tabId);assert.ok(refFor(snap,'link "Nested heading link"'));assert.ok(refFor(snap,'textbox "Nested editor"'));
+  assert.ok(snap.text.includes('Balance: 42 credits'));assert.ok(refFor(snap,'canvas "Preview canvas"'));
+  assert.ok(refFor(snap,'textbox "Composer"'));assert.ok(!snap.text.includes('textbox "First line"'));
+  assert.ok(snap.text.includes('option "Team plan" value="team"'));assert.ok(snap.text.includes('option "Old plan" value="old" (disabled)'));
+  await tool('browser_action',{tabId,pageId:snap.pageId,action:'select',ref:refFor(snap,'combobox "Audit plan"'),values:['team']});
+  const observation=(await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'({selected:document.querySelector("#auditPlan").value,large:"x".repeat(12001)})'})).value;
+  assert.equal(observation.value.selected,'team');assert.equal(observation.truncated,true);
+  report.checks.push('display:contents composer; one editing host; named-container text; canvas ref; exact select values; truthful evaluation truncation');
   await tool('browser_action',{tabId,pageId:snap.pageId,action:'fill',ref:refFor(snap,'Nested editor'),text:'nested'});
   await tool('browser_action',{tabId,pageId:snap.pageId,action:'click',ref:refFor(snap,'Hold target')});
   await tool('browser_action',{tabId,pageId:snap.pageId,action:'key',ref:refFor(snap,'Nested editor'),key:'ENTER'});

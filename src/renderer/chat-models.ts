@@ -1,4 +1,4 @@
-import { ui, t } from './i18n.js';
+import { ui, uiText, t } from './i18n.js';
 import type { ChatModelCatalog } from '../shared/chat-models.js';
 import { chatModelDisplayLabel } from '../shared/chat-models.js';
 import type { Config } from '../shared/types.js';
@@ -170,7 +170,11 @@ function paintComposerLabel(): void {
     ? chatModelDisplayLabel(modelLabel, confirmed.reasoningEffort, effortLabel(confirmed.reasoningEffort))
     : catalog.state === 'pending' ? t("Loading models…") : t("Select model");
   const node = $('composerModelLabel');
-  ui(node, 'textContent', label);
+  if (confirmed) {
+    const pro = confirmed.reasoningEffort === 'pro';
+    node.replaceChildren(el('strong', '', pro ? label : modelLabel));
+    if (!pro) node.append(uiText(() => ` · ${effortLabel(confirmed.reasoningEffort)}`));
+  } else node.replaceChildren(uiText(label));
   ui(node, 'title', label);
   onComposerPaint?.();
 }

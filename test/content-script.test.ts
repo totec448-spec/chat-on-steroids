@@ -7869,6 +7869,32 @@ describe('a content script reloaded into a turn already in flight', () => {
     expect(order.indexOf('bind')).toBeLessThan(order.indexOf('events'));
   });
 
+  it.each(['native', 'interim'].flatMap(kind => [true, false].map(named => ({ kind, named }))))(
+    'takes the adopted transcript as a baseline and counts subsequent new work (%j)', async ({ kind, named }) => {
+    const source = 'g-rehydrated-source-0-1';
+    live = await harness('https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', {
+      activity: () => activity({ activeTurnId: source, recordedTurnId: source,
+        userAnchors: [{ seq: 1, time: 1700000000000, messageId: 'm-turn-live-user' }] })
+    }, midTurn);
+    live.hook.observe(); await settle();
+    const section = live.document.querySelector('[data-turn-id="turn-live"]') as HTMLElement;
+    const descriptor = (fresh: boolean) => ({ turnId: named ? 'turn-live' : null, endMessageId: null, calls: [],
+      messages: kind === 'interim' ? [{ messageId: 'rehydrated-interim', rawMessageId: 'rehydrated-interim', role: 'assistant',
+        stable: true, rawText: fresh ? 'New work after the reload.' : 'Earlier work before the reload.', renderedHtml: '' }] : [],
+      activities: kind === 'native' ? [
+        { messageId: 'rehydrated-native', label: 'Searched earlier websites', order: 1 },
+        ...(fresh ? [{ messageId: 'fresh-native', label: 'Prepared a new PDF', order: 2 }] : [])
+      ] : [] });
+    await bindFiberTurns([{ section, turn: descriptor(false) }]); await live.hook.flush();
+    const eventKind = kind === 'native' ? 'page_tool' : 'assistant_message';
+    const first = emitted(live.sent, eventKind).map(row => row.event).filter(event => event.messageId === `rehydrated-${kind}`);
+    expect(first.length).toBeGreaterThan(0);
+    expect(first.some(event => event.activeNow === true)).toBe(false);
+    await bindFiberTurns([{ section, turn: descriptor(true) }]); await live.hook.flush();
+    expect(emitted(live.sent, eventKind).at(-1)?.event).toMatchObject({ turnId: source, activeNow: true });
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+  });
+
   it('retains the recorded turn when runtime activity expired before reload and Thinking failed arrives later', async () => {
     const recordedTurnId = 'g-original-mcp-run-0-2';
     live = await harness('https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', {
@@ -18110,6 +18136,67 @@ describe('ordinary Continue native recovery', () => {
   const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   const id = '11111111-2222-4333-8444-555555555555';
   const text = 'Continue until fully finished. Tur Tur Sahur.';
+  it('journals native Stop immediately even while the native Stop control remains mounted', async () => {
+    live = await harness(`https://chatgpt.com/c/${chat}`);
+    userTurn(live.document, 'source', 'Complete the task'); startGenerating(live.document, { send: false });
+    live.hook.observe(); await settle();
+    const button = live.document.querySelector('[data-testid="stop-button"]') as HTMLElement;
+    Object.defineProperty(button, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
+    button.click(); await live.hook.flush();
+    expect(live.document.contains(button)).toBe(true);
+    expect(emitted(live.sent, 'turn_end').filter(row => row.event.outcome === 'stopped')).toHaveLength(1);
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).toMatchObject({ safe: false });
+    button.click(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').filter(row => row.event.outcome === 'stopped')).toHaveLength(1);
+  });
+
+  it.each(['stop', 'send'] as const)('does not execute a stale %s permission after new native work', async during => {
+    let sourceTurn = '', work: unknown[] = [];
+    live = await harness(`https://chatgpt.com/c/${chat}`, {
+      activity: () => ({ ok: true, data: { entries: [], stream: work, nextSince: work.length ? 100 : 0, pendingTools: 0, job: null } }),
+      desktop_input: async message => {
+        if ((during === 'stop' && message.recoveryAction === 'stop') || (during === 'send' && message.authorize)) {
+          work = [{ kind: 'page_tool', turnId: sourceTurn, messageId: 'new-search', label: 'Searched more websites', seq: 100, time: Date.now() }];
+          await live!.hook.pullActivity();
+        }
+        return { ok: true, data: message.recoveryAction || message.authorize || message.ack || message.fail ? { ok: true }
+          : { input: { id, owner: 'input-owner', text, model: null, reasoningEffort: null,
+            recovery: { questionId: 'm-source', phase: 'ready' }, silenceBoundary: { turnId: sourceTurn } } } };
+      }
+    });
+    userTurn(live.document, 'source', 'Complete the task'); startGenerating(live.document, { send: false });
+    live.hook.observe(); await settle();
+    sourceTurn = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+    const stop = vi.fn(() => stopGenerating(live!.document));
+    const button = live.document.querySelector('[data-testid="stop-button"]')!;
+    Object.defineProperty(button, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
+    button.addEventListener('click', stop);
+    const send = vi.fn(); live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', send);
+    await live.runtimeMessage({ type: 'clf-desktop-input', id, conversationId: chat, silenceTurnId: sourceTurn,
+      recovery: { questionId: 'm-source', stop: true } });
+    expect(stop).toHaveBeenCalledTimes(during === 'stop' ? 0 : 1);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('treats a revised native label as the same work at the reload boundary', async () => {
+    let work: unknown[] = [];
+    live = await harness(`https://chatgpt.com/c/${chat}`, { activity: () => ({ ok: true,
+      data: { entries: [], stream: work, nextSince: work.length ? 100 : 0, pendingTools: 0, job: null } }) });
+    userTurn(live.document, 'source', 'Complete the task'); startGenerating(live.document, { send: false });
+    live.hook.observe(); await settle();
+    const turnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId;
+    work = [{ kind: 'page_tool', turnId, messageId: 'one-step', label: 'Searching websites', seq: 100, time: Date.now() }];
+    await live.hook.pullActivity();
+    const before = await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat }) as Record<string, unknown>;
+    expect(before.safe).toBe(true);
+    work = [{ ...(work[0] as object), label: 'Searched websites' }];
+    await live.hook.pullActivity();
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, expected: before })).toMatchObject({ safe: true });
+    work = [...work, { kind: 'page_tool', turnId, messageId: 'second-step', label: 'Prepared the PDF', seq: 101, time: Date.now() }];
+    await live.hook.pullActivity();
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, expected: before })).toMatchObject({ safe: false });
+  });
+
   it.each(['busy', 'idle', 'draft', 'revoked', 'became-idle'] as const)('uses Stop only for an unchanged active page (%s)', async scenario => {
     live = await harness(`https://chatgpt.com/c/${chat}`, {
       desktop_input: async message => {

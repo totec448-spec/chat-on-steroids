@@ -8,6 +8,39 @@ import { sessionInputPolicy } from '../src/main/session/input.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let directory: string;
+
+it.each(['same', 'new-question', 'new-turn'] as const)('accepts a later native Stop only for its still-current source (%s)', async change => {
+  const conversationId = `native-stop-upgrade-${change}`;
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'user_message', messageId: 'stop-question', text: 'Work', time: 10 },
+    { kind: 'turn_start', turnId: 'stop-source', time: 11 },
+    { kind: 'turn_end', turnId: 'stop-source', outcome: 'interrupted', time: 12 }
+  ]);
+  if (change === 'new-question') await recordChatObservations(conversationId, [{ kind: 'user_message', messageId: 'new-question', text: 'Next', time: 13 }]);
+  if (change === 'new-turn') await recordChatObservations(conversationId, [{ kind: 'turn_start', turnId: 'new-turn', time: 13 }]);
+  await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests();
+  const stop = { kind: 'turn_end' as const, turnId: 'stop-source', outcome: 'stopped' as const, time: 14 };
+  const accepted = await recordChatObservations(conversationId, [stop]);
+  expect(accepted.activity.terminal).toBe(change === 'same');
+  await recordChatObservations(conversationId, [stop]);
+  const ends = await readEvents(opened.sessionId!, { kinds: ['turn_end'] });
+  expect(ends.filter(event => event.kind === 'turn_end' && event.outcome === 'stopped')).toHaveLength(change === 'same' ? 1 : 0);
+  if (change === 'new-turn') expect((await getSession(opened.sessionId!))?.activeTurnId).toBe('new-turn');
+});
+
+it('finds the latest real work behind a later revision of an old native label', async () => {
+  const { readRecentEvents } = await import('../src/main/session/store.js');
+  const { workSequence } = await import('../src/shared/session.js');
+  const opened = await recordChatObservations('native-label-work-order', [
+    { kind: 'turn_start', turnId: 'work-order', time: 10 },
+    { kind: 'page_tool', messageId: 'old-step', turnId: 'work-order', text: 'Preparing', time: 11 },
+    { kind: 'page_tool', messageId: 'new-step', turnId: 'work-order', text: 'Searching', time: 12 }
+  ]);
+  const [before] = await readRecentEvents(opened.sessionId!, 1, { kinds: ['page_tool', 'turn_start'] });
+  await recordChatObservations('native-label-work-order', [{ kind: 'page_tool', messageId: 'old-step', turnId: 'work-order', text: 'Prepared', time: 13 }]);
+  const [after] = await readRecentEvents(opened.sessionId!, 1, { kinds: ['page_tool', 'turn_start'] });
+  expect(workSequence(after!)).toBe(workSequence(before!));
+});
 it('records an empty native image message and keeps its stable origin on replay', async () => {
   const image = { kind: 'user_message' as const, messageId: 'image-only-user', time: 100, text: '',
     attachments: [{ id: 'native-file', name: 'example.png', size: 123, mimeType: 'image/png' }] };

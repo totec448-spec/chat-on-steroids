@@ -1041,7 +1041,7 @@ describe('session store', () => {
   });
 
   it.each(['completed', 'stopped'] as const)('does not restore an abandoned older turn after the latest turn %s', async (outcome) => {
-    const conversationId = 'c-restore-latest-terminal';
+    const conversationId = `c-restore-latest-terminal-${outcome}`;
     const opened = await recordChatObservations(conversationId, [
       { kind: 'turn_start', time: 10, turnId: 'g-abandoned' },
       { kind: 'turn_start', time: 20, turnId: 'g-latest' },

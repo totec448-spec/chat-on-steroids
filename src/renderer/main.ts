@@ -7,6 +7,7 @@ import { initBrowserPreferences } from './browser-preferences.js';
 import { initConnectionAdvanced } from './connection-popover.js';
 import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
+import { initPet } from './pet.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
@@ -47,6 +48,7 @@ declare global {
 
 const api = window.api;
 initLanguage();
+initPet();
 initSetupGuide();
 // Escape the translucent sidebar's backdrop-filter containing block.
 document.body.append($('connectionPopover'));
