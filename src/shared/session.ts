@@ -236,8 +236,11 @@ export function toolCallSummary(call: Pick<ToolCallRecord, 'tool' | 'summary'>):
     ? { ...call.summary, metric: 'started' } : call.summary;
 }
 
-/** Process-status revisions are delivery cursors, not new model work. */
+/** Rendering, identity and process-status revisions are cursors, not new work. */
 export function workSequence(event: SessionEvent): number {
+  if (event.kind === 'user_message') return event.contentSeq ?? event.origin ?? event.seq;
+  if (event.kind === 'assistant_message') return event.contentSeq ?? event.finalContentSeq ?? event.origin ?? event.seq;
+  if (event.kind === 'page_tool') return event.contentSeq ?? event.origin ?? event.seq;
   return event.kind === 'tool_call' ? event.origin ?? event.seq : event.seq;
 }
 
@@ -299,6 +302,8 @@ export type SessionEvent =
       retiredImageAssetIds?: string[];
       /** First sequence assigned to this stable website message; revisions keep this anchor. */
       origin?: number;
+      /** Store-owned authored-content revision; metadata and rehydration preserve it. */
+      contentSeq?: number;
     })
   | (BaseEvent & {
       kind: 'assistant_message';
@@ -329,6 +334,8 @@ export type SessionEvent =
       finalObservedAt?: number;
       /** First sequence assigned to this logical message; later revisions keep this anchor. */
       origin?: number;
+      /** Store-owned text/state revision, including interim progress before the final. */
+      contentSeq?: number;
     })
   | (BaseEvent & {
       /** ChatGPT-native generated media, independent of assistant prose and local MCP calls. */
@@ -378,7 +385,7 @@ export type SessionEvent =
    * neither affects identity. `origin` names the seq of the first record of that site object,
    * for readers working from a cursor that has already consumed it.
    */
-  | (BaseEvent & { kind: 'page_tool'; messageId: string; label: string; origin?: number })
+  | (BaseEvent & { kind: 'page_tool'; messageId: string; label: string; origin?: number; contentSeq?: number })
   /**
    * `detail` names an app-authored reopening: the page reported this turn ended, and a tool
    * call under the same server turn then proved it had not. Absent on the page's own starts.

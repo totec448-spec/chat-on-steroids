@@ -10,6 +10,21 @@ beforeEach(() => {
 });
 afterEach(() => { dom.window.close(); vi.unstubAllGlobals(); });
 
+it.each(['silence', 'unattributed', 'unattributed-wait', 'pickup'] as const)('reveals %s only in its final thirty seconds without rebuilding the row', kind => {
+  const countdowns = [{ kind, deadline: 120_000, visibleAt: 90_000 }];
+  renderRecoveryCountdowns(host, countdowns, 0);
+  const row = host.firstElementChild;
+  expect(host.hidden).toBe(true);
+  renderRecoveryCountdowns(host, countdowns, 89_999);
+  expect(host.hidden).toBe(true);
+  renderRecoveryCountdowns(host, countdowns, 90_000);
+  expect(host.hidden).toBe(false);
+  expect(host.textContent).toContain('0:30');
+  expect(host.firstElementChild).toBe(row);
+  renderRecoveryCountdowns(host, [{ ...countdowns[0]!, deadline: 210_000, visibleAt: 180_000 }], 90_000);
+  expect(host.hidden).toBe(true);
+});
+
 it('ticks the actual deadline without rebuilding the row or claiming an action at zero', () => {
   const countdowns = [{ kind: 'thinking-failed' as const, deadline: 300_000 }];
   expect(renderRecoveryCountdowns(host, countdowns, 0)).toBe(true);

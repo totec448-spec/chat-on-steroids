@@ -2572,6 +2572,7 @@ async function performBrowserRepairs(repairs, policy) {
     const [target] = (owned.length > 0 ? owned : candidates).sort((a, b) => a.id - b.id);
     const repairAction = target ? 'reloaded' : 'reopened';
     try {
+      const documentId = target ? tabDocuments[String(target.id)] : null;
       // Suspension grants a reload of a still-suspended shell, never a new tab.
       if (suspended) {
         if (!target) continue;
@@ -2590,8 +2591,27 @@ async function performBrowserRepairs(repairs, policy) {
       // The tab scan can yield while attribution recovers or a final/new question
       // retires an interrupted-response repair. Claim only at the action boundary.
       if (requiresClaim) {
+        // A responsive document flushes native progress and manual Stop before
+        // main revalidates its original grant. An unresponsive page contributes
+        // no evidence; main still owns its existing bounded repair authority.
+        const check = target && !suspended ? await tabReply(target.id,
+          { type: 'clf-repair-check', conversationId }, documentId ? { documentId } : undefined) : null;
+        if (check?.safe === false) continue;
         const claim = await call('/repairs/claim', { method: 'POST', body: JSON.stringify({ token }) });
         if (!claim.ok || claim.data?.allowed !== true) continue;
+        if (target && !suspended) {
+          const latest = await tabReply(target.id, { type: 'clf-repair-check', conversationId,
+            ...(check?.safe === true ? { expected: { revision: check.revision, turnId: check.turnId, questionId: check.questionId } } : {}) },
+            documentId ? { documentId } : undefined);
+          const tab = await chrome.tabs.get(target.id);
+          if (latest?.safe === false || (!check?.safe && latest?.safe === true) ||
+              tab.pendingUrl || conversationForTab(tab) !== conversationId || tabDocuments[String(target.id)] !== documentId) {
+            // No browser action occurred. Release only this exact claim; a
+            // concurrently retired episode cannot be reconstructed by this ACK.
+            await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
+            continue;
+          }
+        }
       }
       if (target) await chrome.tabs.reload(target.id);
       else {

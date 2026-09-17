@@ -58,7 +58,7 @@ const entrySchema = inputArgs.extend({
   /** One after-turn pickup earned by confirmed silence or settled Thinking failed. */
   silenceBoundary: z.object({ turnId: z.string().min(1).max(256), conversationId: z.string().min(1).max(256), workSeq: z.number().int().nonnegative(), acceptedAt: z.number().nonnegative().optional(), listenUntil: z.number().nonnegative().optional(), nativeBusy: z.boolean().optional() }).optional(),
   /** Shared unfinished-response fallback belongs to this question in every mode. */
-  recovery: z.object({ questionId: z.string(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional() }).optional(),
+  recovery: z.object({ questionId: z.string(), episode: z.string().max(200).optional(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional() }).optional(),
   /** Exact tool-free turn this explicit browser correction may interrupt. */
   directTurn: z.object({ id: z.string().min(1).max(256), startedAt: z.number() }).optional(),
   finishOwner: z.object({ turnId: z.string().min(1).max(256), periodic: z.boolean(), userRequested: z.boolean().optional() }).optional(),
@@ -809,9 +809,12 @@ export function authorizeBrowserInput(id: string, owner: string, conversationId:
       if (!companion || !session || !queuedAfterTurn({ ...companion, state: 'queued' }, session)) return false;
     }
     await commit(current.map(entry => sameDelivery(row, entry) ? { ...entry, sendAuthorizedAt: Date.now() } : entry));
+    // Recorder work is serialized independently and can arrive during the durable
+    // claim write. Keep the spent claim, but never publish stale Send permission.
+    if (row.recovery && !await recoveryCurrent(row)) return false;
     if (row.completedTurnId && row.sessionId && conversationId)
       await consumeGoalReplyForInputNow(conversationId, row.sessionId, row.completedTurnId);
-    return true;
+    return !row.recovery || await recoveryCurrent(row);
   });
 }
 /** The same outbox serialization owns mode changes and browser ACK. A late ACK
@@ -925,7 +928,7 @@ export function pendingQueuedPickups(): Promise<Array<{ conversationId: string; 
       const probe = row.silenceBoundary ? { ...row, silenceBoundary: { ...row.silenceBoundary, listenUntil: undefined } } : row;
       const sourceTurnId = await eligibleStageEnd(probe);
       if (!sourceTurnId || rows.some(other => other.sessionId === row.sessionId &&
-          (other.completedTurnId === sourceTurnId || other.state === 'browser' || other.state === 'tool'))) continue;
+          (consumedTurn(other, sourceTurnId) || other.state === 'browser' || other.state === 'tool'))) continue;
       const [end] = await readRecentEvents(row.sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
       const completed = end?.kind === 'turn_end' && end.outcome === 'completed';
       const acceptedAt = row.silenceBoundary?.acceptedAt ?? (!row.silenceBoundary && completed ? end.time : undefined);
@@ -939,6 +942,11 @@ export function pendingQueuedPickups(): Promise<Array<{ conversationId: string; 
   });
 }
 
+function consumedTurn(row: InputEntry, turnId: string): boolean {
+  return row.completedTurnId === turnId &&
+    (row.sendAuthorizedAt !== undefined || row.deliveredAt !== undefined || row.requiresAuthorization === false);
+}
+
 /** The visible outbox precedes automatic Goal work, including an ineligible head.
  * A spent completion also belongs to its user input after that row leaves the queue. */
 export function inputBeforeGoal(sessionId: string, sourceTurnId?: string): Promise<'queued' | 'consumed' | null> {
@@ -946,8 +954,7 @@ export function inputBeforeGoal(sessionId: string, sourceTurnId?: string): Promi
     const rows = await load();
     if (rows.some(row => row.sessionId === sessionId && row.purpose !== 'decision' &&
       ['queued', 'browser', 'tool'].includes(row.state))) return 'queued';
-    return sourceTurnId && rows.some(row => row.sessionId === sessionId && row.completedTurnId === sourceTurnId &&
-      (row.sendAuthorizedAt !== undefined || row.deliveredAt !== undefined || row.requiresAuthorization === false)) ? 'consumed' : null;
+    return sourceTurnId && rows.some(row => row.sessionId === sessionId && consumedTurn(row, sourceTurnId)) ? 'consumed' : null;
   });
 }
 
@@ -982,6 +989,7 @@ async function recoveryCurrent(row: InputEntry): Promise<boolean> {
       (session.activeTurnId && session.activeTurnId !== boundary.turnId) || session.finishTurn?.released) return false;
   const [end] = await readRecentEvents(row.sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
   if (end?.turnId !== boundary.turnId || (end.kind === 'turn_end' && end.outcome === 'stopped')) return false;
+  if (!await turnHasMcpCall(row.sessionId, boundary.conversationId, boundary.turnId)) return false;
   if (await readCompletedFinal(row.sessionId, boundary.conversationId)) return false;
   const question = await readLatestUserMessage(row.sessionId);
   const [work] = await readRecentEvents(row.sessionId, 1, { kinds: RECOVERY_WORK_KINDS });
@@ -991,7 +999,7 @@ async function recoveryCurrent(row: InputEntry): Promise<boolean> {
 
 /** Shared unfinished-response ticket; mode policy belongs to the bridge hook. */
 export function fileRecoveryInput(sessionId: string, conversationId: string, turnId: string, pro: boolean,
-  currentOwner: () => boolean, busyUntil = Date.now() + recoveryBusyMs(pro)): Promise<boolean> {
+  currentOwner: () => boolean, busyUntil = Date.now() + recoveryBusyMs(pro), episode = `turn:${turnId}`): Promise<boolean> {
   return serial(async () => {
     const current = await load();
     // Never overtake authored input, retry an ambiguous send, or reuse a spent source.
@@ -1000,12 +1008,12 @@ export function fileRecoveryInput(sessionId: string, conversationId: string, tur
     const [work] = await readRecentEvents(sessionId, 1, { kinds: RECOVERY_WORK_KINDS });
     if (!question?.messageId || !work || !currentOwner()) return false;
     if (current.some(row => row.sessionId === sessionId && row.recovery && row.silenceBoundary?.turnId === turnId &&
-        (row.silenceBoundary.workSeq === workSequence(work) || row.sendAuthorizedAt !== undefined))) return false;
+        (!row.recovery.episode || row.recovery.episode === episode || row.sendAuthorizedAt !== undefined))) return false;
     const now = Date.now();
     const row: InputEntry = { id: randomUUID(), sessionId, conversationId, owner: null, state: 'queued',
       mode: 'after-turn', dueAt: now, createdAt: now, model: null, reasoningEffort: null,
       text: recoveryMessage(),
-      recovery: { questionId: question.messageId, pro, busyUntil, phase: 'ready' },
+      recovery: { questionId: question.messageId, episode, pro, busyUntil, phase: 'ready' },
       silenceBoundary: { turnId, conversationId, workSeq: workSequence(work), acceptedAt: now } };
     if (!await recoveryCurrent(row) || !currentOwner()) return false;
     await commit(append(current, row));
@@ -1032,7 +1040,9 @@ export function advanceRecoveryInput(id: string, owner: string, conversationId: 
           deliveryText: undefined, recovery: { ...row.recovery, phase: 'resumed', reloadOwner: owner } }
       : { ...row, recovery: { ...row.recovery, phase: action === 'stop' ? 'stopping' : 'resumed' } };
     await commit(current.map(entry => entry === row ? next : entry));
-    return true;
+    // Recording can accept resumed work while this write is pending. A written
+    // Stop claim is spent even when its permission was revoked before publication.
+    return recoveryCurrent(next);
   });
 }
 
@@ -1049,7 +1059,7 @@ export function fileSilenceInput(sessionId: string, conversationId: string, turn
     if (!boundary || boundary.turnId !== turnId || (boundary.kind !== 'turn_start' && boundary.kind !== 'turn_end')) return false;
     if (!await turnHasMcpCall(sessionId, conversationId, turnId) || !currentOwner()) return false;
     if (current.some(row => row.sessionId === sessionId &&
-      (row.completedTurnId === turnId || (row.silenceBoundary?.turnId === turnId && row.state === 'browser')))) return true;
+      (consumedTurn(row, turnId) || (row.silenceBoundary?.turnId === turnId && row.state === 'browser')))) return true;
     if (current.some(row => row.sessionId === sessionId && (row.state === 'browser' || row.state === 'tool'))) return false;
     const candidates = ordered(current).filter(row => row.sessionId === sessionId && row.state === 'queued');
     const row = candidates.find(row => manualInput(row) && row.offeredAt === undefined && row.dueAt <= Date.now()) ?? candidates.find(queuedFollowup);
@@ -1122,7 +1132,7 @@ async function completedStageBoundary(entry: InputEntry, current: InputEntry[]):
   // A deferred ticket still owns this boundary. Later queue rows cannot overtake it.
   if (current.some(row => row !== entry && row.sessionId === entry.sessionId && row.state === 'queued' &&
       row.silenceBoundary?.turnId === turnId)) return null;
-  if (current.some(row => row.sessionId === entry.sessionId && (row.completedTurnId === turnId || row.state === 'tool' || row.state === 'browser'))) return null;
+  if (current.some(row => row.sessionId === entry.sessionId && (consumedTurn(row, turnId) || row.state === 'tool' || row.state === 'browser'))) return null;
   if (current.some(row => row.sessionId === entry.sessionId && !queuedFollowup(row) && row.purpose !== 'decision' &&
       row.dueAt <= Date.now() && ['queued', 'browser', 'tool'].includes(row.state))) return null;
   return turnId;
