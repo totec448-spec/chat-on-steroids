@@ -93,10 +93,11 @@ function captureRow(id: string, state: CaptureState, meta: string, copyValue: st
   row.className = `connection-advanced-row is-${state}`;
   const value = row.querySelector<HTMLElement>('.meta')!;
   ui(value, 'textContent', () => t(meta));
-  ui(value, 'title', () => copyValue ?? t(meta));
-  if (value instanceof HTMLButtonElement) {
-    value.disabled = !copyValue;
-    value.dataset.copyValue = copyValue ?? '';
+  ui(row, 'title', () => copyValue ?? t(meta));
+  const copy = row.querySelector<HTMLButtonElement>('button.copy');
+  if (copy) {
+    copy.disabled = !copyValue;
+    copy.dataset.copyValue = copyValue ?? '';
   }
 }
 
@@ -397,7 +398,7 @@ export function initConnectionAdvanced(): ConnectionAdvancedController {
   };
 
   for (const id of ['connectionAdvancedChat', 'connectionAdvancedRequest']) {
-    const button = $(id).querySelector<HTMLButtonElement>('button.meta')!;
+    const button = $(id).querySelector<HTMLButtonElement>('button.copy')!;
     button.addEventListener('click', () => {
       const value = button.dataset.copyValue;
       if (!value) return;

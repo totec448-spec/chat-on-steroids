@@ -546,6 +546,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
 
 const STATUS_TEXT: Record<AppState['status']['state'], string> = {
   disconnected: "Not connected",
+  disconnecting: "Disconnecting",
   'starting-server': "Starting",
   'connecting-tunnel': "Connecting",
   connected: "Connected",
@@ -968,7 +969,8 @@ function apply(next: AppState): void {
 
   const connected = status.state === 'connected';
   const offline = status.state === 'offline';
-  const busy = status.state === 'starting-server' || status.state === 'connecting-tunnel';
+  const disconnecting = status.state === 'disconnecting';
+  const busy = disconnecting || status.state === 'starting-server' || status.state === 'connecting-tunnel';
   const failed = status.state === 'auth-failed' || status.state === 'tunnel-unavailable';
   const running = isRunning(status.state);
   const missing = missingStep(next);
@@ -981,7 +983,7 @@ function apply(next: AppState): void {
   const wasVisible = !headerConnect.hidden;
   headerConnect.hidden = connected;
   headerConnect.disabled = busy;
-  ui(headerConnect, 'textContent', () => busy ? t('Connecting…') : t('Connect'));
+  ui(headerConnect, 'textContent', () => disconnecting ? t('Disconnecting…') : busy ? t('Connecting…') : t('Connect'));
   if (connected && wasVisible && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) $('sidebarConnection').animate([
     { boxShadow: '0 0 0 0 var(--green)' }, { boxShadow: '0 0 0 12px transparent' }
   ], { duration: 850, iterations: 2 });
@@ -1002,8 +1004,8 @@ function apply(next: AppState): void {
       : (status.publicUrl ?? status.localUrl ?? config.tunnel.kind));
 
   const connectBtn = $<HTMLButtonElement>('connectionPopoverToggle');
-  ui(connectBtn, 'textContent', () => running ? t("Disconnect") : t("Connect"));
-  connectBtn.disabled = !running && missing !== null;
+  ui(connectBtn, 'textContent', () => disconnecting ? t('Disconnecting…') : running ? t("Disconnect") : t("Connect"));
+  connectBtn.disabled = disconnecting || (!running && missing !== null);
   connectBtn.title = !running && missing ? missing.text : '';
 
   ui($('connectionPopoverExtension'), 'textContent', () => next.bridge.extensionVersion
@@ -1112,9 +1114,9 @@ function apply(next: AppState): void {
   $<HTMLButtonElement>('removeApiKey').disabled = !next.hasApiKey || !secureStorageAvailable;
 
   const wizConnect = $<HTMLButtonElement>('wizConnect');
-  ui(wizConnect, 'textContent', () => running ? t("Disconnect") : t("Connect"));
+  ui(wizConnect, 'textContent', () => disconnecting ? t('Disconnecting…') : running ? t("Disconnect") : t("Connect"));
   wizConnect.disabled = connectBtn.disabled;
-  ui($('wizStatus'), 'textContent', () => running || failed ? status.detail || t(STATUS_TEXT[status.state]) : '');
+  ui($('wizStatus'), 'textContent', () => running || failed || disconnecting ? status.detail || t(STATUS_TEXT[status.state]) : '');
 
   $('chatgptConn').replaceChildren(
     openai
@@ -1384,6 +1386,7 @@ function paintClock(): void {
   const { status, bridge } = state;
   const running = isRunning(status.state);
   const connected = status.state === 'connected';
+  const disconnecting = status.state === 'disconnecting';
 
   const handshake = $('bigHandshake');
   handshake.textContent = shortAgo(status.handshakeAt);
@@ -1394,22 +1397,26 @@ function paintClock(): void {
   request.className = status.lastRequestAt === null ? 'is-cold' : '';
 
   const core = status.surfaces.find((surface) => surface.id === 'core');
-  ui($('connectionPopoverConnector'), 'textContent', () => !running
+  ui($('connectionPopoverConnector'), 'textContent', () => disconnecting ? t('Disconnecting…') : !running
     ? t("Not connected")
     : core?.lastRequestAt
       ? t("Reached")
       : connected
-        ? t("Waiting for ChatGPT")
+        ? t("waiting")
         : t(STATUS_TEXT[status.state]));
   ui($('connectionPopoverBrowser'), 'textContent', () => bridge.present
     ? t("Connected")
     : bridge.paired ? t("Paired · not active") : t("Not connected"));
 
-  ui($('connectionPopoverConnector'), 'title', () => core?.lastRequestAt ? t("Reached {0}", [ago(core.lastRequestAt)]) : $('connectionPopoverConnector').textContent ?? '');
-  ui($('connectionPopoverBrowser'), 'title', () => bridge.lastSeenAt ? t("Seen {0}", [ago(bridge.lastSeenAt)]) : $('connectionPopoverBrowser').textContent ?? '');
+  const connectorRow = $('connectionPopoverConnector').parentElement!;
+  const browserRow = $('connectionPopoverBrowser').parentElement!;
+  connectorRow.dataset.tone = connected ? 'ok' : disconnecting || status.state === 'starting-server' || status.state === 'connecting-tunnel' ? 'wait' : 'bad';
+  browserRow.dataset.tone = bridge.present ? 'ok' : bridge.paired ? 'wait' : 'bad';
+  ui(connectorRow, 'title', () => core?.lastRequestAt ? t("Reached {0}", [ago(core.lastRequestAt)]) : $('connectionPopoverConnector').textContent ?? '');
+  ui(browserRow, 'title', () => bridge.lastSeenAt ? t("Seen {0}", [ago(bridge.lastSeenAt)]) : $('connectionPopoverBrowser').textContent ?? '');
   $('connectionPopoverVerified').hidden = connected;
-  ui($('connectionPopoverTitle'), 'title', () => status.handshakeAt !== null ? t("verified {0}", [ago(status.handshakeAt)]) : t("no handshake yet"));
-  ui($('connectionPopoverVerified'), 'textContent', () => running
+  ui($('connectionPopoverTitle'), 'title', () => disconnecting ? t('Closing connection…') : status.handshakeAt !== null ? t("verified {0}", [ago(status.handshakeAt)]) : t("no handshake yet"));
+  ui($('connectionPopoverVerified'), 'textContent', () => disconnecting ? t('Closing connection…') : running
     ? status.handshakeAt === null
       ? t("no handshake yet")
       : t("verified {0}", [ago(status.handshakeAt)])
@@ -1616,7 +1623,7 @@ async function dropFolders(event: DragEvent): Promise<void> {
 }
 
 async function toggleConnection(): Promise<void> {
-  if (!state) return;
+  if (!state || state.status.state === 'disconnecting') return;
   // Mirrors the button label exactly, so a click always does what it says.
   const next = await run(isRunning(state.status.state) ? api.disconnect() : api.connect());
   if (next) apply(next);

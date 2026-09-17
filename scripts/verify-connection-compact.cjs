@@ -21,14 +21,17 @@ app.whenReady().then(async () => {
       const $ = id => document.getElementById(id);
       ${relocation}
       document.documentElement.dataset.theme = 'dark';
+      document.documentElement.dataset.translucentSidebar = 'true';
+      document.documentElement.style.setProperty('--sidebar-color', '#1a2129');
       const popup = $('connectionPopover');
       popup.hidden = false;
       popup.classList.add('is-connected');
       popup.style.left = '100px';
       $('connectionPopoverTitle').textContent = 'Connected';
       $('connectionPopoverToggle').textContent = 'Disconnect';
-      $('connectionPopoverConnector').textContent = 'Waiting for ChatGPT';
+      $('connectionPopoverConnector').textContent = 'waiting';
       $('connectionPopoverBrowser').textContent = 'Connected';
+      for (const row of document.querySelectorAll('.connection-popover-row')) row.dataset.tone = 'ok';
       $('connectionPopoverExtension').textContent = 'v2.1.13';
       for (const row of document.querySelectorAll('.connection-advanced-row')) row.classList.add('is-ok');
       $('connectionAdvancedApp').querySelector('.meta').textContent = 'ID confirmed';
@@ -40,19 +43,19 @@ app.whenReady().then(async () => {
         const popup = document.getElementById('connectionPopover');
         const rect = popup.getBoundingClientRect();
         const style = getComputedStyle(popup);
-        const clipped = [...popup.querySelectorAll('.connection-popover-row > span')].filter(el => el.scrollWidth > el.clientWidth).map(el => el.textContent);
+        const clipped = [...popup.querySelectorAll('.connection-popover-row > span:not(.sr-only)')].filter(el => el.scrollWidth > el.clientWidth).map(el => el.textContent);
         const summary = document.querySelector('#connectionAdvanced > summary');
         return { width: rect.width, height: rect.height, clipped, blur: style.backdropFilter,
           summaryHit: summary.contains(document.elementFromPoint(summary.getBoundingClientRect().x + 12, summary.getBoundingClientRect().y + 12)),
           pipelineHidden: !document.getElementById('connectionPipeline').checkVisibility(),
           x: rect.x, y: rect.y };
       })()`);
-      assert.equal(result.width, 220);
-      assert.ok(result.height < (open ? 360 : 160), JSON.stringify(result));
+      assert.equal(result.width, 160);
+      assert.ok(result.height <= (open ? 580 : 220), JSON.stringify(result));
       assert.deepEqual(result.clipped, []);
       assert.equal(result.summaryHit, true);
       assert.equal(result.pipelineHidden, true);
-      assert.equal(result.blur, 'blur(18px)');
+      assert.equal(result.blur, 'blur(22px) saturate(1.25)');
       results.push({ open, ...result });
       await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
       const png = await win.webContents.capturePage({ x: result.x - 20, y: result.y - 20, width: result.width + 40, height: Math.ceil(result.height) + 40 });
@@ -60,6 +63,18 @@ app.whenReady().then(async () => {
     }
     await win.webContents.executeJavaScript(`document.getElementById('connectionRuntime').open = true`);
     assert.equal(await win.webContents.executeJavaScript(`document.getElementById('connectionPipeline').checkVisibility()`), true);
+    // Both surfaces share custom tint and the same translucent/opaque preference.
+    for (const color of ['#35234c', '#eef4ff']) for (const translucent of [true, false]) {
+      const themed = await win.webContents.executeJavaScript(`(() => {
+        document.documentElement.style.setProperty('--sidebar-color', '${color}');
+        document.documentElement.dataset.translucentSidebar = '${translucent}';
+        const popup = document.getElementById('connectionPopover');
+        const actual = getComputedStyle(popup), expected = getComputedStyle(document.querySelector('.sidebar'));
+        const same = actual.background === expected.background && actual.backdropFilter === expected.backdropFilter;
+        return { same, width: popup.getBoundingClientRect().width, overflow: popup.scrollWidth > popup.clientWidth };
+      })()`);
+      assert.deepEqual(themed, { same: true, width: 160, overflow: false });
+    }
     fs.mkdirSync(output, { recursive: true });
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));
     console.log('Compact connection layout passed: ' + JSON.stringify(results));

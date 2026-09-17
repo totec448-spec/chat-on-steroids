@@ -57,8 +57,8 @@ const entrySchema = inputArgs.extend({
   toolImages: inputArgs.shape.images,
   /** One after-turn pickup earned by confirmed silence or settled Thinking failed. */
   silenceBoundary: z.object({ turnId: z.string().min(1).max(256), conversationId: z.string().min(1).max(256), workSeq: z.number().int().nonnegative(), acceptedAt: z.number().nonnegative().optional(), listenUntil: z.number().nonnegative().optional(), nativeBusy: z.boolean().optional() }).optional(),
-  /** Generated fallback belongs to this question, never to a later turn or Goal/Loop. */
-  recovery: z.object({ questionId: z.string(), epoch: z.string(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional() }).optional(),
+  /** Shared unfinished-response fallback belongs to this question in every mode. */
+  recovery: z.object({ questionId: z.string(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional() }).optional(),
   /** Exact tool-free turn this explicit browser correction may interrupt. */
   directTurn: z.object({ id: z.string().min(1).max(256), startedAt: z.number() }).optional(),
   finishOwner: z.object({ turnId: z.string().min(1).max(256), periodic: z.boolean(), userRequested: z.boolean().optional() }).optional(),
@@ -414,10 +414,14 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
     // how long ChatGPT takes to assign its durable conversation identity.
     const companion = current.find(other => other.id === row.companionInputId);
     if (row.state === 'browser' && row.sendAuthorizedAt === undefined && row.requiresAuthorization === true &&
-        Date.now() - (row.offeredAt ?? row.createdAt) >= (row.attachments?.length || companion?.attachments?.length ? 720_000 : row.images?.length || companion?.images?.length ? 120_000 : 60_000))
+        Date.now() - (row.offeredAt ?? row.createdAt) >= (row.attachments?.length || companion?.attachments?.length ? 720_000 : row.images?.length || companion?.images?.length ? 120_000 : 60_000)) {
+      // A never-authorized Continue still owes delivery. Retain its ticket and
+      // pickup budget, but never replay a possibly consumed Stop after losing a page.
+      if (row.recovery) return releaseRecoveryClaim(row);
       return { ...row, state: 'cancelled', error: row.requiresAuthorization && row.sendAuthorizedAt === undefined
         ? 'Not sent: browser preparation timed out. This attempt was cancelled.'
         : 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.' };
+    }
     return row;
   }));
   for (let i = 0; i < next.length; i++) {
@@ -962,13 +966,14 @@ export function finishNeedsBrowserInput(sessionId: string): Promise<boolean> {
 // Control-only turn_end observations (including our own Stop) are not renewed work.
 const RECOVERY_WORK_KINDS: import('../../shared/session.js').SessionEvent['kind'][] =
   ['user_message', 'assistant_message', 'tool_call', 'page_tool', 'turn_start'];
-const recoveryEpoch = randomUUID(); // Browser-repair authority is never restored from historical input.
-
+function releaseRecoveryClaim(row: InputEntry): InputEntry {
+  return { ...row, state: 'queued', owner: null, offeredAt: undefined, completedTurnId: undefined,
+    recovery: { ...row.recovery!, phase: row.recovery!.phase === 'ready' ? 'ready' : 'resumed' } };
+}
 async function recoveryCurrent(row: InputEntry): Promise<boolean> {
   const boundary = row.silenceBoundary;
-  if (!row.recovery || row.recovery.epoch !== recoveryEpoch || !row.sessionId || !boundary) return false;
-  const allowed = () => getConfig().ui.autoContinue !== false &&
-    deliveryHooks?.recoveryAllowed?.(row.sessionId!, boundary.conversationId) === true &&
+  if (!row.recovery || !row.sessionId || !boundary || Date.now() - row.createdAt >= 12 * 60 * 60_000) return false;
+  const allowed = () => deliveryHooks?.recoveryAllowed?.(row.sessionId!, boundary.conversationId) === true &&
     !isChatBlocked(boundary.conversationId) && inFlightToolCalls(boundary.conversationId) === 0;
   if (!allowed()) return false;
   const session = await getSession(row.sessionId);
@@ -984,7 +989,7 @@ async function recoveryCurrent(row: InputEntry): Promise<boolean> {
     allowed() && (await getSession(row.sessionId))?.conversationId === boundary.conversationId;
 }
 
-/** Only a confirmed live silence repair may generate this ordinary-chat fallback. */
+/** Shared unfinished-response ticket; mode policy belongs to the bridge hook. */
 export function fileRecoveryInput(sessionId: string, conversationId: string, turnId: string, pro: boolean,
   currentOwner: () => boolean, busyUntil = Date.now() + recoveryBusyMs(pro)): Promise<boolean> {
   return serial(async () => {
@@ -1000,7 +1005,7 @@ export function fileRecoveryInput(sessionId: string, conversationId: string, tur
     const row: InputEntry = { id: randomUUID(), sessionId, conversationId, owner: null, state: 'queued',
       mode: 'after-turn', dueAt: now, createdAt: now, model: null, reasoningEffort: null,
       text: recoveryMessage(),
-      recovery: { questionId: question.messageId, epoch: recoveryEpoch, pro, busyUntil, phase: 'ready' },
+      recovery: { questionId: question.messageId, pro, busyUntil, phase: 'ready' },
       silenceBoundary: { turnId, conversationId, workSeq: workSequence(work), acceptedAt: now } };
     if (!await recoveryCurrent(row) || !currentOwner()) return false;
     await commit(append(current, row));
@@ -1008,8 +1013,8 @@ export function fileRecoveryInput(sessionId: string, conversationId: string, tur
   });
 }
 
-/** Each destructive browser step consumes its exact durable claim once. Losing a
- * response never licenses another Stop/reload. The replacement document owns Send. */
+/** Stop consumes an exact durable claim once; the same document then sends.
+ * Only the shared pickup schedule may reload a ticket that remains uncollected. */
 export function advanceRecoveryInput(id: string, owner: string, conversationId: string,
   action: 'stop' | 'stopped' | 'reloaded'): Promise<boolean> {
   return serial(async () => {
@@ -1025,7 +1030,7 @@ export function advanceRecoveryInput(id: string, owner: string, conversationId: 
     const next: InputEntry = action === 'reloaded'
       ? { ...row, state: 'queued', owner: null, offeredAt: undefined, completedTurnId: undefined,
           deliveryText: undefined, recovery: { ...row.recovery, phase: 'resumed', reloadOwner: owner } }
-      : { ...row, recovery: { ...row.recovery, phase: action === 'stop' ? 'stopping' : 'reloading' } };
+      : { ...row, recovery: { ...row.recovery, phase: action === 'stop' ? 'stopping' : 'resumed' } };
     await commit(current.map(entry => entry === row ? next : entry));
     return true;
   });
@@ -1154,6 +1159,7 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     const current = await load();
     const entry = current.find((row) => row.id === id);
     if (!entry || !preparable(entry) || (entry.state === 'browser' && !requiresAuthorization) || entry.dueAt > Date.now() || !owner) return null;
+    if (entry.recovery && entry.state === 'browser' && entry.owner !== owner) return null;
     if (entry.recovery?.reloadOwner === owner) return null;
     if (companionOf(current, entry)) return null;
     const completedTurnId = entry.state === 'browser' ? entry.completedTurnId : queuedFollowup(entry)
@@ -1416,6 +1422,10 @@ export function failBrowserInput(id: string, owner: string, error: string): Prom
     const current = await load();
     const entry = current.find((row) => row.id === id && row.owner === owner && row.state === 'browser');
     if (!entry || companionOf(current, entry)) return false;
+    if (entry.recovery && entry.requiresAuthorization === true && entry.sendAuthorizedAt === undefined) {
+      await commit(current.map(row => row === entry ? releaseRecoveryClaim(row) : row));
+      return true;
+    }
     const pickupCancelled = !!(entry.silenceBoundary || entry.completedTurnId) && entry.requiresAuthorization === true &&
       entry.sendAuthorizedAt === undefined && error === 'After-turn pickup was withdrawn before Send.';
     // Losing a document before Send does not lose a still-valid refresh ticket.

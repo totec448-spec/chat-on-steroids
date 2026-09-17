@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => {
     report: null as null | ((report: Record<string, unknown>) => void),
     starts: 0,
     prewarm: vi.fn(async () => undefined),
-    endpointStop: vi.fn(async (_options?: { forceAfterMs?: number }) => undefined),
+    endpointStop: vi.fn(async (_options?: { forceAfterMs?: number }): Promise<void> => undefined),
     publication: vi.fn((surface: string, observe: (name: string, version: string, instructions: string, tools: unknown[]) => void) => observe(`Chat On Steroids ${surface}`, '1', 'instructions', [])),
     endpointStartGate: null as Promise<void> | null,
     endpointStartReached: vi.fn(),
@@ -217,6 +217,66 @@ describe('connection surface state', () => {
     expect(mocks.endpointStop).toHaveBeenLastCalledWith({ forceAfterMs: 30_000 });
   });
 
+  it('publishes Disconnect immediately and coalesces 100 clicks while accepted work drains', async () => {
+    const connection = await import('../src/main/connection.js');
+    await connection.connect();
+    let release!: () => void;
+    mocks.endpointStop.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+    const stopping = connection.disconnect();
+    expect(connection.getStatus().state).toBe('disconnecting');
+    for (let click = 0; click < 100; click++) expect(connection.disconnect()).toBe(stopping);
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    mocks.report?.({ state: 'connected', detail: 'late health report' });
+    expect(connection.getStatus().state).toBe('disconnecting');
+    expect(mocks.tunnelStop).not.toHaveBeenCalled();
+    release();
+    await stopping;
+    expect(mocks.endpointStop).toHaveBeenCalledTimes(1);
+    expect(mocks.tunnelStop).toHaveBeenCalledTimes(1);
+    expect(connection.getStatus().state).toBe('disconnected');
+    await connection.connect();
+    expect(connection.getStatus().state).toBe('connected');
+  });
+
+  it('lets final shutdown bound the ordinary drain already ahead of it in the lifecycle queue', async () => {
+    const connection = await import('../src/main/connection.js');
+    await connection.connect();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    mocks.endpointStop.mockImplementationOnce(() => gate);
+    const stopping = connection.disconnect();
+    await vi.waitFor(() => expect(mocks.endpointStop).toHaveBeenCalledTimes(1));
+    mocks.endpointStop.mockImplementationOnce(async (options) => {
+      expect(options).toEqual({ forceAfterMs: 30_000 });
+      release();
+    });
+    await connection.shutdownConnection();
+    await stopping;
+    expect(connection.getStatus().state).toBe('disconnected');
+  });
+
+  it('cancels a queued Connect and permits an explicit Connect after Disconnect', async () => {
+    const connection = await import('../src/main/connection.js');
+    const connecting = connection.connect();
+    const stopping = connection.disconnect();
+    await Promise.all([connecting, stopping]);
+    expect(mocks.starts).toBe(0);
+    const disconnecting = connection.disconnect();
+    const reconnecting = connection.connect();
+    await Promise.all([disconnecting, reconnecting]);
+    expect(connection.getStatus().state).toBe('connected');
+  });
+
+  it('bounds Disconnect when final shutdown arrives before its queued drain starts', async () => {
+    const connection = await import('../src/main/connection.js');
+    await connection.connect();
+    const stopping = connection.disconnect();
+    const shutdown = connection.shutdownConnection();
+    await Promise.all([stopping, shutdown]);
+    expect(mocks.endpointStop).toHaveBeenCalledWith({ forceAfterMs: 30_000 });
+    expect(connection.getStatus().state).toBe('disconnected');
+  });
+
   it('cancels an MCP endpoint that finishes starting after final shutdown was requested', async () => {
     let releaseEndpoint!: () => void;
     mocks.endpointStartGate = new Promise<void>((resolve) => {
@@ -269,6 +329,26 @@ describe('connection surface state', () => {
 
     expect(mocks.starts).toBe(0);
     expect(mocks.endpointStop).toHaveBeenCalledWith({ forceAfterMs: 30_000 });
+    expect(connection.getStatus().state).toBe('disconnected');
+  });
+
+  it('cancels tunnel startup through the same graceful endpoint-before-tunnel drain', async () => {
+    let releaseTunnel!: () => void;
+    mocks.tunnelStartGate = new Promise<void>(resolve => { releaseTunnel = resolve; });
+    const connection = await import('../src/main/connection.js');
+    const connecting = connection.connect();
+    await vi.waitFor(() => expect(mocks.tunnelStartReached).toHaveBeenCalledTimes(1));
+    let releaseDrain!: () => void;
+    mocks.endpointStop.mockImplementationOnce(() => new Promise<void>(resolve => { releaseDrain = resolve; }));
+    const stopping = connection.disconnect();
+    releaseTunnel();
+    await vi.waitFor(() => expect(releaseDrain).toBeTypeOf('function'));
+    expect(mocks.endpointStop).toHaveBeenLastCalledWith();
+    expect(mocks.tunnelStop).not.toHaveBeenCalled();
+    expect(connection.getStatus().state).toBe('disconnecting');
+    releaseDrain();
+    await Promise.all([connecting, stopping]);
+    expect(mocks.tunnelStop).toHaveBeenCalledTimes(1);
     expect(connection.getStatus().state).toBe('disconnected');
   });
 

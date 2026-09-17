@@ -1595,7 +1595,7 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   ]);
   if (entry.nextSeq !== revision || entry.queue !== queue || entry.summary.conversationId !== conversationId) return null;
   const final = recent.findLast(event => event.kind === 'assistant_message' && event.final === true &&
-    !!event.message.text.trim() && !!event.messageId && (!turnId || event.turnId === turnId ||
+    (!!event.message.text.trim() || !!event.providerMessageId) && !!event.messageId && (!turnId || event.turnId === turnId ||
       (turnId.startsWith('reply:') && event.messageId === turnId.slice(6))));
   if (!final || final.kind !== 'assistant_message' || !final.messageId) return null;
   const seq = final.finalContentSeq ?? positionOf(final);

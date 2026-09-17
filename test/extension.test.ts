@@ -825,8 +825,8 @@ describe('accepted helper tab cleanup', () => {
   }
 });
 
-describe('automatic Continue reload custody', () => {
-  it.each(['accepted', 'draft', 'navigated', 'rejected'] as const)('reloads only the authorized stopped document (%s)', async outcome => {
+describe('automatic Continue shares scheduled reload custody', () => {
+  it.each(['accepted', 'draft', 'navigated', 'rejected'] as const)('never reloads immediately after Stop (%s)', async outcome => {
     const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     let url = `https://chatgpt.com/c/${chat}`;
     const actions: string[] = [];
@@ -857,11 +857,11 @@ describe('automatic Continue reload custody', () => {
     const message = { type: 'desktop_input', id: 'ffffffff-1111-4222-8333-444444444444',
       owner: '1:document-1-0:0', conversationId: chat, recoveryAction: 'stopped' };
     await worker.send(message);
-    expect(worker.tabsReload).toHaveBeenCalledTimes(outcome === 'accepted' ? 1 : 0);
-    expect(actions.includes('reloaded')).toBe(outcome === 'accepted');
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(actions.includes('reloaded')).toBe(false);
     if (outcome === 'accepted') {
       await worker.send(message);
-      expect(worker.tabsReload).toHaveBeenCalledTimes(1);
+      expect(worker.tabsReload).not.toHaveBeenCalled();
     }
   });
 });
@@ -1948,6 +1948,70 @@ describe('extension command delivery', () => {
     ]);
   });
 
+  it.each(['healthy', 'missing', 'loading', 'discarded', 'frozen', 'navigated'] as const)(
+    'repairs missing recorders through maintenance without opening or reloading (%s)', async scenario => {
+      const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+      const fetch = vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') return response(200, { ok: true, repairs: [], commandIds: [] });
+        return response(404, {});
+      });
+      const tab = { id: 41, url: `https://chatgpt.com/c/${chat}`,
+        ...(scenario === 'loading' ? { status: 'loading' } : {}),
+        ...(scenario === 'discarded' ? { discarded: true } : {}),
+        ...(scenario === 'frozen' ? { frozen: true } : {}) };
+      const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+        tabsQuery: async () => [tab],
+        tabsGet: async () => scenario === 'navigated' ? { id: 41, url: 'https://example.com/' } : tab });
+      if (scenario === 'healthy') worker.tabsSendMessage.mockResolvedValue({ ok: true, recorderVersion: 13 });
+      // Startup restoration is a separate path; exercise the later maintenance pass.
+      await worker.installed('update');
+      worker.scriptingExecuteScript.mockClear();
+      worker.scriptingInsertCSS.mockClear();
+      await worker.fireAlarm();
+      if (scenario === 'healthy' || scenario === 'missing') {
+        await vi.waitFor(() => expect(worker.scriptingExecuteScript).toHaveBeenCalledWith({
+          target: { tabId: 41 }, world: 'MAIN', files: ['fiber.js']
+        }));
+        if (scenario === 'missing') await vi.waitFor(() => expect(worker.scriptingInsertCSS).toHaveBeenCalled());
+      } else expect(worker.scriptingExecuteScript).not.toHaveBeenCalled();
+      const calls = worker.scriptingExecuteScript.mock.calls.length;
+      await worker.fireAlarm();
+      expect(worker.scriptingExecuteScript).toHaveBeenCalledTimes(calls);
+      expect(worker.tabsCreate).not.toHaveBeenCalled();
+      expect(worker.tabsReload).not.toHaveBeenCalled();
+    });
+
+  it.each(['live', 'retired', 'expired', 'foreign-chat', 'unknown-policy'] as const)(
+    'keeps command tab custody through conversation promotion and MV3 restoration (%s)', async scenario => {
+      const CHAT = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+      let commandIds: string[] | undefined = scenario === 'unknown-policy' ? undefined : ['cmd-handoff'];
+      const fetch = vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') return response(200, { ok: true, repairs: [], commandIds });
+        return response(404, {});
+      });
+      const session = new FakeStorageArea({ discardProtectedTabs: { '71': {
+        commandId: 'cmd-handoff', at: Date.now() - (scenario === 'expired' ? 31 * 60_000 : 0),
+        conversationId: scenario === 'foreign-chat' ? 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' : null
+      } } });
+      const worker = loadWorker({ local: new FakeStorageArea(paired), session, fetch });
+      await worker.createTab({ id: 71, url: `https://chatgpt.com/c/${CHAT}`, autoDiscardable: false });
+      if (scenario === 'retired') commandIds = [];
+      await worker.fireAlarm();
+      const releases = () => worker.tabsUpdate.mock.calls.filter(call =>
+        (call[1] as { autoDiscardable?: boolean })?.autoDiscardable === true);
+      expect(releases()).toHaveLength(scenario === 'live' ? 0 : 1);
+      if (scenario === 'live') {
+        expect(session.data.discardProtectedTabs).toMatchObject({ '71': { commandId: 'cmd-handoff', conversationId: CHAT } });
+        commandIds = [];
+        await worker.fireAlarm();
+        expect(releases()).toEqual([[71, { autoDiscardable: true }]]);
+      }
+    });
+
   it('keeps a live recorder but revalidates the idempotent MAIN-world Fiber helper', async () => {
     const local = new FakeStorageArea(paired);
     const session = new FakeStorageArea();
@@ -1957,7 +2021,7 @@ describe('extension command delivery', () => {
 
     await worker.installed('update');
 
-    expect(worker.tabsSendMessage).toHaveBeenCalledWith(41, { type: 'clf-recorder-ping' });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(41, { type: 'clf-recorder-ping' }, undefined);
     expect(worker.scriptingExecuteScript.mock.calls).toEqual([
       [{ target: { tabId: 41 }, world: 'MAIN', files: ['fiber.js'] }]
     ]);

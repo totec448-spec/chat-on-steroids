@@ -536,11 +536,11 @@ it('keeps global connection controls in a compact sidebar popover', async () => 
     x: 200, y: 700, left: 200, top: 700, right: 236, bottom: 736, width: 36, height: 36,
     toJSON: () => ({})
   } as DOMRect);
-  vi.spyOn(popover, 'getBoundingClientRect').mockReturnValue({ width: 220 } as DOMRect);
+  vi.spyOn(popover, 'getBoundingClientRect').mockReturnValue({ width: 160 } as DOMRect);
   trigger.click();
   expect(popover.hidden).toBe(false);
   expect(trigger.getAttribute('aria-expanded')).toBe('true');
-  expect(popover.style.left).toBe('108px');
+  expect(popover.style.left).toBe('138px');
   expect(popover.parentElement).toBe(doc.body);
   expect(doc.getElementById('connectionPopoverSettings')).toBeNull();
   const advanced = doc.getElementById('connectionAdvanced') as HTMLDetailsElement;
@@ -551,7 +551,9 @@ it('keeps global connection controls in a compact sidebar popover', async () => 
   expect(runtime.open).toBe(false);
   expect(doc.getElementById('connectionPopoverConnector')!.textContent).toMatch(/Reached/i);
   expect(doc.getElementById('connectionPopoverBrowser')!.textContent).toBe('Connected');
-  expect(doc.getElementById('connectionPopoverBrowser')!.title).toMatch(/Seen/i);
+  expect(doc.getElementById('connectionPopoverBrowser')!.parentElement!.title).toMatch(/Seen/i);
+  expect(doc.getElementById('connectionPopoverBrowser')!.classList.contains('sr-only')).toBe(true);
+  expect(doc.getElementById('connectionPopoverBrowser')!.parentElement!.dataset.tone).toBe('ok');
   expect(doc.getElementById('connectionPopoverVerified')!.hidden).toBe(true);
   expect(doc.getElementById('connectionPopoverTitle')!.title).toMatch(/verified/i);
   expect(doc.getElementById('connectionPipeline')!.closest('details')).toBe(runtime);
