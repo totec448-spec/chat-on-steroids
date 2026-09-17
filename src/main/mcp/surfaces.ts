@@ -92,11 +92,10 @@ export interface SurfaceDefinition {
  *    it here. A dedicated connector for one conditional schema is pure setup overhead with
  *    no discovery benefit.
  *
- *  - `remote_steering` is the Command Center signed-operation bridge, and it is registered
- *    only when the operator has switched that bridge on *and* multi-agent mode is exposed —
- *    both of its actions are about a worker run, so it can never be the reason a model sees
- *    worker vocabulary on an install that turned workers off. Off on every fresh install, so
- *    the overwhelming majority of endpoints never advertise it at all.
+ *  - `remote_steering` and `frontier_longrun` are governed Command Center bridges. They are
+ *    registered only when the operator exposes Remote Steering. The latter is the narrow normal
+ *    phone surface: semantic Longrun intent in, locally-issued signed operation out. Neither
+ *    derives authority from caller identity or generic command permission.
  *
  * Each surface also exposes JavaScript exec, restricted to that surface's own tools.
  * `find` and the exec pair are mutually exclusive — `find` exists only when command
@@ -127,6 +126,7 @@ const CORE: SurfaceDefinition = {
     'update_plan',
     'agents',
     'remote_steering',
+    'frontier_longrun',
     'session_finish',
     'exec'
   ]

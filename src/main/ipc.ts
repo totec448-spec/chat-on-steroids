@@ -19,6 +19,10 @@ import { randomUUID } from 'node:crypto';
 import { retryGoalBrowserHelper } from './goal.js';
 import { requestBrowserPreferences } from './browser-preferences.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from './session/start-input.js';
+import {
+  FRONTIER_LONGRUN_AUTHORITY_CLASS,
+  markFrontierLongrunRemoteText
+} from './frontier-longrun-authority.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 /**
@@ -1134,8 +1138,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     prepareText: async (entry, limits) => {
       const control = entry.conversationId ? goalSwitchFor(entry.conversationId) : getConfig().goal;
       const mode = entry.automation ?? (control.enabled ? control.mode : 'off');
-      const text = mode === 'goal' && goalBackendFor('goal') === 'templates' && !entry.text.includes(GOAL_MARKER_INSTRUCTION)
+      const authored = mode === 'goal' && goalBackendFor('goal') === 'templates' && !entry.text.includes(GOAL_MARKER_INSTRUCTION)
         ? entry.text + GOAL_MARKER_INSTRUCTION : entry.text;
+      const text = entry.authorityClass === FRONTIER_LONGRUN_AUTHORITY_CLASS
+        ? markFrontierLongrunRemoteText(authored)
+        : authored;
       // Only the opening user input owns executor setup. Existing chats, queued
       // checkpoints and automatic continuations already have their instructions.
       return !entry.sessionId && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish'

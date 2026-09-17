@@ -403,7 +403,7 @@ export type NewSessionEvent = SessionEvent extends infer Event
  * queued to the conversation that command became.
  */
 export interface SessionOrigin {
-  kind: 'resume' | 'worker' | 'helper' | 'desktop';
+  kind: 'resume' | 'worker' | 'helper' | 'desktop' | 'frontier_longrun';
   /** The session this chat continues. Null when the source session no longer exists. */
   fromSessionId: string | null;
   /** Agent id for a worker chat ("worker-1"). Null for a resume. */
@@ -431,6 +431,7 @@ function clip(text: string, max: number): string {
  */
 export function originTitle(origin: SessionOrigin, source: string | null): string {
   if (origin.kind === 'desktop') return source || 'New chat';
+  if (origin.kind === 'frontier_longrun') return source || 'Frontier Longrun';
   if (origin.kind === 'helper') return 'Task helper';
   if (origin.kind === 'worker') {
     const who = origin.agentId ?? 'worker';

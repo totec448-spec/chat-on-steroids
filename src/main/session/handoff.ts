@@ -14,6 +14,7 @@ import { logInfo } from '../logger.js';
 import { getSession, readSessionPlan, saveHandoff } from './store.js';
 import { destinationContinuationMarker } from './handoff-prompt.js';
 import { userPromptText } from '../../shared/user-prompt.js';
+import { FRONTIER_LONGRUN_REMOTE_TASK_MARKER } from '../frontier-longrun-authority.js';
 
 export interface PrepareHandoffInput {
   sessionId: string;
@@ -120,10 +121,13 @@ export function newHandoffId(now: Date = new Date()): string {
  * its semantic state is durable; restart recovery repairs the tiny opposite crash window.
  */
 export async function prepareHandoff(input: PrepareHandoffInput): Promise<Handoff> {
-  const text = input.text.trim();
+  let text = input.text.trim();
   if (!text) throw new Error('A handoff cannot be empty');
   const summary = await getSession(input.sessionId);
   if (!summary) throw new Error('That session no longer exists');
+  if (summary.origin?.kind === 'frontier_longrun' && !text.split(/\r?\n/).includes(FRONTIER_LONGRUN_REMOTE_TASK_MARKER)) {
+    text = `${FRONTIER_LONGRUN_REMOTE_TASK_MARKER}\n${text}`;
+  }
   // Checked again here, and not only at the bridge route that can word the refusal well,
   // because this is the one function that writes a handoff to disk. A stub that reaches the
   // store is indistinguishable from a real brief for the rest of its life.

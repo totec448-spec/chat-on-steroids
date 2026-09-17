@@ -365,6 +365,52 @@ describe('remote steering target-scoped measurement', () => {
 });
 
 describe('remote steering is not caller identity', () => {
+  it('keeps arbitrary shell out of the identity-neutral Remote Steering lane even when unattributed calls are otherwise allowed', async () => {
+    const base = defaultConfig();
+    await saveConfig({
+      ...base,
+      sessions: { ...base.sessions, record: false },
+      multiAgent: { ...base.multiAgent, enabled: true, maxWorkers: 2, allowUnattributedCalls: true },
+      remoteSteering: { enabled: true }
+    });
+    const endpoint = await startMcpServer(() => ({
+      roots: [],
+      caps: { ...DEFAULT_CAPABILITIES, command: true },
+      readOnly: false,
+      sessionTools: false,
+      agentTools: false,
+      remoteSteeringTools: true
+    }));
+    try {
+      const url = new URL(endpoint.url);
+      const payload = JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'exec_command', arguments: { cmd: 'echo SHOULD_NOT_RUN' } }
+      });
+      const reply = await new Promise<any>((resolve, reject) => {
+        const request = http.request({
+          hostname: url.hostname, port: url.port, path: url.pathname, method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'content-length': Buffer.byteLength(payload) }
+        }, response => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk: Buffer) => chunks.push(chunk));
+          response.on('end', () => {
+            const text = Buffer.concat(chunks).toString('utf8').trim();
+            const frame = text.startsWith('{') ? text : ([...text.matchAll(/^data:\s*(.*)$/gm)].at(-1)?.[1] ?? '{}');
+            resolve(JSON.parse(frame));
+          });
+        });
+        request.on('error', reject);
+        request.end(payload);
+      });
+      const rendered = ((reply.result?.content ?? []) as Array<{ text?: string }>).map(part => part.text ?? '').join('\n');
+      expect(rendered).toContain('CALLER_IDENTITY_REQUIRED');
+      expect(rendered).not.toContain('SHOULD_NOT_RUN\r\n');
+    } finally {
+      await endpoint.stop();
+    }
+  }, 15_000);
+
   it('accepts an anonymous signed STATUS for live run B even while dormant run A still fences ordinary anonymous calls', async () => {
     const dormantRunId = startRun();
     expect(sleepWorker('worker-1', 'park run A before signed run B', dormantRunId)?.info.state).toBe('sleeping');

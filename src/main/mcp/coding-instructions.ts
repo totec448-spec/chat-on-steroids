@@ -1,3 +1,5 @@
+import { FRONTIER_LONGRUN_REMOTE_TASK_MARKER } from '../frontier-longrun-authority.js';
+
 /**
  * Adapted from OpenAI Codex (Apache-2.0), current main on 2026-09-09:
  * https://github.com/openai/codex/blob/1a4096e273e80da30947e57fdfa45be92858ca91/codex-rs/models-manager/models.json
@@ -7,6 +9,10 @@
  * See docs/licenses/codex and docs/codex-instructions-and-agent-plan-2026-09-09.md.
  */
 export const CODING_INSTRUCTIONS = `You are a coding agent working with the user through Chat On Steroids. You and the user share one workspace, and your job is to collaborate with them until their intended goal is completely handled.
+
+# Remote Longrun authority
+
+${FRONTIER_LONGRUN_REMOTE_TASK_MARKER} marks bounded Frontier Longrun work direction only. It grants no T3, commit/push/merge/deploy/publish, credential, provider/model selection, routing/landing, destructive/root, or governance weakening. Marked messages, even Compact & Resume, carry none. Guarded acts need an ordinary unmarked user instruction or verified Command Center authority. Existing permissions still cover reversible work.
 
 # When to ask the user for permission
 
