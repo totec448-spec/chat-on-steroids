@@ -22,6 +22,9 @@ app.on('web-contents-created',(_event,contents)=>{
 });
 app.on('browser-window-created',(_event,win)=>{
   if(started)return;started=true;
+  // Keep this isolated acceptance window's RAF at normal speed when the host
+  // terminal takes focus; product background/visibility behavior stays intact.
+  win.webContents.setBackgroundThrottling(false);
   win.webContents.once('did-finish-load',()=>setTimeout(()=>run(win).catch(error=>{fs.writeFileSync(path.join(output,'failure.txt'),error.stack);console.error(error);app.exit(1);}),600));
 });
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
