@@ -50,6 +50,7 @@ const {
   releaseVersion,
   resetUpdateForTests,
   stagedArtifact,
+  UPDATE_REPOSITORY,
   updateStatus
 } = await import('../src/main/update.js');
 
@@ -75,10 +76,12 @@ function github(options: {
   const body = options.body ?? 'installer bytes';
   const sums = options.checksums ?? `${sha256(body)}  ${WINDOWS_ASSET}\n${sha256(body)}  ${APPIMAGE_ASSET}\n`;
   const asked: string[] = [];
+  const urls: string[] = [];
   const fetch = vi.fn(async (input: string | URL) => {
     const url = String(input);
     const name = url.split('/').pop()!;
     asked.push(name);
+    urls.push(url);
     if (url.includes('api.github.com')) {
       if (options.fail === 'release') return new Response('nope', { status: 503 });
       return new Response(JSON.stringify({ tag_name: `v${version}` }), { status: 200 });
@@ -91,7 +94,7 @@ function github(options: {
     return new Response(body, { status: 200 });
   });
   vi.stubGlobal('fetch', fetch);
-  return { asked, fetch, body };
+  return { asked, urls, fetch, body };
 }
 
 /** Runs the pass as an installation of the given shape, and puts the real one back. */
@@ -123,6 +126,18 @@ afterEach(() => {
 });
 
 describe('which installations update themselves', () => {
+  it('uses the Nexora fork as the only unattended release authority', async () => {
+    const { urls } = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+
+    expect(UPDATE_REPOSITORY).toBe('just100ghz/chat-on-steroids');
+    expect(urls).toEqual([
+      `https://api.github.com/repos/${UPDATE_REPOSITORY}/releases/latest`,
+      `https://github.com/${UPDATE_REPOSITORY}/releases/download/v${NEXT}/SHA256SUMS.txt`,
+      `https://github.com/${UPDATE_REPOSITORY}/releases/download/v${NEXT}/${WINDOWS_ASSET}`
+    ]);
+  });
+
   it('takes the Windows installer and the Linux AppImage, and nothing else', () => {
     expect(stagedArtifact('win32', 'x64')).toMatchObject({ name: 'Chat-On-Steroids-Setup-x64.exe', kind: 'installer' });
     expect(stagedArtifact('linux', 'arm64', '/opt/cos.AppImage')).toMatchObject({
