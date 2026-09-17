@@ -49,8 +49,17 @@ import { logInfo, logWarn } from './logger.js';
 import { APP_VERSION } from './version.js';
 import { isNewer, type UpdateStatus } from '../shared/types.js';
 
-const REPO = 'totec448-spec/chat-on-steroids';
-const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
+/**
+ * Self-update authority for this Nexora-maintained build.
+ *
+ * The installed app contains Command Center/Frontier control code that is not present in the
+ * upstream release line. Following upstream's moving `latest` here would let an ordinary quit
+ * replace the governed build with a release that never contained those controls. Upstream
+ * updates are therefore integrated and validated in this fork first; only releases published by
+ * the fork are eligible for unattended self-update.
+ */
+export const UPDATE_REPOSITORY = 'just100ghz/chat-on-steroids';
+const LATEST_RELEASE_API = `https://api.github.com/repos/${UPDATE_REPOSITORY}/releases/latest`;
 
 const CHECK_TIMEOUT_MS = 15_000;
 const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
@@ -272,7 +281,7 @@ async function releaseDigests(version: string): Promise<Map<string, string>> {
 
 /** The url of one release asset. Built here, never taken from a response body. */
 function assetUrl(version: string, name: string): string {
-  return `https://github.com/${REPO}/releases/download/v${encodeURIComponent(version)}/${name}`;
+  return `https://github.com/${UPDATE_REPOSITORY}/releases/download/v${encodeURIComponent(version)}/${name}`;
 }
 
 async function get(url: string, timeout: number, headers: Record<string, string> = {}): Promise<Response> {
