@@ -71,6 +71,16 @@ afterEach(() => {
 });
 
 describe('the user’s own connector instructions', () => {
+  it.each(['win32', 'darwin', 'linux'] as const)('teaches the same terminal result lifetime on %s', platform => {
+    const text = serverInstructions({ ...ctx, caps: { ...ctx.caps, command: true } }, 'core', platform);
+    expect(text).toContain('completed_session_id');
+    expect(text).toContain('benign_exit');
+    expect(text).toContain('without rerunning work');
+    if (platform !== 'win32') {
+      expect(text).toContain('normal POSIX shell');
+      expect(text).not.toContain('Pipe foreach output');
+    }
+  });
   it('starts with the coding guidance and explains connectors once beside the local tools without a setup link', () => {
     const text = serverInstructions(ctx, 'core', 'win32');
     expect(text.startsWith('You are a coding agent working with the user through Chat On Steroids.')).toBe(true);

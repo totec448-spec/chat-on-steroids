@@ -89,7 +89,7 @@ function slugSkillId(value: string): string {
 
 function importId(sourcePath: string): string {
   const extension = path.extname(sourcePath).toLowerCase();
-  if (extension !== '.md' && extension !== '.txt') throw new Error('Choose one Markdown or text skill file');
+  if (extension !== '.md') throw new Error('Choose one Markdown (.md) skill file');
   const filename = path.basename(sourcePath);
   const sourceName = filename.toLowerCase() === 'skill.md'
     ? path.basename(path.dirname(sourcePath))
@@ -289,6 +289,11 @@ export function skillsDirectory(): string | null {
   return root;
 }
 
+/** Shared bounded snapshot reader for discovered metadata and explicit package imports. */
+export async function readSkillTextSnapshot(filename: string): Promise<{ bytes: Buffer; text: string; identity: FileIdentity }> {
+  return readTextSnapshot(filename);
+}
+
 export function initSkillsPath(userData: string): Promise<void> {
   return serial(async () => {
     if (!path.isAbsolute(userData)) throw new Error('Skills storage requires an absolute user-data path');
@@ -386,6 +391,53 @@ export function importSkillFile(sourcePath: string): Promise<SkillSummary> {
       if (directoryOwned) await fs.rmdir(destination).catch(() => undefined);
       throw error;
     }
+  });
+}
+
+/** Publish a complete selected package using the same serialized managed-library owner. */
+export function importSkillPackage(sourcePath: string): Promise<SkillSummary> {
+  return serial(async () => {
+    if (!path.isAbsolute(sourcePath)) throw new Error('Choose an absolute skill package folder');
+    const sourceDirectory = await fs.lstat(sourcePath);
+    if (!sourceDirectory.isDirectory() || sourceDirectory.isSymbolicLink()) throw new Error('Choose a real skill package folder');
+    const id = slugSkillId(path.basename(sourcePath));
+    const sourceFile = path.join(sourcePath, SKILL_FILENAME);
+    const sourceStat = await fs.lstat(sourceFile);
+    if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) throw new Error('A skill package needs a regular SKILL.md');
+    const document = await readTextSnapshot(sourceFile);
+    const { parseSkillFrontmatter } = await import('./skill-metadata.js');
+    parseSkillFrontmatter(document.text);
+    const candidateRoot = requiredRoot();
+    const current = await scan(candidateRoot);
+    if (current.length >= MAX_SKILLS) throw new Error('The Skills library supports at most 64 skills');
+    const names = await directoryNames(candidateRoot);
+    if (names.some(name => name.toLowerCase() === id.toLowerCase())) throw new Error(`Skill "${id}" already exists`);
+    const { publishSkillPackage } = await import('./skill-package.js');
+    await publishSkillPackage(sourcePath, candidateRoot, id, document.bytes);
+    const records = await scan(candidateRoot);
+    const installed = records.find(record => record.summary.id === id);
+    if (!installed) throw new Error('The imported package changed during publication');
+    publish(records);
+    return { ...installed.summary };
+  });
+}
+
+/** The caller supplies the OS Trash operation; removing a skill includes all package resources. */
+export function removeSkill(id: string, moveToTrash: (directory: string) => Promise<void>): Promise<void> {
+  return serial(async () => {
+    assertSkillId(id);
+    const candidateRoot = requiredRoot();
+    await assertManagedRoot(candidateRoot);
+    const record = await recordAt(candidateRoot, id);
+    if (!record) throw new Error(`Skill "${id}" was not found or is invalid`);
+    const directory = path.join(candidateRoot, id);
+    const before = identityOf(await fs.lstat(directory));
+    const current = await recordAt(candidateRoot, id);
+    await assertManagedRoot(candidateRoot);
+    if (!current || record.revision !== current.revision || !sameIdentity(before, identityOf(await fs.lstat(directory))))
+      throw new Error('The skill changed before removal; reload the library');
+    await moveToTrash(directory);
+    publish(await scan(candidateRoot));
   });
 }
 

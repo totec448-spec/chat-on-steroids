@@ -2,6 +2,8 @@ import { promises as fs } from 'node:fs';
 import * as filesystem from '../src/main/codex/filesystem.js';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
+import { once } from 'node:events';
 import { afterEach, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
@@ -24,7 +26,30 @@ afterEach(async () => {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-it('drains an accepted MCP mutation before closing its response socket', async () => {
+it.each(['idle TCP', 'partial headers', 'partial body'])('disconnect retires %s without waiting for HTTP timeouts', async (kind) => {
+  dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clf-mcp-unaccepted-'));
+  initConfigPath(dir);
+  const cfg = defaultConfig();
+  endpoint = await startMcpServer(() => ({ roots: [], caps: cfg.capabilities, readOnly: true }));
+  const socket = net.connect(endpoint.port, '127.0.0.1');
+  socket.on('error', () => {});
+  try {
+    await once(socket, 'connect');
+    if (kind === 'partial headers') socket.write('POST / HTTP/1.1\r\nHost: localhost\r\n');
+    if (kind === 'partial body') {
+      socket.write(`POST ${new URL(endpoint.url).pathname} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{`);
+    }
+    // Let the HTTP parser consume the partial input; no adapter invocation may own it.
+    await sleep(20);
+    const stopping = endpoint.stop();
+    expect(await Promise.race([stopping.then(() => 'stopped'), sleep(250).then(() => 'stuck')])).toBe('stopped');
+    endpoint = null;
+  } finally {
+    socket.destroy();
+  }
+});
+
+it.each([false, true])('drains an accepted mutation, with final-shutdown escalation=%s', async (forceShutdown) => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clf-mcp-drain-'));
   initConfigPath(dir);
   initSessionStore(dir);
@@ -61,8 +86,10 @@ it('drains an accepted MCP mutation before closing its response socket', async (
   // Windows runner can exceed that yield before its first command runs.
   let entered!: () => void;
   let release!: () => void;
+  let written!: () => void;
   const accepted = new Promise<void>(resolve => { entered = resolve; });
   const gate = new Promise<void>(resolve => { release = resolve; });
+  const completed = new Promise<void>(resolve => { written = resolve; });
   const writeFile = filesystem.writeFile;
   const mutation = vi.spyOn(filesystem, 'writeFile').mockImplementation(async (file, contents) => {
     if (file === path.join(rootPath, 'after-stop.txt')) {
@@ -70,6 +97,7 @@ it('drains an accepted MCP mutation before closing its response socket', async (
       await gate;
     }
     await writeFile(file, contents);
+    written();
   });
   const request = fetch(endpoint.url, {
     method: 'POST',
@@ -82,16 +110,26 @@ it('drains an accepted MCP mutation before closing its response socket', async (
       accepted,
       request.then(result => { throw new Error(`MCP request finished before mutation: HTTP ${result.status} ${result.text}`); })
     ]);
-    stopping = endpoint.stop();
+    const draining = endpoint;
+    stopping = draining.stop();
+    expect(draining.stop()).toBe(stopping);
     endpoint = null;
     expect(await Promise.race([stopping.then(() => true), sleep(20).then(() => false)])).toBe(false);
     await expect(fs.readFile(path.join(dir, 'after-stop.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
-    release();
-    const result = await request;
-    await stopping;
-
-    expect(result.status).toBe(200);
-    expect(result.text).toContain('Success. Updated the following files:');
+    if (forceShutdown) {
+      const rejected = request.catch(error => error);
+      expect(draining.stop({ forceAfterMs: 0 })).toBe(stopping);
+      await stopping;
+      expect(await rejected).toBeInstanceOf(TypeError);
+      release();
+      await completed;
+    } else {
+      release();
+      const result = await request;
+      await stopping;
+      expect(result.status).toBe(200);
+      expect(result.text).toContain('Success. Updated the following files:');
+    }
     await expect(fs.readFile(path.join(dir, 'after-stop.txt'), 'utf8')).resolves.toBe('after\n');
   } finally {
     release();

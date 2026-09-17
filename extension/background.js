@@ -21,6 +21,9 @@
  */
 
 import { createBrowserControl } from './browser-control.js';
+import { createActiveTabs } from './active-tabs.js';
+
+const activeTabs = globalThis.chrome?.debugger ? createActiveTabs(chrome) : null;
 
 const PORTS = [8765, 8766, 8767, 8768, 8769];
 const HELLO_TIMEOUT_MS = 1200;
@@ -43,6 +46,10 @@ const MODEL_REQUEST_TIMEOUT_MS = 190_000;
 const TIMED_OUT = 'the app took too long to answer';
 /** Bumped only when the request/response shape changes; the app compares it. */
 const BRIDGE_PROTOCOL = 14;
+/** Browser-owned presentation preferences also exposed by the popup. */
+const RENDER_STREAM_KEY = 'renderStreamEnabled';
+const SHOW_TIMES_KEY = 'showStreamTimes';
+let companionDiagnosticsFlight = null;
 
 /**
  * Journal caps. The byte figure is what actually matters — chrome.storage.session has a
@@ -234,8 +241,9 @@ let stopOpenings = {};
 const deferredRevivalOffers = new Map();
 /** App says an active agent/recovery episode still needs the maintenance cadence. */
 let recoveryMonitoring = false;
-/** Tabs whose normal auto-discard policy this extension changed for a live agent conversation. */
+/** Discard custody; command openings retain their identity until app policy takes over. */
 let discardProtectedTabs = {};
+const COMMAND_TAB_PROTECTION_MS = 30 * 60_000;
 
 function load() {
   if (loaded) return Promise.resolve();
@@ -307,7 +315,9 @@ async function loadOnce() {
       ? live.discardProtectedTabs
       : {};
   discardProtectedTabs = Object.fromEntries(
-    Object.entries(savedDiscardProtection).filter(([id, owned]) => /^\d+$/.test(id) && owned === true)
+    Object.entries(savedDiscardProtection).filter(([id, owned]) => /^\d+$/.test(id) && (owned === true ||
+      (owned && commandMarkerId(owned.commandId) && Number.isFinite(owned.at) &&
+        (owned.conversationId === null || cleanConversationId(owned.conversationId))))).slice(-1000)
   );
   if (live.delivery && typeof live.delivery === 'object' && !Array.isArray(live.delivery)) {
     delivery = { ...delivery, ...live.delivery };
@@ -1024,6 +1034,7 @@ async function latchAppDisconnect() {
   void getBrowserController().then(controller => controller?.revoke()).catch(() => undefined);
   token = null;
   disconnected = true;
+  await activeTabs?.revoke().catch(() => undefined);
   await persist();
 }
 
@@ -1784,6 +1795,28 @@ async function createChatTab(url, background = false, active = !background) {
   });
 }
 
+/**
+ * Holds discard defence for an app-opened chat until its conversation binds and the app's
+ * policy set takes over.
+ *
+ * A tab created for an input has no conversation yet, so the policy pass in maintainOnce
+ * cannot see it; a background-window chat under memory pressure could otherwise be discarded
+ * before its first Send. The maintenance pass owns release once the conversation exists.
+ */
+async function protectCreatedTab(tab, commandId = null) {
+  if (!Number.isInteger(tab?.id)) return;
+  // Keep the opening identity even if Chrome temporarily refuses the policy update.
+  if (commandId) {
+    discardProtectedTabs[String(tab.id)] = { commandId, at: Date.now(), conversationId: null };
+    await persistLive();
+  }
+  try {
+    await chrome.tabs.update(tab.id, { autoDiscardable: false });
+    if (!commandId) discardProtectedTabs[String(tab.id)] = true;
+    await persistLive();
+  } catch { /* The tab changed under creation; the next maintenance pass reconciles it. */ }
+}
+
 /** Bound waiting for a page; a missing reply never grants action or replay authority. */
 async function tabReply(tabId, message, options, timeoutMs = 3000) {
   let timer;
@@ -1929,6 +1962,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
             // exactly one replacement. Persist that expenditure before Chrome awaits.
             await elect(input.id, { tab: null, stage: 'opening', fallbackUsed: true });
             tab = await createChatTab(url, background);
+            await protectCreatedTab(tab);
             await elect(input.id, { tab: tab.id, stage: 'ready', fallbackUsed: true });
             tabs.push(tab);
             // A failed New Chat transition can leave the borrowed managed page
@@ -1955,11 +1989,13 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       }
       await elect(input.id, { tab: null, stage: 'opening', conversationId: target });
       tab = await createChatTab(url, background);
+      await protectCreatedTab(tab);
       await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target });
       tabs.push(tab);
       continue;
     }
     offerDesktopInput(tab.id, { type: 'clf-desktop-input', id: input.id, conversationId: target,
+      ...(input.recovery ? { recovery: input.recovery } : {}),
       ...(input.silenceTurnId ? { silenceTurnId: input.silenceTurnId } : {}),
       ...(input.directTurn ? { directTurn: input.directTurn } : {}), ...(input.lifetime ? { lifetime: input.lifetime } : {}) });
   }
@@ -2021,6 +2057,38 @@ async function offerStopTurns(requests, background = false) {
 let modelCatalogFlight = null;
 let modelCatalogTarget = null;
 let pluginRefreshFlight = null;
+const MODEL_CATALOG_TARGET_KEY = 'modelCatalogTarget';
+function validModelCatalogTarget(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value) &&
+    /^[a-f0-9-]{36}$/i.test(value.nonce || '') && Number.isInteger(value.tab) && value.tab > 0 &&
+    typeof value.url === 'string' && value.url.length > 0 && value.url.length <= 4096 &&
+    (value.documentId === undefined || (typeof value.documentId === 'string' && value.documentId.length > 0 && value.documentId.length <= 200)) &&
+    (value.navigationEpoch === undefined || (Number.isSafeInteger(value.navigationEpoch) && value.navigationEpoch >= 0));
+}
+/** holzhaker1's #251: the exact picker observation survives MV3 suspension. */
+async function holdModelCatalogTarget(target) {
+  modelCatalogTarget = target;
+  try { await chrome.storage.session.set({ [MODEL_CATALOG_TARGET_KEY]: target }); }
+  catch { /* A live worker still owns its in-memory observation; app nonce remains authority. */ }
+}
+async function currentModelCatalogTarget(nonce) {
+  if (modelCatalogTarget) return modelCatalogTarget.nonce === nonce ? modelCatalogTarget : null;
+  try {
+    const stored = (await chrome.storage.session.get(MODEL_CATALOG_TARGET_KEY))[MODEL_CATALOG_TARGET_KEY];
+    // Another request may have acquired custody while storage was read.
+    if (modelCatalogTarget) return modelCatalogTarget.nonce === nonce ? modelCatalogTarget : null;
+    if (!validModelCatalogTarget(stored) || stored.nonce !== nonce) return null;
+    modelCatalogTarget = stored;
+    return stored;
+  } catch { return null; }
+}
+async function releaseModelCatalogTarget(nonce) {
+  if (modelCatalogTarget?.nonce === nonce) modelCatalogTarget = null;
+  try {
+    const stored = (await chrome.storage.session.get(MODEL_CATALOG_TARGET_KEY))[MODEL_CATALOG_TARGET_KEY];
+    if (validModelCatalogTarget(stored) && stored.nonce === nonce) await chrome.storage.session.remove(MODEL_CATALOG_TARGET_KEY);
+  } catch { /* Stale observations still require the app's current nonce and exact document. */ }
+}
 function pluginRefreshMarker(tab) {
   try { const url = new URL(tab?.pendingUrl || tab?.url || ''); return url.origin === 'https://chatgpt.com' && url.pathname === '/' && /^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash) ? url.searchParams.get('cos-plugin-refresh') : null; } catch { return null; }
 }
@@ -2094,7 +2162,9 @@ function catalogTabNonce(tab) {
 }
 function inspectRequestedModels(request) {
   if (modelCatalogFlight) return modelCatalogFlight;
+  const intent = connectionEpoch;
   const wanted = request && /^[a-f0-9-]{36}$/i.test(request.nonce) && Number.isFinite(request.expiresAt) && Date.now() < request.expiresAt ? request : null;
+  let targetNonce = null;
   modelCatalogFlight = (async () => {
     const observed = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
     const owner = (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
@@ -2154,12 +2224,22 @@ function inspectRequestedModels(request) {
         ]);
       } finally { clearTimeout(timer); }
     };
-    modelCatalogTarget = { tab: tab.id, nonce: wanted.nonce, url: tab.url || tab.pendingUrl };
+    targetNonce = wanted.nonce;
+    const key = String(tab.id);
+    await holdModelCatalogTarget({ tab: tab.id, nonce: wanted.nonce, url: tab.url || tab.pendingUrl,
+      ...(typeof tabDocuments[key] === 'string' ? { documentId: tabDocuments[key] } : {}),
+      ...(Number.isSafeInteger(tabEpochs[key]) ? { navigationEpoch: tabEpochs[key] } : {}) });
+    if (intent !== connectionEpoch || !token || disconnected || Date.now() >= wanted.expiresAt) return;
+    await activeTabs?.set(`catalog:${wanted.nonce}`, [tab]);
     const inspected = await send({ type: 'clf-model-catalog', nonce: wanted.nonce, expiresAt: wanted.expiresAt });
     // Work->Chat is an in-document transition owned by the content script.
     // Failure never grants navigation to New Chat or a replacement helper tab.
     if (inspected === true || inspected?.ok === true) await retireCatalogTabs();
-  })().catch(() => undefined).finally(() => { modelCatalogTarget = null; modelCatalogFlight = null; });
+  })().catch(() => undefined).finally(async () => {
+    if (targetNonce) await activeTabs?.set(`catalog:${targetNonce}`, []).catch(() => undefined);
+    if (targetNonce) await releaseModelCatalogTarget(targetNonce);
+    modelCatalogFlight = null;
+  });
   return modelCatalogFlight;
 }
 
@@ -2175,7 +2255,7 @@ function getBrowserController() {
   browserController ||= Promise.resolve(createBrowserControl(chrome, call,
     (tabId, url, caller) => {
       const conversation = conversationFromUrl(url);
-      return Boolean(conversation && (conversation === caller || discardProtectedTabs[String(tabId)] === true));
+      return activeTabs?.owns(tabId) || Boolean(conversation && (conversation === caller || discardProtectedTabs[String(tabId)]));
     }));
   return browserController;
 }
@@ -2184,6 +2264,7 @@ globalThis.chrome?.debugger?.onEvent.addListener((source, method, params) => {
   void getBrowserController().then(controller => controller?.event(source, method, params)).catch(() => undefined);
 });
 globalThis.chrome?.debugger?.onDetach.addListener(source => {
+  void activeTabs?.detached(source).catch(() => undefined);
   void getBrowserController().then(controller => controller?.detached(source)).catch(() => undefined);
 });
 function closeWakeSocket() {
@@ -2212,7 +2293,12 @@ function connectWakeSocket() {
     }
   };
   connection.onerror = () => connection.close();
-  connection.onclose = () => { if (wakeSocket === connection) wakeSocket = null; };
+  connection.onclose = () => {
+    if (wakeSocket === connection) {
+      wakeSocket = null;
+      void activeTabs?.revoke().catch(() => undefined);
+    }
+  };
   // Existing startup/maintenance reconnects after app/browser restart. No retry timer.
 }
 async function applyRequestedBrowserPreferences(request) {
@@ -2314,12 +2400,37 @@ function maintain(woken = false) {
 async function maintainOnce() {
   // The app decides whether there is recovery work; a worker holding no tabs is not a worker
   // with nothing to do, it is the one that has to open the chat the app is owed.
-  if (token === null) return;
+  if (token === null) { await activeTabs?.revoke(); return; }
+  const intent = connectionEpoch;
   let observedTabs = [];
   try { observedTabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS }); } catch { /* Status/recovery still runs; no unobserved tab is pruned. */ }
   const openConversations = [...new Set(observedTabs.map(conversationForTab).filter(Boolean))];
-  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations }) });
-  if (!reply.ok || !reply.data) return;
+  // A discarded or frozen tab still answers the query with its URL, but its page is gone or
+  // suspended: nothing the app owes that chat — recording, input, a wake — can arrive until
+  // it is reloaded, and no close or silence path will ever say so. Report the shells
+  // separately so the app can tell "open" from "alive". (`frozen` exists on Chrome 132+;
+  // older versions simply report undefined.)
+  const stalledConversations = [...new Set(observedTabs
+    .filter((tab) => tab && (tab.discarded === true || tab.frozen === true))
+    .map(conversationForTab)
+    .filter(Boolean))];
+  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, stalledConversations }) });
+  if (intent !== connectionEpoch || !token || disconnected) return;
+  if (!reply.ok || !reply.data) { await activeTabs?.revoke(); return; }
+  const liveChats = new Set(Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : []);
+  const liveOpenings = new Set(Array.isArray(reply.data.inputOpeningIds) ? reply.data.inputOpeningIds : []);
+  const renderingWanted = tab => {
+    if (liveChats.has(conversationForTab(tab))) return true;
+    try {
+      const url = new URL(tab.url);
+      const id = url.searchParams.get('cos-input') || new URLSearchParams(url.hash.slice(1)).get('cos-input');
+      return liveOpenings.has(id) && inputOpenings[id]?.tab === tab.id;
+    } catch { return false; }
+  };
+  // Reuse the app's current work policy. Old history, pins and tab presence do not qualify.
+  await activeTabs?.set('policy', observedTabs.filter(renderingWanted));
+  // Diagnostic page reads share one bounded flight and never delay recovery or input.
+  publishCompanionDiagnostics();
   connectWakeSocket();
   void pumpBrowserControl().catch(() => undefined);
   // Quoted back exactly as they arrived. A token names the handout being answered, so that a
@@ -2330,12 +2441,15 @@ async function maintainOnce() {
       conversationId: cleanConversationId(entry && entry.conversationId),
       token: entry && typeof entry.token === 'string' ? entry.token : '',
       requiresClaim: entry?.requiresClaim === true,
+      suspended: entry?.reason === 'stalled',
       focus: Boolean(entry && entry.focus === true)
     }))
     .filter((entry) => entry.conversationId && entry.token);
   // Fulfilling a due repair must not wait behind window layout, input preparation
   // or serial idle-tab probes. Keep the same single maintenance owner and receipt.
   await performBrowserRepairs(repairs, reply.data);
+  // Reuse this maintenance scan/cadence; recorder repair must never delay owed actions.
+  void restoreSilentRecorders(observedTabs, intent).catch(() => undefined);
   await applyRequestedBrowserPreferences(reply.data.browserPreferenceRequest);
   void offerStopTurns(reply.data.stopTurns, reply.data.background === true);
   const bounds = reply.data.browserWindowBounds;
@@ -2384,15 +2498,34 @@ async function maintainOnce() {
     return;
   }
   tabs = await pruneManagedTabs(tabs, reply.data, nonDiscardable, closable);
+  // Include this pass's newly elected input tab. The outbox projection, not its old marker,
+  // keeps the opening eligible until the conversation's normal activity grant takes over.
+  if (intent === connectionEpoch && token && !disconnected)
+    await activeTabs?.set('policy', tabs.filter(renderingWanted));
   if (protectionWork) {
     let changed = false;
     for (const tab of tabs) {
       if (!Number.isInteger(tab && tab.id)) continue;
       const key = String(tab.id);
-      const ours = discardProtectedTabs[key] === true;
+      const custody = discardProtectedTabs[key];
+      const ours = Boolean(custody);
       const conversation = conversationForTab(tab);
-      const opening = ours && !conversation && /[?&#]clf=/.test(tab.pendingUrl || tab.url || '');
-      const protect = opening || nonDiscardable.has(conversation);
+      const carrying = custody && custody !== true && Array.isArray(reply.data.commandIds) &&
+        reply.data.commandIds.includes(custody.commandId) && Date.now() >= custody.at &&
+        Date.now() - custody.at < COMMAND_TAB_PROTECTION_MS &&
+        (!custody.conversationId || custody.conversationId === conversation) &&
+        (!tab.pendingUrl || tab.pendingUrl === tab.url);
+      if (carrying && conversation && !custody.conversationId) {
+        custody.conversationId = conversation;
+        changed = true;
+      }
+      // Legacy input openings still use their marker; a retired command cannot borrow it.
+      const opening = custody === true && !conversation && /[?&#](?:clf|cos-input)=/.test(tab.pendingUrl || tab.url || '');
+      const protect = opening || carrying || nonDiscardable.has(conversation);
+      if (custody && custody !== true && !carrying && protect) {
+        discardProtectedTabs[key] = true;
+        changed = true;
+      }
       if (protect && tab.autoDiscardable !== false) {
         try {
           await chrome.tabs.update(tab.id, { autoDiscardable: false });
@@ -2419,7 +2552,7 @@ async function maintainOnce() {
 }
 
 async function performBrowserRepairs(repairs, policy) {
-  for (const { conversationId, token, focus, requiresClaim } of repairs) {
+  for (const { conversationId, token, focus, requiresClaim, suspended } of repairs) {
     // Re-scanned per repair rather than reused from above. Earlier entries in this same batch
     // may have created a tab, and the scan has to be the state immediately before the action or
     // the duplicate rule below is deciding on a tab list that no longer exists.
@@ -2429,7 +2562,8 @@ async function performBrowserRepairs(repairs, policy) {
     } catch {
       return;
     }
-    const candidates = live.filter((tab) => conversationForTab(tab) === conversationId);
+    const candidates = live.filter((tab) => conversationForTab(tab) === conversationId &&
+      (!suspended || tab.discarded === true || tab.frozen === true));
     // One chat is one tab. Bailing out on two copies left the chat broken *and* left the
     // duplicate sitting there, so the ambiguity is resolved instead: reload the copy this
     // worker's registry already binds to the conversation, falling back to the lowest tab id so
@@ -2438,6 +2572,15 @@ async function performBrowserRepairs(repairs, policy) {
     const [target] = (owned.length > 0 ? owned : candidates).sort((a, b) => a.id - b.id);
     const repairAction = target ? 'reloaded' : 'reopened';
     try {
+      // Suspension grants a reload of a still-suspended shell, never a new tab.
+      if (suspended) {
+        if (!target) continue;
+        const documentId = tabDocuments[String(target.id)];
+        const current = await chrome.tabs.get(target.id);
+        if (current.pendingUrl || conversationForTab(current) !== conversationId ||
+            (current.discarded !== true && current.frozen !== true) ||
+            tabDocuments[String(target.id)] !== documentId) continue;
+      }
       if (!target && policy.browserOnly === true) continue;
       // Select the working tab within Chrome without stealing OS focus from the
       // desktop app. Tab selection and window activation are separate operations.
@@ -2546,7 +2689,7 @@ async function releaseTab(tab, expected = null, expectedDocument = null, expecte
   if (!stillOwned()) return { ok: true, closed: false };
   const current = cleanConversationId(tabConversations[key]);
   const wanted = cleanConversationId(expected);
-  const protectedHere = discardProtectedTabs[key] === true;
+  const protectedHere = Boolean(discardProtectedTabs[key]);
   if (current && (!wanted || current === wanted)) {
     delete tabConversations[key];
   }
@@ -2721,7 +2864,12 @@ const HANDLERS = {
   async model_catalog(message, _sender, source) {
     if (!ownsDocument(source) || typeof message.nonce !== 'string' || !/^[a-f0-9-]{36}$/i.test(message.nonce)) return { ok: false };
     const tab = await chrome.tabs.get(source.tab);
-    if (!ownsDocument(source) || modelCatalogTarget?.tab !== source.tab || modelCatalogTarget.nonce !== message.nonce || modelCatalogTarget.url !== (tab.url || tab.pendingUrl)) return { ok: false };
+    const target = await currentModelCatalogTarget(message.nonce);
+    const latest = await chrome.tabs.get(source.tab);
+    if (!ownsDocument(source) || !target || target.tab !== source.tab || target.url !== (tab.url || tab.pendingUrl) ||
+        target.url !== (latest.url || latest.pendingUrl) ||
+        (target.documentId !== undefined && target.documentId !== source.documentId) ||
+        (target.navigationEpoch !== undefined && target.navigationEpoch !== source.navigationEpoch)) return { ok: false };
     const body = JSON.stringify({ nonce: message.nonce, models: message.models, error: message.error });
     if (body.length > 12000) return { ok: false };
     const result = await call('/models', { method: 'POST', body });
@@ -2759,8 +2907,9 @@ const HANDLERS = {
       const result = await call('/input/attachment', { method: 'POST', body: JSON.stringify({ id, owner, conversationId, attachmentId: message.attachmentId, offset: message.offset }) });
       return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
     }
+    if (message.recoveryAction && message.owner !== owner) return { ok: false };
     const result = await call(typeof message.partial === 'string' ? '/input/progress' : typeof message.response === 'string' ? '/input/answer' : message.fail === true ? '/input/fail' : message.ack === true ? '/input/ack' : '/input/claim', {
-      method: 'POST', body: JSON.stringify({ id, owner, conversationId, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined })
+      method: 'POST', body: JSON.stringify({ id, owner, conversationId, recoveryAction: ['stop', 'stopped'].includes(message.recoveryAction) ? message.recoveryAction : undefined, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined })
     });
     if (typeof message.response === 'string' && message.lifetime === 'temporary-planner' && result.ok && result.data?.ok === true && ownsDocument(source)) {
       // Acceptance retires this exact helper immediately. Fresh page proof still
@@ -2852,6 +3001,7 @@ const HANDLERS = {
     // Remembered, not just cleared. Otherwise the next request — two seconds away in any
     // open tab — provisions a new token and the browser is connected again.
     disconnected = true;
+    await activeTabs?.revoke().catch(() => undefined);
     pairingError = null;
     await persist();
     return { ok: true };
@@ -2914,13 +3064,16 @@ const HANDLERS = {
     const isChat = isChatGptUrl(active && active.url);
     const bound = key ? cleanConversationId(tabConversations[key]) : null;
     const documentId = key && typeof tabDocuments[key] === 'string' ? tabDocuments[key] : null;
+    const navigationEpoch = key ? tabEpochs[key] : null;
     const provisional = tab !== null && documentId ? `tab-${tab}:${documentId}` : null;
     const terminal = key ? Object.prototype.hasOwnProperty.call(terminalDocuments, key) : false;
 
     let page = null;
     if (tab !== null && isChat) {
       try {
-        page = await chrome.tabs.sendMessage(tab, { type: 'clf-page-status' });
+        page = await tabReply(tab, { type: 'clf-page-status' }, documentId ? { documentId } : undefined);
+        if (key && ((documentId !== null && tabDocuments[key] !== documentId) ||
+            tabEpochs[key] !== navigationEpoch || terminalDocuments[key])) page = null;
       } catch {
         // No live recorder in that document: an unreloaded tab from before this extension
         // was loaded, or a page still starting up. Reported as such rather than as an error.
@@ -3411,6 +3564,48 @@ const HANDLERS = {
   }
 };
 
+/** Snapshot sent only to the current paired bridge; it does not grant work or recovery. */
+async function companionDiagnosticSnapshot(found) {
+  const preferences = await chrome.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
+  return {
+    capturedAt: Date.now(),
+    status: {
+      connected: found !== null,
+      port: found ? found.port : null,
+      paired: token !== null,
+      disconnected,
+      pending: journal.length,
+      pendingCommandAcks: commandAckOutbox.length,
+      compatible: found ? found.compatible !== false : null,
+      appVersion: found ? found.version : null,
+      appProtocol: found ? found.bridge : null,
+      extensionVersion: chrome.runtime.getManifest().version,
+      extensionProtocol: BRIDGE_PROTOCOL,
+      pairError: pairingError
+        ? { error: String(pairingError.error || ''), message: String(pairingError.message || '') }
+        : null
+    },
+    preferences: { overwrite: preferences[RENDER_STREAM_KEY] !== false, durations: preferences[SHOW_TIMES_KEY] === true },
+    tab: await HANDLERS.tabStatus()
+  };
+}
+
+function publishCompanionDiagnostics() {
+  if (companionDiagnosticsFlight || !token || disconnected) return companionDiagnosticsFlight;
+  const intent = connectionEpoch, credential = token, endpoint = port;
+  const work = (async () => {
+    const found = await discover();
+    if (!found) return;
+    const snapshot = await companionDiagnosticSnapshot(found);
+    if (intent !== connectionEpoch || credential !== token || endpoint !== port || disconnected) return;
+    await call('/diagnostics', { method: 'POST', body: JSON.stringify(snapshot) });
+  })().catch(() => undefined).finally(() => {
+    if (companionDiagnosticsFlight === work) companionDiagnosticsFlight = null;
+  });
+  companionDiagnosticsFlight = work;
+  return work;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handler = message && typeof message.type === 'string' ? HANDLERS[message.type] : null;
   if (!handler) {
@@ -3486,7 +3681,12 @@ function conversationForTab(tab) {
 // Document unload is not conversation lifetime. A real tab close is: reload keeps the
 // same tab id, while closing it wakes the service worker and retires only that tab's claim.
 chrome.tabs.onRemoved.addListener((id) => {
+  void activeTabs?.navigation(id).catch(() => undefined);
   clearDeferredRevivalOffersForTab(id);
+  if (discardProtectedTabs[String(id)]) {
+    delete discardProtectedTabs[String(id)];
+    void persistLive().catch(() => undefined);
+  }
   void serializeTab(id, async () => {
     const documentId = await markTerminal(id);
     return releaseTab(id, null, documentId);
@@ -3504,6 +3704,8 @@ chrome.tabs.onRemoved.addListener((id) => {
 // which fires no `loading` status, remains the content script's to prove.
 chrome.tabs.onUpdated.addListener((id, changeInfo) => {
   if (!changeInfo) return;
+  if (changeInfo.status === 'loading' || typeof changeInfo.url === 'string')
+    void activeTabs?.navigation(id).catch(() => undefined);
   const fullNavigation = changeInfo.status === 'loading';
   const completedNavigation = changeInfo.status === 'complete';
   const leftChatGpt = typeof changeInfo.url === 'string' && !isChatGptUrl(changeInfo.url);
@@ -3513,6 +3715,13 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
   // SPA pushState does not emit it. The replacement document must register with its own
   // MessageSender.documentId before any identity-sensitive IPC is accepted.
   if (completedNavigation && !leftChatGpt) {
+    // Registration can offer input before this page is usable. Loading completion
+    // must re-read the outbox instead of leaving that unclaimed offer until the
+    // 30-second alarm. Reuse the elected tab and single maintenance flight; the
+    // app's current claim/receipt still decides whether anything may be sent.
+    void load().then(() => {
+      if (Object.values(inputOpenings).some(opening => opening.tab === id)) return maintain(true);
+    }).catch(() => undefined);
     void (async () => {
       const key = String(id);
       const { documentId, epoch, conversation } = await serializeTab(id, async () => ({
@@ -3698,11 +3907,7 @@ async function placeSuccessorChat(raw, tabId) {
     if (model) query.push(`model=${encodeURIComponent(model)}`);
     if (effort) query.push(`reasoning_effort=${encodeURIComponent(effort)}`);
     const created = await createChatTab(`https://chatgpt.com/?${query.join('&')}#${marker}`, true);
-    if (Number.isInteger(created?.id)) {
-      await chrome.tabs.update(created.id, { autoDiscardable: false });
-      discardProtectedTabs[String(created.id)] = true;
-      await persistLive();
-    }
+    await protectCreatedTab(created, id);
     return;
   }
   if (!id) return;
@@ -3739,11 +3944,7 @@ async function placeSuccessorChat(raw, tabId) {
   if (typeof home.index === 'number') create.index = home.index + 1;
   try {
     const created = await chrome.tabs.create(create);
-    if (raw.active === false && Number.isInteger(created?.id)) {
-      await chrome.tabs.update(created.id, { autoDiscardable: false });
-      discardProtectedTabs[String(created.id)] = true;
-      await persistLive();
-    }
+    await protectCreatedTab(created, id);
   } catch {
     // Opening authority was spent. The command deadline reports an unsuccessful attempt.
   }
@@ -3825,6 +4026,22 @@ function recoverDeferredRevivals() {
         entry.openingSpent = true;
         await persistLive();
       } else if (!exact.length) continue;
+      // A discarded tab still answers for its conversation URL, but its page is gone: the
+      // ping and the injection in restoreChatgptTab both fail on it, and reading that failure
+      // as "the exact tab is still there" parked the revival until its deadline. Reload the
+      // shell back to life instead; the reloaded document's registration re-enters this flow
+      // for the offer, and the exact conversation remains the only target.
+      let reloaded = false;
+      for (const tab of exact) {
+        if (tab.discarded !== true) continue;
+        reloaded = true;
+        try {
+          const current = await chrome.tabs.get(tab.id);
+          if (!current.pendingUrl && current.discarded === true && conversationForTab(current) === entry.conversationId)
+            await chrome.tabs.reload(tab.id);
+        } catch { /* The tab changed under the scan; the next pass re-reads it. */ }
+      }
+      if (reloaded) continue;
       let routed = false;
       for (const tab of exact) {
         if (await restoreChatgptTab(tab.id)) {
@@ -3856,9 +4073,11 @@ function recoverDeferredRevivals() {
   return tracked;
 }
 
-async function restoreChatgptTab(id) {
+async function restoreChatgptTab(id, current = () => true) {
+  if (!current()) return false;
   try {
-    const live = await chrome.tabs.sendMessage(id, { type: 'clf-recorder-ping' });
+    const live = await tabReply(id, { type: 'clf-recorder-ping' });
+    if (!current()) return false;
     if (live && live.ok === true && live.recorderVersion === PAGE_RECORDER_VERSION) {
       // Healthy content.js does not prove the independently running MAIN-world helper is
       // still present. Request-id ownership depends on fiber.js, and re-executing it is
@@ -3875,13 +4094,17 @@ async function restoreChatgptTab(id) {
     // was invalidated by an extension reload. Fall through to deterministic recovery.
   }
   try {
+    if (!current()) return false;
     // Rebuild the isolated-world DOM adapter before the recorder that consumes it.
     await chrome.scripting.executeScript({ target: { tabId: id }, files: ['chatgpt-dom.js'] });
+    if (!current()) return false;
     // Keep the React/Fiber reader in ChatGPT's own world, exactly like the static manifest
     // declaration. An older helper may still answer too; the nonce/version gate in
     // content.js makes those replies harmless, and a future version bump rejects them.
     await chrome.scripting.executeScript({ target: { tabId: id }, world: 'MAIN', files: ['fiber.js'] });
+    if (!current()) return false;
     await chrome.scripting.executeScript({ target: { tabId: id }, files: ['content.js'] });
+    if (!current()) return false;
     await chrome.scripting.insertCSS({ target: { tabId: id }, files: ['overlay.css'] });
     // Successful injection means this exact tab is recovering. Its document registration will
     // re-run revival routing; opening a second tab during that handoff recreates the race.
@@ -3890,6 +4113,29 @@ async function restoreChatgptTab(id) {
     // Injection failure does not transfer ownership to a replacement tab.
     return false;
   }
+}
+
+// The existing maintenance owner repairs missing observers without reloading or opening pages.
+const RECORDER_CHECK_EVERY_MS = 60_000;
+let lastRecorderCheckAt = 0;
+let recorderCheckRunning = false;
+async function restoreSilentRecorders(tabs, intent) {
+  if (recorderCheckRunning || Date.now() - lastRecorderCheckAt < RECORDER_CHECK_EVERY_MS) return;
+  lastRecorderCheckAt = Date.now();
+  recorderCheckRunning = true;
+  const current = () => intent === connectionEpoch && Boolean(token) && !disconnected;
+  try {
+    for (const tab of tabs.slice(0, 64)) {
+      if (!current()) return;
+      if (!Number.isInteger(tab?.id) || tab.pendingUrl || tab.status === 'loading' || tab.discarded || tab.frozen) continue;
+      const latest = await chrome.tabs.get(tab.id).catch(() => null);
+      if (!current()) return;
+      if (!latest || latest.url !== tab.url || !isChatGptUrl(latest.url) || latest.pendingUrl ||
+          latest.status === 'loading' || latest.discarded || latest.frozen) continue;
+      // A healthy isolated recorder cannot prove that the separate MAIN helper survived.
+      await restoreChatgptTab(tab.id, current);
+    }
+  } finally { recorderCheckRunning = false; }
 }
 
 async function restoreOpenChatgptTabs() {

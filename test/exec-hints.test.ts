@@ -335,6 +335,18 @@ describe('a non-zero exit that is a result rather than a failure', () => {
     expect(nonZeroExitIsBenign('rg foo || Write-Output no', 1, parserError)).toBe(false);
   });
 
+  it.each([
+    'zsh:1: no matches found: missing/*.ts',
+    'zsh: no matches found: missing/*.ts',
+    '/bin/bash: line 1: /bin/rg: No such file or directory',
+    'sh: 1: cannot create /missing/file: Directory nonexistent',
+    '-zsh: permission denied: /bin/rg',
+    'dash: 1: /bin/rg: not found'
+  ])('never exempts POSIX shell refusal: %s', (diagnostic) => {
+    expect(nonZeroExitIsBenign('/bin/rg needle missing/*.ts', 1, diagnostic)).toBe(false);
+    expect(nonZeroExitIsBenign('/bin/rg needle sample.txt', 1, '')).toBe(true);
+  });
+
   it('never exempts a search the shell could not even find', () => {
     const notFound = [
       "rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, " +
@@ -916,11 +928,11 @@ const WORKER_2_IMPORT_SWEEP =
   'connection\\.js\'|connection\\.js\\"" test src | Select-Object -First 200';
 
 describe('repairing a bash-style escaped quote', () => {
-  it('re-quotes the argument PowerShell would have refused, keeping the backslash', () => {
+  it('re-quotes a regex without embedded native quotes', () => {
     const repaired = repairPowerShellQuoting(WORKER_2_SYMBOL_SWEEP, 'powershell');
     expect(repaired.cmd).toContain(
       "rg -n 'connection:|connectBtn|connect-button|connecting|disconnect|applySettings|" +
-        "saveSettings|onState|state === ''starting|state === \\\"starting' src/main/ipc.ts"
+        "saveSettings|onState|state === ''starting|state === \\x22starting' src/main/ipc.ts"
     );
     // The statements that had nothing to do with the broken quote are untouched.
     expect(repaired.cmd).toContain("echo '--- connection diff ---'; git diff -- src/main/connection.ts");
@@ -930,8 +942,8 @@ describe('repairing a bash-style escaped quote', () => {
   it('repairs every broken argument on the line and leaves the rest of it alone', () => {
     const repaired = repairPowerShellQuoting(WORKER_2_IMPORT_SWEEP, 'powershell');
     expect(repaired.cmd).toBe(
-      "rg -n 'from ''../src/main/connection|from \\\"../src/main/connection|" +
-        "connection\\.js''|connection\\.js\\\"' test src | Select-Object -First 200"
+      "rg -n 'from ''../src/main/connection|from \\x22../src/main/connection|" +
+        "connection\\.js''|connection\\.js\\x22' test src | Select-Object -First 200"
     );
   });
 
@@ -952,7 +964,7 @@ describe('repairing a bash-style escaped quote', () => {
     }
 
     expect(repairPowerShellQuoting(recorded[4] as string, 'powershell').cmd).toBe(
-      String.raw`rg -n 'from [''\"][^''\"]*fsops\.js[''\"]' src/main --glob '!out/**'`
+      String.raw`rg -n 'from [''\x22][^''\x22]*fsops\.js[''\x22]' src/main --glob '!out/**'`
     );
   });
 

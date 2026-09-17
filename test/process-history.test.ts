@@ -56,6 +56,16 @@ it('revises the exact launch once, preserves chronology and survives a cold hist
   expect((await getSession(session.id))!.toolCalls).toBe(count);
 });
 
+it('keeps a proven benign non-zero completion green without changing its raw exit code', async () => {
+  const session = await createSession({ conversationId: 'benign-owner', title: 'process' });
+  await recordProcessCall(session.id, launch('benign-call', 'benign-owner'));
+  await completeProcessCall(session.id, 'benign-call', { completedAt: 200, durationMs: 100,
+    exitCode: 4294967295, benignExit: true });
+  const row = (await readEvents(session.id)).find(event => event.kind === 'tool_call');
+  expect(row).toMatchObject({ call: { process: { exitCode: 4294967295 },
+    summary: { title: 'Completed fixture', tone: 'good', metric: '✓ finished' } } });
+});
+
 it('does not cross sessions or reused numeric process ids', async () => {
   const a = await createSession({ conversationId: 'a', title: 'a' });
   const b = await createSession({ conversationId: 'b', title: 'b' });

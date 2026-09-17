@@ -21,7 +21,7 @@ describe('native window activation', () => {
     vm.runInNewContext(constructor, {
       BrowserWindow: function (value: Record<string, unknown>) { options = value; },
       layout: {}, icon: null, process: { platform },
-      titleBarOverlayForTheme: () => ({}), getConfig: () => ({ ui: { theme: 'dark' } }),
+      titleBarOverlayForTheme: () => ({}), windowBackgroundForTheme: () => '#181818', getConfig: () => ({ ui: { theme: 'dark' } }),
       UI_BASE_ZOOM: 1, path: { join: () => 'preload.js' }, __dirname: '/app'
     });
     expect(options?.fullscreenable).toBe(platform === 'darwin');
@@ -68,7 +68,7 @@ describe('native window activation', () => {
     ready();
     expect(showWindow).toHaveBeenCalledTimes(2);
   });
-  it('discovers on first visible use only when there is no saved catalog, never on repeat show or quit', async () => {
+  it('passively observes on first visible use without opening a browser, never on repeat show or quit', async () => {
     const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
     const listener = source.slice(source.indexOf("  window.on('show'"), source.indexOf("  window.once('ready-to-show'"));
     let show!: () => void;
@@ -83,7 +83,7 @@ describe('native window activation', () => {
     show(); await Promise.resolve();
     show(); await Promise.resolve();
     expect(start).toHaveBeenCalledTimes(1);
-    expect(start).toHaveBeenCalledWith(true);
+    expect(start).toHaveBeenCalledWith(false);
     state = 'unavailable';
     show(); await Promise.resolve();
     expect(start).toHaveBeenCalledTimes(1);

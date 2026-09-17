@@ -411,6 +411,8 @@ interface GoalReplyObligation {
   silenceSourceTurnId?: string;
   silencePro?: boolean;
   listenUntil?: number;
+  /** A native Stop is claimed once for this final, including across app restart. */
+  recoveryStopClaimed?: true;
   conversationId: string;
   sessionId: string;
   replyId: string;
@@ -496,6 +498,7 @@ export function restoreGoalReplies(snapshot: GoalRepliesSnapshot | null): void {
         { silenceSourceTurnId: raw.silenceSourceTurnId.slice(0, 200) } : {}),
       ...(Number.isSafeInteger(raw.listenUntil) && raw.listenUntil! > 0 ? { listenUntil: raw.listenUntil } : {}),
       ...(raw.silencePro === true ? { silencePro: true } : {}),
+      ...(raw.recoveryStopClaimed === true ? { recoveryStopClaimed: true } : {}),
       ...(raw.explicitActivation === true ? { explicitActivation: true } : {}),
       eventSeq: raw.eventSeq,
       acceptedAt: raw.acceptedAt,
@@ -536,7 +539,7 @@ export function goalDraftNeedsIntervention(conversationId: string): boolean {
 
 export function goalPendingReplyFor(
   conversationId: string
-): Pick<GoalReplyObligation, 'replyId' | 'turnId' | 'eventSeq' | 'acceptedAt' | 'silenceSourceTurnId' | 'silencePro' | 'listenUntil'> | null {
+): Pick<GoalReplyObligation, 'replyId' | 'turnId' | 'eventSeq' | 'acceptedAt' | 'silenceSourceTurnId' | 'silencePro' | 'listenUntil' | 'explicitActivation'> | null {
   const reply = goalReplies.get(conversationId);
   // Expiry is read here as well as pruned on write, because the ledger is only pruned when
   // something writes to it. A chat reopened after the window must not be offered work the
@@ -544,6 +547,7 @@ export function goalPendingReplyFor(
   if (reply && Date.now() - reply.acceptedAt >= GOAL_REPLY_TTL_MS) return null;
   return reply?.state === 'pending'
     ? { replyId: reply.replyId, turnId: reply.turnId, eventSeq: reply.eventSeq, acceptedAt: reply.acceptedAt,
+      ...(reply.explicitActivation ? { explicitActivation: true as const } : {}),
       ...(reply.silenceSourceTurnId ? { silenceSourceTurnId: reply.silenceSourceTurnId } : {}),
       ...(reply.listenUntil ? { listenUntil: reply.listenUntil } : {}),
       ...(reply.silencePro ? { silencePro: true } : {}) }
@@ -1313,7 +1317,7 @@ export async function withdrawSilenceGoalReplyNow(conversationId: string, replyI
 export async function deferSilenceGoalReplyNow(conversationId: string, turnId: string, listenUntil?: number,
   prepared?: { token: string; clientId: string }): Promise<boolean> {
   const reply = goalReplies.get(conversationId);
-  if (!reply || reply.state !== 'pending' || reply.turnId !== turnId || (!reply.silenceSourceTurnId && !prepared)) return false;
+  if (!reply || reply.state !== 'pending' || reply.turnId !== turnId) return false;
   if (prepared) {
     const draft = drafts.get(conversationId);
     if (!draft || draft.token !== prepared.token || draft.clientId !== prepared.clientId ||
@@ -1333,6 +1337,16 @@ export async function deferSilenceGoalReplyNow(conversationId: string, turnId: s
   try { await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies()); }
   catch (error) { persistGoalRepliesSoon(); throw error; }
   return goalReplies.get(conversationId) === reply;
+}
+
+/** The existing reply ledger owns the one busy wait and the irreversible Stop claim. */
+export async function claimGoalRecoveryStopNow(conversationId: string, replyId: string, acceptedAt: number): Promise<boolean> {
+  const reply = goalReplies.get(conversationId);
+  if (!reply || reply.replyId !== replyId || reply.acceptedAt !== acceptedAt || reply.state !== 'pending' || !goalArmedFor(conversationId) ||
+      !reply.listenUntil || reply.listenUntil > Date.now() || reply.recoveryStopClaimed) return false;
+  reply.recoveryStopClaimed = true;
+  await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+  return goalReplies.get(conversationId) === reply && reply.state === 'pending' && goalArmedFor(conversationId);
 }
 
 export function resetGoalStateForTests(): void {

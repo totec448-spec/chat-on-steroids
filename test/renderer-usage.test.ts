@@ -4,6 +4,15 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { UsageOverview } from '../src/shared/usage.js';
 
 let dom: JSDOM;
+/**
+ * The renderer prints money through `Intl.NumberFormat(undefined, …)`, on purpose: the amount
+ * is read by whoever runs the app, in their own locale. A literal '1.44' in an assertion is
+ * therefore not the value under test, it is en-US punctuation — and the suite failed on a
+ * de-DE machine, where the same correct render reads '1,44 $'. Ask the same formatter what
+ * this number looks like here, so the assertion keeps testing the amount.
+ */
+const money = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+const usd = (value: number) => money.format(value);
 afterEach(() => { dom?.window.close(); vi.unstubAllGlobals(); vi.resetModules(); });
 
 it('explains a pending background rebuild and replaces transport failure with a retryable status', async () => {
@@ -56,27 +65,27 @@ it.each([256_000, 400_000])('shows the calculated %i context cap and edits formu
   expect(balances.textContent).not.toMatch(/deep_research|file_upload|paste_text_to_file|image_gen|below/);
   expect(field('usageDivisor')).toBe(divisor);
   expect(dom.window.document.getElementById('costModel')).toBeNull();
-  expect(cost()).toContain('0.48'); expect(cost()).toContain('unpriced');
+  expect(cost()).toContain(usd(0.48)); expect(cost()).toContain('unpriced');
   change(divisor, '4');
-  expect(cost()).toContain('0.24');
+  expect(cost()).toContain(usd(0.24));
   expect(dom.window.document.getElementById('usageFormula')!.textContent).toContain('÷ 4');
   formulaDetails.querySelector('summary')!.click();
   expect(formulaDetails.open).toBe(false);
-  expect(cost()).toContain('0.24');
+  expect(cost()).toContain(usd(0.24));
   change(divisor, '0'); // Invalid edits do not corrupt the active calculation.
-  expect(cost()).toContain('0.24');
+  expect(cost()).toContain(usd(0.24));
   const unknownRate = dom.window.document.querySelector('input[aria-label="another-model cached-input USD per million tokens"]') as HTMLInputElement;
   change(unknownRate, '1');
-  expect(cost()).toContain('0.84'); expect(cost()).not.toContain('unpriced');
+  expect(cost()).toContain(usd(0.84)); expect(cost()).not.toContain('unpriced');
   change(field('usageMultiplier'), '1');
-  expect(cost()).toContain('0.70');
+  expect(cost()).toContain(usd(0.7));
   expect(getUsage).toHaveBeenCalledTimes(1);
   expect(JSON.parse(dom.window.localStorage.getItem('usage-formula-v1')!)).toMatchObject({ divisor: 4, multiplier: 1, rates: { 'gpt-5.6': 0.4, 'gpt-5.6-sol': 0.4, 'gpt-6-astra': 1, 'gpt-5.5': 0.5, 'another-model': 1 } });
   vi.resetModules();
   const restored = await import('../src/renderer/usage.js');
   restored.initUsage(); await restored.refreshUsage();
   expect(field('usageDivisor').value).toBe('4'); expect(field('usageMultiplier').value).toBe('1');
-  expect(cost()).toContain('0.70');
+  expect(cost()).toContain(usd(0.7));
 });
 
 it('shows the Sol picker alias rate and preserves an explicitly cleared rate after reload', async () => {
@@ -90,7 +99,7 @@ it('shows the Sol picker alias rate and preserves an explicitly cleared rate aft
   usage.initUsage(); await usage.refreshUsage();
   const rate = () => dom.window.document.querySelector('input[aria-label="gpt-5-6-thinking cached-input USD per million tokens"]') as HTMLInputElement;
   expect(rate().value).toBe('0.4');
-  expect(dom.window.document.getElementById('usageTotalCost')!.textContent).toContain('0.21');
+  expect(dom.window.document.getElementById('usageTotalCost')!.textContent).toContain(usd(0.21));
   expect(dom.window.document.getElementById('usageDays')!.textContent).not.toContain('Rate unknown');
   rate().value = ''; rate().dispatchEvent(new dom.window.Event('input'));
   expect(getUsage).toHaveBeenCalledTimes(1);
@@ -113,12 +122,12 @@ it('combines equivalent recorded names in the table while keeping raw rate edits
   const table = () => dom.window.document.querySelector('#usageDays table')!;
   expect(table().querySelectorAll('tr')).toHaveLength(2);
   expect(table().textContent).toContain('gpt-5.6-sol · high');
-  expect(table().textContent).toContain('1.44');
+  expect(table().textContent).toContain(usd(1.44));
   expect(table().querySelector('[data-usage-hint]')!.getAttribute('data-usage-hint')).toBe('Recorded IDs: 5.6, gpt-5-6-thinking, gpt-5.6-sol');
   expect(dom.window.document.querySelectorAll('#usageRates input')).toHaveLength(3);
   const rate = dom.window.document.querySelector('input[aria-label="5.6 cached-input USD per million tokens"]') as HTMLInputElement;
   rate.value = ''; rate.dispatchEvent(new dom.window.Event('input'));
-  expect(table().textContent).toContain('0.96 + unpriced');
+  expect(table().textContent).toContain(`${usd(0.96)} + unpriced`);
   expect(getUsage).toHaveBeenCalledTimes(1);
   expect(models[0]!.model).toBe('5.6');
 });

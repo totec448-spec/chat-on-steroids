@@ -10,6 +10,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { positionOf } from '../src/shared/chronology.js';
 import sharp from 'sharp';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
@@ -265,6 +266,42 @@ describe('session store', () => {
     }
     expect(seen.size).toBeGreaterThanOrEqual(12);
   });
+  it('pages revised long answers by origin in both directions while live deltas still use revision sequence', async () => {
+    const session = await createSession({ title: 'Origin paging' });
+    const body = { text: 'Detailed review. '.repeat(1200), truncated: false, chars: 19200 };
+    const answer = { kind: 'assistant_message' as const, source: 'extension' as const,
+      time: 100, messageId: 'long-review', message: body, final: true };
+    const first = await upsertMessageEvent(session.id, answer);
+    for (let i = 0; i < 12; i++) await appendEvent(session.id, {
+      time: 200 + i, source: 'app', kind: 'note', message: { text: `later ${i}`, truncated: false, chars: 8 }
+    });
+    const revised = await upsertMessageEvent(session.id, { ...answer, renderedHtml: { text: '<p>Detailed review.</p>', truncated: false, chars: 23 } });
+    expect(revised.event.seq).toBeGreaterThan(first.event.seq);
+    const all = await readEvents(session.id);
+    const expected = all.map(positionOf).sort((a, b) => a - b);
+    const backwards: number[] = [];
+    let before: number | undefined;
+    for (;;) {
+      const page = await readRecentEvents(session.id, 3, { before, orderByOrigin: true });
+      if (!page.length) break;
+      backwards.push(...page.map(positionOf));
+      before = Math.min(...page.map(positionOf));
+    }
+    expect(backwards.sort((a, b) => a - b)).toEqual(expected);
+    const forwards: number[] = [];
+    let after = 0;
+    for (;;) {
+      const page = await readRecentEvents(session.id, 3, { after, orderByOrigin: true });
+      if (!page.length) break;
+      forwards.push(...page.map(positionOf));
+      after = Math.max(...page.map(positionOf));
+    }
+    expect(forwards).toEqual(expected);
+    expect((await readEvents(session.id, { from: revised.event.seq })).find(e => e.kind === 'assistant_message')).toMatchObject({
+      seq: revised.event.seq, origin: first.event.seq, message: body
+    });
+  });
+
   it('counts stable legacy message revisions once when building a recent presentation window', async () => {
     const summary = await createSession({ title: 'legacy recent dedupe' });
     await appendEvent(summary.id, {

@@ -260,6 +260,23 @@ it('does not close an old turn when its revised final follows a newer user messa
 });
 
 
+it.each([false, true])('accepts a textless native final only with exact provider identity (%s)', async native => {
+  const conversationId = `image-final-${native}`;
+  const result = await recordChatObservations(conversationId, [
+    { kind: 'user_message', time: 10, messageId: 'image-question', text: 'Generate two images' },
+    { kind: 'turn_start', time: 11, turnId: 'image-turn' },
+    { kind: 'assistant_message', time: 20, messageId: 'image-final', turnId: 'image-turn', text: '',
+      ...(native ? { providerMessageId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' } : {}), state: 'final', final: true, goalEligible: true },
+    { kind: 'turn_end', time: 21, turnId: 'image-turn', outcome: 'completed' }
+  ]);
+  expect(!!await readCompletedFinal(result.sessionId!, conversationId)).toBe(native);
+  await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests();
+  expect(!!await readCompletedFinal(result.sessionId!, conversationId)).toBe(native);
+  await recordChatObservations(conversationId, [{ kind: 'user_message', time: 30,
+    messageId: 'new-image-question', text: 'Generate another image', authoredNow: true }]);
+  expect(await readCompletedFinal(result.sessionId!, conversationId)).toBeNull();
+});
+
 it('uses an unowned canonical final as a settled ordinary input boundary without inventing a turn', async () => {
   const conversationId = 'unowned-final-current-question';
   const opened = await recordChatObservations(conversationId, [

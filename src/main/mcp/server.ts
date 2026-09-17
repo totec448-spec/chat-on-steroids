@@ -20,6 +20,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createInboundTiming, formatInboundTiming, requestIdFromHeader, withInboundRequestId } from './inbound.js';
 import http from 'node:http';
+import type { Socket } from 'node:net';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import { getConfig } from '../config.js';
@@ -87,7 +88,7 @@ function jsonError(res: http.ServerResponse, status: number, error: string): voi
 }
 
 /**
- * Buffers an HTTP body only when its size is not already bounded by Content-Length.
+ * Buffers an HTTP body before adapter admission, irrespective of Content-Length.
  *
  * The MCP Node adapter otherwise concatenates a chunked/missing-length request to an
  * unbounded JS string before parsing it. Stop retaining bytes at the same 8 MiB limit the
@@ -125,7 +126,7 @@ function readBoundedJsonBody(
     const onEnd = (): void => {
       try {
         const text = Buffer.concat(chunks, total).toString('utf8');
-        finish({ body: text.length === 0 ? undefined : JSON.parse(text) });
+        finish({ body: text.length === 0 ? null : JSON.parse(text) });
       } catch {
         finish({ error: 'invalid_json' });
       }
@@ -330,7 +331,19 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
   const checkHost = localhostHostValidation();
   const checkOrigin = localhostOriginValidation();
 
+  // A TCP connection or incomplete body is not an accepted MCP operation. Only
+  // requests handed to the adapter own a response that must survive Disconnect.
+  const sockets = new Map<Socket, Set<http.ServerResponse>>();
+  let stopping: Promise<void> | null = null;
+  let forceTimer: ReturnType<typeof setTimeout> | null = null;
+  let forceDeadline = Infinity;
+  let stopped = false;
   const server = http.createServer((req, res) => {
+    if (stopping) {
+      res.setHeader('connection', 'close');
+      jsonError(res, 503, 'server_stopping');
+      return;
+    }
     const timing = createInboundTiming();
     const url = req.url ?? '';
     const pathOnly = url.split('?')[0] ?? '';
@@ -409,8 +422,30 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
     // The tool dispatch reads this back to join the call to the page request that issued
     // it; see inbound.ts for why it cannot be taken from the MCP call context.
     const requestId = requestIdFromHeader(req.headers['x-request-id']);
-    if (req.method === 'POST' && declaredHeader === undefined) {
+    const dispatch = (body?: unknown): void => {
+      if (stopping || res.destroyed) {
+        if (!res.destroyed) {
+          res.setHeader('connection', 'close');
+          jsonError(res, 503, 'server_stopping');
+        }
+        return;
+      }
+      const socket = req.socket;
+      const responses = sockets.get(socket)!;
+      responses.add(res);
+      const release = (): void => {
+        responses.delete(res);
+        // Flush the completed response without waiting for the peer to close its
+        // half of the connection. Immediate destroy() could lose buffered bytes.
+        if (stopping && responses.size === 0) socket.destroySoon();
+      };
+      res.once('finish', release);
+      res.once('close', release);
+      withInboundRequestId(requestId, () => void route.handler(req, res, body), timing, publication);
+    };
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
       void readBoundedJsonBody(req).then((parsed) => {
+        if (res.destroyed) return;
         if (parsed.error === 'payload_too_large') {
           jsonError(res, 413, 'payload_too_large');
           return;
@@ -419,11 +454,16 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
           jsonError(res, 400, 'invalid_json');
           return;
         }
-        withInboundRequestId(requestId, () => void route.handler(req, res, parsed.body), timing, publication);
+        dispatch(parsed.body);
       });
       return;
     }
-    withInboundRequestId(requestId, () => void route.handler(req, res), timing, publication);
+    dispatch();
+  });
+  server.on('connection', (socket) => {
+    sockets.set(socket, new Set());
+    socket.once('close', () => sockets.delete(socket));
+    if (stopping) socket.destroy();
   });
 
   // Reject slow or oversized bodies rather than holding sockets open indefinitely.
@@ -457,36 +497,36 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
     url: urls.core,
     urls,
     publication: (surface, observe) => { void buildServer(stableContext(surface), surface, observe).close(); },
-    stop: (options = {}) =>
-      new Promise<void>((resolve) => {
-        // Stop accepting new work, but let requests already accepted by the MCP adapter
-        // finish and deliver their result. Destroying active sockets here created ambiguous
-        // commits: the caller saw `fetch failed` and could retry while the original mutation
-        // continued in this process. `server.close()` drains active connections. There is no
-        // force deadline for an ordinary disconnect/reconnect; only final process shutdown
-        // opts into one explicitly, where remaining work cannot outlive the app anyway.
-        let settled = false;
-        const forceAfterMs = options.forceAfterMs;
-        const force =
-          forceAfterMs === undefined
-            ? null
-            : setTimeout(() => {
-                if (settled) return;
-                // Force first, report second. This timer is the only thing between a wedged
-                // peer and a shutdown that never ends, so nothing it depends on may sit behind
-                // a call that could throw — and logging reaches the renderer, which by this
-                // point in a quit is already gone.
-                server.closeAllConnections();
-                logWarn(`server drain timed out after ${forceAfterMs}ms during final shutdown; forcing remaining connections closed`);
-              }, Math.max(0, forceAfterMs));
-        force?.unref?.();
-        server.closeIdleConnections?.();
+    stop: (options = {}) => {
+      if (!stopping) {
+        // Publish the admission fence before closing any sockets or receiving late bodies.
+        let resolveStop!: () => void;
+        stopping = new Promise<void>((resolve) => { resolveStop = resolve; });
+        const accepted = [...sockets.values()].reduce((count, responses) => count + responses.size, 0);
+        logInfo(`server stopping: draining ${accepted} accepted response(s)`);
         server.close(() => {
-          settled = true;
-          if (force) clearTimeout(force);
+          stopped = true;
+          if (forceTimer) clearTimeout(forceTimer);
           logInfo('server stopped');
-          resolve();
+          resolveStop();
         });
-      })
+        for (const [socket, responses] of sockets) {
+          if (responses.size === 0) socket.destroy();
+        }
+      }
+      // Final shutdown can escalate an ordinary drain already in progress. Repeated
+      // calls share custody and may shorten, but never extend, its force deadline.
+      const forceAfterMs = options.forceAfterMs;
+      if (!stopped && forceAfterMs !== undefined && Date.now() + forceAfterMs < forceDeadline) {
+        if (forceTimer) clearTimeout(forceTimer);
+        forceDeadline = Date.now() + Math.max(0, forceAfterMs);
+        forceTimer = setTimeout(() => {
+          server.closeAllConnections();
+          logWarn(`server drain timed out after ${forceAfterMs}ms during final shutdown; forcing remaining connections closed`);
+        }, Math.max(0, forceAfterMs));
+        forceTimer.unref?.();
+      }
+      return stopping;
+    }
   };
 }

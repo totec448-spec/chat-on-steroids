@@ -8,5 +8,8 @@ retrieved 2026-09-07. It retains the upstream copyright and complete permission/
 
 Other dependency notices are collected directly from the installed packages. The @img native
 packages publish composite library attribution in their README files; those are also preserved.
+The platform-specific `@napi-rs/canvas-*` binary packages declare MIT but omit the repository
+license from their npm tarballs. `napi-rs-canvas-LICENSE` is the complete MIT license shipped by
+their parent `@napi-rs/canvas` package from the same release and repository.
 The packaging pipeline separately supplies the target-specific tunnel, ripgrep, image-library
 and Electron/Chromium notices alongside those binaries.
