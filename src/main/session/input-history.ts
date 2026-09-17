@@ -3,9 +3,10 @@ import { browserInputModel } from '../../shared/input.js';
 import { getSession, observeSessionModel, readAsset, readEvents, upsertMessageEvent, writeAsset } from './store.js';
 import { validateInputImages } from './input-images.js';
 import sharp from 'sharp';
+import { positionOf } from '../../shared/chronology.js';
 
 /** Project a tool handout or proven delivery into history, never the enqueue intent. */
-export async function recordDeliveredInput(entry: Readonly<InputEntry>, anchorCommitted?: () => void): Promise<boolean> {
+export async function recordDeliveredInput(entry: Readonly<InputEntry>, anchorCommitted?: (seq: number) => void): Promise<boolean> {
   const sessionId = entry.sessionId ?? entry.deliveredSessionId;
   const offered = entry.state === 'tool' && !!entry.owner && Number.isFinite(entry.offeredAt);
   const confirmed = ['sent', 'cancelled'].includes(entry.state) && !!entry.messageId && Number.isFinite(entry.deliveredAt);
@@ -38,8 +39,8 @@ export async function recordDeliveredInput(entry: Readonly<InputEntry>, anchorCo
   };
   // Delivery and its chronology do not depend on optional preview storage. This
   // stable row survives a quota failure; retry only enriches the same origin.
-  await upsertMessageEvent(sessionId, message);
-  anchorCommitted?.();
+  const committed = await upsertMessageEvent(sessionId, message);
+  anchorCommitted?.(positionOf(committed.event));
   if (images.length) {
     await validateInputImages(images);
     const assets = [];

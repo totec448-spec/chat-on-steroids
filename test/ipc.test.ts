@@ -28,7 +28,7 @@ vi.mock('electron', () => ({
     encryptStringAsync: vi.fn(async (value: string) => Buffer.from(value, 'utf8')),
     decryptStringAsync: vi.fn(async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false }))
   },
-  app: { getPath: () => '', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
+  app: { on: vi.fn(), getPath: () => '', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
 }));
 
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
@@ -37,7 +37,7 @@ vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: vi.fn(async (
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, resetSecretsCacheForTests } = await import('../src/main/secrets.js');
-const { appendEvent, createSession, initSessionStore, rebindSession, resetSessionStoreForTests } = await import('../src/main/session/store.js');
+const { appendEvent, createSession, initSessionStore, rebindSession, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { pendingCommands, resetBridgeForTests, setBrowserOpener, startBridge, stopBridge } = await import(
   '../src/main/bridge.js'
@@ -84,6 +84,19 @@ const renameRoot = (payload: unknown): Promise<any> => handlers.get('roots:renam
 const removeRoot = (payload: unknown): Promise<any> => handlers.get('roots:remove')!(null, payload) as Promise<any>;
 const sessionEvents = (payload: unknown): Promise<any> => handlers.get('sessions:events')!(null, payload) as Promise<any>;
 const sessionList = (): Promise<any> => handlers.get('sessions:list')!(null, undefined) as Promise<any>;
+
+it('persists arbitrary colors through Settings IPC and preserves concurrent per-field edits', async () => {
+  const { defaultAppearance } = await import('../src/shared/appearance.js');
+  const base = getConfig();
+  const appearance = defaultAppearance(); appearance.dark.sidebar = '#fa89c2'; appearance.font = 'serif';
+  expect(await save({ ...base, ui: { ...base.ui, appearance } }, base)).toMatchObject({ ok: true });
+  const nextAppearance = defaultAppearance(); nextAppearance.dark.accent = '#4a6be2';
+  expect(await save({ ...base, ui: { ...base.ui, appearance: nextAppearance } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.appearance).toMatchObject({ font: 'serif', dark: { sidebar: '#fa89c2', accent: '#4a6be2' } });
+  const current = getConfig();
+  expect(await save({ ...current, ui: { ...current.ui, appearance: { ...current.ui.appearance, fontSize: 100 } } }, current)).toMatchObject({ ok: false });
+  expect(getConfig().ui.appearance).toEqual(current.ui.appearance);
+});
 
 it('switches setup IDs and encrypted key ownership without changing shared settings', async () => {
   const { getSecret } = await import('../src/main/secrets.js');
@@ -379,6 +392,26 @@ beforeEach(async () => {
     sessions: { ...defaultConfig().sessions, record: true },
     multiAgent: { enabled: true, maxWorkers: 3, allowUnattributedCalls: false, recoverAgentTabs: true }
   });
+});
+
+it('keeps origin history navigation separate from live revision cursors over IPC', async () => {
+  const session = await createSession({ title: 'History cursors' });
+  const message = { kind: 'assistant_message' as const, source: 'extension' as const, time: 10,
+    messageId: 'review', message: { text: 'Detailed review', truncated: false, chars: 15 }, final: true };
+  const first = await upsertMessageEvent(session.id, message);
+  await appendEvent(session.id, { kind: 'note', source: 'app', time: 20, message: { text: 'Later work', truncated: false, chars: 10 } });
+  const revision = await upsertMessageEvent(session.id, { ...message, renderedHtml: { text: '<p>Detailed review</p>', truncated: false, chars: 22 } });
+  const read = (options: object) => handlers.get('sessions:events')!(null, { id: session.id, ...options }) as Promise<any>;
+  const tail = await read({ limit: 1 });
+  expect(tail.ok).toBe(true);
+  expect(tail.data.events[0].kind).toBe('note');
+  const older = await read({ before: tail.data.events[0].seq, limit: 1 });
+  expect(older.data.events[0]).toMatchObject({ kind: 'assistant_message', origin: first.event.seq, seq: revision.event.seq });
+  const newer = await read({ after: first.event.seq, limit: 1 });
+  expect(newer.data.events[0].kind).toBe('note');
+  const delta = await read({ from: revision.event.seq, limit: 1 });
+  expect(delta.data.events[0].messageId).toBe('review');
+  expect(delta.data.nextFrom).toBe(revision.event.seq + 1);
 });
 
 describe('explicit settings replace the published tool contract', () => {
@@ -761,9 +794,9 @@ describe('settings writes from more than one UI', () => {
     expect(reply.ok, reply.error).toBe(true);
     expect(getConfig().ui.theme).toBe('dark');
     expect(nativeTheme.themeSource).toBe('dark');
-    expect(currentWindow.setBackgroundColor).toHaveBeenCalledWith('#0e0e11');
+    expect(currentWindow.setBackgroundColor).toHaveBeenCalledWith('#181818');
     if (process.platform === 'win32') expect(currentWindow.setTitleBarOverlay).toHaveBeenCalledWith({
-      height: 36, color: '#1a2129', symbolColor: '#b8c0c5'
+      height: 36, color: '#00000000', symbolColor: '#ffffff'
     });
     expect(getConfig().goal.enabled).toBe(false);
   });

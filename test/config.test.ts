@@ -25,6 +25,19 @@ afterAll(async () => {
 });
 
 describe('settings migration', () => {
+  it('round-trips custom appearance and isolates malformed appearance from permissions', async () => {
+    const { defaultAppearance } = await import('../src/shared/appearance.js');
+    const config = defaultConfig(); config.readOnly = true; config.capabilities.command = false;
+    expect(config.ui.appearance).toBeUndefined();
+    const appearance = defaultAppearance(); appearance.dark.sidebar = '#e53aa0'; appearance.fontSize = 18;
+    await saveConfig({ ...config, ui: { ...config.ui, appearance } });
+    expect((await loadConfig()).ui.appearance).toEqual(appearance);
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config,
+      ui: { ...config.ui, appearance: { ...appearance, fontSize: 900 } } }), 'utf8');
+    const loaded = await loadConfig();
+    expect(loaded.readOnly).toBe(true); expect(loaded.capabilities.command).toBe(false);
+    expect(loaded.ui.appearance).toBeUndefined();
+  });
   it('drops removed file-saving settings without changing other saved choices', async () => {
     const config = defaultConfig();
     config.readOnly = true;

@@ -1426,7 +1426,7 @@ export async function recordProcessCall(sessionId: string, event: Omit<Extract<S
 
 /** Exit revises its launch; it is not a tool invocation, output receipt or turn boundary. */
 export async function completeProcessCall(sessionId: string, callId: string, completion: {
-  completedAt: number; durationMs: number; exitCode: number | null;
+  completedAt: number; durationMs: number; exitCode: number | null; benignExit?: boolean;
 }): Promise<void> {
   const entry = await ensureOpen(sessionId);
   await enqueueSessionOperation(entry, 'process completion', async () => {
@@ -1434,7 +1434,7 @@ export async function completeProcessCall(sessionId: string, callId: string, com
     const previous = entry.messages.get(key);
     if (previous?.kind !== 'tool_call' || !previous.call.process || previous.call.process.completedAt !== undefined) return;
     const { exitCode } = completion;
-    const failed = exitCode !== null && exitCode !== 0;
+    const failed = exitCode !== null && exitCode !== 0 && completion.benignExit !== true;
     const full: Extract<SessionEvent, { kind: 'tool_call' }> = {
       ...previous, seq: entry.nextSeq,
       call: { ...previous.call, process: { ...previous.call.process, ...completion }, summary: {
@@ -1564,7 +1564,7 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
 export async function readRecentEvents(
   sessionId: string,
   limit: number,
-  options: Pick<ReadOptions, 'kinds' | 'agent'> & { maxBytes?: number; before?: number } = {}
+  options: Pick<ReadOptions, 'kinds' | 'agent'> & { maxBytes?: number; before?: number; after?: number; orderByOrigin?: boolean } = {}
 ): Promise<SessionEvent[]> {
   assertSessionId(sessionId);
   await flushSession(sessionId);
@@ -1658,7 +1658,7 @@ async function readRecentEventsFromDisk(
   sessionId: string,
   limit: number,
   options: Pick<ReadOptions, 'kinds' | 'agent'> & {
-    maxBytes?: number; before?: number; acceptEvent?: (event: SessionEvent) => boolean; orderByOrigin?: boolean
+    maxBytes?: number; before?: number; after?: number; acceptEvent?: (event: SessionEvent) => boolean; orderByOrigin?: boolean
   } = {}
 ): Promise<SessionEvent[]> {
   const cap = Math.max(1, Math.min(MAX_EVENT_TAIL, Math.floor(limit)));
@@ -1675,13 +1675,18 @@ async function readRecentEventsFromDisk(
   // the row cap or a long old answer can hide every earlier user turn from Goal/history tails.
   const legacyMessageKeys = new Set<string>();
   const rawTail: SessionEvent[] = [];
+  const sequence = options.orderByOrigin ? positionOf : workSequence;
+  const forward = options.after !== undefined;
+  let replaced = 0;
+  let reachedStart = false;
+  const scanning = () => !reachedStart && (forward || rawTail.length < cap);
   let damaged = 0;
   // Explicit history navigation may seek beyond the recent-tail budget. It streams backwards
   // in fixed chunks and retains only this page, never materializing the complete journal.
-  const readBudget = options.before === undefined ? Math.max(64 * 1024, Math.min(MAX_RECENT_READ_BYTES, options.maxBytes ?? MAX_RECENT_READ_BYTES)) : Number.POSITIVE_INFINITY;
+  const readBudget = options.before === undefined && !forward ? Math.max(64 * 1024, Math.min(MAX_RECENT_READ_BYTES, options.maxBytes ?? MAX_RECENT_READ_BYTES)) : Number.POSITIVE_INFINITY;
 
   const accept = (line: Buffer): void => {
-    if (rawTail.length >= cap || line.length === 0) return;
+    if (!scanning() || line.length === 0) return;
     if (line.length > MAX_LINE_BYTES) {
       damaged += 1;
       return;
@@ -1697,7 +1702,11 @@ async function readRecentEventsFromDisk(
       damaged += 1;
       return;
     }
-    if (options.before !== undefined && parsed.seq >= options.before) return;
+    // Journal sequence is append ordered. Canonical revisions are joined below;
+    // crossing the forward origin boundary retires this backwards scan.
+    if (forward && parsed.seq <= options.after!) { reachedStart = true; return; }
+    if (options.before !== undefined && sequence(parsed) >= options.before) return;
+    if (forward && sequence(parsed) <= options.after!) return;
     if (options.kinds && !options.kinds.includes(parsed.kind)) return;
     if (options.agent && parsed.agent !== options.agent) return;
     if (options.acceptEvent && !options.acceptEvent(parsed)) return;
@@ -1708,7 +1717,8 @@ async function readRecentEventsFromDisk(
         legacyMessageKeys.add(key);
       }
     }
-    rawTail.push(parsed);
+    if (rawTail.length < cap) rawTail.push(parsed);
+    else rawTail[replaced++ % cap] = parsed;
   };
 
   const file = path.join(sessionDir(sessionId), 'events.jsonl');
@@ -1718,7 +1728,7 @@ async function readRecentEventsFromDisk(
     let cursor = (await handle.stat()).size;
     let bytes = 0;
     let carry = Buffer.alloc(0);
-    while (cursor > 0 && rawTail.length < cap && bytes < readBudget) {
+    while (cursor > 0 && scanning() && bytes < readBudget) {
       const wanted = Math.min(64 * 1024, cursor, readBudget - bytes);
       if (wanted <= 0) break;
       cursor -= wanted;
@@ -1737,15 +1747,15 @@ async function readRecentEventsFromDisk(
       carry = joined.subarray(0, firstNewline);
       const complete = joined.subarray(firstNewline + 1);
       let endAt = complete.length;
-      for (let at = complete.length - 1; at >= 0 && rawTail.length < cap; at--) {
+      for (let at = complete.length - 1; at >= 0 && scanning(); at--) {
         if (complete[at] !== 0x0a) continue;
         const line = complete.subarray(at + 1, endAt);
         if (line.length > 0) accept(line);
         endAt = at;
       }
-      if (rawTail.length < cap && endAt > 0) accept(complete.subarray(0, endAt));
+      if (scanning() && endAt > 0) accept(complete.subarray(0, endAt));
     }
-    if (cursor === 0 && rawTail.length < cap && carry.length > 0) accept(carry);
+    if (cursor === 0 && scanning() && carry.length > 0) accept(carry);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   } finally {
@@ -1754,15 +1764,15 @@ async function readRecentEventsFromDisk(
 
   const candidates: SessionEvent[] = [...rawTail];
   for (const message of messages.values()) {
-    if (options.before !== undefined && workSequence(message) >= options.before) continue;
+    if (options.before !== undefined && sequence(message) >= options.before) continue;
+    if (forward && sequence(message) <= options.after!) continue;
     if (options.kinds && !options.kinds.includes(message.kind)) continue;
     if (options.agent && message.agent !== options.agent) continue;
     if (options.acceptEvent && !options.acceptEvent(message)) continue;
     candidates.push(message);
   }
-  const sequence = options.orderByOrigin ? positionOf : workSequence;
   candidates.sort((left, right) => sequence(left) - sequence(right));
-  const selected = candidates.slice(Math.max(0, candidates.length - cap));
+  const selected = forward ? candidates.slice(0, cap) : candidates.slice(Math.max(0, candidates.length - cap));
   if (damaged > 0) logWarn(`session ${sessionId}: skipped ${damaged} unreadable recent event line(s)`);
   return chronological(selected);
 }

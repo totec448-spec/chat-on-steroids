@@ -25,6 +25,7 @@ export interface CallEvidence {
   /** Free-form qualifier the summariser may use, e.g. "lines 200-420". */
   detail: string | null;
   exitCode: number | null;
+  benignExit?: boolean;
   timedOut: boolean;
   /** Child/process lifetime when the command surface measured it itself. */
   durationMs: number | null;
@@ -316,6 +317,7 @@ export function noteExec(result: {
   store.evidence.timedOut = result.timedOut === true;
   // A timeout is our failure and outranks a child status; benign child statuses are exempt.
   const exempt = result.benignExit === true;
+  store.evidence.benignExit = exempt;
   if (result.exitCode !== null && result.exitCode !== 0 && !exempt) {
     noteOutcome('process_exit_nonzero');
   }

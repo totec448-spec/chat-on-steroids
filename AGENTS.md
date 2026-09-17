@@ -193,6 +193,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8. | Legacy absent enabled/allow-unattributed fields remain false. Existing choices stay exact. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
+| Automatic Continue | On. | Ordinary unfinished turns only while Goal and Loop are both Off; explicit Off survives and malformed config disables it. See §14. |
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-5.6-sol` High. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
 | Desktop | Windows on; macOS retains its off default and separate native OS consent; Linux supports extension browser control. | Existing screen/control grants also govern browser tools; unsupported native clipboard remains masked. No new per-tab permission dialog. |
 | Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
@@ -221,6 +222,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Terminal custody | `src/main/codex/{manager,ownership,unified-exec,unified-exec-constants,shell,command-batch,head-tail-buffer,truncate,exec-output}.ts`. |
 | Patching/images | `src/main/codex/apply-patch/*`, `codex/{filesystem,read-backend,view-image}.ts`. |
 | Projects/cwd | `src/main/projects.ts`, `workspace.ts`, `src/shared/projects.ts`: explicit local folder catalog, session binding, inherited/learned workspaces. |
+| Project Files UI | `src/main/project-files.ts`, `project-file-watcher.ts`, `src/shared/project-files.ts`, `src/renderer/{file-panel,file-code-editor,file-pdf-viewer,work-panel-resize}.ts`: bounded project views, revision-checked saves and renderer-owned drafts. |
 | Durable history | `src/main/session/{store,recorder,correlation,retention,summarize,progress}.ts`, `src/shared/{session,chronology}.ts`: canonical messages, tool truth, chronology and indexes. |
 | Input | `src/main/session/{input,start-input,input-history,input-attachments,input-images,prompt}.ts`, `src/shared/{input,user-prompt}.ts`: outbox, native files, prompt frame and receipts. |
 | Finish/planning | `src/main/session/finish.ts`, `task-request.ts`, `goal.ts`, `src/shared/{finish,task-progress}.ts`: held turn, decision/plan invocation and cancellation. |
@@ -231,7 +233,8 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Extension | `extension/{manifest.json,chatgpt-dom.js,content.js,fiber.js,background.js,usage.js,overlay.css,popup.html,popup.css,popup.js}`: injection worlds, native observations/actions, journal and UI. |
 | Models/usage | `src/main/chat-models.ts`, `session/usage.ts`; `src/shared/{chat-models,usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
 | External plugins | `src/main/plugins/{catalog,installer,manager,exposure,oauth}.ts`, `plugins-ipc.ts`, `plugin-refresh.ts`, `src/shared/{plugins,plugin-refresh}.ts`, `src/renderer/plugins.ts`. |
-| Renderer boundary | `src/main/ipc.ts`, `edit-context-menu.ts`, `src/preload/index.ts`; `src/renderer/{main,chat,dom,tool-result,timeline-scroll,sidebar-resize,browser-preferences,i18n}.ts`, `locales/zh-CN.json`, `index.html`, `styles.css`. |
+| Renderer boundary | `src/main/ipc.ts`, `edit-context-menu.ts`, `src/preload/index.ts`; `src/renderer/{main,chat,dom,tool-result,timeline-scroll,sidebar-resize,browser-preferences,connection-popover,i18n}.ts`, `locales/{es,zh-CN}.json`, `index.html`, `styles.css`. |
+| Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography, field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. |
 | Native Desktop | `src/main/computer/{index,helper,browser-chords,windows-api,windows-capture,windows-apps,windows-keys}.ts`, `src/shared/windows-computer.ts`, `mcp/tools-desktop-{windows,macos}.ts`, `native/macos-desktop-helper/*`, `native/macos-desktop-addon/*`. |
 | Direct browser control | `src/main/browser-control.ts`, `mcp/tools-browser.ts`, `src/shared/browser-control.ts`, `extension/browser-control{,-page}.js`: short-lived RPCs, session-owned debugger tabs, bounded DOM/diagnostics and background input. |
 | Delivery/build | `src/main/{update,extension-path,version,logger,durable}.ts`, `electron.vite.config.ts`, `electron-builder.yml`, `scripts/*`, `.github/workflows/*`, `vitest.config.ts`. |
@@ -388,11 +391,25 @@ guards still apply. This root is not saved in config, does not satisfy connectio
 and never becomes the default or learned project cwd, including native paths through an
 overlapping approved root. Desktop and external plugins receive no managed root.
 
-The composer offers a compact Skills list/import under `+` and leading `/id` or `/prompt id`
-completion. Multiple leading commands preserve order and deduplicate; prose/code later in a
-message is literal. Empty/loading/no-match states do not intercept Enter. Draft replacement,
-navigation and IME composition retire stale choices. The authored commands are the selection;
-there is no separate renderer selection ledger.
+Skills open through leading `/` completion in the composer; the attachment popup's Skills button
+inserts that leading slash and focuses the input while preserving existing draft text. Commands and Skills are
+separate compact sections; there is no sidebar entry, modal library or native import/remove UI.
+A small plus icon to the right of that Skills button inserts `Please add the following skills to my COS skills:`
+into the authored draft without sending it. ChatGPT can create Markdown instructions through
+the existing permission-checked `/skills` filesystem root. Leading `/id` or `/prompt id` completion projects selected
+commands as removable chips. The existing authored draft retains those command bytes; chips and
+the visible task textarea are projections, never a separate selection ledger. Multiple commands
+preserve order and deduplicate; prose/code later in a message is literal. Empty/loading/no-match
+states do not intercept Enter. Draft replacement, navigation, render generations and IME composition retire stale choices.
+
+`skill-library.ts` discovers repository `.agents/skills`, project `.codex/skills`, standard user,
+Codex, system and admin directories only within current approved roots. No new root authority or
+implicit cwd is granted. Depth, directory entries, catalog rows and errors are bounded; package
+references are not recursively treated as another catalog. External command IDs derive from
+canonical paths and remain stable when similarly named packages appear. `skill-metadata.ts` owns
+bounded YAML/TOML parsing and layered configuration. Invalid policy never enables implicit use.
+`skill-package.ts` stages resource copies and publishes SKILL.md last; the existing serialized
+managed-library owner controls imports and removals. Scripts/assets remain inert resources.
 
 Input `authoredSource` identifies which existing field contains the human request: `text`
 by default, `objective` for generated Goal/workflow openings, and `none` for generated
@@ -620,6 +637,13 @@ then records changes. Ordered exact/whitespace/limited-Unicode content matching 
 path authority. Shell-style `apply_patch` interception lives above the parser; quoting, `cd`
 and shell control flow are invocation problems, not grammar fixes.
 
+Content-match failures explain when the expected text lies behind the forward search cursor;
+callers must order edits within each Update File block. Diagnostics bound expected text and
+source excerpts to eight lines and 240 characters per line. A source excerpt requires Read
+permission and a matched context marker or reliable literal anchor; it describes the verification
+snapshot, never a relaxed match or another write attempt. The timeline labels these preflight
+failures “Patch didn’t match” / “not applied”; permission and identity refusals remain distinct.
+
 Partial multi-file failure uses bounded rollback snapshots. Restore only a path still matching
 what **this patch produced**; a concurrent external edit must never be overwritten. Preserve
 the port's explicit line-ending mode and readable parse/match failures.
@@ -627,8 +651,20 @@ the port's explicit line-ending mode and readable parse/match failures.
 ### Terminal execution and custody
 
 One app-lifetime `codex/manager.ts` owns `UnifiedExecProcessManager`. `exec_command` runs a shell,
-returns output or a process `session_id`; `write_stdin` continues that same process, sends input
+returns output and a process id; `write_stdin` continues that same process, sends input
 or drains output. Caller isolation is in `ownership.ts`, not separate managers per request.
+
+Every successful launch also returns a session id when it finishes immediately. Empty
+`write_stdin` calls can reread completed output after direct polling or automatic delivery;
+structured results keep `session_id` for running work and use `completed_session_id` for
+finished work, so existing polling loops still stop. Either id is the `write_stdin` input.
+On every OS, structured `output_replayed` marks a retained reread and `benign_exit` marks a
+proven expected non-zero result; raw exit codes remain intact.
+nonempty input to a completed process is refused and never restarts work. The same manager
+retains the latest 64 completed results for this app lifetime, with 256 KiB of raw head/tail
+output each (and delimiter-free batch presentation). Completed rereads have no unread debt,
+live-process capacity charge or automatic reoffer. Eviction/shutdown drops their existing
+custody entries; retained ids cannot be reallocated. Unread results keep their separate bounds.
 
 The owner is the **durable local session principal** established by correlation. A→B compaction
 keeps that principal, so B can continue A's live terminal without an adoption/move fallback.
@@ -649,9 +685,16 @@ so use its accessors rather than creating both `Path` and `PATH`. Preserve inher
 `toolchain.ts` fills missing/unreachable Windows JDK/Go configuration conservatively; never
 override an explicit reachable toolchain. `exec-hints.ts` repairs only provable narrow shell
 mismatches and otherwise abstains. Ambiguous globs/control flow keep original command semantics.
+The narrow PowerShell rg-regex quote repair uses `\x22`, avoiding embedded-quote/whitespace
+argument splitting in Windows PowerShell 5.1; fixed-string and PCRE literal regions are excluded.
+POSIX shell refusals (including zsh unmatched globs before launch) never count as search no-match.
 Search exit 1 can mean no matches; git/build/mutation failure must not be relabeled success.
 Search exit 2 remains a failure even with partial matches: missing or unreadable paths leave
 the requested search incomplete. Preserve returned matches and repair the failed path.
+The launch's classification also governs later polls, completion revisions and summaries;
+a proven benign non-zero exit stays non-error while preserving the raw exit code. Incomplete
+or omitted classification evidence fails closed. Batch summaries name `cmds`; polling retains
+the “Waited on session” title with its numeric id and measured exit status.
 The shell's virtual-path diagnostic excludes an exact approved native POSIX spelling, even
 when `/Users` collides with a `users` alias. This classification never rewrites command text
 or grants filesystem permission; genuine virtual paths retain their native-path guidance.
@@ -679,6 +722,26 @@ publication reoffers it. Explicit `write_stdin` can drain the remaining unacknow
 After 120 seconds without attendance, a running process can contribute one owner-scoped
 reminder; reading diagnostic state does not consume it. Blocked/compacting/superseded sources
 and nested code-mode calls do not receive or acknowledge these automatic pages.
+
+### Human workspace terminal
+
+`workspace-terminal.ts` and `workspace-terminal-ipc.ts` own human-operated node-pty shells;
+`renderer/workspace-terminal.ts` renders them with xterm and FitAddon. These shells are separate
+from MCP process custody and never consume agent output. The header button or Ctrl+backtick opens
+a resizable bottom panel. Each new tab captures the selected approved project's canonical cwd;
+changing chats does not retarget existing shells. No project means no guessed cwd. The live
+Command permission gates spawn/input, and input rechecks the original project path.
+
+Up to eight tabs retain interactive shell state. Hiding the panel preserves processes; closing
+a tab, renderer reload/destruction or app shutdown retires them. UUIDs and pending-create tickets
+prevent a late spawn after close. IPC accepts only the current main-frame sender and bounded
+named requests. Output pauses at 256 KiB until xterm parser acknowledgements drain it; scrollback
+is limited to 5,000 lines and queued input to 256 KiB. Ctrl+C interrupts unless copying a selection;
+Ctrl+Shift+C copies. Native terminal escape handling stays in xterm, not HTML rendering.
+Appearance application refreshes all existing xterm palettes, including hidden tabs, from the
+current page/ink tokens without recreating shells; cursor colors follow the same palette.
+`scripts/verify-workspace-terminal.cjs` tests real Electron/PTY input, cwd/environment persistence,
+hide/reopen, tabs, Ctrl+C, exit codes, resize and closing against isolated state.
 
 ### Images
 
@@ -809,8 +872,9 @@ MCP history do not qualify. Refresh and manual sends need no MCP proof. Recheck 
 for restored tickets and before claims; a genuine full final uses ordinary completion policy.
 A running local tool still vetoes Send.
 
-Queued after-turn work and pending immediate corrections use the normal model's **two-minute**
-silence/refresh authority; Pro uses **ten minutes**. Normal models then listen for **one minute
+Queued after-turn work and pending immediate corrections use **two-minute**
+silence/refresh authority for normal and unknown models; only proven Pro uses **ten minutes**.
+Normal and unknown models then listen for **one minute
 from the acknowledged refresh** before automatic Goal/Loop or queued delivery. The existing
 activity grant and outbox/Goal listening deadline own this wait. Thinking failed instead uses
 immediate refresh plus **five minutes** for automatic continuation. The final user decision
@@ -871,6 +935,10 @@ gets fifteen seconds. Missing preparation replies retain the elected tab and gra
 Only fresh same-document/epoch idle proof allows preparing that elected tab again. Final input
 offers do not block maintenance; the content busy slot and durable app claim/authorization own
 delivery. A due repair defers that same conversation's input to the next status pass.
+When an elected input tab finishes loading, its existing election wakes that same status pass
+immediately. Registration can precede page readiness; a missed early offer must not wait solely
+for the 30-second maintenance alarm. The wake rereads current outbox eligibility and retains
+the original tab election, native readiness checks and exact send receipt.
 
 A claimed/authorized ambiguous browser send is never automatically resent. Pre-send preparation
 failure and post-click uncertainty have different error text and retry authority. Late exact
@@ -1150,7 +1218,11 @@ Desktop session lists use stable `(updatedAt,id)` pagination. Each session selec
 recent tail and opens at the bottom after its current load renders, including A -> B -> A;
 the previous chat's viewport does not decide the new chat's position. Timeline
 pages older/newer on deliberate scrolling in 80-record stages, targets 160 resident records,
-and retains the measured viewport plus one screen of surrounding content up to a hard
+and navigates/evicts by immutable canonical `origin` (or original `seq`). Revision `seq`
+belongs only to live delta delivery; a later revision cannot relocate an answer, skip a page,
+or resurrect an off-page row in the live tail. Older/newer IPC navigation uses `before`/`after`
+origins; `from` remains the separate publication cursor.
+The renderer retains the measured viewport plus one screen of surrounding content up to a hard
 320-record staging bound. Dense collapsed activity must not make an 80-record eviction
 discard the reader's visible prose. The existing 2 MiB text/HTML paint budget still applies.
 Overlapping activity groups keep their disclosure identity across page boundaries. The
@@ -1185,6 +1257,10 @@ not independently verified provider truncation. `shared/session.ts::eventTokens(
 rule for context and Usage. Existing metadata and Usage caches invalidate their old estimates;
 reconstruction preserves rebind resets, applying old-frontend return reductions only to lifetime
 totals. Recorded results, overflow assets and actual MCP responses retain their existing bounds.
+Code-mode children are recorded with dispatcher-proven `nested: true`: they remain audit/tool
+activity but contribute neither context tokens nor Usage billing calls. Only the outer exchange
+counts. Legacy rows lack this proof and keep their old estimate; request ids and timing are not
+safe nesting identities. Usage cache version 8 enforces the distinction on recorded new calls.
 
 `extension/usage.js` observes bounded allowed account-usage responses in MAIN world, including
 already available state; it does not retain raw account payloads. App `session/usage.ts` accepts
@@ -1222,17 +1298,34 @@ while leaving ChatGPT's messages, model execution and account permissions with t
 | `background.js` | MV3 journal and HTTP transport, tab/document registry, command elections and durable ACK custody. |
 | `popup.*`, `overlay.css` | Pair/reconnect status and extension-owned presentation; no local tool authority. |
 
+The popup has no extension-reload action. The temporary debug button, handler and opener
+script are retired; manual extension reload uses the browser's normal extension management.
+
 Content↔MAIN messages need the expected source, type, nonce and navigation epoch. MAIN evidence
 is untrusted data, not instructions or filesystem permission. Prefer bounded observations of
 the current document over repeated full Fiber/DOM scans. Shared selectors belong in the DOM
 adapter; do not make each feature guess a different composer or terminal message.
+
+`active-tabs.js` projects the bridge's existing `nonDiscardableConversations` policy into
+lightweight debugger focus-emulation leases, plus exact still-pending input openings and the
+elected model-catalog operation. At most 64 ChatGPT tabs receive rendering protection. No
+Runtime/Network capture, synthetic input, global Chrome flags or selected-tab/OS focus change
+is involved. Idle/personal tabs and pins alone earn no lease. Navigation, policy retirement,
+failed status, unpair or wake-socket loss release it through existing lifecycle events;
+ordinary idle/reuse/close policy remains unchanged. Session storage retains attachment cleanup
+custody and cancellation, never activity authority. Chrome/user debugger cancellation is not
+retried until that activity scope ends. Browser tools cannot borrow these attachments.
+`test/active-tabs.test.ts` covers custody/races; `scripts/verify-active-tabs.mjs` verifies native
+background animation pause/resume and release in isolated Chromium without observing the target
+through a debugger. This fixture is not signed-in ChatGPT or installed-runtime acceptance.
 
 ### Direct background browser control
 
 Chrome 125+ grants the companion required `debugger`, `tabs` and HTTP(S) host access. The app
 adds no per-tab approval UI: existing screen/control settings govern observation/input and
 Read-only still masks mutation. Only an explicit `browser_tabs new` creates a tab; listing or
-attaching never activates one. A blue border identifies an attached tab; release removes the
+attaching never activates one. A soft blue edge glow, without a hard border or text badge,
+identifies an attached tab; release removes the
 indicator and debugger without closing the page. Chrome's own permission/debugger UI remains.
 The root debugger session enables Chromium focus emulation while attached, so hidden pages
 continue rendering and accepting input without changing the selected tab or OS foreground.
@@ -1332,6 +1425,25 @@ Send. A visible option, an English label, a remembered release name or “Upgrad
 entitlement. Do not enumerate every model × effort or create helper tabs to compensate for an
 uncertain catalog. Exact family rules live in `shared/chat-models.ts`.
 
+Model names and recovery policy checked against native picker metadata on **2026-09-17**:
+
+| Display family / compatible short name | Execution identity / selected effort | Silence refresh |
+| --- | --- | --- |
+| GPT-5.6 Sol / 5.6 Sol / Sol | `gpt-5-6`, `gpt-5-6-thinking`; Instant/Medium/High/Extra High | 2 minutes, then 1 minute listening after confirmed refresh |
+| GPT-5.5 / 5.5 | `gpt-5-5-instant`, `gpt-5-5-thinking`; non-Pro efforts | 2 minutes, then 1 minute listening |
+| GPT-5.6 Pro / 5.6 Pro; GPT-5.5 Pro / 5.5 Pro | `gpt-5-6-pro`, `gpt-5-5-pro`, or an explicitly selected `pro` effort | 10 minutes |
+| GPT-6 Pro / 6 Pro / Astra | `gpt-6-pro`, `gpt-6-astra`; exact Astra identities retain their finish policy | 10 minutes |
+| Unobserved / unknown model | No invented model identity | 2 minutes, then 1 minute listening |
+
+The native trigger can omit `GPT-`; the checked account still exposed full `GPT-5.6 Sol`
+and `GPT-5.5` family labels. Names/aliases describe compatibility, not account entitlement.
+Pro classification uses exact identities or the selected Pro effort, never `High`, a label
+substring, or the fact that the account offers Pro. The picker publishes selection changes;
+it need not repeat an unchanged selection in every turn-start batch. Recovery uses the recorded
+selection for the exact conversation, pins known turn identity, and resolves previously unknown
+selection without advancing its last-work timestamp. Unknown timing does not invent normal-model
+proof for other features. All continuation paths still require their exact source/MCP/queue proof.
+
 Direct Chrome selection is observed even with the picker closed. The existing MAIN scan reads
 the current native picker state, including September's retained `dropdownContent.props`, then
 stamps exact model/effort and document/route for the isolated reader. The older closed-trigger
@@ -1421,6 +1533,35 @@ to previously recorded previews without creating new content.
 
 ## 14. Bridge, durable browser commands and recovery
 
+### Ordinary automatic Continue (2026-09-17)
+
+`ui.autoContinue` defaults On (explicit Off survives; malformed-config recovery is Off).
+Its switch is first in Agents & automation. It applies only with both Goal and Loop Off,
+to an exact current ordinary executor question, never a helper or worker. It reuses the
+bridge silence grant and confirmed reload, then the existing durable input outbox. No
+error-string match or caller-identity bypass is involved. Known Pro waits ten minutes
+without actual work; other/unknown models wait two. After reload, native Send/idle permits
+immediate Continue if the same question still lacks a canonical final. Native Stop/busy
+earns one half-window only: one minute normally, five for Pro, bounded at three/fifteen
+minutes from the last work. If idle at expiry, send normally. Only if still active may the
+exact claimed document stop generation, prove idle, reload once, and release its frozen
+Continue text to the replacement document's normal send/receipt path. Reload latency does
+not restart the budget. The outbox freezes one combination of ten Continue phrases, ten
+recovery notices and eleven playful asides (1,100 variants). Each aside explicitly says to
+ignore it, not research or answer it, and stay on the original task. Every notice explains that prior
+work may already exist even if tool history is missing, and asks to inspect the current state
+before repeating work. Neither a finished-sounding paragraph nor native idle replaces the
+existing canonical-final authority.
+
+The outbox owns generated text, source work sequence, busy deadline and Stop/reload custody.
+Each browser action consumes its exact document claim once; an uncertain result is not
+replayed. The replacement document cannot reuse the old owner's send claim. Native user
+Stop stays distinct from recovery Stop. Fresh MCP/native work, a canonical final, a newer
+question/input, changed binding, running tools, Goal/Loop activation, disabled setting,
+block or compaction prevents the action. Drafts are checked before Stop and again before
+reload/Send. Process restart invalidates unspent generated recovery authority; authorized
+send custody remains durable. Countdown UI only projects this same outbox deadline.
+
 **Intent:** deliver one authorized operation to one exact document, survive transport loss,
 and revive only work that remains owed. The bridge never grants arbitrary local tools.
 
@@ -1472,6 +1613,14 @@ regressions do not establish those tabs' original cause or live validation of th
 silence/no-tab recovery for workers, primes and ordinary chats. Reload repair for exact errors,
 Unattributed incidents and compaction has its own evidence. “Recover agents” is not blanket
 permission to reopen the session list. A plain historical chat with no current work is unprotected.
+Chrome can still suspend an app-used background tab two ways: Memory Saver *discards* the document
+(the shell keeps its URL and answers tab queries) and Energy Saver *freezes* its timers.
+`autoDiscardable` protects only against discarding; no extension API exempts a tab from freezing.
+The extension reports discarded/frozen shells in `stalledConversations`, and the bridge answers
+each report with the missing-tab decision minus the close side effects — same recovery policy, one
+bounded reload of the exact tab under the shared cooldown, retired by its first real activity. A
+deferred worker revival likewise reloads a discarded exact tab rather than reading its dead page
+as proof the tab is still there. An idle chat with nothing owed is deliberately left asleep.
 Provider access-limit notices preserve only an active Goal/Loop's existing exact session/turn
 recovery grant. They neither renew its deadline nor discard a pending/spent repair or postpone
 Goal pickup. Genuine new work in the same batch keeps its ordinary rearming authority, and an
@@ -1481,6 +1630,7 @@ chats retain their no-reload behavior for these blocking notices; no new grant c
 | Trigger | Required meaning |
 | --- | --- |
 | Missing tab | Current non-retired binding plus still-owed/live work and recovery policy; ordinary chats need recorded tool work, workers use broker attachment state. |
+| Stalled tab | Extension-reported discarded/frozen shell; the missing-tab decision minus close side effects, under the shared reload cooldown. |
 | Page silence | Known live activity with model-specific deadline; a live local process and browser liveness are different facts. |
 | Assistant error | Exact turn/error, per-turn retry budget and cooldown; repair the broken page without fabricating a new task. |
 | Unattributed | A separate unresolved incident after attribution has landed; re-observe suspects, never assign ownership by proximity. |
@@ -1513,9 +1663,9 @@ the original source turn. A recoverable transport banner does not end a natively
 turn; exact Thinking failed keeps its immediate failure rule. Exact native final evidence
 supersedes a stale transport banner and retains ordinary Goal/Loop eligibility.
 
-Silence handling gives ordinary positively known non-Pro work a two-minute policy and Pro a
-longer ten-minute evidence budget. Unknown work receives the ten-minute recovery floor whenever
-recovery is wanted, including without queued input. A synthesized continuation additionally
+Silence handling gives normal and unknown work a two-minute policy followed by one minute
+of listening after a confirmed refresh; only positively identified Pro gets the ten-minute
+evidence budget. This applies with or without queued input. A synthesized continuation additionally
 needs exact durable source-turn proof. Reloading Pro can file the next
 queued after-turn input under §11, or an opted-in Pro Loop ticket under §17. User inputs take
 precedence. Goal's shorter watch is not a generic one-minute keepalive.
@@ -1888,6 +2038,10 @@ Current persistence/publication exceptions are in §21.
 
 ## 18. Desktop workspace, plugins, connection and native control
 
+Dark is the default theme. Theme selection belongs in Appearance settings; the main header
+has no light/dark shortcut. Files and worker-panel controls attach to the header independently
+of appearance controls.
+
 ### Renderer and IPC
 
 `renderer/main.ts` owns the shell/setup/settings; `chat.ts` owns sessions, composer and timeline.
@@ -1901,6 +2055,10 @@ A failed destination read clears retained rows. The welcome belongs only to expl
 Unbound local sessions do not request provider-only controls. The timeline and pending-message
 projection reconcile exact input/native message identities in the same paint: keep an accepted
 bubble until its history arrives, then remove its pending copy. Unchanged pending rows stay mounted.
+The outbox's `historySeq` is the store-confirmed canonical origin. Once the loaded publication
+cursor covers it, the pending projection cannot resurrect that input when its history page is
+evicted. Historical browsing leaves committed inputs with history. Never infer membership from
+the minimum event timestamp: old observations and tool start times can occur on newer pages.
 Pushes and async loads are scoped to selection/draft generation; a late load must not overwrite
 focused edits or a newer A → B → A view.
 
@@ -1985,7 +2143,7 @@ names render as plain chips; unresolved file citations do not gain invented loca
 Tool result rendering preserves structured text/image/resource distinctions within bounds.
 App-owned external/local links cross their validated main-process route.
 
-English and Simplified Chinese are explicit UI translations (`i18n.ts`, `locales/zh-CN.json`),
+English, Spanish and Simplified Chinese are explicit UI translations (`i18n.ts`, `locales/{es,zh-CN}.json`),
 with the selected locale in `cos.ui.language`. Changing language repaints owned labels while
 retaining drafts/selections; never translate authored messages, provider text or file paths.
 Bindings live only in a WeakMap keyed by their DOM node. Language changes walk the current
@@ -1996,12 +2154,37 @@ row replacement; ordinary language tests preserve controls, drafts and authored 
 Authored prose uses automatic text direction; shell/code remain LTR with logical layout edges.
 Theme and layout preferences do not change backend authority.
 Settings places ChatGPT model defaults second and Workers & recovery third, after Continuation
-sources; Appearance and its language selector come last. The connector-instructions editor
+sources. Appearance has its own Settings navigation page, including the language selector and
+existing setup profiles. The connector-instructions editor
 is removed. Settings saves preserve existing stored MCP instructions for compatibility.
 Dropdowns use native customizable selects (`appearance: base-select`) with theme-matched
 top-layer pickers, wrapping option labels and native keyboard/focus semantics. Pro Loop delivery
 stacks its label and full-width control within the composer menu. `scripts/verify-dropdown-layout.cjs`
 checks the real Electron layout and opened pickers at normal and enlarged zoom.
+Appearance and other Settings selects use paint containment so native dropdown repaints
+do not change neighboring rasterized edges at fractional zoom. Top-layer options remain
+outside that clip. `scripts/verify-settings-focus.cjs` checks unchanged geometry, pixel-exact
+restoration after closing/blurring, and hit testing options beyond the card edge.
+
+Appearance uses `ui.appearance` in the existing config, with separate Light/Dark background,
+sidebar and accent RGB colors plus contrast. Native color pickers and HEX fields allow every
+six-digit RGB color. A shared font choice, 12–18px base text size and translucent-sidebar switch
+apply immediately; Reset appearance restores both palettes and typography without changing the
+theme, language or setup profile. Text size scales the existing typography hierarchy, including
+code, independently of window zoom. System font retains the locale-specific fallback stack.
+Readable foregrounds, secondary text, borders, status colors and accent labels derive from the
+chosen surfaces; sidebar text derives from its own color. Translucency is an in-window tinted
+gradient/blur, not transparency through the native window to other applications.
+The connection status popover uses the exact page background, with no translucent card tint.
+Goal/Loop selection, Save task, selected dropdown options and Usage activity levels use the
+same readable accent token. Usage retains four increasing tint levels and neutral empty days.
+The main config and IPC schemas share bounded validation. Invalid disk appearance alone falls
+back to defaults without resetting permissions. Settings IPC merges each appearance field
+against its captured base, preserving concurrent edits. Renderer input previews remain local
+until change; pending saves and dirty HEX input survive status pushes. Native caption symbols
+and reload backing follow the persisted palette. `scripts/verify-appearance.cjs` exercises the
+production renderer in isolated Electron with color, queue/push, theme, reset, reload and narrow
+layout checks. It does not operate the installed app or a provider conversation.
 
 `renderer/plugin-refresh-reminder.ts` owns the chat-header reminder to refresh plugins
 in ChatGPT. Its X stores only the acknowledged running `state.update.current` version in
@@ -2010,6 +2193,41 @@ it. No acknowledgement shows the reminder, including the first version with this
 It survives restart until dismissed, returns for a different running version and is hidden
 in Settings. It stacks with update/extension notices and never marks an actual connector
 refresh complete or starts a browser action.
+
+### Project Files workspace
+
+The Files panel projects the current session's LocalProject through fixed IPC using a project
+UUID and relative paths. It does not change the main composer or grant additional filesystem
+access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
+and project-root mutation. Files and the read-only sub-agent panel share one resizable work slot.
+Directories load one level at a time (500 entries); at most 128 expanded directory watches are
+retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.
+Files uses one action toolbar with Refresh; the outer Files toggle closes the panel. Its shared
+work slot can grow to host width minus 360 px for chat, without a fixed maximum pixel width.
+Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep
+the previous accepted preview until replacement content is ready; hidden previews stay hidden.
+The horizontal preview separator paints a one-pixel hover line with a three-pixel drag area.
+The tree keeps keyboard focus across refreshes and supports arrow/Home/End navigation with
+Enter to activate. Preview and tree share layout space rather than overlapping; the preview's
+Files toggle temporarily hides the tree for reading. Closing the preview restores it.
+Creating an entry uses the same unsaved-edit guard as changing the selected file.
+
+Text previews/editor input are bounded to 256 KiB; full editable previews retain exact UTF-8,
+BOM and line endings plus a content/file-identity revision. Save stages complete replacement bytes
+beside the original, flushes them, revalidates project access and the original revision, then
+renames. A failed staging write or rename never truncates the original. Duplicate saves are
+refused and newer edits typed during a pending save remain dirty. Atomic replacement is not an
+OS-wide lock against an unrelated writer after the final revision check.
+
+Images accept at most 5 MiB input and 16 megapixels, then decode to a bounded 1600-pixel thumbnail.
+PDF input is bounded to 20 MiB; bundled PDF.js renders one page with at most 16 megapixels and
+8192 pixels per backing-store dimension. Retiring a preview immediately cancels its loader/render.
+Markdown drops active content and remote images. Unsupported or oversized files remain available
+through Reveal or Attach without a fabricated preview. Delete uses the OS Trash after confirmation.
+
+The renderer retains at most eight unsaved project drafts during project navigation. Async dialog,
+preview, watcher and save results recheck their original view generation. File attachment staging
+captures the existing ComposerDraftOwner before the await, so a later chat cannot receive it.
 
 ### Plugins: installation, execution and connector refresh
 
@@ -2069,6 +2287,24 @@ Approved-root requirements are surface/capability decisions, not whether the ext
 Separate local listener health, public tunnel reachability, ChatGPT connector configuration and
 browser attachment in both status and diagnosis. Stale connect/disconnect results cannot replace
 a newer endpoint. Secret paths/tokens are not public diagnostics.
+
+The sidebar footer owns global connection controls in a compact popover outside the translucent
+sidebar stacking context. Its translucent, blurred surface shows two compact status rows;
+verification/last-seen ages remain available in tooltips. A small plus opens Advanced, including
+the extension version and session capture. The request pipeline lives inside Runtime diagnostics.
+Every opening collapses Advanced and its nested Runtime diagnostics.
+Extension-only Overwrite/Timestamps and the redundant settings link are absent. A red header
+Connect action remains visible while disconnected and disappears only on confirmed connection,
+briefly highlighting the footer status (respecting reduced motion). Setup stays reachable from
+Settings and from Connect when configuration is incomplete. The View menu has its own foreground
+stacking layer; Appearance rows align controls at a shared minimum height and Setup uses a stable
+responsive title/language grid across locales.
+The companion sends a bounded snapshot on the authenticated `/diagnostics` route, outside the
+authority-bearing `/status` response. One pending diagnostic page read is shared; current
+connection/document epochs fence delayed results. The bridge cache is presentation only and
+clears on disconnect/stop/reset. Request discovery, receipt, exact ownership and recorded tool
+activity remain distinct evidence. Optional embedded-host presentation does not enable or
+implement an embedded browser.
 
 `tunnel/*` owns pinned-client discovery, child lifetime, health metrics and confirmed outages;
 `diagnostics.ts` tests the chain hop by hop. Transient health evidence must not produce repeated
@@ -2297,9 +2533,6 @@ These are source-level discrepancies checked for this map, not new live reproduc
 permission for an unsolicited rewrite. Recheck current code/tests before acting; another
 shared-tree change may already have addressed them.
 
-- **Startup opening:** `index.ts` still calls `startChatModelDiscovery(true)` on window show
-  when the catalog is unknown. Desired policy requires a concrete operation to own any new
-  browser document; app opening alone must not become a fallback opener.
 - **Repair handout vs action:** attribution and assistant-error repairs claim their exact attempt after the
   extension's tab scan. Other repair reasons still mark handout before the tab query/action
   without that final claim. Intent requires browser actions to retain current authority

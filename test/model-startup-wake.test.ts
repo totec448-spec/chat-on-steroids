@@ -9,6 +9,7 @@ const wake = source.slice(source.indexOf('let wakeSocket = null;'), source.index
 function harness(status = 200, unavailableSocket = false) {
   const sockets: any[] = [];
   const maintain = vi.fn(async () => {});
+  const activeTabs = { revoke: vi.fn(async () => {}) };
   class Socket {
     readyState = 0;
     send = vi.fn();
@@ -16,12 +17,13 @@ function harness(status = 200, unavailableSocket = false) {
     constructor(public url: string) { if (unavailableSocket) throw new Error('WebSocket unavailable'); sockets.push(this); }
   }
   const context = vm.createContext({ WebSocket: Socket, token: 'paired-secret', disconnected: false, port: 8765,
+    activeTabs,
     discover: async () => ({ port: 8765, compatible: true }), load: async () => {},
     fetchBounded: async () => ({ ok: status === 200, status, json: async () => ({}) }),
     REQUEST_TIMEOUT_MS: 15000, TIMED_OUT: 'timed_out', versionHeaders: () => ({}), maintain,
     persist: async () => {}, latchAppDisconnect: async () => {} });
   vm.runInContext(`${wake}\n${transport}\nglobalThis.callBridge = call;`, context);
-  return { sockets, maintain, call: context.callBridge as (path: string) => Promise<unknown> };
+  return { sockets, maintain, activeTabs, call: context.callBridge as (path: string) => Promise<unknown> };
 }
 
 it('reattaches wake transport on the first authenticated HTTP success before an alarm/status pass', async () => {
@@ -34,6 +36,7 @@ it('reattaches wake transport on the first authenticated HTTP success before an 
   socket.onmessage({ data: 'wake' }); expect(h.maintain).toHaveBeenCalledWith(true);
   await h.call('/events'); expect(h.sockets).toHaveLength(1);
   socket.onclose(); await h.call('/events'); expect(h.sockets).toHaveLength(2);
+  expect(h.activeTabs.revoke).toHaveBeenCalledTimes(1);
 });
 
 it('does not treat failed HTTP as proof of a restored wake channel', async () => {

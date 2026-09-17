@@ -41,12 +41,9 @@ export function browserPage(operation, args) {
     host.setAttribute('data-cos-browser-control', args.lease);
     host.style.cssText = 'all:initial!important;position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483647!important;display:block!important;';
     const shadow = host.attachShadow({ mode: 'closed' });
-    const border = document.createElement('div');
-    border.style.cssText = 'position:fixed;inset:0;border:3px solid #69a8ff;box-shadow:inset 0 0 22px #4c91ff55;pointer-events:none;border-radius:5px;';
-    const chip = document.createElement('div');
-    chip.style.cssText = 'position:fixed;right:14px;bottom:14px;background:#152c4f;color:#ddecff;border:1px solid #78b0ff;border-radius:9px;padding:7px 11px;font:12px/1.4 system-ui;box-shadow:0 3px 16px #10284a44;pointer-events:none;';
-    chip.textContent = 'Chat On Steroids · Browser control';
-    shadow.append(border, chip); document.documentElement.append(host); state.overlay = host;
+    const glow = document.createElement('div');
+    glow.style.cssText = 'position:fixed;inset:0;box-shadow:inset 0 0 20px #3984ff99,inset 0 0 52px #3984ff55;pointer-events:none;';
+    shadow.append(glow); document.documentElement.append(host); state.overlay = host;
     return true;
   }
   if (operation === 'removeOverlay') { state.overlay?.remove(); state.overlay = null; return true; }

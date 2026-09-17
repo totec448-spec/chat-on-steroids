@@ -96,7 +96,7 @@ describe('managed Skills store', () => {
   });
 
   it('derives a stable ID from a plain text filename and refuses duplicate publication', async () => {
-    const one = await sourceFile('My useful skill.txt', 'Plain instructions without a heading.\nContinue here.');
+    const one = await sourceFile('My useful skill.md', 'Plain instructions without a heading.\nContinue here.');
     const two = await sourceFile('my-useful-skill.md', '# Replacement\n\nMust not replace the first file.');
     expect((await importSkillFile(one)).id).toBe('my-useful-skill');
     await expect(importSkillFile(two)).rejects.toThrow(/already exists/i);
@@ -118,9 +118,9 @@ describe('managed Skills store', () => {
     const nul = await sourceFile('zero.md', 'before\0after');
     const oversized = await sourceFile('large.md', Buffer.alloc(MAX_SKILL_BYTES + 1, 0x61));
     const tooManyCharacters = await sourceFile('characters.md', 'a'.repeat(96_001));
-    const invalid = await sourceFile('...txt', 'text');
+    const invalid = await sourceFile('...md', 'text');
     const prompt = await sourceFile('prompt.md', 'reserved alias');
-    const windows = await sourceFile('con.txt', 'reserved device');
+    const windows = await sourceFile('con.md', 'reserved device');
     const windowsExt = await sourceFile('LPT1.notes.md', 'reserved device with extension');
     const folder = path.join(sources, 'folder.md');
     await fs.mkdir(folder);

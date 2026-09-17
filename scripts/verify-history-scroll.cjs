@@ -13,8 +13,12 @@ if (!process.versions.electron) {
 const { app, BrowserWindow } = require('electron');
 app.whenReady().then(async () => {
   const root = path.join(__dirname, '..');
-  const code = require('esbuild').buildSync({ entryPoints: [path.join(root, 'src/renderer/chat.ts')],
-    bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'chat' }).outputFiles[0].text;
+  const code = (await require('esbuild').build({ entryPoints: [path.join(root, 'src/renderer/chat.ts')],
+    bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'chat',
+    plugins: [{ name: 'fixture-url-assets', setup(build) {
+      build.onResolve({ filter: /\?url$/ }, args => ({ path: args.path, namespace: 'fixture-url' }));
+      build.onLoad({ filter: /.*/, namespace: 'fixture-url' }, () => ({ contents: 'export default "";', loader: 'js' }));
+    } }] })).outputFiles[0].text;
   const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
   const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*>/g, '')
@@ -37,17 +41,19 @@ app.whenReady().then(async () => {
     const session={id:'history-fixture',title:'Dense history fixture',conversationId:'fixture',chatIds:['fixture'],
       startedAt:1,updatedAt:1,endedAt:null,events:history.length,userMessages:1,toolCalls:200,
       errors:0,estimatedTokens:0,contextTokens:0,agents:[],origin:null};
-    window.fixture={history,session,reads:[],listReads:0,
+    window.fixture={history,session,inputs:[],reads:[],listReads:0,
       add:event=>{add(event);session.events=history.length;session.updatedAt++;},
       signal:()=>{if(!sessionChanged)throw new Error('onSessionChanged was not registered');sessionChanged();}};
     window.api=new Proxy({
       listSessions:()=>{fixture.listReads++;return ok({sessions:[session],activeId:null,blocked:[],pressure:[]})},
-      listProjects:()=>ok([]),listInputs:()=>ok([]),listPausedHelpers:()=>ok([]),
+      listProjects:()=>ok([]),listInputs:()=>ok(fixture.inputs),listPausedHelpers:()=>ok([]),
       onSessionChanged:handler=>{sessionChanged=handler;return()=>{if(sessionChanged===handler)sessionChanged=null;}},
       getSession:(_id,options)=>{
         fixture.reads.push(options);
-        const eligible=history.filter(e=>(options.from===undefined||e.seq>=options.from)&&(options.before===undefined||e.seq<options.before));
-        const events=options.from===undefined?eligible.slice(-options.limit):eligible.slice(0,options.limit);
+        const position=e=>e.origin??e.seq;
+        const eligible=history.filter(e=>(options.from===undefined||e.seq>=options.from)&&(options.before===undefined||position(e)<options.before)&&(options.after===undefined||position(e)>options.after))
+          .sort((a,b)=>options.from===undefined?position(a)-position(b):a.seq-b.seq);
+        const events=options.from===undefined&&options.after===undefined?eligible.slice(-options.limit):eligible.slice(0,options.limit);
         return ok({summary:session,total:history.length,events,nextFrom:events.reduce((n,e)=>Math.max(n,e.seq+1),options.from??0)});
       }
     },{get:(target,key)=>target[key]??(()=>ok(null))});
@@ -157,7 +163,43 @@ app.whenReady().then(async () => {
   assert.equal(shortAfter.top,0,'Wheel-up cannot scroll a fitting conversation');
   assert.equal(shortAfter.height,shortAfter.viewport,'Empty history does not create overflow');
   assert.equal(shortAfter.banner,false,'Short conversation never shows a navigation banner');
+  const revisedHistory=await win.webContents.executeJavaScript(`(async()=>{
+    document.getElementById('newChat').click();await frame();
+    fixture.history.splice(0,fixture.history.length,...Array.from({length:360},(_,i)=>({
+      seq:i+1,time:1,source:'extension',kind:'user_message',messageId:'position-'+i,
+      message:{text:'History position '+(i+1),chars:25,truncated:false}})));
+    fixture.history[99]={seq:1000,origin:100,time:1,source:'extension',kind:'assistant_message',messageId:'review',
+      message:{text:'Detailed review with ratings. '.repeat(650),chars:18850,truncated:false},final:true};
+    fixture.inputs=[{id:'old',sessionId:'history-fixture',text:'Already delivered input',state:'sent',mode:'auto',
+      createdAt:100,deliveredAt:110,messageId:'input:old',historyAnchored:true,historyRecorded:true,historySeq:50},
+      {id:'waiting',sessionId:'history-fixture',text:'Still waiting input',state:'queued',mode:'auto',createdAt:100,dueAt:100}];
+    fixture.session.events=1000;
+    document.querySelector('#sessionList [data-id="history-fixture"]').click();
+    await waitFor(()=>document.getElementById('timeline').textContent.includes('History position 360'));
+    fixture.signal();await waitFor(()=>document.getElementById('inputQueue').textContent.includes('Still waiting input'));
+    const pane=document.getElementById('chatBody'),timeline=document.getElementById('timeline');
+    const checks=[];
+    for(let i=0;i<4&&!timeline.textContent.includes('Detailed review');i++) {
+      pane.scrollTop=0;await frame();const count=fixture.reads.length;
+      pane.dispatchEvent(new WheelEvent('wheel',{deltaY:-100}));
+      await waitFor(()=>fixture.reads.length>count);await frame();
+      checks.push(fixture.reads.at(-1));
+    }
+    const present=timeline.textContent.includes('Detailed review');
+    const reads=fixture.reads.length;
+    // Panel departure/return performs the same production refresh path.
+    chat.chatVisible(false);chat.chatVisible(true);await frame();
+    return {present,afterReturn:timeline.textContent.includes('Detailed review'),checks,reads,
+      queue:document.getElementById('inputQueue').textContent,
+      copies:timeline.querySelectorAll('.ev-assistant_message').length};
+  })()`);
+  assert.equal(revisedHistory.present,true,'A revised long answer remains reachable by its original history page');
+  assert.equal(revisedHistory.afterReturn,true,'Returning to the chat retains the long answer');
+  assert.equal(revisedHistory.copies,1,'The long answer has one canonical row');
+  assert.ok(!revisedHistory.queue.includes('Already delivered input'),'Old timestamps cannot resurrect a committed input in the queue');
+  assert.ok(revisedHistory.queue.includes('Still waiting input'),'The actual waiting input stays visible');
   console.log(JSON.stringify({observations,historicalRefresh,latest,refresh,bottomRefresh,shortAfter},null,2));
+  console.log(JSON.stringify({revisedHistory},null,2));
   console.log('Dense history scroll passed: real renderer, native wheel, overlap, reversals, scrollbar continuity and live refresh.');
   if(show) { win.webContents.debugger.detach(); return; }
   win.destroy();app.exit(0);

@@ -46,6 +46,11 @@ for (const [relative, entry] of Object.entries(lock.packages).sort(([a], [b]) =>
   }
   await walk(directory);
   if (manifest.name === 'flora-colossus' && !files.length) files.push(path.join(root, 'docs/licenses/flora-colossus-LICENSE'));
+  if (manifest.name.startsWith('@napi-rs/canvas-') && !files.length) {
+    // Platform binary packages are published from the @napi-rs/canvas repository but omit the
+    // repository's MIT LICENSE from the npm tarball. Preserve the upstream license explicitly.
+    files.push(path.join(root, 'docs/licenses/napi-rs-canvas-LICENSE'));
+  }
   if (manifest.name.startsWith('@img/')) {
     // libvips distributions publish their composite attribution in README.md.
     try { await fs.access(path.join(directory, 'README.md')); files.push(path.join(directory, 'README.md')); } catch { /* package has separate licenses */ }

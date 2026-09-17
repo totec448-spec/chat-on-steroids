@@ -402,11 +402,6 @@ $('copyBtn').addEventListener('click', (event) => {
 
 $('more').addEventListener('toggle', () => paintDetails(latest.status, latest.tab));
 
-$('reloadBtn').addEventListener('click', () => {
-  // The old worker may be stuck: this explicit action belongs to the popup itself.
-  chrome.runtime.reload();
-});
-
 $('retryBtn').addEventListener('click', async () => {
   $('retryBtn').disabled = true;
   await chrome.runtime.sendMessage({ type: 'pair' });

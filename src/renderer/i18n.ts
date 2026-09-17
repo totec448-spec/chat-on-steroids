@@ -1,17 +1,28 @@
 import zhCN from './locales/zh-CN.json';
+import es from './locales/es.json';
+import zhTW from './locales/zh-TW.json';
 
-export type Language = 'en' | 'zh-CN';
+export type Language = 'en' | 'es' | 'zh-CN' | 'zh-TW';
 const STORAGE_KEY = 'cos.ui.language';
-const catalog: Readonly<Record<string, string>> = zhCN;
+type Catalog = Readonly<Record<string, string>>;
+const catalogs: Readonly<Record<Exclude<Language, 'en'>, Catalog>> = { es, 'zh-CN': zhCN, 'zh-TW': zhTW };
+const sourceKeys = new Set(Object.values(catalogs).flatMap(catalog => Object.keys(catalog)));
+
+function parseLanguage(value: string | null | undefined): Language {
+  return value === 'es' || value === 'zh-CN' || value === 'zh-TW' ? value : 'en';
+}
+
 let language: Language = 'en';
-try { if (window.localStorage.getItem(STORAGE_KEY) === 'zh-CN') language = 'zh-CN'; } catch { /* Storage may be unavailable in a restricted renderer. */ }
+try { language = parseLanguage(window.localStorage.getItem(STORAGE_KEY)); }
+catch { /* Storage may be unavailable in a restricted renderer; English remains the default. */ }
 
 export function currentLanguage(): Language { return language; }
 
 /** Translate only app-authored copy at explicit call sites. Arguments remain verbatim. */
 export function t(source: string, args: readonly unknown[] = []): string {
-  const key = Object.hasOwn(catalog, source) ? source : source.replace(/\s+/g, ' ').trim();
-  const translated = language === 'zh-CN' && Object.hasOwn(catalog, key) ? catalog[key]! : source;
+  const catalog = language === 'en' ? undefined : catalogs[language];
+  const key = catalog && Object.hasOwn(catalog, source) ? source : source.replace(/\s+/g, ' ').trim();
+  const translated = catalog && Object.hasOwn(catalog, key) ? catalog[key]! : source;
   return translated.replace(/\{(\d+)\}/g, (match, index: string) => Number(index) < args.length ? String(args[Number(index)]) : match);
 }
 
@@ -83,19 +94,19 @@ export function initLanguage(): void {
     if (node.parentElement?.closest('script, style, svg, code, kbd, textarea, [translate="no"]')) continue;
     const source = node.data;
     const key = source.replace(/\s+/g, ' ').trim();
-    if (Object.hasOwn(catalog, key)) ui(node, 'textContent', () => source.replace(/\S[\s\S]*\S|\S/, t(key)));
+    if (sourceKeys.has(key)) ui(node, 'textContent', () => source.replace(/\S[\s\S]*\S|\S/, t(key)));
   }
   for (const node of document.querySelectorAll<HTMLElement>('[title], [placeholder], [aria-label]')) {
     for (const property of ['title', 'placeholder', 'aria-label'] as const) {
       const source = node.getAttribute(property);
-      if (source && Object.hasOwn(catalog, source)) ui(node, property, () => t(source));
+      if (source && sourceKeys.has(source)) ui(node, property, () => t(source));
     }
   }
   document.documentElement.lang = language;
   const select = document.getElementById('uiLanguage') as HTMLSelectElement;
   syncLanguageControls();
-  select.addEventListener('change', () => setLanguage(select.value === 'zh-CN' ? 'zh-CN' : 'en'));
+  select.addEventListener('change', () => setLanguage(parseLanguage(select.value)));
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-language]')) {
-    button.addEventListener('click', () => setLanguage(button.dataset.language === 'zh-CN' ? 'zh-CN' : 'en'));
+    button.addEventListener('click', () => setLanguage(parseLanguage(button.dataset.language)));
   }
 }

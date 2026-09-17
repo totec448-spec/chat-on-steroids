@@ -2,7 +2,7 @@
  * `ParseError` and `ApplyPatchError` from `codex-rs/apply-patch/src/parser.rs` and
  * `codex-rs/apply-patch/src/lib.rs`.
  *
- * Each `message` is the Rust `Display` rendering, because that is what reaches the model. The
+ * Messages follow Rust `Display`, with local bounded guidance for content mismatches. The
  * pieces Codex formats separately elsewhere (a bare hunk message, an I/O context) stay available
  * as fields: `apply_patch` writes `Invalid patch hunk on line {n}: {message}` to stderr using the
  * inner message, not the `Display` form.
@@ -54,12 +54,15 @@ export class ApplyPatchError extends Error {
   readonly kind: ApplyPatchErrorKind;
   /** Present for `io`: the `{context}` half of `{context}: {source}`. */
   readonly context: string | undefined;
+  /** Bounded source excerpt; the tool adapter must check Read permission before publishing it. */
+  readonly sourceContext: string | undefined;
 
-  private constructor(kind: ApplyPatchErrorKind, message: string, context?: string, cause?: unknown) {
+  private constructor(kind: ApplyPatchErrorKind, message: string, context?: string, cause?: unknown, sourceContext?: string) {
     super(message, cause === undefined ? undefined : { cause });
     this.name = 'ApplyPatchError';
     this.kind = kind;
     this.context = context;
+    this.sourceContext = sourceContext;
   }
 
   /** `ParseError(#[from] ParseError)`, rendered transparently. */
@@ -74,8 +77,8 @@ export class ApplyPatchError extends Error {
   }
 
   /** `ComputeReplacements(String)`. */
-  static computeReplacements(message: string): ApplyPatchError {
-    return new ApplyPatchError('compute_replacements', message);
+  static computeReplacements(message: string, sourceContext?: string): ApplyPatchError {
+    return new ApplyPatchError('compute_replacements', message, undefined, undefined, sourceContext);
   }
 
   /** `PathUri(#[from] PathUriParseError)`, rendered transparently. */

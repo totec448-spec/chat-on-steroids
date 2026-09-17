@@ -1,4 +1,5 @@
 import { REASONING_EFFORTS } from '../shared/session.js';
+import { appearanceSchema } from './appearance-schema.js';
 /**
  * Non-secret settings, stored as one small JSON file in the app's userData folder.
  * No database: there are at most a handful of roots and a dozen booleans.
@@ -277,6 +278,8 @@ const configSchema = z.object({
     tunnelId: z.string().max(128), desktopTunnelId: z.string().max(128), pluginsTunnelId: z.string().max(128)
   })).max(11).refine(rows => new Set(rows.map(row => row.id)).size === rows.length, 'Duplicate setup profile').optional(),
   ui: z.object({
+    appearance: appearanceSchema.optional().catch(undefined),
+    autoContinue: z.boolean().optional().default(true),
     chatBrowser: z.enum(CHAT_BROWSERS).optional().default('chrome'),
     developerMode: z.boolean().optional(),
     finishTool: z.boolean().optional(),
@@ -458,7 +461,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     capabilities: firstLaunchCapabilities(platform, release),
     readOnly: false,
     tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: false, backgroundChats: true },
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: false, backgroundChats: true, autoContinue: true },
     sessions: { ...DEFAULT_SESSIONS },
     compaction: { ...DEFAULT_COMPACTION },
     multiAgent: { ...FIRST_LAUNCH_MULTI_AGENT },
@@ -481,6 +484,7 @@ function conservativeRecoveryConfig(): Config {
     capabilities: { ...DEFAULT_CAPABILITIES },
     readOnly: true,
     multiAgent: { ...DEFAULT_MULTI_AGENT },
+    ui: { ...defaultConfig().ui, autoContinue: false },
     // A config file that could not be trusted is not consent to have a second model typing
     // into the user's chat, whatever the unreadable file said.
     goal: { ...DEFAULT_GOAL }

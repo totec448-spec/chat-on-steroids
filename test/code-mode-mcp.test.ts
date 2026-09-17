@@ -4,7 +4,7 @@ import path from 'node:path';
 import { beforeAll, afterAll, afterEach, expect, it, vi } from 'vitest';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
-import { initSessionStore, createSession, readSessionPlan, readEvents, rebindSession, appendEvent, observeSessionModel, resetSessionStoreForTests } from '../src/main/session/store.js';
+import { initSessionStore, createSession, getSession, readSessionPlan, readEvents, rebindSession, appendEvent, observeSessionModel, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
 import { flushRecorder, recordChatObservations } from '../src/main/session/recorder.js';
 import { cancelInput, enqueueInput, listInputs, resetInputForTests } from '../src/main/session/input.js';
@@ -12,6 +12,7 @@ import { setChatBlocked, resetBlockedChatsForTests } from '../src/main/session/b
 import { startMcpServer, type McpEndpoint } from '../src/main/mcp/server.js';
 import type { ToolContext } from '../src/main/mcp/kernel.js';
 import { currentCall } from '../src/main/mcp/call-context.js';
+import { eventTokens } from '../src/shared/session.js';
 import * as backend from '../src/main/codex/read-backend.js';
 import * as desktopBackend from '../src/main/computer/index.js';
 import sharp from 'sharp';
@@ -251,6 +252,15 @@ it('initializes, discovers and executes the actual model-facing MCP contract wit
   const events = (await readEvents(who.session.id)).filter(event => event.kind === 'tool_call');
   expect(events.map(event => event.call.tool).sort()).toEqual(['exec', 'read', 'read']);
   expect(new Set(events.map(event => event.call.callId)).size).toBe(3);
+  const children = events.filter(event => event.call.tool === 'read');
+  expect(children.every(event => event.call.nested === true)).toBe(true);
+  expect(children.map(eventTokens)).toEqual([0, 0]);
+  const outer = events.find(event => event.call.tool === 'exec')!;
+  expect(outer.call.nested).toBeUndefined();
+  expect(eventTokens(outer)).toBeGreaterThan(0);
+  expect(await getSession(who.session.id)).toMatchObject({
+    estimatedTokens: eventTokens(outer), contextTokens: eventTokens(outer), toolCalls: 3
+  });
   expect(JSON.stringify(events.filter(event => event.call.tool === 'read'))).toContain('PRIVATE_ALPHA');
   expect(JSON.stringify(events.filter(event => event.call.tool === 'exec'))).not.toContain('PRIVATE_ALPHA');
 });

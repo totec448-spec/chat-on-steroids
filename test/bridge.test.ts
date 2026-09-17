@@ -50,6 +50,7 @@ const { initSecretsPath, resetSecretsCacheForTests, setSecret } = await import('
 const {
   bridgePort,
   bridgeStatus,
+  companionDiagnostics,
   sessionControlsFor,
   onBridgeChange,
   compactSession,
@@ -67,7 +68,6 @@ const {
   STALE_SWARM_MS,
   CHAT_SILENCE_MS,
   GOAL_QUIET_MS,
-  PRO_SILENCE_RETIRE_MS,
   PRO_SILENCE_MS,
   PRO_ACTIVITY_MS,
   COMMAND_DEADLINE_MS,
@@ -350,7 +350,8 @@ beforeAll(async () => {
   suiteConfig = {
     ...baseConfig,
     sessions: { ...baseConfig.sessions, record: true },
-    // Recovery of ordinary chats is off by default; this suite is where it is exercised.
+    // Isolate legacy tab/Goal recovery; automatic Continue is covered by input integration.
+    ui: { ...baseConfig.ui, autoContinue: false },
     multiAgent: { ...baseConfig.multiAgent, enabled: true, recoverAgentTabs: true }
   };
   await saveConfig(suiteConfig);
@@ -433,6 +434,24 @@ describe('direct browser control over the paired bridge', () => {
 });
 
 describe('who is allowed to talk to it', () => {
+  it('bounds authenticated companion diagnostics and clears them with the bridge lifecycle', async () => {
+    const body = { capturedAt: Date.now(), status: { connected: true, paired: true, appVersion: 'v'.repeat(200) },
+      preferences: { overwrite: true, durations: false }, transcript: 'must not be forwarded',
+      tab: { tab: 17, page: { text: 'must not be forwarded', requestId: 'r'.repeat(500),
+        trace: Array.from({ length: 30 }, () => ({ requestId: 'r', read: true, text: 'must not be forwarded' })) } } };
+    expect((await request('POST', '/diagnostics', { auth: null, body })).status).toBe(401);
+    await pair();
+    const pending = companionDiagnostics();
+    expect((await request('POST', '/diagnostics', { body })).status).toBe(200);
+    const snapshot = await pending;
+    expect(snapshot?.status.appVersion).toHaveLength(32);
+    expect(snapshot?.tab?.page?.requestId).toHaveLength(160);
+    expect(snapshot?.tab?.page?.trace).toHaveLength(16);
+    expect(JSON.stringify(snapshot)).not.toContain('must not be forwarded');
+    resetBridgeForTests();
+    expect(await companionDiagnostics()).toBeNull();
+  });
+
   it('pushes newly detected incompatible extension versions without granting browser presence', async () => {
     const changed = vi.fn();
     const unsubscribe = onBridgeChange(changed);
@@ -5693,6 +5712,8 @@ describe('unattributed activity recovery', () => {
   it('keeps the original unattributed cohort visible for five minutes without requiring another unknown call', async () => {
     vi.useFakeTimers();
     try {
+      // Attribution owns this watch; ordinary two-minute silence is tested separately.
+      await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
       await pair();
       for (const chat of [PRIME, WORKER, OTHER]) await events(chat, [openTurn('five-minute-cohort')]);
       const ids = await Promise.all([PRIME, WORKER, OTHER].map(async chat => (await findSessionByConversation(chat, { requireUnique: true }))!.id));
@@ -6561,6 +6582,118 @@ describe('unattributed activity recovery', () => {
     }
   });
 
+  /**
+   * A discarded or frozen tab still answers the extension's tab query with its URL, so neither
+   * /closed nor the silence sweep ever fire for it. The stalled report is the only signal that
+   * its page is gone or suspended, and it is owed the missing-tab decision minus the close.
+   */
+  it('hands a stalled worker tab to the browser for one reload, never a second tab', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+    const bootstrap = await redeem();
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+    });
+    await events(WORKER, [openTurn('turn-worker-stalled')]);
+
+    const stalled = async () =>
+      ((await request('POST', '/status', { body: { openConversations: [WORKER], stalledConversations: [WORKER] } })).body
+        .repairs ?? []) as Array<{ conversationId: string; token: string; reason: string }>;
+    const handout = (await stalled()).find((row) => row.conversationId === WORKER);
+    expect(handout?.reason).toBe('stalled');
+    expect(reopened(WORKER)).toEqual([]);
+
+    // Confirming the reload retires the episode; a still-stalled report inside the shared
+    // cooldown is queued behind it rather than handed another reload every pass.
+    const confirmed = await request('POST', `/status?repaired=${encodeURIComponent(handout!.token)}&repairAction=reloaded`, {
+      body: { openConversations: [WORKER], stalledConversations: [] }
+    });
+    expect(confirmed.status).toBe(200);
+    expect((await stalled()).filter((row) => row.conversationId === WORKER)).toEqual([]);
+  });
+
+  it('waits out the shared cooldown before reloading a tab Chrome keeps stalling', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', {
+        body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+      });
+      // Keep live work beyond the three-minute browser cooldown; unknown work
+      // now exhausts ordinary silence after two minutes.
+      await events(WORKER, [{ kind: 'model_selection', model: 'gpt-6-pro', reasoningEffort: 'pro', time: Date.now() }, openTurn('turn-worker-stall-loop')]);
+      const stalled = async () =>
+        ((await request('POST', '/status', { body: { openConversations: [WORKER], stalledConversations: [WORKER] } })).body
+          .repairs ?? []) as Array<{ conversationId: string; token: string; reason: string }>;
+
+      const first = (await stalled()).find((row) => row.conversationId === WORKER);
+      expect(first?.reason).toBe('stalled');
+      await request('POST', `/status?repaired=${encodeURIComponent(first!.token)}&repairAction=reloaded`, {
+        body: { openConversations: [WORKER], stalledConversations: [] }
+      });
+
+      expect((await stalled()).filter((row) => row.conversationId === WORKER)).toEqual([]);
+      await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS - 1);
+      expect((await stalled()).filter((row) => row.conversationId === WORKER)).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      const second = (await stalled()).find((row) => row.conversationId === WORKER);
+      expect(second?.reason).toBe('stalled');
+      expect(second!.token).not.toBe(first!.token);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves a stalled ordinary tab asleep when tab recovery is off for it', async () => {
+    await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
+    await pair();
+    await events(OTHER, [openTurn('turn-ordinary-stalled')]);
+    await attributed(OTHER);
+
+    const status = (await request('POST', '/status', { body: { openConversations: [OTHER], stalledConversations: [OTHER] } })).body;
+    expect((status.repairs ?? []).filter((row: any) => row.conversationId === OTHER)).toEqual([]);
+  });
+
+  it('ignores a stalled report for a chat the same pass did not report open', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+    const bootstrap = await redeem();
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+    });
+    await events(WORKER, [openTurn('turn-worker-not-open')]);
+
+    // A stalled shell is defined by its surviving tab. Without one the report names nothing —
+    // the missing-tab path, not this one, owns a genuinely absent tab.
+    const status = (await request('POST', '/status', { body: { openConversations: [], stalledConversations: [WORKER] } })).body;
+    expect((status.repairs ?? []).filter((row: any) => row.conversationId === WORKER)).toEqual([]);
+  });
+
+  it('repairs a stalled compaction source on the ticket’s own evidence, even with tab recovery off', async () => {
+    await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ad01';
+    await request('POST', '/events', {
+      body: {
+        conversationId,
+        events: [{ kind: 'user_message', time: Date.now(), text: 'compact me later', messageId: 'stalled-source' }]
+      }
+    });
+    const filed = await request('POST', '/compact', { body: { conversationId, ticket: true } });
+    expect(filed.status).toBe(202);
+
+    const status = (await request('POST', '/status', { body: { openConversations: [conversationId], stalledConversations: [conversationId] } })).body;
+    const handout = (status.repairs ?? []).find((row: any) => row.conversationId === conversationId);
+    expect(handout?.reason).toBe('stalled');
+  });
+
+  it('rejects a malformed stalled report', async () => {
+    await pair();
+    expect((await request('POST', '/status', { body: { openConversations: [], stalledConversations: ['not-a-conversation'] } })).status).toBe(400);
+  });
+
   it('records explicit provider access limits without scheduling a reload or silence retry', async () => {
     vi.useFakeTimers();
     try {
@@ -7392,7 +7525,7 @@ describe('unattributed activity recovery', () => {
         text: 'start working'
       }]);
 
-      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - 1);
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toBeNull();
 
@@ -7701,8 +7834,9 @@ describe('unattributed activity recovery', () => {
   });
 
   it.each([
-    ['goal', false], ['loop', false], ['goal', true], ['loop', true]
-  ] as const)('files a %s ticket at confirmed reload and waits one minute before drafting (completed tool-only: %s)', async (mode, completed) => {
+    ['goal', false, true], ['loop', false, true], ['goal', true, true], ['loop', true, true],
+    ['goal', false, false], ['loop', false, false], ['goal', true, false], ['loop', true, false]
+  ] as const)('files a %s ticket at confirmed reload and waits one minute before drafting (completed tool-only: %s, model known: %s)', async (mode, completed, known) => {
     const previous = getConfig();
     await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode } });
     await setSecret('openRouterApiKey', 'sk-or-silence');
@@ -7710,7 +7844,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-loop-dead')]);
+      await events(OTHER, [...(known ? [{ kind: 'model_selection', model: 'gpt-5-6-thinking', reasoningEffort: 'high', time: Date.now() }] : []), openTurn('turn-loop-dead')]);
       await attributed(OTHER, false, Date.now());
       if (completed) {
         await vi.advanceTimersByTimeAsync(20_000);
@@ -7758,7 +7892,7 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  for (const model of ['GPT-6 Pro', 'GPT-5.6 Pro', 'gpt-5-6-pro', 'gpt-5-5-pro']) it(`keeps ${model} silent until ten minutes without inventing a Goal final`, async () => {
+  for (const model of ['GPT-6 Pro', '6 Pro', 'GPT-5.6 Pro', '5.6 Pro', 'gpt-5-6-pro', 'gpt-5-5-pro', 'Pro']) it(`keeps ${model} silent until ten minutes without inventing a Goal final`, async () => {
     const previous = getConfig();
     await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
     await setSecret('openRouterApiKey', 'sk-or-pro');
@@ -8013,13 +8147,8 @@ describe('unattributed activity recovery', () => {
         ...(model === 'normal' ? [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }] : []),
         openTurn(`no-queue-${model}`)
       ]);
-      const deadline = model === 'unknown' ? PRO_SILENCE_MS : CHAT_SILENCE_MS;
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
       expect(await maintenance()).toBeNull();
-      if (model === 'unknown') {
-        await vi.advanceTimersByTimeAsync(deadline - CHAT_SILENCE_MS);
-        expect(await maintenance()).toBeNull();
-      }
       await vi.advanceTimersByTimeAsync(1);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toMatchObject({ conversationId: chat, reason: 'silence' });
@@ -8027,7 +8156,69 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it('retires unknown activity after five minutes when recovery is off and no input is queued', async () => {
+  it.each(['high', 'pro'] as const)('pins an observed %s turn across a later picker change', async effort => {
+    const chat = effort === 'high' ? 'a7777777-1111-4111-8111-000000000004' : 'a7777777-1111-4111-8111-000000000006';
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(chat, [{ kind: 'model_selection', model: '5.6', reasoningEffort: effort, time: Date.now() }]);
+      await events(chat, [openTurn('pinned-model')]);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await events(chat, [{ kind: 'model_selection', model: '5.6', reasoningEffort: effort === 'pro' ? 'high' : 'pro', time: Date.now() }]);
+      const deadline = effort === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS;
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 30_000 - 1);
+      expect(await maintenance()).toBeNull();
+      if (effort === 'pro') {
+        await vi.advanceTimersByTimeAsync(deadline - CHAT_SILENCE_MS);
+        expect(await maintenance()).toBeNull();
+      }
+      await vi.advanceTimersByTimeAsync(1);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ conversationId: chat, reason: 'silence' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('resolves delayed Sol High evidence without restarting its silence deadline', async () => {
+    const chat = 'a7777777-1111-4111-8111-000000000005';
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(chat, [openTurn('late-sol')]);
+      await vi.advanceTimersByTimeAsync(90_000);
+      await events(chat, [{ kind: 'model_selection', model: 'gpt-5-6-thinking', reasoningEffort: 'high', time: Date.now() }]);
+      const { sessionInputActivity } = await import('../src/main/bridge.js');
+      const sessionId = (await request('GET', `/activity?conversationId=${chat}`)).body.sessionId;
+      expect(sessionInputActivity((await getSession(sessionId))!).model).toBe('other');
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(await maintenance()).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ conversationId: chat, reason: 'silence' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('reuses unchanged Sol selection for a later turn and keeps that fresh turn visibly active', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [{ kind: 'model_selection', model: 'gpt-5-6-thinking', reasoningEffort: 'high', time: Date.now() }, openTurn('sol-first')]);
+      await recordFinalForTest(OTHER, 'sol-first');
+      await events(OTHER, [endTurn('sol-first', 'completed')]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await events(OTHER, [{ kind: 'user_message', messageId: 'sol-second-question', time: Date.now(), text: 'Next task' }, openTurn('sol-second')]);
+      const sessionId = (await request('GET', `/activity?conversationId=${OTHER}`)).body.sessionId;
+      const summary = (await getSession(sessionId))!;
+      const { sessionInputActivity, sessionActivityExpiresAt } = await import('../src/main/bridge.js');
+      const { sessionWorkingAt } = await import('../src/shared/session-activity.js');
+      expect(sessionInputActivity(summary)).toMatchObject({ model: 'other', turnId: 'sol-second' });
+      expect(sessionWorkingAt({ ...summary, activityExpiresAt: sessionActivityExpiresAt(summary) }, Date.now())).toBe(true);
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ conversationId: OTHER, reason: 'silence' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('retires unknown activity after two minutes when recovery is off and no input is queued', async () => {
     const previous = getConfig();
     const chat = 'a7777777-1111-4111-8111-000000000003';
     await saveConfig({ ...previous, goal: { ...previous.goal, enabled: false },
@@ -8036,19 +8227,19 @@ describe('unattributed activity recovery', () => {
     try {
       await pair();
       await events(chat, [openTurn('unknown-recovery-off')]);
-      await vi.advanceTimersByTimeAsync(PRO_SILENCE_RETIRE_MS);
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       expect((await request('GET', `/activity?conversationId=${chat}`)).body.activeTurnId).toBeNull();
       expect(await maintenance()).toBeNull();
       // Enabling recovery later must not resurrect the already-retired grant.
       await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: true } });
-      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - PRO_SILENCE_RETIRE_MS);
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toBeNull();
     } finally { await saveConfig(previous); vi.useRealTimers(); }
   });
 
-  for (const selection of ['missing', 'stale', 'after-start']) it(`does not synthesize a silence Goal from ${selection} model evidence`, async () => {
+  for (const selection of ['missing', 'stale', 'after-start']) it(`does not synthesize a silence Goal without MCP proof (${selection} model evidence)`, async () => {
     // Persisted model observations survive the bridge reset: use a fresh conversation.
     const uncertainChat = `a4444444-1111-4111-8111-00000000000${["missing", "stale", "after-start"].indexOf(selection)}`;
     const previous = getConfig();
@@ -8061,12 +8252,12 @@ describe('unattributed activity recovery', () => {
       await vi.advanceTimersByTimeAsync(1_000);
       await events(uncertainChat, [openTurn('uncertain-' + selection)]);
       if (selection === 'after-start') await events(uncertainChat, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() + 1 }]);
-      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS);
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       const reload = await maintenance();
       expect(reload).toMatchObject({ reason: 'silence' });
       await maintenance(reload!.token);
-      await vi.advanceTimersByTimeAsync(PRO_SILENCE_RETIRE_MS);
+      await vi.advanceTimersByTimeAsync(60_000);
       await sweepStaleSwarm(Date.now());
       expect(goalPendingReplyFor(uncertainChat)).toBeNull();
     } finally { resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); vi.useRealTimers(); }
@@ -8658,9 +8849,9 @@ describe('unattributed activity recovery', () => {
       await sweepStaleSwarm(Date.now());
 
       // A confirmed reload alone is spent. A new exact call is the sole fact that starts episode 2.
-      // Its replacement page has supplied no new model proof, so recovery is conservative.
+      // Missing replacement-page model proof still uses the ordinary two-minute clock.
       await attributed(OTHER);
-      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - 1);
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toBeNull();
 
@@ -8809,6 +9000,7 @@ describe('unattributed activity recovery', () => {
         kind: 'assistant_message',
         time: finalAt,
         messageId: 'assistant-final-after-reload',
+        turnId: 'turn-final-after-reload',
         text: 'The complete answer is here.',
         state: 'final',
         final: true
@@ -8817,7 +9009,9 @@ describe('unattributed activity recovery', () => {
       // That late exact call must not resurrect a completed answer's reload clock.
       await attributed(OTHER, false, finalAt);
 
-      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS * 2);
+      // Cross both policy windows; the old four-minute assertion could pass
+      // just because unknown recovery had not reached its ten-minute deadline.
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS * 2);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toBeNull();
     } finally {
