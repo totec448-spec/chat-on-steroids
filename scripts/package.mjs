@@ -68,4 +68,8 @@ for (const arch of arches) {
   if (dirOnly) builderArgs.push('--dir');
   run(node, builderArgs, { ...process.env, COS_PACKAGE_ARCH: arch });
   run(node, ['scripts/smoke-packaged-runtime.mjs', ...targetArgs]);
+  // Native closure is only half of "this package works". The runtime smoke runs the binary as
+  // plain Node, so a package whose UI never paints passes it — which is exactly what shipped on
+  // 2026-09-17. This one opens the packaged renderer and requires a real composited frame.
+  run(node, ['scripts/smoke-packaged-ui.mjs', ...targetArgs]);
 }

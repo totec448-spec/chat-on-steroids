@@ -4,7 +4,7 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
  */
 
 import path from 'node:path';
-import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, screen, session } from 'electron';
+import { app, dialog, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, screen, session } from 'electron';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { connect, disconnect, getStatus, onStatusChange, shutdownConnection } from './connection.js';
 import { registerIpc } from './ipc.js';
@@ -76,6 +76,7 @@ import {
 } from './window-lifecycle.js';
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
+import { createStartupHealthMonitor, type StartupHealthMonitor, type StartupHealthReport } from './startup-health.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
@@ -83,6 +84,7 @@ const SWARM_STATE = 'swarm';
 const RETIRED_WORKERS_STATE = 'retired-workers';
 
 let window: BrowserWindow | null = null;
+let startupHealth: StartupHealthMonitor | null = null;
 let tray: Tray | null = null;
 let quitting = false;
 let shutdownStarted = false;
@@ -98,6 +100,47 @@ if (!hasSingleInstanceLock) {
   // below can touch shared config/durable state while the primary instance is still running.
   quitting = true;
   app.quit();
+}
+
+/**
+ * What the user gets instead of a blank window they cannot ask about.
+ *
+ * Drawn by the OS, not by Chromium: the failure this reports is the compositor not presenting
+ * frames, so anything rendered through the same path would be invisible for exactly the same
+ * reason. Reload is offered because recreating the surface is the cheapest honest first move
+ * and it is reversible; nothing here changes a setting or turns GPU acceleration off, because
+ * no evidence we hold establishes the cause.
+ */
+function showStartupFailSafe(report: StartupHealthReport): void {
+  if (quitting) return;
+  const owner = window && !window.isDestroyed() ? window : null;
+  // Make the window visible even in the case where it never showed at all, so the dialog has
+  // somewhere to sit and the user is not left with a taskbar entry and nothing else.
+  if (owner && !owner.isVisible()) owner.show();
+  const options = {
+    type: 'error' as const,
+    title: 'Chat On Steroids',
+    message: 'The window loaded but nothing was drawn.',
+    detail:
+      `${report.detail}\n\n` +
+      'This is a display problem, not lost work — your sessions and settings are untouched. ' +
+      'Reloading recreates the window surface. If it keeps happening, the Activity log has ' +
+      'the details under "startup health".',
+    buttons: ['Reload window', 'Leave it open'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  };
+  const answer = owner ? dialog.showMessageBox(owner, options) : dialog.showMessageBox(options);
+  void answer
+    .then(({ response }) => {
+      if (response !== 0) return;
+      const target = window;
+      if (!target || target.isDestroyed() || quitting) return;
+      logInfo('startup health: reloading window at user request');
+      target.webContents.reload();
+    })
+    .catch((error: unknown) => logWarn(`startup fail-safe dialog: ${error instanceof Error ? error.message : String(error)}`));
 }
 
 function createWindow(): void {
@@ -130,6 +173,16 @@ function createWindow(): void {
 
   if (process.platform === 'win32') window.removeMenu();
 
+  startupHealth?.dispose();
+  startupHealth = createStartupHealthMonitor({
+    logInfo,
+    logError,
+    onUnhealthy: showStartupFailSafe,
+    setTimer: (callback, ms) => setTimeout(callback, ms),
+    clearTimer: (handle) => clearTimeout(handle as NodeJS.Timeout)
+  });
+  const health = startupHealth;
+
   // First use discovers the account once. A restored catalog is immediately usable;
   // showing the window again cannot refresh it or open another browser attempt.
   window.on('show', () => {
@@ -150,7 +203,20 @@ function createWindow(): void {
 
   // A renderer that fails to load leaves a blank window with no other clue, so
   // record it where the diagnostics panel can show it.
-  window.webContents.on('did-finish-load', () => logInfo('window loaded'));
+  //
+  // `window loaded` answers "did the document load", which the 2026-09-17 blank window proved
+  // is not the same question as "did anything reach the screen" — it was logged by that very
+  // launch. The round trip below asks the second question directly: `requestAnimationFrame`
+  // is driven by the compositor, so it resolves only once frames are actually being produced,
+  // and stays pending for exactly the failure the log used to call a clean start.
+  window.webContents.on('did-finish-load', () => {
+    logInfo('window loaded');
+    health.markLoaded();
+    window?.webContents
+      .executeJavaScript('new Promise(resolve => requestAnimationFrame(() => resolve(true)))', true)
+      .then(() => health.markPainted())
+      .catch((error: unknown) => logWarn(`first frame probe: ${error instanceof Error ? error.message : String(error)}`));
+  });
   window.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || input.key !== 'F11' || input.isAutoRepeat) return;
     event.preventDefault();
@@ -162,14 +228,34 @@ function createWindow(): void {
     const template = editContextMenuTemplate(params);
     if (template.length) Menu.buildFromTemplate(template).popup({ window: owner });
   });
-  window.webContents.on('did-fail-load', (_event, code, description) =>
-    logError(`window failed to load (${code}): ${description}`)
-  );
+  window.webContents.on('did-fail-load', (_event, code, description) => {
+    logError(`window failed to load (${code}): ${description}`);
+    health.markLoadFailed(code, description);
+  });
+  // A dead renderer leaves the same blank window as one that never painted, and until now it
+  // left the same empty log. `did-fail-load` never covers this: the load already succeeded.
+  window.webContents.on('render-process-gone', (_event, details) => {
+    health.markRenderProcessGone(`renderer process gone (${details.reason}${typeof details.exitCode === 'number' ? `, exit ${details.exitCode}` : ''})`);
+  });
+  // A preload that throws leaves `window.api` undefined, so the renderer fails on its first
+  // call — with the cause recorded nowhere, because this event is the only place it surfaces.
+  window.webContents.on('preload-error', (_event, preloadPath, error) => {
+    logError(`preload failed (${path.basename(preloadPath)}): ${error.message}`);
+  });
+  window.webContents.on('unresponsive', () => logWarn('renderer stopped responding'));
+  window.webContents.on('responsive', () => logInfo('renderer responsive again'));
   // Renderer errors are otherwise invisible from here. Only errors, and only the
   // message text — never anything the page was working with.
   window.webContents.on('console-message', (details) => {
     if (details.level === 'error') logError(`renderer: ${details.message}`);
   });
+
+  // Startup health tracks visibility, because the frame deadline only means anything while the
+  // window is on screen: a tray/background launch genuinely stops receiving frames and must not
+  // be reported as a failure to paint. Kept here rather than in the `show` handler above so that
+  // handler stays the single, self-contained model-discovery listener it is tested as.
+  window.on('show', () => health.markVisible());
+  window.on('hide', () => health.markHidden());
 
   // Nothing in this app should ever open a second window or navigate away.
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -190,6 +276,8 @@ function createWindow(): void {
   // corpse. Dropping it is what makes those paths take their existing null branch.
   window.on('closed', () => {
     window = null;
+    startupHealth?.dispose();
+    startupHealth = null;
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -288,6 +376,18 @@ function refreshTray(): void {
 
 app.on('second-instance', (_event, argv) => {
   if (!isBackgroundLaunch(argv)) windowActivation.request();
+});
+
+/**
+ * The GPU process dying is the single most likely explanation for a window that loads and then
+ * shows nothing, and it was completely unrecorded: Chromium restarts the process on its own, so
+ * the app kept running and the log kept looking healthy. Recording it costs nothing and is the
+ * difference between "the UI went blank once" and a timestamped cause sitting next to it.
+ */
+app.on('child-process-gone', (_event, details) => {
+  if (details.reason === 'clean-exit') return;
+  const service = details.type === 'Utility' && details.serviceName ? `${details.type}/${details.serviceName}` : details.type;
+  logError(`${service} process gone (${details.reason}${typeof details.exitCode === 'number' ? `, exit ${details.exitCode}` : ''})`);
 });
 
 void app.whenReady().then(async () => {
