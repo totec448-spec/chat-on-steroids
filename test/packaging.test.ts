@@ -141,6 +141,21 @@ describe('cross-platform packaging targets', () => {
     expect(packaging).toContain("run(node, ['scripts/smoke-packaged-runtime.mjs', ...targetArgs]);");
   });
 
+  it('proves the packaged UI paints, not only that the packaged modules load', () => {
+    const packaging = readFileSync(path.join(root, 'scripts', 'package.mjs'), 'utf8');
+    const ui = readFileSync(path.join(root, 'scripts', 'smoke-packaged-ui.mjs'), 'utf8');
+
+    expect(packaging).toContain("run(node, ['scripts/smoke-packaged-ui.mjs', ...targetArgs]);");
+    // The runtime smoke runs the binary as Node; this one must not, or it proves the same half twice.
+    expect(ui).toContain("delete environment.ELECTRON_RUN_AS_NODE;");
+    expect(ui).toContain('requestAnimationFrame(() => resolve(true))');
+    expect(ui).toContain('capturePage');
+    expect(ui).toContain('the UI did not paint');
+    // Package smokes must never wake the operator's browser or touch live state.
+    expect(ui).not.toContain('startChatModelDiscovery');
+    expect(ui).toContain("path.join(asar, 'out', 'renderer', 'index.html')");
+  });
+
   it('grants sandbox read access only to the Windows install tree and fails on ACL errors', () => {
     const config = yamlFile('electron-builder.yml');
     const installer = readFileSync(path.join(root, 'scripts/windows-installer-acl.nsh'), 'utf8');
