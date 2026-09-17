@@ -957,7 +957,7 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsReload).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['unattributed', 'assistant-error'].flatMap(reason =>
+  it.each(['unattributed', 'assistant-error', 'silence', 'no-tab', 'goal'].flatMap(reason =>
     ['unresolved', 'resolved-during-scan', 'claim-unavailable'].map(mode => ({ reason, mode }))))(
     'claims $reason recovery after the tab scan: $mode', async ({ reason, mode }) => {
       let armed = false;
@@ -985,6 +985,9 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
         return response(200, {});
       });
       const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+        tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${CHAT}` }),
+        tabsSendMessage: async (_id, message) => message.type === 'clf-repair-check'
+          ? { safe: true, revision: 1, turnId: 'source', questionId: 'question' } : { ok: true },
         tabsQuery: async () => {
           if (handed) {
             trace.push('scan');
@@ -1016,6 +1019,42 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
    * so the ambiguity is resolved rather than deferred - the registry-bound copy is the one
    * reloaded, deterministically, and no third tab is ever created to settle it.
    */
+  it.each(['stop-before-claim', 'work-after-claim', 'stop-after-claim', 'navigation-after-claim'] as const)(
+    'vetoes the exact browser repair at its last page check: %s', async scenario => {
+      let armed = false, handed = false, claimed = false, receipts = 0;
+      const fetch = vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/repairs/claim') { claimed = true; return response(200, { allowed: true }); }
+        if (url.pathname === '/status') {
+          if (url.searchParams.has('repaired')) receipts++;
+          if (armed && !handed) { handed = true; return response(200, { repairs: [{ conversationId: CHAT,
+            token: 'quiet-repair', reason: 'silence', requiresClaim: true }] }); }
+          return response(200, { repairs: [] });
+        }
+        return response(200, {});
+      });
+      const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+        tabsQuery: async () => [{ id: 21, url: `https://chatgpt.com/c/${CHAT}` }],
+        tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${claimed && scenario === 'navigation-after-claim' ? OTHER : CHAT}` }),
+        tabsSendMessage: async (_id, message) => {
+          if (message.type !== 'clf-repair-check') return { ok: true };
+          if (scenario === 'stop-before-claim') return { safe: false };
+          if (message.expected) {
+            expect(message.expected).toEqual({ revision: 1, turnId: 'source', questionId: 'question' });
+            return { safe: scenario === 'navigation-after-claim', revision: 2, turnId: 'source', questionId: 'question' };
+          }
+          return { safe: true, revision: 1, turnId: 'source', questionId: 'question' };
+        } });
+      await worker.registerTab(21);
+      await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+      await worker.fireAlarm(); armed = true; await worker.fireAlarm();
+      expect(claimed).toBe(scenario !== 'stop-before-claim');
+      expect(worker.tabsReload).not.toHaveBeenCalled();
+      expect(worker.tabsCreate).not.toHaveBeenCalled();
+      expect(receipts).toBe(0);
+    });
+
   it('reloads the registry-bound copy when one chat has two tabs', async () => {
     const { fetch, asked } = appWith(CHAT);
     const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });

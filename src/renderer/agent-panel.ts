@@ -16,13 +16,12 @@ export function createAgentPanel(options: {
   const pane = el('aside', 'agent-panel'); pane.hidden = true;
   ui(pane, 'aria-label', () => t("Sub-agents"));
   attachWorkPanelResize(options.host, pane);
-  const head = el('div', 'agent-panel-header');
+  const head = el('div', 'agent-panel-header'); head.hidden = true;
   const back = el('button', 'btn', '←'); ui(back, 'title', () => t("Back to sub-agents")); back.setAttribute('type', 'button');
   back.setAttribute('aria-label', back.title);
-  const title = el('strong', '', () => t("Sub-agents"));
-  const close = el('button', 'btn', '×'); close.setAttribute('type', 'button'); ui(close, 'aria-label', () => t("Close sub-agents"));
+  const title = el('strong');
   const body = el('div', 'agent-panel-body');
-  head.append(back, title, close); pane.append(head, body); options.host.append(pane);
+  head.append(back, title); pane.append(head, body); options.host.append(pane);
   let parent: string | null = null, workers: SessionSummary[] = [], selected: string | null = null;
   let generation = 0;
   function hide(): void {
@@ -34,7 +33,7 @@ export function createAgentPanel(options: {
     pane.hidden = false; options.host.classList.add('has-agent-panel'); options.toggle.setAttribute('aria-expanded', 'true');
   }
   function list(): void {
-    generation++; selected = null; back.hidden = true; ui(title, 'textContent', () => t("Sub-agents")); body.replaceChildren();
+    generation++; selected = null; head.hidden = true; body.replaceChildren();
     for (const active of [true, false]) {
       const group = workers.filter(worker => options.working(worker) === active);
       body.append(el('h3', '', () => `${active ? t("Active") : t("History")} · ${group.length}`));
@@ -52,7 +51,7 @@ export function createAgentPanel(options: {
     if (!worker) return;
     const preserve = refresh && selected === id && !pane.hidden;
     show(); selected = id; const request = ++generation;
-    back.hidden = false; title.textContent = worker.title;
+    head.hidden = false; title.textContent = worker.title;
     if (!preserve) body.replaceChildren(el('p', 'meta', () => t("Loading conversation…")));
     const current = () => request === generation && selected === id && !pane.hidden;
     const detail = await options.load(id);
@@ -65,7 +64,7 @@ export function createAgentPanel(options: {
     body.replaceChildren(openMain, ...options.render(detail.events, id, current));
     body.scrollTop = follow ? body.scrollHeight : position;
   }
-  back.onclick = list; close.onclick = hide;
+  back.onclick = list;
   pane.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
     event.preventDefault(); hide(); options.toggle.focus();

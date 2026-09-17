@@ -20,6 +20,71 @@ function page(html: string) {
 afterEach(()=>{for(const dom of windows.splice(0))dom.window.close();});
 
 describe('browser DOM observations and exact targets',()=>{
+  it('exposes an editing host once rather than inventing textboxes for inherited editable children',()=>{
+    const {run,w}=page('<div contenteditable="true" aria-label="Composer"><p>First line</p><p>Second line</p></div>');
+    Object.defineProperty(w.HTMLElement.prototype,'isContentEditable',{get(){return this.closest('[contenteditable]')?.getAttribute('contenteditable')==='true';}});
+    const snapshot=run<Snapshot>('snapshot');
+    expect(snapshot.text.match(/textbox/g)).toHaveLength(1);
+    expect(snapshot.text).toContain('First line');
+    expect(snapshot.text).toContain('Second line');
+  });
+
+  it('traverses layoutless display:contents wrappers without exposing hidden or inert subtrees',()=>{
+    const {run,ref,w}=page('<div style="display:contents"><div role="textbox" contenteditable="true" aria-label="Composer">Draft</div></div><div style="display:none"><button>Hidden</button></div><div inert><button>Inert</button></div>');
+    Object.defineProperty(w.document.body.firstElementChild!,'getClientRects',{value:()=>[]});
+    const snapshot=run<Snapshot>('snapshot',{filter:'textbox'});
+    expect(ref(snapshot,'textbox "Composer"')).toBeTruthy();
+    const full=run<Snapshot>('snapshot');
+    expect(full.text).not.toContain('Hidden');
+    expect(full.text).not.toContain('Inert');
+    expect(full.text).toContain('Draft');
+  });
+
+  it('reports value truncation for per-string, property-count, key and depth limits',()=>{
+    const {w}=page('');
+    for(const expression of ['"x".repeat(12001)','Object.fromEntries(Array.from({length:101},(_,i)=>[i,i]))','({a:{b:{c:{d:{e:{f:1}}}}}})','({["k".repeat(201)]:1})']) {
+      expect((w.eval(`boundedBrowserValue(${expression})`) as {truncated:boolean}).truncated).toBe(true);
+    }
+    expect(w.eval('boundedBrowserValue({ok:true})')).toEqual({value:{ok:true},truncated:false});
+  });
+
+  it('preserves visible content of explicitly named containers and exposes canvas targets',()=>{
+    const {run,ref}=page('<div tabindex="0" aria-label="Account card"><p>Balance: 42 credits</p><button>Confirm</button></div><canvas aria-label="Preview canvas"></canvas>');
+    const snapshot=run<Snapshot>('snapshot');
+    expect(snapshot.text).toContain('Balance: 42 credits');
+    expect(ref(snapshot,'button "Confirm"')).toBeTruthy();
+    expect(ref(snapshot,'canvas "Preview canvas"')).toBeTruthy();
+  });
+
+  it('names native selects without option text and reports exact option values and state',()=>{
+    const {run,ref}=page('<label>Plan<select><option value="basic">Basic plan</option><option value="team">Team plan</option><optgroup label="Legacy" disabled><option value="old">Old plan</option></optgroup></select></label>');
+    const snapshot=run<Snapshot>('snapshot');
+    const select=ref(snapshot,'combobox "Plan"');
+    expect(snapshot.text).toContain('option "Basic plan" value="basic" (selected)');
+    expect(snapshot.text).toContain('option "Team plan" value="team"');
+    expect(snapshot.text).toContain('option "Old plan" value="old" (disabled)');
+    expect(run('select',{ref:select,values:['team']})).toEqual({values:['team']});
+    expect(()=>run('select',{ref:select,values:['old']})).toThrow(/OPTION_UNAVAILABLE/);
+    const filtered=run<Snapshot>('snapshot',{filter:'Team plan'});
+    expect(ref(filtered,'combobox "Plan"')).toBeTruthy();
+    expect(filtered.text).toContain('value="team"');
+    expect(run<Snapshot>('snapshot',{maxNodes:2}).truncated).toBe(true);
+  });
+
+  it('preserves opaque option values and bounds oversized option lists',()=>{
+    const {run,ref}=page('<select aria-label="Opaque"><option value="  team  x  ">Team</option><option value="">None</option></select>');
+    const snapshot=run<Snapshot>('snapshot');
+    expect(snapshot.text).toContain('value="  team  x  "');
+    expect(snapshot.text).toContain('option "None" value=""');
+    expect(run('select',{ref:ref(snapshot,'combobox "Opaque"'),values:['  team  x  ']})).toEqual({values:['  team  x  ']});
+    const huge=page(`<select aria-label="Huge">${'<option>Choice</option>'.repeat(250)}</select>`).run<Snapshot>('snapshot',{maxNodes:1000,maxChars:24000});
+    expect(huge.truncated).toBe(true);
+    expect(huge.text.match(/option /g)).toHaveLength(200);
+    const clipped=page(`<select aria-label="Long"><option value="${'x'.repeat(1001)}">Long</option></select>`).run<Snapshot>('snapshot');
+    expect(clipped.truncated).toBe(true);
+    expect(clipped.text).toContain('value truncated');
+  });
+
   it('retains nested links and editors under named cards without duplicate label text',()=>{
     const {run,ref}=page('<h2><a href="/next">Read next</a></h2><div tabindex="0" aria-label="Note card"><label>Body<textarea></textarea></label></div>');
     const snapshot=run<Snapshot>('snapshot');

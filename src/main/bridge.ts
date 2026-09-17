@@ -1062,7 +1062,7 @@ function parseObservations(input: unknown): ChatObservation[] {
     };
     if (item['authoredTime'] === true) observation.authoredTime = true;
     if (item['authoredNow'] === true && kind === 'user_message') observation.authoredNow = true;
-    if (item['activeNow'] === true && kind === 'assistant_message') observation.activeNow = true;
+    if (typeof item['activeNow'] === 'boolean' && (kind === 'assistant_message' || kind === 'page_tool')) observation.activeNow = item['activeNow'];
     if (kind === 'model_selection') {
       if (typeof item['model'] !== 'string' || !/^[a-zA-Z0-9 ._-]{1,80}$/.test(item['model'])) continue;
       observation.model = item['model'];
@@ -2083,14 +2083,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     try { body = await readBody(req); } catch { return json(res, 400, { error: 'bad_request' }, origin); }
     const token = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>).token : null;
     if (typeof token !== 'string' || token.length > 128) return json(res, 400, { error: 'bad_request' }, origin);
-    const found = [...repairsInFlight].find(([, repair]) => (repair.reason === 'unattributed' || repair.reason === 'assistant-error') && repair.token === token && repair.state === 'handed');
+    const found = [...repairsInFlight].find(([, repair]) => repairNeedsClaim(repair) && repair.token === token && repair.state === 'handed');
     if (!found) return json(res, 200, { allowed: false }, origin);
     const [conversationId, repair] = found;
     const session = await getSession(repair.sessionId);
-    const current = session?.conversationId === conversationId && !isChatBlocked(conversationId) &&
+    const current = session?.conversationId === conversationId && !(!session.activeTurnId && session.lastTurnOutcome === 'stopped') && !isChatBlocked(conversationId) &&
       !stopRequestedFor(conversationId) && await attributionRepairAllowed(repair, session) &&
-      await assistantRepairCurrent(conversationId, repair);
-    const allowed = current && repairsInFlight.get(conversationId) === repair && repair.state === 'handed' && !repair.claimed;
+      await assistantRepairCurrent(conversationId, repair) && await silenceRepairCurrent(conversationId, repair);
+    // An observation still publishing can revoke this handout. Refuse this
+    // claim transiently; the same unclaimed token remains eligible to be checked.
+    const allowed = current && observationWritesInFlight === 0 && repairsInFlight.get(conversationId) === repair && repair.state === 'handed' && !repair.claimed;
     if (allowed) {
       repair.claimed = true;
       if (repair.attribution && repair.attribution.incident.firstAttemptAt === null)
@@ -5892,7 +5894,8 @@ async function fileSilenceInputTicket(conversationId: string, now: number, liste
   const grant = activeUntil.get(conversationId);
   const repair = repairsInFlight.get(conversationId);
   if (!grant?.turnId || (!grant.thinkingFailed && now - grant.evidenceAt < (grant.model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS)) ||
-      repair?.reason !== 'silence' || repair.state !== 'done' || repair.sessionId !== grant.sessionId) return false;
+      repair?.reason !== 'silence' || repair.state !== 'done' || repair.sessionId !== grant.sessionId ||
+      !await turnHasMcpCall(grant.sessionId, conversationId, grant.turnId)) return false;
   const current = () => activeUntil.get(conversationId) === grant && repairsInFlight.get(conversationId) === repair &&
     !stopRequestedFor(conversationId) && !isChatBlocked(conversationId) &&
     !continuationForSession(grant.sessionId) && runningToolCalls(conversationId) === 0 &&
@@ -5905,7 +5908,7 @@ async function fileSilenceInputTicket(conversationId: string, now: number, liste
   return recoveryInputAllowed(grant.sessionId, conversationId) &&
     fileRecoveryInput(grant.sessionId, conversationId, grant.turnId, grant.model === 'pro', current,
       grant.thinkingFailed ? (lastBrowserRecoveryAt.get(conversationId) ?? now) + recoveryBusyMs(grant.model === 'pro') :
-        grant.evidenceAt + (grant.model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS) * 1.5);
+        grant.evidenceAt + (grant.model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS) * 1.5, repair.progressId);
 }
 
 /**
@@ -6076,6 +6079,7 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
   const source = boundary?.kind === 'turn_start' || boundary?.kind === 'turn_end' ? boundary.turnId : null;
   if (!source || (session.activeTurnId && session.activeTurnId !== source)) return result;
   if (boundary?.kind === 'turn_end' && boundary.outcome === 'stopped') return result;
+  if (!await turnHasMcpCall(sessionId, conversationId, source)) return result;
   const repair = repairsInFlight.get(conversationId);
   const confirmed = repair?.reason === 'silence' && repair.state === 'done' && repair.sessionId === sessionId;
   const owned = grant?.sessionId === sessionId && grant.turnId === source;
@@ -6088,9 +6092,10 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
     result.push({ kind: 'silence', deadline: grant.until });
     return result;
   }
-  if (owned && !grant.thinkingFailed && grant.model === 'pro' && !confirmed &&
+  if (owned && !grant.thinkingFailed && !confirmed &&
       (recoveryInputAllowed(sessionId, conversationId) || tabRecoveryWanted(conversationId) || loopAfterTurnFor(conversationId) || queuedAfterTurn)) {
-    result.push({ kind: 'silence', deadline: grant.until, visibleAt: grant.evidenceAt + PRO_SILENCE_MS / 2 });
+    result.push({ kind: 'silence', deadline: grant.until,
+      ...(grant.model === 'pro' ? { visibleAt: grant.evidenceAt + PRO_SILENCE_MS / 2 } : {}) });
     return result;
   }
   // A confirmed reload's listening deadline is not fresh work. Real activity
@@ -6121,6 +6126,8 @@ const UNATTRIBUTED_REQUEST_MEMORY = 500;
 
 /** One existing browser-action owner per chat: queued, issued, or acknowledged. */
 interface Repair {
+  /** Reference to the existing work owner, invalidated when genuine activity replaces it. */
+  silenceGrant?: ActivityGrant;
   /** The authored question owns transport recovery across document-local generation changes. */
   assistantSource?: { key: string; turnId: string | null; completed: boolean };
   attribution?: { incident: UnattributedIncident; candidate: UnattributedCandidate };
@@ -6162,6 +6169,38 @@ interface Repair {
 const TURN_SCOPED_REPAIRS: ReadonlySet<Repair['reason']> = new Set(['unattributed', 'assistant-error']);
 
 const repairsInFlight = new Map<string, Repair>();
+function repairNeedsClaim(repair: Repair): boolean {
+  return ['unattributed', 'assistant-error', 'silence', 'no-tab', 'goal'].includes(repair.reason);
+}
+
+/** Recheck the original source immediately before a silence reload can execute. */
+async function silenceRepairCurrent(conversationId: string, repair: Repair): Promise<boolean> {
+  if (repair.reason === 'goal' && repair.state !== 'done') {
+    const watch = pickupWatch.get(conversationId);
+    const pickup = (await owedPickups(Date.now())).get(conversationId);
+    return !!watch && !!pickup && pickup.replyId === watch.replyId &&
+      Date.now() >= pickup.listenUntil && Date.now() < watch.expiresAt &&
+      (!pickup.queued ? !goalDraftBusy(conversationId) : true) &&
+      runningToolCalls(conversationId) === 0 && !continuationForSession(repair.sessionId) &&
+      pickupWatch.get(conversationId) === watch && repairsInFlight.get(conversationId) === repair;
+  }
+  if (repair.reason !== 'silence' || repair.state === 'done') return true;
+  const grant = repair.silenceGrant;
+  const current = () => !!grant?.turnId && activeUntil.get(conversationId) === grant &&
+    repairsInFlight.get(conversationId) === repair && !stopRequestedFor(conversationId) &&
+    !isChatBlocked(conversationId) && !continuationForSession(repair.sessionId) &&
+    runningToolCalls(conversationId) === 0;
+  if (!current()) return false;
+  const session = await getSession(repair.sessionId);
+  const [boundary] = await readRecentEvents(repair.sessionId, 1, { kinds: ['turn_start', 'turn_end', 'user_message'] });
+  if (session?.conversationId !== conversationId || session.finishTurn?.released ||
+      (session.activeTurnId && session.activeTurnId !== grant!.turnId) ||
+      boundary?.kind === 'user_message' || boundary?.turnId !== grant!.turnId ||
+      (boundary.kind === 'turn_end' && boundary.outcome === 'stopped')) return false;
+  if (!await turnHasMcpCall(repair.sessionId, conversationId, grant!.turnId!) ||
+      await readCompletedFinal(repair.sessionId, conversationId, grant!.turnId)) return false;
+  return current();
+}
 /** Last browser action per exact chat. Error/no-tab recovery shares a cooldown; owned schedules do not. */
 const lastBrowserRecoveryAt = new Map<string, number>();
 
@@ -6275,6 +6314,7 @@ function queueBrowserRecovery(
       ? now
       : Math.max(now, (lastBrowserRecoveryAt.get(conversationId) ?? 0) + BROWSER_RECOVERY_COOLDOWN_MS);
   const repair: Repair = {
+    ...(reason === 'silence' ? { silenceGrant: activeUntil.get(conversationId) } : {}),
     ...(assistantSource ? { assistantSource } : {}),
     sessionId,
     endedTurns,
@@ -6336,7 +6376,7 @@ async function noteRecoveryObservations(
   conversationId: string,
   sessionId: string | null,
   observations: readonly ChatObservation[],
-  activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; toolStartedAt?: number; endedTurnId?: string }
+  activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; endedTurnId?: string }
 ): Promise<void> {
   const accessLimit = (item: ChatObservation): boolean => item.kind === 'chat_error' &&
     (item.blocking === true ||
@@ -6377,23 +6417,13 @@ async function noteRecoveryObservations(
       armSilenceSweep();
     }
   }
-  if (sessionId && !activity.terminal && activity.toolStartedAt !== undefined) {
-    await revokeSilenceInputs(sessionId);
-    await revokeSilenceLoop(conversationId);
-    const previous = activeUntil.get(conversationId);
-    const session = !previous ? await getSession(sessionId) : null;
-    const selection = session?.selectedModel;
-    if (previous?.model === 'pro' || (!previous && session?.activeTurnId && !session.finishTurn?.released &&
-        selection?.conversationId === conversationId && isProModel(selection.model, selection.reasoningEffort))) {
-      grantActivity(conversationId, sessionId, Math.min(Date.now(), activity.toolStartedAt), CHAT_SILENCE_MS,
-        previous ? undefined : { turnId: session!.activeTurnId!, model: 'pro' });
-    }
-  }
   // Access-limit diagnostics are recorded history, not renewed work. Preserve both the
   // existing deadline and repair/Goal pickup custody unless this batch proves work or a
   // terminal boundary. A completed answer must still retire the repair it supersedes.
-  if (activity.meaningful && (activity.working || activity.terminal || !observations.some(accessLimit))) {
+  if (activity.meaningful && (activity.working || activity.terminal)) {
     if (sessionId && activity.working && !activity.terminal) {
+      // Withdraw reload authority before awaiting the serialized input owner.
+      noteRecoveryActivity(conversationId);
       await revokeSilenceInputs(sessionId);
       await revokeSilenceLoop(conversationId);
     }
@@ -6402,7 +6432,7 @@ async function noteRecoveryObservations(
     notePickupActivity(conversationId);
     // A current-turn interim can push an existing deadline; historical transcript/page rows
     // never enter this verdict and therefore cannot keep a confirmed reload alive.
-    if (sessionId && !activity.terminal && (activity.working || (activeUntil.has(conversationId) && !activeUntil.get(conversationId)?.thinkingFailed))) {
+    if (sessionId && !activity.terminal && activity.working) {
       const liveTurn = liveConversations().find(entry => entry.conversationId === conversationId && entry.sessionId === sessionId)?.activeTurnId;
       const previous = activeUntil.get(conversationId);
       const [sourceBoundary] = !previous && !liveTurn && activity.working
@@ -6723,6 +6753,12 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
   for (const [conversationId, grant] of activeUntil) {
     if (compacting.has(conversationId)) continue;
     if (grant.until > now) continue;
+    // Observation owns liveness, never permission to interrupt the native page.
+    // Only an exactly recorded local call in this source turn earns silence repair.
+    if (!grant.turnId || !await turnHasMcpCall(grant.sessionId, conversationId, grant.turnId)) {
+      if (activeUntil.get(conversationId) === grant) spent.push(conversationId);
+      continue;
+    }
     const pro = await extendedSilenceWindowFor(conversationId, grant.sessionId);
     const afterTurn = recoveryInputAllowed(grant.sessionId, conversationId) || loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(grant.sessionId);
     if (activeUntil.get(conversationId) !== grant) continue;
@@ -7126,6 +7162,7 @@ async function queueMissingTab(conversationId: string, working: boolean, now = D
   };
   // A chat with no session is not this app's chat; its tab closing is nobody's business here.
   if (!session) return;
+  if (!session.activeTurnId && session.lastTurnOutcome === 'stopped') return declined('the user stopped its turn');
   if (!tabRecoveryWanted(conversationId)) return declined('tab recovery is off for this chat');
   if (agent && agent.state !== 'detached') return declined(`its ${agent.role} slot is ${agent.state}, not working`);
   if (!agent && !goalActiveFor(conversationId) && (session.toolCalls ?? 0) === 0) return declined('it has never called a tool');
@@ -7489,8 +7526,10 @@ async function takePendingRepairs(
     const session = await getSession(repair.sessionId);
     const superseded = await conversationWasSuperseded(conversationId);
     if (!isChatBlocked(conversationId) && !superseded && session?.conversationId === conversationId &&
+        !(!session.activeTurnId && session.lastTurnOutcome === 'stopped') &&
         !stopRequestedFor(conversationId, session.activeTurnId)) {
-      if ((!await attributionRepairAllowed(repair, session) || !await assistantRepairCurrent(conversationId, repair)) &&
+      if ((!await attributionRepairAllowed(repair, session) || !await assistantRepairCurrent(conversationId, repair) ||
+          !await silenceRepairCurrent(conversationId, repair)) &&
           repairsInFlight.get(conversationId) === repair) repairsInFlight.delete(conversationId);
       continue;
     }
@@ -7511,7 +7550,7 @@ async function takePendingRepairs(
   // in place let the first entry win every pass, so one repair the browser could not carry out
   // starved every other chat behind it — precisely when several chats break at once.
   for (const [conversationId, repair] of [...repairsInFlight]) {
-    if (repair.state !== 'handed' || repair.reason === 'goal' || repair.reason === 'unattributed' || repair.reason === 'assistant-error') continue;
+    if (repair.state !== 'handed' || repair.reason === 'goal' || repairNeedsClaim(repair)) continue;
     repair.state = 'queued';
     repairsInFlight.delete(conversationId);
     repairsInFlight.set(conversationId, repair);
@@ -7525,10 +7564,10 @@ async function takePendingRepairs(
     requiresClaim?: boolean;
   }> = [];
   for (const [conversationId, repair] of repairsInFlight) {
-    const unclaimedError = repair.reason === 'assistant-error' && repair.state === 'handed' && !repair.claimed;
-    if (repair.state !== 'queued' && !unclaimedError) continue;
+    const unclaimed = repair.reason !== 'unattributed' && repairNeedsClaim(repair) && repair.state === 'handed' && !repair.claimed;
+    if (repair.state !== 'queued' && !unclaimed) continue;
     if (now < repair.notBefore) continue;
-    if (!unclaimedError) {
+    if (!unclaimed) {
       repair.state = 'handed';
       repair.token = randomBytes(9).toString('base64url');
       await updateRepairProgress(conversationId, repair, `Trying to reload chat to recover ${repairReason(repair)}…`);
@@ -7544,12 +7583,13 @@ async function takePendingRepairs(
       }
     }
     const currentSession = repair.attribution ? await getSession(repair.sessionId) : null;
-    const allowed = await attributionRepairAllowed(repair, currentSession) && await assistantRepairCurrent(conversationId, repair);
+    const allowed = await attributionRepairAllowed(repair, currentSession) && await assistantRepairCurrent(conversationId, repair) &&
+      await silenceRepairCurrent(conversationId, repair);
     if (allowed && repairsInFlight.get(conversationId) === repair && !isChatBlocked(conversationId) &&
         !stopRequestedFor(conversationId))
       {
         ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction',
-          ...(repair.attribution || repair.reason === 'assistant-error' ? { requiresClaim: true } : {}) });
+          ...(repairNeedsClaim(repair) ? { requiresClaim: true } : {}) });
       }
   }
   return ready;
