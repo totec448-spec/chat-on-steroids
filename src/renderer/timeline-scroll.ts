@@ -33,8 +33,17 @@ export function preserveTimelineViewport(pane: HTMLElement, timeline: HTMLElemen
       // must preserve that space too, otherwise Chromium clamps the restored
       // anchor to the new bottom and moves every visible message. Recompute the
       // reserve on each paint so later content naturally consumes it.
-      const reserve = Math.ceil(top - Math.max(0, pane.scrollHeight - pane.clientHeight));
-      if (reserve > 0) timeline.style.setProperty('--timeline-scroll-reserve', `${reserve}px`);
+      let reserve = Math.ceil(top - Math.max(0, pane.scrollHeight - pane.clientHeight));
+      if (reserve > 0) {
+        // scrollHeight is floored at clientHeight. When eviction leaves less than
+        // one viewport of content, it hides the additional blank-space deficit.
+        // Measure with one viewport of temporary padding, then remove the excess;
+        // both writes happen before paint and leave only the required reserve.
+        reserve += pane.clientHeight;
+        timeline.style.setProperty('--timeline-scroll-reserve', `${reserve}px`);
+        reserve = Math.max(0, reserve - (pane.scrollHeight - pane.clientHeight - top));
+        timeline.style.setProperty('--timeline-scroll-reserve', `${Math.ceil(reserve)}px`);
+      }
       pane.scrollTop = top;
       return;
     }

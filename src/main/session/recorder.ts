@@ -30,6 +30,7 @@ import type {
   TurnOutcome
 } from '../../shared/session.js';
 import { estimateTokens, originTitle } from '../../shared/session.js';
+import { chatErrorMessageKey } from '../../shared/chat-error.js';
 import { getConfig } from '../config.js';
 import { logInfo, logWarn } from '../logger.js';
 import { redactCredentialText } from '../redaction.js';
@@ -232,12 +233,17 @@ export async function sessionForConversation(
  * history first, then use the ordinary reopen path so live turn/session state is rebuilt from
  * the existing log exactly as if the page had just reported an observation.
  */
-export async function restoreRecordedConversation(conversationId: string): Promise<string | null> {
+export async function restoreRecordedConversation(conversationId: string, pageObservedAt = Date.now()): Promise<string | null> {
   if (!recordingEnabled() || !conversationId) return null;
   const existing = conversations.get(conversationId);
-  if (existing) return existing.sessionId;
-  const known = await findSessionByConversation(conversationId);
+  const known = existing ? await getSession(existing.sessionId) : await findSessionByConversation(conversationId);
   if (!known) return null;
+  if (known.browserRecoveryDismissedAt !== undefined) {
+    // A poll accepted before Close cannot undo a newer user decision after an await.
+    if (pageObservedAt <= known.browserRecoveryDismissedAt) return null;
+    await reopenSession(known.id, pageObservedAt);
+  }
+  if (existing) return existing.sessionId;
   return sessionForConversation(conversationId);
 }
 
@@ -1665,6 +1671,8 @@ export interface ChatObservation {
   reasoningEffort?: import('../../shared/session.js').ReasoningEffort;
   /** True when `time` is ChatGPT's own authored create_time, not local observation time. */
   authoredTime?: boolean;
+  /** Provider time retained for display without changing local recovery clocks. */
+  authoredAt?: number;
   /** True only for the newest DOM user row that this document proved was just sent. */
   authoredNow?: boolean;
   /** True only when the current page generation owns this assistant revision now. */
@@ -1960,6 +1968,7 @@ async function recordSupersededMessages(
     if (!item.messageId) continue;
     const base = {
       time: item.time,
+      ...(item.authoredAt !== undefined ? { authoredAt: item.authoredAt } : {}),
       source: 'extension' as const,
       ...(item.turnId ? { turnId: item.turnId } : {})
     };
@@ -2062,6 +2071,7 @@ async function recordChatObservationsNow(
     const base = {
       time: item.time,
       source: 'extension' as const,
+      ...(item.authoredAt !== undefined ? { authoredAt: item.authoredAt } : {}),
       ...(item.turnId ? { turnId: item.turnId } : {}),
       ...(agent ? { agent } : {})
     };
@@ -2228,7 +2238,7 @@ async function recordChatObservationsNow(
         // Reloads lose/remint document turn ids. A recoverable notice belongs to the
         // canonical question, not that document. Keep the original notice throughout
         // recovery; a genuinely new question gives the same error a new owner.
-        const text = (item.text ?? '').replace(/\s+/g, ' ').trim();
+        const text = chatErrorMessageKey(item.text ?? '', item.recoverable === true);
         const question = item.recoverable === true ? await readLatestUserMessage(sessionId) : undefined;
         const recent = await readRecentEvents(sessionId, 32, { kinds: ['chat_error'], maxBytes: 256 * 1024 });
         if (recent.some(event => event.kind === 'chat_error' &&
@@ -2237,7 +2247,7 @@ async function recordChatObservationsNow(
               (item.reason === 'thinking_failed' && event.reason === item.reason && event.turnId === item.turnId)) &&
             (item.blocking === true || (event.turnId ?? '') === (item.turnId ?? '')) &&
             (!question || event.seq > (question.origin ?? question.seq)))) &&
-            event.message.text.replace(/\s+/g, ' ').trim() === text)) continue;
+            chatErrorMessageKey(event.message.text, event.recoverable === true) === text)) continue;
         await appendEvent(sessionId, {
           ...base,
           kind: 'chat_error',
@@ -2444,7 +2454,10 @@ export async function recordAgentMessage(
     // from an exact MCP caller must carry that conversation through instead of resolving the
     // same friendly id against whichever other prime happens to be active now.
     const conversationId = ownerConversationId ?? agentConversation(owner);
-    const sessionId = conversationId ? await sessionForConversation(conversationId) : await ensureUnattributedSession();
+    // Broker reports are history, not evidence that a closed browser page returned.
+    const sessionId = conversationId
+      ? (await findSessionByConversation(conversationId, { includeHistorical: true }))?.id ?? await sessionForConversation(conversationId)
+      : await ensureUnattributedSession();
     if (!sessionId) return;
     await appendEvent(sessionId, {
       time: delivery === 'sent' ? message.time : Date.now(),
@@ -2513,9 +2526,13 @@ export async function ensureHandoffRecorded(
  * stays open; the detach is recorded as a note, which the timeline shows without ending
  * anything, and recordChatObservations writes the real terminal when the chat comes back.
  */
-export async function closeConversation(conversationId: string): Promise<void> {
+export async function closeConversation(conversationId: string, dismissBrowserRecovery = false): Promise<void> {
   const live = conversations.get(conversationId);
-  if (!live) return;
+  if (!live) {
+    const known = dismissBrowserRecovery ? await findSessionByConversation(conversationId) : null;
+    if (known) await endSession(known.id, true, conversationId);
+    return;
+  }
   if (live.turnStartedAt !== null) {
     await appendEvent(live.sessionId, {
       time: Date.now(),
@@ -2530,7 +2547,7 @@ export async function closeConversation(conversationId: string): Promise<void> {
     }).catch(() => undefined);
   }
   conversations.delete(conversationId);
-  await endSession(live.sessionId).catch(() => undefined);
+  await endSession(live.sessionId, dismissBrowserRecovery, conversationId);
   notifyChanged();
 }
 

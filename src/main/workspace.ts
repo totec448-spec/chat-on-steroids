@@ -19,19 +19,19 @@
  * that evidence is already available. That conversation is stronger than the old
  * sole-generating fallback and must win whenever present.
  *
- * Identity comes only from the request-correlated conversation. Friendly agent names are
- * local to a run and cannot own cwd. When exact identity is absent — Chrome off, late/missing Fiber evidence,
- * or a conflicting observation — there
- * is **no workspace**, and a relative path is refused with the absolute form to use instead.
- * That is the whole safety argument: ambiguity costs a retry, never a wrong file. Nothing
- * here ever widens what may be reached; every path still goes through `resolvePath` and
- * every root, containment and symlink check it performs.
+ * Identity normally comes from the request-correlated conversation. Friendly agent names are
+ * local to a run and cannot own cwd. When the user explicitly permits unattributed calls, the
+ * turn-level request id is a temporary workspace owner until its exact conversation arrives.
+ * That keeps one unresolved workflow coherent without borrowing another chat's folder. Nothing
+ * here widens what may be reached; every path still goes through `resolvePath` and every root,
+ * containment and symlink check it performs.
  */
 
 import path from 'node:path';
 import { rawPromises as fs } from './rawfs.js';
 import type { Root } from '../shared/types.js';
 import { currentCall } from './mcp/call-context.js';
+import { requestCorrelation } from './session/correlation.js';
 import { isSkillPath } from './skill-access.js';
 
 /** How long a learned workspace survives without being used or renewed. */
@@ -65,9 +65,20 @@ const workspaces = new Map<string, Workspace>();
  * Returns null rather than a guess. Callers treat null as "this chat has no workspace",
  * which refuses relative paths; they never fall back to another chat's.
  */
+function workspaceKeys(): string[] {
+  const call = currentCall();
+  if (!call) return [];
+  const keys: string[] = [];
+  if (call.caller.conversationId) keys.push(`chat:${call.caller.conversationId}`);
+  if (call.allowUnattributed && call.caller.requestId) keys.push(`request:${call.caller.requestId}`);
+  // Transport-only callers are rare, but the explicit opt-in still grants them ordinary
+  // operations. Keep them apart from identified chats while preserving the legacy behavior.
+  if (call.allowUnattributed && keys.length === 0) keys.push('unattributed');
+  return keys;
+}
+
 export function workspaceKey(): string | null {
-  const conversationId = currentCall()?.caller.conversationId;
-  return conversationId ? `chat:${conversationId}` : null;
+  return workspaceKeys()[0] ?? null;
 }
 
 function prune(): void {
@@ -89,11 +100,35 @@ function prune(): void {
 
 /** The workspace for the call currently running, or null if it has none. */
 export function currentWorkspace(): Workspace | null {
-  const key = workspaceKey();
-  if (!key) return null;
+  const call = currentCall();
+  const keys = workspaceKeys();
+  if (!keys.length) return null;
   prune();
-  const held = workspaces.get(key) ?? null;
-  if (held) held.at = Date.now();
+  let held: Workspace | null = null;
+  for (const key of keys) {
+    held = workspaces.get(key) ?? null;
+    if (held) break;
+  }
+  // Correlation may arrive after the request-scoped call already returned. On the next exact
+  // call, recover the newest request workspace proven to belong to this same session instead
+  // of requiring another absolute path merely to perform the delayed alias.
+  if (!held && call?.caller.conversationId) {
+    for (const [key, candidate] of workspaces) {
+      if (!key.startsWith('request:')) continue;
+      const owner = requestCorrelation(key.slice('request:'.length));
+      if (!owner) continue;
+      const sameConversation = owner.conversationId === call.caller.conversationId;
+      const sameSession = Boolean(call.caller.sessionId && owner.sessionId === call.caller.sessionId);
+      if (!sameConversation && !sameSession) continue;
+      if (!held || candidate.at > held.at) held = candidate;
+    }
+  }
+  if (held) {
+    held.at = Date.now();
+    // Exact browser proof can arrive between two calls in one turn. Mirror the same cwd to
+    // both keys so already-running request-scoped children and later chat-scoped calls agree.
+    for (const key of keys) if (!workspaces.has(key)) workspaces.set(key, { ...held, at: Date.now() });
+  }
   return held;
 }
 
@@ -106,9 +141,9 @@ export function setWorkspaceFor(key: string, workspace: Omit<Workspace, 'at'>): 
 
 /** Sets the workspace for the call currently running, if it has an identity. */
 export function setCurrentWorkspace(workspace: Omit<Workspace, 'at'>): boolean {
-  const key = workspaceKey();
-  if (!key) return false;
-  setWorkspaceFor(key, workspace);
+  const keys = workspaceKeys();
+  if (!keys.length) return false;
+  for (const key of keys) setWorkspaceFor(key, workspace);
   return true;
 }
 
@@ -117,10 +152,10 @@ function stagedAgentKey(agentId: string, runId?: string | null): string | null {
   return agentId && runId ? `agent:${runId}:${agentId}` : null;
 }
 
-export function inheritWorkspace(toAgent: string, primeConversationId: string | null, runId?: string): boolean {
+export function inheritWorkspace(toAgent: string, primeConversationId: string | null, runId?: string, requestId?: string): boolean {
   const key = stagedAgentKey(toAgent, runId);
   if (!key) return false;
-  const held = primeWorkspace(primeConversationId);
+  const held = primeWorkspace(primeConversationId) ?? (requestId ? workspaces.get(`request:${requestId}`) : undefined);
   if (!held) { workspaces.delete(key); return false; }
   setWorkspaceFor(key, { virtual: held.virtual, real: held.real });
   return true;

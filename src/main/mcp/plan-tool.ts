@@ -2,6 +2,9 @@ import { currentCaller, currentCall } from './call-context.js';
 import { fail, failIdentity, guard, ok, type SurfaceRegistrar } from './kernel.js';
 import { toolDeclaration } from './tool-declarations.js';
 import { updateSessionPlan } from '../session/store.js';
+import { attachRequestPlan, updateRequestPlan } from '../session/request-plans.js';
+import { requestCorrelation } from '../session/correlation.js';
+import { getConfig } from '../config.js';
 import { agentPlanUpdateSchema } from '../../shared/agent-plan.js';
 
 /**
@@ -18,10 +21,24 @@ export function registerPlanTool(reg: SurfaceRegistrar): void {
   })), update => guard('update_plan', async () => {
     if (!reg.sessionToolsLive) return reg.featureDisabled('Session recording', 'Settings → Chat');
     const caller = currentCaller();
-    if (!caller.sessionId || !caller.conversationId) {
-      return failIdentity('Exact chat identity is required to update its plan. No plan was changed; retry after the companion reconnects.');
+    const startedAt = currentCall()?.startedAt ?? Date.now();
+    if (caller.sessionId && caller.conversationId) {
+      const accepted = await updateSessionPlan(caller.sessionId, caller.conversationId, update, startedAt);
+      return accepted ? ok('Plan updated') : fail('This plan update is stale or its chat was replaced. The current plan was preserved.');
     }
-    const accepted = await updateSessionPlan(caller.sessionId, caller.conversationId, update, currentCall()!.startedAt);
-    return accepted ? ok('Plan updated') : fail('This plan update is stale or its chat was replaced. The current plan was preserved.');
+    const allowUnattributed = currentCall()?.allowUnattributed ?? getConfig().multiAgent.allowUnattributedCalls;
+    if (!allowUnattributed || !caller.requestId) {
+      return failIdentity('Exact chat identity or an allowed request-scoped caller is required to update a plan. No plan was changed.');
+    }
+    const accepted = await updateRequestPlan(caller.requestId, update, startedAt);
+    if (!accepted) return fail('This request plan update is stale. The current plan was preserved.');
+    // Browser evidence may have landed just before the request-scoped write. Recheck here;
+    // correlation.ts covers the opposite ordering and both paths serialize in request-plans.ts.
+    const owner = requestCorrelation(caller.requestId);
+    if (owner) {
+      const attached = await attachRequestPlan(owner);
+      if (attached === 'stale') return fail('This plan update is stale or its chat was replaced. The current plan was preserved.');
+    }
+    return ok(owner ? 'Plan updated' : 'Plan updated for this request and will attach when its chat identity arrives.');
   }));
 }

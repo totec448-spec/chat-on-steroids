@@ -957,18 +957,20 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsReload).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['unattributed', 'assistant-error', 'silence', 'no-tab', 'goal'].flatMap(reason =>
-    ['unresolved', 'resolved-during-scan', 'claim-unavailable'].map(mode => ({ reason, mode }))))(
+  it.each(['unattributed', 'assistant-error', 'silence', 'no-tab', 'goal', 'compaction'].flatMap(reason =>
+    ['unresolved', 'resolved-during-scan', 'claim-unavailable', 'navigated-during-claim'].map(mode => ({ reason, mode }))))(
     'claims $reason recovery after the tab scan: $mode', async ({ reason, mode }) => {
       let armed = false;
       let handed = false;
       let resolved = false;
+      let navigated = false;
       const trace: string[] = [];
       const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
         const url = new URL(input);
         if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
         if (url.pathname === '/repairs/claim') {
           trace.push('claim');
+          if (mode === 'navigated-during-claim') navigated = true;
           expect(init.method).toBe('POST');
           expect(JSON.parse(String(init.body))).toEqual({ token: 'attribution-attempt' });
           return mode === 'claim-unavailable' ? response(503, {}) : response(200, { allowed: !resolved });
@@ -985,7 +987,7 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
         return response(200, {});
       });
       const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
-        tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${CHAT}` }),
+        tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${navigated ? OTHER : CHAT}` }),
         tabsSendMessage: async (_id, message) => message.type === 'clf-repair-check'
           ? { safe: true, revision: 1, turnId: 'source', questionId: 'question' } : { ok: true },
         tabsQuery: async () => {
@@ -1568,13 +1570,14 @@ describe('worker settings authority', () => {
     const token = '0123456789abcdef0123456789abcdef';
 
     await worker.send({ type: 'compact', conversationId: CHAT, ticket: true, automatic: true }, 44);
-    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceLost: true }, 44);
+    const sourceError = 'The browser could not insert the handoff request (native_edit_rejected).';
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceLost: true, sourceError }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDispatch: true }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, destinationDispatch: true }, 44);
 
     expect(posted).toEqual([
       expect.objectContaining({ conversationId: CHAT, ticket: true, automatic: true }),
-      expect.objectContaining({ conversationId: CHAT, token, sourceLost: true }),
+      expect.objectContaining({ conversationId: CHAT, token, sourceLost: true, sourceError }),
       expect.objectContaining({ conversationId: CHAT, token, sourceDispatch: true }),
       expect.objectContaining({ conversationId: CHAT, token, destinationDispatch: true })
     ]);
@@ -3139,6 +3142,8 @@ describe('extension observation journal', () => {
     expect(closed).toEqual([]);
     await worker.closeTab(11);
     expect(closed).toEqual([conversationId]);
+    const closeRequest = fetch.mock.calls.find(([input]) => new URL(input).pathname === '/closed');
+    expect(JSON.parse(String(closeRequest?.[1]?.body))).toEqual({ conversationId, manual: true });
   });
 
   it('relays one exact recorded-call disclosure only while its document and route stay current', async () => {

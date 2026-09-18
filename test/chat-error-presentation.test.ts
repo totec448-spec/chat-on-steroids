@@ -38,6 +38,22 @@ it('explains every error without promising an unknown automatic retry', () => {
   expect(chatErrorPresentation(error('Unbekannt', { recoverable: true })).next).toContain('when recovery is eligible');
 });
 
+it('folds Retry-label duplicates and keeps the acknowledged reload visible while tools continue', () => {
+  const question: SessionEvent = { seq: 1, time: 90, source: 'extension', kind: 'user_message', messageId: 'question', message: { text: 'Build', chars: 5, truncated: false } };
+  const failed = error('Message delivery timed out. Please try again. Retry', { seq: 3, recoverable: true });
+  const duplicate = error('Message delivery timed out. Please try again.', { seq: 5, turnId: undefined, recoverable: true });
+  const receipt = repair('Reloaded chat to recover an interrupted response.', { seq: 4 });
+  const work: SessionEvent = { seq: 6, time: 120, source: 'app', kind: 'turn_start', turnId: 'turn-a', detail: 'Work resumed' };
+  const history = [question, failed, receipt, duplicate, work];
+  expect([...duplicateChatErrors(history)]).toEqual([5]);
+  expect(chatErrorPresentation(failed, history)).toMatchObject({ resolved: false, reloaded: true });
+  expect(chatErrorPresentation(failed, history).next).toContain('Reloaded chat');
+  expect(chatErrorPresentation(failed, history).next).toContain('once per chat');
+  expect(chatErrorPresentation(failed, history).next).toContain('silence');
+  expect(chatErrorPresentation(failed, [question, failed, repair('Trying to reload chat', { seq: 4 })]).reloaded).not.toBe(true);
+  expect(chatErrorPresentation(failed, [question, failed, repair('Reload failed', { seq: 4 })]).reloaded).not.toBe(true);
+});
+
 it('distinguishes a failed view and app silence from actual native generation', () => {
   const thinking = chatErrorPresentation(error('Thinking failed'));
   expect(thinking.title).toBe('Thinking failed');
@@ -47,6 +63,20 @@ it('distinguishes a failed view and app silence from actual native generation', 
   expect(stalled.title).toBe('Response stalled');
   expect(stalled.message).toContain('could not confirm');
   expect(stalled.message).not.toContain('generating');
+});
+
+it('explains a spent error reload on a later error in the same question, never on another question', () => {
+  const question: SessionEvent = { seq: 1, time: 90, source: 'extension', kind: 'user_message', messageId: 'q1', message: { text: 'Build', chars: 5, truncated: false } };
+  const interrupted = error('Connection interrupted', { seq: 2, recoverable: true });
+  const receipt = repair('Reloaded chat to recover an interrupted response.', { seq: 3 });
+  const later = error('Message delivery timed out.', { seq: 4, turnId: undefined, recoverable: true });
+  const history = [question, interrupted, receipt, later];
+  expect(chatErrorPresentation(later, history).next).toContain('already received');
+  expect(chatErrorPresentation(later, history).next).toContain('silence');
+  expect(chatErrorPresentation(later, history).resolved).toBe(false);
+  const next = { ...later, seq: 6 };
+  expect(chatErrorPresentation(next, [...history, { ...question, seq: 5, messageId: 'q2' }, next]).next).not.toContain('already received');
+  expect(chatErrorPresentation(later, [question, interrupted, repair('Trying to reload chat', { seq: 3 }), later]).next).not.toContain('already received');
 });
 
 it('shows the existing repair receipt, not a claim that the response recovered', () => {

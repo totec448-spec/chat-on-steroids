@@ -1194,11 +1194,11 @@ function publishCommittedProjection(
   moveGoalSwitch(entry.from, toConversationId);
   // A's final is superseded, never a completed turn in B. B earns its own debt.
   retireGoalDraftsFor(entry.from);
-  if (swarm === 'frozen') {
+  if (swarm === 'frozen' || swarm === 'absent') {
     if (!commitPrimeTransfer(entry.from, toConversationId)) {
       // The frozen handover cannot expire. A miss here means the run ended outright while
       // the session write was in flight; there is no live prime left in A to split from.
-      logWarn(`continuation ${entry.token.slice(0, 8)} committed after its run ended; no prime to move`);
+      if (swarm === 'frozen') logWarn(`continuation ${entry.token.slice(0, 8)} committed after its run ended; no prime to move`);
     }
   } else if (swarm === 'recovery') {
     // Normal commitPrimeTransfer intentionally requires the ephemeral frozen transfer. After

@@ -2552,7 +2552,7 @@ async function maintainOnce() {
 }
 
 async function performBrowserRepairs(repairs, policy) {
-  for (const { conversationId, token, focus, requiresClaim, suspended } of repairs) {
+  for (const { conversationId, token, reason, focus, requiresClaim, suspended } of repairs) {
     // Re-scanned per repair rather than reused from above. Earlier entries in this same batch
     // may have created a tab, and the scan has to be the state immediately before the action or
     // the duplicate rule below is deciding on a tab list that no longer exists.
@@ -2594,17 +2594,20 @@ async function performBrowserRepairs(repairs, policy) {
         // A responsive document flushes native progress and manual Stop before
         // main revalidates its original grant. An unresponsive page contributes
         // no evidence; main still owns its existing bounded repair authority.
-        const check = target && !suspended ? await tabReply(target.id,
+        // A compaction pickup is authorized by its exact WAL token/phase. Its
+        // own busy page is what it may recover, not an ordinary turn to keep idle.
+        const inspectTurn = target && !suspended && reason !== 'compaction';
+        const check = inspectTurn ? await tabReply(target.id,
           { type: 'clf-repair-check', conversationId }, documentId ? { documentId } : undefined) : null;
         if (check?.safe === false) continue;
         const claim = await call('/repairs/claim', { method: 'POST', body: JSON.stringify({ token }) });
         if (!claim.ok || claim.data?.allowed !== true) continue;
         if (target && !suspended) {
-          const latest = await tabReply(target.id, { type: 'clf-repair-check', conversationId,
+          const latest = inspectTurn ? await tabReply(target.id, { type: 'clf-repair-check', conversationId,
             ...(check?.safe === true ? { expected: { revision: check.revision, turnId: check.turnId, questionId: check.questionId } } : {}) },
-            documentId ? { documentId } : undefined);
+            documentId ? { documentId } : undefined) : null;
           const tab = await chrome.tabs.get(target.id);
-          if (latest?.safe === false || (!check?.safe && latest?.safe === true) ||
+          if ((inspectTurn && (latest?.safe === false || (!check?.safe && latest?.safe === true))) ||
               tab.pendingUrl || conversationForTab(tab) !== conversationId || tabDocuments[String(target.id)] !== documentId) {
             // No browser action occurred. Release only this exact claim; a
             // concurrently retired episode cannot be reconstructed by this ACK.
@@ -2635,8 +2638,8 @@ function conversationStillOpen(conversationId) {
 async function enqueueClose(conversationId) {
   const id = cleanConversationId(conversationId);
   if (!id) return false;
-  // One status pass after the final tab closes lets the app decide whether that exact chat is
-  // an active agent needing a reopen. The pass clears this again when it is ordinary history.
+  // Publish the final departure and let the existing maintenance pass revoke its protection.
+  // The close itself never grants a replacement tab.
   recoveryMonitoring = true;
   if (!closeOutbox.some((entry) => entry && entry.conversationId === id)) {
     closeOutbox.push({ conversationId: id, queuedAt: Date.now() });
@@ -2663,7 +2666,8 @@ async function drainCloses() {
       if (conversationStillOpen(conversationId)) continue;
       const result = await call('/closed', {
         method: 'POST',
-        body: JSON.stringify({ conversationId })
+        // Confirmed removal/navigation is a deliberate departure, never a reload or a lost poll.
+        body: JSON.stringify({ conversationId, manual: true })
       });
       if (!result.ok) {
         scheduleRetry();
@@ -2808,7 +2812,7 @@ const COMPACT_CHECKPOINT_FLAGS = [
   'destinationDispatch',
   'destinationLost'
 ];
-const COMPACT_CHECKPOINT_TEXT = ['summary', 'sourceMessageId', 'destinationMessageId'];
+const COMPACT_CHECKPOINT_TEXT = ['summary', 'sourceMessageId', 'destinationMessageId', 'sourceError'];
 // Not a checkpoint of its own: it qualifies `sourceMessageId` by saying how far that exact
 // marked response has grown. Sent only alongside the field it describes, so a bare count can
 // never move a deadline by itself.

@@ -111,7 +111,7 @@
    * Exact names, never a prefix: `Chat On Steroids Backup` would be somebody else's
    * connector, and a prefix test would have this app vouch for its traffic.
    */
-  const OUR_APPS = ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'TobisComputer'];
+  const OUR_APPS = ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins', 'TobisComputer'];
 
   /** Whether an `invoked_resource.app_name` names one of this app's own connectors. */
   function ourApp(name) {
@@ -1123,6 +1123,18 @@
     if (!resource || typeof resource !== 'object') return null;
     return { app: str(resource.app_name), resource: str(resource.resource_uri) };
   }
+
+  /** Rehydrated direct calls can expose only their public result object. Its UUID,
+   * request id and invoked resource are exact evidence; no parent or payload is guessed. */
+  function completedCallOf(message) {
+    if (!message || message.author?.role !== 'tool' || message.author.name !== 'api_tool.call_tool' ||
+        message.recipient !== 'all' || str(message.metadata?.parent_id)) return null;
+    const result = resultOf(message);
+    const messageId = str(message.id), requestId = str(message.metadata?.request_id);
+    const tool = result && toolName(result.resource);
+    if (!result || !ourApp(result.app) || !messageId || !requestId || !tool) return null;
+    return { ...result, messageId, requestId, tool, createTime: num(message.create_time) };
+  }
   /** Exact number of this app's own invocations represented by the whole turn, or null. */
   function localCountOf(messages) {
     if (!Array.isArray(messages)) return null;
@@ -1147,7 +1159,7 @@
       const result = resultOf(message);
       if (result && ourApp(result.app)) {
         const meta = message && typeof message === 'object' ? message.metadata : null;
-        remember(meta && typeof meta === 'object' ? str(meta.parent_id) : null);
+        remember((meta && typeof meta === 'object' ? str(meta.parent_id) : null) || completedCallOf(message)?.messageId);
       }
     }
     return Math.min(999, ids.length + anonymous);
@@ -1179,7 +1191,14 @@
     const localCount = localCountOf(turnMessages);
     const messages = group.messages;
     const request = requestOf(messages[0]);
-    if (!request) return null;
+    if (!request) {
+      const completed = completedCallOf(messages[0]);
+      return completed ? { v: VERSION, index, tool: completed.tool, path: null, app: completed.app,
+        resource: completed.resource, messageId: completed.messageId, turnId: str(group.turnId),
+        conversationId: str(group.clientThreadId) || str(group.conversationId), createTime: completed.createTime,
+        hidden: int(own.call(group, 'collapsedSameToolCallCount') ? group.collapsedSameToolCallCount : null),
+        localCount, answered: true } : null;
+    }
 
     let result = null;
     if (request.messageId) {
@@ -1266,16 +1285,17 @@
     const duplicated = new Set();
     for (let at = 0; at < messages.length && out.length < MAX_CALLS; at++) {
       const request = requestOf(messages[at]);
-      if (!request || !ourPath(request.path)) continue;
-      const tool = toolName(request.path);
-      const id = request.messageId;
+      const completed = request ? null : completedCallOf(messages[at]);
+      if ((!request || !ourPath(request.path)) && !completed) continue;
+      const tool = completed ? completed.tool : toolName(request.path);
+      const id = completed ? completed.messageId : request.messageId;
       if (!tool || !id) continue;
       // An id reported twice is an ambiguity, not a second call, and it is dropped on
       // *both* sides: keeping the first would still hand the app one identity standing
       // for two different requests, which is the same piece of evidence spent twice.
       if (seen.has(id)) duplicated.add(id);
       seen.add(id);
-      const hasResult = answered.has(id);
+      const hasResult = Boolean(completed) || answered.has(id);
       out.push({
         messageId: id,
         tool,
@@ -1285,8 +1305,8 @@
         // created. The app's existing stamp is when the *extension* observed the row, which
         // is a poll tick and jitters per tab; these are the only values on either side that
         // say which request this is and when it was actually issued.
-        requestId: request.requestId || null,
-        createTime: request.createTime
+        requestId: (completed || request).requestId || null,
+        createTime: (completed || request).createTime
       });
     }
 
