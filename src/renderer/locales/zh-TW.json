@@ -199,6 +199,8 @@
   "This file changed on disk while you were editing it. Your unsaved edits were kept.": "編輯期間磁碟上的檔案已變更。尚未儲存的編輯內容已保留。",
   "Copied": "已複製",
   "Automatic Continue": "自動繼續",
+  "Cancel automatic Continue": "取消自動繼續",
+  "Resumes without a final answer. If ChatGPT is still generating, the silent turn is stopped before Continue is sent.": "無需最終回答即可繼續。如果 ChatGPT 仍在生成，會先停止沒有進展的回合，再傳送繼續訊息。",
   "Continue in {0}": "{0} 後繼續",
   "Preparing Continue…": "正在準備繼續…",
   "New activity, a final answer or your Stop cancels automatic Continue. Stop is used only if ChatGPT is still generating.": "新活動、最終回答或手動停止會取消自動繼續。僅在 ChatGPT 仍在生成時才停止。",

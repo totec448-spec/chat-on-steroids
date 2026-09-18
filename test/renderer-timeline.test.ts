@@ -630,6 +630,37 @@ it('shows ordinary after-turn messages in the task dock until actual delivery', 
   expect(w.document.getElementById('timeline')!.textContent).toContain('Next task');
 });
 
+it('identifies automatic Continue without user-task editing or reordering and keeps its cancellation', async () => {
+  const { w, live, append } = await boot([]);
+  const sessionId = summary([]).id;
+  const recovery: InputEntry = { id: 'automatic-continue', sessionId, text: 'Resume the unfinished work.', mode: 'after-turn',
+    dueAt: 0, model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b',
+    recovery: { questionId: 'source-question', pro: false, busyUntil: Date.now() + 60_000, phase: 'ready' } };
+  live.inputs.push(recovery, ...['first', 'second'].map((text, index): InputEntry => ({
+    id: `authored-${index}`, sessionId, text, mode: 'after-turn', dueAt: 0, model: null, reasoningEffort: null,
+    state: 'queued', owner: null, createdAt: index + 1, conversationId: 'chat-b'
+  })));
+  const api = (w as any).api;
+  api.reorderQueuedInputs = vi.fn(async () => ({ ok: true, data: true }));
+  await append([]);
+  const card = w.document.querySelector<HTMLElement>('#finishQueue [data-input-id="automatic-continue"]')!;
+  expect(card.textContent).toContain('Automatic Continue');
+  expect(card.textContent).toContain(recovery.text);
+  expect(card.querySelector<HTMLElement>('.queue-label')!.title).toContain('without a final answer');
+  expect(card.querySelector('[aria-label="Edit queued task"]')).toBeNull();
+  expect(card.querySelector('[draggable="true"]')).toBeNull();
+  const second = w.document.querySelector('#finishQueue [data-input-id="authored-1"] .queue-label')!;
+  second.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true }));
+  await settle();
+  expect(api.reorderQueuedInputs).toHaveBeenCalledWith(sessionId, ['authored-1', 'authored-0']);
+  w.document.querySelector<HTMLButtonElement>('#finishQueue [aria-label="Cancel automatic Continue"]')!.click();
+  await settle();
+  expect(api.cancelInput).toHaveBeenCalledWith(recovery.id);
+  expect(live.inputs[0]!.state).toBe('cancelled');
+  expect(w.document.querySelector('#finishQueue [data-input-id="automatic-continue"]')).toBeNull();
+  expect(w.document.querySelectorAll('#finishQueue [aria-label="Edit queued task"]')).toHaveLength(2);
+});
+
 it('keeps a transport-deferred immediate upload visible with cancellation instead of an invalid task editor', async () => {
   const { w, live, append } = await boot([]);
   live.inputs.push({ id: 'native-correction', sessionId: summary([]).id, text: 'Waiting upload', mode: 'after-turn', requestedMode: 'auto',
@@ -2899,6 +2930,67 @@ it('shows the immediate recovery deadline before a draft exists and clears it on
   goalWait = null;
   await append([]);
   expect(row.hidden).toBe(true);
+});
+
+it.each([
+  { reason: 'silence', kind: 'silence' },
+  { reason: 'listening', kind: 'post-reload' },
+  { reason: 'native-busy', kind: 'native-busy' },
+  { reason: 'quiet', kind: 'post-reload' }
+] as const)('shows the shared $reason deadline once while keeping independent Loop waits', async ({ reason, kind }) => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api, original = api.getSessionControls;
+  const deadline = Date.now() + 60_000;
+  const goalWait = { reason, until: deadline };
+  const recovery = [{ kind: kind as string, deadline, visibleAt: 0 }];
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data,
+    automation: 'loop', objective: 'Keep working', goalWait, recovery, goalDraft: null } });
+  await append([]);
+  const lifecycle = w.document.getElementById('goalLifecycle')!;
+  expect(lifecycle.hidden).toBe(true);
+  expect(lifecycle.querySelector('[role="timer"]')).toBeNull();
+  expect(w.document.getElementById('recoveryStatus')!.hidden).toBe(false);
+  expect(w.document.getElementById('activeGoalRow')!.hidden).toBe(false);
+  expect(w.document.querySelectorAll('#composerDock [role="timer"]')).toHaveLength(1);
+
+  // A different deadline is independent, even when both owners happen to be waiting.
+  goalWait.until += 15_000;
+  await append([]);
+  expect(lifecycle.hidden).toBe(false);
+  expect(w.document.querySelectorAll('#composerDock [role="timer"]')).toHaveLength(2);
+
+  // A hidden recovery row must not swallow the only visible indication of a wait.
+  goalWait.until = deadline; recovery[0]!.visibleAt = deadline - 15_000;
+  await append([]);
+  expect(lifecycle.hidden).toBe(false);
+  expect(w.document.getElementById('recoveryStatus')!.hidden).toBe(true);
+
+  // Attribution and pickup have their own actions, even at the same timestamp.
+  recovery[0]!.visibleAt = 0; recovery[0]!.kind = 'pickup';
+  await append([]);
+  expect(lifecycle.hidden).toBe(false);
+  expect(w.document.querySelectorAll('#composerDock [role="timer"]')).toHaveLength(2);
+});
+
+it.each([false, true])('does not redisplay the old reload receipt after Continue starts the next turn (developer mode: %s)', async developerMode => {
+  const reloadedAt = Date.now() - 60_000;
+  const repair: SessionEvent = { seq: 1, time: reloadedAt, source: 'app', kind: 'progress',
+    progressId: 'browser-repair:fixture', turnId: 'silent-turn',
+    message: text('Reloaded chat to recover an unresponsive open turn.') };
+  const { w, append, live } = await boot([repair], true, [], [], { developerMode });
+  const host = w.document.getElementById('recoveryStatus')!;
+  expect(host.hidden).toBe(false);
+  await append([{ seq: 2, time: Date.now(), source: 'app', kind: 'turn_start', turnId: 'silent-turn' }]);
+  expect(host.hidden).toBe(false); // Reopening the same source is not a new question.
+  await append([
+    { seq: 3, time: Date.now(), source: 'extension', kind: 'user_message', messageId: 'continue-message', message: text('Continue the work.') },
+    { seq: 4, time: Date.now(), source: 'extension', kind: 'turn_start', turnId: 'continued-turn' }
+  ]);
+  expect(host.hidden).toBe(true);
+  expect(live.events).toContainEqual(repair);
+  if (developerMode) expect(w.document.getElementById('timeline')!.textContent).toContain(repair.message.text);
+  await append([{ ...repair, seq: 5, time: Date.now(), turnId: 'continued-turn', progressId: 'browser-repair:new-turn' }]);
+  expect(host.hidden).toBe(false);
 });
 
 it('reuses the Goal animation for a session-finish draft while ordinary automation is off', async () => {

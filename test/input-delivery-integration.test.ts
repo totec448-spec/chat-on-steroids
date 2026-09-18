@@ -2070,6 +2070,20 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
     } finally { clock.mockRestore(); }
   });
 
+  it('keeps the recovery message and source immutable under user queue operations', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const { row, conversationId, session } = await silent('gpt-5.6-sol', ms => { now += ms; });
+      expect(await input.editQueuedInput(row.id, 'Replace the automatic recovery with a different task')).toBe(false);
+      expect(await input.reorderQueuedInputs(session.id, [row.id])).toBe(false);
+      const stored = (await input.listInputs()).find(entry => entry.id === row.id)!;
+      expect(stored.text).toBe(row.text);
+      expect(stored.silenceBoundary).toEqual(row.silenceBoundary);
+      expect(stored.recovery).toEqual(row.recovery);
+      expect((await input.claimBrowserInput(row.id, 'unchanged-recovery-doc', conversationId, true))?.text).toBe(row.text);
+    } finally { clock.mockRestore(); }
+  });
+
   it.each(['gpt-5.6-sol', 'gpt-5.6-pro', null])('keeps the activity-based Thinking failed deadline and conditional busy wait for %s', async model => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {
