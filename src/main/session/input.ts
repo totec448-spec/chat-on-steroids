@@ -23,6 +23,8 @@ import { finishInstruction } from '../../shared/finish.js';
 import { attachmentSchema, validateInputAttachments, normalizeInputAttachments } from './input-attachments.js';
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../../shared/user-prompt.js';
 import type { PromptLimits } from './prompt.js';
+import { FRONTIER_LONGRUN_AUTHORITY_CLASS } from '../frontier-longrun-authority.js';
+import { FRONTIER_MANUAL_SESSION_AUTHORITY_CLASS } from '../frontier-manual-session-authority.js';
 
 export const inputArgs = z.object({
   projectId: z.string().uuid().nullable().optional(),
@@ -41,7 +43,10 @@ export const inputArgs = z.object({
   dueAt: z.number().int().nonnegative(),
   model: z.string().max(80).nullable(),
   reasoningEffort: z.enum(REASONING_EFFORTS).nullable(),
-  authorityClass: z.literal(FRONTIER_LONGRUN_AUTHORITY_CLASS).optional()
+  authorityClass: z.union([
+    z.literal(FRONTIER_LONGRUN_AUTHORITY_CLASS),
+    z.literal(FRONTIER_MANUAL_SESSION_AUTHORITY_CLASS)
+  ]).optional()
 });
 export type InputArgs = z.infer<typeof inputArgs>;
 const entrySchema = inputArgs.extend({
@@ -127,7 +132,7 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
   const settled = terminal && ((end.outcome === 'completed' && !activity.possible && !activity.exact) ||
     (end.outcome === 'failed' && end.reason === 'thinking_failed'));
   const executing = inFlightToolCalls(session.conversationId) > 0;
-  return { canInject, injectionTurnId, directTurn, queueAtFinish: astra && canInject && getConfig().ui.finishTool === true,
+  return { canInject, injectionTurnId, directTurn, queueAtFinish: astra && canInject && getConfig().ui.finishTool === true && session.origin?.kind !== 'frontier_manual_session',
     browserAllowed: !session.activeTurnId && !activity.possible && !activity.exact && !executing && (!astra || terminal),
     settled: settled && !executing && (session.lastToolCallAt ?? 0) <= end.time };
 }
@@ -241,7 +246,11 @@ async function load(): Promise<InputEntry[]> {
     if (row.historyRecorded && row.deliveryText && row.deliveryText !== row.text) row.historyRecorded = false;
     if (!row.sessionId && row.purpose !== 'decision' && row.conversationId && row.deliveredAt !== undefined && !stamped.has(row.conversationId)) {
       await noteChatOrigin(row.conversationId, {
-        kind: row.authorityClass === FRONTIER_LONGRUN_AUTHORITY_CLASS ? 'frontier_longrun' : 'desktop',
+        kind: row.authorityClass === FRONTIER_LONGRUN_AUTHORITY_CLASS
+          ? 'frontier_longrun'
+          : row.authorityClass === FRONTIER_MANUAL_SESSION_AUTHORITY_CLASS
+            ? 'frontier_manual_session'
+            : 'desktop',
         fromSessionId: null,
         agentId: null,
         task: ''
@@ -356,13 +365,16 @@ async function prepare(entry: InputEntry, suffix = ''): Promise<InputEntry> {
     : entry.objective && !entry.sessionId
       ? `Original user request:\n${entry.objective}\n\nOpening instruction:\n${entry.text}\n\nFollow the complete original request, including all constraints, throughout this task.`
       : entry.text;
-  const mandatoryOverhead = `${TOOL_INPUT_HEADER}\n\n${finishInstruction(getConfig().ui.finishLeadMinutes)}`;
+  const preparedSession = entry.sessionId ? await getSession(entry.sessionId) : null;
+  const finishAllowed = entry.authorityClass !== FRONTIER_MANUAL_SESSION_AUTHORITY_CLASS && preparedSession?.origin?.kind !== 'frontier_manual_session';
+  const finishAppendix = finishAllowed ? finishInstruction(getConfig().ui.finishLeadMinutes) : '';
+  const mandatoryOverhead = `${TOOL_INPUT_HEADER}${finishAppendix ? `\n\n${finishAppendix}` : ''}`;
   const deliveryText = entry.deliveryText ?? await deliveryHooks?.prepareText?.({ ...entry, text: text + suffix }, {
     maxChars: MAX_CHATGPT_MESSAGE_CHARS, maxBytes: TOOL_INPUT_TEXT_BYTES - Buffer.byteLength(mandatoryOverhead)
   }) ?? text + suffix;
   // A single input must fit the tool envelope by itself. Aggregate batching below
   // may defer a second input, but cannot silently defer an individually impossible one.
-  const envelope = `${TOOL_INPUT_HEADER}${deliveryText}\n\n${finishInstruction(getConfig().ui.finishLeadMinutes)}`;
+  const envelope = `${TOOL_INPUT_HEADER}${deliveryText}${finishAppendix ? `\n\n${finishAppendix}` : ''}`;
   if (!deliveryText || deliveryText.length > MAX_CHATGPT_MESSAGE_CHARS || Buffer.byteLength(envelope) > TOOL_INPUT_TEXT_BYTES)
     throw new Error('Prepared message exceeds the delivery limit; shorten the request or plan');
   return { ...entry, deliveryText };
@@ -419,7 +431,7 @@ async function finishInputCurrent(entry: InputEntry): Promise<boolean> {
   return !!session?.conversationId && session.conversationId === entry.conversationId &&
     session.activeTurnId === entry.finishOwner.turnId && session.finishTurn?.turnId === entry.finishOwner.turnId &&
     !session.finishTurn.released && config.ui.finishTool === true && !isChatBlocked(session.conversationId) &&
-    session.origin?.kind !== 'worker' && session.origin?.kind !== 'helper' &&
+    session.origin?.kind !== 'worker' && session.origin?.kind !== 'helper' && session.origin?.kind !== 'frontier_manual_session' &&
     (entry.finishOwner.userRequested === true || automaticFinishEnabled(session.conversationId));
 }
 export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwner']): Promise<InputEntry> {
@@ -619,6 +631,7 @@ export function setInputAutomation(id: string, automation: NonNullable<InputArgs
     const current = await load();
     const entry = current.find(row => row.id === id && row.purpose !== 'decision' && ['queued', 'browser', 'sent', 'tool'].includes(row.state));
     if (!entry) return false;
+    if (entry.authorityClass === FRONTIER_MANUAL_SESSION_AUTHORITY_CLASS) return false;
     const conversationId = entry.conversationId;
     if (conversationId && await conversationWasSuperseded(conversationId)) return false;
     const sessionId = entry.sessionId ?? entry.deliveredSessionId;
@@ -903,7 +916,8 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     const observed = session?.selectedModel?.conversationId === conversationId ? session?.selectedModel : null;
     const selection = browserInputModel(entry);
     const settings = getConfig().ui;
-    const instruction = settings.finishTool && entry.purpose !== 'decision' && session?.origin?.kind !== 'worker' && session?.origin?.kind !== 'helper' &&
+    const instruction = settings.finishTool && entry.purpose !== 'decision' && entry.authorityClass !== FRONTIER_MANUAL_SESSION_AUTHORITY_CLASS &&
+      session?.origin?.kind !== 'worker' && session?.origin?.kind !== 'helper' && session?.origin?.kind !== 'frontier_manual_session' &&
       isAstraModel(selection.model ?? observed?.model, selection.model ? selection.reasoningEffort ?? undefined : observed?.reasoningEffort)
       ? finishInstruction(settings.finishLeadMinutes) : '';
     const suffix = instruction && !entry.text.includes(instruction) ? '\n\n' + instruction : '';
@@ -975,7 +989,11 @@ export function acknowledgeBrowserInput(id: string, owner: string, conversationI
     const deliveredConversation = conversationId ?? entry.conversationId;
     if (!entry.sessionId && entry.purpose !== 'decision' && deliveredConversation) {
       await noteChatOrigin(deliveredConversation, {
-        kind: entry.authorityClass === FRONTIER_LONGRUN_AUTHORITY_CLASS ? 'frontier_longrun' : 'desktop',
+        kind: entry.authorityClass === FRONTIER_LONGRUN_AUTHORITY_CLASS
+          ? 'frontier_longrun'
+          : entry.authorityClass === FRONTIER_MANUAL_SESSION_AUTHORITY_CLASS
+            ? 'frontier_manual_session'
+            : 'desktop',
         fromSessionId: null,
         agentId: null,
         task: ''
@@ -1027,9 +1045,9 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
     const session = await getSession(sessionId);
     if (session?.conversationId !== conversationId) return batch;
     const finishSettings = getConfig().ui;
-    finishBoundary = finishBoundary && finishSettings.finishTool === true && session.origin?.kind !== 'worker';
+    finishBoundary = finishBoundary && finishSettings.finishTool === true && session.origin?.kind !== 'worker' && session.origin?.kind !== 'frontier_manual_session';
     const finishReminder = finishSettings.finishTool === true && !session.finishTurn?.released &&
-      session.origin?.kind !== 'worker' && session.origin?.kind !== 'helper' &&
+      session.origin?.kind !== 'worker' && session.origin?.kind !== 'helper' && session.origin?.kind !== 'frontier_manual_session' &&
       session.selectedModel?.conversationId === conversationId && isAstraModel(session.selectedModel.model, session.selectedModel.reasoningEffort)
       ? finishInstruction(finishSettings.finishLeadMinutes) : '';
     const current = await load();
@@ -1229,4 +1247,3 @@ export async function collectRecordedBrowserDecision(conversationId: string): Pr
       final.message.truncated || final.message.text.length > 16000) return;
   await completeBrowserDecision(row.id, row.owner!, final.message.text, conversationId);
 }
-import { FRONTIER_LONGRUN_AUTHORITY_CLASS } from '../frontier-longrun-authority.js';

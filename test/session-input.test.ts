@@ -436,6 +436,26 @@ describe('durable user input ownership', () => {
     await acknowledgeBrowserInput(second.id, 'second-owner', binding.conversationId);
     expect(automate.mock.calls.at(-1)?.[1]).toBe('off');
   });
+  it('refuses Goal, Loop and Off mutations for queued and sent Frontier manual-session inputs without changing state', async () => {
+    const entry = await enqueueInput(input({ authorityClass: 'frontier_manual_session_v1', automation: 'off', loopAfterTurn: false }));
+    const queuedBefore = structuredClone((await listInputs()).find(row => row.id === entry.id)!);
+    automate.mockClear();
+    for (const [mode, delivery] of [['goal', undefined], ['loop', true], ['off', false]] as const) {
+      expect(await setInputAutomation(entry.id, mode, delivery)).toBe(false);
+    }
+    expect((await listInputs()).find(row => row.id === entry.id)).toEqual(queuedBefore);
+    expect(automate).not.toHaveBeenCalled();
+
+    expect(await claimBrowserInput(entry.id, 'manual-owner', binding.conversationId, true)).not.toBeNull();
+    expect(await acknowledgeBrowserInput(entry.id, 'manual-owner', binding.conversationId, 'manual-native')).toBe(true);
+    const sentBefore = structuredClone((await listInputs()).find(row => row.id === entry.id)!);
+    automate.mockClear();
+    for (const [mode, delivery] of [['goal', undefined], ['loop', true], ['off', false]] as const) {
+      expect(await setInputAutomation(entry.id, mode, delivery)).toBe(false);
+    }
+    expect((await listInputs()).find(row => row.id === entry.id)).toEqual(sentBefore);
+    expect(automate).not.toHaveBeenCalled();
+  });
   it('expires a legacy initial browser attempt while retaining an intentional after-turn wait', async () => {
     const stale = await seedLegacyInput(input({ sessionId: null }));
     const after = await seedLegacyInput(input({ mode: 'after-turn' }));

@@ -92,10 +92,10 @@ export interface SurfaceDefinition {
  *    it here. A dedicated connector for one conditional schema is pure setup overhead with
  *    no discovery benefit.
  *
- *  - `remote_steering` and `frontier_longrun` are governed Command Center bridges. They are
- *    registered only when the operator exposes Remote Steering. The latter is the narrow normal
- *    phone surface: semantic Longrun intent in, locally-issued signed operation out. Neither
- *    derives authority from caller identity or generic command permission.
+ *  - `remote_steering`, `frontier_longrun` and `travel_parent` are governed Command Center
+ *    bridges. They are registered only when the operator exposes Remote Steering. The semantic
+ *    phone surfaces obtain their bounded authority from pinned local CC commands. None derives
+ *    authority from caller identity or generic command permission.
  *
  * Each surface also exposes JavaScript exec, restricted to that surface's own tools.
  * `find` and the exec pair are mutually exclusive — `find` exists only when command
@@ -127,6 +127,8 @@ const CORE: SurfaceDefinition = {
     'agents',
     'remote_steering',
     'frontier_longrun',
+    'frontier_session',
+    'travel_parent',
     'session_finish',
     'exec'
   ]

@@ -90,7 +90,7 @@ import { anyContinuationOpen, compactingConversation } from '../session/continua
 import { acknowledgeBackgroundExecOutput, backgroundExecRecoveryNotices, offerBackgroundExecOutput } from '../codex/ownership.js';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '../codex/unified-exec-constants.js';
 import { unattributedRepairEta } from '../bridge.js';
-import { conversationAttachment, readOverflowText } from '../session/store.js';
+import { conversationAttachment, getSession, readOverflowText } from '../session/store.js';
 import type { StoredText, ToolOutcome } from '../../shared/session.js';
 
 export interface ToolContext {
@@ -573,13 +573,14 @@ async function dispatchTracked(
   surfaceToolCallAt.set(surface, Date.now());
   const isFinish = isFinishCall(name, args);
   const startedAt = context.startedAt;
-  // The two governed remote-control tools are deliberately NOT caller-identity lanes.
-  // `remote_steering` carries signed Command Center bytes; `frontier_longrun` accepts only
-  // semantic intent and obtains those signed bytes from the pinned local CC CLI. Both are
-  // expected to work from an unattributed mobile ChatGPT turn. Keep only these exact direct
+  // The governed remote-control tools are deliberately NOT caller-identity lanes.
+  // `remote_steering` carries signed Command Center bytes; `frontier_longrun` and
+  // `frontier_session` accept only their closed semantic intents and obtain signed bytes from the
+  // pinned local CC CLI; `travel_parent` manages the attended root/closed child families. These
+  // four exact surfaces are expected to work from an unattributed mobile ChatGPT turn. Keep only them
   // tool names out of conversation-derived fences/lifecycle/inbox projection. Ordinary tools
   // — especially `exec` and `agents` — retain the existing identity behavior unchanged.
-  const identityNeutralRemote = !nested && (name === 'remote_steering' || name === 'frontier_longrun');
+  const identityNeutralRemote = !nested && (name === 'remote_steering' || name === 'frontier_longrun' || name === 'frontier_session' || name === 'travel_parent');
   // Cheap, non-blocking ingress identity. When the page has already reported this exact
   // request id, identity-sensitive handlers (workspace/session/agents) see it before they
   // touch state. If the page is one tick late this stays null; only handlers that actually
@@ -791,7 +792,7 @@ async function dispatchTracked(
         : remoteControlShell && !context.caller.conversationId
         ? Promise.resolve(
             failIdentity(
-              'CALLER_IDENTITY_REQUIRED: arbitrary shell is not an identity-neutral Remote Steering surface. This call was not proven to belong to a local ChatGPT conversation, so no command or process input was executed. Use the bounded remote_steering/frontier_longrun tools for unattributed remote control.'
+              'CALLER_IDENTITY_REQUIRED: arbitrary shell is not an identity-neutral Remote Steering surface. This call was not proven to belong to a local ChatGPT conversation, so no command or process input was executed. Use the bounded remote_steering/frontier_longrun/frontier_session/travel_parent tools for unattributed remote control.'
             )
           )
         : retiredLeaseAmbiguous
@@ -812,8 +813,8 @@ async function dispatchTracked(
               'CALLER_IDENTITY_REQUIRED: this operation needs this chat’s exact workspace, but the connector could not prove which ChatGPT conversation made the call. Retry after the extension reconnects; no file or command was changed.'
             )
           )
-        : nested && (name === 'exec' || name === 'frontier_longrun' || name === 'session_finish' || isFinish)
-        ? Promise.resolve(fail('DIRECT_CALL_REQUIRED: call this lifecycle tool directly, outside exec. No action was taken.'))
+        : nested && (name === 'exec' || name === 'frontier_longrun' || name === 'frontier_session' || name === 'travel_parent' || name === 'session_finish' || isFinish)
+        ? Promise.resolve(fail('DIRECT_CALL_REQUIRED: call this tool directly, outside exec. No action was taken.'))
         : invokeHandler()
   );
   markTiming('handler');
@@ -870,7 +871,10 @@ async function dispatchTracked(
         );
   // Ordinary tools carry direct user input, but only the explicit finish signal
   // advances a planned stage. Successful work is not evidence that a stage is done.
-  const userInput = nested || identityNeutralRemote ? { messages: [], reminder: '' } : await offerToolInput(context.caller.sessionId, context.caller.conversationId, context.caller.requestId, startedAt, name === 'session_finish' && !result.isError).catch(() => {
+  const manualSessionFinish = name === 'session_finish' && context.caller.sessionId && context.caller.conversationId
+    ? await getSession(context.caller.sessionId).then(session => session?.conversationId === context.caller.conversationId && session.origin?.kind === 'frontier_manual_session')
+    : false;
+  const userInput = nested || identityNeutralRemote || manualSessionFinish ? { messages: [], reminder: '' } : await offerToolInput(context.caller.sessionId, context.caller.conversationId, context.caller.requestId, startedAt, name === 'session_finish' && !result.isError).catch(() => {
     logWarn('User input could not be attached; the completed tool result is preserved');
     return { messages: [], reminder: '' };
   });

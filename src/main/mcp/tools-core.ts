@@ -2,6 +2,7 @@ import { toolDeclaration } from './tool-declarations.js';
 import { registerPlanTool } from './plan-tool.js';
 import { goalWorkerChat } from '../bridge.js';
 import { announceSessionFinish } from '../session/finish.js';
+import { getSession } from '../session/store.js';
 import { getConfig } from '../config.js';
 /**
  * The Core connector: reading, changing and running code on this PC.
@@ -121,11 +122,19 @@ import {
   type Caller
 } from '../agents.js';
 import { repairPrimeFromResumeShadow } from '../session/continuation.js';
-import { REMOTE_STEERING_MAX_ENVELOPE_CHARS, steerRemotely } from '../remote-steering.js';
+import { REMOTE_STEERING_ABSOLUTE_MAX_ENVELOPE_CHARS, steerRemotely } from '../remote-steering.js';
 import {
   normalizeFrontierLongrunControllerLabel,
   runFrontierLongrunController,
 } from '../frontier-longrun-controller.js';
+import {
+  normalizeTravelParentLabel,
+  runTravelParentController,
+} from '../travel-parent-controller.js';
+import {
+  normalizeFrontierManualSessionLabel,
+  runFrontierManualSessionController,
+} from '../frontier-manual-session-controller.js';
 import {
   currentCall,
   currentCaller,
@@ -1078,6 +1087,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       if (!getConfig().ui.finishTool) return { content: [{ type: 'text' as const, text: 'RELEASED: The user disabled finish hold. You may write your final answer.' }] };
       const caller = currentCaller();
       if (!caller.sessionId || !caller.conversationId) return failIdentity('Exact session identity is required');
+      const exactSession = await getSession(caller.sessionId);
+      if (!exactSession || exactSession.conversationId !== caller.conversationId) return failIdentity('Exact session identity is required');
+      if (exactSession.origin?.kind === 'frontier_manual_session') return fail('FRONTIER_MANUAL_SESSION_FINISH_DISABLED: session_finish is disabled for Frontier manual sessions. No finish hold or queued action was changed.');
       if (goalWorkerChat(caller.conversationId)) return fail('Session finish hold is not applicable to workers or decision helpers. Workers report with agents action=finish; decision helpers answer normally.');
       return guard('session_finish', async () => ({ content: [{ type: 'text', text: await announceSessionFinish(caller.sessionId!, summary) }] }));
     });
@@ -1096,6 +1108,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
   if (reg.remoteSteeringToolsExposed) {
     registerRemoteSteeringTool(reg);
     registerFrontierLongrunTool(reg);
+    registerFrontierManualSessionTool(reg);
+    registerTravelParentTool(reg);
   }
 }
 
@@ -1585,7 +1599,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
  * exact future worker id and one exact task. V3 is separately signed and binds one exact recorded
  * session for LONGRUN_START / LOOP_OFF / SESSION_STATUS. The separate Frontier parent protocol
  * creates and steers at most eight CoS-owned local slots without putting local session ids in the
- * remote authority. None grants caller identity. This function is only the envelope transport,
+ * remote authority. Manual-session v1 separately creates/prompts/queries one ordinary fixed-profile
+ * CoS-owned session and returns only content-blind manualSession state. None grants caller identity. This function is only the envelope transport,
  * feature switch and minimized projection back to MCP.
  */
 function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
@@ -1598,7 +1613,8 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
         'pass its exact JSON text. It is not an identity and grants nothing beyond the single act it already names, ' +
         'once, inside its own short window: V1 supports worker status/message; V2 can additionally spawn exactly one ' +
         'signed future worker id; V3 can start/stop/query Frontier Longrun on one exact pre-existing session and never selects a model; ' +
-        'the Frontier parent protocol can create and steer up to eight CoS-owned Longrun slots while keeping local session/conversation ids private. ' +
+        'the Frontier parent protocol can create and steer up to eight CoS-owned Longrun slots while keeping local session/conversation ids private; ' +
+        'manual-session v1 can create, prompt, or query one TP-derived fixed-profile ordinary session and returns content-blind state only. ' +
         'Relaying the same envelope twice repeats nothing. ' +
         'Never edit, re-sign, summarize or construct one — an altered envelope is refused.',
       inputSchema: z
@@ -1606,7 +1622,7 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
           envelope: z
             .string()
             .min(1)
-            .max(REMOTE_STEERING_MAX_ENVELOPE_CHARS)
+            .max(REMOTE_STEERING_ABSOLUTE_MAX_ENVELOPE_CHARS)
             .describe('The envelope JSON exactly as the user supplied it.')
         })
         .strict(),
@@ -1621,9 +1637,16 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
         }
         const outcome = await steerRemotely(input.envelope, { measureSleepingWorkers });
         const parent = outcome.frontier;
+        const manual = outcome.manualSession;
         const headline =
           outcome.status === 'accepted'
-            ? parent && outcome.replay
+            ? manual && outcome.action === 'SESSION_CREATE'
+              ? `${outcome.replay ? 'Recovered' : 'Accepted'} the signed Frontier manual-session CREATE; its bounded state is ${manual.state}.`
+              : manual && outcome.action === 'SESSION_PROMPT'
+                ? `${outcome.replay ? 'Recovered' : 'Accepted'} the signed Frontier manual-session PROMPT; its bounded state is ${manual.state}.`
+                : manual && outcome.action === 'SESSION_STATUS'
+                  ? `Read the signed Frontier manual session’s bounded state: ${manual.state}.`
+                  : parent && outcome.replay
               ? `Recovered the exact signed parent operation for slot ${parent.slot}; its current state is ${parent.state}. No duplicate input was created.`
               : outcome.replay
                 ? 'Already carried out. This is the recorded result of that exact operation; nothing was repeated.'
@@ -1744,6 +1767,18 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
                       }
                     : null
                 }
+              : null,
+            manual_session: outcome.manualSession
+              ? {
+                  state: outcome.manualSession.state,
+                  found: outcome.manualSession.found,
+                  active_turn: outcome.manualSession.activeTurn,
+                  blocked: outcome.manualSession.blocked,
+                  superseded: outcome.manualSession.superseded,
+                  model_confirmed: outcome.manualSession.modelConfirmed,
+                  automation_off: outcome.manualSession.automationOff,
+                  pending_user_input: outcome.manualSession.pendingUserInput
+                }
               : null
           },
           ...(outcome.status === 'refused' ? { isError: true } : {})
@@ -1857,6 +1892,160 @@ function registerFrontierLongrunTool(reg: SurfaceRegistrar): void {
             : null
         },
         ...(relay.status === 'refused' ? { isError: true } : {})
+      };
+    })
+  );
+}
+
+// ---------------------------------------------------------------------------
+// frontier_session
+// ---------------------------------------------------------------------------
+
+function registerFrontierManualSessionTool(reg: SurfaceRegistrar): void {
+  const prompt = z.string().min(1).max(16_000).refine(
+    value => value.trim().length > 0 && Buffer.byteLength(value, 'utf8') <= 16_000,
+    'prompt must be non-empty and at most 16,000 UTF-8 bytes'
+  );
+  const label = z.string().max(256).refine(
+    value => normalizeFrontierManualSessionLabel(value) !== null,
+    "label must normalize to 1..64 lowercase letters/digits plus '.', '_' or '-'"
+  );
+  const scope = z.enum(['command_center', 'nkb', 'vyper']);
+  const inputSchema = z.discriminatedUnion('action', [
+    z.object({ action: z.literal('start'), scope, label, prompt, ttl_hours: z.number().int().min(1).max(72).optional() }).strict(),
+    z.object({ action: z.literal('send'), scope, label, prompt }).strict(),
+    z.object({ action: z.literal('status'), scope, label }).strict(),
+  ]);
+
+  reg.register(
+    'frontier_session',
+    {
+      title: 'Control one Frontier manual session',
+      description:
+        'Fresh-chat semantic control for a TP-derived ordinary Frontier session. start derives one fixed manual-session child and opens ' +
+        'one fresh PC-owned chat; send queues one signed prompt to that exact bound local session; status returns bounded state. Choose a ' +
+        'stable semantic label and scope. start defaults to 72 hours and accepts only 1..72 whole hours. This tool accepts no executable, ' +
+        'cwd, path, root/grant/certificate/session/slot id, model/reasoning/provider, argv, route or controller-request id. Automation remains off.',
+      inputSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+    },
+    async (input) => guard('frontier_session', async () => {
+      if (!reg.remoteSteeringToolsLive) return reg.featureDisabled('Remote steering', 'Remote steering (Command Center bridge)');
+      const result = await runFrontierManualSessionController(input, async envelope =>
+        steerRemotely(JSON.stringify(envelope), { measureSleepingWorkers })
+      );
+      const relay = result.relay;
+      const session = relay.manualSession;
+      const headline = relay.status === 'accepted'
+        ? `${result.action} accepted (${result.scope}/${result.label})${session ? `; Frontier session is ${session.state}` : ''}.`
+        : `${result.action} refused (${result.scope}/${result.label}): ${relay.reason ?? 'unknown refusal'}.`;
+      return {
+        content: [{ type: 'text' as const, text: `${headline}${relay.detail ? `\n${relay.detail}` : ''}` }],
+        structuredContent: {
+          kind: 'intent',
+          action: result.action,
+          scope: result.scope,
+          label: result.label,
+          child_replay: result.childReplay,
+          child: result.child,
+          status: relay.status,
+          reason: relay.reason,
+          detail: relay.detail,
+          replay: relay.replay,
+          session: session ? {
+            state: session.state,
+            found: session.found,
+            active_turn: session.activeTurn,
+            blocked: session.blocked,
+            superseded: session.superseded,
+            model_confirmed: session.modelConfirmed,
+            automation_off: session.automationOff,
+            pending_user_input: session.pendingUserInput,
+          } : null,
+        },
+        ...(relay.status === 'refused' ? { isError: true } : {})
+      };
+    })
+  );
+}
+
+// ---------------------------------------------------------------------------
+// travel_parent
+// ---------------------------------------------------------------------------
+
+/**
+ * Fresh-chat Travel Parent surface.
+ *
+ * The attended root already exists in Command Center. This surface can read that root, revoke it,
+ * or derive one fixed Frontier Longrun child from semantic mission text. It owns every local
+ * pathname, executable, replay id and operator-intent byte used for that derivation.
+ */
+function registerTravelParentTool(reg: SurfaceRegistrar): void {
+  const mission = z.string().min(1).max(16_000).refine(
+    value => value.trim().length > 0 && Buffer.byteLength(value, 'utf8') <= 16_000,
+    'mission must be non-empty and at most 16,000 UTF-8 bytes'
+  );
+  const label = z.string().max(256).refine(
+    value => normalizeTravelParentLabel(value) !== null,
+    "label must normalize to 1..64 lowercase letters/digits plus '.', '_' or '-'"
+  );
+  const inputSchema = z.discriminatedUnion('action', [
+    z.object({ action: z.literal('show') }).strict(),
+    z.object({
+      action: z.literal('create_longrun'),
+      scope: z.enum(['command_center', 'nkb', 'vyper']),
+      mission,
+      label,
+      ttl_hours: z.number().int().min(1).max(72).optional(),
+    }).strict(),
+    z.object({ action: z.literal('revoke') }).strict(),
+  ]);
+
+  reg.register(
+    'travel_parent',
+    {
+      title: 'Use the attended Travel Parent',
+      description:
+        'Fresh-chat control for one already-attended Travel Parent root. Actions are closed: show bounded root metadata; ' +
+        'create_longrun derives one fixed Frontier Longrun child for command_center, nkb, or vyper from mission text plus an ' +
+        'assistant-chosen semantic label; revoke explicitly stops future Travel Parent issuance. create_longrun defaults to 72 hours ' +
+        'and accepts only 1..72 whole hours. This tool has no root-create action and accepts no path, cwd, argv, executable, root/grant, ' +
+        'session/slot, provider/model/reasoning, routing, landing, shell, credential, commit, push, merge, deploy or release selector. ' +
+        'CoS derives the hidden retry id, mission id, fixed operator intent and temporary files locally, and invokes only the pinned Command Center commands.',
+      inputSchema,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async (input) => guard('travel_parent', async () => {
+      if (!reg.remoteSteeringToolsLive) {
+        return reg.featureDisabled('Remote steering', 'Remote steering (Command Center bridge)');
+      }
+      const result = await runTravelParentController(input);
+      if (result.kind === 'show') {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Travel Parent is ${result.parent.revoked ? 'revoked' : result.parent.live ? 'live' : 'expired'}; ${result.parent.childrenUsedTotal} of ${result.parent.maxChildrenTotal} lifetime child slots are used.`
+          }],
+          structuredContent: result,
+        };
+      }
+      if (result.kind === 'revoke') {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: result.replay ? 'Travel Parent was already revoked; no second revocation was created.' : 'Travel Parent revoked; future Travel Parent child issuance is stopped.'
+          }],
+          structuredContent: result,
+        };
+      }
+      return {
+        content: [{
+          type: 'text' as const,
+          text: result.replay
+            ? `Recovered the exact ${result.scope} Frontier Longrun child (${result.label}); no additional Travel Parent capacity was consumed.`
+            : `Created one ${result.scope} Frontier Longrun child (${result.label}) under the attended Travel Parent.`
+        }],
+        structuredContent: result,
       };
     })
   );

@@ -158,11 +158,72 @@ it('keeps direct frontier_longrun identity-neutral while nested exec is refused 
   expect(ran).not.toHaveBeenCalled();
 });
 
+it('keeps direct travel_parent identity-neutral and direct-only without changing ordinary caller bookkeeping', async () => {
+  broker.sleep.mockReturnValue([
+    { info: { id: 'worker-quiet', conversationId: 'quiet-chat', runId: 'run-quiet' }, report: { id: 'quiet-report', from: 'worker-quiet', to: 'prime', text: 'quiet' } }
+  ]);
+  const direct = governedHandler('travel_parent', 'travel-parent-only');
+  expect(await direct('req-phone-chat')).toEqual(ok('travel-parent-only'));
+  expect(broker.origin).not.toHaveBeenCalled();
+  expect(broker.reactivate).not.toHaveBeenCalled();
+  expect(broker.sleep).not.toHaveBeenCalled();
+  expect(broker.alive).not.toHaveBeenCalled();
+  expect(broker.ack).not.toHaveBeenCalled();
+  expect(broker.offer).not.toHaveBeenCalled();
+  expect(broker.ackInput).not.toHaveBeenCalled();
+  expect(broker.offerInput).not.toHaveBeenCalled();
+  expect(broker.toolRecord).toHaveBeenCalledWith(expect.objectContaining({
+    tool: 'travel_parent', agent: null, conversationId: null, sessionId: null
+  }));
+
+  vi.clearAllMocks();
+  const registrar = createRegistrar(null, { roots: [], caps: defaultConfig().capabilities, readOnly: true }, 'core');
+  const ran = vi.fn(async () => ok('should-not-run'));
+  registrar.register('travel_parent', { description: 'direct-only fixture', inputSchema: z.object({}) }, ran);
+  const nested = await dispatch('exec', {}, null, 'req-chat-a', 'core', async () =>
+    registrar.invokeNested('travel_parent', {}, currentCall()!)
+  );
+  expect(JSON.stringify(nested)).toContain('DIRECT_CALL_REQUIRED');
+  expect(ran).not.toHaveBeenCalled();
+
+  vi.clearAllMocks();
+  await handler()('req-chat-a');
+  expect(broker.origin).toHaveBeenCalled();
+  expect(broker.alive).toHaveBeenCalledWith('chat-a');
+  expect(broker.ackInput).toHaveBeenCalled();
+  expect(broker.offerInput).toHaveBeenCalled();
+});
+
+it('keeps direct frontier_session identity-neutral and direct-only', async () => {
+  const direct = governedHandler('frontier_session', 'manual-session-only');
+  expect(await direct('req-phone-chat')).toEqual(ok('manual-session-only'));
+  expect(broker.origin).not.toHaveBeenCalled();
+  expect(broker.sleep).not.toHaveBeenCalled();
+  expect(broker.alive).not.toHaveBeenCalled();
+  expect(broker.ack).not.toHaveBeenCalled();
+  expect(broker.offer).not.toHaveBeenCalled();
+  expect(broker.ackInput).not.toHaveBeenCalled();
+  expect(broker.offerInput).not.toHaveBeenCalled();
+  expect(broker.toolRecord).toHaveBeenCalledWith(expect.objectContaining({
+    tool: 'frontier_session', agent: null, conversationId: null, sessionId: null
+  }));
+
+  vi.clearAllMocks();
+  const registrar = createRegistrar(null, { roots: [], caps: defaultConfig().capabilities, readOnly: true }, 'core');
+  const ran = vi.fn(async () => ok('unexpected'));
+  registrar.register('frontier_session', { description: 'direct fixture', inputSchema: z.object({}) }, ran);
+  const nested = await dispatch('exec', {}, null, 'req-chat-a', 'core', async () =>
+    registrar.invokeNested('frontier_session', {}, currentCall()!)
+  );
+  expect(JSON.stringify(nested)).toContain('DIRECT_CALL_REQUIRED');
+  expect(ran).not.toHaveBeenCalled();
+});
+
 function remoteHandler() {
   return governedHandler('remote_steering', 'signed-only');
 }
 
-function governedHandler(name: 'remote_steering' | 'frontier_longrun', text: string) {
+function governedHandler(name: 'remote_steering' | 'frontier_longrun' | 'frontier_session' | 'travel_parent', text: string) {
   let call!: (args: object) => Promise<{ content: Array<{ text?: string }> }>;
   const server = { registerTool: (_name: string, _schema: unknown, callback: typeof call) => { call = callback; } };
   const registrar = createRegistrar(server as never, { roots: [], caps: defaultConfig().capabilities, readOnly: true }, 'core');
