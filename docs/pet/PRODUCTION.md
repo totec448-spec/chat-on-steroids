@@ -148,5 +148,16 @@ the character artwork. Runtime assets are local and need no ImageGen service.
 `previews/openai-live.gif` and `anthropic-live.gif` are crops of the real Electron
 action recordings, including the independent text and bin. Rebuild these with
 `node scripts/build-pet-live-previews.mjs` after the Electron acceptance script.
-The live GIFs use the recording's average capture interval (about 8 fps), while
-the app itself uses requestAnimationFrame and the manifest's authored timings.
+The live GIFs use the recording's average capture interval (about 8 fps). The app
+keeps the manifest's authored frame durations. Stationary frames sleep until the
+next frame, phase or autonomous decision; travel and interpolated props use
+requestAnimationFrame. The context menu and hidden document stop that clock.
+Interactions retire any previous wake before scheduling from the new state.
+Unchanged DOM values, including hit/target visibility, do not get rewritten.
+
+Run `node scripts/verify-pet-performance.cjs <label> --check` to build the current
+production pet and CSS into an isolated Electron fixture. It records process CPU
+time normalized across logical processors, renderer task/style/layout work and
+actual animation callbacks. A CPU counter reset invalidates that sample instead
+of counting it as a saving. The idle/menu checks are independent of machine speed;
+CPU percentages are measurements of the fixture, not an installed-app guarantee.

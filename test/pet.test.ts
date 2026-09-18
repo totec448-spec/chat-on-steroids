@@ -10,6 +10,37 @@ describe('Tur Tur Sahur animation owner',()=>{
     expect(animationFrame('heavy',animationDuration('heavy')+100)).toBe(65);
     expect(animationFrame('walk',animationDuration('walk'))).toBe(12);
   });
+  it('advances a deliberate long hold in full and parks settled held/reduced poses',()=>{
+    const pet=create();
+    for(const duration of manifest.animations.spawn.ms)pet.tick(duration);
+    expect(pet.state).toBe('idle');expect(pet.nextUpdateIn).toBe(600);
+    pet.tick(600);expect(pet.frame).toBe(5);expect(pet.nextUpdateIn).toBe(200);
+    pet.beginPointer(1,{x:0,y:0});expect(pet.nextUpdateIn).toBe(Infinity);
+    pet.movePointer(1,{x:20,y:0});
+    for(const duration of manifest.animations.held.ms)pet.tick(duration);
+    expect(pet.frame).toBe(23);expect(pet.nextUpdateIn).toBe(Infinity);
+    pet.setReducedMotion(true);expect(pet.nextUpdateIn).toBe(Infinity);
+    pet.poke();expect(pet.nextUpdateIn).toBe(animationDuration('poke'));
+    pet.tick(pet.nextUpdateIn);expect(pet.state).toBe('idle');expect(pet.nextUpdateIn).toBe(Infinity);
+  });
+  it.each(['openai','anthropic'] as const)('deadline-driven %s retains every authored non-looping action frame',kind=>{
+    const pet=create();pet.startAction(kind);
+    const seen=new Map<string,number[]>();
+    for(let steps=0;pet.scene && steps<5000;steps++){
+      const frames=seen.get(pet.state)??[];if(frames.at(-1)!==pet.frame)frames.push(pet.frame);seen.set(pet.state,frames);
+      const delay=pet.nextUpdateIn;expect(Number.isFinite(delay)).toBe(true);
+      pet.tick(delay===0?5:delay);
+    }
+    expect(pet.scene).toBeNull();
+    for(const [state,frames] of seen){
+      const clip=manifest.animations[state as keyof typeof manifest.animations];
+      if(!clip.loop)expect(frames,state).toEqual(clip.frames);
+    }
+  });
+  it('still bounds an unexpected stall during continuous motion',()=>{
+    const pet=create();pet.startAction('openai');pet.tick(60000);
+    expect(pet.clock).toBe(100);expect(pet.state).toBe('walk');expect(pet.position.x-180).toBeLessThan(5);
+  });
   it('distinguishes jitter clicks from drags, and rejects foreign pointer events',()=>{
     const pet=create();pet.beginPointer(1,{x:10,y:10});pet.movePointer(9,{x:200,y:10});
     pet.movePointer(1,{x:13,y:12});pet.endPointer(1);expect(pet.state).toBe('poke');expect(pet.position.x).toBe(180);

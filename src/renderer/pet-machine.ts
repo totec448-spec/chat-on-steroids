@@ -28,6 +28,16 @@ export function animationFrame(name: PetAnimation, elapsed: number, reduced=fals
   for(let i=0;i<clip.frames.length;i++) { time -= clip.ms[i]!; if(time<0) return clip.frames[i]!; }
   return clip.frames.at(-1)!;
 }
+function nextFrameIn(name: PetAnimation, elapsed: number): number {
+  const clip=manifest.animations[name];
+  let time=clip.loop?elapsed%animationDuration(name):elapsed;
+  for(let i=0;i<clip.frames.length;i++){
+    if(!clip.loop && i===clip.frames.length-1)return Infinity;
+    if(time<clip.ms[i]!)return clip.ms[i]!-time;
+    time-=clip.ms[i]!;
+  }
+  return Infinity;
+}
 interface Phase { animation: PetAnimation; duration: number; distance?: number }
 export interface ActionScene { kind: PetAction; phase: number; target: Point; bin: Point; from: Point; facing: 1|-1 }
 interface Pointer { id: number; start: Point; origin: Point; dragging: boolean }
@@ -58,6 +68,17 @@ export class PetMachine {
   get visible(): boolean { return this.state !== 'hidden'; }
   get frame(): number { return this.state==='hidden' ? 7 : animationFrame(this.state,this.elapsed,this.reducedMotion); }
   get preference(): PetPreference { return {...this.position,visible:this.visible}; }
+  /** Zero needs continuous motion; Infinity is static until an interaction.
+   * Otherwise the authored frame, phase or autonomous decision owns the wake. */
+  get nextUpdateIn(): number {
+    if(this.state==='hidden' || this.pointer && !this.pointer.dragging)return Infinity;
+    if(this.state==='walk' || this.scene && ['grab','carry','throw'].includes(this.state))return 0;
+    const frame=this.reducedMotion?Infinity:nextFrameIn(this.state,this.elapsed);
+    if(this.scene)return Math.max(0,Math.min(frame,this.phases[this.scene.phase]!.duration-this.elapsed));
+    if(this.state==='held')return frame;
+    if(this.state!=='idle')return Math.max(0,Math.min(frame,animationDuration(this.state)-this.elapsed));
+    return this.reducedMotion?Infinity:Math.max(0,Math.min(frame,this.nextDecision-this.clock,this.nextSpecial-this.clock));
+  }
   private enter(state: PetAnimation): void { this.state=state; this.elapsed=0; }
   private cancel(): void { this.scene=null; this.phases=[]; this.walkDistance=0; }
   private rest(): void { this.enter('idle'); this.nextDecision=this.clock+2500+this.random()*3500; }
@@ -106,7 +127,10 @@ export class PetMachine {
   }
   tick(milliseconds:number): void {
     if(!this.visible)return;
-    const dt=Math.max(0,Math.min(milliseconds,100));this.clock+=dt;
+    // A deliberate frame hold (e.g. 600 ms breathing) is elapsed animation time.
+    // Keep the existing 100 ms stall allowance beyond the requested wake; normal
+    // continuous movement still cannot jump across a long renderer suspension.
+    const dt=Math.max(0,Math.min(Number.isFinite(milliseconds)?milliseconds:0,this.nextUpdateIn+100));this.clock+=dt;
     if(this.pointer && !this.pointer.dragging)return;
     this.elapsed+=dt;
     if(this.scene){
