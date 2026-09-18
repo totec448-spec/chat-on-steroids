@@ -798,18 +798,18 @@ describe('the calls a turn says it made', () => {
       : mode === 'duplicate' ? [null, null, stamp(b.id), stamp(final.id)] : [null, null, stamp(final.id)]);
   });
 
-  it.each(['exact', 'duplicate', 'conflicting-label', 'wrong-type', 'unknown-owner'])('stamps only exact typed thought notifications and retains duplicate DOM copies (%s)', async mode => {
+  it.each(['exact', 'empty-label', 'duplicate', 'conflicting-label', 'wrong-type', 'unknown-owner'])('stamps only exact typed thought notifications and retains duplicate DOM copies (%s)', async mode => {
     const owner = '11111111-2222-4333-8444-555555555555';
     const key = `thought-${mode === 'unknown-owner' ? 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' : owner}-7`;
     const fiber = chain({ item: { type: mode === 'wrong-type' ? 'preamble' : 'thought', key } });
     const activities = [
-      { label: '任意の実行通知', fiber, staleThoughtStamp: 'old-scan:0:stale' },
+      { label: mode === 'empty-label' ? '' : '任意の実行通知', fiber, staleThoughtStamp: 'old-scan:0:stale' },
       ...(['duplicate', 'conflicting-label'].includes(mode)
         ? [{ label: mode === 'conflicting-label' ? '別の表示' : '任意の実行通知', fiber }]
         : [])
     ];
     const result = await scan([], [{ id: 'typed-thought-turn', messages: [thought(owner)], activities }], true);
-    const accepted = ['exact', 'duplicate', 'conflicting-label'].includes(mode);
+    const accepted = ['exact', 'empty-label', 'duplicate', 'conflicting-label'].includes(mode);
     expect(result.turns[0]?.thoughtNotifications).toEqual(accepted
       ? [{ messageId: `thought-${owner}-7`, kind: 'thought_notification' }]
       : undefined);

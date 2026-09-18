@@ -1,4 +1,11 @@
 // Isolated renderer/Chromium acceptance. No backend, provider, credentials or pairing.
+if (!process.versions.electron) {
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+  const result = require('node:child_process').spawnSync(require('electron'), [__filename],
+    { env, encoding: 'utf8', windowsHide: true });
+  process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr || '');
+  process.exit(result.status ?? 1);
+}
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -152,10 +159,43 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.getElementById('setupProfileCurrent').textContent`),'Work');
     await js(`document.getElementById('setupProfile').scrollIntoView({block:'center'});document.getElementById('setupProfile').click()`);
     assert.equal(await js(`document.querySelectorAll('[data-remove-profile-id]:not(:disabled)').length`),2);
+    const compactProfiles = await js(`(() => {
+      const menu = document.getElementById('setupProfileMenu').getBoundingClientRect();
+      const trigger = document.getElementById('setupProfile').getBoundingClientRect();
+      const rows = [...document.querySelectorAll('.setup-profile-option')].map(row => {
+        const choice = row.firstElementChild.getBoundingClientRect();
+        const remove = row.lastElementChild.getBoundingClientRect();
+        return {left:choice.left, choiceRight:choice.right, removeLeft:remove.left, removeRight:remove.right};
+      });
+      return {width:menu.width, right:menu.right, triggerWidth:trigger.width, triggerRight:trigger.right, rows};
+    })()`);
+    assert.ok(compactProfiles.width >= compactProfiles.triggerWidth && compactProfiles.width <= 190, JSON.stringify(compactProfiles));
+    assert.ok(Math.abs(compactProfiles.right - compactProfiles.triggerRight) <= 1, JSON.stringify(compactProfiles));
+    for (const row of compactProfiles.rows) {
+      assert.ok(compactProfiles.right - row.removeRight <= 12, JSON.stringify(compactProfiles));
+      assert.ok(Math.abs(row.removeLeft - compactProfiles.rows[0].removeLeft) <= 1, JSON.stringify(compactProfiles));
+      assert.ok(row.choiceRight <= row.removeLeft, JSON.stringify(compactProfiles));
+    }
     // Wake the hidden fixture's compositor before retaining the final frame.
     await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});
     await new Promise(r=>setTimeout(r,250));
     fs.writeFileSync(path.join(output,'settings-profiles.png'),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
+    const longProfile = await js(`(() => {
+      const choice = document.querySelector('.setup-profile-option > :first-child');
+      const text = choice.textContent; choice.textContent = 'Long-profile-'.repeat(6);
+      const menu = document.getElementById('setupProfileMenu');
+      const bounds = menu.getBoundingClientRect();
+      const label = choice.getBoundingClientRect();
+      const remove = choice.nextElementSibling.getBoundingClientRect();
+      const result = {width:bounds.width, left:bounds.left, right:bounds.right, viewport:innerWidth,
+        labelRight:label.right, removeLeft:remove.left, removeRight:remove.right,
+        overflow:menu.scrollWidth > menu.clientWidth + 1};
+      choice.textContent = text;
+      return result;
+    })()`);
+    assert.ok(longProfile.width <= 260 && longProfile.left >= 0 && longProfile.right <= longProfile.viewport, JSON.stringify(longProfile));
+    assert.ok(longProfile.labelRight <= longProfile.removeLeft && !longProfile.overflow, JSON.stringify(longProfile));
+    assert.ok(longProfile.right - longProfile.removeRight <= 12, JSON.stringify(longProfile));
     win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
     win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
     await new Promise(r=>setTimeout(r,50));
@@ -167,6 +207,6 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('[data-remove-profile-id="default"]').click()`);
     for(let i=0;i<100 && await js(`document.querySelectorAll('[data-remove-profile-id]').length!==1`);i++) await new Promise(r=>setTimeout(r,25));
     assert.equal(await js(`document.querySelector('[data-remove-profile-id]').disabled`),true);
-    console.log(JSON.stringify({projectDisclosure:{initiallyCollapsed:true,pointer:true,space:true,enter:true},geometry,drag:moved,showMore:13,collapse:true,profileLayout:true,output}));
+    console.log(JSON.stringify({projectDisclosure:{initiallyCollapsed:true,pointer:true,space:true,enter:true},geometry,drag:moved,showMore:13,collapse:true,profileLayout:compactProfiles,longProfile,output}));
   } finally { win?.destroy(); await server.close(); app.quit(); }
 }).catch(error=>{console.error(error);app.exit(1)});

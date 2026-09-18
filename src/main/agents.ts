@@ -3214,7 +3214,7 @@ export interface AliveResult {
  */
 export function noteAgentAlive(
   conversationId: string | null | undefined,
-  source: 'call' | 'page' | 'turn' = 'call',
+  source: 'call' | 'page' | 'turn' | 'output' = 'call',
   at = Date.now()
 ): AliveResult | null {
   const primeRuns = conversationId ? [...runs.values()].filter(owner => owner.primeConversationId === conversationId) : [];
@@ -3263,8 +3263,13 @@ export function noteAgentAlive(
   // every page fact was refused here — the app then slept a worker that was visibly generating
   // and spent the next revival deadline typing at a chat it had already given up on.
   const sleeping = agent.info.state === 'sleeping' || agent.info.state === 'waking';
-  const staleTurn = source === 'turn' && at <= (agent.info.sleptAt ?? 0);
-  if (sleeping && staleTurn) {
+  const staleTurn = (source === 'turn' || source === 'output') && at <= (agent.info.sleptAt ?? 0);
+  // A completed report is stronger than later capture of the same response.
+  // Native preambles/statuses often hydrate after finish; they retain their
+  // transcript without retracting the report or reclaiming its worker slot.
+  // A new accepted turn or exact tool call still proves the worker is working.
+  const reportedOutput = source === 'output' && agent.info.result !== null;
+  if (sleeping && (staleTurn || reportedOutput)) {
     return { agentId: agent.info.id, revived: false, report: null };
   }
   // Recorder timestamps belong to accepted work, not to the later delivery/replay time.
@@ -3318,7 +3323,7 @@ export function noteAgentAlive(
   let report: AgentMessage | null = null;
   if (was === 'failed' || was === 'sleeping') {
     const how =
-      source === 'turn' ? 'published new work' : 'made another tool call';
+      source === 'turn' || source === 'output' ? 'published new work' : 'made another tool call';
     report = newMessage(
       agent.info.id,
       PRIME_ID,

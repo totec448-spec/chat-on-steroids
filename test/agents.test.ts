@@ -1179,6 +1179,17 @@ describe('a worker that is sleeping', () => {
     expect(offerMessages('worker-1').map((message) => message.text)).toEqual(['second piece']);
   });
 
+  it('lets fresh output revive a silence-based sleep without reviving an explicit finish', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    const at = Date.now();
+    expect(sleepSilentWorkers(at + WORKER_SILENCE_MS + 1000)).toHaveLength(1);
+    expect(noteAgentAlive('c-worker-1', 'output', at + WORKER_SILENCE_MS + 2000)?.revived).toBe(true);
+    finishAgent(worker.caller, 'Audit finished');
+    expect(noteAgentAlive('c-worker-1', 'output', Date.now() + 1)?.revived).toBe(false);
+    expect(noteAgentAlive('c-worker-1', 'call')?.revived).toBe(true);
+  });
+
   it('does not let a stop observed while waking end the wake', () => {
     startSwarm(1);
     const worker = startWorker('worker-1');

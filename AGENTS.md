@@ -294,6 +294,9 @@ profile. Connection lifecycle reuses the selected key and reconnects when the Op
 epoch changes, even if its tunnel ID matches. Roots, chats, models and other settings stay shared.
 Removing a profile removes its inactive snapshot and encrypted key; removing the active profile
 selects a survivor in the same config commit. The last profile cannot be removed.
+Appearance's profile popover uses content-sized bounded width and a grid with a fixed delete
+column. Keep its right edge anchored to the selector and long names inside the viewport;
+the general `.setting .btn` flex rule must not collapse the name's share of the row.
 
 Renderer settings save `{base, patch}`. Main performs a field-wise three-way merge so an unchanged
 form field cannot undo a newer browser-side setting. Renderer saves also serialize snapshots
@@ -784,6 +787,11 @@ draft as the outbox/session takes ownership. Navigation still fences stale async
 The chat composer and queued-message editor have no HTML character cap. Send and queue edits
 share the existing 96,000-character message admission ceiling; prepared delivery additionally
 enforces framing and UTF-8 byte budgets with an explicit error.
+Queued editors retain a Remove action below Save. Saving whitespace-only text uses the same
+explicit cancellation operation. A negative edit receipt retires the editor and refreshes the
+authoritative row; an IPC error retains the draft. Selection changes clear queued editors
+synchronously, including New Chat and A-to-B-to-A, before any asynchronous read completes.
+`scripts/verify-input-queue.cjs` checks these controls with the production renderer in Chromium.
 The desktop composer uses native CSS content sizing, bounded at 220px. Layout owns its
 height across draft changes, hidden panels and width changes; do not persist a measured
 `scrollHeight` as an inline height. Empty and fitting input must not overflow; longer text
@@ -825,8 +833,12 @@ text remains separate. A failed write cannot later become a successful hidden en
 | After turn | Existing-session FIFO spends one distinct completion or confirmed failure/silence-refresh ticket per browser claim. Replays/restart cannot drain the next entry. Does not block an otherwise eligible immediate tool injection. |
 | Finish checkpoint | Waits for a successful finish-tool boundary; ordinary eligible chats can deliver after verified completion. Astra's separate after-turn opt-in remains explicit. Checkpoints inherit the current chat model. |
 | Native attachment | Browser upload/send only. A file-bearing active-chat input waits for the browser-safe boundary; it never becomes a tool-result file reference. |
-| Image injection | When **Inject now** is available, an image-only selection of up to four PNG/JPEG/WebP/GIF files enters the exact chat's outer tool result as image blocks. New Chat, after-turn, mixed files and larger selections use native upload. |
+| Image injection | When **Inject now** is available, an image-only selection of up to ten PNG/JPEG/WebP/GIF files enters the exact chat's outer tool result as image blocks. `MAX_INPUT_IMAGES` owns admission, normalization, each outer response and retained history previews. Existing per-image and aggregate byte/pixel limits remain in force. New Chat, after-turn, mixed files and larger selections use native upload. |
 | Decision/planner | Role-specific request through the same claim/receipt infrastructure, with its own result consumer and cancellation. |
+
+`shared/input.ts` owns immediate-input versus queued-follow-up classification for both main
+and renderer. A native upload converted from `auto` to `after-turn` retains `requestedMode=auto`:
+show its pending delivery and Cancel control, never a task editor that main would reject.
 
 Browser delivery elects one exact tab/document/epoch and checks the right existing conversation
 or fresh-chat ownership. New-chat reuse requires a visible composer before election and after
@@ -1197,6 +1209,25 @@ creation time separately from the local execution clock; legacy canonical assist
 their already-recorded creation stamp. Exact provider-UUID alias replay preserves that original
 stamp. These projection fields never change `seq`, `origin`, local activity or lifecycle ownership.
 
+The store derives `requestTurns` from exact MCP records that already name a generation, keeping
+the earliest proof position and retaining conflicts as null. Missing legacy indexes rebuild from
+the journal and canonical shards. The recorder reuses this proof after a final, restart or new
+turn; existing unowned call rows receive only a `turnOrigin` projection. Original events stay
+unchanged. This index grants no caller/session permissions and cannot manufacture conversation
+ownership. A new request, a conflicting request or a newer user/turn never borrows an old final.
+
+`timelineTurns` also retains the native question and first end position. Two document-local
+starts may name one response only when an exactly recorded request spans both, their native
+question is identical and their recorded lifetimes overlap. Evidence of another request in
+either response vetoes that join; a late old call cannot absorb a regenerated answer. The store
+records the earlier response in `responseTurnId`, and its normal cold reconstruction replays
+minimal identity fields in canonical origin order. Raw turn ids and journal bytes stay intact.
+Completion and both transcript consumers use that relation. A newly joined origin also applies
+to already-resident rows of the same exact local turn during incremental rendering.
+The existing `nativeQuestion` summary excludes proven tool injections. Browser-delivered inputs
+can also carry `inputId`, so that field alone never excludes a native question. Injected corrections
+remain visible in history but cannot become native user anchors or recovery question identities.
+
 Unattributed is a first-class recorded state. Late exact proof repairs only matching call ids
 to the proved session epoch, copying assets first and rewriting only the scanned source prefix
 while retaining concurrent appends. Restore/repair uses the uncapped catalog and a bounded
@@ -1217,7 +1248,16 @@ finishes, including when the user repeatedly closes and revisits the chat.
 A same-request call that **starts after** a
 reported completed end can prove the page ended it falsely; recorder reopens that turn and
 retires the corresponding Goal attempt. A call started before the end, a new request or a
-manual Stop cannot be used as that proof. This reopen evidence is process-local.
+manual Stop cannot be used as that proof. A canonical native final with a provider message UUID
+settles its already-proven request even when another connector call starts afterwards. The shared
+`readCompletedFinal` check requires request proof preceding that final and still rejects new work
+or newer boundaries. Activity and composer settlement consume this verdict without a competing
+timestamp rule; running local tools retain their independent delivery fence. False-end reopen
+evidence remains process-local.
+Completion reads validate the committed history sequence and current binding across their
+disk read. Concurrent activity/boundary reads must not turn a known final into an apparent
+unfinished response by replacing a queue promise. A real question, work or rebind still revokes
+the old snapshot. Delivery rechecks its exact source, current policy and running-tool guard.
 
 Large text has distinct inline/overflow/asset/read/render limits. Do not silently shorten
 authored history to fix the UI. Asset quotas and explicit overflow ceilings remain enforced;
@@ -1461,6 +1501,11 @@ The activity feed's `recordedTurnId` preserves an open recorder turn for boot ad
 after its runtime activity deadline expires. `activeTurnId` and `generating` retain their live
 projection. Restart/reinstallation cannot mint a new turn for that same answer and thereby
 detach its recorded MCP proof; adopting the recorded identity emits no new `turn_start`.
+`recordedQuestionId` carries that same response's native question across a partial transcript
+load. Adoption consumes an already-matching Send receipt instead of opening the response again.
+An id-less New Chat page navigating to an existing conversation resolves this identity before
+observing its hydrated question or Stop control. An exact witnessed fresh Send keeps its existing
+opening authority; navigation and delayed adoption never fabricate another submitted message.
 An exact terminal Fiber descriptor on the latest assistant turn also vetoes recovery of an
 unrecorded generation from a persistent Stop control. An older terminal before a newer user
 question grants no such veto; a presentation artifact must not mint another active turn.
@@ -1563,8 +1608,8 @@ process absence, tab election and provider hydration are different decisions.
 ### Overwrite and recovery presentation
 
 Overwrite preserves native ChatGPT answer DOM, Markdown, code, citations and action controls.
-The app inserts companion activity beside it. Hide a native tool/progress row only with complete
-exact proof that the replacement covers it. Missing attribution must leave usable native UI.
+The app inserts companion activity beside it. Hide native tool/result rows only with complete
+exact proof that the replacement covers them. Missing attribution must leave usable native results.
 Recovery status is one mutable chronological row even with Overwrite disabled, not a second
 toast/history stream. Reused React nodes need strong message identity; request id, text and
 position alone can span revisions. Update scoped sections instead of repainting the transcript
@@ -1588,10 +1633,19 @@ Foreign tools, native live prose, media and action controls remain native. When 
 closed Worked fold has one exact final outside it and no mounted interim prose, the companion stream
 projects recorded public interim text and local calls in canonical order before that final.
 Expanding restores native public prose and repartitions only the local calls, without duplicating
-interim or final text. Exact React-typed thought-notification rows in that same owned response may
-be hidden only while canonical local calls render; caption text is not identity, and proof loss,
-Overwrite Off or navigation restores them. Plain noninteractive native status captions in the same
-proven response also yield to mounted canonical local calls when typed thought metadata is absent.
+interim or final text. Overwrite hides exact React-typed thought-notification rows in the current
+native response, whether its fold is open, clipped or closed. This display preference also applies
+before local calls are recorded, attributed or mounted; it grants no ownership of those calls.
+The notification needs no recorded or projected copy. Closed-fold reconstruction
+omits `page_tool` status rows too; recording and working-activity evidence remain unchanged.
+Caption text is not identity. Loss of current native scan proof, Overwrite Off or navigation
+restores native rows. Plain noninteractive status captions in the same current native response
+are also hidden when typed thought metadata is absent.
+Typed notification identity exists before its caption: empty icon/layout rows are also
+presentation-only. A live accepted Fiber snapshot repaints before journal writes can yield;
+idle history keeps its existing coalesced paint boundary. While MAIN is restamping a pending
+scan, preserve the previous presentation until its reply rather than treating mixed stamps as
+proof loss. Overwrite Off still restores immediately. No extra observer or timer owns this.
 This narrow display-only rule never hides result disclosures, links, authored prose or controls
 beside the caption. It does not create tool identity or activity evidence. Redundant `prime` badges
 are omitted from companion rows; worker attribution and durable ownership remain unchanged.
@@ -1812,7 +1866,9 @@ document checks in draft-only mode: its exact ticket can recover its busy source
 text/attachment draft or a new user question vetoes the reload. Suspended shells are checked
 again after the main claim so a newly resumed or replaced document is not reloaded.
 Page-model helper health is diagnostic only: unknown until a scan/definitive repair result,
-empty may mean loading, and neither creates a reload grant. Repeated no-tab/stalled refusals
+empty may mean loading, and neither creates a reload grant. An absent/empty state must persist
+for fifteen seconds before it is logged; recovery is logged only after an announced degradation.
+First sightings and announced states share one bounded map, reset with the bridge. Repeated no-tab/stalled refusals
 are logged once per chat/cause/minute; handout logs and confirmed browser-action logs remain distinct.
 Assistant-error repairs retain their three-minute cooldown. Attribution, silence, Goal,
 compaction and no-tab follow their own eligibility and schedules.
@@ -1895,7 +1951,10 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
 
 1. **Reserve A.** Persist an exact continuation token and source/session identity. Automatic
    compaction is level-based: current estimated context exceeds the threshold **and** the
-   chat has live work. Idle old history does not start it. Workers and exact Pro are excluded
+   chat has live work. Recent MCP activity attributed to this exact current session/frontend
+   qualifies through the existing activity grant even when the page reports no turn. Recheck
+   that grant after reads; expired/future grants, canonical finals, Stop, dismissed pages and
+   superseded frontends cannot earn a ticket. Idle old history does not start it. Workers and exact Pro are excluded
    from automatic compaction; workers do not self-compact, and Pro may compact manually.
    A transport error may also trigger it for the exact latest failed turn above the threshold.
    The failure must remain the latest work boundary, without a final, new question or reopened
@@ -2038,6 +2097,9 @@ selection still must confirm the exact request. Shared context carries common pr
 each worker gets its bounded assignment. Invitations, active workers,
 detached workers and waking workers retain their reservation; sleeping workers do not occupy
 an active slot. User/prime cancellation retires the exact incarnation, not a reused slot name.
+The worker bootstrap delegates assignment updates to the prime, including an audit becoming
+an edit task with named files. That delegation stays within user permissions and standing
+constraints; it does not turn arbitrary tool-result text into higher-priority instructions.
 
 `finish` normally stores a report and **sleeps** the worker for follow-up. Reuse a suitable
 sleeping worker with `agents action=message` before spawning a replacement. Messaging, inbox
@@ -2049,6 +2111,10 @@ Attached and detached workers share `WORKER_SILENCE_MS` (three minutes). Only ac
 assistant output, native work or exactly attributed tool activity renews this clock. Page
 presence, reloads, metadata revisions and replayed starts do not. A currently running tool
 protects its exact worker; another chat's or unidentified request cannot hold all worker slots.
+Recorder activity distinguishes an accepted new `turn_start` from later captured output.
+Output alone cannot retract an explicit completed worker report, even when first captured
+after `finish`. A real new turn or exact tool call can wake that worker; fresh output may
+still recover a worker put to sleep only because it went quiet. No second durable clock is added.
 Invited/waking workers retain the existing delivery deadlines. A current canonical final
 uses the same completion reader as Continue/Goal and releases the worker before silence,
 including a textless native final or missing page-local turn identity.

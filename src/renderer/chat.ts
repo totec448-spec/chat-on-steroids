@@ -23,7 +23,7 @@ import { communicationTitle, foldAgentCommunication } from './agent-communicatio
 import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { isAstraModel, isProModel } from '../shared/chat-models.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
-import { injectableAttachments } from '../shared/input.js';
+import { injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
 import type { TaskProgress } from '../shared/task-progress.js';
@@ -880,7 +880,6 @@ function paintGoalProgress(): void {
   }
 }
 const cancelledStarts = new Set<string>();
-const queuedFollowup = (entry: InputEntry): boolean => !entry.opening && (entry.mode === 'finish' || (entry.mode === 'after-turn' && !!entry.sessionId && entry.purpose !== 'decision'));
 function pendingComposerInput(): InputEntry | undefined {
   return [...startingInputs.values(), ...pendingComposerInputs].find(entry => (!queuedFollowup(entry) || entry.state === 'browser') && ['queued', 'browser'].includes(entry.state) &&
     (selectedId ? (entry.sessionId ?? entry.deliveredSessionId) === selectedId :
@@ -1763,7 +1762,7 @@ function retainedInputImages(event: Extract<SessionEvent, { kind: 'user_message'
   const companion = root.companionInputId ? pendingComposerInputs.find(entry => entry.id === root.companionInputId &&
     (entry.sessionId ?? entry.deliveredSessionId) === sessionId && entry.messageId === root.messageId) : undefined;
   // Match combinedInput's canonical image order for asset-index fallback.
-  return [...root.images ?? [], ...companion?.images ?? [], ...root.toolImages ?? []].slice(0, 4);
+  return [...root.images ?? [], ...companion?.images ?? [], ...root.toolImages ?? []].slice(0, MAX_INPUT_IMAGES);
 }
 
 function paintMessageReaction(box: HTMLElement, value: unknown): void {
@@ -1788,7 +1787,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       box.append(el('b', '', () => t("You")));
       const attachments = el('div', 'message-attachments');
       if (event.attachments?.length) attachments.append(...event.attachments.map(file => attachmentCard(file)));
-      const assets = event.assets?.filter(asset => asset.mimeType === 'image/webp').slice(0, 4) ?? [];
+      const assets = event.assets?.filter(asset => asset.mimeType === 'image/webp').slice(0, MAX_INPUT_IMAGES) ?? [];
       const retained = retainedInputImages(event, context?.id ?? selectedId);
       const preview = (data: string, retainedOnly = false, slot?: HTMLElement) => {
         const image = document.createElement('img');
@@ -3507,6 +3506,7 @@ async function refreshInputQueue(): Promise<void> {
   paintDeliveryControls();
   const accepted = pendingNewInput && all.find(entry => entry.id === pendingNewInput!.id);
   if (accepted && await adoptAcceptedOpening(accepted)) return;
+  if (selection !== selectionGeneration || request !== inputQueueGeneration) return;
   const belongsToSelection = (entry: { id: string; sessionId: string | null; deliveredSessionId?: string | null }): boolean => selectedId === null
     ? pendingNewInput?.generation === selectionGeneration && entry.id === pendingNewInput.id
     : (entry.sessionId ?? entry.deliveredSessionId) === selectedId;
@@ -3586,15 +3586,31 @@ async function refreshInputQueue(): Promise<void> {
         const next = ids[ids.indexOf(entry.id) + (event.key === 'ArrowDown' ? 1 : -1)];
         if (next) void reorder(entry.id, next, event.key === 'ArrowDown');
       };
+      const retireCard = () => { card.remove(); taskList.hidden = taskList.childElementCount === 0; };
+      const cancel = dockAction(() => t("Remove queued task"), 'i-trash', () => {});
+      cancel.onclick = async () => {
+        if (cancel.disabled || !card.isConnected || selection !== selectionGeneration) return;
+        cancel.disabled = true;
+        const removed = await run(api.cancelInput(entry.id));
+        if (!card.isConnected || selection !== selectionGeneration) return;
+        if (removed === true || removed === false) {
+          inputQueueGeneration++;
+          if (removed) pendingComposerInputs = pendingComposerInputs.filter(row => row.id !== entry.id);
+          retireCard();
+          void refreshInputQueue();
+        } else cancel.disabled = false;
+      };
       const edit = dockAction(() => t("Edit queued task"), 'i-pencil', () => {});
       edit.onclick = () => {
+        if (!card.isConnected || selection !== selectionGeneration) return;
         const field = document.createElement('textarea'); field.dir = 'auto'; field.value = entry.text; ui(field, 'aria-label', () => t("Queued task"));
         const contents = [...card.childNodes];
         const save = el('button', 'btn', () => t("Save")) as HTMLButtonElement; save.type = 'button';
         save.onclick = async () => {
-          if (save.disabled) return;
+          if (save.disabled || cancel.disabled || !card.isConnected || selection !== selectionGeneration) return;
           const value = field.value;
-          save.disabled = true; ui(save, 'textContent', () => t("Saving…")); field.readOnly = true;
+          if (!value.trim()) { cancel.click(); return; }
+          save.disabled = true; cancel.disabled = true; ui(save, 'textContent', () => t("Saving…")); field.readOnly = true;
           try {
             const saved = await run(api.editQueuedInput(entry.id, value));
             if (!card.isConnected || selection !== selectionGeneration) return;
@@ -3603,14 +3619,20 @@ async function refreshInputQueue(): Promise<void> {
               // queue refresh. Refreshes preserve drafts; they do not own Save completion.
               entry.text = value.trim(); label.textContent = entry.text;
               card.classList.remove('is-editing'); card.replaceChildren(...contents);
+              inputQueueGeneration++;
               void refreshInputQueue();
-            } else if (saved === false) toast(t("This task is no longer queued and could not be edited."));
+            } else if (saved === false) {
+              // A claimed or removed row no longer owns an editor. Refresh projects
+              // its actual delivery state; it must never preserve this stale draft.
+              inputQueueGeneration++;
+              retireCard();
+              void refreshInputQueue();
+            }
           } catch (error) { toast(error instanceof Error ? error.message : t("Could not save this task.")); }
-          finally { save.disabled = false; ui(save, 'textContent', () => t("Save")); field.readOnly = false; }
+          finally { save.disabled = false; cancel.disabled = false; ui(save, 'textContent', () => t("Save")); field.readOnly = false; }
         };
-        card.classList.add('is-editing'); card.replaceChildren(field, save); field.focus();
+        card.classList.add('is-editing'); card.replaceChildren(field, save, cancel); field.focus();
       };
-      const cancel = dockAction(() => t("Remove queued task"), 'i-trash', () => {}); cancel.onclick = async () => { await run(api.cancelInput(entry.id)); void refreshInputQueue(); };
       card.append(edit, cancel);
     }
     return card;
@@ -3813,6 +3835,8 @@ function selectSession(id: string): void {
   const ownerChanged = id !== selectedId;
   rememberDraft();
   selectionGeneration++; replaceComposerDraft();
+  inputQueueGeneration++;
+  $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = false;
   selectedId = id;
   const selected = sessions.find(row => row.id === id);
@@ -3849,6 +3873,8 @@ function selectSession(id: string): void {
 
 function selectNewChat(projectId: string | null = null): void {
   rememberDraft(); selectionGeneration++; replaceComposerDraft(); pendingNewInput = null;
+  inputQueueGeneration++;
+  $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
   if (projectId) expandedProjects.add(projectId);
   applyComposerSessionModel(null, null);

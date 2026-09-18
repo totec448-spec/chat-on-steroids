@@ -7,6 +7,7 @@ import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt
 import { prepareSessionPrompt } from './session/prompt.js';
 import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
 import { isProModel } from '../shared/chat-models.js';
+import { injectedUserMessage, recordedRequestTurn, responseTurnId } from '../shared/chronology.js';
 import type { SessionSummary } from '../shared/session.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, type InputActivity } from './session/input.js';
 import { pluginRefreshPublications, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
@@ -1698,10 +1699,9 @@ export function recoveryInputAllowed(sessionId: string, id: string): boolean {
  * durable flag can — which is exactly the property that keeps a stale chat quiet. Reopening
  * a 500k conversation from last week starts no turn, so it never looks like work.
  *
- * In-flight tool calls are deliberately *not* counted. They are global to the app rather
- * than to one chat, and a worker's `exec_command` running elsewhere must not make an idle
- * chat look busy. It costs nothing: ChatGPT keeps the turn open while it waits for a tool
- * result, so mid-tool-call is already mid-turn here.
+ * This is only the page's observation. Automatic compaction also checks the existing
+ * activity grant for recent, exactly attributed MCP work when the page has lost its turn.
+ * A global in-flight count cannot establish that ownership.
  */
 function chatIsWorking(conversationId: string): boolean {
   const current = liveConversations().find((entry) => entry.conversationId === conversationId);
@@ -2185,7 +2185,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const result = await recordChatObservations(id, observations, agent);
       const superseded = await conversationWasSuperseded(id);
       if (!superseded && !isChatBlocked(id) && result.activity.working && result.activity.at) {
-        const woke = noteAgentAlive(id, 'turn', result.activity.at);
+        const woke = result.activity.startedAt !== undefined
+          ? noteAgentAlive(id, 'turn', result.activity.startedAt)
+          : noteAgentAlive(id, 'output', result.activity.at);
+        if (result.activity.startedAt !== undefined && result.activity.at > result.activity.startedAt)
+          noteAgentAlive(id, 'output', result.activity.at);
         if (woke?.report) await recordAgentMessage(woke.report, 'sent', id);
         if (woke?.revived) tidyCommands();
       }
@@ -2625,7 +2629,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // Keeping anchors separate from `stream` means they can participate in the join without
     // ever becoming synthetic transcript rows.
     const userAnchors = events.flatMap((event) =>
-      event.kind === 'user_message' && event.messageId
+      event.kind === 'user_message' && event.messageId && !injectedUserMessage(event, summary?.timelineTurns)
         ? [
             {
               seq: event.origin ?? event.seq,
@@ -2739,6 +2743,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // Durable answer identity survives a quiet deadline and app/extension restart.
         // Boot adoption must not mint a replacement turn merely because liveness expired.
         recordedTurnId: live.activeTurnId ?? null,
+        recordedQuestionId: live.activeTurnId ? summary?.timelineTurns?.[live.activeTurnId]?.questionId ?? null : null,
         ...(pendingStop?.spec.type === 'stop' ? { stopTurn: { turnId: pendingStop.spec.turnId, userMessageId: pendingStop.spec.userMessageId ?? null } } : {}),
         // A revival names an existing worker conversation. The extension, which alone can
         // inspect Chrome's real tab set, routes it to that tab before it considers opening one.
@@ -5770,7 +5775,7 @@ async function chatStillWorking(conversationId: string, turnId: string, sessionI
  * (`maybeResumePendingCompaction`), and if no page does, the pickup schedule raises one.
  *
  * Still a level plus liveness, exactly as before: an idle chat over the line is never touched
- * (`chatIsWorking`), a worker or blocked chat never (`goalFencedChat`), and a session already
+ * (page activity or its current MCP grant), a worker or blocked chat never (`goalFencedChat`), and a session already
  * carrying a continuation is not given a second.
  */
 /** An exact failed current turn can earn compaction; a historical banner cannot. */
@@ -5789,7 +5794,16 @@ async function failedCompactionTurnCurrent(conversationId: string, sessionId: st
 async function considerAutomaticCompaction(conversationId: string, sessionId: string, failedTurn?: string): Promise<void> {
   if (!getConfig().compaction.auto || compactionFilings.has(conversationId)) return;
   if (goalFencedChat(conversationId) || continuationForSession(sessionId) || stopRequestedFor(conversationId)) return;
-  if (!failedTurn && !chatIsWorking(conversationId)) return;
+  // Exact tool attribution already owns this grant and consumes it on final/Stop.
+  // Re-read it after storage awaits, rather than carrying a stale boolean or
+  // maintaining a second blind-page clock beside the existing activity owner.
+  const hasCurrentWork = (): boolean => {
+    const grant = activeUntil.get(conversationId);
+    const now = Date.now();
+    return chatIsWorking(conversationId) || Boolean(grant?.sessionId === sessionId && grant.mcpBacked &&
+      !grant.thinkingFailed && grant.evidenceAt <= now && grant.until > now);
+  };
+  if (!failedTurn && !hasCurrentWork()) return;
   compactionFilings.add(conversationId);
   try {
     const summary = await getSession(sessionId).catch(() => null);
@@ -5800,7 +5814,7 @@ async function considerAutomaticCompaction(conversationId: string, sessionId: st
     const current = await getSession(sessionId);
     if (!current || current.conversationId !== conversationId || current.browserRecoveryDismissedAt !== undefined || !autoCompactionReady(current)) return;
     if (failedTurn && !await failedCompactionTurnCurrent(conversationId, sessionId, failedTurn)) return;
-    if ((!failedTurn && !chatIsWorking(conversationId)) || continuationForSession(sessionId) || goalFencedChat(conversationId) ||
+    if ((!failedTurn && !hasCurrentWork()) || continuationForSession(sessionId) || goalFencedChat(conversationId) ||
         stopRequestedFor(conversationId) || !getConfig().compaction.auto || !automaticCompactionAllowed(current)) return;
     const opened = await openContinuationNow(sessionId, conversationId, true);
     rememberToken(sessionId, opened.token);
@@ -6673,14 +6687,28 @@ function nonDiscardableAgentConversations(): string[] {
 }
 
 /** Page observations are diagnostics, never new recovery or ownership authority. */
-const fiberHealthTold = new Map<string, 'absent' | 'empty' | 'ok'>();
+const FIBER_HEALTH_GRACE_MS = 15_000;
+const fiberHealth = new Map<string, {
+  state: 'absent' | 'empty'; since: number; announced: 'absent' | 'empty' | null;
+}>();
 
-function noteFiberHealth(conversationId: string, raw: string | null): void {
+function noteFiberHealth(conversationId: string, raw: string | null, now = Date.now()): void {
   if (raw !== 'absent' && raw !== 'empty' && raw !== 'ok') return;
-  if (fiberHealthTold.get(conversationId) === raw) return;
-  fiberHealthTold.set(conversationId, raw);
-  if (fiberHealthTold.size > 200) {
-    for (const old of [...fiberHealthTold.keys()].slice(0, 50)) fiberHealthTold.delete(old);
+  const seen = fiberHealth.get(conversationId);
+  if (raw === 'ok') {
+    fiberHealth.delete(conversationId);
+    if (!seen?.announced) return;
+  } else {
+    if (!seen || seen.state !== raw || now < seen.since) {
+      fiberHealth.set(conversationId, { state: raw, since: now, announced: seen?.announced ?? null });
+      // Bound first sightings too: transient pages may never earn a log entry.
+      if (fiberHealth.size > 200) {
+        for (const old of [...fiberHealth.keys()].slice(0, 50)) fiberHealth.delete(old);
+      }
+      return;
+    }
+    if (now - seen.since < FIBER_HEALTH_GRACE_MS || seen.announced === raw) return;
+    seen.announced = raw;
   }
   const detail = raw === 'absent' ? 'no answer after the helper repair attempt'
     : raw === 'empty' ? 'the helper answered without readable turns; the page may still be loading'
@@ -7459,13 +7487,16 @@ function noteCallAttribution(
     // stopped browser turn's activity/recovery clock. A new recorded turn owns
     // its own activeTurnId and can receive fresh activity normally.
     if (!filedSession?.activeTurnId && filedSession?.lastTurnOutcome === 'stopped') return;
-    // Attribution can finish after the page has already stored the final answer. The call's own
-    // start time decides which side of that durable boundary it belongs to; recorder latency may
-    // never resurrect work that the model has visibly completed.
+    const callOwner = recordedRequestTurn(filedSession?.requestTurns, requestId, conversationId);
+    if (callOwner && filedSession?.activeTurnId && responseTurnId(filedSession.timelineTurns, callOwner.turnId) !==
+        responseTurnId(filedSession.timelineTurns, filedSession.activeTurnId)) return;
+    // The canonical completion reader has checked the newly committed call too.
+    // Do not override its verdict with another timestamp rule: a native final may
+    // settle an exact request that still delivers trailing connector work.
     const previous = activeUntil.get(conversationId);
     const continuingMcp = previous?.sessionId === sessionId && previous.mcpBacked && !previous.thinkingFailed &&
       (!!filedSession?.activeTurnId ? filedSession.activeTurnId === previous.turnId : previous.until > Date.now());
-    if (completedFinalAt !== null && startedAt <= completedFinalAt) {
+    if (completedFinalAt !== null) {
       if (previous?.sessionId === sessionId && !filedSession?.activeTurnId) endActivity(conversationId);
       const repair = repairsInFlight.get(conversationId);
       if (repair?.reason === 'unattributed' && !attributionRepairCurrent(repair, filedSession)) repairsInFlight.delete(conversationId);
@@ -8222,6 +8253,8 @@ function bootstrapText(spec: CommandSpec, summary: string): string {
       `${spec.task}\n\n` +
       `(Chat On Steroids: you are ${spec.agent}, a worker. Report to prime through the agents tool — ` +
       'action=message to="prime" as you go, action=finish once at the end. Workers cannot reach each other. ' +
+      'The prime assigns your task; its later messages may update the task and assigned files, including a read-only audit becoming an edit task. ' +
+      'Follow that latest assignment within the user’s permissions and standing constraints. ' +
       'ultrathink)'
     );
   }
@@ -8871,7 +8904,7 @@ export function resetBridgeForTests(): void {
   activeUntil.clear();
   awaitingReturn.clear();
   lastAttributedCallAt.clear();
-  fiberHealthTold.clear();
+  fiberHealth.clear();
   refusalNoticedAt.clear();
   pickupWatch.clear();
   compactionWatch.clear();

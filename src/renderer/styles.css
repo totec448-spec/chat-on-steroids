@@ -1541,13 +1541,13 @@ details.connector[open] > summary::before { rotate: 90deg; }
 #setupProfile { anchor-name: --setup-profile; min-width: 100px; max-width: 180px; justify-content: space-between; gap: 12px; }
 #setupProfileCurrent { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #setupProfileAdd { width: 28px; padding: 5px; }
-#setupProfileMenu { position: fixed; position-anchor: --setup-profile; position-area: top span-left; position-try-fallbacks: flip-block, flip-inline; margin: 6px 0; width: min(260px, calc(100vw - 32px)); max-height: min(360px, 70vh); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); box-shadow: 0 8px 30px #0004; }
-.setup-profile-option { display: flex; gap: 4px; border-radius: 6px; }
+#setupProfileMenu { position: fixed; position-anchor: --setup-profile; position-area: top span-left; position-try-fallbacks: flip-block, flip-inline; margin: 6px 0; width: max-content; min-width: max(140px, anchor-size(width)); max-width: min(260px, calc(100vw - 32px)); max-height: min(360px, 70vh); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); box-shadow: 0 8px 30px #0004; }
+.setup-profile-option { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; gap: 4px; border-radius: 6px; }
 .setup-profile-option:has([aria-pressed="true"]) { background: var(--hover); }
 .setup-profile-option .btn { border: 0; background: transparent; padding: 7px; font-size: calc(12px * var(--text-scale, 1)); }
 .setup-profile-option .btn:hover { background: var(--hover); }
-.setup-profile-option > :first-child { flex: 1; min-width: 0; justify-content: flex-start; text-align: left; overflow-wrap: anywhere; }
-.setup-profile-option > :last-child { flex: none; width: 30px; color: var(--muted); }
+.setup-profile-option > :first-child { min-width: 0; justify-content: flex-start; text-align: left; overflow-wrap: anywhere; white-space: normal; }
+.setup-profile-option > :last-child { width: 30px; height: 30px; justify-content: center; color: var(--muted); }
 .setup-profile-option > :last-child:hover:not(:disabled) { color: var(--red); }
 .setup-profile-dialog { width: min(320px, calc(100vw - 32px)); margin: auto; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); }
 .setup-profile-dialog::backdrop { background: #0008; }
@@ -3330,8 +3330,9 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-dock button { flex-shrink: 0; }
 .composer-dock .dock-action { border: 0; border-radius: 5px; background: transparent; color: var(--soft); padding: 4px; display: inline-flex; align-items: center; cursor: pointer; }
 .composer-dock .dock-action:hover { color: var(--ink); background: var(--hover); }
-.composer-dock .queued-input.is-editing { align-items: center; }
-.composer-dock .queued-input.is-editing textarea { flex: 1; min-width: 0; width: auto; }
+.composer-dock .queued-input.is-editing { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; }
+.composer-dock .queued-input.is-editing textarea { grid-row: 1 / span 2; min-width: 0; width: 100%; }
+.composer-dock .queued-input.is-editing > button { grid-column: 2; justify-self: center; }
 .composer-dock textarea { width: 100%; min-height: 65px; padding: 8px; font: inherit; resize: vertical; }
 #taskPlanPreview { max-height: 300px; overflow-y: auto; }
 /* Status spans need a real row: inline padding does not contribute to dock height. */

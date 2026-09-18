@@ -526,6 +526,10 @@ export function originTitle(origin: SessionOrigin, source: string | null): strin
 export interface SessionSummary {
   /** Rebuildable transcript boundaries; no message bodies or execution authority. */
   timelineTurns?: import('./chronology.js').TimelineTurns;
+  /** Rebuildable request-to-turn proof from recorded MCP calls, never a caller permission. */
+  requestTurns?: import('./chronology.js').RequestTurns;
+  /** Rebuildable native question boundary; tool-result instructions never replace it. */
+  nativeQuestion?: { messageId: string; origin: number } | null;
   /** Durable naming authority; absent only on legacy recordings. */
   titleSource?: 'fallback' | 'provider' | 'manual';
   /** Latest proven native picker selection; scoped to its frontend, never worker creation intent. */

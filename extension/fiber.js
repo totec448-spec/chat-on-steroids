@@ -964,7 +964,6 @@
           continue;
         }
         const label = visibleText(row.textContent).slice(0, 300);
-        if (!label || label.length > 300) continue;
         let activity = null;
         try {
           const fiber = fiberOf(row);
@@ -979,6 +978,9 @@
         // display text for this scan.
         exactThoughtRows.set(row, activity.messageId);
         notificationIds.add(activity.messageId);
+        // The native icon/empty layout mounts before its caption. Typed identity
+        // already proves what may be suppressed; only recording needs text.
+        if (!label) continue;
 
         let prior = null;
         for (let entryAt = 0; entryAt < held.length; entryAt++) {

@@ -630,6 +630,80 @@ it('shows ordinary after-turn messages in the task dock until actual delivery', 
   expect(w.document.getElementById('timeline')!.textContent).toContain('Next task');
 });
 
+it('keeps a transport-deferred immediate upload visible with cancellation instead of an invalid task editor', async () => {
+  const { w, live, append } = await boot([]);
+  live.inputs.push({ id: 'native-correction', sessionId: summary([]).id, text: 'Waiting upload', mode: 'after-turn', requestedMode: 'auto',
+    dueAt: 0, model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b',
+    attachments: [{ id: 'native-file', name: 'notes.txt', mimeType: 'text/plain', size: 12 }] });
+  await append([]);
+  const row = w.document.querySelector('#inputQueue [data-input-id="native-correction"]');
+  expect(row?.textContent).toContain('Waiting upload');
+  expect(row?.textContent).toContain('notes.txt');
+  expect(w.document.querySelector('#finishQueue [data-input-id="native-correction"]')).toBeNull();
+  (row!.querySelector('[aria-label="Cancel delivery"]') as HTMLButtonElement).click();
+  await settle();
+  expect(live.inputs[0]?.state).toBe('cancelled');
+  expect(w.document.querySelector('[data-input-id="native-correction"]')).toBeNull();
+});
+
+it.each(['trash', 'empty-save'])('removes a queued message during editing via %s even while a refresh is delayed', async action => {
+  const { w, live, append } = await boot([]);
+  live.inputs.push({ id: 'remove-edit', sessionId: summary([]).id, text: 'Delete me', mode: 'after-turn', dueAt: 0,
+    model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b' });
+  await append([]);
+  (w.document.querySelector('[aria-label="Edit queued task"]') as HTMLButtonElement).click();
+  const field = w.document.querySelector<HTMLTextAreaElement>('#finishQueue textarea')!;
+  (w as any).api.listInputs = () => new Promise(() => {});
+  if (action === 'empty-save') field.value = ' \n\t ';
+  const button = action === 'trash' ? w.document.querySelector('#finishQueue [aria-label="Remove queued task"]') : field.nextElementSibling;
+  expect(button).not.toBeNull();
+  (button as HTMLButtonElement).click(); await settle();
+  expect((w as any).api.cancelInput).toHaveBeenCalledWith('remove-edit');
+  expect(live.inputs[0]?.state).toBe('cancelled');
+  expect(w.document.querySelector('#finishQueue textarea')).toBeNull();
+  expect(w.document.getElementById('finishQueue')!.hidden).toBe(true);
+});
+
+it.each(['cancelled', 'browser'])('retires the editor when Save learns the queued message became %s', async state => {
+  const { w, live, append } = await boot([]);
+  live.inputs.push({ id: 'retired-edit', sessionId: summary([]).id, text: 'Original', mode: 'after-turn', dueAt: 0,
+    model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b' });
+  await append([]);
+  (w.document.querySelector('[aria-label="Edit queued task"]') as HTMLButtonElement).click();
+  const field = w.document.querySelector<HTMLTextAreaElement>('#finishQueue textarea')!;
+  field.value = 'Late edit';
+  (w as any).api.editQueuedInput = async () => {
+    live.inputs[0]!.state = state as InputEntry['state'];
+    return { ok: true, data: false };
+  };
+  (field.nextElementSibling as HTMLButtonElement).click(); await settle();
+  expect(w.document.querySelector('#finishQueue textarea')).toBeNull();
+  expect(live.inputs[0]?.text).toBe('Original');
+  if (state === 'cancelled') expect(w.document.querySelector('#finishQueue [data-input-id="retired-edit"]')).toBeNull();
+  else expect(w.document.querySelector('#finishQueue [data-input-id="retired-edit"]')).not.toBeNull();
+});
+
+it('retires a queued editor synchronously on New Chat and ignores its delayed save after returning', async () => {
+  const { w, live, append } = await boot([]);
+  live.inputs.push({ id: 'old-editor', sessionId: summary([]).id, text: 'Original', mode: 'finish', dueAt: 0,
+    model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b' });
+  await append([]);
+  (w.document.querySelector('[aria-label="Edit queued task"]') as HTMLButtonElement).click();
+  let resolveSave!: (value: unknown) => void;
+  (w as any).api.editQueuedInput = () => new Promise(resolve => { resolveSave = resolve; });
+  const field = w.document.querySelector<HTMLTextAreaElement>('#finishQueue textarea')!;
+  field.value = 'Old save'; (field.nextElementSibling as HTMLButtonElement).click();
+  w.document.getElementById('newChat')!.click();
+  expect(w.document.querySelector('#finishQueue textarea')).toBeNull();
+  expect(w.document.getElementById('finishQueue')!.hidden).toBe(true);
+  (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click(); await settle();
+  (w.document.querySelector('[aria-label="Edit queued task"]') as HTMLButtonElement).click();
+  const fresh = w.document.querySelector<HTMLTextAreaElement>('#finishQueue textarea')!;
+  fresh.value = 'New edit'; resolveSave({ ok: true, data: true }); await settle();
+  expect(w.document.querySelector('#finishQueue textarea')).toBe(fresh);
+  expect(fresh.value).toBe('New edit');
+});
+
 it('keeps canonical image attachments above the user text bubble for the selected session', async () => {
   const app = await boot([]);
   const { w } = app;
@@ -926,6 +1000,23 @@ it('restores the image draft after rejected injection and removes native-only de
   expect(app.w.document.querySelector('[aria-label="Remove image.png"]')).not.toBeNull();
 });
 
+it.each([7, 10, 11])('uses the same visible delivery choice and payload for %s attached images', async count => {
+  const { w, live } = await boot([]);
+  const files = Array.from({ length: count }, (_, index) => ({
+    id: `image-${index}`, name: `image-${index}.png`, mimeType: 'image/png', size: 42
+  }));
+  (w as any).api.chooseFiles = async () => ({ ok: true, data: files });
+  w.document.getElementById('attachImages')!.click(); await settle();
+  const inject = w.document.querySelector<HTMLElement>('[data-delivery="tool"]')!;
+  expect(inject.hidden).toBe(count > 10);
+  expect(w.document.getElementById('immediateDeliveryLabel')!.textContent).toBe(count > 10 ? 'After this turn' : 'Inject now');
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]?.attachments).toEqual(files);
+  expect(live.sent[0]?.delivery).toBe(count > 10 ? undefined : 'tool');
+});
+
 it('uses the same separate image row for pending and recorded native attachments', async () => {
   const app = await boot([]);
   const attachment = { id: 'a'.repeat(32), name: 'meme.png', mimeType: 'image/png', size: 42, preview: 'data:image/webp;base64,YQ==' };
@@ -941,6 +1032,18 @@ it('uses the same separate image row for pending and recorded native attachments
   expect(recorded.querySelector('.message-attachments')?.nextElementSibling?.classList.contains('user-message-text')).toBe(true);
   expect(recorded.querySelector('.message-attachments > img')?.getAttribute('alt')).toBe('meme.png');
   expect(recorded.querySelector('.composer-image')).toBeNull();
+});
+
+it('keeps all ten injected image previews when the outbox message gains its canonical history row', async () => {
+  const { w, live, append } = await boot([]);
+  const images = Array.from({ length: 10 }, (_, index) => ({ name: `reference-${index}.webp`, dataUrl: 'data:image/webp;base64,YQ==' }));
+  live.inputs.push({ id: 'ten-images', sessionId: summary([]).id, text: 'Ten references', images, mode: 'auto', dueAt: 0,
+    state: 'tool', owner: 'request', createdAt: 0, conversationId: 'chat-b', model: null, reasoningEffort: null });
+  await append([]);
+  expect(w.document.querySelectorAll('#inputQueue [data-input-id="ten-images"] img')).toHaveLength(10);
+  await append([{ seq: 1, source: 'app', time: T0, kind: 'user_message', inputId: 'ten-images', messageId: 'input:ten-images', message: text('Ten references') }]);
+  expect(w.document.querySelectorAll('#timeline .user-image-slot img')).toHaveLength(10);
+  expect(w.document.querySelector('#inputQueue [data-input-id="ten-images"]')).toBeNull();
 });
 
 it('explains a legacy missing image recording without asserting a provider receipt', async () => {
