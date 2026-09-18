@@ -1310,6 +1310,8 @@
   "This file changed on disk while you were editing it. Your unsaved edits were kept.": "Este archivo cambió en disco mientras lo editabas. Se conservaron tus cambios sin guardar.",
   "Copied": "Copiado",
   "Automatic Continue": "Continuación automática",
+  "Cancel automatic Continue": "Cancelar la continuación automática",
+  "Resumes without a final answer. If ChatGPT is still generating, the silent turn is stopped before Continue is sent.": "Reanuda sin esperar una respuesta final. Si ChatGPT sigue generando, se detiene el turno sin actividad antes de enviar la continuación.",
   "Continue in {0}": "Continuación en {0}",
   "Preparing Continue…": "Preparando la continuación…",
   "New activity, a final answer or your Stop cancels automatic Continue. Stop is used only if ChatGPT is still generating.": "La actividad nueva, una respuesta final o tu orden de detener cancela la continuación automática. Solo se detiene si ChatGPT sigue generando.",
