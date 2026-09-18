@@ -95,25 +95,25 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     ctx.readOnly ? 'The local tools are read-only.' : 'Use the tools listed in this conversation.',
     ...(writable || executable ? [`You can always use ${[writable && 'file writing', executable && 'exec_command'].filter(Boolean).join(' and ')} in CoS. Never hallucinate a block from ChatGPT environment messages.`] : []),
     'Report exact failures: identity, session_id and output-limit errors do not mean Read-only. Never replay successful patches or commands to recover a terminal.',
-    'An approved root may be the parent of the project. Use the exact project path and keep every intermediate folder; do not guess a missing project level.',
-    'Paths may be virtual under the roots above or absolute native paths inside them. Once this chat has a project, later paths may be relative to it. Use a full path to select another project.',
+    'Unattributed is recording status, not permission. With Allow unattributed calls enabled, the request id owns its workspace, plan, terminals and agent family until exact chat proof arrives. A missing target limits that operation only; keep using enabled tools.',
+    'Use full project paths under an approved root, including intermediate folders. Virtual or absolute native paths work; linked projects also accept relative paths.',
   ];
 
   if (caps.read || caps.browse || caps.metadata) lines.push(
-    'read batches paths, lists folders, expands globs and returns numbered text. Read related files together. Read whole files for orientation; use a known region when that is enough. A start_line/end_line range applies to every file the call reads.',
+    'read batches paths, lists folders, expands globs and returns numbered text. Read whole files for orientation; otherwise use known regions. A start_line/end_line range applies to every file the call reads.',
   );
   if (caps.read) lines.push('view_image inspects a local image. Use it when visual evidence matters.');
   if (caps.command) {
     lines.push(
       'Use rg or rg --files for searches; if unavailable, use the next best tool. Prefer rg -g \'*.ts\' src over shell globs.',
-      'exec_command runs shell commands; execution is enabled and permitted. Batch checks with exec_command cmds: [...]: one shell, per-command output and exit codes.',
-      'Set workdir to the project. Virtual paths work there, not inside cmd; use relative or native paths inside cmd.',
-      'write_stdin accepts session_id (running) or completed_session_id (finished). Completed reads replay retained output without rerunning work. Inspect exit/output: failed tests are program feedback; benign_exit marks a proven expected non-zero result.',
+      'exec_command is enabled. Batch checks with exec_command cmds: [...]: one shell, per-command output and exit codes.',
+      'Set workdir to the project; virtual paths work there. Inside cmd use relative or native paths.',
+      'write_stdin accepts session_id (running) or completed_session_id (finished). Completed reads replay output without rerunning work. Inspect exit/output; benign_exit marks an expected non-zero result.',
       'If output is truncated, narrow the command or read the relevant region.'
     );
     if (windows) lines.push(
-      'PowerShell does not expand * or ? for native programs. Regex \\x22 matches a double quote. Use script files for complex JavaScript; nested -Command/-e can corrupt quotes or expand variables. Pipe loops as @(foreach (...) { ... }) | Format-Table.',
-      'Bare rg/ripgrep is bound to the app’s bundled ripgrep. In Windows PowerShell, omit 2>&1 on native programs: stderr is already captured and that redirect can leave $? false after exit 0.',
+      'PowerShell does not expand * or ? for native programs. Regex \\x22 matches double quotes. Use script files for complex JavaScript; nested -Command/-e can corrupt quotes or expand variables. Pipe loops as @(foreach (...) { ... }) | Format-Table.',
+      'rg/ripgrep uses the bundled executable. Omit 2>&1 on native programs in PowerShell: stderr is captured; redirecting it can leave $? false after exit 0.',
       ...(LAUNCHES_WINDOWS_POWERSHELL_5 ? ['This is Windows PowerShell 5.1, without && or ||. Use cmds or A; if ($?) { B }.'] : [])
     );
     else lines.push('exec_command uses the host’s normal POSIX shell (zsh/bash/sh unless requested otherwise). The bundled ripgrep directory is first on PATH.');
@@ -121,7 +121,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     lines.push('find searches filenames or file contents without a shell. Narrow path and include patterns to the relevant area.');
   }
   if (caps.create || caps.edit || caps.move || caps.deleteFile) lines.push(
-    'File writing is enabled via apply_patch within approved roots and file permissions: atomic add/update/move/delete. Never copy read’s line-number prefixes into a patch.'
+    'apply_patch enables atomic add/update/move/delete within approved roots and permissions. Never copy read’s line-number prefixes into a patch.'
   );
   if (sessionTools) lines.push(
     '',
@@ -145,7 +145,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
   );
   if (desktop && (caps.screen || caps.control || caps.clipboardRead || caps.clipboardWrite)) lines.push(
     '',
-    `Native screen, window, mouse, keyboard and clipboard tools live in the separate "${surfaceDefinition('desktop').connectorName}" connector. If the task needs them and they are unavailable, tell the user which connector is needed.`
+    `Native screen, window, mouse, keyboard and clipboard tools are in "${surfaceDefinition('desktop').connectorName}". If needed but unavailable, name that connector.`
   );
   lines.push('', CODE_MODE_INSTRUCTIONS, ...userInstructions());
   return lines.join('\n');

@@ -4112,7 +4112,7 @@
 
         const message = item.value;
         if (message.role === 'user') {
-          if (!message.attachments?.length && renderedUserTexts.get(message.messageId) === message.rawText) continue;
+          if (!message.createTime && !message.attachments?.length && renderedUserTexts.get(message.messageId) === message.rawText) continue;
           const key = occurrenceKey(message.messageId, message.rawText + (message.attachments?.length ? JSON.stringify(message.attachments) : ''));
           if (message.createTime) {
             if (userAuthoredTimesReported.get(key) === message.createTime) continue;
@@ -4127,7 +4127,7 @@
             messageId: message.messageId,
             text: message.rawText,
             ...(message.attachments?.length ? { attachments: message.attachments } : {}),
-            ...(message.createTime ? { time: message.createTime, authoredTime: true } : {})
+            ...(message.createTime ? { time: message.createTime, authoredTime: true, authoredAt: message.createTime } : {})
           });
           continue;
         }
@@ -4179,6 +4179,7 @@
           kind: 'assistant_message',
           messageId: message.messageId,
           providerMessageId: message.rawMessageId,
+          ...(message.createTime ? { authoredAt: message.createTime } : {}),
           turnId: localOwner || undefined,
           text: message.rawText,
           renderedHtml: message.renderedHtml,
@@ -4403,11 +4404,17 @@
    * turn-local and why sorting the whole feed by time would corrupt reloaded history.
    */
   function chronological(entries) {
-    const position = (entry) => (Number.isFinite(Number(entry && entry.origin)) ? Number(entry.origin) : entry.seq);
+    const position = (entry) => (typeof entry?.origin === 'number' && Number.isFinite(entry.origin) ? entry.origin : entry.seq);
+    const authoredTime = entry => {
+      if (Number.isFinite(entry.authoredAt) && entry.authoredAt > 0) return entry.authoredAt;
+      const id = entry.kind === 'assistant_message' && entry.messageId?.match(/^assistant:([a-f0-9-]{36})?:([a-f0-9-]{36})?:(\d{13})$/i);
+      return id && (id[1] || id[2]) ? Number(id[3]) : undefined;
+    };
     const bySeq = [...entries].sort((a, b) => position(a) - position(b) || a.seq - b.seq);
     const anchors = new Map();
     const ends = new Map();
     for (const entry of bySeq) {
+      if (entry.turnId && Number.isFinite(entry.turnOrigin)) anchors.set(entry.turnId, entry.turnOrigin);
       if (entry.kind === 'turn_start' && entry.turnId && !anchors.has(entry.turnId)) {
         anchors.set(entry.turnId, position(entry));
       }
@@ -4432,7 +4439,7 @@
       return found;
     };
     const byTime = (a, b) => {
-      const apart = a.time - b.time;
+      const apart = (authoredTime(a) ?? a.time) - (authoredTime(b) ?? b.time);
       return Number.isFinite(apart) && apart !== 0 ? apart : position(a) - position(b) || a.seq - b.seq;
     };
     const groups = new Map();
@@ -4450,11 +4457,11 @@
         currentPosition = entryPosition;
       }
       let inferredAnchor;
-      if (!entry.turnId && activeAnchor !== undefined) {
+      if (entry.turnOrigin !== null && !entry.turnId && entry.kind !== 'user_message' && activeAnchor !== undefined) {
         const end = ends.get(activeAnchor);
         if (end === undefined || entry.time <= end) inferredAnchor = activeAnchor;
       }
-      const anchor = (entry.turnId ? anchors.get(entry.turnId) : inferredAnchor) ?? entryPosition;
+      const anchor = entry.turnOrigin ?? (entry.turnId ? anchors.get(entry.turnId) : inferredAnchor) ?? entryPosition;
       const held = groups.get(anchor);
       if (held) held.push(entry);
       else groups.set(anchor, [entry]);
@@ -4508,8 +4515,18 @@
     const groups = [];
     const byTurn = new Map();
     const timedRequestTools = [];
+    // Every page carries the recorded start of its exact turns. Retaining a tool or final
+    // must not depend on the start row still fitting inside the bounded feed.
+    for (const entry of entries) {
+      if (!entry.turnId || !Number.isFinite(entry.turnOrigin) || byTurn.has(entry.turnId)) continue;
+      const start = entries.find(row => row.kind === 'turn_start' && row.turnId === entry.turnId);
+      const group = { id: entry.turnId, entries: [], origin: entry.turnOrigin, startedAt: start?.time ?? Infinity };
+      groups.push(group); byTurn.set(entry.turnId, group);
+    }
     for (const entry of entries) {
       if (entry.kind === 'turn_start') {
+        const existing = entry.turnId ? byTurn.get(entry.turnId) : null;
+        if (existing) { existing.entries.push(entry); continue; }
         const group = { id: entry.turnId || `seq:${entry.seq}`, entries: [entry], startedAt: Number(entry.time) || 0 };
         groups.push(group);
         if (entry.turnId) byTurn.set(entry.turnId, group);
@@ -4547,27 +4564,9 @@
       if (owner) owner.entries.push(entry);
     }
 
-    // Same reading order as chronological(): the message that ended the turn closes it,
-    // whatever `create_time` says, because a turn cannot continue past its own last message.
-    const closing = (entries) => {
-      let found = null;
-      for (const entry of entries) {
-        if (entry.kind !== 'assistant_message') continue;
-        if (entry.final !== true && entry.state !== 'final') continue;
-        const at = Number.isFinite(Number(entry.origin)) ? Number(entry.origin) : entry.seq;
-        const held = found === null ? -Infinity : Number.isFinite(Number(found.origin)) ? Number(found.origin) : found.seq;
-        if (at > held) found = entry;
-      }
-      return found;
-    };
-    const rank = (entry, ends) =>
-      entry.kind === 'turn_start' ? -1 : entry.kind === 'turn_end' ? 1 : entry === ends ? 0.5 : 0;
+    // Keep the same order as the store and desktop, including late authored prose.
     for (const group of groups) {
-      const ends = closing(group.entries);
-      group.entries.sort(
-        (a, b) =>
-          rank(a, ends) - rank(b, ends) || (Number(a.time) || 0) - (Number(b.time) || 0) || a.seq - b.seq
-      );
+      group.entries = chronological(group.entries);
     }
     return groups;
   }
@@ -5162,7 +5161,7 @@
     else icon.textContent = entry.kind === 'chat_error' ? '!' : entry.kind === 'agent_message' ? '↔' : entry.kind === 'repair' ? '↻' : '';
     row.append(icon);
 
-    if (entry.agent) {
+    if (entry.agent && entry.agent !== 'prime') {
       const who = document.createElement('span');
       who.className = 'clf-agent';
       who.textContent = String(entry.agent).slice(0, 40);
@@ -5316,7 +5315,7 @@
         head.dataset.clfSignature = signature;
       }
       head.title = `${members.length} tool calls`;
-      reconcileStreamChildren(group.lastElementChild, members.reverse());
+      reconcileStreamChildren(group.lastElementChild, members);
       children.push(group); i = end;
     }
     reconcileStreamChildren(root, children);
@@ -5643,43 +5642,56 @@
 
   /** Native rows are hidden only when Fiber proves this app's exact mounted request. */
   function coveredNativeBlocks(turn, chunks) {
-    const requests = new Set((chunks || []).flatMap(chunk => chunk.entries || [])
-      .filter(entry => entry.kind === 'tool_call' && entry.requestId)
-      .map(entry => entry.requestId));
-    if (!requests.size) return [];
+    const mounted = new Map();
+    const callKey = entry => `${entry.requestId}\u0000${entry.tool}`;
+    for (const entry of (chunks || []).flatMap(chunk => chunk.entries || [])) {
+      if (entry.kind !== 'tool_call' || !entry.requestId || !entry.tool || !entry.callId) continue;
+      const key = callKey(entry), ids = mounted.get(key) || new Set();
+      ids.add(entry.callId); mounted.set(key, ids);
+    }
+    if (!mounted.size) return [];
     const descriptor = fiberTurnFor(turn);
     if (!descriptor) return [];
     const callsByMessage = new Map();
+    const nativeCalls = new Map();
     for (const call of descriptor.calls || []) {
       if (!call?.messageId) continue;
       const held = callsByMessage.get(call.messageId) || [];
       held.push(call);
       callsByMessage.set(call.messageId, held);
+      if (call.answered === true && call.requestId && call.tool) {
+        const key = callKey(call), ids = nativeCalls.get(key) || new Set();
+        ids.add(call.messageId); nativeCalls.set(key, ids);
+      }
     }
     const covered = [];
     for (const block of CLF_DOM.toolBlocks(turn)) {
       const row = fiberFor(block);
       if (!row || row.answered !== true || !ourConnectorSeen(row) || !row.messageId) continue;
       const exact = callsByMessage.get(row.messageId) || [];
-      if (exact.length === 1 && exact[0].answered === true && exact[0].requestId && requests.has(exact[0].requestId)) covered.push(block);
+      if (exact.length !== 1 || exact[0].answered !== true || !exact[0].requestId || row.tool !== exact[0].tool) continue;
+      const key = callKey(exact[0]);
+      // request_id can cover several calls. Coverage must not spend one mounted
+      // read to hide another result from the same response before it is recorded.
+      if ((mounted.get(key)?.size || 0) >= (nativeCalls.get(key)?.size || Infinity)) covered.push(block);
     }
     return covered;
   }
 
-  /** Exact typed native thought notifications belonging to this proven response. */
-  function coveredThoughtNotifications(turn, chunks, websiteRender) {
+  /** Native status captions belonging to this proven, visibly reconstructed response. */
+  function coveredNativeSummaries(turn, chunks, websiteRender) {
     // Response ownership alone is insufficient. At least one canonical local call must be in
     // a chunk that this paint actually mounted; an unplaced call elsewhere in the response
     // cannot make a progress-only root suppress the provider's only visible execution row.
     if (!websiteRender || !(chunks || []).some(chunk =>
-      (chunk.entries || []).some(entry => entry.kind === 'tool_call'))) return [];
+      (chunk.entries || []).some(entry => entry.kind === 'tool_call'))) return { summaries: [], thoughts: [] };
+    const summaries = CLF_DOM.activitySummaryRows(turn);
     const descriptor = fiberTurnFor(turn);
-    if (!descriptor || !Array.isArray(descriptor.thoughtNotifications)) return [];
+    if (!descriptor || !Array.isArray(descriptor.thoughtNotifications)) return { summaries, thoughts: [] };
     const ids = descriptor.thoughtNotifications
       .filter(entry => entry?.kind === 'thought_notification' && entry.messageId)
       .map(entry => entry.messageId);
-    if (!ids.length || typeof CLF_DOM.thoughtActivityRows !== 'function') return [];
-    return CLF_DOM.thoughtActivityRows(turn, fiberScanToken, descriptor.index, ids);
+    return { summaries, thoughts: ids.length ? CLF_DOM.thoughtActivityRows(turn, fiberScanToken, descriptor.index, ids) : [] };
   }
 
   function renderStreams() {
@@ -5926,10 +5938,12 @@
       record.anchors = placement.anchors;
       for (const node of nodes) if (node.dataset) node.dataset.clfStreamKey = streamKey;
       CLF_DOM.replaceActivity(turn, null, true);
+      const nativeSummaries = coveredNativeSummaries(turn, gaps, websiteRender);
       CLF_DOM.hideActivity(
         turn,
         coveredNativeBlocks(turn, gaps),
-        coveredThoughtNotifications(turn, gaps, websiteRender)
+        nativeSummaries.thoughts,
+        nativeSummaries.summaries
       );
       painted.add(streamKey);
     }
@@ -8248,6 +8262,14 @@
     stagePanel.body.hidden = view.body === '';
   }
 
+  async function retireUnsentCompaction(forId, token, why, current) {
+    const retired = token ? await ask({ type: 'compact', conversationId: forId, token,
+      sourceLost: true, sourceError: why }).catch(() => null) : null;
+    if (!current()) return;
+    if (retired?.ok === true && retired.data?.aborted === true) job = retired.data.job || null;
+    else localError = `${why} The app has not yet confirmed that this failed request was closed.`;
+  }
+
   async function startCompact(automatic = false) {
     const forId = conversationId;
     const forEpoch = epoch;
@@ -8371,6 +8393,8 @@
       nativeBusy = false;
       nativePhase = '';
       localError = barrier;
+      if (!automatic) await retireUnsentCompaction(forId, String(filed.data.token || ''), barrier, current);
+      if (!current()) return;
       renderControl();
       void pullActivity();
       return;
@@ -8406,7 +8430,7 @@
       void pullActivity();
       return;
     }
-    await runNativeCompaction(String(data.prompt), String(data.token || ''), forId, forEpoch, forRun);
+    await runNativeCompaction(String(data.prompt), String(data.token || ''), forId, forEpoch, forRun, sameTurn);
   }
 
   /**
@@ -8511,7 +8535,7 @@
   }
 
   /** Submits the marked source prompt after the app durably grants this exact Send. */
-  async function runNativeCompaction(prompt, token, forId = conversationId, forEpoch = epoch, forRun = nativeRun) {
+  async function runNativeCompaction(prompt, token, forId = conversationId, forEpoch = epoch, forRun = nativeRun, sameSource = () => true) {
     const current = () =>
       alive &&
       nativeRun === forRun &&
@@ -8532,17 +8556,10 @@
       // so the caller can retire this pre-Send ticket instead of scheduling the same refusal.
       // A manual press keeps its historical immediate-abort behaviour; the user is still present
       // and can retry it without leaving an invisible job behind.
-      if (!automaticTicket) {
-        job = null;
-        await ask({ type: 'compact', conversationId: forId, cancel: true }).catch(() => undefined);
-      } else if (retireAutomatic) {
-        // This is not the user-facing Cancel path. The bridge accepts sourceLost only while its
-        // durable checkpoint still proves no Send happened (`not-attempted` or
-        // `attempted-unresolved`). If another page crossed sourceDispatch meanwhile, this refuses
-        // and the ambiguous attempt remains alive rather than being cancelled underneath it.
-        const lost = await ask({ type: 'compact', conversationId: forId, token, sourceLost: true }).catch(() => null);
-        if (lost && lost.ok === true && lost.data && lost.data.aborted === true) job = null;
-        else localError = replyError(lost) || 'The blocked handoff could not be safely retired; it was not sent twice.';
+      if (!automaticTicket || retireAutomatic) {
+        // A late failure belongs to this exact pre-Send ticket, never to a newer
+        // manual retry. The durable guard refuses an already-dispatched request.
+        await retireUnsentCompaction(forId, token, why, current);
       }
       if (!current()) return;
       renderControl();
@@ -8557,13 +8574,30 @@
       nativePhase = 'prompting';
       renderControl();
       const squeeze = (value) => String(value || '').replace(/\s+/g, '');
+      const editable = () => {
+        const box = CLF_DOM.composer();
+        return box?.isConnected && CLF_DOM.composerVisible() && box.getAttribute('contenteditable') !== 'false' &&
+          box.getAttribute('aria-disabled') !== 'true' ? box : null;
+      };
+      // Activity can reach a reopened page before React mounts its editor. Use
+      // the existing DOM waiter; an unavailable host is not a provider rejection.
+      const ready = editable() || await waitPageView(editable, () => current() && sameSource(), INTERRUPT_WAIT_MS);
+      if (!current()) return;
+      if (!sameSource()) return void (await abandonBeforeSend('The chat changed while preparing the handoff. Nothing was sent.', true));
+      if (!ready) {
+        const reason = CLF_DOM.composer() ? 'composer_unavailable' : 'composer_missing';
+        return void (await abandonBeforeSend(`The ChatGPT message box is not ready (${reason}). Wait for the page to load and retry.`));
+      }
       const existing = CLF_DOM.composer();
       const occupiedByOtherDraft =
         Boolean(existing && (existing.textContent || '').trim()) &&
         squeeze(existing?.textContent) !== squeeze(prompt);
-      if (squeeze(existing?.textContent) !== squeeze(prompt) && !CLF_DOM.insertPrompt(prompt)) {
+      let insertionFailure = '';
+      if (squeeze(existing?.textContent) !== squeeze(prompt) && !CLF_DOM.insertPrompt(prompt, false, reason => { insertionFailure = reason; })) {
         return void (await abandonBeforeSend(
-          'ChatGPT would not accept the handoff instruction — clear the message box and try again.',
+          occupiedByOtherDraft
+            ? 'A draft is already in ChatGPT; clear the message box before requesting the handoff.'
+            : `The browser could not insert the handoff request (${insertionFailure || 'insertion_failed'}). Check that the message box is available and retry.`,
           // An occupied composer is durable state: ChatGPT restores drafts across reloads. Leaving
           // an automatic ticket open here makes every compaction pickup reload the same draft and
           // hit this same refusal forever. Retire only this provably pre-Send ticket; the draft
@@ -8574,6 +8608,10 @@
       }
       await Promise.resolve();
       if (!current()) return;
+      if (!sameSource()) {
+        CLF_DOM.clearPromptExact(prompt);
+        return void (await abandonBeforeSend('The chat changed while preparing the handoff. Nothing was sent.', true));
+      }
       const composer = CLF_DOM.composer();
       if (!composer || squeeze(composer.textContent) !== squeeze(prompt)) {
         return void (await abandonBeforeSend(
@@ -8594,30 +8632,35 @@
         renderControl();
         return;
       }
-      // The at-most-once cut, and the last thing before the click. Exactly one document takes
-      // this transition; past it the prompt may be with ChatGPT already — send() clicks first
-      // and only then watches for acceptance — so no page is ever offered it again.
-      const armed = await ask({ type: 'compact', conversationId: forId, token, sourceDispatch: true });
-      if (!current()) return;
-      if (!armed || armed.ok !== true || !armed.data || armed.data.armed !== true) {
+      if (!sameSource() || CLF_DOM.composer() !== composer || squeeze(composer.textContent) !== squeeze(prompt)) {
         CLF_DOM.clearPromptExact(prompt);
-        nativeBusy = false;
-        nativePhase = 'waiting';
-        pressedAt = 0;
-        // True of both answers this can get: a refusal because another page armed it first,
-        // and a lost reply. Neither one clicked anything here.
-        localError = 'Nothing was submitted: this handoff was not armed. Press it again.';
-        renderControl();
-        return;
+        return void (await abandonBeforeSend('The message box changed before the handoff could be sent. Its draft was preserved.', true));
       }
-      attemptCrossed = true;
       rememberUserSend();
-      if (!(await sendSubmittedText(current))) {
+      const sent = await sendSubmittedText(current, true, async stillSending => {
+        if (!stillSending() || !current() || !sameSource()) return false;
+        // Native Send readiness precedes this irreversible checkpoint. A disabled
+        // button timing out is still a provably unsent request. Once dispatched,
+        // a missing reply retains custody rather than granting another click.
+        attemptCrossed = true;
+        const armed = await ask({ type: 'compact', conversationId: forId, token, sourceDispatch: true });
+        if (!current()) return false;
+        if (!armed || armed.ok !== true || armed.data?.armed !== true) {
+          localError = 'Nothing was submitted here: the handoff send permission was not confirmed. The existing request will not be sent twice.';
+          return false;
+        }
+        return stillSending() && sameSource();
+      });
+      if (!current()) return;
+      if (!sent) {
         CLF_DOM.clearPromptExact(prompt);
+        if (!attemptCrossed) return void (await abandonBeforeSend(
+          'The handoff request was not submitted because the Send button or message box was not ready. Retry after the page is ready.'
+        ));
         nativeBusy = false;
         nativePhase = 'waiting';
         pressedAt = 0;
-        localError = 'The send result was ambiguous. Nothing will be sent twice; cancel explicitly if ChatGPT never accepted it.';
+        localError ||= 'The send result was ambiguous. Nothing will be sent twice; cancel explicitly if ChatGPT never accepted it.';
         renderControl();
         return;
       }
@@ -10565,6 +10608,22 @@
     } finally { recoveryStopping = false; }
   }
 
+  // Continue may arrive before the browser journal's final reaches the app. Check the
+  // exact latest native answer locally as well, even when the composer already says Send.
+  async function recoveryPageUnfinished(safe) {
+    if (!safe()) return false;
+    const latest = CLF_DOM.turns().at(-1);
+    if (latest?.role === 'assistant') {
+      if (!await refreshFiber({ pageTurnId: latest.id, pageTurn: latest.node || latest.nodes?.[0] }) || !safe()) return false;
+      const current = CLF_DOM.turns().at(-1);
+      const native = current?.role === 'assistant' ? fiberTurnFor(current) : null;
+      if (!native) return false;
+      // A known native final vetoes Continue even while delivery to the app is pending.
+      if (native?.endMessageId) { await flush(); return false; }
+    }
+    return Boolean(await flush() && safe());
+  }
+
   async function inspectRepairPage(message) {
     const target = conversationId, forEpoch = epoch;
     const current = () => alive && target === message.conversationId && conversationId === target &&
@@ -10600,6 +10659,7 @@
         (!turnId || turnId === sourceTurn)));
     if (!onTarget()) return false;
     if (message.recovery && (!sourceUser || sourceUser !== message.recovery.questionId || userStopped)) return false;
+    if (message.recovery && !await recoveryPageUnfinished(onTarget)) return false;
     if (silencePickup && CLF_DOM.generating() && !await confirmedProviderTerminal()) {
       if (!onTarget()) return false;
       if (message.recovery?.stop === true) {
@@ -10620,7 +10680,7 @@
           input = claim?.data?.input;
           if (!input?.recovery || !safe()) return false;
           const permit = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, recoveryAction: 'stop' });
-          if (permit?.data?.ok !== true || !safe() || await confirmedProviderTerminal() || !safe()) return false;
+          if (permit?.data?.ok !== true || !safe() || !await recoveryPageUnfinished(safe) || !safe()) return false;
           if (!await stopAutomationGeneration(safe)) return false;
           if (generating) finishGeneration(currentAssistantTurn(), { outcome: 'interrupted', detail: 'Automatic Continue stopped an unchanged silent turn.' }, false);
           await flush();
@@ -10733,8 +10793,10 @@
       let receipt = null;
       if (!(await sendSubmittedText(sendingTarget, false, async sendCurrent => {
         // Preserve the outbox's revocable claim until the actual native Send is ready.
+        if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current())) return false;
         const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
         if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) return false;
+        if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current())) return false;
         sendAttempted = true;
         return true;
       }, (user, conversation) => {

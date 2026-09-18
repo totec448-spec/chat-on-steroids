@@ -62,3 +62,32 @@ it('uses another visible row when a paged activity group loses its old key', () 
     expect(pane.scrollTop).toBe(2000);
   } finally { dom.window.close(); }
 });
+
+it('preserves a visible row when the page shrinks below the scrollHeight viewport floor', () => {
+  const dom = new JSDOM('<div id="pane"><div id="timeline"><div data-timeline-key="reader"></div></div></div>');
+  try {
+    const pane = dom.window.document.getElementById('pane')!;
+    const timeline = dom.window.document.getElementById('timeline')!;
+    const reader = timeline.firstElementChild as HTMLElement;
+    let contentHeight = 1300, rowTop = 20, scrollTop = 0;
+    const reserve = () => Number.parseFloat(timeline.style.getPropertyValue('--timeline-scroll-reserve')) || 0;
+    Object.defineProperties(pane, {
+      clientHeight: { value: 778 },
+      scrollHeight: { get: () => Math.max(778, contentHeight + reserve()) },
+      scrollTop: { get: () => scrollTop, set: value => { scrollTop = Math.max(0, Math.min(value, pane.scrollHeight - pane.clientHeight)); } }
+    });
+    pane.getBoundingClientRect = () => ({ top: 0 } as DOMRect);
+    timeline.getBoundingClientRect = () => ({ height: contentHeight + reserve() } as DOMRect);
+    reader.getBoundingClientRect = () => ({ top: rowTop - scrollTop, bottom: rowTop + 200 - scrollTop, height: 200 } as DOMRect);
+    const restore = preserveTimelineViewport(pane, timeline, false);
+    contentHeight = 520;
+    rowTop = 122.25;
+    restore();
+    expect(reader.getBoundingClientRect().top).toBe(20);
+    expect(pane.scrollTop).toBe(102.25);
+    expect(reserve()).toBe(361);
+    const again = preserveTimelineViewport(pane, timeline, false);
+    again();
+    expect(reader.getBoundingClientRect().top).toBe(20);
+  } finally { dom.window.close(); }
+});

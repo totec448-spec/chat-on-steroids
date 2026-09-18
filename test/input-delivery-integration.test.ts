@@ -761,12 +761,12 @@ it.each([
     await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
     const boundary = (await input.listInputs()).find(row => row.id === first.id)!.silenceBoundary!;
     expect(boundary.listenUntil).toBe(now + 60_000);
-    expect((await bridge.sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'post-reload', next: 'queue', deadline: boundary.listenUntil }]);
+    expect((await bridge.sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'post-reload', next: 'queue', deadline: boundary.listenUntil, generating: true }]);
     if (selection === 'after-refresh') {
       now += 10_000;
       await post('/events', { conversationId, events: [{ ...observed, time: now }] });
       expect(bridge.sessionInputActivity((await getSession(session.id))!).model).toBe('other');
-      expect((await bridge.sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'post-reload', next: 'queue', deadline: boundary.listenUntil }]);
+      expect((await bridge.sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'post-reload', next: 'queue', deadline: boundary.listenUntil, generating: true }]);
       await bridge.sweepStaleSwarm(now);
       expect((await post('/status', { openConversations: [conversationId] })).body.repairs.some((row: any) => row.conversationId === conversationId)).toBe(false);
     }
@@ -1855,7 +1855,7 @@ describe('native progress silence authority', () => {
 
 describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)', mode => {
   beforeEach(async () => { await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } }); });
-  async function silent(model: string, advance: (ms: number) => void, reloadDelay = 0, sourceEnd?: 'completed' | 'interrupted' | 'unknown', mcp = true) {
+  async function silent(model: string, advance: (ms: number) => void, reloadDelay = 0, sourceEnd?: 'completed' | 'interrupted' | 'unknown', mcp = true, manualClose = false) {
     const bridge = await import('../src/main/bridge.js');
     const conversationId = randomUUID();
     const session = await createSession({ title: 'Automatic Continue fixture', conversationId });
@@ -1868,16 +1868,23 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
     ] });
     if (mcp) await attributedMcp(conversationId);
     if (sourceEnd) await post('/events', { conversationId, events: [{ kind: 'turn_end', turnId, outcome: sourceEnd, time: Date.now() }] });
+    const openConversations = manualClose ? [] : [conversationId];
+    if (manualClose) {
+      await post('/closed', { conversationId, manual: true });
+      expect((await getSession(session.id))?.browserRecoveryDismissedAt).toBe(Date.now());
+      expect((await post('/status', { openConversations })).body.repairs.some((row: any) => row.conversationId === conversationId)).toBe(false);
+    }
     const window = model === 'gpt-5.6-pro' ? 600_000 : 120_000;
     advance(window - 1);
     await bridge.sweepStaleSwarm(Date.now());
     expect((await input.pendingBrowserInputs()).filter(row => row.conversationId === conversationId)).toEqual([]);
     advance(2);
     await bridge.sweepStaleSwarm(Date.now());
-    const repair = (await post('/status', { openConversations: [conversationId] })).body.repairs.find((row: any) => row.conversationId === conversationId);
+    const repair = (await post('/status', { openConversations })).body.repairs.find((row: any) => row.conversationId === conversationId);
     expect(repair?.reason).toBe('silence');
+    if (repair.requiresClaim) expect((await post('/repairs/claim', { token: repair.token })).body.allowed).toBe(true);
     advance(reloadDelay);
-    await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
+    await post(`/status?repaired=${repair.token}&repairAction=${manualClose ? 'reopened' : 'reloaded'}`, { openConversations });
     const row = (await input.listInputs()).find(row => row.sessionId === session.id && row.recovery)!;
     expect(row).toMatchObject({ state: 'queued', recovery: { questionId, phase: 'ready' } });
     return { row, conversationId, session, turnId };
@@ -1956,10 +1963,13 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
     } finally { clock.mockRestore(); }
   });
 
-  it.each(['text', 'image'] as const)('hands a recovered %s final to Goal/Loop and cancels Continue before Stop', async kind => {
+  it.each([
+    { kind: 'text', manualClose: false }, { kind: 'image', manualClose: false },
+    { kind: 'text', manualClose: true }, { kind: 'image', manualClose: true }
+  ])('hands a recovered $kind final to Goal/Loop and cancels Continue before Stop (manual close: $manualClose)', async ({ kind, manualClose }) => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {
-      const { row, conversationId, turnId } = await silent('gpt-5.6-sol', ms => { now += ms; }, 0, undefined, true);
+      const { row, conversationId, turnId } = await silent('gpt-5.6-sol', ms => { now += ms; }, 0, undefined, true, manualClose);
       expect(await input.deferSilenceInput(row.id, conversationId, turnId)).toBe(true);
       const messageId = randomUUID();
       await post('/events', { conversationId, events: [{ kind: 'assistant_message', messageId,

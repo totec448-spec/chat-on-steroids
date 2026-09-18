@@ -248,7 +248,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
 | Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | First exact proof wins; retain local session epoch; reconcile from history on startup. |
 | Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. |
-| Agent progress plan | `store.ts::updateSessionPlan` / `sessions/<id>/plan.json` | Exact caller/session and invocation ordering; atomically replace the whole plan. |
+| Agent progress plan | `request-plans.ts` → `store.ts::updateSessionPlan` / `sessions/<id>/plan.json` | Request-scoped storage before proof; exact session and invocation ordering on attachment; atomically replace the whole plan. |
 | Input and checkpoints | `input.ts` / `state/session-input.json` | Serialized acceptance, frozen payload, exclusive claim and receipt; stages belong here. |
 | Native upload originals | `input-attachments.ts` / `input-attachments/` | Immutable bytes, opaque ids; outbox owns membership and retention. |
 | Project catalog | `projects.ts` / `state/projects.json` | Serialized catalog mutation; session metadata owns association. |
@@ -525,13 +525,18 @@ defers the appendix. Nested calls record refusals but only the outer result deli
 including Core's structured supplemental context. Current blocked, compacting, superseded and
 inactive-worker restrictions veto delivery; the notice never grants permission or repeats work.
 
-`allowUnattributedCalls` permits ordinary tools and code mode without chat attribution,
-including computer use, approved file edits, shell commands and external plugin tools.
-Windows observations use a separate shared unattributed context so follow-up input works.
-Plan updates, agent operations, finish signals, chat-specific workspace selection and owned
-terminal access still require their actual owner; the setting cannot invent that identity.
-Anonymous terminals retain their existing anonymous custody. Live capabilities, approved roots
-and native window/frame/ref validation still apply.
+`allowUnattributedCalls` permits enabled tools and code mode without a browser chat attachment.
+The normalized transport request ID owns its workspace, plan, terminals and provisional worker
+family. File edits, commands, Desktop and Plugins retain their live capability/root checks;
+missing attribution never enables Read-only mode. Headerless calls keep legacy anonymous
+ordinary-tool custody but cannot invent a request plan or worker family.
+The Identity notice is present even without a pending repair timer. It names the tools that
+remain usable, reports actual results and forbids replaying successful work to repair identity.
+One process/recipient refusal is never a global edit/terminal refusal. Code-mode children inherit
+caller proof and recheck current permission settings; only the outer response carries notices.
+Windows observations are isolated per request and attach to the exact session on late proof.
+Agent messages/finish wait for exact member proof when no request-owned family can supply their
+recipient. `session_finish` still targets an exact live session; its hold never guesses a chat.
 A positively known blocked, retired, ended or superseded caller is refused regardless of that
 preference. Refused historical calls must not revive workers, acknowledge inboxes or grant
 activity to a successor chat.
@@ -603,11 +608,14 @@ inputs and workers keep their durable project association; their chats return to
 sidebar list. Adding that same folder again restores grouping. It does not delete files,
 sessions or the approved root. A local project is distinct from a ChatGPT project route.
 
-`workspace.ts` is convenient learned/inherited cwd, keyed to proven chat/family/agent identity.
+`workspace.ts` is learned/inherited cwd, keyed to the proven chat or permitted transport request.
 Explicit session project binding takes precedence at kernel entry. Workers inherit only their
 exact prime's project/workspace. Different primes may each own `worker-1` in different folders.
 Compaction keeps local session/project identity and moves frontend workspace projection. A
-relative path without trusted ownership fails; a workspace never grants permission by itself.
+relative path without owned workspace fails; a workspace never grants permission by itself.
+An absolute approved path teaches an unresolved request its project. Subsequent relative paths
+and absolute patches work while other families execute; late proof attaches that cwd to the
+same durable session, including a replacement frontend. Existing current-chat cwd takes priority.
 
 Project instruction injection reads **only the selected folder's `AGENTS.md`**, not a recursive
 scan, guessed cwd, parent tree or cached copy. Existing-session scope comes from its durable
@@ -669,8 +677,10 @@ output each (and delimiter-free batch presentation). Completed rereads have no u
 live-process capacity charge or automatic reoffer. Eviction/shutdown drops their existing
 custody entries; retained ids cannot be reallocated. Unread results keep their separate bounds.
 
-The owner is the **durable local session principal** established by correlation. A→B compaction
-keeps that principal, so B can continue A's live terminal without an adoption/move fallback.
+The owner is the **durable local session principal**, or `request:<id>` while permitted work
+awaits correlation. Only that request can initially continue its process. Exact proof makes
+the request principal equivalent to its durable session, so A→B compaction lets B continue
+A's live terminal and receive its retained output without rerunning a command.
 Another session/worker cannot poll or write it. Anonymous process custody is non-adoptable.
 Refusals distinguish unavailable ids, anonymous launch custody, missing caller proof and a
 different owning session. Only missing caller proof invites retry after identity recovery and
@@ -1043,6 +1053,11 @@ composition retain their ordinary editing behavior.
   Completion animates then dismisses the card; completed reloads stay hidden while the document
   and history remain. Prepared handoffs include an exact-session notice to inspect the saved
   plan. This card neither delivers instructions nor completes/deletes queued checkpoints.
+  Before attribution, `request-plans.ts` durably retains the latest complete plan for each
+  request (256 entries / seven days) and attaches it on proof or restart. The session's rebind
+  commit records `retiredChatAt` alongside its existing lineage. Recovery may attach a historical
+  request plan only when both its invocation and saved acceptance preceded that source's
+  retirement; a newer successor plan always wins. Direct calls from retired frontends stay refused.
 
 Finish checkpoints use `shared/input.ts::browserInputModel()` to inherit current selection,
 including legacy rows containing an old model. A receipt for an inherited checkpoint must not
@@ -1173,6 +1188,14 @@ updates one namespaced progress/message identity in its original place. A HTML r
 old worker final must not put a revived worker to sleep. Unknown identity is never folded by
 similar text, time or display position. Recovery messages use this same projection mechanism.
 
+The session's derived `timelineTurns` index retains each exact generation's first start and
+observed end. Every read projects `turnOrigin` before rendering so paging out a `turn_start`
+cannot change the order of its surviving replies/calls. Explicit null means unowned, not a
+license to infer a group from whichever start remains in the page. `authoredAt` retains provider
+creation time separately from the local execution clock; legacy canonical assistant keys supply
+their already-recorded creation stamp. Exact provider-UUID alias replay preserves that original
+stamp. These projection fields never change `seq`, `origin`, local activity or lifecycle ownership.
+
 Unattributed is a first-class recorded state. Late exact proof repairs only matching call ids
 to the proved session epoch, copying assets first and rewriting only the scanned source prefix
 while retaining concurrent appends. Restore/repair uses the uncapped catalog and a bounded
@@ -1222,21 +1245,38 @@ lookup tool calls remain displayable in existing transcripts.
 Desktop session lists use stable `(updatedAt,id)` pagination. Each session selection loads a
 recent tail and opens at the bottom after its current load renders, including A -> B -> A;
 the previous chat's viewport does not decide the new chat's position. Timeline
-pages older/newer on deliberate scrolling in 80-record stages, targets 160 resident records,
+opens, pages older/newer and drains live deltas in 30-record stages, targets 160 resident records,
 and navigates/evicts by immutable canonical `origin` (or original `seq`). Revision `seq`
 belongs only to live delta delivery; a later revision cannot relocate an answer, skip a page,
 or resurrect an off-page row in the live tail. Older/newer IPC navigation uses `before`/`after`
 origins; `from` remains the separate publication cursor.
-The renderer retains the measured viewport plus one screen of surrounding content up to a hard
-320-record staging bound. Dense collapsed activity must not make an 80-record eviction
-discard the reader's visible prose. The existing 2 MiB text/HTML paint budget still applies.
+An underfilled opening automatically reads more bounded stages until visible content fills the
+viewport and its nearby buffer. Deliberate wheel, keyboard or scrollbar navigation prefetches
+before the edge and continues through stages containing only hidden events or more members of
+the same collapsed group. Each stage yields to rendering; a storage batch is not a wheel step.
+The current selection generation and direction own that demand. Live refreshes wait for paging
+instead of invalidating its result, and a proven empty older page is not repeatedly requested.
+The renderer retains the measured viewport plus one screen of surrounding content. Visible
+prose and collapsed groups take precedence over the resident target; a second fixed-count or
+hidden-output byte limit must not discard them. A large collapsed group can remain resident
+until it leaves the measured area. Tool argument/result DOM is populated only on expansion,
+so large hidden outputs neither consume paint work nor evict surrounding messages. Empty live
+deltas preserve the resident page instead of silently applying a new eviction pass.
 Overlapping activity groups keep their disclosure identity across page boundaries. The
 viewport owner preserves a surviving visible row and any underfilled tail space; new
-content consumes that space, while an unchanged refresh cannot collapse it. Session selection
-clears that reserve. There is no Back to latest banner; navigation uses ordinary scrolling.
+content consumes that space, while an unchanged refresh cannot collapse it. Compensating for
+underfilled pages must account for Chromium flooring `scrollHeight` at `clientHeight`; the
+temporary reserve measurement is removed synchronously before paint. Session selection
+clears that reserve; an explicit disclosure change clears obsolete geometry too. The reserve
+belongs to `timelineContent`, below both recorded history and pending input. It cannot separate
+a waiting interjection from the preceding tool rows. Pending and canonical input rows share their
+exact outbox identity for viewport anchoring through delivery. There is no Back to latest banner;
+navigation uses ordinary scrolling.
 Empty or failed older-page reads preserve the current live cursor and viewport instead of
 switching to historical mode. `scripts/verify-history-scroll.cjs` checks native
-Chromium wheel input over a long task, dense activity, reversals and live refreshes.
+Chromium wheel input over a long task, dense activity, reversals and live refreshes. Its optional
+`--recording` argument accepts an ignored local event snapshot for the same production renderer;
+never check private recordings or their screenshots into the repository.
 Historical browsing does not silently evict the user's
 place on live updates; controls remain live. Selection generation fences every async page.
 Expanded tool arguments/results and Compact & Resume content use the chat pane's vertical
@@ -1507,7 +1547,10 @@ External navigation may hide its destination URL under ChatGPT-only host permiss
 A completed tab absent from a successful ChatGPT URL query can release the departed
 conversation only while its original document, epoch and terminal lease still agree.
 Loading alone and failed queries are not departure proof; replacement registration wins.
-Each real active-chat departure remains independently eligible for existing recovery.
+Confirmed removal or navigation sends an explicit departure to the bridge. It defers immediate
+missing-tab/error repair without ending the server turn or cancelling its existing silence and
+pickup clocks. A newer page observation clears the departure marker; scheduled recovery still
+requires the current source and its normal deadline.
 
 Browser-only preferences suppress automatic opening as defined by their owner. Background
 operations reuse a suitable existing window unchanged. If a new background window is actually
@@ -1528,13 +1571,25 @@ or scanning every historical message on each tool delta.
 Canonical app activity owns companion tool rows. Native authored-message identity proves their
 response and intervening prose boundaries; missing provider tool captions do not veto an otherwise
 proven local call. Only exact answered local-connector blocks covered by the replacement are hidden.
+Rehydrated direct tool calls may expose a result-only `tool/api_tool.call_tool` message with no
+request parent. Its exact provider UUID, request id and supported `invoked_resource` metadata
+are accepted without reading result bytes or inventing a parent. A response request id can cover
+multiple calls: suppression requires mounted coverage for every completed native call of that
+request/function, and never spends one local row to hide a second still-unrecorded invocation.
+Parent tool disclosures keep their children in ascending chronological order. Each child remains
+individually named and expandable; public prose divides groups and preserves its native owner.
 Foreign tools, native live prose, media and action controls remain native. When an exact completed
 closed Worked fold has one exact final outside it and no mounted interim prose, the companion stream
 projects recorded public interim text and local calls in canonical order before that final.
 Expanding restores native public prose and repartitions only the local calls, without duplicating
 interim or final text. Exact React-typed thought-notification rows in that same owned response may
 be hidden only while canonical local calls render; caption text is not identity, and proof loss,
-Overwrite Off or navigation restores them. Native web/image/download/code/result UI and response
+Overwrite Off or navigation restores them. Plain noninteractive native status captions in the same
+proven response also yield to mounted canonical local calls when typed thought metadata is absent.
+This narrow display-only rule never hides result disclosures, links, authored prose or controls
+beside the caption. It does not create tool identity or activity evidence. Redundant `prime` badges
+are omitted from companion rows; worker attribution and durable ownership remain unchanged.
+Native web/image/download/code/result UI and response
 actions remain protected. Empty lifecycle groups leave no root or margin. The existing DOM coalescer
 refreshes presentation anchors without waiting for the idle activity poll or granting turn/recovery authority.
 
@@ -1609,6 +1664,11 @@ Stop and Send permission are checked again after their durable claim writes. A s
 does not issue permission and cannot replay the spent claim. Native page checks fence the
 same question, turn, work revision and document immediately before the actual input.
 
+Continue also refreshes the current native assistant response before recovery Stop and
+before and after asynchronous Send authorization. Its exact final message vetoes Continue
+even when the browser journal has not reached the app or a stale Stop control remains.
+A final from before the latest native question cannot veto recovery of that newer question.
+
 A native Stop click publishes the user's stop intent through the existing journal immediately,
 even while the control remains mounted. Trusted user input also wins during automation's own
 Stop wait; automation's synthetic click is distinct. A later native Stop can strengthen the
@@ -1672,6 +1732,18 @@ regressions do not establish those tabs' original cause or live validation of th
 silence/no-tab recovery for workers, primes and ordinary chats. Reload repair for exact errors,
 Unattributed incidents and compaction has its own evidence. “Recover agents” is not blanket
 permission to reopen the session list. A plain historical chat with no current work is unprotected.
+An explicit `/closed` departure with `manual: true` persists `browserRecoveryDismissedAt` in the
+existing session metadata and withdraws an unexecuted page repair. It does not end the provider
+turn, erase its activity grant, cancel owed input, or refund a confirmed repair. Exact owned
+MCP work renews the same activity and silence clocks with no tab; an in-flight owned call is
+also visible before its result is recorded. Anonymous safety counters cannot light another chat.
+Departure suppresses immediate error/no-tab/stalled/attribution repairs. The existing qualified
+silence, queued/Goal and compaction pickup deadlines may still reopen that chat after quiet work.
+MCP results, broker reports, generic session reattachment and old page reads cannot clear the
+departure marker. A newer native page poll can; Compact & Resume clears it only when committing
+the successor frontend. The session queue rechecks the expected conversation so closing source A
+cannot pause successor B. `endedAt` describes browser presence, not the Active/generating verdict.
+Legacy close reports without this flag retain their existing missing-tab recovery contract.
 Chrome can still suspend an app-used background tab two ways: Memory Saver *discards* the document
 (the shell keeps its URL and answers tab queries) and Energy Saver *freezes* its timers.
 `autoDiscardable` protects only against discarding; no extension API exempts a tab from freezing.
@@ -1711,7 +1783,7 @@ Attribution repair handouts retain their token after an absent acknowledgement. 
 claims the server-held attempt after its tab scan and immediately before its browser action;
 late attribution or lost owner authority denies that claim. A reload receipt proves the action,
 not that attribution recovered. Other repair reasons retain their own delivery policy.
-Silence, missing-tab and queued/Goal repairs also use that exact pre-action claim. Unclaimed
+Silence, missing-tab, stalled-tab and queued/Goal repairs also use that exact pre-action claim. Unclaimed
 offers retain one token; a claimed action is not reissued merely because its ACK is absent.
 A responsive page flushes native progress and Stop before the main claim, then rechecks its
 captured work/question/document after the claim. An explicit veto or navigation prevents the
@@ -1719,11 +1791,19 @@ browser action. An unresponsive page supplies no new proof; the original main-pr
 still requires independent validation. These checks use existing RPC and repair owners.
 Assistant-error repairs retain their three-minute cooldown. Attribution, silence, Goal,
 compaction and no-tab follow their own eligibility and schedules.
+Recoverable notice equality ignores a trailing native Retry button label while retaining the
+original recorded error text. Canonical-question ownership still separates genuinely new work.
+The renderer keeps acknowledged Reloaded/Reopened receipts visible after tools resume, colors
+those notices with the existing accent, and explains the one-error-reload budget and subsequent
+silence wait. Trying/failed receipts do not prove a reload; only actual completion is resolved.
 The canonical authored question owns one error reload, not document-local generation ids or
 ended-turn counts. Without a recorded question, the latest durable start is the legacy owner.
 A queued error repair retires when a new question or a newly recovered final supersedes it.
 Its exact token is claimed after the extension's tab scan; unclaimed offers retain that token,
-and a claimed attempt is never reissued on missing acknowledgement. Progress stays anchored to
+and that claim reserves the authored question's error budget before the browser action. A lost
+acknowledgement cannot refund it, including when a later silence repair replaces the old repair.
+Only an exact failed-action receipt proving no browser action occurred releases that reservation.
+A claimed attempt is never reissued on missing acknowledgement. Progress stays anchored to
 the original source turn. A recoverable transport banner does not end a natively generating
 turn; exact Thinking failed keeps its immediate failure rule. Exact native final evidence
 supersedes a stale transport banner and retains ordinary Goal/Loop eligibility.
@@ -1793,7 +1873,8 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    manual Stop cannot grant the exception.
 2. **Ask for a brief safely.** Wait for running local tools, not the recorder's attribution
    tail. The source-tool fence prevents work continuing on A after handoff. Mark send attempt
-   before clicking; attempted/dispatched/sent checkpoints are not interchangeable. Retry a
+   before clicking; dispatch is granted only once the native Send button is ready, through its
+   existing pre-Send authorization callback. Attempted/dispatched/sent checkpoints are not interchangeable. Retry a
    known pre-dispatch failure, but never click again merely because the receipt is missing.
 3. **Capture exact provenance.** Match the authored handoff request and assistant brief by
    token/message/turn identity. Enforce minimum and bounded brief content; do not capture the
@@ -1819,6 +1900,17 @@ A manual ticket whose frozen source selection is Pro instead gets a one-hour dea
 brief is being written: Pro reasoning is not visible transcript, so it produces no text growth
 to renew the ordinary clock, and a healthy long Pro generation used to be swept as "took too
 long". Captured/claimed phases and an unobserved selection keep the ordinary ten minutes.
+
+An explicit desktop compaction immediately uses the existing exact-tab recovery path, which can
+open a missing source while Chrome is already running. It may replace an unclaimed ordinary
+repair, but cannot create a second browser action while another repair is already claimed.
+Every compaction reload rechecks its original continuation token and phase at handout and the
+browser action claim. Cancellation, replacement, source dispatch and completed capture revoke
+obsolete pickup authority. Recovery text distinguishes an unsent request from an outstanding
+answer; neither implies a completed brief exists. The source waits for a visible, editable
+composer before insertion. Failed manual preparation retires only its exact pre-Send token and
+stores a bounded concrete failure reason. Existing user drafts remain intact. Ambiguous dispatched
+requests retain their existing custody and cannot be sent again merely because a receipt is absent.
 
 An unnamed destination never reports a successful resume ACK, even after a transport banner.
 Keep its armed dispatch and journal gate for exact marker reconciliation; a missing id plus
@@ -1873,19 +1965,35 @@ it must not guess a new rebind, delete history or become the path for new contin
 independent user tasks run at once. Inside a family the topology is a star: workers report to
 their prime and cannot create worker descendants.
 
-`agents.ts` is the one broker. Its run map and v6 `activeRuns` snapshot hold independent families;
+`agents.ts` is the one broker. Its run map and v7 `activeRuns` snapshot hold independent families;
 `maxWorkers` applies **per family**, not to one global active run. Display names such as
 `worker-1` are scoped by run incarnation/prime. Resolve a proven caller first, then its family;
 never select the newest run globally. Workspace, inbox, activity and finish routing follow
-that identity. Old single-active-run documentation is obsolete.
+that identity. With unattributed calls allowed, `primeRequestId` holds a provisional family
+without inventing a conversation ID. Exact correlation plus the durable session's current
+frontend reattaches it automatically, including when proof arrives after Compact & Resume.
+Observation batches, MCP ingress/completion and startup after continuation recovery use this
+same reconciliation; there is no new timer or alternate identity credential.
+
+Several recovered fleets may belong to the same real prime. Keep each run, worker conversation
+and inbox intact; parked histories are keyed by their last run incarnation, not just the prime.
+`agents status` returns `available_runs`; `run_id` selects an already-owned family for ambiguous
+operations. Naming a foreign run grants no authority. Ordinary prime results collect all its
+inboxes under one shared output budget, label repeated worker names by run, and acknowledge
+only messages actually offered. A wake returns its fresh incarnation ID.
+If late proof identifies a provisional prime as an existing worker, its accepted fleet is
+attached to that worker's real root prime; the worker cannot control descendants or spawn more.
+Spawn acceptance remains atomic when proof arrives during its disk barrier: the unpublished
+family prevents a duplicate but remains hidden from status until accepted.
 
 Worker model and reasoning belong to the user's saved app settings by default. Model-visible
 instructions and the agents schema require omitting each override unless the user explicitly
 requests it; do not ask for those settings merely to spawn. `agents.ts` resolves omitted fields
 from current config at admission, so the executor need not know or repeat their concrete values.
 An exact caller without its own family receives a successful empty `agents status`, regardless
-of other active primes. This neither creates a family nor grants a role; unknown identity still
-fails closed. Sleeping-worker measurement remains scoped to the caller's actual history.
+of other active primes. A permitted unresolved request can likewise inspect its own state and
+start its own family. Missing both exact proof and permitted request identity refuses only that
+operation. Sleeping-worker measurement remains scoped to the caller's actual history.
 
 Spawn validates capacity, objective/context, account-observed model/effort, workspace and role,
 then durably reserves the worker before handing out browser work. Model checks precede every
@@ -1900,6 +2008,18 @@ sleeping worker with `agents action=message` before spawning a replacement. Mess
 delivery and report receipts are at-least-once transports with durable message identities;
 acknowledgement belongs to the exact recipient/run, not a UI read. Pending reports remain
 available when the last worker sleeps and the family parks.
+
+Attached and detached workers share `WORKER_SILENCE_MS` (three minutes). Only accepted new
+assistant output, native work or exactly attributed tool activity renews this clock. Page
+presence, reloads, metadata revisions and replayed starts do not. A currently running tool
+protects its exact worker; another chat's or unidentified request cannot hold all worker slots.
+Invited/waking workers retain the existing delivery deadlines. A current canonical final
+uses the same completion reader as Continue/Goal and releases the worker before silence,
+including a textless native final or missing page-local turn identity.
+The bridge listens to existing broker state changes to retire old activity grants and repair
+tokens synchronously, whether sleep came from MCP, an observed final or maintenance. A later
+wake does not revive those tokens. New repair requests for sleeping/terminal workers are refused;
+their stored conversation, report, workspace and pending work remain available.
 
 Revival reserves the new assignment with its current inbox task preview, a neutral worker-id
 label and no completion result. The previous spawn label/result must not describe new work.
@@ -1927,8 +2047,11 @@ restore another family's state. Disable parks families; Clear deliberately disca
 broker's retained history/fences. Dormant families are bounded (16 / seven days). Retirement
 and browser close are separate: a sleeping worker becomes eligible for page reuse after two
 quiet minutes and page closure after five (§14), while remaining available for revival by its
-exact conversation id. Compact & Resume rebinds a prime within its
-family; it does not merge families or move a terminal process to another principal.
+exact conversation id. Compact & Resume transfers every active and parked fleet of that prime
+in the same transaction. A newly attributed fleet joins an already-open handoff, including the
+commit publication gap. Old source requests retain their historical proof and cannot reacquire
+prime authority in the successor. Distinct fleets remain distinct; process custody stays with
+the same durable session.
 
 The app's configurable worker capacity is distinct from the coding agent's delegation policy
 in §19. Do not infer permission to launch development subagents from a product feature toggle.
@@ -2200,18 +2323,24 @@ work or attribution removes the relevant countdown, and native busy projects the
 extended deadline. Pro silence becomes visible after five minutes without work and counts
 down to the existing ten-minute deadline; fresh work hides it for the next five minutes.
 The normal two-minute silence clock appears only in its final thirty seconds above the composer;
-Pro appears five minutes before its reload. Unattributed and pickup watches also appear only
-in their final thirty seconds. Genuine new work moves the same deadline and hides an early row.
+Pro appears five minutes before its reload. Pickup watches also appear only in their final thirty
+seconds. Unattributed watches remain visible throughout their original window. Genuine new work
+moves the same silence deadline and hides an early silence row.
 Native-only chats have no automatic-silence countdown. A confirmed reload reveals the listening
 countdown. A completed page boundary without a canonical final uses the same delayed reveal
 in app and browser; it cannot expose the countdown early. `visibleAt` lets the existing renderer clock reveal a row without a
 new backend scheduler. Selection generations fence delayed controls and clear old-chat timers.
 Listening rows name the next existing step: queued input takes priority, otherwise the active
-Goal or Loop obligation. This is a projection of delivery ownership, never another trigger.
+Continue, Goal or Loop obligation. An already pending browser repair takes display precedence
+over future watches. Post-reload rows say when CoS still holds the source turn generating;
+native-busy rows explicitly name the additional wait and show its actual remaining deadline.
+The generating flag belongs only to that post-reload wait and disappears when it is retired.
+This is a projection of delivery ownership, never another trigger.
 After attribution's first attempt, every still-unproven member of its original cohort keeps
 the countdown to the incident's existing five-minute end, even without another unknown call.
-That row appears only in the final thirty seconds and says awaiting attribution/check, since the existing retry conditions still govern
-whether another reload is allowed. Exact MCP proof removes only its chat; later chats stay out.
+That row remains visible and says awaiting attribution/check unless the original second-attempt
+conditions already permit a reload. Its label then names the reload without changing its schedule.
+Exact MCP proof removes only its chat; later chats stay out.
 
 Session metadata owns `titleSource` (authored fallback, provider, manual). The preview uses only
 the first authored user message, at one 80-character bound; injected instructions/AGENTS frames
@@ -2419,10 +2548,10 @@ postconditions. Registrars own live capability checks. Windows `windows-api.ts` 
 13 Window2 methods: `list_windows`, `get_window`, `list_apps`, `launch_app`, `get_window_state`,
 `click`, `press_key`, `type_text`, `scroll`, `set_value`, `drag`, `perform_secondary_action`,
 `activate_window`. The old `observe`/`computer` wrapper is macOS-only. Windows observation state
-is bounded per exact caller or a separate shared unattributed context when explicitly allowed,
-contains no pixels/text, and input consumes its indexes/geometry. Identified and unattributed
-calls never borrow each other's observations. Opted-out anonymous calls discard that context
-and refuse indexed/coordinate input.
+is bounded per exact caller or permitted request ID, contains no pixels/text, and input consumes
+its indexes/geometry. Late proof aliases a request's state only to its own session. Different
+unresolved requests cannot borrow observations. Headerless calls retain a separate legacy
+anonymous context; opting out refuses indexed/coordinate input without exact identity.
 Explicit activation consumes observation state too; ordinary input already activates its target.
 Late observations and replaced principals cannot lend another call their state.
 Observe → act uses exact frame/ref, target geometry and
@@ -2628,10 +2757,11 @@ These are source-level discrepancies checked for this map, not new live reproduc
 permission for an unsolicited rewrite. Recheck current code/tests before acting; another
 shared-tree change may already have addressed them.
 
-- **Repair handout vs action:** attribution, assistant-error, silence, missing-tab and pickup
+- **Repair handout vs action:** attribution, assistant-error, silence, missing-tab, compaction and pickup
   repairs claim their exact attempt after the extension's tab scan; responsive documents
-  flush observations and recheck their source before action. Compaction and suspended-tab
-  repair retain their separate existing action checks rather than this final claim protocol.
+  flush observations and recheck their source before action. Compaction uses its exact ticket
+  and phase rather than ordinary-turn idleness. Suspended-tab repair retains its separate
+  existing action checks.
   Keep their operation-specific authority current through the browser action boundary.
 - **Goal publication:** explicit switch writes serialize, but mutate shared memory before
   the awaited durable write; synchronous clear/move paths and objective/reply mutations do not

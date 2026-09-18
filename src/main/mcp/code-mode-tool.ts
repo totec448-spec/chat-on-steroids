@@ -27,8 +27,9 @@ export function codeModeHandler(
 ): (args: { code: string }) => Promise<ToolResult> {
   return ({ code }) => guard('exec', async () => {
     const parent = currentCall();
+    const allowUnattributed = parent?.allowUnattributed ?? getConfig().multiAgent.allowUnattributedCalls;
     if (!parent || ((!parent.caller.requestId || !parent.caller.conversationId || !parent.caller.sessionId) &&
-      !getConfig().multiAgent.allowUnattributedCalls)) {
+      !allowUnattributed)) {
       return failIdentity('CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.');
     }
     return runCodeMode(code, getTools().filter(tool => tool.name !== 'exec'), (name, args) => invoke(name, args, parent), CODE_MODE_LIMITS, options);
@@ -43,8 +44,8 @@ export function registerCodeMode(
   reg.register('exec', codeModeDeclaration(options), codeModeHandler(() => reg.descriptions(), invoke, options));
 }
 
-export const CODE_MODE_INSTRUCTIONS = `Code mode: use exec with a code string for bounded tool composition and filtering. Inside JavaScript, call tools by their existing names and arguments. Results are normal MCP objects; inspect content, structuredContent and isError. Only text(...) and image(...) emit data to the model. Given requests you define using this connector's listed tool schemas:
+export const CODE_MODE_INSTRUCTIONS = `Code mode: use exec with JavaScript to compose this connector's tools by their listed names and argument schemas. Inspect content, structuredContent and isError in each MCP result. Only text(...) and image(...) emit output. For a requests array you define:
 const results = await Promise.all(requests.map(({name, args}) => tools[name](args)));
 text(results.map((result, index) => ({index, isError: result.isError ?? false, content: result.content})));
 Keep emitted text within 40,000 UTF-8 bytes total. For large read batches, request smaller max_bytes or line ranges, filter the returned content, or use read directly. Forward images with image(...), not text(result); base64 serialized as text consumes the text limit. An oversized text emission returns an explicitly truncated preview and stops the script; inspect already dispatched calls before retrying.
-Keep independent calls parallel only when their operations do not conflict; await mutations before dependent work. Use image(result.content.find(item => item.type === "image")) to forward a native image explicitly. A script without text/image returns no intermediate data. All nested calls still check live permissions and retain the caller’s proven identity, or remain Unattributed when allowed. Each child is individually recorded. Chat-owned operations such as agents and update_plan still require exact identity. New user instructions and worker inbox messages arrive with the outer result, outside filtering. Call finish/lifecycle signals directly. Use individual tools for simple calls, native file arguments, or when a result needs fresh model judgment. No persistent script state or code-mode wait tool; long-running tools retain their existing continuation contracts.`;
+Run independent calls in parallel only when they cannot conflict; await mutations before dependent work. Forward native images with image(result.content.find(item => item.type === "image")). Children keep the parent’s exact or permitted request identity, recheck live permissions and record separately. No text/image means no emitted output. New user instructions and worker inbox messages arrive with the outer result, outside filtering. Call finish/lifecycle tools directly and supply their actual target. Prefer direct tools for simple calls or native file arguments. No persistent state or wait tool; long-running tools use their usual continuation IDs.`;

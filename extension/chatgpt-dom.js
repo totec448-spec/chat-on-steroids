@@ -1577,6 +1577,16 @@ var CLF_DOM = (() => {
     }, false);
   }
 
+  /** Noninteractive native status captions have no result or action to preserve.
+   * Their owning response still needs a mounted local replacement before hiding. */
+  function activitySummaryRows(turn) {
+    return safe(() => {
+      const interactive = `${ACTIVITY_CONTROL}, [tabindex]:not([tabindex="-1"]), [contenteditable="true"], [aria-expanded], [aria-controls]`;
+      return toolBlocks(turn).filter(row => !row.closest(`${OWN_SURFACES}, ${interactive}, ${CONNECTOR}`) &&
+        !row.querySelector(`${interactive}, ${CONNECTOR}, pre, code, table, details`) && canHideActivity(row));
+    }, []);
+  }
+
   /** Exact current typed-thought rows stamped by the matching MAIN-world scan. */
   function thoughtActivityRows(turn, scanToken, turnIndex, messageIds) {
     return safe(() => {
@@ -1608,9 +1618,9 @@ var CLF_DOM = (() => {
    * Find the layout child whose removal also removes its flex/grid gap. Never cross the
    * turn section, a native fold/progress owner, another tool row, or unrelated controls.
    */
-  function activityHideTarget(block, section, blocks) {
+  function activityHideTarget(block, section, blocks, ownsControls = true) {
     if (!canHideActivity(block)) return null;
-    const allowedControls = activityControls(block);
+    const allowedControls = ownsControls ? activityControls(block) : new Set();
     let target = block;
     for (let parent = target.parentElement; parent && parent !== section; parent = parent.parentElement) {
       if (parent.matches?.('[data-interrupted], [data-clf-progress]') || !canHideActivity(parent)) break;
@@ -1647,20 +1657,22 @@ var CLF_DOM = (() => {
     return targets;
   }
 
-  function hideActivity(turn, coveredBlocks, typedThoughtBlocks = []) {
+  function hideActivity(turn, coveredBlocks, typedThoughtBlocks = [], summaryBlocks = []) {
     const sections = turnNodes(turn);
     const blocks = toolBlocks(turn);
     const candidates = [...new Set([...blocks, ...(Array.isArray(typedThoughtBlocks) ? typedThoughtBlocks : [])])];
     const desired = new Map(sections.map(section => [section, new Set()]));
     const covered = new Set([
       ...(Array.isArray(coveredBlocks) ? coveredBlocks : []),
-      ...(Array.isArray(typedThoughtBlocks) ? typedThoughtBlocks : [])
+      ...(Array.isArray(typedThoughtBlocks) ? typedThoughtBlocks : []),
+      ...(Array.isArray(summaryBlocks) ? summaryBlocks : [])
     ]);
+    const summaries = new Set(Array.isArray(summaryBlocks) ? summaryBlocks : []);
     if (covered.size > 0) {
       for (const block of candidates) {
         if (!covered.has(block)) continue;
         const section = sections.find(candidate => candidate.contains(block));
-        const target = section && activityHideTarget(block, section, candidates);
+        const target = section && activityHideTarget(block, section, candidates, !summaries.has(block));
         if (target) desired.get(section).add(target);
       }
     }
@@ -2423,6 +2435,7 @@ var CLF_DOM = (() => {
     hasConnectorRow,
     connectorRows,
     fiberRef,
+    activitySummaryRows,
     thoughtActivityRows,
     toolLabel,
     errors,

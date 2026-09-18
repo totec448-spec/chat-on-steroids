@@ -259,7 +259,7 @@ describe('visible Chat refresh', () => {
     expect(detailCalls).toHaveLength(0); // Startup stays in New Chat; reading history is deliberate.
     (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click();
     await vi.waitFor(() => expect(detailCalls).toHaveLength(1));
-    expect(detailCalls[0]).toEqual({ id: selected.id, options: { limit: 160 } });
+    expect(detailCalls[0]).toEqual({ id: selected.id, options: { limit: 30 } });
 
     listDelay = streaming ? 600 : 0;
     const stream = streaming ? setInterval(changed, 100) : undefined;
@@ -267,7 +267,7 @@ describe('visible Chat refresh', () => {
       changed();
       await vi.waitFor(() => expect(detailCalls).toHaveLength(2), { timeout: 1600 });
     } finally { clearInterval(stream); }
-    expect(detailCalls[1]).toEqual({ id: selected.id, options: { from: 101, limit: 160 } });
+    expect(detailCalls[1]).toEqual({ id: selected.id, options: { from: 101, limit: 30 } });
     expect(w.document.getElementById('timeline')?.textContent).toContain('initial');
     expect(w.document.getElementById('timeline')?.textContent).toContain('delta');
   });

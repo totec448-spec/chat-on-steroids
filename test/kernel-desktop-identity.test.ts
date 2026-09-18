@@ -27,3 +27,17 @@ it.each(['get_window_state', 'click', 'scroll', 'drag', 'set_value', 'perform_se
     expect(run).toHaveBeenCalledOnce();
   }
 );
+
+it('falls back to request-scoped Desktop state when exact proof never arrives', async () => {
+  const requestId = 'unattributed-desktop-fallback';
+  const startedAt = Date.now();
+  const run = vi.fn(async () => {
+    expect(currentCall()?.caller).toMatchObject({ requestId, conversationId: null, sessionId: null });
+    expect(currentCall()?.allowUnattributed).toBe(true);
+    return ok('observed');
+  });
+
+  expect((await dispatch('get_window_state', {}, null, requestId, 'desktop', run)).isError).not.toBe(true);
+  expect(run).toHaveBeenCalledOnce();
+  expect(Date.now() - startedAt).toBeLessThan(2_000);
+});

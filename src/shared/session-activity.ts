@@ -18,5 +18,7 @@ export function workerReportedFinish(summary: SessionSummary): boolean {
 
 /** Shared by the displayed label and the opening cohort of attribution recovery. */
 export function sessionWorkingAt(summary: SessionSummary, now: number): boolean {
-  return summary.endedAt === null && !workerReportedFinish(summary) && recentChatActivity(summary, now);
+  // endedAt records browser departure. Only work evidence and real finish signals
+  // determine whether a server-side turn is still active without its tab.
+  return !workerReportedFinish(summary) && recentChatActivity(summary, now);
 }

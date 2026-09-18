@@ -497,6 +497,67 @@ describe('session store', () => {
     expect(events.map((event) => event.kind)).toEqual(kinds);
   });
 
+  it.each([false, true])('keeps recovered replies in their original turn across bounded reads and legacy restart (%s)', async restart => {
+    const session = await createSession({ title: 'paged turn boundaries', conversationId: 'timeline-boundaries' });
+    const text = (value: string) => ({ text: value, chars: value.length, truncated: false });
+    await upsertMessageEvent(session.id, { kind: 'user_message', messageId: 'first-question', time: 90, source: 'extension', message: text('First question') });
+    const start = await appendEvent(session.id, { kind: 'turn_start', turnId: 'first', time: 100, source: 'extension' });
+    await appendEvent(session.id, { kind: 'progress', turnId: 'first', time: 120, source: 'app', message: text('First work') });
+    await appendEvent(session.id, { kind: 'turn_end', turnId: 'first', time: 180, source: 'extension', outcome: 'completed' });
+    await upsertMessageEvent(session.id, { kind: 'user_message', messageId: 'second-question', time: 200, source: 'extension', message: text('Second question') });
+    await appendEvent(session.id, { kind: 'turn_start', turnId: 'second', time: 210, source: 'extension' });
+    const work = await appendEvent(session.id, { kind: 'progress', turnId: 'second', time: 230, source: 'app', message: text('Second work') });
+    const recovered = await upsertMessageEvent(session.id, { kind: 'assistant_message', turnId: 'first', time: 290,
+      authoredAt: 150, messageId: 'first-reply', source: 'extension', message: text('Recovered first answer'), final: true });
+    await upsertMessageEvent(session.id, { kind: 'assistant_message', turnId: 'second', time: 280,
+      messageId: 'second-reply', source: 'extension', message: text('Second answer'), final: true });
+    await appendEvent(session.id, { kind: 'turn_end', turnId: 'second', time: 300, source: 'extension', outcome: 'completed' });
+    await flushSessions();
+    const folder = path.join(sessionsRoot(), session.id);
+    const journal = await fs.readFile(path.join(folder, 'events.jsonl'), 'utf8');
+    const before = await readEvents(session.id);
+    const coordinates = (event: SessionEvent) => ({ seq: event.seq, position: positionOf(event), time: event.time, turnId: event.turnId });
+    const original = before.map(coordinates);
+    if (restart) {
+      resetRecorderForTests(); resetSessionStoreForTests();
+      for (const name of ['meta.json', 'meta.backup.json']) {
+        const file = path.join(folder, name);
+        const metadata = JSON.parse(await fs.readFile(file, 'utf8'));
+        delete metadata.timelineTurns;
+        await fs.writeFile(file, JSON.stringify(metadata));
+      }
+    }
+    const page = await readRecentEvents(session.id, 4, { orderByOrigin: true });
+    expect(page[0]).toMatchObject({ kind: 'assistant_message', messageId: 'first-reply',
+      seq: recovered.event.seq, origin: recovered.event.origin, time: 290, authoredAt: 150, turnId: 'first', turnOrigin: start.seq });
+    expect(page[1]?.seq).toBe(work.seq);
+    const full = await readEvents(session.id);
+    expect(full.map(coordinates)).toEqual(original);
+    for (const row of full) {
+      const older = await readRecentEvents(session.id, 3, { before: positionOf(row) + 1, orderByOrigin: true });
+      const keys = new Set(older.map(event => event.seq));
+      expect(older.map(event => event.seq)).toEqual(full.filter(event => keys.has(event.seq)).map(event => event.seq));
+    }
+    expect((await getSession(session.id))?.activeTurnId).toBeNull();
+    expect((await getSession(session.id))?.timelineTurns?.first).toEqual({ origin: start.seq, time: 100, endTime: 180 });
+    expect(await fs.readFile(path.join(folder, 'events.jsonl'), 'utf8')).toBe(journal);
+  });
+
+  it('preserves the legacy authored position when a reload changes the provider timestamp for the same UUID', async () => {
+    const session = await createSession({ title: 'reload authored timestamp' });
+    const owner = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const providerMessageId = '11111111-2222-4333-8444-555555555555';
+    const message = { text: 'The recorded answer', chars: 19, truncated: false };
+    const first = await upsertMessageEvent(session.id, { kind: 'assistant_message', source: 'extension', final: true,
+      messageId: `assistant:${owner}:${owner}:1789662776481`, providerMessageId, time: 1789662900000, message });
+    const replay = await upsertMessageEvent(session.id, { kind: 'assistant_message', source: 'extension', final: true,
+      messageId: `assistant:${owner}:${owner}:1789662999999`, providerMessageId, time: 1789663000000,
+      authoredAt: 1789662999999, message }, { preferTime: true });
+    expect(replay.event).toMatchObject({ messageId: first.event.messageId, time: first.event.time,
+      origin: first.event.origin, authoredAt: 1789662776481 });
+    expect(await readEvents(session.id)).toHaveLength(1);
+  });
+
   it('reorders late events only inside the durable turn that owns them', async () => {
     const summary = await createSession({ title: 'deferred append' });
     await appendEvent(summary.id, { time: 1000, source: 'extension', kind: 'turn_start', turnId: 'g-order' });
@@ -2156,6 +2217,21 @@ describe('canonical recorder 1.8', () => {
     const retry = await recordChatObservations(conversationId, [error]);
     expect(retry.stored).toBe(1);
     expect(await readEvents(retry.sessionId!, { kinds: ['chat_error'] })).toHaveLength(1);
+  });
+
+  it('coalesces the same transport notice with Retry button text across document turns', async () => {
+    const conversationId = 'conv-error-retry-label';
+    const error = { kind: 'chat_error' as const, time: 100_000,
+      text: 'Message delivery timed out. Please try again.', recoverable: true, turnId: 'original' };
+    const first = await recordChatObservations(conversationId, [
+      { kind: 'user_message', messageId: 'question', text: 'Build', time: 90_000, authoredNow: true },
+      { ...error, text: `${error.text} Retry` }, { ...error, time: 100_100, turnId: undefined }
+    ]);
+    await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests();
+    await recordChatObservations(conversationId, [{ ...error, time: 200_000, turnId: 'replacement' }]);
+    expect(await readEvents(first.sessionId!, { kinds: ['chat_error'] })).toHaveLength(1);
+    await recordChatObservations(conversationId, [{ ...error, time: 201_000, text: 'Connection interrupted' }]);
+    expect(await readEvents(first.sessionId!, { kinds: ['chat_error'] })).toHaveLength(2);
   });
 
   it('keeps one exact Thinking failed notice across reload/restart beyond the burst window', async () => {

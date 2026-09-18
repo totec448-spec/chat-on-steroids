@@ -2,8 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { capabilityTools, DESKTOP_CAPABILITIES, type Capabilities } from '../src/shared/types.js';
 import { BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from '../src/shared/browser-control.js';
 
-const native = vi.hoisted(() => ({ act: vi.fn(), getWindowState: vi.fn(), call: null as any, apis: [] as any[], allowUnattributed: false }));
+const native = vi.hoisted(() => ({
+  act: vi.fn(), getWindowState: vi.fn(), call: null as any, apis: [] as any[],
+  allowUnattributed: false, correlations: new Map<string, { sessionId: string }>()
+}));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ multiAgent: { allowUnattributedCalls: native.allowUnattributed } }) }));
+vi.mock('../src/main/session/correlation.js', () => ({ requestCorrelation: (requestId: string) => native.correlations.get(requestId) ?? null }));
 vi.mock('../src/main/computer/index.js', () => ({
   ComputerError: class extends Error {}, act: native.act, getWindowState: native.getWindowState
 }));
@@ -29,7 +33,10 @@ function surface(over: Partial<Capabilities> = {}) {
 }
 const window = { app: 'fixture.exe', id: 71 };
 let principalSequence = 0;
-beforeEach(() => { vi.clearAllMocks(); native.apis.length = 0; native.allowUnattributed = false; native.call = { caller: { sessionId: `test-${++principalSequence}` } }; });
+beforeEach(() => {
+  vi.clearAllMocks(); native.apis.length = 0; native.correlations.clear(); native.allowUnattributed = false;
+  native.call = { caller: { sessionId: `test-${++principalSequence}` } };
+});
 
 describe('Windows Desktop public registrar', () => {
   it('matches the settings tool names to registration for each Desktop permission', () => {
@@ -86,28 +93,51 @@ describe('Windows Desktop public registrar', () => {
     expect(JSON.stringify(result)).not.toContain('three');
   });
 
-  it('honors unattributed opt-in across registrars, isolates known callers and rechecks opt-out', async () => {
+  it('keeps unattributed observations request-scoped, upgrades them to the session and rechecks opt-out', async () => {
     await surface().call('get_window_state', { window });
     const identified = native.apis[0];
-    native.call = { caller: { requestId: 'unresolved-observation' } };
+    native.call = { caller: { requestId: 'unresolved-workflow' } };
     native.allowUnattributed = true;
     await surface().call('get_window_state', { window });
     const anonymous = native.apis[1];
-    native.call = { caller: { requestId: 'unresolved-input' } };
+    native.call = { caller: { requestId: 'unresolved-workflow' } };
     await surface().call('click', { window, element_index: 2 });
     expect(anonymous.click).toHaveBeenCalledExactlyOnceWith({ window, element_index: 2 });
     expect(identified.click).not.toHaveBeenCalled();
-    native.call = null;
+    native.call = { caller: { requestId: 'different-workflow' } };
+    await surface().call('click', { window, element_index: 2 });
+    expect(native.apis).toHaveLength(3);
+    expect(native.apis[2].click).toHaveBeenCalledOnce();
+    native.call = { caller: { requestId: 'unresolved-workflow', sessionId: 'resolved-session' } };
     await surface().call('drag', { window, from_x: 1, from_y: 1, to_x: 2, to_y: 2 });
-    expect(native.apis).toHaveLength(2);
+    expect(anonymous.drag).toHaveBeenCalledOnce();
+    native.call = { caller: { requestId: 'next-turn', sessionId: 'resolved-session' } };
+    await surface().call('click', { window, element_index: 3 });
+    expect(anonymous.click).toHaveBeenCalledTimes(2);
     native.allowUnattributed = false;
+    native.call = null;
     await expect(surface().call('click', { window, x: 2, y: 3 })).rejects.toThrow(/CALLER_IDENTITY_REQUIRED/);
-    expect(anonymous.click).toHaveBeenCalledTimes(1);
+    expect(anonymous.click).toHaveBeenCalledTimes(2);
     native.allowUnattributed = true;
     await surface().call('get_window_state', { window });
-    expect(native.apis).toHaveLength(3);
+    expect(native.apis).toHaveLength(4);
     native.allowUnattributed = false;
     await surface().call('list_windows');
+  });
+
+  it('adopts a request observation when exact correlation arrives after that call returned', async () => {
+    native.allowUnattributed = true;
+    native.call = { caller: { requestId: 'late-observation' } };
+    await surface().call('get_window_state', { window });
+    const observation = native.apis[0];
+
+    native.correlations.set('late-observation', { sessionId: 'late-session' });
+    native.allowUnattributed = false;
+    native.call = { caller: { requestId: 'next-turn', conversationId: 'late-chat', sessionId: 'late-session' } };
+    await surface().call('click', { window, element_index: 4 });
+
+    expect(native.apis).toHaveLength(1);
+    expect(observation.click).toHaveBeenCalledExactlyOnceWith({ window, element_index: 4 });
   });
 
   it('returns image blocks and structured screenshot values under one combined response bound', async () => {

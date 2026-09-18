@@ -102,7 +102,7 @@ it('redacts only delivery additions after the plugin boundary and records the ex
     structuredContent: { count: 2, detail: 'credential-fixture' },
     _meta: { detail: 'credential-fixture' }
   });
-  vi.spyOn(agents, 'offerMessagesForConversation').mockReturnValue({ agentId: 'prime', messages: [{
+  vi.spyOn(agents, 'offerMessagesForCaller').mockReturnValue({ agentId: 'prime', messages: [{
     id: 'message-fixture', from: 'worker-1', to: 'prime', time: Date.now(), text: 'credential-fixture inbox',
     offeredAt: Date.now(), offers: 1, offeredOnFinish: false, offeredViaRevival: false, ackedAt: null
   }] });
