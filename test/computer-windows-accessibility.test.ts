@@ -199,10 +199,12 @@ try {
       child.stderr.setEncoding('utf8').on('data', text => { stderr += text; });
       // Keep the launcher alive until tree termination owns its WPF child. A
       // spawnSync timeout kills only PowerShell and strands the fixture executable.
+      // Startup compiles a WPF fixture and performs native UI Automation round-trips.
+      // Bound hangs without making sixty seconds under shared CI load a correctness test.
       const timer = setTimeout(() => {
         timedOut = true;
         if (child.pid) void terminateProcessTree(child.pid, true);
-      }, 60_000);
+      }, 150_000);
       try {
         const status = await new Promise<number | null>((resolve, reject) => {
           child.once('error', reject);
@@ -215,5 +217,5 @@ try {
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
     }
-  }, 70_000);
+  }, 180_000);
 });

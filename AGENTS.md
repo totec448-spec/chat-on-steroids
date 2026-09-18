@@ -871,12 +871,13 @@ Explicit native files remain browser-only, including an Immediate request tempor
 as after-turn input for upload. Queued checkpoints and generated Loop instructions are different
 from this immediate correction and retain their automatic boundary policy.
 
-The bridge's existing silence grant requests a refresh immediately when the view fails only
-after an exactly attributed local MCP call has been recorded in that source turn.
-There is no initial grace period and no ignored-activity window. The recovery grant does not
-count as active input. For authored queued/checkpoint input, the confirmed refresh files its existing outbox ticket
-with **five minutes** of durable listening; native busy extends that same authored ticket by
-five minutes as often as necessary. Generated Continue and Goal/Loop use §14 instead. New work revokes the ticket and restores the normal
+Thinking failed keeps the existing activity-based silence grant: **two minutes** for normal
+and unknown models, **five minutes** for proven Pro instead of ten. It does not renew activity
+or request an immediate refresh. An exactly attributed local MCP call must exist in that source
+turn. The recovery grant does not count as active input. For authored queued/checkpoint input,
+the confirmed refresh files its existing outbox ticket with **one minute** of durable listening
+for normal/unknown models and **five minutes** for Pro. Native busy extends the same authored
+ticket by that model's interval as necessary. Generated Continue and Goal/Loop use §14 instead. New work revokes the ticket and restores the normal
 silence clock. An already reloading page retains its existing hydration/cooldown protection.
 If that refresh later reveals Thinking failed, its error-observation timestamp is not fresh
 work and must retain the exact authored-input ticket and original listening deadline.
@@ -890,12 +891,12 @@ Queued after-turn work and pending immediate corrections use **two-minute**
 silence/refresh authority for normal and unknown models; only proven Pro uses **ten minutes**.
 Normal and unknown models then listen for **one minute
 from the acknowledged refresh** before queued-checkpoint delivery. The existing
-activity grant and outbox listening deadline own this wait. Thinking failed for queued checkpoints uses
-immediate refresh plus **five minutes** for automatic continuation. The final user decision
-retains that original five-minute window; the earlier proposed reduction to two is withdrawn. An ACK
+activity grant and outbox listening deadline own this wait. Thinking failed keeps two minutes
+before refresh for normal/unknown models and shortens Pro to five; the confirmed refresh owns
+one/five minutes of listening respectively. This is the user decision of 2026-09-18. An ACK
 for that exact refresh files `silenceBoundary` on the next existing outbox row before publication.
 It records source conversation/turn and work sequence; no parallel ticket ledger or scheduler.
-Native Stop prevents claiming/sending and durably extends listening by five minutes, rechecking
+Native Stop prevents claiming/sending and durably extends listening by one/five minutes, rechecking
 again if it remains busy. Only a full canonical final can consume the silence window; native
 control changes cannot bypass it or an existing native-busy delivery deferral.
 New work withdraws an unspent ticket/pre-send claim and rearms the model's silence clock. Authorized
@@ -912,10 +913,10 @@ The transport's text/file limits still apply; an oversized companion stays queue
 discarding the correction. No companion is pulled early into the immediate Thinking-failed send.
 User delivery spends that source's automatic obligation; a new turn must earn new continuation.
 
-The **extra five minutes when the native page is still busy at a send attempt remain unchanged**,
-for authored normal-silence user delivery and queued-checkpoint Thinking-failed recovery alike.
-This is separate from the generated Continue/Goal/Loop busy wait in §14. This is a deferral of the
-same existing ticket, repeatable if still busy, not a new ticket or an initial five-minute wait.
+The extra native-busy interval is **one minute for normal/unknown and five for Pro**, for
+authored silence delivery and queued-checkpoint Thinking-failed recovery alike. This is separate
+from the generated Continue/Goal/Loop Stop claim in §14. It defers the same existing authored
+ticket, repeatable if still busy, without creating another ticket.
 Its reason and deadline belong to the existing outbox/Goal obligation; do not add another timer.
 
 The displayed follow-up order also governs browser and finish-tool delivery: an ineligible
@@ -1547,10 +1548,11 @@ External navigation may hide its destination URL under ChatGPT-only host permiss
 A completed tab absent from a successful ChatGPT URL query can release the departed
 conversation only while its original document, epoch and terminal lease still agree.
 Loading alone and failed queries are not departure proof; replacement registration wins.
-Confirmed removal or navigation sends an explicit departure to the bridge. It defers immediate
-missing-tab/error repair without ending the server turn or cancelling its existing silence and
-pickup clocks. A newer page observation clears the departure marker; scheduled recovery still
-requires the current source and its normal deadline.
+Confirmed removal or navigation sends an explicit departure to the bridge. It suspends local
+activity and automatic browser recovery, including silence, Goal/queue and compaction pickups.
+An unexpected lost/discarded page retains its existing recovery contract. A newer observation
+of the exact departed page clears the dismissal; unresolved work reuses its last exact MCP
+timestamp and normal deadline. A tab close never fabricates provider completion.
 
 Browser-only preferences suppress automatic opening as defined by their owner. Background
 operations reuse a suitable existing window unchanged. If a new background window is actually
@@ -1578,6 +1580,10 @@ multiple calls: suppression requires mounted coverage for every completed native
 request/function, and never spends one local row to hide a second still-unrecorded invocation.
 Parent tool disclosures keep their children in ascending chronological order. Each child remains
 individually named and expandable; public prose divides groups and preserves its native owner.
+An intermediate paint after React replaces a whole section retains its detached disclosure
+state for the existing replacement grace. Only exact call/message proof may reclaim that record;
+expiry or Overwrite Off retires it. Disconnection alone cannot erase user expansion before the
+replacement's Fiber identity arrives.
 Foreign tools, native live prose, media and action controls remain native. When an exact completed
 closed Worked fold has one exact final outside it and no mounted interim prose, the companion stream
 projects recorded public interim text and local calls in canonical order before that final.
@@ -1619,11 +1625,11 @@ and workers retain their separate lifecycle. Silence intervention requires an ex
 local MCP call in the current source turn, including at refresh and restored-ticket admission.
 Observing a website chat, native searches and earlier-turn calls do not grant that permission.
 An eligible turn's actual-work silence earns one initial reload:
-two minutes normally/unknown, ten for proven Pro. After confirmed reload, idle permits
-Continue immediately if the same question still lacks a final. Native busy gets one additional
-minute (Pro: five), bounded at three/fifteen minutes from the last activity for ordinary silence.
-An MCP-backed Thinking-failed source earns its immediate refresh, then the same conditional one/five-minute busy
-wait. Reload latency never restarts an existing wait. A final found after reload cancels
+two minutes normally/unknown, ten for proven Pro; Thinking failed shortens only Pro to five.
+These deadlines use the last real work, not the failure observation or its replay. After confirmed
+reload, idle permits Continue immediately if the same question still lacks a final. Native busy
+gets one additional minute (Pro: five), measured from the confirmed browser action. A slow reload
+does not shorten that listening interval; a repeated ACK or failure cannot restart it. A final found after reload cancels
 Continue and makes the normal Goal/Loop decision eligible instead.
 
 A final whose native composer remains busy uses the same one/five-minute wait, stored in its
@@ -1733,17 +1739,29 @@ silence/no-tab recovery for workers, primes and ordinary chats. Reload repair fo
 Unattributed incidents and compaction has its own evidence. “Recover agents” is not blanket
 permission to reopen the session list. A plain historical chat with no current work is unprotected.
 An explicit `/closed` departure with `manual: true` persists `browserRecoveryDismissedAt` in the
-existing session metadata and withdraws an unexecuted page repair. It does not end the provider
-turn, erase its activity grant, cancel owed input, or refund a confirmed repair. Exact owned
-MCP work renews the same activity and silence clocks with no tab; an in-flight owned call is
-also visible before its result is recorded. Anonymous safety counters cannot light another chat.
-Departure suppresses immediate error/no-tab/stalled/attribution repairs. The existing qualified
-silence, queued/Goal and compaction pickup deadlines may still reopen that chat after quiet work.
+existing session metadata, retires its activity grant and withdraws every unexecuted browser
+repair. It revokes synthetic silence inputs while retaining authored input, continuation tickets,
+exact request ownership and confirmed repair receipts. Late owned MCP results remain history;
+neither their arrival nor an in-flight call can light the closed chat or renew recovery.
+All automatic error/no-tab/stalled/attribution, silence, Goal/queue and compaction pickups remain
+suspended until a real page return. This is local departure, not a fabricated provider turn end.
 MCP results, broker reports, generic session reattachment and old page reads cannot clear the
 departure marker. A newer native page poll can; Compact & Resume clears it only when committing
 the successor frontend. The session queue rechecks the expected conversation so closing source A
 cannot pause successor B. `endedAt` describes browser presence, not the Active/generating verdict.
+The outbox also withholds previously accepted input from browser offers, claims and final Send
+authorization while dismissed. Authored rows remain queued. A newly authored explicit immediate
+send may open its target; merely waiting on old input cannot. After an observed return, an offer
+may transfer from a departed elected tab to an already-existing exact-chat tab. Its opening
+authority remains spent, and durable Send custody still prevents duplicates.
 Legacy close reports without this flag retain their existing missing-tab recovery contract.
+The countdown, silence scheduler and final browser claim share a source boundary that excludes
+app-delivered corrections carrying an `inputId` and that source's exact turn id. A new question,
+foreign-turn input or Stop still supersedes the old source. Canonical revisions use authored
+order; a replay cannot buy or revoke recovery. Invalid sources are retired before queuing so a
+rejected handout cannot become an endless queue/delete loop.
+Continue's native question identity and the per-question error budget exclude those same injected
+corrections. Their app-only message IDs cannot replace the user's actual ChatGPT question.
 Chrome can still suspend an app-used background tab two ways: Memory Saver *discards* the document
 (the shell keeps its URL and answers tab queries) and Energy Saver *freezes* its timers.
 `autoDiscardable` protects only against discarding; no extension API exempts a tab from freezing.
@@ -1789,6 +1807,13 @@ A responsive page flushes native progress and Stop before the main claim, then r
 captured work/question/document after the claim. An explicit veto or navigation prevents the
 browser action. An unresponsive page supplies no new proof; the original main-process grant
 still requires independent validation. These checks use existing RPC and repair owners.
+The maintenance projection must retain each repair's reason. Compaction uses the same two
+document checks in draft-only mode: its exact ticket can recover its busy source, but an unsent
+text/attachment draft or a new user question vetoes the reload. Suspended shells are checked
+again after the main claim so a newly resumed or replaced document is not reloaded.
+Page-model helper health is diagnostic only: unknown until a scan/definitive repair result,
+empty may mean loading, and neither creates a reload grant. Repeated no-tab/stalled refusals
+are logged once per chat/cause/minute; handout logs and confirmed browser-action logs remain distinct.
 Assistant-error repairs retain their three-minute cooldown. Attribution, silence, Goal,
 compaction and no-tab follow their own eligibility and schedules.
 Recoverable notice equality ignores a trailing native Retry button label while retaining the
@@ -1805,7 +1830,7 @@ acknowledgement cannot refund it, including when a later silence repair replaces
 Only an exact failed-action receipt proving no browser action occurred releases that reservation.
 A claimed attempt is never reissued on missing acknowledgement. Progress stays anchored to
 the original source turn. A recoverable transport banner does not end a natively generating
-turn; exact Thinking failed keeps its immediate failure rule. Exact native final evidence
+turn; exact Thinking failed uses the activity-based two/five-minute silence rule. Exact native final evidence
 supersedes a stale transport banner and retains ordinary Goal/Loop eligibility.
 
 Automatic response recovery follows the shared decision and conditional busy wait above.
@@ -1813,7 +1838,8 @@ Authored queue delivery retains its own input eligibility under §11 and takes p
 a generated Continue or Goal/Loop message. A synthetic unfinished Goal decision is no longer
 filed automatically: recovery uses Continue until a canonical final appears.
 Continue, queue and Goal/Loop share pickup gaps of 2/5/10/15 minutes, then retain fifteen until
-expiry, including Pro after its initial ten-minute silence and conditional five-minute wait.
+expiry, including Pro after its initial ten-minute (Thinking failed: five-minute) silence and
+conditional five-minute wait.
 Reordering, replacing the head on the same
 source and Goal Off cannot reset the backoff. Missing pickup ACK retains its original action
 custody; status polling does not issue a fresh token. Startup restores eligible durable debt
@@ -1823,6 +1849,10 @@ source/session/stop/block/continuation and listening checks apply again at repai
 Publishing a repair wakes the extension over the existing authenticated socket; due repairs run
 before window layout, input preparation and idle-tab pruning. The MV3 30-second maintenance
 alarm remains a recovery cadence, not the normal pickup path.
+The shared browser startup owner validates the same durable pickup before and after its
+process-absence probe. Queue and Continue remain eligible with Goal Off; cancellation, a
+source change, manual close or expiry revokes startup. Validation may read the serialized
+outbox, so its result must be awaited before any browser launch.
 
 The app keeps queued/handed/done repair evidence; `/status` returns all due eligible repairs.
 Handout rechecks current binding, supersession, block and pending Stop. Extension maintenance
@@ -1915,6 +1945,12 @@ requests retain their existing custody and cannot be sent again merely because a
 An unnamed destination never reports a successful resume ACK, even after a transport banner.
 Keep its armed dispatch and journal gate for exact marker reconciliation; a missing id plus
 generic timeout text is not proof of non-delivery and cannot authorize another Send.
+Continuation readback accepts one layer of Markdown escaping on ASCII punctuation, never
+escapes on letters/digits. Main/store/renderer and the unbundled content script must agree on
+the marker and preserve its exact removable span. Match an escaped marker separately from
+the brief before considering a fully escaped rendering, preserving literal path/glob backslashes.
+Bootstrap receipt fallback remains restricted to app-owned opening messages and retains native
+message/document/epoch proof. Ordinary submitted-user receipts do not gain escape normalization.
 
 The continuation WAL freezes the source's confirmed model and reasoning selection when its
 session and selection both name A. Placement and bootstrap project that one intent; B's native
@@ -2194,9 +2230,10 @@ grant no execution authority. A full canonical final consumes silence immediatel
 exact final first backfilled after a completed turn; interim prose and Stop/Send changes never do.
 A completed MCP-backed response without final text is a recovery indication, not a terminal error:
 normal chats use two minutes before reload and one minute of listening after confirmed reload.
-Expired recovery debt goes directly to decision preparation without another Answer Settling wait.
+An unfinished response uses shared Continue recovery; a canonical final releases Goal/Loop
+decision preparation without another silence wait.
 Fresh work invalidates that debt and any captured draft, including across async activity reads.
-Pro retains its existing ten-minute silence and five-minute listening/deferral policy.
+Pro uses ten-minute silence (five on Thinking failed) and five-minute listening/deferral.
 If the source reports work before a prepared continuation reaches native Send, abandon that
 exact draft without acknowledging its obligation as handled. The existing pending reply owns
 a fresh minimum two-minute wait (Pro: five minutes); retries prepare a new decision. Repeated
@@ -2316,7 +2353,7 @@ chat starts with its plan collapsed. Collapsing it returns height to the convers
 status updates preserve the user's current disclosure state.
 
 The recovery row above Goal/Loop shows read-only countdowns from `bridge.ts::sessionControlsFor`:
-confirmed Thinking-failed listening, an outbox/Goal native-busy deferral, and each unresolved
+activity-based silence and confirmed reload listening, an outbox/Goal native-busy deferral, and each unresolved
 attribution incident's exact candidate deadline. `renderer/recovery.ts` updates only the seconds
 using the existing visible-chat clock; zero says checking/pending, never sent/reloaded. Fresh
 work or attribution removes the relevant countdown, and native busy projects the same owner's
@@ -2326,6 +2363,9 @@ The normal two-minute silence clock appears only in its final thirty seconds abo
 Pro appears five minutes before its reload. Pickup watches also appear only in their final thirty
 seconds. Unattributed watches remain visible throughout their original window. Genuine new work
 moves the same silence deadline and hides an early silence row.
+Thinking failed leaves the normal two-minute/last-thirty-second presentation unchanged. Pro's
+deadline becomes last work plus five minutes, so the remainder becomes visible when that failure
+is observed. Confirmed reloads then project the same one/five-minute deadline used by delivery.
 Native-only chats have no automatic-silence countdown. A confirmed reload reveals the listening
 countdown. A completed page boundary without a canonical final uses the same delayed reveal
 in app and browser; it cannot expose the countdown early. `visibleAt` lets the existing renderer clock reveal a row without a

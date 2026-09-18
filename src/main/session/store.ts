@@ -38,7 +38,7 @@ import type {
   SessionSummary,
   StoredText
 } from '../../shared/session.js';
-import { CONTINUATION_MARKER, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
+import { continuationMarkerOf, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
 import { authoredTimeOf, chronological, positionOf, projectTimeline } from '../../shared/chronology.js';
 import { automaticTitle, firstTitleMessage, legacyContextTitle, refreshUserTitle } from './title.js';
 import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type AgentPlan, type AgentPlanUpdate } from '../../shared/agent-plan.js';
@@ -1595,12 +1595,37 @@ export async function readRecentEvents(
   return readRecentEventsFromDisk(sessionId, limit, options);
 }
 
-/** The latest authored question, unaffected by later revisions of older messages. */
-export async function readLatestUserMessage(sessionId: string): Promise<Extract<SessionEvent, { kind: 'user_message' }> | undefined> {
+/** The latest authored question. A recovery source excludes its injected corrections,
+ * which have no native user bubble and cannot grant another error reload. */
+export async function readLatestUserMessage(sessionId: string, turnId?: string | null): Promise<Extract<SessionEvent, { kind: 'user_message' }> | undefined> {
   assertSessionId(sessionId);
   await flushSession(sessionId);
-  const [message] = await readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true });
+  const [message] = await readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true,
+    ...(turnId ? { before: Number.POSITIVE_INFINITY, acceptEvent: (event: SessionEvent) => !isTurnCorrection(event, turnId) } : {}) });
   return message?.kind === 'user_message' ? message : undefined;
+}
+
+/** An injected instruction belongs to its existing generation, even after native reconciliation. */
+function isTurnCorrection(event: SessionEvent, turnId?: string | null): boolean {
+  return event.kind === 'user_message' && !!event.inputId && !!turnId && event.turnId === turnId;
+}
+
+/** Latest lifecycle boundary for one recovery source. Injected same-turn instructions
+ * do not replace it; a new question, another turn, or a stop still does. Message revisions
+ * retain their authored position so replaying an old question cannot cancel current work. */
+export async function readRecoveryBoundary(sessionId: string, turnId?: string | null): Promise<SessionEvent | undefined> {
+  const entry = await ensureOpen(sessionId);
+  await flushSession(sessionId);
+  // Read under this session's existing queue. Another read or metadata flush
+  // must not invalidate the boundary and permanently spend a valid silence grant.
+  return enqueueSessionOperation(entry, 'recovery boundary read', async () => {
+    const [boundary] = await readRecentEventsFromDisk(sessionId, 1, {
+      kinds: ['turn_start', 'turn_end', 'user_message'], orderByOrigin: true,
+      before: Number.POSITIVE_INFINITY,
+      acceptEvent: event => !isTurnCorrection(event, turnId)
+    });
+    return boundary;
+  });
 }
 
 /** Canonical completion evidence shared by activity retirement and input eligibility.
@@ -1625,8 +1650,7 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   const seq = final.finalContentSeq ?? positionOf(final);
   const completedAt = final.finalObservedAt ?? final.time;
   const question = questions[0];
-  const correction = (event: SessionEvent) => event.kind === 'user_message' && !!event.inputId &&
-    !!final.turnId && event.turnId === final.turnId && positionOf(event) < seq;
+  const correction = (event: SessionEvent) => isTurnCorrection(event, final.turnId) && positionOf(event) < seq;
   if (question && positionOf(question) >= positionOf(final) && !correction(question)) return null;
   // With no generation identity, require an actual preceding authored boundary.
   if (!final.turnId && (!question || question.time > final.time)) return null;
@@ -1840,7 +1864,7 @@ export async function readActivityEvents(sessionId: string, since: number, limit
       if (event.kind !== 'user_message') continue;
       const position = event.origin ?? event.seq;
       if (!openingUserMessage || position < (openingUserMessage.origin ?? openingUserMessage.seq)) openingUserMessage = event;
-      if (CONTINUATION_MARKER.exec(event.message.text)?.[1] === 'RESUME' &&
+      if (continuationMarkerOf(event.message.text)?.kind === 'RESUME' &&
           (!resumeUserMessage || position > (resumeUserMessage.origin ?? resumeUserMessage.seq))) resumeUserMessage = event;
     }
     const resumeBoundary = resumeUserMessage ? resumeUserMessage.origin ?? resumeUserMessage.seq : 0;

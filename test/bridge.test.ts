@@ -23,7 +23,7 @@ import type { SwarmSnapshot } from '../src/main/agents.js';
 import type { Config } from '../src/shared/types.js';
 
 const recoveryBrowserWake = vi.hoisted(() => vi.fn(async (_url: string, _retry?: boolean, _background?: boolean,
-  _authority?: { current(): boolean }) => {}));
+  _authority?: { current(): boolean | Promise<boolean> }) => {}));
 vi.mock('../src/main/browser-startup.js', () => ({ wakeBrowserUrl: recoveryBrowserWake }));
 
 async function recordFinalForTest(conversationId: string, turnId: string): Promise<void> {
@@ -2564,6 +2564,19 @@ describe('delivering a bootstrap', () => {
       { kind: 'user_message', time: Date.now() + 1, messageId: 'worker-followup', text: 'Now read another file' }
     ] } });
     expect((await request('GET', `/activity?conversationId=${worker}&since=999999`)).body.bootstrapMessageId).toBe('worker-opening');
+
+    // The worker bootstrap is typed into the fresh chat by this app, so ChatGPT's composer
+    // escapes it exactly as it escapes a resume brief — measured from 2026-09-16. The opening
+    // row is still the bootstrap; refusing it here loses the boundary that keeps chat A's
+    // repair notices out of chat B's feed.
+    const escapedWorker = '66666666-3333-2222-1111-000000000083';
+    await noteChatOrigin(escapedWorker, { kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'Read the bounded fixture' });
+    await request('POST', '/events', { body: { conversationId: escapedWorker, events: [
+      { kind: 'user_message', time: Date.now(), messageId: 'escaped-opening',
+        text: boot.text.replace(/([_:#*[\]`])/g, '\\$1') }
+    ] } });
+    expect((await request('GET', `/activity?conversationId=${escapedWorker}&since=999999`)).body.bootstrapMessageId)
+      .toBe('escaped-opening');
 
     const missing = '66666666-3333-2222-1111-000000000082';
     await noteChatOrigin(missing, { kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'Read the bounded fixture' });
@@ -5797,13 +5810,16 @@ describe('unattributed activity recovery', () => {
       const id = (await request('GET', `/activity?conversationId=${OTHER}`)).body.sessionId;
       expect((await sessionControlsFor(id)).recovery?.every(row => row.kind === 'silence')).toBe(true);
       await events(OTHER, [{ kind: 'turn_end', turnId: 'failed-countdown', outcome: 'failed', reason: 'thinking_failed', time: Date.now() }]);
+      expect(await maintenance()).toBeNull();
+      await vi.advanceTimersByTimeAsync(model === 'gpt-6-pro' ? 300_000 : CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
       const repair = await maintenance();
       expect(repair?.reason).toBe('silence');
       await maintenance(repair!.token);
-      const deadline = Date.now() + 5 * 60_000;
-      expect((await sessionControlsFor(id)).recovery).toEqual([{ kind: 'thinking-failed', deadline }]);
+      const deadline = Date.now() + (model === 'gpt-6-pro' ? 300_000 : 60_000);
+      expect((await sessionControlsFor(id)).recovery).toEqual([{ kind: 'post-reload', deadline }]);
       await vi.advanceTimersByTimeAsync(10_000);
-      expect((await sessionControlsFor(id)).recovery).toEqual([{ kind: 'thinking-failed', deadline }]);
+      expect((await sessionControlsFor(id)).recovery).toEqual([{ kind: 'post-reload', deadline }]);
       await events(OTHER, [{ kind: 'assistant_message', messageId: 'fresh-after-failure', turnId: 'failed-countdown', text: 'Continuing the work.', state: 'streaming', activeNow: true, time: Date.now() }]);
       expect((await sessionControlsFor(id)).recovery?.every(row => row.kind === 'silence')).toBe(true);
     } finally { vi.useRealTimers(); }
@@ -5860,7 +5876,7 @@ describe('unattributed activity recovery', () => {
       const repair = await maintenance();
       expect(repair?.reason).toBe('silence');
       await maintenance(repair!.token);
-      expect((await sessionControlsFor(id)).recovery).toEqual([]);
+      expect((await sessionControlsFor(id)).recovery).toEqual([{ kind: 'post-reload', deadline: Date.now() + 300_000, generating: true }]);
     } finally { vi.useRealTimers(); }
   });
 
@@ -5924,8 +5940,8 @@ describe('unattributed activity recovery', () => {
       for (let attempt = 0; attempt < 2; attempt++) {
         const response = await request('POST', '/input/claim', { body: { id: row.id, owner: 'queue-countdown-page', conversationId: OTHER, silenceBusyTurnId: 'queue-countdown' } });
         expect(response.body.ok).toBe(true);
-        expect((await sessionControlsFor(session!.id)).recovery).toEqual([{ kind: 'native-busy', next: 'queue', deadline: Date.now() + 300_000 }]);
-        if (attempt === 0) await vi.advanceTimersByTimeAsync(300_000);
+        expect((await sessionControlsFor(session!.id)).recovery).toEqual([{ kind: 'native-busy', next: 'queue', deadline: Date.now() + 60_000 }]);
+        if (attempt === 0) await vi.advanceTimersByTimeAsync(60_000);
       }
       await attributed(OTHER, false, Date.now());
       expect((await sessionControlsFor(session!.id)).recovery).toEqual([{ kind: 'silence', deadline: Date.now() + CHAT_SILENCE_MS, visibleAt: Date.now() + CHAT_SILENCE_MS - 30_000 }]);
@@ -6153,6 +6169,57 @@ describe('unattributed activity recovery', () => {
       socket?.terminate();
       vi.useRealTimers();
     }
+  });
+
+  it('reports observed helper transitions without treating an empty page as a fault', async () => {
+    await pair();
+    const ask = (fiber: string | null, id = PRIME) =>
+      request('GET', `/activity?conversationId=${id}&since=0${fiber === null ? '' : `&fiber=${fiber}`}`);
+    const lines = () => getLog().filter(entry => entry.message.includes('page-model helper as'));
+    await ask(null); await ask('invalid');
+    expect(lines()).toHaveLength(0);
+    expect((await ask('empty')).status).toBe(200);
+    expect(lines()).toHaveLength(1);
+    expect(lines()[0]).toMatchObject({ level: 'info' });
+    await ask('empty'); await ask(null);
+    expect(lines()).toHaveLength(1);
+    await ask('absent'); await ask('absent');
+    expect(lines()).toHaveLength(2);
+    expect(lines()[1]).toMatchObject({ level: 'warn' });
+    expect(lines()[1]!.message).toContain('after the helper repair attempt');
+    await ask('ok'); await ask('ok');
+    expect(lines()).toHaveLength(3);
+    expect(lines()[2]!.message).toContain('readable turns');
+    await ask('absent', OTHER);
+    expect(lines()).toHaveLength(4);
+  });
+
+  it('explains a refused stalled-tab reload once a minute, not once a pass', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await attributed(PRIME);
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      const stalled = () => request('POST', '/status', {
+        body: { openConversations: [PRIME], stalledConversations: [PRIME] }
+      });
+      const lines = () => getLog().filter(entry => entry.message.includes('is a stalled browser tab — not reloaded'));
+      await stalled();
+      const first = lines().length;
+      expect(first).toBeGreaterThan(0);
+      for (let pass = 0; pass < 4; pass++) {
+        await vi.advanceTimersByTimeAsync(10_000);
+        await stalled();
+      }
+      expect(lines()).toHaveLength(first);
+      await vi.advanceTimersByTimeAsync(20_000);
+      await stalled();
+      expect(lines()).toHaveLength(first + 1);
+      // Clock rollback must not silence the refusal until wall time catches up.
+      vi.setSystemTime(Date.now() - 120_000);
+      await stalled();
+      expect(lines()).toHaveLength(first + 2);
+    } finally { vi.useRealTimers(); }
   });
 
   it('waits 15 seconds before handing a lone suspect to the browser once attribution has failed', async () => {
@@ -6634,7 +6701,81 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  it('keeps a manually closed worker active and recovers only after its calls go silent', async () => {
+  it.each(['normal', 'pro'] as const)('keeps the %s silence countdown and reload valid across same-turn corrections', async model => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), turnId = `corrected-${model}`;
+      await events(chat, [
+        { kind: 'user_message', messageId: 'question', text: 'Review the changes', time: Date.now(), authoredNow: true },
+        { kind: 'model_selection', model: model === 'pro' ? 'gpt-6-pro' : 'GPT-5.6 Sol', reasoningEffort: model === 'pro' ? 'pro' : 'high', time: Date.now() },
+        openTurn(turnId)
+      ]);
+      await attributed(chat, false, Date.now());
+      const session = (await findSessionByConversation(chat))!;
+      await vi.advanceTimersByTimeAsync(10_000);
+      // The app records instructions delivered in MCP responses with inputId and
+      // their existing turn id. They are authored rows, but not a new generation.
+      for (let index = 0; index < 3; index++) await sessionStoreModule.appendEvent(session.id, {
+        kind: 'user_message', source: 'app', time: Date.now(), turnId,
+        inputId: `correction-${index}`, messageId: `correction-${index}`,
+        message: { text: 'Also inspect the recovery boundary.', truncated: false, chars: 35 }
+      });
+      await attributed(chat, false, Date.now());
+      const window = model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS;
+      const deadline = Date.now() + window, visibleAt = deadline - (model === 'pro' ? 300_000 : 30_000);
+      expect((await sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'silence', deadline, visibleAt }]);
+      await vi.advanceTimersByTimeAsync(visibleAt - Date.now());
+      expect((await sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'silence', deadline, visibleAt }]);
+      expect(await maintenance()).toBeNull();
+      await vi.advanceTimersByTimeAsync(deadline - Date.now());
+      await sweepStaleSwarm(Date.now());
+      const repair = await maintenance();
+      expect(repair).toMatchObject({ conversationId: chat, reason: 'silence' });
+      expect((await request('POST', '/repairs/claim', { body: { token: repair!.token } })).body.allowed).toBe(true);
+      // An acknowledged claim retains custody rather than buying another reload.
+      expect(await maintenance()).toBeNull();
+      await maintenance(repair!.token, 'reloaded');
+      expect((await readEvents(session.id, { kinds: ['progress'] })).some(event =>
+        event.kind === 'progress' && event.message.text.includes('Reloaded chat'))).toBe(true);
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
+  it.each(['new-question', 'foreign-correction', 'stopped'] as const)('retires silence recovery at a %s boundary instead of repeatedly queuing it', async boundary => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), turnId = 'retired-correction-source';
+      await events(chat, [openTurn(turnId)]);
+      await attributed(chat, false, Date.now());
+      const session = (await findSessionByConversation(chat))!;
+      await sessionStoreModule.appendEvent(session.id, {
+        kind: 'user_message', source: 'app', time: Date.now(), turnId,
+        inputId: 'valid-correction', messageId: 'valid-correction',
+        message: { text: 'Inspect the same task', truncated: false, chars: 21 }
+      });
+      if (boundary === 'stopped') await events(chat, [endTurn(turnId, 'stopped')]);
+      else await sessionStoreModule.appendEvent(session.id, {
+        kind: 'user_message', source: boundary === 'new-question' ? 'extension' : 'app', time: Date.now(),
+        turnId: boundary === 'new-question' ? turnId : 'different-turn', messageId: 'next-question',
+        ...(boundary === 'foreign-correction' ? { inputId: 'other-turn-input' } : {}),
+        message: { text: 'A different task', truncated: false, chars: 16 }
+      });
+      for (let pass = 0; pass < 3; pass++) {
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+        await sweepStaleSwarm(Date.now());
+        expect(await maintenance()).toBeNull();
+        expect((await sessionControlsFor(session.id)).recovery).toEqual([]);
+      }
+      expect(getLog().filter(entry => entry.message.includes('asking the browser to reload') && entry.message.includes(chat))).toEqual([]);
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
+  it('keeps a manually closed worker inactive through maintenance and late tool results', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -6657,24 +6798,22 @@ describe('unattributed activity recovery', () => {
         content: [{ type: 'text', text: 'ok' }], outcome: 'ok', durationMs: 1,
         startedAt: Date.now(), requestId: call!.kind === 'tool_call' ? call!.call.requestId! : '' });
       expect(liveConversations().some(row => row.conversationId === WORKER)).toBe(false);
-      expect((await sessionControlsFor(session!.id)).activeTurnId).toBe('manually-closed-worker');
-      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
-      expect(await maintenance()).toBeNull();
-      await vi.advanceTimersByTimeAsync(1);
-      await sweepStaleSwarm(Date.now());
-      const repair = await maintenance();
-      expect(repair).toMatchObject({ conversationId: WORKER, reason: 'silence' });
-      expect((await request('POST', '/repairs/claim', { body: { token: repair!.token } })).body.allowed).toBe(true);
-      await maintenance(repair!.token, 'reopened');
-      expect(agentInfoForOwnedConversation(WORKER)?.state).not.toBe('sleeping');
+      expect((await sessionControlsFor(session!.id)).activeTurnId).toBeNull();
+      for (let minute = 0; minute < 12; minute++) {
+        await vi.advanceTimersByTimeAsync(60_000);
+        await sweepStaleSwarm(Date.now());
+        expect(await maintenance()).toBeNull();
+        expect((await sessionControlsFor(session!.id)).recovery).toEqual([]);
+      }
+      expect(agentInfoForOwnedConversation(WORKER)?.state).toBe('sleeping');
       expect((await getSession(session!.id))?.browserRecoveryDismissedAt).toBeTruthy();
-      // Only a real browser return clears the departure marker; it never ended the work.
+      // Tool history remains attributed; only an observed browser return clears dismissal.
       await request('GET', `/activity?conversationId=${WORKER}`);
       expect((await getSession(session!.id))?.browserRecoveryDismissedAt).toBeUndefined();
     } finally { vi.useRealTimers(); }
   });
 
-  it.each(['normal', 'pro'] as const)('retains activity and injection across repeated manual closes, then uses the %s silence window', async model => {
+  it.each(['normal', 'pro'] as const)('pauses a manually closed %s chat until a real page return restores recovery', async model => {
     const previous = getConfig();
     await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true },
       multiAgent: { ...previous.multiAgent, recoverAgentTabs: false } });
@@ -6696,18 +6835,18 @@ describe('unattributed activity recovery', () => {
       const session = (await findSessionByConversation(OTHER))!;
       const { sessionActivityExpiresAt } = await import('../src/main/bridge.js');
       const { sessionWorkingAt } = await import('../src/shared/session-activity.js');
-      const assertActive = async () => {
+      const assertInactive = async () => {
         const summary = (await getSession(session.id))!;
-        expect(sessionWorkingAt({ ...summary, activityExpiresAt: sessionActivityExpiresAt(summary) }, Date.now())).toBe(true);
-        expect(await sessionControlsFor(session.id)).toMatchObject({ activeTurnId: turnId, canInject: true, canSendDirectly: false });
+        expect(sessionWorkingAt({ ...summary, activityExpiresAt: sessionActivityExpiresAt(summary) }, Date.now())).toBe(false);
+        expect(await sessionControlsFor(session.id)).toMatchObject({ activeTurnId: null, canInject: false, recovery: [] });
       };
       for (let cycle = 0; cycle < 2; cycle++) {
         await request('POST', '/closed', { body: { conversationId: OTHER, manual: true } });
-        await assertActive();
+        await assertInactive();
         expect(await maintenance()).toBeNull();
         await vi.advanceTimersByTimeAsync(30_000);
         await call();
-        await assertActive();
+        await assertInactive();
         // Neither this exact call nor reading app controls pretends that a tab is open.
         expect(liveConversations().some(row => row.conversationId === OTHER)).toBe(false);
         if (cycle === 0) {
@@ -6716,13 +6855,15 @@ describe('unattributed activity recovery', () => {
         }
       }
       const window = model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS;
-      const deadline = Date.now() + window;
-      expect((await sessionControlsFor(session.id)).recovery).toEqual([
-        { kind: 'silence', deadline, visibleAt: deadline - (model === 'pro' ? 300_000 : 30_000) }
-      ]);
-      await vi.advanceTimersByTimeAsync(window - 1);
+      await vi.advanceTimersByTimeAsync(window + 60_000);
+      await sweepStaleSwarm(Date.now());
+      await assertInactive();
       expect(await maintenance()).toBeNull();
-      await vi.advanceTimersByTimeAsync(1);
+      expect(reopened(OTHER)).toEqual([]);
+      // Returning to the page re-enables recovery of this same unfinished source.
+      // It must work without another tool call or a fabricated new turn_start.
+      await request('GET', `/activity?conversationId=${OTHER}`);
+      expect((await getSession(session.id))?.browserRecoveryDismissedAt).toBeUndefined();
       await sweepStaleSwarm(Date.now());
       const repair = await maintenance();
       expect(repair).toMatchObject({ conversationId: OTHER, reason: 'silence' });
@@ -6738,7 +6879,7 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); await saveConfig(previous); }
   });
 
-  it('keeps an exactly owned running call active without an open page or a completed result', async () => {
+  it.each([false, true])('projects an exactly owned running call after page departure (manual=%s)', async manual => {
     const previous = getConfig();
     await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: false },
       multiAgent: { ...previous.multiAgent, recoverAgentTabs: false } });
@@ -6748,7 +6889,7 @@ describe('unattributed activity recovery', () => {
       await events(OTHER, [openTurn('offline-admission')]);
       await attributed(OTHER, false, Date.now());
       const session = (await findSessionByConversation(OTHER))!;
-      await request('POST', '/closed', { body: { conversationId: OTHER, manual: true } });
+      await request('POST', '/closed', { body: { conversationId: OTHER, manual } });
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS * 2);
       await sweepStaleSwarm(Date.now());
       const { sessionActivityExpiresAt } = await import('../src/main/bridge.js');
@@ -6760,10 +6901,11 @@ describe('unattributed activity recovery', () => {
       for (const owner of [PRIME, null, OTHER]) await trackInFlight({ startedAt: Date.now(), transportKey: null,
         agent: null, outcome: null, evidence: emptyEvidence(),
         caller: { conversationId: owner, requestId: `offline-running-${owner}`, transportKey: null } }, async () => {
-        expect(active()).toBe(owner === OTHER);
+        expect(active()).toBe(!manual && owner === OTHER);
         if (owner === OTHER) {
           await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS * 2);
-          expect(active()).toBe(true);
+          expect(active()).toBe(!manual);
+          if (manual) expect((await sessionControlsFor(session.id)).activeTurnId).toBeNull();
           expect(liveConversations().some(row => row.conversationId === OTHER)).toBe(false);
           expect(await maintenance()).toBeNull();
         }
@@ -7285,6 +7427,10 @@ describe('unattributed activity recovery', () => {
       expect(silence?.reason).toBe('silence');
       await maintenance(silence!.token);
       await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS);
+      const session = (await findSessionByConversation(PRIME))!;
+      await sessionStoreModule.appendEvent(session.id, { kind: 'user_message', source: 'app', time: Date.now(),
+        turnId: 'lost-ack-answer', inputId: 'same-turn-correction', messageId: 'input:same-turn-correction',
+        message: { text: 'Include this detail.', truncated: false, chars: 20 } });
       await events(PRIME, [{ kind: 'chat_error', time: Date.now(), text: 'Connection interrupted', recoverable: true }]);
       expect((await maintenance())?.reason).not.toBe('assistant-error');
       // A late receipt for the superseded error cannot reconstruct a repair either.
@@ -8192,6 +8338,10 @@ describe('unattributed activity recovery', () => {
       await maintenance(repair!.token);
       await sweepStaleSwarm(Date.now());
       expect(goalPendingReplyFor(chat)).toBeNull();
+      if (model === 'pro') {
+        await vi.advanceTimersByTimeAsync(300_000);
+        await sweepStaleSwarm(Date.now());
+      }
       const held = goal.snapshotGoalReplies().replies.find(row => row.conversationId === chat);
       expect(held).toMatchObject({ state: 'handled', silenceSourceTurnId: 'off-silence-source' });
       if (model === 'other') {
@@ -10842,16 +10992,16 @@ describe('the goal loop over the bridge', () => {
       expect(url).toBe(`https://chatgpt.com/c/${chat}`);
       expect(retry).toBe(true);
       expect(authority?.current).toEqual(expect.any(Function));
-      expect(authority?.current()).toBe(true);
+      expect(await authority?.current()).toBe(true);
       const config = getConfig();
       await saveConfig({ ...config, ui: { ...config.ui, browserOnly: true } });
-      expect(authority?.current()).toBe(false);
+      expect(await authority?.current()).toBe(false);
       await saveConfig(config);
-      expect(authority?.current()).toBe(true);
+      expect(await authority?.current()).toBe(true);
       await sweepStaleSwarm(Date.now());
       expect(recoveryBrowserWake).toHaveBeenCalledTimes(1);
       await request('POST', '/settings', { body: { conversationId: chat, goal: false } });
-      expect(authority?.current()).toBe(false);
+      expect(await authority?.current()).toBe(false);
       await vi.advanceTimersByTimeAsync(5 * 60_000);
       await sweepStaleSwarm(Date.now());
       expect(recoveryBrowserWake).toHaveBeenCalledTimes(1);
@@ -10883,6 +11033,9 @@ describe('the goal loop over the bridge', () => {
       for (const [index, minutes] of [2, 5, 10, 15].entries()) {
         await vi.advanceTimersByTimeAsync(minutes * 60_000);
         await sweepStaleSwarm(Date.now());
+        const authority = recoveryBrowserWake.mock.calls.at(-1)?.[3];
+        expect(authority?.current).toEqual(expect.any(Function));
+        expect(await authority!.current()).toBe(true);
         const repair = (await request('GET', '/status')).body.repairs?.[0];
         expect(repair).toMatchObject({ conversationId: chat, reason: 'goal' });
         await request('GET', `/status?repaired=${repair.token}&repairAction=reloaded`);

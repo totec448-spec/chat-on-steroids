@@ -55,6 +55,21 @@ is retained with an exclusive-send regression: an unnamed resume keeps its dispa
 instead of reporting success or automatically resending after a transport banner. The original
 banner-driven resend and process-local retry counter were not incorporated.
 
+The September 18 dirty-tree review incorporates and adapts [@Maximapple](https://github.com/Maximapple)'s
+page-model health reporting ([#284](https://github.com/totec448-spec/chat-on-steroids/pull/284)),
+draft-preserving recovery ([#286](https://github.com/totec448-spec/chat-on-steroids/pull/286)),
+Windows accessibility test allowance ([#288](https://github.com/totec448-spec/chat-on-steroids/pull/288)),
+bounded recovery-refusal logging ([#289](https://github.com/totec448-spec/chat-on-steroids/pull/289)),
+Markdown-escaped continuation readback ([#291](https://github.com/totec448-spec/chat-on-steroids/pull/291))
+and the unread-output receipt regression ([#292](https://github.com/totec448-spec/chat-on-steroids/pull/292)).
+The receipt test observes completed publication before the next invocation instead of repeatedly
+trying commands. Draft protection uses the existing document/claim checks, including compaction.
+The marker readers accept punctuation escapes while retaining literal brief text and rejecting
+escapes before letters or digits. Recovery handout/result logging from
+[#280](https://github.com/totec448-spec/chat-on-steroids/pull/280) is incorporated; its additional
+blind-reload detector and request-based attempt counter are not. This is an adapted source
+integration, not a claim that those seven PR branches were merged unchanged.
+
 ## Reports, review and proposed work
 
 [@raxy24](https://github.com/raxy24)'s report in

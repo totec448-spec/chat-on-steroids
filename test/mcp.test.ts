@@ -3504,10 +3504,28 @@ describe('exec sessions belong to the chat that opened them', () => {
 
     const blockedRequest = 'wfr_background_admission_blocked';
     expect(prove(blockedRequest, conversationId)).toBe('stored');
-    const blocked = await asChat(blockedRequest, 'exec_command', {
-      cmd: IS_WINDOWS ? "Write-Output 'must-not-run'" : "printf '%s\\n' must-not-run",
-      workdir: '/workspace'
+    const offer = unifiedExecManager.offerCompletedOutput.bind(unifiedExecManager);
+    let publication: Parameters<typeof offer>[1] | undefined;
+    const published = vi.spyOn(unifiedExecManager, 'offerCompletedOutput').mockImplementation(async (...args) => {
+      publication = args[1];
+      return offer(...args);
     });
+    let blocked: Awaited<ReturnType<typeof asChat>>;
+    try {
+      blocked = await asChat(blockedRequest, 'exec_command', {
+        cmd: IS_WINDOWS ? "Write-Output 'must-not-run'" : "printf '%s\\n' must-not-run",
+        workdir: '/workspace'
+      });
+      // A later invocation acknowledges only a successfully published page whose completion
+      // timestamp is strictly earlier. Observe that boundary instead of retrying commands.
+      await vi.waitFor(() => {
+        expect(publication?.failed).toBe(false);
+        expect(publication?.completedAt).toBeTypeOf('number');
+        expect(Date.now()).toBeGreaterThan(publication!.completedAt!);
+      });
+    } finally {
+      published.mockRestore();
+    }
     expect(failed(blocked)).toBe(true);
     expect(textOf(blocked)).toContain('EXEC_RESULTS_UNREAD');
     for (const sessionId of sessionIds) expect(textOf(blocked)).toContain(String(sessionId));

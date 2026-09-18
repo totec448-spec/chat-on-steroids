@@ -709,6 +709,17 @@
   let userSendReceipt = null;
   const pageViewChecks = new Set(); // Existing readiness waits also observe accepted MAIN-world snapshots.
   const sendText = (value) => String(value || '').replace(/\s+/g, '');
+  /** Undo page-readback punctuation escapes only; never rewrite authored Send text. */
+  const unescapeMarkdown = (value) => String(value || '').replace(/\\([!-\/:-@\[-`{-~])/g, '$1');
+  /** The leading continuation marker, as typed or as the composer escaped it. */
+  const markedAs = (value) => {
+    const text = String(value || '');
+    // Bounded to the marker's own neighbourhood: the brief behind it is prose the page may
+    // legitimately escape, and nothing here has any business rewriting that.
+    const match = text.match(CONTINUATION_MARKER) || text.slice(0, 200).match(CONTINUATION_MARKER_ESCAPED);
+    if (match) match[2] = unescapeMarkdown(match[2]);
+    return match;
+  };
   /** Receipt, transcript and presentation share the same exact native user source. */
   function userMessageSource(message) {
     if (!message || message.role !== 'user' || !message.id || !message.node?.isConnected ||
@@ -736,6 +747,19 @@
     const source = userMessageSource(message);
     return source !== null && sendText(source.text) === sendText(expected);
   }
+  /** An app-owned bootstrap may return escaped. Ordinary input authorization keeps
+   * matchesSubmittedUser; native message identity and document lifetime still own the receipt. */
+  function matchesSubmittedBootstrap(message, expected) {
+    if (matchesSubmittedUser(message, expected)) return true;
+    if (typeof expected !== 'string' || expected.length > 240000) return false;
+    const source = userMessageSource(message);
+    if (source === null) return false;
+    const actualMarker = markedAs(source.text), expectedMarker = expected.match(CONTINUATION_MARKER);
+    // A marker-only escape must not consume literal path/glob backslashes in the brief.
+    if (actualMarker && expectedMarker && actualMarker[1] === expectedMarker[1] && actualMarker[2] === expectedMarker[2] &&
+        sendText(source.text.slice(actualMarker[0].length)) === sendText(expected.slice(expectedMarker[0].length))) return true;
+    return sendText(unescapeMarkdown(source.text)) === sendText(expected);
+  }
   // A first fresh route may await authored evidence. A second route (including an
   // observed return to New Chat) revokes this send; text proof is not its lifetime.
   function submittedSendLifetime(target, startedEpoch = epoch) {
@@ -757,8 +781,9 @@
       return !revoked;
     };
   }
-  function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser: matchesSubmittedUser,
+  function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
+                             matchesUser = matchesSubmittedUser) {
+    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -1640,7 +1665,7 @@
     fiberRows = new Map();
     fiberTurns = new Map();
     fiberScanToken = null;
-    fiberPresent = false;
+    fiberPresent = null;
   }
 
   const stoppedAppCommands = new Set();
@@ -2052,7 +2077,7 @@
         // the stable ChatGPT-authored identity. This is the reload path after the URL command
         // marker has already disappeared. reconcileContinuationMarker() releases the gate on
         // the app's answer, committed or refused; only an unreachable app keeps it shut.
-        const continuation = text.match(CONTINUATION_MARKER);
+        const continuation = markedAs(text);
         // The app's settled disposition outlives this DOM row. A remount or a later
         // quotation of its marker cannot turn a committed chat back into a shadow.
         const settledContinuation = continuation && [...reconciledContinuations.keys()].some(
@@ -2986,7 +3011,7 @@
   let fiberScanToken = null;
   let fiberAsking = null;
   /** Off until the helper answers once, so a browser without it behaves exactly as before. */
-  let fiberPresent = false;
+  let fiberPresent = null; // Unknown until this document gets a reply or a definitive repair failure.
   /** Avoid turning a missing MAIN-world helper into one script injection per observer tick. */
   let fiberRepairAt = -Infinity;
   let fiberRepairing = null;
@@ -3694,6 +3719,8 @@
       const repair = fiberRepairing ? await fiberRepairing : null;
       if (repair && repair.ok === true) answer = await askFiber();
       if (answer === null) {
+        if (!alive || epoch !== askedEpoch || conversationId !== askedConversation ||
+            (askedConversation && CLF_DOM.conversationId() !== askedConversation)) return false;
         // `unknown_message` is compatibility with an older service worker during extension
         // update. It has not actually tested the helper, so preserve the last proof until the
         // update recovery path installs the matching worker. Every current worker returns a
@@ -3745,7 +3772,7 @@
     // id that can join the call to B. A marker-shaped string alone is never authority: the app
     // must accept the exact destination message first, or the provisional answer is discarded.
     const newestUser = [...CLF_DOM.messages()].reverse().find((message) => message.role === 'user');
-    const currentContinuationMarker = String(newestUser?.text || '').match(CONTINUATION_MARKER);
+    const currentContinuationMarker = markedAs(newestUser?.text);
     let committedResumeOwner = null;
     if (currentContinuationMarker?.[1] === 'RESUME') {
       const resumeEntry = markedContinuationTurns(answer.turns).find(
@@ -5595,7 +5622,8 @@
       if (!presented.length) return;
       const leftPlacement = left ? nativeAnchors.get(left.seq) : null;
       const rightPlacement = right ? nativeAnchors.get(right.seq) : null;
-      if (leftPlacement) gaps.push({ key, entries: presented, ...leftPlacement, before: false });
+      if (leftPlacement) gaps.push({ key, entries: presented, ...leftPlacement, before: false,
+        interim: left.final !== true && left.state !== 'final' });
       else if (rightPlacement) gaps.push({ key, entries: presented, ...rightPlacement, before: true });
     };
     for (const entry of rendered) {
@@ -5611,32 +5639,39 @@
     return { chunks: gaps, anchors };
   }
 
-  /** Narrow exception for the reviewed closed Worked fold shape. */
+  /** Public progress must remain readable when the provider unmounts its closed activity
+   * fold, including an interrupted response that never produced a final answer. */
   function collapsedFoldPlacement(turn, rendered, nativeAnchors) {
     const fold = typeof CLF_DOM.collapsedActivityFold === 'function' ? CLF_DOM.collapsedActivityFold(turn) : null;
     if (!fold) return null;
     const finals = rendered.filter(entry => entry.kind === 'assistant_message' &&
       (entry.final === true || entry.state === 'final'));
-    if (finals.length !== 1) return null;
-    const finalPlacement = nativeAnchors.get(finals[0].seq);
-    if (!finalPlacement || finalPlacement.turn !== turn || fold.clip.contains(finalPlacement.anchor)) return null;
-    const order = fold.clip.compareDocumentPosition(finalPlacement.anchor);
-    if (!(order & Node.DOCUMENT_POSITION_FOLLOWING)) return null;
+    if (finals.length > 1) return null;
+    const finalPlacement = finals.length ? nativeAnchors.get(finals[0].seq) : null;
+    // A recorded final still needs its exact native renderer. Absence of a final is valid;
+    // losing the anchor of a known final is not permission to reconstruct or hide it.
+    if (finals.length && (!finalPlacement || finalPlacement.turn !== turn ||
+        fold.clip.contains(finalPlacement.anchor) ||
+        !(fold.clip.compareDocumentPosition(finalPlacement.anchor) & Node.DOCUMENT_POSITION_FOLLOWING))) return null;
     const nonFinalAuthored = rendered.filter(entry => entry.kind === 'assistant_message' &&
       entry !== finals[0] && entry.final !== true && entry.state !== 'final');
     // An expanded or transitioning fold with any exact public prose still belongs to ChatGPT's
     // native renderer. The text-only projection exists only for the stable closed shape where
-    // every non-final authored anchor is absent and the exact native final remains outside.
+    // every non-final authored anchor is absent. Any final remains in its native renderer.
     if (nonFinalAuthored.some(entry => nativeAnchors.get(entry.seq))) return null;
+    if (!finalPlacement && !nonFinalAuthored.length) return null;
     const entries = rendered.filter(entry =>
       PRESENTED_STREAM_KINDS.has(entry.kind) ||
+      (entry.kind === 'page_tool' && entry.messageId && entry.label && !fiberBusyCaption(entry.label)) ||
       (entry.kind === 'assistant_message' && entry !== finals[0] && entry.final !== true &&
         entry.state !== 'final' && typeof entry.text === 'string' && entry.text.length > 0)
     );
-    if (!entries.length) return { chunks: [], anchors: [finalPlacement.anchor] };
+    const anchors = [fold.clip, ...(finalPlacement ? [finalPlacement.anchor] : [])];
+    if (!entries.length) return { chunks: [], anchors, fold };
+    const owner = finals[0] || nonFinalAuthored[0];
     return {
-      chunks: [{ key: `fold:${finals[0].messageId || finals[0].seq}`, entries, anchor: fold.clip, before: false }],
-      anchors: [fold.clip, finalPlacement.anchor]
+      chunks: [{ key: `fold:${owner.messageId || owner.seq}`, entries, anchor: fold.clip, before: false }],
+      anchors, fold
     };
   }
 
@@ -5680,16 +5715,16 @@
 
   /** Native status captions belonging to this proven, visibly reconstructed response. */
   function coveredNativeSummaries(turn, chunks, websiteRender) {
-    // Response ownership alone is insufficient. At least one canonical local call must be in
-    // a chunk that this paint actually mounted; an unplaced call elsewhere in the response
-    // cannot make a progress-only root suppress the provider's only visible execution row.
-    if (!websiteRender || !(chunks || []).some(chunk =>
-      (chunk.entries || []).some(entry => entry.kind === 'tool_call'))) return { summaries: [], thoughts: [] };
-    const summaries = CLF_DOM.activitySummaryRows(turn);
+    if (!websiteRender) return { summaries: [], thoughts: [] };
+    const entries = (chunks || []).flatMap(chunk => chunk.entries || []);
+    const summaries = entries.some(entry => entry.kind === 'tool_call') ? CLF_DOM.activitySummaryRows(turn) : [];
+    // Public thinking updates are content. A local tool alone cannot replace one. Keep
+    // native updates when expanded; hide only exact copies of a mounted closed-fold update.
+    const projectedThoughts = new Set(entries.filter(entry => entry.kind === 'page_tool').map(entry => entry.messageId));
     const descriptor = fiberTurnFor(turn);
     if (!descriptor || !Array.isArray(descriptor.thoughtNotifications)) return { summaries, thoughts: [] };
     const ids = descriptor.thoughtNotifications
-      .filter(entry => entry?.kind === 'thought_notification' && entry.messageId)
+      .filter(entry => entry?.kind === 'thought_notification' && projectedThoughts.has(entry.messageId))
       .map(entry => entry.messageId);
     return { summaries, thoughts: ids.length ? CLF_DOM.thoughtActivityRows(turn, fiberScanToken, descriptor.index, ids) : [] };
   }
@@ -5891,7 +5926,7 @@
         streamRootsByKey.set(streamKey, record);
         for (const node of nodes) if (node.dataset) node.dataset.clfStreamKey = streamKey;
         CLF_DOM.replaceActivity(turn, null, true);
-        CLF_DOM.hideActivity(turn, []);
+        CLF_DOM.hideActivity(turn, [], [], [], websiteRender ? placement : null);
         painted.add(streamKey);
         continue;
       }
@@ -5943,14 +5978,17 @@
         turn,
         coveredNativeBlocks(turn, gaps),
         nativeSummaries.thoughts,
-        nativeSummaries.summaries
+        nativeSummaries.summaries,
+        websiteRender ? placement : null
       );
       painted.add(streamKey);
     }
     for (const [key, record] of streamRootsByKey) {
       if (seenStreamKeys.has(key)) continue;
-      if (Date.now() - record.completeAt >= REPLACEMENT_GRACE_MS ||
-          ![...record.chunks.values(), ...record.anchors].some(node => node.isConnected)) releaseRoot(key);
+      // React can replace a section one paint before Fiber identifies its successor.
+      // Keep detached disclosure state for the existing bounded grace; reclaiming
+      // still requires exact call/message proof in remountedStreamRecord above.
+      if (!enabled || Date.now() - record.completeAt >= REPLACEMENT_GRACE_MS) releaseRoot(key);
     }
     renderRepairNotices(sourceTurns);
     restorePresentationViewport(viewportAnchor);
@@ -6024,7 +6062,13 @@
     const forEpoch = epoch;
     const current = () => alive && conversationId === forId && epoch === forEpoch;
     try {
-      const reply = await ask({ type: 'activity', conversationId, since });
+      const reply = await ask({
+        type: 'activity',
+        conversationId,
+        since,
+        // Initial/loading state is unknown; only a completed scan or repair can report health.
+        fiber: fiberPresent === null ? undefined : !fiberPresent ? 'absent' : fiberTurns.size === 0 ? 'empty' : 'ok'
+      });
       if (!reply || reply.ok !== true || !reply.data) {
         // Keep waiting only for failures that can genuinely mean "the local app/worker is
         // not reachable yet". A structured application refusal is an answer to the identity
@@ -8691,6 +8735,8 @@
   }
 
   const CONTINUATION_MARKER = /^\s*\[\[CLF-(HANDOFF|RESUME):([A-Za-z0-9_-]{16,64})\]\](?:\s|$)/;
+  // Same grammar as src/shared/session.ts; letters and digits cannot carry Markdown escapes.
+  const CONTINUATION_MARKER_ESCAPED = /^\s*(?:\\?\[){2}CLF\\?-(HANDOFF|RESUME)\\?:((?:[A-Za-z0-9]|\\?[_-]){16,64})(?:\\?\]){2}(?:\s|$)/;
   const continuationReconciliations = new Map();
   /**
    * Proof key → how the app answered the marker: `committed` is ownership proof for the
@@ -8737,7 +8783,7 @@
       const turn = turns[index];
       for (const message of turn.messages || []) {
         if (message.role !== 'user' || message.stable !== true) continue;
-        const match = String(message.rawText || '').match(CONTINUATION_MARKER);
+        const match = markedAs(message.rawText);
         if (!match) continue;
         const key = `${match[1]}:${match[2]}`;
         const marked = {
@@ -10157,7 +10203,7 @@
       if (acknowledged?.ok !== true || acknowledged.data?.ok === false || !bootstrapDraft.current()) return;
       const receipt = await waitPageView(() => {
         const latest = CLF_DOM.messages().filter(message => message.role === 'user').at(-1);
-        return latest?.id !== priorBootstrapUser && matchesSubmittedUser(latest, boot.text);
+        return latest?.id !== priorBootstrapUser && matchesSubmittedBootstrap(latest, boot.text);
       }, () => !attempt?.cancelled && sendingBootstrap(), 15000);
       if (receipt) await bootstrapDraft.clear();
     };
@@ -10211,7 +10257,7 @@
       if (!found || (conversationId && conversationId !== found) ||
           (acceptedBootstrap && (acceptedBootstrap.conversationId !== found || acceptedBootstrap.epoch !== epoch))) return null;
       const message = CLF_DOM.messages().find(message => message.role === 'user' &&
-        matchesSubmittedUser(message, expectedText));
+        matchesSubmittedBootstrap(message, boot.text));
       if (!message || (acceptedBootstrap && acceptedBootstrap.messageId !== message.id)) return null;
       acceptedBootstrap ||= { conversationId: found, epoch, messageId: message.id };
       return found;
@@ -10241,7 +10287,10 @@
     // Record it before send() clicks so reportMessages can open B's turn immediately instead
     // of waiting until Fiber eventually exposes the first connector request.
     rememberUserSend();
-    if (!(await sendSubmittedText(() => !attempt?.cancelled && sendingBootstrap(), false))) {
+    // The bootstrap's own receipt, which allows for the composer's Markdown escaping — see
+    // matchesSubmittedBootstrap. Every other caller keeps the exact comparison.
+    if (!(await sendSubmittedText(() => !attempt?.cancelled && sendingBootstrap(), false, null, null,
+                                  matchesSubmittedBootstrap))) {
       // Once send() was invoked, a missing/cleared draft cannot prove that no click
       // happened. Only the exact pre-click check above may release the dispatch.
       if (boot.type === 'resume') {
@@ -10628,6 +10677,15 @@
     const target = conversationId, forEpoch = epoch;
     const current = () => alive && target === message.conversationId && conversationId === target &&
       CLF_DOM.conversationId() === target && epoch === forEpoch;
+    // An exact compaction ticket may recover its own busy page. It still cannot
+    // discard a draft or cross a new user message while main is granting the claim.
+    if (message.draftOnly === true) {
+      const questionId = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id ?? null;
+      return { safe: current() && !desktopInputBusy &&
+        !(CLF_DOM.composer()?.textContent || '').trim() && !CLF_DOM.hasComposerAttachments() &&
+        (!message.expected || message.expected.questionId === questionId),
+        revision: turnProgressRevision, turnId, questionId };
+    }
     if (!current() || userStopped) return { safe: false };
     const source = currentAssistantTurn();
     if (source) await refreshFiber({ pageTurnId: source.id, pageTurn: source.node || source.nodes?.[0] });

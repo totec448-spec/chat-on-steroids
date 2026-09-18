@@ -47,7 +47,7 @@ import type {
 import {
   ATTRIBUTION_LABELS,
   CHAT_ACTIVE_MS,
-  CONTINUATION_MARKER,
+  continuationMarkerOf,
   TURN_OUTCOME_LABELS,
   foldProgress,
   toolCallSummary
@@ -2123,8 +2123,8 @@ type TimelineItem = { kind: 'event'; event: SessionEvent } | { kind: 'compaction
 
 function continuationMarker(event: SessionEvent): { kind: 'HANDOFF' | 'RESUME'; token: string } | null {
   if (event.kind !== 'user_message') return null;
-  const match = CONTINUATION_MARKER.exec(event.message.text);
-  return match ? { kind: match[1] as 'HANDOFF' | 'RESUME', token: match[2]! } : null;
+  const match = continuationMarkerOf(event.message.text);
+  return match ? { kind: match.kind, token: match.token } : null;
 }
 
 /**
@@ -2289,7 +2289,10 @@ function compactionRow(block: CompactionBlock, previous?: HTMLElement): HTMLElem
   if (block.prompt) {
     raw.append(el('h4', '', () => t("Brief request")));
     // The routing marker is the app's, not the user's; the card already says what this is.
-    const request = (userPromptText(block.prompt.message.text) ?? block.prompt.message.text).replace(CONTINUATION_MARKER, '');
+    const prompt = userPromptText(block.prompt.message.text) ?? block.prompt.message.text;
+    // The marker is stripped in whichever form the page recorded it; `marker` is the exact
+    // text that matched, so an escaped one is removed as completely as a clean one.
+    const request = prompt.replace(continuationMarkerOf(prompt)?.marker ?? '', '');
     raw.append(textBlock('pre', request, block.prompt.message.truncated, block.prompt.message.chars));
   }
   if (block.brief) {
