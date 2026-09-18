@@ -614,9 +614,10 @@ describe('durable user input ownership', () => {
     await listInputs();
     expect(record).toHaveBeenCalledTimes(1);
   });
-  it('legacy queue: offers images in the held turn, bounds each offer to four, and preserves the receipt boundary', async () => {
+  it('legacy queue: offers images in the held turn, bounds each offer to ten, and preserves the receipt boundary', async () => {
     binding.activeTurnId = 'held-turn';
-    const images = Array.from({ length: 4 }, (_, index) => ({ name: `${index}.webp`, dataUrl: 'data:image/webp;base64,YQ==' }));
+    const images = Array.from({ length: 10 }, (_, index) => ({ name: `${index}.webp`, dataUrl: 'data:image/webp;base64,YQ==' }));
+    expect(inputArgs.safeParse(input({ images: [...images, images[0]!] })).success).toBe(false);
     const first = await seedLegacyInput(input({ images }));
     await seedLegacyInput(input({ images: images.slice(0, 1) }));
     expect(await hasEligibleToolInput(sessionId)).toBe(true);
@@ -630,6 +631,13 @@ describe('durable user input ownership', () => {
     expect(next).toHaveLength(1);
     expect(next[0]?.images).toHaveLength(1);
     expect((await listInputs()).find(row => row.id === first.id)?.state).toBe('sent');
+  });
+  it('retains the image byte budget when ten individually bounded images exceed it', async () => {
+    binding.activeTurnId = 'held-turn';
+    const images = Array.from({ length: 10 }, (_, index) => ({ name: `${index}.webp`, dataUrl: 'data:image/webp;base64,' + 'A'.repeat(512000) }));
+    expect(inputArgs.safeParse(input({ images })).success).toBe(true);
+    await expect(enqueueInput(input({ images, delivery: 'tool' }))).rejects.toThrow('The image queue is full');
+    expect(await listInputs()).toEqual([]);
   });
   it('keeps input in tool delivery during a proven active turn even when the browser looks idle', async () => {
     binding.activeTurnId = 'real-turn';
@@ -1724,7 +1732,7 @@ describe('one silence delivery for a correction and its next checkpoint', () => 
     const image = { name: 'shape.webp', dataUrl: 'data:image/webp;base64,AAAA' };
     const { head, correction } = kind === 'text'
       ? await bundle({ text: 'x'.repeat(90_000) }, { text: 'y'.repeat(10_000) })
-      : await bundle({ images: [image, image, image, image] }, { images: [image] });
+      : await bundle({ images: Array(10).fill(image) }, { images: [image] });
     const claim = await claimBrowserInput(correction.id, 'page', binding.conversationId, true);
     expect(claim?.text).toBe(correction.text);
     expect(claim?.companionInputId).toBeUndefined();

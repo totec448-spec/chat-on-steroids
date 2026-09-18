@@ -255,4 +255,19 @@ describe('the order a recorded turn is read in', () => {
     ];
     expect(reading(rows)).toEqual(['turn_start@100', 'revised assistant', 'tool_call@120', 'turn_end@140']);
   });
+
+  it('applies a newly proved response origin to already resident rows of that same local turn', () => {
+    const rows = [
+      { ...row(1, 100, 'turn_start', 'document-a'), turnOrigin: 1 },
+      { ...row(2, 110, 'tool_call', 'document-a'), turnOrigin: 1 },
+      { ...row(3, 120, 'turn_start', 'document-b'), turnOrigin: 3 },
+      { ...row(4, 125, 'assistant_message', 'document-b', 'resident interim'), turnOrigin: 3 },
+      // Only this fresh delta knows that both documents observed one response.
+      { ...row(5, 130, 'tool_call', 'document-b'), turnOrigin: 1 },
+      { ...row(6, 140, 'assistant_message', 'document-a', 'native final'), turnOrigin: 1, final: true }
+    ];
+    const output = chronological(rows);
+    expect(output.at(-1)?.label).toBe('native final');
+    expect(output.findIndex(event => event.label === 'resident interim')).toBeLessThan(output.findIndex(event => event.seq === 5));
+  });
 });
