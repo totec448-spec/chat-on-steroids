@@ -53,4 +53,6 @@ jobs:
       - name: Exercise published plugins on this OS
         env:
           COS_PLUGIN_LIVE_TEST: '1'
-        run: npx vitest run test/plugins-live-proxy.test.ts test/plugins-python-live.test.ts test/plugins-catalog-live.test.ts
+        # These suites install full npm/Python environments and immediately start
+        # their servers. Give each cold start the runner without competing installs.
+        run: npx vitest run --maxWorkers=1 test/plugins-live-proxy.test.ts test/plugins-python-live.test.ts test/plugins-catalog-live.test.ts
