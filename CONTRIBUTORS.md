@@ -70,6 +70,14 @@ escapes before letters or digits. Recovery handout/result logging from
 blind-reload detector and request-based attempt counter are not. This is an adapted source
 integration, not a claim that those seven PR branches were merged unchanged.
 
+The follow-up review on September 18 also adapts [@Maximapple](https://github.com/Maximapple)'s
+compaction for an oversized chat whose page no longer reports a turn
+([#295](https://github.com/totec448-spec/chat-on-steroids/pull/295)) and the fifteen-second
+health-reporting grace in [#284](https://github.com/totec448-spec/chat-on-steroids/pull/284).
+Compaction uses the existing exactly attributed MCP activity grant and rechecks it after
+storage reads. Health observations share one bounded map, including unannounced first sightings.
+The stacked blind-page reload subsystem from #280 is not added.
+
 ## Reports, review and proposed work
 
 [@raxy24](https://github.com/raxy24)'s report in
