@@ -866,7 +866,14 @@ function paintGoalProgress(): void {
   const mode = $<HTMLSelectElement>('chatAutomation').value === 'loop' ? t('Loop') : t('Goal');
   labels.settling = `${mode} · ${wait?.reason === 'native-busy' ? t('ChatGPT resumed work · waiting before retry') : wait?.reason === 'silence' ? t('Waiting before recovery reload') : wait?.reason === 'quiet' ? t('Waiting for tool inactivity') :
     wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : t('Answer settling')}`;
-  row.hidden = !phase; if (!phase) return;
+  // The dock already describes this same silence/listening deadline. Keep the
+  // Loop/Goal task controls, but do not present its shared wait as another action.
+  const sharedRecoveryWait = phase === 'settling' && wait?.until !== undefined &&
+    ['silence', 'listening', 'native-busy', 'quiet'].includes(wait.reason) && controlledRecovery.some(countdown =>
+      ['silence', 'post-reload', 'native-busy', 'thinking-failed'].includes(countdown.kind) &&
+      countdown.deadline === wait.until && (countdown.visibleAt ?? 0) <= Date.now());
+  row.hidden = !phase || sharedRecoveryWait;
+  if (row.hidden) { row.replaceChildren(); row.setAttribute('aria-busy', 'false'); return; }
   const busy = ['settling', 'saving', 'preparing', 'generating', 'retrying', 'sending', 'answering', 'browser', 'queued', 'ready'].includes(phase) && !error;
   row.setAttribute('aria-busy', String(busy));
   const marker = el('span', busy ? 'session-status is-working' : 'session-status');
@@ -2657,7 +2664,12 @@ function paintRecoveryStatus(): boolean {
   const recovery = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'progress' && event.progressId?.startsWith('browser-repair:')) : undefined;
   const sessionId = selectedId;
   const revision = recovery?.kind === 'progress' ? JSON.stringify([recovery.progressId, recovery.time, recovery.message.text]) : '';
-  host.hidden = !recovery || Date.now() - recovery.time > 120000 || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision);
+  // Once the next question/turn is recorded, the old reload remains history.
+  // Removing the live Continue countdown must not revive its earlier receipt.
+  const advanced = recovery && events.some(event => positionOf(event) > positionOf(recovery) &&
+    ((event.kind === 'turn_start' && event.turnId !== recovery.turnId) ||
+      (event.kind === 'user_message' && event.source === 'extension')));
+  host.hidden = !recovery || !!advanced || Date.now() - recovery.time > 120000 || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision);
   host.replaceChildren();
   if (!host.hidden && recovery?.kind === 'progress') {
     const row = el('div', 'recovery-notice');
@@ -3523,7 +3535,7 @@ async function refreshInputQueue(): Promise<void> {
   const queueSession = selectedId;
   const reorder = async (from: string, to: string, after: boolean) => {
     if (!queueSession || selectedId !== queueSession) return;
-    const ids = queuedTasks.filter(row => row.state === 'queued').map(row => row.id);
+    const ids = queuedTasks.filter(row => row.state === 'queued' && !row.recovery).map(row => row.id);
     if (from === to || !ids.includes(from) || !ids.includes(to)) return;
     ids.splice(ids.indexOf(from), 1);
     ids.splice(ids.indexOf(to) + Number(after), 0, from);
@@ -3540,10 +3552,29 @@ async function refreshInputQueue(): Promise<void> {
     if (entry.state === 'queued' && existing?.classList.contains('is-editing')) return existing;
     const card = el('div', 'queued-input'); card.dataset.inputId = entry.id;
     if (projectedIds.has(entry.id)) ui(card, 'aria-label', () => t("Plan stage · waiting for the first message to be sent"));
-    const label = el('span', 'queue-label', entry.text); ui(label, 'title', () => `${entry.state === 'queued' ? (entry.mode === 'after-turn' ? t("After the next completed answer") : t("At Session finish or after a completed answer")) : t("Awaiting receipt")} · ${entry.text}`);
+    if (entry.recovery) ui(card, 'aria-label', () => t('Automatic Continue'));
+    const label = el('span', 'queue-label', entry.recovery ? () => `${t('Automatic Continue')} · ${entry.text}` : entry.text);
+    ui(label, 'title', () => `${entry.recovery
+      ? t('Resumes without a final answer. If ChatGPT is still generating, the silent turn is stopped before Continue is sent.')
+      : entry.state === 'queued' ? (entry.mode === 'after-turn' ? t("After the next completed answer") : t("At Session finish or after a completed answer")) : t("Awaiting receipt")} · ${entry.text}`);
     label.dir = 'auto';
-    card.append(icon('i-clock'), label);
+    card.append(icon(entry.recovery ? 'i-pulse' : 'i-clock'), label);
     if (entry.state === 'queued') {
+      const retireCard = () => { card.remove(); taskList.hidden = taskList.childElementCount === 0; };
+      const cancel = dockAction(() => entry.recovery ? t('Cancel automatic Continue') : t("Remove queued task"), 'i-trash', () => {});
+      cancel.onclick = async () => {
+        if (cancel.disabled || !card.isConnected || selection !== selectionGeneration) return;
+        cancel.disabled = true;
+        const removed = await run(api.cancelInput(entry.id));
+        if (!card.isConnected || selection !== selectionGeneration) return;
+        if (removed === true || removed === false) {
+          inputQueueGeneration++;
+          if (removed) pendingComposerInputs = pendingComposerInputs.filter(row => row.id !== entry.id);
+          retireCard();
+          void refreshInputQueue();
+        } else cancel.disabled = false;
+      };
+      if (entry.recovery) { card.append(cancel); return card; }
       const queueSessionSummary = sessions.find(row => row.id === selectedId);
       const modelSelection = queueSessionSummary?.selectedModel;
       if (entry.mode === 'finish' && modelSelection?.conversationId === queueSessionSummary?.conversationId && isAstraModel(modelSelection?.model, modelSelection?.reasoningEffort)) {
@@ -3582,23 +3613,9 @@ async function refreshInputQueue(): Promise<void> {
       label.onkeydown = event => {
         if (!event.altKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
         event.preventDefault();
-        const ids = queuedTasks.filter(row => row.state === 'queued').map(row => row.id);
+        const ids = queuedTasks.filter(row => row.state === 'queued' && !row.recovery).map(row => row.id);
         const next = ids[ids.indexOf(entry.id) + (event.key === 'ArrowDown' ? 1 : -1)];
         if (next) void reorder(entry.id, next, event.key === 'ArrowDown');
-      };
-      const retireCard = () => { card.remove(); taskList.hidden = taskList.childElementCount === 0; };
-      const cancel = dockAction(() => t("Remove queued task"), 'i-trash', () => {});
-      cancel.onclick = async () => {
-        if (cancel.disabled || !card.isConnected || selection !== selectionGeneration) return;
-        cancel.disabled = true;
-        const removed = await run(api.cancelInput(entry.id));
-        if (!card.isConnected || selection !== selectionGeneration) return;
-        if (removed === true || removed === false) {
-          inputQueueGeneration++;
-          if (removed) pendingComposerInputs = pendingComposerInputs.filter(row => row.id !== entry.id);
-          retireCard();
-          void refreshInputQueue();
-        } else cancel.disabled = false;
       };
       const edit = dockAction(() => t("Edit queued task"), 'i-pencil', () => {});
       edit.onclick = () => {

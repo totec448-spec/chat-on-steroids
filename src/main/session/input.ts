@@ -758,11 +758,12 @@ async function settleToolInputFromFinal(row: InputEntry): Promise<InputEntry> {
   return { ...row, state: 'sent', toolTurnId: call.turnId, messageId: `input:${row.id}`, deliveredAt: final.completedAt, historyRecorded: false };
 }
 
-/** Editing is possible only before handout; claimed text is immutable. */
+/** Editing is possible only before handout. Recovery shares delivery custody,
+ * but its frozen message and source never belong to the authored task order. */
 export function reorderQueuedInputs(sessionId: string, ids: string[]): Promise<boolean> {
   return serial(async () => {
     const current = await load();
-    const queue = current.filter(row => row.sessionId === sessionId && queuedFollowup(row) && row.state === 'queued');
+    const queue = current.filter(row => row.sessionId === sessionId && queuedFollowup(row) && !row.recovery && row.state === 'queued');
     // A stale snapshot must not move claimed input or omit newly queued work.
     if (!ids.length || ids.length !== queue.length || new Set(ids).size !== ids.length ||
         queue.some(row => !ids.includes(row.id))) return false;
@@ -790,7 +791,7 @@ export function editQueuedInput(id: string, text: string, afterTurn?: boolean): 
   return serial(async () => {
     const value = inputArgs.shape.text.parse(text);
     const current = await load();
-    const row = current.find(entry => entry.id === id && entry.state === 'queued' && queuedFollowup(entry));
+    const row = current.find(entry => entry.id === id && entry.state === 'queued' && queuedFollowup(entry) && !entry.recovery);
     if (!row) return false;
     if (current.filter(entry => !terminal(entry)).reduce((sum, entry) => sum + Buffer.byteLength(entry === row ? value : entry.text), 0) > 1024000) throw new Error('Queued messages exceed the text limit');
     await commit(current.map(entry => entry === row ? { ...row, text: value, authoredSource: 'text', ...(afterTurn === undefined ? {} : { afterTurn }), deliveryText: undefined } : entry));
