@@ -14,7 +14,7 @@ import { startMcpServer } from '../src/main/mcp/server.js';
 import { setFinishNotifier, releaseSessionFinish } from '../src/main/session/finish.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
-it('carries validated user image bytes through an exact-session MCP result and acknowledges the next same-turn call', async () => {
+it.each([1, 7])('carries %s validated images through an exact-session MCP result and acknowledges the next same-turn call', async count => {
   const directory = await makeTempDir('clf-mcp-input-image-');
   initDurableStore(directory); initSessionStore(directory); resetInputForTests();
   initConfigPath(directory);
@@ -23,7 +23,7 @@ it('carries validated user image bytes through an exact-session MCP result and a
   await fs.writeFile(path.join(directory, 'example.txt'), 'Image test');
   const endpoint = await startMcpServer(() => ({ roots: [{ name: 'workspace', path: directory }], caps: config.capabilities, readOnly: true, sessionTools: false, agentTools: false }));
   try {
-    const conversationId = randomUUID(), requestId = 'wfr_input_image_test';
+    const conversationId = randomUUID(), requestId = `wfr_input_image_test_${randomUUID()}`;
     const session = await createSession({ conversationId, title: 'Image injection test' });
     await observeSessionModel(session.id, conversationId, 'gpt-6-astra', Date.now());
     await appendEvent(session.id, { kind: 'turn_start', source: 'extension', turnId: 'held-image-turn', time: Date.now() });
@@ -31,8 +31,9 @@ it('carries validated user image bytes through an exact-session MCP result and a
     const bytes = await sharp({ create: { width: 12, height: 12, channels: 3, background: '#437b79' } }).webp().toBuffer();
     const images = [{ name: 'reference.webp', dataUrl: `data:image/webp;base64,${bytes.toString('base64')}` }];
     await validateInputImages(images);
-    const attachment = await stageInputAttachment({ name: 'reference.webp', bytes }, new Set());
-    const authored = { id: randomUUID(), sessionId: session.id, text: 'Use this image', attachments: [attachment], attachmentDelivery: 'tool' as const, mode: 'auto' as const, dueAt: 0, model: null, reasoningEffort: null };
+    const attachments = [];
+    for (let index = 0; index < count; index++) attachments.push(await stageInputAttachment({ name: `reference-${index}.webp`, bytes }, new Set()));
+    const authored = { id: randomUUID(), sessionId: session.id, text: 'Use these images', attachments, delivery: 'tool' as const, mode: 'auto' as const, dueAt: 0, model: null, reasoningEffort: null };
     const input = await enqueueInput(authored);
     expect((await enqueueInput(authored)).id).toBe(input.id);
     const injectedBytes = input.toolImages![0]!.dataUrl.split(',')[1]!;
@@ -56,9 +57,9 @@ it('carries validated user image bytes through an exact-session MCP result and a
     expect(texts.match(/Use session_finish/g)).toHaveLength(1);
     const start = first.result.content.findIndex((row: { text?: string }) => row.text?.includes('--- New instructions from the user ---'));
     const injected = first.result.content.slice(start);
-    expect(injected.map((row: { type: string }) => row.type)).toEqual(['text', 'image', 'text', 'text', 'image', 'text']);
+    expect(injected.map((row: { type: string }) => row.type)).toEqual(['text', ...Array(count).fill('image'), 'text', 'text', 'image', 'text']);
     for (const [index, entry] of [input, ...additional].entries()) {
-      expect(injected[[0, 2, 3][index]!].text).toBe((index === 0 ? '\n--- New instructions from the user ---\n' : '\n\n') + entry.text);
+      expect(injected[[0, count + 1, count + 2][index]!].text).toBe((index === 0 ? '\n--- New instructions from the user ---\n' : '\n\n') + entry.text);
       expect(texts).not.toContain(entry.id);
     }
     expect(injected.at(-1).text).toContain('about 5 minutes of final verification remain');

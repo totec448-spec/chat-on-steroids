@@ -1578,7 +1578,7 @@ var CLF_DOM = (() => {
   }
 
   /** Noninteractive native status captions have no result or action to preserve.
-   * Their owning response still needs a mounted local replacement before hiding. */
+   * The caller checks current native response identity and the Overwrite setting. */
   function activitySummaryRows(turn) {
     return safe(() => {
       const interactive = `${ACTIVITY_CONTROL}, [tabindex]:not([tabindex="-1"]), [contenteditable="true"], [aria-expanded], [aria-controls]`;

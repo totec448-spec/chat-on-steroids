@@ -282,7 +282,8 @@ app.whenReady().then(async () => {
   if (recordingAt >= 0) {
     const recordingPath = process.argv[recordingAt + 1];
     if (!recordingPath) throw new Error('--recording requires an event snapshot path');
-    const source = JSON.parse(fs.readFileSync(recordingPath, 'utf8'));
+    const recording = JSON.parse(fs.readFileSync(recordingPath, 'utf8'));
+    const source = Array.isArray(recording) ? recording : recording.events;
     assert.ok(Array.isArray(source) && source.length > 0 && source.every(row =>
       row && Number.isFinite(row.seq) && typeof row.kind === 'string'), 'Recording must contain stored events');
     const compiled = require('esbuild').transformSync(fs.readFileSync(path.join(root, 'src/shared/chronology.ts'), 'utf8'),
@@ -294,8 +295,9 @@ app.whenReady().then(async () => {
       if (row.kind === 'turn_start' && row.turnId && !turns[row.turnId]) turns[row.turnId] = {origin:positionOf(row),time:row.time};
       if (row.kind === 'turn_end' && turns[row.turnId]) turns[row.turnId].endTime = Math.max(turns[row.turnId].endTime || 0,row.time);
     }
-    const projected = projectTimeline(source, turns);
+    const projected = projectTimeline(source, recording.summary?.timelineTurns ?? turns, recording.summary?.requestTurns);
     const keys = [...new Set(chronological(projected).flatMap(row => {
+      if (row.kind === 'user_message' && row.inputId) return ['input:'+row.inputId];
       if (row.kind === 'tool_call') return [`message:tool_call\u0000${row.call.callId}`];
       return ['user_message','assistant_message'].includes(row.kind) && row.messageId
         ? [`message:${row.kind}\u0000${row.messageId}`] : [];
@@ -304,8 +306,11 @@ app.whenReady().then(async () => {
       document.getElementById('newChat').click();await frame();
       fixture.history.splice(0,fixture.history.length,...${JSON.stringify(projected)});
       fixture.inputs=[];fixture.session.events=fixture.history.length;fixture.session.updatedAt++;
+      // Use a distinct recording identity instead of reusing the synthetic history window.
+      fixture.session.id='recorded-fixture';fixture.signal();
       window.recordingOrder = new Map(${JSON.stringify(keys)}.map((key,index)=>[key,index]));
-      document.querySelector('#sessionList [data-id="history-fixture"]').click();
+      await waitFor(()=>document.querySelector('#sessionList [data-id="recorded-fixture"]'));
+      document.querySelector('#sessionList [data-id="recorded-fixture"]').click();
       await waitFor(()=>document.querySelectorAll('#timeline [data-timeline-key]').length>0);await frame();
     })()`);
     const recorded = await win.webContents.executeJavaScript(`(async()=>{
@@ -341,12 +346,17 @@ app.whenReady().then(async () => {
       if(JSON.stringify(order())!==JSON.stringify(retained)) throw new Error('Idle recording refresh reordered resident history');
       const question=[...timeline.querySelectorAll('.ev-user_message')].at(-1);
       question?.scrollIntoView({block:'center'});await frame();
-      return {sourceRows:fixture.history.length,steps,maxDrift:Math.max(0,...steps.map(step=>step.drift))};
+      return {sourceRows:fixture.history.length,residentRows:retained.length,expectedRows:recordingOrder.size,
+        missing:fixture.history.filter(row=>row.kind==='tool_call' ? !retained.some(key=>key.endsWith(row.call.callId)) :
+          ['user_message','assistant_message'].includes(row.kind) && row.messageId && !retained.some(key=>key.endsWith(row.inputId ?? row.messageId)))
+          .map(row=>({kind:row.kind,tool:row.call?.tool,seq:row.seq})),
+        steps,maxDrift:Math.max(0,...steps.map(step=>step.drift))};
     })()`);
-    assert.ok(recorded.steps.length > 0, 'The recorded transcript must exercise history paging');
     const screenshotPath = path.join(root, '.local', 'recorded-transcript-scroll.png');
     fs.mkdirSync(path.dirname(screenshotPath), {recursive:true});
     fs.writeFileSync(screenshotPath, (await win.webContents.capturePage()).toPNG());
+    assert.ok(recorded.steps.length > 0 || recorded.residentRows === recorded.expectedRows,
+      'The recorded transcript must exercise paging or already contain every canonical row: '+JSON.stringify(recorded));
     console.log(JSON.stringify({recorded,screenshot:screenshotPath},null,2));
   }
   console.log(JSON.stringify({observations,expanded,collapsedAgain,interjection,historicalRefresh,latest,refresh,bottomRefresh,shortAfter},null,2));

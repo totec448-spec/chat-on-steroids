@@ -4,7 +4,7 @@ import { REASONING_EFFORTS, workSequence } from '../../shared/session.js';
  * Tool delivery repeats under a stable message id until a later request proves receipt.
  */
 import { z } from 'zod';
-import { browserInputModel, type InputImage } from '../../shared/input.js';
+import { browserInputModel, manualInput, queuedFollowup, MAX_INPUT_IMAGES, type InputImage } from '../../shared/input.js';
 import type { SessionSummary } from '../../shared/session.js';
 import { getConfig } from '../config.js';
 import { randomUUID } from 'node:crypto';
@@ -33,7 +33,7 @@ export const inputArgs = z.object({
   /** Which existing field holds the human request, before generated workflow wrapping. */
   authoredSource: z.enum(['text', 'objective', 'none']).optional(),
   stages: z.array(z.string().trim().min(1).max(16000)).max(11).optional(),
-  images: z.array(z.object({ name: z.string().min(1).max(110), dataUrl: z.string().max(512100).regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/) })).max(4).optional(),
+  images: z.array(z.object({ name: z.string().min(1).max(110), dataUrl: z.string().max(512100).regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/) })).max(MAX_INPUT_IMAGES).optional(),
   attachments: z.array(attachmentSchema).max(20).optional(),
   /** User selected the next exact local-tool response, even before the first call. */
   delivery: z.literal('tool').optional(),
@@ -141,7 +141,7 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
   const injectionTurnId = canInject ? session.activeTurnId ?? (activity.turnId === end?.turnId ? activity.turnId ?? null : null) : null;
   const astra = session.origin?.kind !== 'worker' && session.origin?.kind !== 'helper' &&
     session.selectedModel?.conversationId === session.conversationId && isAstraModel(session.selectedModel.model, session.selectedModel.reasoningEffort);
-  const completed = !session.activeTurnId && !astra
+  const completed = !session.activeTurnId
     ? await readCompletedFinal(sessionId, session.conversationId) : null;
   const current = await getSession(sessionId);
   if (current?.conversationId !== session.conversationId || current?.activeTurnId !== session.activeTurnId)
@@ -149,11 +149,13 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
   const terminal = end?.kind === 'turn_end' && !!end.turnId && end.outcome !== 'unknown';
   const settled = (terminal && ((end.outcome === 'completed' && !activity.possible && !activity.exact) ||
     (end.outcome === 'failed' && end.reason === 'thinking_failed'))) ||
-    (!!completed && !activity.possible && !activity.exact);
+    (!astra && !!completed && !activity.possible && !activity.exact);
   const executing = inFlightToolCalls(session.conversationId) > 0;
   return { canInject, injectionTurnId, directTurn, queueAtFinish: astra && canInject && getConfig().ui.finishTool === true,
     browserAllowed: !session.activeTurnId && !activity.possible && !activity.exact && !executing && (!astra || terminal),
-    settled: settled && !executing && (session.lastToolCallAt ?? 0) <= (completed?.completedAt ?? end?.time ?? 0) };
+    // Completion already reconciles trailing same-request calls. A separate time
+    // comparison would leave the composer unsettled after the activity clock stopped.
+    settled: settled && !executing && (!!completed || (session.lastToolCallAt ?? 0) <= (end?.time ?? 0)) };
 }
 async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
   if (entry.error?.startsWith('Local chat setup failed:')) return false;
@@ -230,9 +232,6 @@ const needsHistory = (row: InputEntry): boolean => row.purpose !== 'decision' &&
 const pendingStages = (row: InputEntry): boolean => row.state === 'sent' && !!row.stages?.length && !row.stagesApplied;
 const ordered = (rows: InputEntry[]): InputEntry[] => [...rows].sort((a, b) =>
   (a.queueOrder ?? a.dueAt) - (b.queueOrder ?? b.dueAt) || a.createdAt - b.createdAt);
-// Native files convert Auto to after-turn for transport, but retain the user's
-// immediate correction intent. They remain browser-only, never tool attachments.
-const manualInput = (row: InputEntry): boolean => (row.requestedMode ?? row.mode) === 'auto' && !row.finishOwner && row.purpose !== 'decision' && row.attachmentDelivery !== 'tool';
 const companionOf = (rows: InputEntry[], row: InputEntry): InputEntry | undefined => rows.find(root => root.companionInputId === row.id);
 const sameDelivery = (root: InputEntry, row: InputEntry): boolean => row.id === root.id || row.id === root.companionInputId;
 function combinedInput(root: InputEntry, companion?: InputEntry): InputEntry {
@@ -492,8 +491,6 @@ async function prepare(entry: InputEntry, suffix = ''): Promise<InputEntry> {
     throw new Error('Prepared message exceeds the delivery limit; shorten the request or plan');
   return { ...entry, deliveryText };
 }
-/** Explicit follow-ups spend one verified completed turn; each transport elects its eligible FIFO. */
-const queuedFollowup = (row: InputEntry): boolean => !row.opening && !manualInput(row) && (row.mode === 'finish' || (row.mode === 'after-turn' && !!row.sessionId && row.purpose !== 'decision'));
 function append(current: InputEntry[], entry: InputEntry, stackDirect = false): InputEntry[] {
   if (queuedFollowup(entry)) {
     const positioned = current.filter(row => row.sessionId === entry.sessionId && queuedFollowup(row) && !terminal(row) && row.queueOrder !== undefined);
@@ -588,8 +585,8 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
     if (toolDelivery) {
       const turnId = policy?.directTurn?.id ?? policy?.injectionTurnId;
       if (!input.sessionId || input.mode !== 'auto' || finishOwner || input.stages?.length || !turnId ||
-          (input.images?.length ?? 0) + (input.attachments?.length ?? 0) > 4)
-        throw new Error('Inject up to four images into an active chat; otherwise use Send or After this turn');
+          (input.images?.length ?? 0) + (input.attachments?.length ?? 0) > MAX_INPUT_IMAGES)
+        throw new Error(`Inject up to ${MAX_INPUT_IMAGES} images into an active chat; otherwise use Send or After this turn`);
       const owner = await getSession(input.sessionId);
       if (!owner?.conversationId) throw new Error('Inject into an active chat');
       injectionOwner = { conversationId: owner.conversationId, turnId };
@@ -1388,7 +1385,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
         const messageBytes = Buffer.byteLength(message) + (inputTaken ? 2 : 0);
         const reminderBytes = reminder ? Buffer.byteLength(reminder) + 2 : 0;
         const images = [...entry.images ?? [], ...entry.toolImages ?? []];
-        if (payloadBytes + messageBytes + reminderBytes > TOOL_INPUT_TEXT_BYTES || payloadImages + images.length > 4) { payloadFull = true; return entry; }
+        if (payloadBytes + messageBytes + reminderBytes > TOOL_INPUT_TEXT_BYTES || payloadImages + images.length > MAX_INPUT_IMAGES) { payloadFull = true; return entry; }
         payloadBytes += messageBytes;
         payloadImages += images.length;
         inputTaken = true;

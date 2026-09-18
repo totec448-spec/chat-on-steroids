@@ -5,7 +5,7 @@ import { z } from 'zod';
 import sharp from 'sharp';
 import { sessionsRoot } from './store.js';
 import type { InputAttachment } from '../../shared/input.js';
-import { injectableAttachments } from '../../shared/input.js';
+import { injectableAttachments, MAX_INPUT_IMAGES } from '../../shared/input.js';
 import { normalizeInputImage } from './input-images.js';
 
 export const MAX_ATTACHMENT_BYTES = 512 * 1024 * 1024;
@@ -87,7 +87,7 @@ export function validateInputAttachments(attachments: InputAttachment[]): Promis
 /** Resolve only validated staged membership, under the same lock as pruning. */
 export function normalizeInputAttachments(attachments: InputAttachment[]) {
   const next = staging.then(async () => {
-    if (!injectableAttachments(attachments)) throw new Error('Inject up to four PNG, JPEG, WebP or GIF images');
+    if (!injectableAttachments(attachments)) throw new Error(`Inject up to ${MAX_INPUT_IMAGES} PNG, JPEG, WebP or GIF images`);
     await validate(attachments);
     const images = [];
     for (const attachment of attachments) {

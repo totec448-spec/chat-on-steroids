@@ -24,7 +24,8 @@ describe('input image byte and pixel validation', () => {
     const normalized = await normalizeInputAttachments([image]);
     expect(await sharp(Buffer.from(normalized[0]!.dataUrl.split(',')[1]!, 'base64')).metadata()).toMatchObject({ width: 1600, height: 800 });
     expect(Buffer.from(await readInputAttachmentChunk(image, 0), 'base64')).toEqual(await fs.readFile(file));
-    await expect(normalizeInputAttachments(Array(5).fill(image))).rejects.toThrow('four');
+    expect(await normalizeInputAttachments(Array(10).fill(image))).toHaveLength(10);
+    await expect(normalizeInputAttachments(Array(11).fill(image))).rejects.toThrow('10');
     await expect(normalizeInputAttachments([{ ...image, name: 'forged.png' }])).rejects.toThrow('changed');
   });
 

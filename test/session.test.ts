@@ -539,7 +539,8 @@ describe('session store', () => {
       expect(older.map(event => event.seq)).toEqual(full.filter(event => keys.has(event.seq)).map(event => event.seq));
     }
     expect((await getSession(session.id))?.activeTurnId).toBeNull();
-    expect((await getSession(session.id))?.timelineTurns?.first).toEqual({ origin: start.seq, time: 100, endTime: 180 });
+    expect((await getSession(session.id))?.timelineTurns?.first).toEqual({ origin: start.seq, time: 100,
+      endTime: 180, endOrigin: 4, questionId: 'first-question' });
     expect(await fs.readFile(path.join(folder, 'events.jsonl'), 'utf8')).toBe(journal);
   });
 
