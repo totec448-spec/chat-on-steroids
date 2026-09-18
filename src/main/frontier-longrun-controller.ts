@@ -14,6 +14,8 @@ import path from 'node:path';
 
 import { runCommand } from './exec.js';
 import {
+  FRONTIER_LONGRUN_PARENT_MODEL,
+  FRONTIER_LONGRUN_PARENT_REASONING,
   frontierLongrunParentOperationDigest,
   validateFrontierLongrunParentEnvelope,
 } from './frontier-longrun-parent-contract.js';
@@ -283,7 +285,7 @@ function strictShowPayload(value: unknown): FrontierLongrunControllerShowProject
       typeof parent.signingKeyFingerprint !== 'string' || !/^[0-9a-f]{64}$/.test(parent.signingKeyFingerprint) ||
       typeof parent.operatorIntentDigest !== 'string' || !/^[0-9a-f]{64}$/.test(parent.operatorIntentDigest) ||
       typeof parent.grantDigest !== 'string' || !/^[0-9a-f]{64}$/.test(parent.grantDigest) ||
-      parent.model !== 'gpt-6-pro' || parent.reasoning !== 'pro' ||
+      parent.model !== FRONTIER_LONGRUN_PARENT_MODEL || parent.reasoning !== FRONTIER_LONGRUN_PARENT_REASONING ||
       typeof parent.live !== 'boolean' || typeof parent.revoked !== 'boolean' ||
       typeof parent.issuedAt !== 'string' || !Number.isFinite(Date.parse(parent.issuedAt)) ||
       typeof parent.expiresAt !== 'string' || !Number.isFinite(Date.parse(parent.expiresAt))) {

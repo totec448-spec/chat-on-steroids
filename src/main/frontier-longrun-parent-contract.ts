@@ -24,7 +24,9 @@ export const FRONTIER_LONGRUN_PARENT_OPERATION_CONTRACT = 'cc_frontier_longrun_p
 export const FRONTIER_LONGRUN_PARENT_ENVELOPE_CONTRACT = 'cc_frontier_longrun_parent_operation_envelope_v1';
 export const FRONTIER_LONGRUN_PARENT_SCHEMA_VERSION = 1;
 export const FRONTIER_LONGRUN_PARENT_VERIFIER_ID = 'chat-on-steroids';
-export const FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION = 1;
+// V2 keeps the V1 field shape but changes the implicit fixed execution profile. Because this
+// value is inside both signed payloads, V1 gpt-6-pro/pro grants cannot be replayed as V2 Sol work.
+export const FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION = 2;
 export const FRONTIER_LONGRUN_PARENT_SIGNING_DOMAIN = 'nexora.cc.frontier-longrun-parent.v1:';
 
 export type FrontierLongrunParentAction = 'SESSION_CREATE' | 'LONGRUN_PROMPT' | 'LOOP_OFF' | 'SESSION_STATUS';
@@ -35,8 +37,12 @@ export const FRONTIER_LONGRUN_PARENT_MAX_TTL_SECONDS = 259_200;
 export const FRONTIER_LONGRUN_PARENT_OPERATION_MAX_TTL_SECONDS = 60;
 export const FRONTIER_LONGRUN_PARENT_MAX_SLOTS = 8;
 export const FRONTIER_LONGRUN_PARENT_MAX_TEXT_BYTES = 16_000;
-export const FRONTIER_LONGRUN_PARENT_MODEL = 'gpt-6-pro';
-export const FRONTIER_LONGRUN_PARENT_REASONING = 'pro' as const;
+/**
+ * Fixed browser execution profile for every parent-created Frontier session.
+ * Keep the provider's raw execution slug here: display/group ids are not exact model proof.
+ */
+export const FRONTIER_LONGRUN_PARENT_MODEL = 'gpt-5-6-thinking';
+export const FRONTIER_LONGRUN_PARENT_REASONING = 'xhigh' as const;
 
 export interface FrontierLongrunParentGrantV1 {
   readonly contract: typeof FRONTIER_LONGRUN_PARENT_GRANT_CONTRACT;
@@ -174,7 +180,7 @@ export function frontierLongrunParentOperationDigest(operation: FrontierLongrunP
 export function validateFrontierLongrunParentGrant(value: unknown): FrontierLongrunParentGrantV1 | null {
   if (!isPlainObject(value) || !hasExactKeys(value, GRANT_KEYS)) return null;
   if (value['contract'] !== FRONTIER_LONGRUN_PARENT_GRANT_CONTRACT || value['schemaVersion'] !== 1 ||
-      value['verifierId'] !== FRONTIER_LONGRUN_PARENT_VERIFIER_ID || value['verifierContractVersion'] !== 1 ||
+      value['verifierId'] !== FRONTIER_LONGRUN_PARENT_VERIFIER_ID || value['verifierContractVersion'] !== FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION ||
       !isRemoteSteeringId(value['grantId']) || !isRemoteSteeringIdentifier(value['missionId']) ||
       !isRemoteSteeringDigest(value['missionDigest']) || value['maxSlots'] !== FRONTIER_LONGRUN_PARENT_MAX_SLOTS ||
       !isRemoteSteeringTimestamp(value['issuedAt']) || !isRemoteSteeringTimestamp(value['expiresAt']) ||
@@ -187,7 +193,7 @@ export function validateFrontierLongrunParentGrant(value: unknown): FrontierLong
 export function validateFrontierLongrunParentOperation(value: unknown): FrontierLongrunParentOperationV1 | null {
   if (!isPlainObject(value) || !hasExactKeys(value, OPERATION_KEYS)) return null;
   if (value['contract'] !== FRONTIER_LONGRUN_PARENT_OPERATION_CONTRACT || value['schemaVersion'] !== 1 ||
-      value['verifierId'] !== FRONTIER_LONGRUN_PARENT_VERIFIER_ID || value['verifierContractVersion'] !== 1 ||
+      value['verifierId'] !== FRONTIER_LONGRUN_PARENT_VERIFIER_ID || value['verifierContractVersion'] !== FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION ||
       !isRemoteSteeringId(value['operationId']) || !isRemoteSteeringId(value['grantId']) ||
       !isRemoteSteeringDigest(value['grantDigest']) || !isRemoteSteeringDigest(value['missionDigest']) ||
       typeof value['slot'] !== 'number' || !Number.isSafeInteger(value['slot']) || value['slot'] < 1 || value['slot'] > FRONTIER_LONGRUN_PARENT_MAX_SLOTS ||
@@ -235,7 +241,7 @@ export function frontierLongrunParentOperationGrantMismatch(
 export function validateFrontierLongrunParentEnvelope(value: unknown): FrontierLongrunParentOperationEnvelopeV1 | null {
   if (!isPlainObject(value) || !hasExactKeys(value, ENVELOPE_KEYS)) return null;
   if (value['contract'] !== FRONTIER_LONGRUN_PARENT_ENVELOPE_CONTRACT || value['schemaVersion'] !== 1 ||
-      value['verifierId'] !== FRONTIER_LONGRUN_PARENT_VERIFIER_ID || value['verifierContractVersion'] !== 1 ||
+      value['verifierId'] !== FRONTIER_LONGRUN_PARENT_VERIFIER_ID || value['verifierContractVersion'] !== FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION ||
       !isRemoteSteeringDigest(value['signingKeyFingerprint'])) return null;
   const grant = validateFrontierLongrunParentSignedGrant(value['grant']);
   const operation = validateFrontierLongrunParentSignedOperation(value['operation']);
