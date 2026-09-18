@@ -29,14 +29,14 @@ app.whenReady().then(async () => {
       startedAt:1,updatedAt:1,endedAt:null,events:0,userMessages:0,toolCalls:0,lastToolCallAt:null,
       processExitNonzero:0,toolRejected:0,toolInternalErrors:0,errors:0,estimatedTokens:0,contextTokens:0,
       lastHandoffId:null,lastHandoffAt:null,lastTurnOutcome:null,activeTurnId:'fixture-turn',agents:[],origin:null};
-    window.queueFixture={inputs:[],sent:[],files:[],session};
+    window.queueFixture={inputs:[],sent:[],files:[],session,controls:{}};
     const live=window.queueFixture;
     window.api=new Proxy({
       getState:()=>ok(state),getLog:()=>ok([]),listProjects:()=>ok([]),
       getSwarm:()=>ok({running:false,agents:[],maxWorkers:2,pendingReports:0}),
       listSessions:()=>ok({sessions:[session],activeId:null,pressure:[]}),
       getSession:()=>ok({summary:session,events:[],total:0,nextFrom:0}),
-      getSessionControls:()=>ok({sessionId:session.id,activeTurnId:'fixture-turn',canInject:true,automation:'off',objective:''}),
+      getSessionControls:()=>ok({sessionId:session.id,activeTurnId:'fixture-turn',canInject:true,automation:'off',objective:'',...live.controls}),
       getChatModels:()=>ok({state:'ready',observedAt:Date.now(),models:[{id:'gpt-5.6-sol',label:'GPT-5.6 Sol',efforts:['high']}]}),
       listInputs:()=>ok(structuredClone(live.inputs)),listPausedHelpers:()=>ok([]),
       onSessionChanged:fn=>{live.notify=fn;return ()=>{}},chooseFiles:()=>ok(live.files),
@@ -111,6 +111,46 @@ app.whenReady().then(async () => {
     await wait('!!document.querySelector("#inputQueue [data-input-id=\\"deferred-upload\\"] [aria-label=\\"Cancel delivery\\"]")');
     assert.equal(await js('document.getElementById("finishQueue").hidden'), true); checks.push('deferred upload remains visible and cancellable');
     await click('#inputQueue [aria-label="Cancel delivery"]');
+    await js(`(() => {
+      const deadline=Date.now()+60_000;
+      queueFixture.controls={automation:'loop',objective:'Finish the requested work',goalWait:{reason:'listening',until:deadline},
+        recovery:[{kind:'post-reload',next:'continue',generating:true,deadline}]};
+      queueFixture.inputs=[{id:'recovery-continue',sessionId:queueFixture.session.id,text:'Continue until the requested task is finished.',
+        mode:'after-turn',dueAt:0,state:'queued',owner:null,createdAt:0,conversationId:'fixture-chat',model:null,reasoningEffort:null,
+        recovery:{questionId:'fixture-question',pro:false,busyUntil:deadline,phase:'ready'}}];
+      queueFixture.notify();
+    })()`);
+    await wait('!!document.querySelector("#finishQueue [aria-label=\\"Cancel automatic Continue\\"]") && !!document.querySelector("#recoveryStatus [role=timer]")');
+    for (const width of [1100, 640]) {
+      win.setSize(width, 800);
+      await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      const measured = await js(`(() => {
+        const dock=document.getElementById('composerDock'), card=dock.querySelector('[data-input-id="recovery-continue"]');
+        const timer=dock.querySelector('#recoveryStatus [role="timer"]'), label=card.querySelector('.queue-label');
+        const cancel=card.querySelector('[aria-label="Cancel automatic Continue"]'), bounds=dock.getBoundingClientRect();
+        const visibleTimers=[...dock.querySelectorAll('[role="timer"]')].filter(node=>node.getBoundingClientRect().width>0);
+        return {timers:visibleTimers.length,goalHidden:document.getElementById('goalLifecycle').hidden,
+          controlsVisible:!document.getElementById('activeGoalRow').hidden,label:label.textContent,title:label.title,
+          editable:!!card.querySelector('[aria-label="Edit queued task"]'),draggable:label.draggable,
+          fits:[timer,cancel].every(node=>{const r=node.getBoundingClientRect();return r.width>0&&r.left>=bounds.left&&r.right<=bounds.right}),
+          error:window.fixtureError||null};
+      })()`);
+      assert.equal(measured.timers, 1); assert.equal(measured.goalHidden, true); assert.equal(measured.controlsVisible, true);
+      assert.ok(measured.label.startsWith('Automatic Continue')); assert.ok(measured.title.includes('without a final answer'));
+      assert.equal(measured.editable, false); assert.equal(measured.draggable, false); assert.equal(measured.fits, true); assert.equal(measured.error, null);
+      await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
+      await new Promise(resolve => setTimeout(resolve, 150));
+      fs.writeFileSync(path.join(output, `recovery-dock-${width}.png`), (await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG());
+      checks.push({recoveryWidth:width,...measured});
+    }
+    await js('queueFixture.controls.goalWait.until+=15_000;queueFixture.notify()');
+    await wait('!document.getElementById("goalLifecycle").hidden && document.querySelectorAll("#composerDock [role=timer]").length===2');
+    checks.push('independent Loop deadline remains visible');
+    await click('#finishQueue [aria-label="Cancel automatic Continue"]');
+    await wait('document.getElementById("finishQueue").hidden');
+    assert.equal(await js('queueFixture.inputs[0].state'), 'cancelled'); checks.push('automatic Continue remains cancellable');
+    await js('queueFixture.controls={};queueFixture.notify()');
+    await wait('document.getElementById("recoveryStatus").hidden && document.getElementById("goalLifecycle").hidden');
     for (const count of [7, 10]) {
       await js(`queueFixture.files=Array.from({length:${count}},(_,i)=>({id:'image-'+i,name:'reference-'+i+'.png',mimeType:'image/png',size:42}))`);
       await click('#attachImages');

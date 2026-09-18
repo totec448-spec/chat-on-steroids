@@ -1893,6 +1893,9 @@ Automatic response recovery follows the shared decision and conditional busy wai
 Authored queue delivery retains its own input eligibility under §11 and takes precedence over
 a generated Continue or Goal/Loop message. A synthetic unfinished Goal decision is no longer
 filed automatically: recovery uses Continue until a canonical final appears.
+Automatic Continue reuses the durable input owner, but its frozen text and source are not
+editable or reorderable as authored tasks. Queue mutation APIs exclude recovery rows; the
+renderer labels them Automatic Continue and preserves cancellation before browser handout.
 Continue, queue and Goal/Loop share pickup gaps of 2/5/10/15 minutes, then retain fifteen until
 expiry, including Pro after its initial ten-minute (Thinking failed: five-minute) silence and
 conditional five-minute wait.
@@ -2451,6 +2454,11 @@ over future watches. Post-reload rows say when CoS still holds the source turn g
 native-busy rows explicitly name the additional wait and show its actual remaining deadline.
 The generating flag belongs only to that post-reload wait and disappears when it is retired.
 This is a projection of delivery ownership, never another trigger.
+When Goal/Loop projects the same visible silence, post-reload or native-busy deadline, the
+composer displays that countdown only in the recovery row and retains the automation controls.
+Different deadlines, hidden recovery rows and independent pickup/attribution waits do not
+suppress the Goal/Loop lifecycle. A new native question or turn retires the preceding reload
+receipt from the composer fallback; its recorded history remains available in developer mode.
 After attribution's first attempt, every still-unproven member of its original cohort keeps
 the countdown to the incident's existing five-minute end, even without another unknown call.
 That row remains visible and says awaiting attribution/check unless the original second-attempt
