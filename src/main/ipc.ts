@@ -23,6 +23,10 @@ import {
   FRONTIER_LONGRUN_AUTHORITY_CLASS,
   markFrontierLongrunRemoteText
 } from './frontier-longrun-authority.js';
+import {
+  FRONTIER_MANUAL_SESSION_AUTHORITY_CLASS,
+  markFrontierManualSessionRemoteText
+} from './frontier-manual-session-authority.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 /**
@@ -1159,7 +1163,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         ? entry.text + GOAL_MARKER_INSTRUCTION : entry.text;
       const text = entry.authorityClass === FRONTIER_LONGRUN_AUTHORITY_CLASS
         ? markFrontierLongrunRemoteText(authored)
-        : authored;
+        : entry.authorityClass === FRONTIER_MANUAL_SESSION_AUTHORITY_CLASS
+          ? markFrontierManualSessionRemoteText(authored)
+          : authored;
       // Only the opening user input owns executor setup. Existing chats, queued
       // checkpoints and automatic continuations already have their instructions.
       return !entry.sessionId && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish'

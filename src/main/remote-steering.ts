@@ -143,6 +143,30 @@ import {
   type FrontierLongrunParentRefusal,
   type FrontierLongrunParentSlotView,
 } from './frontier-longrun-parent.js';
+import {
+  FRONTIER_MANUAL_SESSION_ENVELOPE_CONTRACT,
+  FRONTIER_MANUAL_SESSION_VERIFIER_CONTRACT_VERSION,
+  canonicalFrontierManualSessionGrantBytes,
+  canonicalFrontierManualSessionOperationBytes,
+  frontierManualSessionGrantDigest,
+  frontierManualSessionOperationDigest,
+  frontierManualSessionOperationGrantMismatch,
+  validateFrontierManualSessionEnvelope,
+  validateFrontierManualSessionSignedGrant,
+  validateFrontierManualSessionSignedOperation,
+  type FrontierManualSessionAction,
+  type FrontierManualSessionGrantV1,
+  type FrontierManualSessionOperationEnvelopeV1,
+  type FrontierManualSessionOperationV1,
+} from './frontier-manual-session-contract.js';
+import {
+  frontierManualSessionReplayState,
+  resetFrontierManualSessionForTests,
+  restoreFrontierManualSession,
+  steerFrontierManualSession,
+  type FrontierManualSessionRefusal,
+  type FrontierManualSessionView,
+} from './frontier-manual-session.js';
 import { recordAgentMessage } from './session/recorder.js';
 import { getSession } from './session/store.js';
 import { enqueueInput } from './session/input.js';
@@ -152,13 +176,12 @@ import { disableLongrunSessionLoop, longrunSessionView } from './session/longrun
 // Bounds.
 // ---------------------------------------------------------------------------
 
-/**
- * Largest envelope text this verifier will even try to parse.
- *
- * A well-formed envelope is two payloads, two 64-byte signatures and at most 4000 bytes of
- * message text. Everything past this ceiling is somebody sending something else.
- */
+/** Legacy ceiling for every existing/unknown protocol. */
 export const REMOTE_STEERING_MAX_ENVELOPE_CHARS = 32_000;
+/** Manual-session text may be 16k UTF-8 bytes and JSON escaping can expand each byte. */
+export const FRONTIER_MANUAL_SESSION_MAX_ENVELOPE_CHARS = 131_072;
+/** Absolute pre-parse ceiling. Only the exact manual-session contract may use bytes above 32k. */
+export const REMOTE_STEERING_ABSOLUTE_MAX_ENVELOPE_CHARS = FRONTIER_MANUAL_SESSION_MAX_ENVELOPE_CHARS;
 
 /**
  * How long a decided receipt is kept past its own operation's expiry.
@@ -235,6 +258,14 @@ export type RemoteSteeringRefusal =
   | 'FRONTIER_LONGRUN_PARENT_OPERATION_WINDOW_EXCEEDS_GRANT'
   | 'FRONTIER_LONGRUN_PARENT_GRANT_NOT_LIVE'
   | 'FRONTIER_LONGRUN_PARENT_OPERATION_NOT_LIVE'
+  | 'FRONTIER_MANUAL_SESSION_GRANT_MALFORMED'
+  | 'FRONTIER_MANUAL_SESSION_OPERATION_MALFORMED'
+  | 'FRONTIER_MANUAL_SESSION_GRANT_SIGNATURE_INVALID'
+  | 'FRONTIER_MANUAL_SESSION_OPERATION_SIGNATURE_INVALID'
+  | 'FRONTIER_MANUAL_SESSION_MALFORMED'
+  | 'FRONTIER_MANUAL_SESSION_EXPIRED'
+  | 'FRONTIER_MANUAL_SESSION_GRANT_NOT_LIVE'
+  | 'FRONTIER_MANUAL_SESSION_OPERATION_NOT_LIVE'
   // --- authorized and attempted; recorded once ---
   | 'REMOTE_STEERING_RUN_NOT_FOUND'
   | 'REMOTE_STEERING_SESSION_NOT_FOUND'
@@ -248,7 +279,8 @@ export type RemoteSteeringRefusal =
   | 'REMOTE_STEERING_SPAWN_REFUSED'
   | 'REMOTE_STEERING_RECEIPT_WRITE_FAILED'
   | 'REMOTE_STEERING_RECEIPT_STORE_FULL'
-  | FrontierLongrunParentRefusal;
+  | FrontierLongrunParentRefusal
+  | FrontierManualSessionRefusal;
 
 // ---------------------------------------------------------------------------
 // The minimized result.
@@ -318,7 +350,7 @@ export interface RemoteSteeringLongrunView {
   readonly automation: 'loop';
 }
 
-type RemoteSteeringActionAny = RemoteSteeringAction | RemoteSteeringActionV2 | RemoteSteeringActionV3 | FrontierLongrunParentAction;
+type RemoteSteeringActionAny = RemoteSteeringAction | RemoteSteeringActionV2 | RemoteSteeringActionV3 | FrontierLongrunParentAction | FrontierManualSessionAction;
 type RemoteSteeringLeaseAny = RemoteSteeringLeaseV1 | RemoteSteeringLeaseV2 | RemoteSteeringLeaseV3;
 type RemoteSteeringOperationAny = RemoteSteeringOperationV1 | RemoteSteeringOperationV2 | RemoteSteeringOperationV3;
 type RemoteSteeringEnvelopeAny = RemoteSteeringOperationEnvelopeV1 | RemoteSteeringOperationEnvelopeV2 | RemoteSteeringOperationEnvelopeV3;
@@ -349,6 +381,8 @@ export interface RemoteSteeringOutcome {
   readonly longrun: RemoteSteeringLongrunView | null;
   /** Parent-slot projection. Contains no session id, conversation id, prompt text or input id. */
   readonly frontier: FrontierLongrunParentSlotView | null;
+  /** Manual-session projection. Contains no local/session/conversation/input id or task text. */
+  readonly manualSession: FrontierManualSessionView | null;
 }
 
 /** What the ordinary `agents message` path owes a wake, supplied by its owner in tools-core. */
@@ -462,6 +496,7 @@ export async function restoreRemoteSteering(): Promise<void> {
   }
   pruneReceipts(Date.now());
   await restoreFrontierLongrunParent();
+  await restoreFrontierManualSession();
 }
 
 function receiptSnapshot(): PersistedReceipts {
@@ -631,6 +666,7 @@ function outcome(partial: Partial<RemoteSteeringOutcome> & { status: 'accepted' 
     session: null,
     longrun: null,
     frontier: null,
+    manualSession: null,
     ...partial
   };
 }
@@ -665,6 +701,24 @@ function refuseParent(
     detail,
     operationId: operation?.operationId ?? null,
     operationDigest: operation ? frontierLongrunParentOperationDigest(operation) : null,
+    action: operation?.action ?? null,
+    runId: null,
+    sessionId: null
+  });
+}
+
+function refuseManual(
+  reason: RemoteSteeringRefusal,
+  detail: string | null,
+  operation?: FrontierManualSessionOperationV1
+): RemoteSteeringOutcome {
+  return outcome({
+    status: 'refused',
+    verifierContractVersion: FRONTIER_MANUAL_SESSION_VERIFIER_CONTRACT_VERSION,
+    reason,
+    detail,
+    operationId: operation?.operationId ?? null,
+    operationDigest: operation ? frontierManualSessionOperationDigest(operation) : null,
     action: operation?.action ?? null,
     runId: null,
     sessionId: null
@@ -756,6 +810,15 @@ interface VerifiedParentEnvelope {
   readonly authorityEpoch: number;
 }
 
+interface VerifiedManualEnvelope {
+  readonly envelope: FrontierManualSessionOperationEnvelopeV1;
+  readonly grant: FrontierManualSessionGrantV1;
+  readonly operation: FrontierManualSessionOperationV1;
+  readonly grantDigest: string;
+  readonly operationDigest: string;
+  readonly authorityEpoch: number;
+}
+
 /**
  * Everything that must hold before a single byte of this app's state may be touched.
  *
@@ -763,7 +826,7 @@ interface VerifiedParentEnvelope {
  * feature off never parses an envelope at all, and an envelope for a key this app does not
  * pin is refused before either signature is verified.
  */
-function verify(envelopeText: string): { verified: VerifiedEnvelope } | { parent: VerifiedParentEnvelope } | { refusal: RemoteSteeringOutcome } {
+function verify(envelopeText: string): { verified: VerifiedEnvelope } | { parent: VerifiedParentEnvelope } | { manual: VerifiedManualEnvelope } | { refusal: RemoteSteeringOutcome } {
   if (!getConfig().remoteSteering.enabled) {
     return {
       refusal: refuse(
@@ -772,17 +835,18 @@ function verify(envelopeText: string): { verified: VerifiedEnvelope } | { parent
       )
     };
   }
+  if (envelopeText.length > REMOTE_STEERING_ABSOLUTE_MAX_ENVELOPE_CHARS) {
+    return { refusal: refuse('REMOTE_STEERING_ENVELOPE_UNREADABLE', 'the envelope exceeds the absolute accepted size') };
+  }
   // V3 exact-session control and the Frontier parent protocol deliberately do not depend on the
   // worker broker. Preserve V1/V2's old refusal ordering when multi-agent is off: only one of
   // those structurally recognizable session-control wrappers may pass this gate.
   let preparsed: unknown = undefined;
   if (!getConfig().multiAgent.enabled) {
-    if (envelopeText.length <= REMOTE_STEERING_MAX_ENVELOPE_CHARS) {
-      try { preparsed = JSON.parse(envelopeText); } catch { /* preserve the worker-run refusal */ }
-    }
+    try { preparsed = JSON.parse(envelopeText); } catch { /* preserve the worker-run refusal */ }
     const contract = typeof preparsed === 'object' && preparsed !== null && !Array.isArray(preparsed)
       ? (preparsed as Record<string, unknown>)['contract'] : null;
-    const sessionControl = contract === REMOTE_STEERING_ENVELOPE_CONTRACT_V3 || contract === FRONTIER_LONGRUN_PARENT_ENVELOPE_CONTRACT;
+    const sessionControl = contract === REMOTE_STEERING_ENVELOPE_CONTRACT_V3 || contract === FRONTIER_LONGRUN_PARENT_ENVELOPE_CONTRACT || contract === FRONTIER_MANUAL_SESSION_ENVELOPE_CONTRACT;
     if (!sessionControl) {
       return {
         refusal: refuse(
@@ -801,10 +865,6 @@ function verify(envelopeText: string): { verified: VerifiedEnvelope } | { parent
       )
     };
   }
-  if (envelopeText.length > REMOTE_STEERING_MAX_ENVELOPE_CHARS) {
-    return { refusal: refuse('REMOTE_STEERING_ENVELOPE_UNREADABLE', 'the envelope exceeds the accepted size') };
-  }
-
   let parsed: unknown = preparsed;
   if (parsed === undefined) {
     try {
@@ -812,6 +872,15 @@ function verify(envelopeText: string): { verified: VerifiedEnvelope } | { parent
     } catch {
       return { refusal: refuse('REMOTE_STEERING_ENVELOPE_UNREADABLE', 'the envelope is not valid JSON') };
     }
+  }
+  const parsedContract = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)['contract']
+    : null;
+  const envelopeLimit = parsedContract === FRONTIER_MANUAL_SESSION_ENVELOPE_CONTRACT
+    ? FRONTIER_MANUAL_SESSION_MAX_ENVELOPE_CHARS
+    : REMOTE_STEERING_MAX_ENVELOPE_CHARS;
+  if (envelopeText.length > envelopeLimit) {
+    return { refusal: refuse('REMOTE_STEERING_ENVELOPE_UNREADABLE', 'the envelope exceeds the accepted size for its protocol') };
   }
 
   if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) &&
@@ -849,6 +918,46 @@ function verify(envelopeText: string): { verified: VerifiedEnvelope } | { parent
         operation: signedOperation.payload,
         grantDigest: frontierLongrunParentGrantDigest(signedGrant.payload),
         operationDigest: frontierLongrunParentOperationDigest(signedOperation.payload),
+        authorityEpoch
+      }
+    };
+  }
+
+  if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) &&
+      (parsed as Record<string, unknown>)['contract'] === FRONTIER_MANUAL_SESSION_ENVELOPE_CONTRACT) {
+    const record = parsed as Record<string, unknown>;
+    const signedGrant = validateFrontierManualSessionSignedGrant(record['grant']);
+    if (!signedGrant) {
+      return { refusal: refuseManual('FRONTIER_MANUAL_SESSION_GRANT_MALFORMED', 'the signed manual-session grant failed closed-schema validation') };
+    }
+    const signedOperation = validateFrontierManualSessionSignedOperation(record['operation']);
+    if (!signedOperation) {
+      return { refusal: refuseManual('FRONTIER_MANUAL_SESSION_OPERATION_MALFORMED', 'the signed manual-session operation failed closed-schema validation') };
+    }
+    const mismatch = frontierManualSessionOperationGrantMismatch(signedOperation.payload, signedGrant.payload);
+    if (mismatch) {
+      return { refusal: refuseManual(mismatch, 'the manual-session operation is not authorized by its own grant', signedOperation.payload) };
+    }
+    const envelope = validateFrontierManualSessionEnvelope(parsed);
+    if (!envelope) {
+      return { refusal: refuseManual('REMOTE_STEERING_ENVELOPE_MALFORMED', 'the manual-session envelope wrapper failed closed-schema validation', signedOperation.payload) };
+    }
+    if (envelope.signingKeyFingerprint !== pinned.fingerprint) {
+      return { refusal: refuseManual('REMOTE_STEERING_KEY_MISMATCH', 'the manual-session envelope names a signing key this app has not pinned', signedOperation.payload) };
+    }
+    if (!verifyRemoteSteeringSignature(canonicalFrontierManualSessionGrantBytes(signedGrant.payload), signedGrant.signature, pinned.publicKeySpkiBase64)) {
+      return { refusal: refuseManual('FRONTIER_MANUAL_SESSION_GRANT_SIGNATURE_INVALID', null, signedOperation.payload) };
+    }
+    if (!verifyRemoteSteeringSignature(canonicalFrontierManualSessionOperationBytes(signedOperation.payload), signedOperation.signature, pinned.publicKeySpkiBase64)) {
+      return { refusal: refuseManual('FRONTIER_MANUAL_SESSION_OPERATION_SIGNATURE_INVALID', null, signedOperation.payload) };
+    }
+    return {
+      manual: {
+        envelope,
+        grant: signedGrant.payload,
+        operation: signedOperation.payload,
+        grantDigest: frontierManualSessionGrantDigest(signedGrant.payload),
+        operationDigest: frontierManualSessionOperationDigest(signedOperation.payload),
         authorityEpoch
       }
     };
@@ -1300,6 +1409,50 @@ export async function steerRemotely(
       sessionId: null,
       replay: result.replay,
       frontier: result.slot
+    });
+  }
+  if ('manual' in checked) {
+    const verified = checked.manual;
+    const { grant, operation, grantDigest, operationDigest } = verified;
+    const replayState = await frontierManualSessionReplayState(operation, operationDigest);
+    if (replayState === 'altered') {
+      return refuseManual(
+        'FRONTIER_MANUAL_SESSION_OPERATION_REPLAY_ALTERED',
+        'this manual-session operation id was already durably assigned to different signed bytes',
+        operation
+      );
+    }
+    const grantLive = remoteSteeringWindowLive(grant.issuedAt, grant.expiresAt, nowMs);
+    const operationLive = remoteSteeringWindowLive(operation.issuedAt, operation.expiresAt, nowMs);
+    if (replayState === 'unseen' && !grantLive) {
+      return refuseManual('FRONTIER_MANUAL_SESSION_GRANT_NOT_LIVE', `the manual-session grant window is ${grant.issuedAt} → ${grant.expiresAt}`, operation);
+    }
+    if (replayState === 'unseen' && !operationLive) {
+      return refuseManual('FRONTIER_MANUAL_SESSION_OPERATION_NOT_LIVE', `the manual-session operation window is ${operation.issuedAt} → ${operation.expiresAt}`, operation);
+    }
+    const result = await steerFrontierManualSession(
+      operation,
+      grant,
+      grantDigest,
+      operationDigest,
+      {
+        authorityStillLive: () => authorityStillLive(verified.authorityEpoch, operation.signingKeyFingerprint, false),
+        effectsAllowed: grantLive && operationLive
+      },
+      nowMs
+    );
+    return outcome({
+      status: result.status,
+      verifierContractVersion: FRONTIER_MANUAL_SESSION_VERIFIER_CONTRACT_VERSION,
+      reason: result.reason,
+      detail: result.detail,
+      operationId: operation.operationId,
+      operationDigest,
+      action: operation.action,
+      runId: null,
+      sessionId: null,
+      replay: result.replay,
+      manualSession: result.session
     });
   }
   const verified = checked.verified;
@@ -1774,4 +1927,5 @@ export function resetRemoteSteeringForTests(): void {
   receipts.clear();
   restored = false;
   resetFrontierLongrunParentForTests();
+  resetFrontierManualSessionForTests();
 }

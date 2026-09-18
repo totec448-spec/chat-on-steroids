@@ -92,7 +92,8 @@ function relayOutcome(action: FrontierLongrunParentAction): RemoteSteeringOutcom
     frontier: {
       slot: 1, state: action === 'LOOP_OFF' ? 'stopped' : 'bound',
       session: { found: true, activeTurn: false, blocked: false, superseded: false, modelClass: 'other', loopEnabled: action !== 'LOOP_OFF', loopMode: 'loop', objectivePresent: true, finishToolEnabled: true, pendingUserInput: false, pendingLongrunStart: false }
-    }
+    },
+    manualSession: null
   };
 }
 
