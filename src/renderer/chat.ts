@@ -47,7 +47,7 @@ import type {
 import {
   ATTRIBUTION_LABELS,
   CHAT_ACTIVE_MS,
-  CONTINUATION_MARKER,
+  continuationMarkerOf,
   TURN_OUTCOME_LABELS,
   foldProgress,
   toolCallSummary
@@ -93,8 +93,7 @@ const GOAL_SCROLL_MARGIN = 72;
 /** Page size and bounded staging capacity. A page is not a viewport: hundreds of
  * collapsed tool records can occupy less space than one authored message. */
 const MAX_TIMELINE_ROWS = 160;
-const MAX_TIMELINE_RESIDENT_ROWS = MAX_TIMELINE_ROWS * 2;
-const MAX_TIMELINE_TEXT_CHARS = 2 * 1024 * 1024;
+const TIMELINE_BATCH_SIZE = 30;
 const MAX_RENDERED_HTML_CHARS = 256 * 1024;
 const SESSION_PAGE_SIZE = 60;
 const SESSION_SCROLL_MARGIN = 72;
@@ -255,6 +254,9 @@ let detailFor: string | null = null;
 let detailCursor: number | null = null;
 let historyBefore: number | null = null;
 let historyLoading = false;
+let historyRefreshPending = false;
+let historyDemand: { sessionId: string; selection: number; direction: number; opening: boolean } | null = null;
+let historyStart: number | null = null;
 /** The last swarm the app reported, so the header can summarise it without the log. */
 let swarm: SwarmState | null = null;
 /**
@@ -791,6 +793,7 @@ function canonicalMessageKey(event: SessionEvent): string | null {
 
 /** Merge one sequence-cursor delta without letting canonical message revisions duplicate rows. */
 function mergeDetailDelta(delta: SessionEvent[]): void {
+  if (delta.length === 0) return;
   const merged = [...events];
   const floor = events.length ? Math.min(...events.map(positionOf)) : 0;
   const messageRows = new Map<string, number>();
@@ -1215,10 +1218,13 @@ async function refreshSessionControls(): Promise<void> {
   ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.") : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
 }
 
-async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: number): Promise<void> {
+async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: number): Promise<boolean> {
   const prepend = olderBefore !== undefined;
   const wanted = selectedId;
-  if (wanted !== null && historyBefore !== null && detailFor === wanted && !navigate) { void refreshSessionControls(); paintDetail(); return; }
+  if (wanted !== null && (historyBefore !== null || historyLoading) && detailFor === wanted && !navigate) {
+    if (historyLoading) historyRefreshPending = true;
+    void refreshSessionControls(); paintDetail(); return false;
+  }
   const generation = ++detailLoadGeneration;
   void refreshSessionControls();
   if (wanted === null) {
@@ -1228,18 +1234,18 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     totalEvents = 0;
     detailFor = null;
     detailCursor = null;
-    $('timeline').style.removeProperty('--timeline-scroll-reserve');
+    $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
     paintDetail();
-    return;
+    return false;
   }
   const opening = detailFor !== wanted;
-  if (opening) historyBefore = null;
+  if (opening) { historyBefore = null; historyStart = null; }
   // Live deltas must not evict a historical page while the user is reading it.
   const incremental = !prepend && newerFrom === undefined && historyBefore === null && detailFor === wanted && detailCursor !== null;
   const detail = await run(
-    api.getSession(wanted, newerFrom !== undefined ? { after: newerFrom, limit: MAX_TIMELINE_ROWS / 2 } : incremental ? { from: detailCursor!, limit: MAX_TIMELINE_ROWS } : { ...(olderBefore !== undefined ? { before: olderBefore } : historyBefore !== null ? { before: historyBefore } : {}), limit: prepend ? MAX_TIMELINE_ROWS / 2 : MAX_TIMELINE_ROWS })
+    api.getSession(wanted, newerFrom !== undefined ? { after: newerFrom, limit: TIMELINE_BATCH_SIZE } : incremental ? { from: detailCursor!, limit: TIMELINE_BATCH_SIZE } : { ...(olderBefore !== undefined ? { before: olderBefore } : historyBefore !== null ? { before: historyBefore } : {}), limit: TIMELINE_BATCH_SIZE })
   );
-  if (generation !== detailLoadGeneration || selectedId !== wanted) return;
+  if (generation !== detailLoadGeneration || selectedId !== wanted) return false;
   if (!detail) {
     // A failed destination read must not leave another chat displayed indefinitely.
     // run() already presents the read error; keep the destination empty and retryable.
@@ -1248,10 +1254,10 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
       $('timeline').removeAttribute('inert');
       $('timeline').removeAttribute('aria-busy');
     }
-    return;
+    return false;
   }
   // An empty older page is not navigation. Keep the live cursor and viewport intact.
-  if (prepend && !detail.events.length) return;
+  if (prepend && !detail.events.length) return true;
   // User/assistant prose is canonical in messages.json, while structured page activity stays
   // append-only by design: ChatGPT can grow one commentary caption or rewrite one activity
   // label several times. `foldProgress` turns those snapshots back into the one logical row
@@ -1265,7 +1271,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
       events = retainTimelinePage(chronological(foldProgress([...events, ...folded])), 'newer');
       // Reaching the live tail restores ordinary delta reads. Paging itself preserves
       // the reader's row even when they were at the bottom of the previous window.
-      if (detail.events.length < MAX_TIMELINE_ROWS / 2) historyBefore = null;
+      if (detail.events.length < TIMELINE_BATCH_SIZE) historyBefore = null;
     } else if (prepend) {
       const boundary = olderBefore!;
       historyBefore = boundary;
@@ -1279,17 +1285,19 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
       ? detail.nextFrom
       : detail.events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), incremental ? detailCursor! : 0));
   totalEvents = detail.total;
-  if (opening) $('timeline').style.removeProperty('--timeline-scroll-reserve');
+  if (opening) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
   paintDetail(!prepend && newerFrom === undefined);
   // A selection opens at the latest message; the previous chat's viewport is not
   // a reading position in this one. Apply only after the current load has rendered.
   if (opening) $('chatBody').scrollTop = $('chatBody').scrollHeight;
+  if (opening) requestHistory(-1, true);
   void loadHandoff();
   // A burst can contain more than one renderer-sized page between coalesced notifications.
   // Drain it page by page rather than silently jumping the cursor or lifting the payload cap.
-  if (incremental && detail.events.length === MAX_TIMELINE_ROWS && selectedId === wanted) {
+  if (incremental && detail.events.length === TIMELINE_BATCH_SIZE && selectedId === wanted) {
     window.setTimeout(() => void loadDetail(), 0);
   }
+  return true;
 }
 
 async function loadHandoff(): Promise<void> {
@@ -1593,6 +1601,87 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
   if (summary.metric) head.append(el('span', 'metric', summary.metric));
   box.append(head);
 
+  // Collapsed calls only need their headline. Large recorded results must not
+  // consume layout/DOM work, or evict surrounding prose, before they are opened.
+  let populated = false;
+  const populate = () => {
+    if (populated || !box.open) return;
+    populated = true;
+    appendToolOutput(box, event, context);
+  };
+  box.addEventListener('toggle', populate);
+  populate();
+  return box;
+}
+
+/** A batch is storage work, not a wheel detent. Fill the requested visible edge
+ * through hidden events/collapsed activity, yielding between bounded IPC reads. */
+function requestHistory(direction: number, opening = false): void {
+  if (!selectedId || detailFor !== selectedId || !direction) return;
+  historyDemand = { sessionId: selectedId, selection: selectionGeneration, direction, opening };
+  void fillTimelineHistory();
+}
+
+async function fillTimelineHistory(): Promise<void> {
+  if (historyLoading) return;
+  historyLoading = true;
+  let filledOpening = false;
+  try {
+    while (historyDemand) {
+      const demand = historyDemand;
+      if (demand.sessionId !== selectedId || demand.selection !== selectionGeneration || detailFor !== selectedId) {
+        historyDemand = null;
+        break;
+      }
+      const pane = $('chatBody'), timeline = $('timelineContent');
+      const buffer = Math.min(480, Math.max(160, pane.clientHeight / 2));
+      const reserve = Number.parseFloat(timeline.style.getPropertyValue('--timeline-scroll-reserve')) || 0;
+      const nearEdge = demand.opening
+        ? timeline.getBoundingClientRect().height - reserve < pane.clientHeight + buffer
+        : demand.direction < 0 ? pane.scrollTop <= buffer
+          : pane.scrollHeight - reserve - pane.clientHeight - pane.scrollTop <= buffer;
+      if (pane.clientHeight <= 0 || !nearEdge || (demand.direction > 0 && historyBefore === null)) {
+        historyDemand = null;
+        break;
+      }
+      const cursor = demand.direction < 0
+        ? events.reduce((oldest, event) => Math.min(oldest, positionOf(event)), Infinity)
+        : events.reduce((newest, event) => Math.max(newest, positionOf(event)), 0);
+      if (!Number.isFinite(cursor) || (demand.direction < 0 && (cursor <= 1 || cursor === historyStart))) {
+        historyDemand = null;
+        break;
+      }
+      const loaded = await loadDetail(true, demand.direction < 0 ? cursor : undefined, demand.direction > 0 ? cursor : undefined);
+      if (demand.sessionId !== selectedId || demand.selection !== selectionGeneration || detailFor !== selectedId) continue;
+      if (!loaded) { if (demand === historyDemand) historyDemand = null; continue; }
+      const next = demand.direction < 0
+        ? events.reduce((oldest, event) => Math.min(oldest, positionOf(event)), Infinity)
+        : events.reduce((newest, event) => Math.max(newest, positionOf(event)), 0);
+      if (demand === historyDemand && demand.opening) {
+        // Filling a newly selected tail has not navigated away from live work.
+        // User input replaces the demand and owns its position from then on.
+        historyBefore = null;
+        timeline.style.removeProperty('--timeline-scroll-reserve');
+        pane.scrollTop = pane.scrollHeight;
+        filledOpening = true;
+      }
+      if (next === cursor) {
+        if (demand.direction < 0) historyStart = cursor;
+        if (demand === historyDemand) historyDemand = null;
+      }
+      await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
+    }
+  } finally {
+    historyLoading = false;
+    const refresh = filledOpening || historyRefreshPending;
+    historyRefreshPending = false;
+    if (historyDemand) void fillTimelineHistory();
+    else if (refresh && historyBefore === null) void loadDetail();
+  }
+}
+
+function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEvent, { kind: 'tool_call' }>,
+  context?: { id: string; current: () => boolean }): void {
   const raw = el('div', 'raw');
   const facts = el('p', 'raw-facts');
   ui(facts, 'textContent', () => `${call.tool} · ${call.outcome} · ${Math.round(call.durationMs)} ms · ` +
@@ -1650,7 +1739,6 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
   }
 
   box.append(raw);
-  return box;
 }
 
 function hasLaterModelActivity(time: number): boolean {
@@ -1787,7 +1875,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
           if (context ? !context.current() : id !== selectedId || generation !== selectionGeneration) return;
           if (!data) {
             const pane = context ? box.closest<HTMLElement>('.agent-panel-body') : $('chatBody');
-            const timeline = context ? pane : $('timeline');
+            const timeline = context ? pane : $('timelineContent');
             const restore = pane && timeline && box.isConnected ? preserveTimelineViewport(pane, timeline) : () => {};
             unavailable(); restore();
             return;
@@ -1823,6 +1911,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       const presentation = () => chatErrorPresentation(event, context?.history ?? events);
       // The timeline signature includes this projection, so later completion/work repaints it.
       notice.classList.toggle('is-resolved', presentation().resolved);
+      notice.classList.toggle('is-reloaded', presentation().reloaded);
       const title = el('strong', '', () => presentation().title);
       notice.append(title, textBlock('msg', presentation().message, event.message.truncated, event.message.chars),
         el('p', 'chat-error-next', () => presentation().next));
@@ -1961,32 +2050,6 @@ function visibleEvents(): SessionEvent[] {
   return events.filter((event) => event.agent === agentFilter);
 }
 
-function eventTextCost(event: SessionEvent): number {
-  switch (event.kind) {
-    case 'user_message':
-    case 'assistant_message':
-      return event.message.text.length + (event.kind === 'assistant_message' ? (event.renderedHtml?.text.length ?? 0) : 0);
-    case 'progress':
-    case 'chat_error':
-    case 'note':
-    case 'agent_message':
-      return event.message.text.length;
-    case 'tool_call':
-      return (
-        event.call.args.text.length +
-        event.call.result.text.length +
-        event.call.summary.title.length +
-        (event.call.summary.detail?.length ?? 0)
-      );
-    case 'page_tool':
-      return event.label.length;
-    case 'turn_end':
-      return event.detail?.length ?? 0;
-    default:
-      return 128;
-  }
-}
-
 /** Eviction follows the measured reader viewport, not an arbitrary half-page.
  * Keep the current visible rows plus the incoming stage; ordinary tall histories
  * still settle at 160 records. Dense collapsed activity has bounded extra room. */
@@ -2020,24 +2083,10 @@ function retainTimelinePage(source: SessionEvent[], direction: 'older' | 'newer'
   const last = protectedIndexes.at(-1) ?? -1;
   if (direction === 'older') {
     const end = Math.min(source.length, Math.max(MAX_TIMELINE_ROWS, last + 1));
-    return chronological(source.slice(0, Math.min(end, MAX_TIMELINE_RESIDENT_ROWS)));
+    return chronological(source.slice(0, end));
   }
   const start = Math.max(0, Math.min(source.length - MAX_TIMELINE_ROWS, first));
-  return chronological(source.slice(Math.max(start, source.length - MAX_TIMELINE_RESIDENT_ROWS)));
-}
-
-/** Newest-first selection, returned chronologically, under resident and text/HTML budgets. */
-function boundedTimeline(source: SessionEvent[]): { shown: SessionEvent[]; omitted: number } {
-  let chars = 0;
-  let start = source.length;
-  while (start > 0 && source.length - start < MAX_TIMELINE_RESIDENT_ROWS) {
-    const next = source[start - 1]!;
-    const cost = Math.min(eventTextCost(next), MAX_TIMELINE_TEXT_CHARS);
-    if (start < source.length && chars + cost > MAX_TIMELINE_TEXT_CHARS) break;
-    chars += cost;
-    start -= 1;
-  }
-  return { shown: foldAgentCommunication(source.slice(start)), omitted: start };
+  return chronological(source.slice(start));
 }
 
 // ------------------------------------------------------------ compaction rows
@@ -2074,8 +2123,8 @@ type TimelineItem = { kind: 'event'; event: SessionEvent } | { kind: 'compaction
 
 function continuationMarker(event: SessionEvent): { kind: 'HANDOFF' | 'RESUME'; token: string } | null {
   if (event.kind !== 'user_message') return null;
-  const match = CONTINUATION_MARKER.exec(event.message.text);
-  return match ? { kind: match[1] as 'HANDOFF' | 'RESUME', token: match[2]! } : null;
+  const match = continuationMarkerOf(event.message.text);
+  return match ? { kind: match.kind, token: match.token } : null;
 }
 
 /**
@@ -2240,7 +2289,10 @@ function compactionRow(block: CompactionBlock, previous?: HTMLElement): HTMLElem
   if (block.prompt) {
     raw.append(el('h4', '', () => t("Brief request")));
     // The routing marker is the app's, not the user's; the card already says what this is.
-    const request = (userPromptText(block.prompt.message.text) ?? block.prompt.message.text).replace(CONTINUATION_MARKER, '');
+    const prompt = userPromptText(block.prompt.message.text) ?? block.prompt.message.text;
+    // The marker is stripped in whichever form the page recorded it; `marker` is the exact
+    // text that matched, so an escaped one is removed as completely as a clean one.
+    const request = prompt.replace(continuationMarkerOf(prompt)?.marker ?? '', '');
     raw.append(textBlock('pre', request, block.prompt.message.truncated, block.prompt.message.chars));
   }
   if (block.brief) {
@@ -2352,6 +2404,7 @@ function itemSignature(item: TimelineItem): string {
 
 function itemKey(item: TimelineItem): string {
   if (item.kind === 'compaction') return `compaction:${item.block.token}`;
+  if (item.event.kind === 'user_message' && item.event.inputId) return `input:${item.event.inputId}`;
   // A canonical revision advances the update cursor, not the identity of the row
   // anchoring the viewport and the following activity disclosure.
   const message = canonicalMessageKey(item.event);
@@ -2470,13 +2523,14 @@ function paintDetail(followBottom = historyBefore === null): void {
   $('timeline').removeAttribute('aria-busy');
   $('inputQueue').removeAttribute('inert');
   const filtered = visibleEvents();
-  const windowed = boundedTimeline(filtered);
-  const shown = windowed.shown;
+  // Residency has already preserved the reader. Do not truncate that retained
+  // page again by hidden tool-output bytes or a second count-only limit.
+  const shown = foldAgentCommunication(filtered);
 
   // Preserve the visible logical row when late transcript revisions change the
   // height above it; retaining absolute scrollTop would move the reader's content.
   const pane = $('chatBody');
-  const restoreViewport = preserveTimelineViewport(pane, $('timeline'), followBottom);
+  const restoreViewport = preserveTimelineViewport(pane, $('timelineContent'), followBottom);
   const timelineRows: HTMLElement[] = [];
   const keep = new Set<string>();
   let activityBoundary = '';
@@ -2548,7 +2602,6 @@ function paintDetail(followBottom = historyBefore === null): void {
     if (agentFilter !== null) {
       facts.push(t("filtered to {0} — {1} matched", [agentFilter === UNATTRIBUTED ? 'unattributed' : agentFilter, filtered.length]));
     }
-    if (windowed.omitted > 0) facts.push(t("{0} newest rendered", [shown.length]));
     facts.push(t("~{0} rough current-chat context tokens", [compactNumber(summary.contextTokens)]));
     const level = pressureOf(summary.id);
     if (level && level.level !== 'ok') {
@@ -3322,6 +3375,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   row.classList.toggle('is-delivered', !entry.error && ['sent', 'tool'].includes(entry.state));
   row.classList.toggle('is-delivery-error', !!entry.error || entry.state === 'failed');
   row.dataset.inputId = entry.id;
+  row.dataset.timelineKey = `input:${entry.id}`;
   if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
   visibleInputIds.add(entry.id);
   if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
@@ -3829,7 +3883,7 @@ export function initChat(next: Deps): void {
     load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
     render: (source, id, current) => {
       let boundary = '';
-      const rows = boundedTimeline(source).shown.flatMap(event => {
+      const rows = foldAgentCommunication(source).flatMap(event => {
         if (!['tool_call', 'page_tool', 'agent_message'].includes(event.kind)) boundary = `event:${event.seq}`;
         if (!['user_message', 'assistant_message', 'native_image', 'tool_call', 'page_tool', 'agent_message', 'chat_error'].includes(event.kind)) return [];
         const row = el('div', `ev ev-${event.kind}`); const body = el('div', 'ev-body');
@@ -4119,47 +4173,38 @@ export function initChat(next: Deps): void {
     selectSession(row.dataset.id);
   });
   $('sessionList').closest<HTMLElement>('.scroll')?.addEventListener('scroll', maybePageSessions);
-  // One bounded window pages in either direction, only on deliberate navigation.
-  // Layout restoration must never drain history or jump straight to the live tail.
+  // Prefetch the visible edge, retaining direction across collapsed batches.
+  // Layout restoration alone never starts another history read.
   const historyPane = $('chatBody');
-  let historyIntent: string | null = null;
-  let historyDirection = 0;
-  const loadAtEdge = () => {
-    if (!historyIntent || historyIntent !== selectedId || historyLoading || !selectedId || detailFor !== selectedId) return;
-    const older = historyDirection < 0 && historyPane.scrollTop <= 80;
-    const newer = historyDirection > 0 && historyBefore !== null && historyPane.scrollHeight - historyPane.clientHeight - historyPane.scrollTop <= 80;
-    if (!older && !newer) return;
-    historyIntent = null;
-    if (newer) {
-      const from = events.reduce((cursor, event) => Math.max(cursor, positionOf(event)), 0);
-      historyLoading = true;
-      void loadDetail(true, undefined, from).finally(() => { historyLoading = false; });
-      return;
-    }
-    const windowed = boundedTimeline(visibleEvents());
-    const boundaryRows = windowed.omitted > 0 && windowed.shown.length ? windowed.shown : events;
-    const before = boundaryRows.length ? Math.min(...boundaryRows.map(positionOf)) : 1;
-    if (before <= 1) return;
-    historyLoading = true;
-    void loadDetail(true, before).finally(() => { historyLoading = false; });
-  };
-  historyPane.addEventListener('wheel', event => { historyIntent = selectedId; historyDirection = Math.sign(event.deltaY); loadAtEdge(); }, { passive: true });
+  let pendingScrollDirection = 0;
+  historyPane.addEventListener('wheel', event => {
+    pendingScrollDirection = Math.sign(event.deltaY);
+    requestHistory(pendingScrollDirection);
+  }, { passive: true });
   let pointerScrollTop: number | null = null;
   historyPane.addEventListener('pointerdown', () => { pointerScrollTop = historyPane.scrollTop; });
   window.addEventListener('pointerup', () => { pointerScrollTop = null; });
   historyPane.addEventListener('keydown', event => {
-    historyIntent = selectedId;
-    historyDirection = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) ? -1 : ['ArrowDown', 'PageDown', 'End'].includes(event.key) ? 1 : 0;
-    loadAtEdge();
+    pendingScrollDirection = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) ? -1 : ['ArrowDown', 'PageDown', 'End'].includes(event.key) ? 1 : 0;
+    requestHistory(pendingScrollDirection);
   });
   historyPane.addEventListener('scroll', () => {
     if (pointerScrollTop !== null) {
-      historyDirection = Math.sign(historyPane.scrollTop - pointerScrollTop);
+      const direction = Math.sign(historyPane.scrollTop - pointerScrollTop);
       pointerScrollTop = historyPane.scrollTop;
-      historyIntent = selectedId;
+      requestHistory(direction);
+    } else if (pendingScrollDirection) {
+      const direction = pendingScrollDirection;
+      pendingScrollDirection = 0;
+      requestHistory(direction);
     }
-    loadAtEdge();
+    if (historyDemand) void fillTimelineHistory();
   }, { passive: true });
+  $('timeline').addEventListener('click', event => {
+    // Disclosure changes deliberately change geometry. Padding retained for an
+    // earlier reconciliation is not part of the collapsed headline's height.
+    if ((event.target as Element).closest('summary')) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
+  });
 
   $('chatView').addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-view]');

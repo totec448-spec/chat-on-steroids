@@ -192,6 +192,19 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
 }
 
 describe('one browser maintenance flight per desktop outbox publication', () => {
+  it.each(['returned', 'absent', 'foreign', 'original-present'] as const)('resumes a pending exact-chat input only in an already returned tab (%s)', async state => {
+    const input = { id: firstId, conversationId: secondId };
+    const h = await worker([input], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready', conversationId: secondId } } });
+    if (state !== 'absent') h.tabs.push({ id: 8, url: `https://chatgpt.com/c/${state === 'foreign' ? firstId : secondId}` });
+    if (state === 'original-present') h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    await h.maintain();
+    const offers = h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-desktop-input');
+    expect(offers).toEqual(state === 'returned' || state === 'original-present'
+      ? [[state === 'returned' ? 8 : 7, { type: 'clf-desktop-input', ...input }]] : []);
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.reload).not.toHaveBeenCalled();
+  });
+
   it('reoffers unclaimed input when its elected page finishes loading without waiting for the alarm', async () => {
     const h = await worker([{ id: firstId, conversationId: secondId }]);
     h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
@@ -292,12 +305,12 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     h.tabs.splice(1, 1, { id: 9, url: `https://chatgpt.com/c/${secondId}` });
     h.sendMessage.mockClear();
     await h.maintain();
-    expect(h.sendMessage.mock.calls.some(([id, message]) => id === 9 && message.type === 'clf-desktop-input')).toBe(false);
+    expect(h.sendMessage.mock.calls.some(([id, message]) => id === 9 && message.type === 'clf-desktop-input')).toBe(true);
     expect(h.create).not.toHaveBeenCalled();
     const restarted = await worker([input], undefined, h.localSaved);
     restarted.tabs.push({ id: 9, url: `https://chatgpt.com/c/${secondId}` });
     await restarted.maintain();
-    expect(restarted.sendMessage.mock.calls.some(([, message]) => message.type === 'clf-desktop-input')).toBe(false);
+    expect(restarted.sendMessage.mock.calls.some(([, message]) => message.type === 'clf-desktop-input')).toBe(true);
     expect(restarted.create).not.toHaveBeenCalled();
   });
 

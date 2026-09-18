@@ -2368,7 +2368,7 @@ describe('apply_patch', () => {
     ].join('\n');
     const reply = await core('tools/call', { name: 'apply_patch', arguments: { patch } });
     expect(reply.body.result?.isError).toBe(true);
-    expect(textOf(reply)).toBe('apply_patch environment selection is unavailable for this turn');
+    expect(reply.body.result.content[0]).toEqual({ type: 'text', text: 'apply_patch environment selection is unavailable for this turn' });
     await expect(fs.stat(path.join(approved, 'env-selected.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -2575,9 +2575,9 @@ describe('exec_command and write_stdin', () => {
       arguments: { cmd: patch, workdir: '/workspace' }
     });
     expect(reply.body.result?.isError).toBe(true);
-    expect(textOf(reply)).toBe(
+    expect(reply.body.result.content[0]).toEqual({ type: 'text', text:
       'apply_patch verification failed: patch detected without explicit call to apply_patch. Rerun as ["apply_patch", "<patch>"]'
-    );
+    });
     await expect(fs.stat(path.join(approved, 'implicit.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -3157,19 +3157,26 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(textOf(stranger)).toContain('EXEC_SESSION_OWNER_MISMATCH');
     expect(textOf(stranger)).not.toContain('may already have delivered');
 
-    // Caller identity is the authorization boundary. An unattributed call must not inherit
-    // the owner's authority merely because it can guess the small numeric session id.
-    const unproven = await asChat(null, 'write_stdin', {
+    // An unresolved request can continue processes it opened itself, but a bare numeric id
+    // does not grant custody over a process that belongs to another request/session.
+    const unproven = await asChat('wfr_execown_unattributed', 'write_stdin', {
       session_id: sessionId,
       chars: 'anon\r',
       yield_time_ms: 1_000
     });
     expect(unproven.body.result?.isError).toBe(true);
-    expect(textOf(unproven)).toContain('current call has no proven chat identity');
     expect(textOf(unproven)).not.toContain('echo=anon');
-    expect(textOf(unproven)).toContain('This refusal concerns this process id, not Read-only mode');
     expect(textOf(unproven)).toContain('EXEC_CALLER_UNIDENTIFIED');
-    expect(textOf(unproven)).toContain('retry this same session_id once');
+    expect(textOf(unproven)).toContain('not Read-only mode');
+
+    expect(prove('wfr_execown_unattributed', 'conv-execown-opener')).toBe('stored');
+    const recovered = await asChat('wfr_execown_unattributed', 'write_stdin', {
+      session_id: sessionId,
+      chars: 'anon\r',
+      yield_time_ms: 1_000
+    });
+    expect(recovered.body.result?.isError).not.toBe(true);
+    expect(textOf(recovered)).toContain('echo=anon');
 
 
     const owner = await asChat('wfr_execown_opener', 'write_stdin', {
@@ -3182,13 +3189,14 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(textOf(owner)).toContain('Process exited with code 0');
   });
 
-  it('distinguishes anonymous launch custody from an unavailable terminal and reports identity recovery', async () => {
+  it('distinguishes unresolved, anonymous and unavailable process custody and reports identity recovery', async () => {
     const source = await createSession({ conversationId: 'exec-return-owner' });
     expect(prove('wfr_exec_return_owner', 'exec-return-owner', source.id)).toBe('stored');
     noteExecOwner(987001, source.id);
     noteExecOwner(987002, null);
     try {
       const unknown = await asChat('wfr_exec_return_late', 'write_stdin', { session_id: 987001, chars: '' });
+      expect(unknown.body.result?.isError).toBe(true);
       expect(textOf(unknown)).toContain('EXEC_CALLER_UNIDENTIFIED');
       expect(prove('wfr_exec_return_late', 'exec-return-owner', source.id)).toBe('stored');
       const recovered = await asChat('wfr_exec_return_owner', 'read', { paths: ['/workspace/src/app.ts'] });
@@ -3496,10 +3504,28 @@ describe('exec sessions belong to the chat that opened them', () => {
 
     const blockedRequest = 'wfr_background_admission_blocked';
     expect(prove(blockedRequest, conversationId)).toBe('stored');
-    const blocked = await asChat(blockedRequest, 'exec_command', {
-      cmd: IS_WINDOWS ? "Write-Output 'must-not-run'" : "printf '%s\\n' must-not-run",
-      workdir: '/workspace'
+    const offer = unifiedExecManager.offerCompletedOutput.bind(unifiedExecManager);
+    let publication: Parameters<typeof offer>[1] | undefined;
+    const published = vi.spyOn(unifiedExecManager, 'offerCompletedOutput').mockImplementation(async (...args) => {
+      publication = args[1];
+      return offer(...args);
     });
+    let blocked: Awaited<ReturnType<typeof asChat>>;
+    try {
+      blocked = await asChat(blockedRequest, 'exec_command', {
+        cmd: IS_WINDOWS ? "Write-Output 'must-not-run'" : "printf '%s\\n' must-not-run",
+        workdir: '/workspace'
+      });
+      // A later invocation acknowledges only a successfully published page whose completion
+      // timestamp is strictly earlier. Observe that boundary instead of retrying commands.
+      await vi.waitFor(() => {
+        expect(publication?.failed).toBe(false);
+        expect(publication?.completedAt).toBeTypeOf('number');
+        expect(Date.now()).toBeGreaterThan(publication!.completedAt!);
+      });
+    } finally {
+      published.mockRestore();
+    }
     expect(failed(blocked)).toBe(true);
     expect(textOf(blocked)).toContain('EXEC_RESULTS_UNREAD');
     for (const sessionId of sessionIds) expect(textOf(blocked)).toContain(String(sessionId));

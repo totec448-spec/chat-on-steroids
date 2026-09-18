@@ -39,6 +39,7 @@ docs/handoff-*.md
 docs/open-issues-*.md
 
 # One-off local experiment scratch.
+/.tmp/
 one-cycle.ps1
 .one-cycle-*
 proof-*.txt

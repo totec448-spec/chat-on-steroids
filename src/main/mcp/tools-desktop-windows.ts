@@ -5,6 +5,7 @@ import { createWindowsComputerApi, WINDOWS_API_METHODS, WINDOWS_API_SCHEMAS, typ
 import { browserTabChord, isBrowserProcess } from '../computer/browser-chords.js';
 import { currentCall, noteCount } from './call-context.js';
 import { getConfig } from '../config.js';
+import { requestCorrelation } from '../session/correlation.js';
 import { fail, type SurfaceRegistrar, type ToolContent, type ToolResult } from './kernel.js';
 import { WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-computer.js';
 import { toolDeclaration } from './tool-declarations.js';
@@ -14,17 +15,22 @@ const STATE_INPUT_METHODS = new Set<string>(WINDOWS_COMPUTER_STATE_INPUT_METHODS
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024 - 64 * 1024;
 // Only disposable observation indexes/geometry live here; the native frame/ref owner still
 // validates generation, identity and current geometry. Explicitly allowed unattributed
-// calls share a separate context; they never borrow an identified chat's observations.
+// calls keep a request-scoped context; they never borrow another unresolved request's or an
+// identified chat's observations. Late exact proof aliases that context to the durable session.
 // No images or userData are persisted.
 const contexts = new Map<string, WindowsComputerApi>();
 const MAX_CONTEXTS = 32;
 
 function apiForCaller(method: string): WindowsComputerApi {
-  const caller = currentCall()?.caller;
-  const principal = caller?.sessionId ? `session:${caller.sessionId}`
-    : caller?.conversationId ? `chat:${caller.conversationId}`
-    : getConfig().multiAgent.allowUnattributedCalls ? 'unattributed' : null;
-  if (!principal) {
+  const call = currentCall();
+  const caller = call?.caller;
+  const allowUnattributed = call?.allowUnattributed ?? getConfig().multiAgent.allowUnattributedCalls;
+  const principals: string[] = [];
+  if (caller?.sessionId) principals.push(`session:${caller.sessionId}`);
+  else if (caller?.conversationId) principals.push(`chat:${caller.conversationId}`);
+  if (allowUnattributed && caller?.requestId) principals.push(`request:${caller.requestId}`);
+  if (allowUnattributed && principals.length === 0) principals.push('unattributed');
+  if (!principals.length) {
     contexts.delete('unattributed');
     if (STATE_INPUT_METHODS.has(method)) {
       throw new ComputerError('CALLER_IDENTITY_REQUIRED: indexed and coordinate input requires exact companion identity or Allow unattributed calls enabled in app settings; no input ran.');
@@ -33,10 +39,26 @@ function apiForCaller(method: string): WindowsComputerApi {
     // an implicit latest-observation authority that another anonymous call could consume.
     return createWindowsComputerApi();
   }
-  let api = contexts.get(principal);
+  let api: WindowsComputerApi | undefined;
+  for (const principal of principals) {
+    api = contexts.get(principal);
+    if (api) break;
+  }
+  // Exact proof may land after the observation call returned. A later turn from that durable
+  // session can still adopt the request-scoped observation by consulting the correlation map.
+  if (!api && caller?.sessionId) {
+    for (const [principal, candidate] of [...contexts.entries()].reverse()) {
+      if (!principal.startsWith('request:')) continue;
+      if (requestCorrelation(principal.slice('request:'.length))?.sessionId !== caller.sessionId) continue;
+      api = candidate;
+      break;
+    }
+  }
   if (!api) api = createWindowsComputerApi();
-  contexts.delete(principal);
-  contexts.set(principal, api);
+  for (const principal of principals) {
+    contexts.delete(principal);
+    contexts.set(principal, api);
+  }
   while (contexts.size > MAX_CONTEXTS) contexts.delete(contexts.keys().next().value!);
   return api;
 }

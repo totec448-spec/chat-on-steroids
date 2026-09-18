@@ -13,9 +13,16 @@ if (!process.versions.electron) {
 const { app, BrowserWindow } = require('electron');
 app.whenReady().then(async () => {
   const root = path.join(__dirname, '..');
-  const code = require('esbuild').buildSync({ entryPoints: [path.join(root, 'src/renderer/chat.ts')],
-    bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'chat' }).outputFiles[0].text;
-  const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
+  const built = await require('esbuild').build({ entryPoints: [path.join(root, 'src/renderer/chat.ts')],
+    bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'chat',
+    outfile: path.join(root, '.local/opening-fixture.js'),
+    plugins: [{name:'fixture-url-assets',setup(build){
+      build.onResolve({filter:/\?url$/},args=>({path:args.path,namespace:'fixture-url'}));
+      build.onLoad({filter:/.*/,namespace:'fixture-url'},()=>({contents:'export default "";',loader:'js'}));
+    }}] });
+  const code = built.outputFiles.find(file=>file.path.endsWith('.js')).text;
+  const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8') +
+    built.outputFiles.filter(file=>file.path.endsWith('.css')).map(file=>file.text).join('\n');
   const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*>/g, '')
     .replace('</head>', `<style>${css}</style></head>`);
@@ -42,8 +49,14 @@ app.whenReady().then(async () => {
       listSessions: () => ok({sessions, activeId:null, blocked:[], pressure:[]}),
       listProjects: () => ok([]), listInputs: () => ok([]), listPausedHelpers: () => ok([]),
       onSessionChanged:handler=>{sessionChanged=handler;return()=>{if(sessionChanged===handler)sessionChanged=null;}},
-      getSession: (id, options) => {reads.push({id,options});return ok({summary:sessions.find(s=>s.id===id), total:history[id].length,
-        events:history[id].filter(e=>e.seq >= (options?.from ?? 0)), nextFrom:history[id].length+1});}
+      getSession: (id, options) => {
+        reads.push({id,options});
+        const eligible=history[id].filter(e=>e.seq >= (options?.from ?? 0) &&
+          (options.before===undefined||e.seq<options.before)&&(options.after===undefined||e.seq>options.after));
+        const events=options.from===undefined&&options.after===undefined?eligible.slice(-options.limit):eligible.slice(0,options.limit);
+        return ok({summary:sessions.find(s=>s.id===id),total:history[id].length,events,
+          nextFrom:events.reduce((next,e)=>Math.max(next,e.seq+1),options.from??0)});
+      }
     }, {get:(target,key) => target[key] ?? (()=>ok(null))});
     window.waitFor=async predicate=>{
       const deadline=performance.now()+5000;
@@ -79,7 +92,7 @@ app.whenReady().then(async () => {
       inserted:[...document.querySelectorAll('.ev-assistant_message')].some(row=>row.textContent.includes('New live row'))};
   })()`);
   console.log(JSON.stringify(results, null, 2));
-  assert.ok(results.observations[0].height > 10000, 'Fixture must exercise a long chat');
+  assert.ok(results.observations[0].height > results.observations[0].viewport * 2, 'Fixture must exercise an overflowing bounded tail');
   for (const row of results.observations) {
     assert.ok(row.viewport > 0, 'Chat must have visible geometry');
     assert.ok(row.gap <= 1, `${row.id} must open at the bottom, got gap ${row.gap}`);

@@ -2046,8 +2046,11 @@ input[readonly] {
 /* ---------------------------------------------------------- timeline */
 
 #timeline {
-  padding: 8px 0 calc(10px + var(--timeline-scroll-reserve, 0px));
+  padding: 8px 0 10px;
 }
+#timeline:has(+ #inputQueue > .pending-message) { padding-bottom: 0; }
+/* Reserve follows recorded AND pending messages, never separates their bubbles. */
+#timelineContent { padding-bottom: var(--timeline-scroll-reserve, 0px); }
 
 .ev {
   display: grid;
@@ -2828,8 +2831,10 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 
 .composer-options { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; }
 .composer-options select { border: 0; background: transparent; color: var(--soft); font: inherit; font-size: calc(11px * var(--text-scale, 1)); max-width: 130px; padding: 5px; }
-.input-queue { width: 100%; margin: 0 auto; }
+.input-queue { display: flex; flex-direction: column; width: 100%; margin: 0 auto; }
 .pending-message { position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; margin: 4px 0 26px auto; width: fit-content; max-width: 82%; text-align: start; }
+/* Match the canonical user row's padding and footer before receipt arrives. */
+#inputQueue > .pending-message { margin-top: 11px; margin-bottom: 33px; }
 .pending-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(15px * var(--text-scale, 1)); line-height: 1.75; }
 .pending-message-status { position: absolute; right: 30px; top: calc(100% + 1px); height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; color: var(--soft); }
 .pending-message.is-delivery-error .pending-message-status { position: static; display: block; height: auto; margin-top: 4px; font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3027,6 +3032,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 
 .chat-error-notice { border: 1px solid var(--red-line); border-radius: 12px; background: var(--red-wash); padding: 14px 16px; color: var(--ink); }
 .chat-error-notice > strong { display: block; color: var(--red); font-size: calc(13px * var(--text-scale, 1)); font-weight: 500; margin-bottom: 6px; }
+.chat-error-notice.is-reloaded { border-color: var(--accent-edge); background: var(--accent-wash); }
+.chat-error-notice.is-reloaded > strong { color: var(--accent); }
 .chat-error-notice.is-resolved { border-color: var(--green-line); background: var(--green-wash); }
 .chat-error-notice.is-resolved > strong { color: var(--green); }
 .chat-error-notice .msg { font-size: calc(14px * var(--text-scale, 1)); }

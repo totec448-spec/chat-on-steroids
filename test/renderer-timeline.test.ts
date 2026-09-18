@@ -87,8 +87,17 @@ function toolCall(seq: number, callId: string): SessionEvent {
   };
 }
 
-/** The rows the recorder writes for one Compact & Resume, in the order it observes them. */
-function compaction(seq: number): SessionEvent[] {
+/**
+ * The rows the recorder writes for one Compact & Resume, in the order it observes them.
+ *
+ * `escaped` is how ChatGPT's composer records the same two prompts since 2026-09-16: it
+ * round-trips inserted text through its own Markdown serializer, which escapes ASCII
+ * punctuation, so the marker arrives as `[[CLF-RESUME\:<token>]]`. These are the exact shapes
+ * read back out of a live install's session store.
+ */
+function compaction(seq: number, escaped = false): SessionEvent[] {
+  const mark = (kind: 'HANDOFF' | 'RESUME') =>
+    escaped ? `[[CLF-${kind}\\:${TOKEN}]]` : `[[CLF-${kind}:${TOKEN}]]`;
   return [
     {
       seq,
@@ -97,7 +106,7 @@ function compaction(seq: number): SessionEvent[] {
       kind: 'user_message',
       messageId: 'm-brief-request',
       turnId: 'turn-brief',
-      message: text(`[[CLF-HANDOFF:${TOKEN}]] Write the handoff brief for this session.`)
+      message: text(`${mark('HANDOFF')} Write the handoff brief for this session.`)
     },
     { seq: seq + 1, time: T0 + (seq + 1) * 1000, source: 'extension', kind: 'turn_start', turnId: 'turn-brief' },
     {
@@ -126,7 +135,7 @@ function compaction(seq: number): SessionEvent[] {
       source: 'extension',
       kind: 'user_message',
       messageId: 'm-bootstrap',
-      message: text(`[[CLF-RESUME:${TOKEN}]] Continue from this brief: keep the loop running.`)
+      message: text(`${mark('RESUME')} Continue from this brief: keep the loop running.`)
     }
   ];
 }
@@ -135,6 +144,14 @@ async function settle(ms = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** History paging yields to the browser frame after each bounded read. Timer
+ * ticks alone can all finish before that frame on Linux and macOS. */
+async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Promise<void> {
+  await settle();
+  await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
+  await settle();
 }
 
 async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; sessions?: SessionSummary[]; pro?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null } = {}) {
@@ -253,15 +270,17 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
         const from = options?.from ?? 0;
         const eligible = live.events.filter((event) => event.seq >= from &&
           (options?.before === undefined || positionOf(event) < options.before) &&
-          (options?.after === undefined || positionOf(event) > options.after)).sort((a, b) => positionOf(a) - positionOf(b));
-        const page = options?.after !== undefined ? eligible.slice(0, options.limit ?? 160)
-          : options?.before === undefined ? eligible : eligible.slice(-(options.limit ?? 160));
+          (options?.after === undefined || positionOf(event) > options.after))
+          .sort((a, b) => options?.from !== undefined ? a.seq - b.seq : positionOf(a) - positionOf(b));
+        const limit = options?.limit ?? 30;
+        const page = options?.after !== undefined || options?.from !== undefined
+          ? eligible.slice(0, limit) : eligible.slice(-limit);
         const opening = live.inputs.find(row => row.opening && row.sessionId === _id);
         return ok({
           summary: opening ? { ...summary(live.events), id: _id, title: opening.text, conversationId: null, chatIds: [] } : summary(live.events),
           events: page,
           total: live.events.length,
-          nextFrom: live.events.reduce((max, e) => Math.max(max, e.seq + 1), 0)
+          nextFrom: page.reduce((max, e) => Math.max(max, e.seq + 1), from)
         });
       },
       getHandoff: (sessionId: string, handoffId: string) => ok(options.handoff?.sessionId === sessionId && options.handoff.id === handoffId ? options.handoff : null)
@@ -324,11 +343,19 @@ it('keeps a reaction on the native question across 100 interim messages, tool ca
   const final: SessionEvent = { kind: 'assistant_message', seq: 118, time: T0 + 117, source: 'extension', messageId: 'final',
     message: text('\uE200message_reaction\uE202👀\uE201\nFinished.'), final: true };
   const { w } = await boot([question, ...middle, ...tools, injected, final]);
+  const correction = [...w.document.querySelectorAll('.said.is-user')].find(node => node.textContent?.includes('An injected correction'))!;
+  expect(correction.querySelector('.message-reaction')).toBeNull();
+  expect(w.document.querySelector('.message-reaction')).toBeNull(); // The native question is on an older page.
+  const pane = w.document.getElementById('chatBody')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 }, scrollHeight: { value: 10000 } });
+  for (let page = 0; page < 3; page++) {
+    pane.scrollTop = 0;
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
+    await settleHistoryFrame(w);
+  }
   const badges = [...w.document.querySelectorAll('.message-reaction')];
   expect(badges).toHaveLength(1);
   expect(badges[0]!.closest('.said')!.textContent).toContain('Original native question');
-  const correction = [...w.document.querySelectorAll('.said.is-user')].find(node => node.textContent?.includes('An injected correction'))!;
-  expect(correction.querySelector('.message-reaction')).toBeNull();
   expect(w.document.getElementById('timeline')!.textContent).not.toContain('message_reaction');
 });
 
@@ -511,7 +538,7 @@ it('keeps the current transcript and handoff mounted when Write Directly focuses
   expect(w.document.querySelector('img[alt="current.png"]')).not.toBeNull();
   expect(w.document.querySelector('details.tool')?.textContent).toContain('Read README.md');
   expect(w.document.getElementById('handoffBox')!.textContent).toContain('CURRENT HANDOFF');
-  expect(api.getSession).toHaveBeenCalledWith(current.id, { from: 3, limit: 160 });
+  expect(api.getSession).toHaveBeenCalledWith(current.id, { from: 3, limit: 30 });
 
   reject({ ok: false, error: 'same-session refresh unavailable' });
   await settle();
@@ -922,7 +949,9 @@ it('explains a legacy missing image recording without asserting a provider recei
   event.call.tool = 'view_image';
   event.call.result = text('');
   await app.append([event]);
-  const tool = app.w.document.querySelector('details.tool')!;
+  const tool = app.w.document.querySelector('details.tool') as HTMLDetailsElement;
+  tool.open = true; tool.dispatchEvent(new app.w.Event('toggle'));
+  await settle();
   expect(tool.textContent).toContain('No image preview was retained in this recording.');
   expect(tool.textContent).not.toContain('received');
 });
@@ -940,9 +969,11 @@ it('loads recorded tool images on expansion and hides truncated binary envelopes
   const tool = w.document.querySelector('details.tool') as HTMLDetailsElement;
   expect(getImage).not.toHaveBeenCalled();
   expect(tool.textContent).not.toContain('AAAA');
-  expect(tool.textContent).toContain('aaaaaaaa.txt');
+  expect(tool.textContent).not.toContain('aaaaaaaa.txt');
   tool.open = true; tool.dispatchEvent(new w.Event('toggle'));
   await settle();
+  expect(tool.textContent).toContain('aaaaaaaa.txt');
+  expect(tool.textContent).not.toContain('AAAA');
   expect(getImage).toHaveBeenCalledWith(summary([]).id, 'abcdefab.png');
   expect(tool.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,YQ==');
 });
@@ -1293,6 +1324,32 @@ it('folds a whole Compact & Resume into one row that says the new chat opened', 
   expect(card.textContent).toContain('keep the loop running');
   expect(card.textContent).toContain('Handoff saved');
   expect(card.textContent).toContain('Bootstrap sent into the new chat');
+});
+
+it('folds a Compact & Resume whose marker ChatGPT escaped as Markdown', async () => {
+  // Same fold, same assertions, but the two prompts are recorded the way the composer has
+  // written them since 2026-09-16. Every reader of the shared marker regex reads text that
+  // came back out of the page, so they all stopped matching at once: this card was not built
+  // at all, and the raw marker was left on screen in the rows it should have replaced.
+  const { w } = await boot([
+    { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },
+    toolCall(2, 'call-1'),
+    ...compaction(3, true),
+    toolCall(9, 'call-2')
+  ]);
+  const timeline = w.document.getElementById('timeline')!;
+
+  const cards = timeline.querySelectorAll('details.compaction');
+  expect(cards).toHaveLength(1);
+  expect(cards[0]!.querySelector('summary')!.textContent).toMatch(/^Compact & Resume:New chat opened at .* \(44 characters\)$/);
+  // Stripped in the form it was recorded in, so no half-removed marker survives either.
+  expect(timeline.textContent).not.toContain('[[CLF-');
+  expect(timeline.textContent).not.toContain('CLF-RESUME');
+  expect([...timeline.children].map((row) => row.className)).toEqual(['ev ev-tool_call', 'ev ev-compaction', 'ev ev-tool_call']);
+
+  cards[0]!.toggleAttribute('open', true);
+  expect(cards[0]!.textContent).toContain('Brief request');
+  expect(cards[0]!.textContent).toContain('keep the loop running');
 });
 
 it('retires a pending Skills picker when sending replaces its draft', async () => {
@@ -2825,6 +2882,7 @@ it('opens every selected chat at the bottom and preserves manual reading during 
   const timeline = w.document.getElementById('timeline')!;
   Object.defineProperties(pane, { clientHeight: { value: 400 },
     scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+  w.document.getElementById('timelineContent')!.getBoundingClientRect = () => ({ height: pane.scrollHeight } as DOMRect);
   const select = async (id: string) => {
     (w.document.querySelector(`#sessionList [data-id="${id}"]`) as HTMLElement).click();
     await settle();
@@ -2871,14 +2929,14 @@ it.each(['empty', 'failed'])('keeps a fitting chat live after an %s older-page r
   Object.defineProperties(pane, { clientHeight: { value: 800 }, scrollHeight: { value: 800 } });
   pane.scrollTop = 0;
   pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 })); await settle();
-  expect(read).toHaveBeenCalledWith(expect.any(String), { before: 12, limit: 80 });
+  expect(read).toHaveBeenCalledWith(expect.any(String), { before: 12, limit: 30 });
   expect(pane.scrollTop).toBe(0);
   expect(timeline.querySelector('.timeline-window-note')).toBeNull();
-  expect(timeline.style.getPropertyValue('--timeline-scroll-reserve')).toBe('');
+  expect(w.document.getElementById('timelineContent')!.style.getPropertyValue('--timeline-scroll-reserve')).toBe('');
   await append([{ seq: 13, time: T0 + 1, source: 'extension', kind: 'assistant_message',
     messageId: 'fresh', message: text('Still receiving live output'), final: true }]);
   expect(timeline.textContent).toContain('Still receiving live output');
-  expect(read).toHaveBeenLastCalledWith(expect.any(String), { from: 13, limit: 160 });
+  expect(read).toHaveBeenLastCalledWith(expect.any(String), { from: 13, limit: 30 });
 });
 
 it('loads bounded earlier pages on deliberate upward scrolling without draining on render', async () => {
@@ -2896,16 +2954,21 @@ it('loads bounded earlier pages on deliberate upward scrolling without draining 
   for (const row of timeline.querySelectorAll<HTMLElement>('[data-timeline-key]')) row.getBoundingClientRect = () => {
     const top = [...timeline.querySelectorAll('[data-timeline-key]')].indexOf(row) * 20 - pane.scrollTop;
     return { top, bottom: top + 20, height: 20, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) };
-  };  const up = async () => { pane.scrollTop = 0; pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 })); await settle(); };
+  };
+  const up = async () => {
+    pane.scrollTop = 0;
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
+    await settleHistoryFrame(w);
+  };
   await up();
-  expect(pane.scrollTop).toBe(1600);
-  expect(timeline.textContent).toContain('History item 121');
-  expect(timeline.textContent).not.toContain('History item 360');
+  expect(pane.scrollTop).toBe(600);
+  expect(timeline.textContent).toContain('History item 301');
+  expect(timeline.textContent).toContain('History item 360');
   await append([{ seq: 361, time: T0 + 361, source: 'extension', kind: 'user_message', messageId: 'newest', message: text('Newest live input') }]);
-  expect(timeline.textContent).toContain('History item 121');
+  expect(timeline.textContent).toContain('History item 301');
   expect(timeline.textContent).not.toContain('Newest live input');
-  await up(); expect(timeline.textContent).toContain('History item 41');
-  await up(); expect(timeline.textContent).toContain('History item 1');
+  for (let page = 0; page < 12 && !timeline.textContent?.includes('History item 1'); page++) await up();
+  expect(timeline.textContent).toContain('History item 1');
   expect(timeline.querySelectorAll('[data-timeline-key]').length).toBeLessThanOrEqual(160);
   expect(timeline.querySelector('[data-history="latest"]')).toBeNull();
 });
@@ -2937,14 +3000,18 @@ it('scrolls forward through evicted history with wheel, keyboard and scrollbar, 
     const top = index < 0 ? 0 : index * 20 - pane.scrollTop;
     return { top, bottom: top + 20, height: 20 } as DOMRect;
   };
-  for (let i = 0; i < 3; i++) {
-    pane.scrollTop = 0; pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 })); await settle();
+  for (let i = 0; i < 14 && !timeline.textContent?.includes('Bidirectional item 1.'); i++) {
+    pane.scrollTop = 0;
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
+    await settleHistoryFrame(w);
   }
   expect(timeline.textContent).toContain('Bidirectional item 1.');
   expect(timeline.textContent).not.toContain('Bidirectional item 400.');
   const downward = async (kind: string) => {
     pane.scrollTop = pane.scrollHeight - pane.clientHeight;
-    const anchor = timeline.querySelectorAll<HTMLElement>('[data-timeline-key]')[140]!;
+    const anchor = [...timeline.querySelectorAll<HTMLElement>('[data-timeline-key]')].find(row => {
+      const rect = row.getBoundingClientRect(); return rect.bottom > 0 && rect.top >= 0;
+    })!;
     const before = anchor.getBoundingClientRect().top;
     if (kind === 'wheel') pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: 100 }));
     else if (kind === 'keyboard') pane.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'PageDown' }));
@@ -2954,20 +3021,19 @@ it('scrolls forward through evicted history with wheel, keyboard and scrollbar, 
       pane.scrollTop += 100; pane.dispatchEvent(new w.Event('scroll'));
       w.dispatchEvent(new w.Event('pointerup'));
     }
-    await settle();
+    await settleHistoryFrame(w);
     expect(anchor.isConnected).toBe(true);
     expect(anchor.getBoundingClientRect().top).toBe(before);
     expect(timeline.querySelectorAll('[data-timeline-key]').length).toBeLessThanOrEqual(160);
     const count = read.mock.calls.length;
-    pane.dispatchEvent(new w.Event('scroll')); await settle();
+    pane.dispatchEvent(new w.Event('scroll')); await settleHistoryFrame(w);
     expect(read).toHaveBeenCalledTimes(count);
   };
-  await downward('wheel');
-  expect(timeline.textContent).toContain('Bidirectional item 240.');
-  await downward('keyboard');
-  expect(timeline.textContent).toContain('Bidirectional item 320.');
-  await downward('scrollbar');
+  for (let page = 0; page < 14 && !timeline.textContent?.includes('Bidirectional item 400.'); page++) {
+    await downward(['wheel', 'keyboard', 'scrollbar'][page % 3]!);
+  }
   expect(timeline.textContent).toContain('Bidirectional item 400.');
+  expect(read.mock.calls.every(([, options]) => options.limit === 30)).toBe(true);
   await downward('wheel'); // Empty forward page proves we reached the current tail.
   await append([{ seq: 401, time: T0 + 401, source: 'extension', kind: 'user_message', messageId: 'live-again', message: text('Live again') }]);
   expect(timeline.textContent).toContain('Live again');
@@ -2985,21 +3051,63 @@ it('keeps a revised long answer reachable in both directions and never uses its 
   api.getSession = read;
   const pane = w.document.getElementById('chatBody')!;
   const timeline = w.document.getElementById('timeline')!;
-  Object.defineProperties(pane, { clientHeight: { value: 400 }, scrollHeight: { value: 400 } });
-  const page = async (deltaY: number) => { pane.scrollTop = 0; pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY })); await settle(); };
-  await page(-100); await page(-100);
+  // The renderer fills a requested edge across animation frames. A permanently
+  // underfilled mock kept that demand alive, making the last read depend on timing.
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => Math.max(400, timeline.querySelectorAll('[data-timeline-key]').length * 20) } });
+  let geometryRows: Map<Element, number> | null = null;
+  const geometryChanges = new w.MutationObserver(() => { geometryRows = null; });
+  geometryChanges.observe(timeline, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-timeline-key'] });
+  w.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (geometryChanges.takeRecords().length) geometryRows = null;
+    geometryRows ??= new Map([...timeline.querySelectorAll('[data-timeline-key]')].map((row, index) => [row, index]));
+    const index = geometryRows.get(this) ?? -1;
+    const top = index < 0 ? 0 : index * 20 - pane.scrollTop;
+    return { top, bottom: top + 20, height: 20 } as DOMRect;
+  };
+  const page = async (deltaY: number) => {
+    pane.scrollTop = deltaY < 0 ? 0 : pane.scrollHeight - pane.clientHeight;
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY }));
+    await settleHistoryFrame(w);
+  };
+  for (let index = 0; index < 12 && !timeline.textContent?.includes('Detailed ratings.'); index++) await page(-100);
   expect(timeline.textContent).toContain('Detailed ratings.');
   expect(timeline.querySelectorAll('.ev-assistant_message')).toHaveLength(1);
-  expect(read).toHaveBeenLastCalledWith(expect.any(String), { before: 121, limit: 80 });
+  expect(read).toHaveBeenLastCalledWith(expect.any(String), { before: 121, limit: 30 });
+  const newestBefore = Math.max(...[...timeline.querySelectorAll<HTMLElement>('.ev-user_message')]
+    .map(row => Number(row.textContent?.match(/Origin row (\d+)\./)?.[1] ?? 0)));
   await page(100);
-  expect(read).toHaveBeenLastCalledWith(expect.any(String), { after: 200, limit: 80 });
-  expect(timeline.textContent).toContain('Origin row 280.');
+  expect(read).toHaveBeenLastCalledWith(expect.any(String), { after: newestBefore, limit: 30 });
+  expect(timeline.textContent).toContain(`Origin row ${newestBefore + 30}.`);
   await page(-100);
   expect(timeline.textContent).toContain('Detailed ratings.');
   expect(timeline.querySelectorAll('.ev-assistant_message')).toHaveLength(1);
+  geometryChanges.disconnect();
 });
 
-it('keeps admitting newer data when dense collapsed activity reaches the resident bound', async () => {
+it('keeps long surrounding prose while materializing large tool results only on expansion', async () => {
+  const call = toolCall(2, 'large-output');
+  if (call.kind !== 'tool_call') throw new Error('Expected fixture tool');
+  call.call.result = text('Recorded output. '.repeat(150000));
+  const { w, append } = await boot([
+    { seq: 1, time: T0, kind: 'assistant_message', source: 'extension', messageId: 'before-large', message: text('Prose before the large tool'), final: false },
+    call,
+    { seq: 3, time: T0 + 3000, kind: 'assistant_message', source: 'extension', messageId: 'after-large', message: text('Prose after the large tool'), final: true }
+  ]);
+  const timeline = w.document.getElementById('timeline')!;
+  const disclosure = timeline.querySelector<HTMLDetailsElement>('details.tool')!;
+  expect(disclosure.querySelector('.raw')).toBeNull();
+  expect(timeline.textContent).toContain('Prose before the large tool');
+  expect(timeline.textContent).toContain('Prose after the large tool');
+  disclosure.open = true; disclosure.dispatchEvent(new w.Event('toggle')); await settle();
+  expect(disclosure.querySelector('.raw')?.textContent).toContain('Recorded output.');
+  await append([]);
+  expect(timeline.querySelector('details.tool')).toBe(disclosure);
+  expect(disclosure.open).toBe(true);
+  expect(timeline.textContent).toContain('Prose before the large tool');
+});
+
+it('retains the visible collapsed group beyond the normal resident target and still admits newer data', async () => {
   const rows = Array.from({ length: 400 }, (_, i) => toolCall(i + 1, `dense-${i}`));
   const { w, live, append } = await boot(rows);
   const api = (w as any).api;
@@ -3017,16 +3125,20 @@ it('keeps admitting newer data when dense collapsed activity reaches the residen
       height: this.classList.contains('tool-group') ? 30 : 0 } as DOMRect;
   };
   const group = timeline.querySelector('.tool-group');
-  for (let i = 0; i < 2; i++) {
-    pane.scrollTop = 0; pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 })); await settle();
-  }
-  expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(320);
+  // One deliberate movement keeps filling the edge through collapsed batches.
+  // Await the actual read result, including its animation-frame yields.
+  pane.scrollTop = 0; pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
+  await vi.waitFor(() => expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(rows.length), { timeout: 5000 });
   expect(timeline.querySelector('.tool-group')).toBe(group);
-  pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: 100 })); await settle();
+  expect(timeline.querySelectorAll('.raw')).toHaveLength(0);
+  for (let i = 0; i < 14; i++) {
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: 100 })); await settle();
+  }
   await append([{ seq: 401, time: T0 + 401_000, source: 'extension', kind: 'user_message',
     messageId: 'dense-live', message: text('New data at the resident bound') }]);
   expect(timeline.textContent).toContain('New data at the resident bound');
-  expect(timeline.querySelectorAll('.ev').length).toBeLessThanOrEqual(320);
+  expect(timeline.querySelector('.tool-group')).toBe(group);
+  expect(timeline.querySelectorAll('.ev').length).toBeLessThanOrEqual(rows.length + 1);
 });
 
 it.each(['older', 'newer'])('does not apply a %s-page response or scroll after switching to a new chat', async direction => {

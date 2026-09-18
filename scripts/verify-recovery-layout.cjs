@@ -35,11 +35,11 @@ app.whenReady().then(async () => {
   for (const width of [920, 420]) for (const zoom of [1, 1.5]) for (const theme of ['dark', 'light']) {
     win.setContentSize(width, 380);
     win.webContents.setZoomFactor(zoom);
-    for (const kind of ['thinking-failed', 'unattributed', 'unattributed-wait', 'native-busy', 'silence', 'post-reload'])
-      for (const next of kind === 'post-reload' ? [null, 'queue', 'goal', 'loop'] : [null]) {
+    for (const kind of ['thinking-failed', 'unattributed', 'unattributed-wait', 'assistant-error', 'tab-recovery', 'native-busy', 'silence', 'post-reload'])
+      for (const next of kind === 'post-reload' ? [null, 'queue', 'goal', 'loop', 'continue'] : kind === 'native-busy' ? [null, 'continue'] : [null]) {
       const measured = await win.webContents.executeJavaScript(`(() => {
         document.documentElement.dataset.theme = '${theme}';
-        recovery.renderRecoveryCountdowns(document.getElementById('recoveryStatus'), [{ kind: '${kind}', next: ${JSON.stringify(next)}, deadline: ${kind === 'unattributed' ? 15000 : 300000} }], 1000);
+        recovery.renderRecoveryCountdowns(document.getElementById('recoveryStatus'), [{ kind: '${kind}', next: ${JSON.stringify(next)}, generating: ${kind === 'post-reload'}, deadline: ${kind === 'unattributed' ? 15000 : 300000} }], 1000);
         const host = document.getElementById('recoveryStatus'), timer = host.querySelector('.recovery-countdown');
         const h = host.getBoundingClientRect(), t = timer.getBoundingClientRect();
         return { hostWidth: h.width, height: h.height, timerWidth: t.width, text: timer.textContent,
@@ -63,6 +63,9 @@ app.whenReady().then(async () => {
     { file: 'preview-unattributed-five-minute', kind: 'unattributed-wait', deadline: 300_000, now: 60_000 },
     { file: 'preview-thinking-failed', kind: 'thinking-failed', deadline: 300_000, now: 0 },
     { file: 'preview-extended-wait', kind: 'native-busy', deadline: 600_000, now: 300_000 },
+    { file: 'preview-continue-one-minute', kind: 'native-busy', next: 'continue', deadline: 60_000, now: 0 },
+    { file: 'preview-continue-five-minutes', kind: 'native-busy', next: 'continue', deadline: 300_000, now: 0 },
+    { file: 'preview-generating-queue', kind: 'post-reload', generating: true, next: 'queue', deadline: 60_000, now: 0 },
     { file: 'preview-pro-silence', kind: 'silence', visibleAt: 300_000, deadline: 600_000, now: 300_000 },
     { file: 'preview-goal-one-minute', kind: 'post-reload', next: 'goal', deadline: 180_000, now: 120_000 },
     { file: 'preview-queue-one-minute', kind: 'post-reload', next: 'queue', deadline: 180_000, now: 120_000 },

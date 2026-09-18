@@ -38,8 +38,8 @@ import type {
   SessionSummary,
   StoredText
 } from '../../shared/session.js';
-import { CONTINUATION_MARKER, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
-import { chronological, positionOf } from '../../shared/chronology.js';
+import { continuationMarkerOf, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
+import { authoredTimeOf, chronological, positionOf, projectTimeline } from '../../shared/chronology.js';
 import { automaticTitle, firstTitleMessage, legacyContextTitle, refreshUserTitle } from './title.js';
 import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type AgentPlan, type AgentPlanUpdate } from '../../shared/agent-plan.js';
 import { getConfig } from '../config.js';
@@ -301,6 +301,7 @@ function emptySummary(id: string, title: string, conversationId: string | null):
     updatedAt: now,
     endedAt: null,
     events: 0,
+    timelineTurns: {},
     userMessages: 0,
     toolCalls: 0,
     lastToolCallAt: null,
@@ -746,6 +747,7 @@ async function rebuildSummaryFromHistory(
         ...checkpoint,
         updatedAt: Math.max(checkpoint.updatedAt, rebuilt.updatedAt),
         events: rebuilt.events,
+        timelineTurns: rebuilt.timelineTurns,
         userMessages: rebuilt.userMessages,
         toolCalls: rebuilt.toolCalls,
         lastToolCallAt: rebuilt.lastToolCallAt,
@@ -805,6 +807,7 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
       (!aliasesCollapsed || checkpoint.canonicalProjectionCurrent) &&
       !checkpoint.outcomeCountersMissing &&
       !checkpoint.activityBoundaryMissing &&
+      checkpoint.summary.timelineTurns !== undefined &&
       checkpoint.summary.finishTurn !== undefined
     ) {
       // A successful no-op migration is still a completed migration. Without this stamp,
@@ -903,6 +906,16 @@ function noteFinishWork(summary: SessionSummary, event: SessionEvent): void {
 }
 
 function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
+  if (event.turnId && event.kind === 'turn_start') {
+    const turns = summary.timelineTurns ?? {};
+    if (!Object.prototype.hasOwnProperty.call(turns, event.turnId)) {
+      summary.timelineTurns = { ...turns, [event.turnId]: { origin: positionOf(event), time: event.time } };
+    }
+  } else if (event.turnId && event.kind === 'turn_end') {
+    const start = summary.timelineTurns?.[event.turnId];
+    if (start) summary.timelineTurns = { ...summary.timelineTurns,
+      [event.turnId]: { ...start, endTime: Math.max(start.endTime ?? 0, event.time) } };
+  }
   summary.events += 1;
   // Never backwards. A tool call is written once the app knows which chat it belongs to,
   // which can be after the page has already reported the end of the turn it ran in, and
@@ -1153,6 +1166,7 @@ export function upsertMessageEvent(
               // The producer already supplied the stable website identity. Keep that exact
               // identity through every revision; a different id is a different logical row.
               messageId: previous.messageId,
+              authoredAt: authoredTimeOf(previous) ?? event.authoredAt,
               providerMessageId: event.providerMessageId ?? previous.providerMessageId,
               // `final` is a compatibility mirror of state, not an independent truth.
               state: event.state === 'final' || event.final === true ? 'final' : 'streaming',
@@ -1171,6 +1185,7 @@ export function upsertMessageEvent(
             }
           : previous?.kind === 'user_message' && event.kind === 'user_message'
             ? { ...event, inputId: event.inputId ?? previous.inputId,
+                authoredAt: previous.authoredAt ?? event.authoredAt,
                 authoredText: event.authoredText ?? previous.authoredText,
                 reaction: event.reaction === undefined ? previous.reaction : event.reaction,
                 // App-owned originals/previews retain their outbox identity when the
@@ -1214,6 +1229,7 @@ export function upsertMessageEvent(
         previous &&
         previous.kind === nextEvent.kind &&
         sameMessage &&
+        nextEvent.authoredAt === previous.authoredAt &&
         nextEvent.model === previous.model &&
         nextEvent.reasoningEffort === previous.reasoningEffort &&
         (previous.kind !== 'assistant_message' ||
@@ -1489,6 +1505,7 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
   // /activity is an incremental feed. Canonical messages use their latest revision seq for
   // the cursor while preserving their first-appearance time/origin for chronology.
   const active = open.get(sessionId);
+  const timelineTurns = active?.summary.timelineTurns ?? (await readDurableSnapshot(sessionId))?.summary.timelineTurns;
   if (options.from !== undefined && active) {
     if (from >= active.nextSeq) return [];
     const cacheFloor = active.tailFrom;
@@ -1503,7 +1520,7 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
       // presentation chronology inside that bounded page; otherwise chronology may move a later
       // row ahead of an earlier seq at the slice boundary and advancing the cursor would skip it.
       const page = cached.sort((left, right) => left.seq - right.seq).slice(0, limit);
-      return chronological(page);
+      return chronological(projectTimeline(page, timelineTurns));
     }
   }
   let raw: string;
@@ -1554,9 +1571,9 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
   // transcript order everywhere.
   if (options.from !== undefined) {
     const page = out.sort((left, right) => left.seq - right.seq).slice(0, limit);
-    return chronological(page);
+    return chronological(projectTimeline(page, timelineTurns));
   }
-  return chronological(out).slice(0, limit);
+  return chronological(projectTimeline(out, timelineTurns)).slice(0, limit);
 }
 
 /**
@@ -1578,19 +1595,44 @@ export async function readRecentEvents(
   return readRecentEventsFromDisk(sessionId, limit, options);
 }
 
-/** The latest authored question, unaffected by later revisions of older messages. */
-export async function readLatestUserMessage(sessionId: string): Promise<Extract<SessionEvent, { kind: 'user_message' }> | undefined> {
+/** The latest authored question. A recovery source excludes its injected corrections,
+ * which have no native user bubble and cannot grant another error reload. */
+export async function readLatestUserMessage(sessionId: string, turnId?: string | null): Promise<Extract<SessionEvent, { kind: 'user_message' }> | undefined> {
   assertSessionId(sessionId);
   await flushSession(sessionId);
-  const [message] = await readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true });
+  const [message] = await readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true,
+    ...(turnId ? { before: Number.POSITIVE_INFINITY, acceptEvent: (event: SessionEvent) => !isTurnCorrection(event, turnId) } : {}) });
   return message?.kind === 'user_message' ? message : undefined;
+}
+
+/** An injected instruction belongs to its existing generation, even after native reconciliation. */
+function isTurnCorrection(event: SessionEvent, turnId?: string | null): boolean {
+  return event.kind === 'user_message' && !!event.inputId && !!turnId && event.turnId === turnId;
+}
+
+/** Latest lifecycle boundary for one recovery source. Injected same-turn instructions
+ * do not replace it; a new question, another turn, or a stop still does. Message revisions
+ * retain their authored position so replaying an old question cannot cancel current work. */
+export async function readRecoveryBoundary(sessionId: string, turnId?: string | null): Promise<SessionEvent | undefined> {
+  const entry = await ensureOpen(sessionId);
+  await flushSession(sessionId);
+  // Read under this session's existing queue. Another read or metadata flush
+  // must not invalidate the boundary and permanently spend a valid silence grant.
+  return enqueueSessionOperation(entry, 'recovery boundary read', async () => {
+    const [boundary] = await readRecentEventsFromDisk(sessionId, 1, {
+      kinds: ['turn_start', 'turn_end', 'user_message'], orderByOrigin: true,
+      before: Number.POSITIVE_INFINITY,
+      acceptEvent: event => !isTurnCorrection(event, turnId)
+    });
+    return boundary;
+  });
 }
 
 /** Canonical completion evidence shared by activity retirement and input eligibility.
  * No turn is manufactured: an unowned reply must follow the latest recorded question.
  * A concurrent write/rebind invalidates this snapshot instead of authorizing stale work. */
 export async function readCompletedFinal(sessionId: string, conversationId: string, turnId?: string | null): Promise<{
-  messageId: string; turnId: string | null; completedAt: number; contentSeq: number;
+  messageId: string; turnId: string | null; completedAt: number; contentSeq: number; text: string;
 } | null> {
   const entry = await ensureOpen(sessionId);
   await flushSession(sessionId);
@@ -1608,8 +1650,7 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   const seq = final.finalContentSeq ?? positionOf(final);
   const completedAt = final.finalObservedAt ?? final.time;
   const question = questions[0];
-  const correction = (event: SessionEvent) => event.kind === 'user_message' && !!event.inputId &&
-    !!final.turnId && event.turnId === final.turnId && positionOf(event) < seq;
+  const correction = (event: SessionEvent) => isTurnCorrection(event, final.turnId) && positionOf(event) < seq;
   if (question && positionOf(question) >= positionOf(final) && !correction(question)) return null;
   // With no generation identity, require an actual preceding authored boundary.
   if (!final.turnId && (!question || question.time > final.time)) return null;
@@ -1626,7 +1667,7 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
     if (event.kind === 'user_message') return !correction(event);
     return event.kind === 'assistant_message' || event.kind === 'page_tool';
   })) return null;
-  return { messageId: final.messageId, turnId: final.turnId ?? null, completedAt, contentSeq: seq };
+  return { messageId: final.messageId, turnId: final.turnId ?? null, completedAt, contentSeq: seq, text: final.message.text };
 }
 
 /** Recorded local execution, not a native tool label or a request-id sighting alone. */
@@ -1787,7 +1828,8 @@ async function readRecentEventsFromDisk(
   candidates.sort((left, right) => sequence(left) - sequence(right));
   const selected = forward ? candidates.slice(0, cap) : candidates.slice(Math.max(0, candidates.length - cap));
   if (damaged > 0) logWarn(`session ${sessionId}: skipped ${damaged} unreadable recent event line(s)`);
-  return chronological(selected);
+  const timelineTurns = active?.summary.timelineTurns ?? (await readDurableSnapshot(sessionId))?.summary.timelineTurns;
+  return chronological(projectTimeline(selected, timelineTurns));
 }
 
 /** Browser projection joins committed writes without forcing the debounced metadata to disk.
@@ -1822,11 +1864,11 @@ export async function readActivityEvents(sessionId: string, since: number, limit
       if (event.kind !== 'user_message') continue;
       const position = event.origin ?? event.seq;
       if (!openingUserMessage || position < (openingUserMessage.origin ?? openingUserMessage.seq)) openingUserMessage = event;
-      if (CONTINUATION_MARKER.exec(event.message.text)?.[1] === 'RESUME' &&
+      if (continuationMarkerOf(event.message.text)?.kind === 'RESUME' &&
           (!resumeUserMessage || position > (resumeUserMessage.origin ?? resumeUserMessage.seq))) resumeUserMessage = event;
     }
     const resumeBoundary = resumeUserMessage ? resumeUserMessage.origin ?? resumeUserMessage.seq : 0;
-    return { events: chronological(selected), reset: reset || (cursor === 0 && candidates.length > cap), resumeBoundary,
+    return { events: chronological(projectTimeline(selected, entry.summary.timelineTurns)), reset: reset || (cursor === 0 && candidates.length > cap), resumeBoundary,
       openingUserMessage, resumeUserMessage };
   });
 }
@@ -1992,6 +2034,14 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         : null;
     const { [META_HISTORY_SEQ]: _historySeq, [META_CANONICAL_PROJECTION]: canonicalProjection, [META_TOKEN_ESTIMATE]: tokenEstimate, ...publicFields } = parsed;
     const publicSummary = publicFields as SessionSummary;
+    if (publicSummary.retiredChatAt !== undefined) {
+      const retired = publicSummary.retiredChatAt;
+      publicSummary.retiredChatAt = retired && typeof retired === 'object' && !Array.isArray(retired)
+        ? Object.fromEntries(Object.entries(retired).filter(([chat, at]) =>
+          Array.isArray(publicSummary.chatIds) && publicSummary.chatIds.includes(chat) &&
+          chat !== publicSummary.conversationId && typeof at === 'number' && Number.isFinite(at) && at >= 0))
+        : {};
+    }
     if (publicSummary.titleSource !== undefined && !['fallback', 'provider', 'manual'].includes(publicSummary.titleSource)) delete publicSummary.titleSource;
     const selected = publicSummary.selectedModel;
     if (selected !== undefined && (!selected || typeof selected !== 'object' ||
@@ -2586,7 +2636,8 @@ export async function readSessionPlan(id: string): Promise<AgentPlan | null> {
 }
 
 export async function updateSessionPlan(
-  id: string, conversationId: string, input: AgentPlanUpdate, startedAt: number
+  id: string, conversationId: string, input: AgentPlanUpdate, startedAt: number,
+  recovery?: { storedAt: number }
 ): Promise<boolean> {
   const plan = agentPlanSchema.parse({ ...agentPlanUpdateSchema.parse(input), updatedAt: startedAt });
   const bytes = JSON.stringify(plan);
@@ -2595,7 +2646,12 @@ export async function updateSessionPlan(
   return enqueueSessionOperation(entry, 'plan', async () => {
     // Rebind and plan updates use this same queue. A delayed A call cannot overwrite
     // B's plan after Compact & Resume, even if A was current when the tool started.
-    if (entry.summary.conversationId !== conversationId) return false;
+    if (entry.summary.conversationId !== conversationId) {
+      const retiredAt = entry.summary.retiredChatAt?.[conversationId];
+      if (!recovery || !entry.summary.conversationId || !entry.summary.chatIds.includes(conversationId) ||
+        typeof retiredAt !== 'number' || !Number.isFinite(recovery.storedAt) || recovery.storedAt < 0 ||
+        Math.max(startedAt, recovery.storedAt) >= retiredAt) return false;
+    }
     const previous = await readPlanFile(id);
     if (previous && previous.updatedAt > startedAt) return false;
     const target = path.join(sessionDir(id), 'plan.json');
@@ -2610,19 +2666,23 @@ export async function updateSessionPlan(
   });
 }
 
-export async function endSession(id: string): Promise<void> {
-  const entry = open.get(id);
+export async function endSession(id: string, dismissBrowserRecovery = false, expectedConversationId?: string): Promise<void> {
+  const entry = dismissBrowserRecovery ? await ensureOpen(id) : open.get(id);
   if (!entry) return;
-  if (entry.metaTimer) {
-    clearTimeout(entry.metaTimer);
-    entry.metaTimer = null;
-  }
-  await enqueueSessionOperation(entry, 'end', async () => {
+  const ended = await enqueueSessionOperation(entry, 'end', async () => {
+    // A source tab may close while Compact & Resume commits a different frontend.
+    if (expectedConversationId !== undefined && entry.summary.conversationId !== expectedConversationId) return false;
+    if (entry.metaTimer) {
+      clearTimeout(entry.metaTimer);
+      entry.metaTimer = null;
+    }
     entry.summary.endedAt = Date.now();
+    if (dismissBrowserRecovery) entry.summary.browserRecoveryDismissedAt = entry.summary.endedAt;
     await writeMeta(entry);
     publishClosedSummary(entry.summary);
+    return true;
   });
-  if (open.get(id) === entry) open.delete(id);
+  if (ended && open.get(id) === entry) open.delete(id);
 }
 
 /**
@@ -2633,10 +2693,13 @@ export async function endSession(id: string): Promise<void> {
  * visit. Without this the reopened session kept the `endedAt` from the close, and
  * everything after it was appended to a session the UI still drew as finished.
  */
-export async function reopenSession(id: string): Promise<void> {
+export async function reopenSession(id: string, pageObservedAt?: number): Promise<void> {
   const entry = await ensureOpen(id);
   await enqueueSessionOperation(entry, 'reopen', async () => {
-    if (entry.summary.endedAt === null) return;
+    const dismissedAt = entry.summary.browserRecoveryDismissedAt;
+    const returned = dismissedAt !== undefined && pageObservedAt !== undefined && pageObservedAt > dismissedAt;
+    if (entry.summary.endedAt === null && !returned) return;
+    if (returned) delete entry.summary.browserRecoveryDismissedAt;
     entry.summary.endedAt = null;
     entry.summary.updatedAt = Date.now();
     await writeMeta(entry);
@@ -2769,12 +2832,14 @@ export async function rebindSession(
     const staged: SessionSummary = {
       ...entry.summary,
       conversationId: toConversationId,
+      retiredChatAt: fromConversationId ? { ...entry.summary.retiredChatAt, [fromConversationId]: Date.now() } : entry.summary.retiredChatAt,
       chatIds: entry.summary.chatIds.includes(toConversationId)
         ? [...entry.summary.chatIds]
         : [...entry.summary.chatIds, toConversationId],
       contextTokens: 0,
       activeTurnId: null,
       finishTurn: null,
+      browserRecoveryDismissedAt: undefined,
       ...(committedResumeHandoffId !== undefined
         ? { lastCommittedResumeHandoffId: committedResumeHandoffId }
         : {}),

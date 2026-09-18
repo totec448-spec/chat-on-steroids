@@ -13,7 +13,7 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 1500, height: 1000, webPreferences: { offscreen: true } });
   const css = fs.readFileSync(path.join(__dirname, '../src/renderer/styles.css'), 'utf8');
   await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<style>${css}</style>
-    <div id="fixture"><div id="chatBody" class="scroll"><div class="view" data-view="timeline">
+    <div id="fixture"><div id="chatBody" class="scroll"><div class="view" id="timelineContent" data-view="timeline">
     <div id="timeline"><button class="timeline-window-note" hidden>Back to latest</button>
     <div class="ev"><div class="ev-body"><p class="msg" id="prose"></p></div></div>
     <details class="tool-group"><summary>Refused to run a tool</summary><div class="tool-group-body" style="height:400px">Recorded tool details</div></details>
@@ -23,7 +23,7 @@ app.whenReady().then(async () => {
     win.webContents.setZoomFactor(zoom);
     for (const width of [1100, 760, 500]) {
       const states = await win.webContents.executeJavaScript(`(async () => {
-        const pane = document.getElementById('chatBody'), timeline = document.getElementById('timeline');
+        const pane = document.getElementById('chatBody'), timeline = document.getElementById('timelineContent');
         const prose = document.getElementById('prose'), group = document.querySelector('details'), latest = document.querySelector('button');
         document.getElementById('fixture').style.width = '${width}px';
         prose.textContent = 'The chat text should keep the same line breaks when opening tool details or returning to the latest messages. '.repeat(4);

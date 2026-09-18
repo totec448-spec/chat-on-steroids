@@ -1877,10 +1877,13 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     let tab = candidates.sort((a, b) => a.id - b.id)[0];
     let elected = elections[input.id];
     let recoveredReuse = null;
-    // A queued checkpoint follows the app's durable session rebind. Transfer only
-    // to an already-existing successor tab, never reopen a closed elected target.
-    if (target && cleanConversationId(input.supersededConversationId) &&
-        input.supersededConversationId !== target && elected && elected.conversationId !== target && tab) {
+    // A fresh app offer can follow a session rebind or the user's actual return.
+    // Transfer to an existing exact-chat document only. Opening authority stays
+    // spent, and main still owns the exclusive claim and final Send permission.
+    const returned = target && elected?.conversationId === target &&
+      !candidates.some(candidate => candidate.id === elected.tab);
+    if (target && elected && tab && (returned || (cleanConversationId(input.supersededConversationId) &&
+        input.supersededConversationId !== target && elected.conversationId !== target))) {
       await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target });
       elected = elections[input.id];
     }
@@ -1924,7 +1927,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       continue;
     }
     // An existing target spends the same opening authority as a newly created tab.
-    // A later user-close or duplicate document cannot transfer that election.
+    // Losing it never authorizes another creation or a transfer to a different chat.
     if (tab && !elected) await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target });
     if (!tab) {
       // Handout is opening authority, not a missing delivery receipt. A closed or
@@ -2440,6 +2443,7 @@ async function maintainOnce() {
     .map((entry) => ({
       conversationId: cleanConversationId(entry && entry.conversationId),
       token: entry && typeof entry.token === 'string' ? entry.token : '',
+      reason: typeof entry?.reason === 'string' ? entry.reason : '',
       requiresClaim: entry?.requiresClaim === true,
       suspended: entry?.reason === 'stalled',
       focus: Boolean(entry && entry.focus === true)
@@ -2552,7 +2556,7 @@ async function maintainOnce() {
 }
 
 async function performBrowserRepairs(repairs, policy) {
-  for (const { conversationId, token, focus, requiresClaim, suspended } of repairs) {
+  for (const { conversationId, token, reason, focus, requiresClaim, suspended } of repairs) {
     // Re-scanned per repair rather than reused from above. Earlier entries in this same batch
     // may have created a tab, and the scan has to be the state immediately before the action or
     // the duplicate rule below is deciding on a tab list that no longer exists.
@@ -2594,23 +2598,35 @@ async function performBrowserRepairs(repairs, policy) {
         // A responsive document flushes native progress and manual Stop before
         // main revalidates its original grant. An unresponsive page contributes
         // no evidence; main still owns its existing bounded repair authority.
-        const check = target && !suspended ? await tabReply(target.id,
-          { type: 'clf-repair-check', conversationId }, documentId ? { documentId } : undefined) : null;
+        // A compaction pickup is authorized by its exact WAL token/phase. Its
+        // own busy page is what it may recover, not an ordinary turn to keep idle.
+        const inspectTurn = target && !suspended;
+        const draftOnly = reason === 'compaction';
+        const check = inspectTurn ? await tabReply(target.id,
+          { type: 'clf-repair-check', conversationId, draftOnly }, documentId ? { documentId } : undefined) : null;
         if (check?.safe === false) continue;
         const claim = await call('/repairs/claim', { method: 'POST', body: JSON.stringify({ token }) });
         if (!claim.ok || claim.data?.allowed !== true) continue;
         if (target && !suspended) {
-          const latest = await tabReply(target.id, { type: 'clf-repair-check', conversationId,
+          const latest = inspectTurn ? await tabReply(target.id, { type: 'clf-repair-check', conversationId, draftOnly,
             ...(check?.safe === true ? { expected: { revision: check.revision, turnId: check.turnId, questionId: check.questionId } } : {}) },
-            documentId ? { documentId } : undefined);
+            documentId ? { documentId } : undefined) : null;
           const tab = await chrome.tabs.get(target.id);
-          if (latest?.safe === false || (!check?.safe && latest?.safe === true) ||
+          if ((inspectTurn && (latest?.safe === false || (!check?.safe && latest?.safe === true))) ||
               tab.pendingUrl || conversationForTab(tab) !== conversationId || tabDocuments[String(target.id)] !== documentId) {
             // No browser action occurred. Release only this exact claim; a
             // concurrently retired episode cannot be reconstructed by this ACK.
             await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
             continue;
           }
+        }
+      }
+      if (target && suspended && requiresClaim) {
+        const tab = await chrome.tabs.get(target.id);
+        if (tab.pendingUrl || conversationForTab(tab) !== conversationId ||
+            (tab.discarded !== true && tab.frozen !== true) || tabDocuments[String(target.id)] !== documentId) {
+          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
+          continue;
         }
       }
       if (target) await chrome.tabs.reload(target.id);
@@ -2635,8 +2651,8 @@ function conversationStillOpen(conversationId) {
 async function enqueueClose(conversationId) {
   const id = cleanConversationId(conversationId);
   if (!id) return false;
-  // One status pass after the final tab closes lets the app decide whether that exact chat is
-  // an active agent needing a reopen. The pass clears this again when it is ordinary history.
+  // Publish the final departure and let the existing maintenance pass revoke its protection.
+  // The close itself never grants a replacement tab.
   recoveryMonitoring = true;
   if (!closeOutbox.some((entry) => entry && entry.conversationId === id)) {
     closeOutbox.push({ conversationId: id, queuedAt: Date.now() });
@@ -2663,7 +2679,8 @@ async function drainCloses() {
       if (conversationStillOpen(conversationId)) continue;
       const result = await call('/closed', {
         method: 'POST',
-        body: JSON.stringify({ conversationId })
+        // Confirmed removal/navigation is a deliberate departure, never a reload or a lost poll.
+        body: JSON.stringify({ conversationId, manual: true })
       });
       if (!result.ok) {
         scheduleRetry();
@@ -2808,7 +2825,7 @@ const COMPACT_CHECKPOINT_FLAGS = [
   'destinationDispatch',
   'destinationLost'
 ];
-const COMPACT_CHECKPOINT_TEXT = ['summary', 'sourceMessageId', 'destinationMessageId'];
+const COMPACT_CHECKPOINT_TEXT = ['summary', 'sourceMessageId', 'destinationMessageId', 'sourceError'];
 // Not a checkpoint of its own: it qualifies `sourceMessageId` by saying how far that exact
 // marked response has grown. Sent only alongside the field it describes, so a bare count can
 // never move a deadline by itself.
@@ -3237,7 +3254,9 @@ const HANDLERS = {
     const query =
       `?conversationId=${encodeURIComponent(message.conversationId)}` +
       `&since=${Number(message.since) || 0}` +
-      `&goalClient=${encodeURIComponent(String(source.tab))}`;
+      `&goalClient=${encodeURIComponent(String(source.tab))}` +
+      // Forward only the helper states this document may report; these are diagnostics.
+      (['absent', 'empty', 'ok'].includes(message.fiber) ? `&fiber=${message.fiber}` : '');
     const result = await call(`/activity${query}`);
     if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevival(result.data.revival)) {
       await recoverDeferredRevivals();

@@ -65,7 +65,7 @@ const LIVE_DEPTH = 30;
 
 interface Message {
   id: string;
-  author: { role: string };
+  author: { role: string; name?: string };
   recipient: string;
   channel?: string;
   create_time?: number;
@@ -429,6 +429,31 @@ const rowInTurn = (messages: Message[], turnMessages: Message[], collapsed = 0) 
 // --------------------------------------------------------------------- tests
 
 describe('reading a row out of the page', () => {
+  it('recognises a native result-only call without inventing its missing request parent', async () => {
+    // Observed provider shape: tool/api_tool.call_tool with invoked_resource,
+    // but no request message or metadata.parent_id in the rehydrated turn.
+    const result = answer('result-only', 'unused', 'read');
+    result.author.name = 'api_tool.call_tool';
+    delete result.metadata!.parent_id;
+    Object.defineProperty(result.content!, 'text', { get() { throw new Error('Result bytes must remain unread'); } });
+    const { rows, turns } = await scan([rowInTurn([result], [result])], [{ id: 'result-only-turn', messages: [result] }]);
+    expect(rows[0]).toMatchObject({ messageId: 'result-only', tool: 'read', app: APP, path: null, answered: true, localCount: 1 });
+    expect(turns[0]!.calls).toEqual([{ messageId: 'result-only', tool: 'read', order: 0,
+      answered: true, requestId: 'wfr_01a009', createTime: 1786873669.5 }]);
+  });
+
+  it.each(['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins', 'Chat On Steroids Backup', 'Gmail'])(
+    'keeps result-only metadata scoped to the exact supported connector %s', async app => {
+      const result = answer('result-scope', 'unused', 'read', app);
+      result.author.name = 'api_tool.call_tool';
+      delete result.metadata!.parent_id;
+      const { turns } = await scan([], [{ id: 'result-scope-turn', messages: [result, result] }]);
+      // Duplicate provider objects are ambiguous, including result-only shapes.
+      expect(turns[0]!.calls).toEqual([]);
+      const single = await scan([], [{ id: 'result-scope-turn', messages: [result] }]);
+      expect(single.turns[0]!.calls).toHaveLength(['Chat On Steroids Backup', 'Gmail'].includes(app) ? 0 : 1);
+    });
+
   /**
    * The regression the whole batch exists for. The group node is exactly `MAX_CLIMB`
    * levels up, which the old `up < MAX_CLIMB` stopped one short of, so this row — and

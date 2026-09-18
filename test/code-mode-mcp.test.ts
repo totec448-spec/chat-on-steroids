@@ -40,6 +40,7 @@ async function identity() {
 }
 const call = (requestId: string | undefined, code: string) => rpc('tools/call', { name: 'exec', arguments: { code } }, requestId);
 const text = (response: any) => response.result.content.filter((item: any) => item.type === 'text').map((item: any) => item.text).join('\n');
+const emittedText = (response: any): string => response.result.content.find((item: any) => item.type === 'text')?.text ?? '';
 
 it.each(['current', 'superseded'] as const)('resolves late session_finish identity before enforcing its %s owner', async state => {
   const conversationId = randomUUID(), requestId = `wfr_${randomUUID().replaceAll('-', '')}`;
@@ -69,10 +70,12 @@ it.each(['current', 'superseded'] as const)('resolves late session_finish identi
 });
 
 it('delivers one recovered-identity notice on the real structured MCP wire after a refused plan update', async () => {
+  const config = getConfig();
+  await saveConfig({ ...config, multiAgent: { ...config.multiAgent, allowUnattributedCalls: false } });
   const requestId = `wfr_${randomUUID().replaceAll('-', '')}`;
   const rejected = await rpc('tools/call', { name: 'update_plan', arguments: { plan: [{ step: 'Verify recovery', status: 'in_progress' }] } }, requestId);
   expect(rejected.result.isError).toBe(true);
-  expect(text(rejected)).toContain('Exact chat identity is required');
+  expect(text(rejected)).toContain('Exact chat identity');
   const conversationId = randomUUID();
   const session = await createSession({ conversationId, title: 'Identity recovery wire' });
   observeRequestCorrelation({ requestId, conversationId, sessionId: session.id, messageId: randomUUID(), tool: 'update_plan', observedAt: Date.now() });
@@ -287,7 +290,8 @@ it.runIf(process.platform === 'win32').each([true, false])('routes sky through D
   expect(text(observed)).toContain('0: Button');
   const publicWindow = { app: window.app, id: window.id, title: window.title };
   const clicked = await rpc('tools/call', { name: 'exec', arguments: { code: `await sky.click({window:${JSON.stringify(publicWindow)},element_index:0}); text("accepted");` } }, who.requestId, 'desktop');
-  expect(text(clicked)).toBe('accepted');
+  expect(emittedText(clicked)).toBe('accepted');
+  if (!attributed) expect(text(clicked)).toContain('does not switch on Read-only mode or disable tools');
   expect(action).toHaveBeenCalledExactlyOnceWith([{ type: 'click_ref', ref: 'fixture-ref', button: 'left', count: 1 }], { window: 77, app: 'fixture.exe' });
   expect(callers).toEqual([who.session.id, who.session.id]);
   ctx.caps = { ...ctx.caps, control: false };
@@ -362,21 +366,29 @@ it('allows unattributed file edits through code mode while preserving permission
   const patch = '*** Begin Patch\n*** Add File: /workspace/unattributed.txt\n+created anonymously\n*** End Patch';
   const response = await call(undefined, `text(await tools.apply_patch({patch:${JSON.stringify(patch)}}));`);
   expect(response.result.isError, text(response)).not.toBe(true);
-  expect(JSON.parse(text(response)).isError).not.toBe(true);
+  expect(JSON.parse(emittedText(response)).isError).not.toBe(true);
   expect(await fs.readFile(path.join(directory, 'unattributed.txt'), 'utf8')).toBe('created anonymously\n');
   const read = await call(`wfr_${randomUUID().replaceAll('-', '')}`, 'text(await tools.read({paths:["/workspace/unattributed.txt"]}));');
   expect(text(read)).toContain('created anonymously');
   const edit = '*** Begin Patch\n*** Update File: /workspace/unattributed.txt\n@@\n-created anonymously\n+edited anonymously\n*** End Patch';
   const edited = await call(undefined, `text(await tools.apply_patch({patch:${JSON.stringify(edit)}}));`);
-  expect(JSON.parse(text(edited)).isError).not.toBe(true);
+  expect(JSON.parse(emittedText(edited)).isError).not.toBe(true);
   expect(await fs.readFile(path.join(directory, 'unattributed.txt'), 'utf8')).toBe('edited anonymously\n');
   ctx.caps = { ...ctx.caps, edit: false };
   const deniedPatch = edit.replace('-created anonymously', '-edited anonymously').replace('+edited anonymously', '+must not change');
   const denied = await call(undefined, `text(await tools.apply_patch({patch:${JSON.stringify(deniedPatch)}}));`);
-  expect(JSON.parse(text(denied)).isError).toBe(true);
+  expect(JSON.parse(emittedText(denied)).isError).toBe(true);
   expect(await fs.readFile(path.join(directory, 'unattributed.txt'), 'utf8')).toBe('edited anonymously\n');
-  const plan = await call(undefined, 'text(await tools.update_plan({plan:[{step:"Anonymous plan",status:"in_progress"}]}));');
-  expect(JSON.parse(text(plan)).isError).toBe(true);
+  const planRequest = `wfr_${randomUUID().replaceAll('-', '')}`;
+  const plan = await call(planRequest, 'text(await tools.update_plan({plan:[{step:"Anonymous plan",status:"in_progress"}]}));');
+  expect(JSON.parse(emittedText(plan)).isError).not.toBe(true);
+  expect(text(plan)).toContain('will attach when its chat identity arrives');
+  const planConversation = randomUUID();
+  const planSession = await createSession({ conversationId: planConversation, title: 'Request plan owner' });
+  expect(observeRequestCorrelation({ requestId: planRequest, conversationId: planConversation, sessionId: planSession.id,
+    messageId: randomUUID(), tool: 'update_plan', observedAt: Date.now() })).toBe('stored');
+  await vi.waitFor(async () => expect((await readSessionPlan(planSession.id))?.plan)
+    .toEqual([{ step: 'Anonymous plan', status: 'in_progress' }]), { timeout: 2_000 });
   const finish = await rpc('tools/call', { name: 'session_finish', arguments: { summary: 'done' } });
   expect(finish.result.isError).toBe(true);
   expect(text(finish)).toContain('Exact session identity');
@@ -384,7 +396,7 @@ it('allows unattributed file edits through code mode while preserving permission
   try {
     await saveConfig({ ...config, multiAgent: { ...config.multiAgent, enabled: true } });
     const spawn = await call(undefined, 'text(await tools.agents({action:"spawn",workers:[{task:"Must never start"}]}));');
-    expect(JSON.parse(text(spawn)).isError).toBe(true);
+    expect(JSON.parse(emittedText(spawn)).isError).toBe(true);
     expect(text(spawn)).toContain('UNIDENTIFIED_CALLER');
   } finally {
     await saveConfig(config);

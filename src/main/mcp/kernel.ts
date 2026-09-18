@@ -48,17 +48,21 @@ import {
   AgentError,
   IdentityLostError,
   currentRunId,
-  acknowledgeOffersForConversation,
+  acknowledgeOffersForCaller,
+  currentRunForCaller,
+  agentFamiliesForCaller,
+  reconcileAgentRequestOwners,
   dormantWorkerNotice,
   reactivateDormantRunForConversation,
   endedWorkerNotice,
   hasDormantWorkerLeases,
-  sleepSilentDetachedWorkers,
+  sleepSilentWorkers,
   noteAgentAlive,
   agentForCaller,
+  agentForOwnedConversation,
   agentForFinishCaller,
   hasRetiredWorkerLeases,
-  offerMessagesForConversation,
+  offerMessagesForCaller,
   persistCriticalSwarmNow,
   requestWorkerRevivals,
   releaseQuiescentRun,
@@ -73,9 +77,11 @@ import {
   noteOutcome,
   holdWhileSettling,
   runInCallContext,
+  runningToolProgress,
   trackInFlight,
   trackMcpRequest,
-  type CallContext
+  type CallContext,
+  type CallCaller
 } from './call-context.js';
 import {
   REQUEST_ID_GRACE_MS,
@@ -88,7 +94,12 @@ import {
 import { requestCorrelation } from '../session/correlation.js';
 import { BLOCKED_CHAT_REFUSAL, anyChatBlocked, isChatBlocked } from '../session/blocked-chats.js';
 import { anyContinuationOpen, compactingConversation } from '../session/continuation.js';
-import { acknowledgeBackgroundExecOutput, backgroundExecRecoveryNotices, offerBackgroundExecOutput } from '../codex/ownership.js';
+import {
+  acknowledgeBackgroundExecOutput,
+  backgroundExecRecoveryNotices,
+  executionPrincipal,
+  offerBackgroundExecOutput
+} from '../codex/ownership.js';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '../codex/unified-exec-constants.js';
 import { unattributedRepairEta } from '../bridge.js';
 import { conversationAttachment, readOverflowText } from '../session/store.js';
@@ -390,13 +401,15 @@ async function withBackgroundExecRecovery(
   result: ToolResult
 ): Promise<ToolResult> {
   const { publication, caller } = context;
-  if (!publication || !caller.requestId || !caller.sessionId) return result;
+  if (!publication || !caller.requestId) return result;
+  const principal = executionPrincipal(caller.requestId, caller.sessionId, context.allowUnattributed === true);
+  if (!principal) return result;
   const used = result.content.reduce((bytes, part) => bytes + (part.type === 'text' ? Buffer.byteLength(part.text, 'utf8') : 0), 0);
-    const budget = Math.min(12_000, DEFAULT_MAX_OUTPUT_TOKENS * 4 - used) - 64;
+  const budget = Math.min(12_000, DEFAULT_MAX_OUTPUT_TOKENS * 4 - used) - 64;
   if (budget < 1_024) return result;
-  const output = await offerBackgroundExecOutput(caller.sessionId, publication, budget);
+  const output = await offerBackgroundExecOutput(principal, publication, budget);
   // The page is the priority. Running-terminal reminders can wait for a later response.
-  const text = output ?? backgroundExecRecoveryNotices(caller.sessionId, publication).join('\n');
+  const text = output ?? backgroundExecRecoveryNotices(principal, publication).join('\n');
   if (!text) return result;
   return {
     ...result,
@@ -419,24 +432,36 @@ async function withBackgroundExecRecovery(
 function withUnattributedNotice(
   conversationId: string | null | undefined,
   result: ToolResult,
-  requestId: string | null
+  requestId: string | null,
+  allowUnattributed: boolean
 ): ToolResult {
   if (conversationId) return result;
   const eta = unattributedRepairEta(Date.now(), requestId);
-  if (eta === null) return result;
+  const recovery = eta === null ? '' : `The next attribution recovery check is in about ${eta}s. `;
   return {
     ...result,
     content: [
       ...result.content,
       {
         type: 'text',
-        text:
-          '\n--- Identity notice ---\n' +
-          'This app could not tell which ChatGPT conversation made this call, so it is filed as ' +
-          `Unattributed. The next recovery check for eligible active chats is in about ${eta}s; ` +
-          'this does not identify this chat as a reload target. The result above still states what ran. ' +
-          'Do not repeat a successful mutation to repair attribution. A later exact request-id match can ' +
-          'reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.'
+        text: allowUnattributed
+          ? '\n--- Identity notice ---\n' +
+            'This call is filed as Unattributed because its exact ChatGPT conversation is not known yet. ' +
+            'Unattributed does not switch on Read-only mode or disable tools. Continue using every enabled tool, ' +
+            'including apply_patch, exec_command, Desktop and Plugins; their existing permissions still apply. ' +
+            (requestId
+              ? 'This request id owns its workspace, update_plan, terminals and agents/subagents. Use the process and run ids returned to this request; later exact proof attaches that state to its chat. '
+              : 'This call has no request id, so request-owned plans and worker families cannot be created until a request id or exact chat proof is available. ') +
+            'A refusal about a particular process, worker or chat target applies only to that operation, not to file edits or other tools. ' +
+            'Report the actual tool result; do not claim mutation or terminal tools are unavailable because of this notice, and never replay successful work. ' +
+            recovery
+          : '\n--- Identity notice ---\n' +
+            'This app could not tell which ChatGPT conversation made this call, so it is filed as ' +
+            'Unattributed. ' + recovery +
+            'This does not identify this chat as a reload target. The result above still states what ran. ' +
+            'Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. ' +
+            'Do not repeat a successful mutation to repair attribution. A later exact request-id match can ' +
+            'reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.'
       }
     ]
   };
@@ -454,7 +479,7 @@ function withUnattributedNotice(
  * again, because that is the first real evidence this result reached ChatGPT.
  */
 function withInbox(
-  conversationId: string | null | undefined,
+  caller: CallCaller,
   agent: string | null,
   result: ToolResult,
   onFinish = false
@@ -464,14 +489,14 @@ function withInbox(
   // exact conversation still owns final worker reports queued before parking. The finish flag
   // also preserves the one dormant-worker exception: retrying a lost finish result may re-offer
   // rows that rode on that finish, without re-authorising ordinary worker activity.
-  const scoped = offerMessagesForConversation(conversationId, onFinish, onFinish);
+  const scoped = offerMessagesForCaller(caller, onFinish, onFinish);
   const recipient = scoped?.agentId ?? agent;
   const messages = scoped?.messages ?? [];
   if (messages.length === 0) return result;
   const lines = messages
     .map(
       (message) =>
-        `• ${message.from}${message.offers > 1 ? ' (delivery retry)' : ''}: ${message.text}`
+        `• ${message.from}${message.runId ? ` [run_id=${message.runId}]` : ''}${message.offers > 1 ? ' (delivery retry)' : ''}: ${message.text}`
     )
     .join('\n');
   return {
@@ -514,6 +539,7 @@ export async function dispatch(
     startedAt: Date.now(),
     transportKey,
     agent: null,
+    allowUnattributed: getConfig().multiAgent.allowUnattributedCalls,
     caller: parent ? { ...parent.caller } : { transportKey, requestId, conversationId: null, sessionId: null },
     outcome: null,
     evidence: emptyEvidence()
@@ -563,11 +589,16 @@ async function dispatchTracked(
   surfaceToolCallAt.set(surface, Date.now());
   const isFinish = isFinishCall(name, args);
   const startedAt = context.startedAt;
+  const allowUnattributed = context.allowUnattributed === true;
   // Cheap, non-blocking ingress identity. When the page has already reported this exact
   // request id, identity-sensitive handlers (workspace/session/agents) see it before they
   // touch state. If the page is one tick late this stays null; only handlers that actually
   // require identity wait for their own exact mate. Ordinary absolute reads/execs never wait.
   if (!nested) setCallerConversation(context, callerConversation(name, startedAt, requestId));
+  await reconcileAgentRequestOwners().catch(error => {
+    logWarn(`Worker ownership recovery deferred: ${error instanceof Error ? error.message : String(error)}`);
+  });
+  if (!context.caller.conversationId) setCallerConversation(context, callerConversation(name, startedAt, requestId));
   // Only calls that need an *existing* per-chat workspace before the handler runs are
   // identity-sensitive here. An absolute read or an exec with an explicit absolute workdir is
   // self-contained and must stay fast; if its exact page mate is late, workspace.ts simply
@@ -587,10 +618,21 @@ async function dispatchTracked(
   const finishDeadline = name === 'session_finish' ? sessionFinishDeadline(startedAt) : null;
   const identityWindow = (requested: number): number => finishDeadline === null
     ? requested : Math.min(requested, Math.max(0, finishDeadline - Date.now()));
-  if (!context.caller.conversationId && (desktopContext || name === 'exec' || name === 'update_plan' || name === 'session_finish' || (identitySensitive && swarmRunning())) && requestId) {
+  // Windows observation/input gets one short grace even under the opt-in. Exact proof can then
+  // alias the observation directly to the durable session, while a genuinely headless caller
+  // falls back to its request principal instead of waiting the old full identity window.
+  const needsExactIdentity = name === 'session_finish' || desktopContext || (!allowUnattributed && (
+    name === 'exec' || name === 'update_plan' || (identitySensitive && swarmRunning())
+  ));
+  if (!context.caller.conversationId && needsExactIdentity && requestId) {
+    const wait = name === 'session_finish'
+      ? SPAWN_EVIDENCE_MS
+      : desktopContext && allowUnattributed
+      ? UNATTRIBUTED_DESKTOP_EVIDENCE_MS
+      : IDENTITY_EVIDENCE_MS;
     setCallerConversation(
       context,
-      await awaitFreshCallOrigin(name, startedAt, identityWindow(name === 'session_finish' ? SPAWN_EVIDENCE_MS : IDENTITY_EVIDENCE_MS), { requestId })
+      await awaitFreshCallOrigin(name, startedAt, identityWindow(wait), { requestId })
     );
   }
   // A run that ended leaves an explicit short-lived lease tombstone for each open worker
@@ -644,10 +686,9 @@ async function dispatchTracked(
   // Two things about liveness, both before the agent is resolved so that the answer this
   // call gets is the state this call itself established.
   //
-  // A detached worker that has also stopped calling is put to sleep here rather than on a
-  // timer: nothing about a run changes while nothing is happening, and this is the moment
-  // something is happening. Sleep rather than failure, so being early about a slow worker
-  // costs the run nothing — its own next call takes the slot straight back.
+  // Use the same three-minute work clock as bridge maintenance for attached and
+  // detached workers. Record this call's proven liveness first; unrelated and
+  // unidentified calls cannot renew a worker's deadline or protect its slot.
   // A superseded frontend is durable historical identity, not liveness. Letting its refused
   // call pass through the broker bookkeeping used to revive the very worker/chat the store had
   // just retired, which kept the session card on "active" after A -> B.
@@ -659,14 +700,14 @@ async function dispatchTracked(
   if (!supersededConversation && !isFinish && !isChatBlocked(context.caller.conversationId)) {
     reactivateDormantRunForConversation(context.caller.conversationId);
   }
-  const quietWorkers = supersededConversation ? [] : sleepSilentDetachedWorkers();
+  const alive = supersededConversation || isChatBlocked(context.caller.conversationId) ? null : noteAgentAlive(context.caller.conversationId);
+  const quietWorkers = supersededConversation ? [] : sleepSilentWorkers(Date.now(), undefined, id => runningToolProgress(id) !== null);
   for (const quiet of quietWorkers) {
     if (quiet.report) await recordAgentMessage(quiet.report, 'sent', quiet.info.conversationId);
   }
   // And this call is itself first-hand evidence that its own conversation is alive. That is
   // what undoes a worker given up on because its tab went away — the turn never stopped, so
   // the call arrives from a chat the app had written off, and the write-off was wrong.
-  const alive = supersededConversation ? null : noteAgentAlive(context.caller.conversationId);
   if (alive?.report) await recordAgentMessage(alive.report, 'sent', context.caller.conversationId);
   // A prime message accepted while a worker's tab was closed could not safely be injected while
   // that server-side turn might still be running. If the silence check above has now proved the
@@ -730,7 +771,6 @@ async function dispatchTracked(
   // chat over to `superseded`, chat A gets no tool at all, and each refusal tells the model
   // the only thing it can usefully do is write the brief.
   const compacting = !blockedChat && compactingConversation(context.caller.conversationId) !== null;
-  const allowUnattributed = getConfig().multiAgent.allowUnattributedCalls;
   const retiredLeaseAmbiguous =
     !allowUnattributed && hasRetiredWorkerLeases() && !context.caller.conversationId;
   const dormantLeaseAmbiguous =
@@ -746,7 +786,8 @@ async function dispatchTracked(
   if (!nested && requestId && !blockedChat && !supersededConversation && !compacting) {
     const explicitPoll = name === 'write_stdin' && args && typeof args === 'object'
       ? (args as { session_id?: number }).session_id : undefined;
-    await acknowledgeBackgroundExecOutput(context.caller.sessionId, startedAt, explicitPoll);
+    const principal = executionPrincipal(requestId, context.caller.sessionId, allowUnattributed);
+    await acknowledgeBackgroundExecOutput(principal, startedAt, explicitPoll);
   }
   let handlerRan = false;
   markTiming('identity');
@@ -806,23 +847,37 @@ async function dispatchTracked(
     const resolved = callerConversation(name, startedAt, requestId);
     if (resolved) setCallerConversation(context, resolved);
   }
+  await reconcileAgentRequestOwners().catch(error => {
+    logWarn(`Worker ownership recovery deferred after tool completion: ${error instanceof Error ? error.message : String(error)}`);
+  });
+  const deliveryFenced = blockedChat || compacting || supersededConversation || isChatBlocked(context.caller.conversationId) ||
+    compactingConversation(context.caller.conversationId) !== null || Boolean(context.caller.conversationId &&
+      (await conversationAttachment(context.caller.conversationId, context.caller.sessionId ?? null)) === 'superseded');
   // Never erase an identity a handler proved more strongly (agents::callerNow). The old
   // post-handler pass could fail to rediscover evidence that callerNow had already reserved
   // and then set agent back to null, which is the live WORKER_IDENTITY_LOST / missing-inbox
   // split brain worker-1 observed.
-  if (!context.agent) {
-    context.agent = isFinish ? agentForFinishCaller(context.caller) : agentForCaller(context.caller);
+  const exactRole = context.caller.conversationId ? agentForOwnedConversation(context.caller.conversationId) : null;
+  const recoveredWorkerRole = context.agent === 'prime' && exactRole && exactRole !== 'prime' ? exactRole : null;
+  if (recoveredWorkerRole) {
+    // A provisional spawn selected its newly-created fleet before the page proved that
+    // this caller was already a worker. That fleet now belongs to the real prime; retain
+    // the worker's own role/inbox rather than using its old provisional selection.
+    context.caller.runId = undefined;
+    context.agent = recoveredWorkerRole;
   }
+  const provenAgent = isFinish ? agentForFinishCaller(context.caller) : agentForCaller(context.caller);
+  if (!context.agent || (context.caller.conversationId && provenAgent)) context.agent = provenAgent;
   // This call is the best evidence there is that the previous result reached the agent's
   // conversation, so anything offered then can be retired and written to its history —
   // except what was offered on a finish result, which this call may itself be the model's
   // retry after a lost result. The SDK exposes the JSON-RPC id, but a model-issued retry is
   // a new MCP request with a new id, so that id cannot prove the previous finish result was
   // seen. The broker therefore re-offers rather than assuming; see acknowledgeOffers.
-  const acknowledgedForConversation = supersededConversation || nested
+  const acknowledgedForConversation = deliveryFenced || nested
     ? null
-    : acknowledgeOffersForConversation(
-        context.caller.conversationId,
+    : acknowledgeOffersForCaller(
+        context.caller,
         isFinish,
         startedAt,
         isFinish
@@ -842,12 +897,19 @@ async function dispatchTracked(
   const baseResult = surface === 'plugins' && !handlerRan ? pluginManager.redactResult(result) as ToolResult : result;
   let delivered = nested ? baseResult : withUnattributedNotice(
     context.caller.conversationId,
-    withInbox(context.caller.conversationId, context.agent, baseResult, isFinish),
-    context.caller.requestId
+    deliveryFenced ? baseResult : withInbox(context.caller, context.agent, baseResult, isFinish),
+    context.caller.requestId,
+    context.allowUnattributed === true
   );
+  if (!nested && recoveredWorkerRole && !deliveryFenced) delivered = {
+    ...delivered,
+    content: [...delivered.content, { type: 'text', text: '\n--- Worker ownership recovered ---\n' +
+      `Exact request proof identifies this caller as ${recoveredWorkerRole}. Any provisional fleet created by this request is attached to its real prime. ` +
+      'Keep your worker role and continue using enabled tools for your assignment; do not repeat completed work.' }]
+  };
   // Ordinary tools carry direct user input, but only the explicit finish signal
   // advances a planned stage. Successful work is not evidence that a stage is done.
-  const userInput = nested ? { messages: [], reminder: '' } : await offerToolInput(context.caller.sessionId, context.caller.conversationId, context.caller.requestId, startedAt, name === 'session_finish' && !result.isError).catch(() => {
+  const userInput = nested || deliveryFenced ? { messages: [], reminder: '' } : await offerToolInput(context.caller.sessionId, context.caller.conversationId, context.caller.requestId, startedAt, name === 'session_finish' && !result.isError).catch(() => {
     logWarn('User input could not be attached; the completed tool result is preserved');
     return { messages: [], reminder: '' };
   });
@@ -860,7 +922,7 @@ async function dispatchTracked(
     if (userInput.reminder) attachments.push({ type: 'text', text: '\n\n' + userInput.reminder });
     delivered = { ...delivered, content: [...delivered.content, ...attachments] };
   }
-  if (!nested && handlerRan && !blockedChat && !supersededConversation && !compacting) {
+  if (!nested && handlerRan && !deliveryFenced) {
     delivered = await withBackgroundExecRecovery(context, delivered);
   }
   if (!nested) delivered = await withIdentityRecoveredNotice(context, delivered);
@@ -915,8 +977,11 @@ async function dispatchTracked(
   // Retire a completed run only after this call has had every chance to acknowledge and
   // receive its inbox. Doing it inside acknowledgeOffers would let `agents status` destroy
   // the run halfway through identifying itself; here the handler and result are already done.
-  const callerRunId = context.caller.conversationId ? currentRunId(context.caller.conversationId) : null;
-  if (callerRunId) releaseQuiescentRun({}, callerRunId);
+  const callerRunId = currentRunForCaller(context.caller);
+  if (!deliveryFenced && callerRunId) releaseQuiescentRun({}, callerRunId);
+  else if (!deliveryFenced && !context.caller.runId) {
+    for (const family of agentFamiliesForCaller(context.caller)) if (family.running) releaseQuiescentRun({}, family.run_id);
+  }
   markTiming('recorder', true);
   return delivered;
 }
@@ -932,13 +997,14 @@ function needsWorkspaceIdentity(name: string, args: unknown): boolean {
   }
   if (name === 'find') return relative(input['path']);
   if (name === 'apply_patch') {
-    // Codex's apply_patch surface has no cwd argument. Relative patch paths therefore always
-    // consume the turn/chat cwd analogue maintained by this connector.
+    // Codex's apply_patch surface has no cwd argument. Relative paths consume connector
+    // workspace state; absolute paths are self-contained. This flag matters only when the
+    // unattributed opt-in is off, because an allowed request id can own that workspace itself.
     return true;
   }
   if (name === 'exec_command') {
-    // Every exec in a swarm also needs caller identity so a long-running session can be
-    // owned by the right chat even when the cwd itself was explicit.
+    // With the opt-in off, every swarm exec needs exact caller identity for workspace/process
+    // ownership even when cwd is explicit. Allowed unattributed calls use a request principal.
     const workdir = input['workdir'];
     return swarmRunning() || workdir === undefined || relative(workdir);
   }
@@ -1245,6 +1311,9 @@ export const PRIME_EVIDENCE_MS = evidenceWindow(2_500);
  * seconds are only ever spent by a call that was going to be refused anyway.
  */
 export const IDENTITY_EVIDENCE_MS = evidenceWindow(15_000);
+
+/** Brief exact-proof preference before allowed Desktop calls fall back to request-scoped state. */
+export const UNATTRIBUTED_DESKTOP_EVIDENCE_MS = evidenceWindow(250);
 
 /**
  * The same window again for the two `agents` actions whose refusal cannot be retried cheaply.
