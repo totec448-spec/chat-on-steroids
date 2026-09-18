@@ -764,6 +764,37 @@ it.each(['discarded', 'frozen', 'woke', 'navigated', 'loading', 'closed', 'missi
   }
 );
 
+it.each(['still-frozen', 'woke', 'navigated', 'new-document'] as const)(
+  'rechecks suspension after the app grants the reload (%s)', async state => {
+    const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const tab = { id: 71, url: `https://chatgpt.com/c/${conversationId}`, frozen: true };
+    const documents = { '71': 'suspended-document' };
+    let claimed = false;
+    const reload = vi.fn();
+    const call = vi.fn(async (url: string) => {
+      if (url === '/repairs/claim') {
+        claimed = true;
+        if (state === 'new-document') documents['71'] = 'replacement-document';
+      }
+      return { ok: true, data: { allowed: true } };
+    });
+    const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+      backgroundSource.indexOf('\nfunction conversationStillOpen('));
+    const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+      tabConversations: { '71': conversationId }, tabDocuments: documents,
+      conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
+      createChatTab: vi.fn(), call,
+      chrome: { tabs: { query: async () => [tab], reload, get: async () => ({ ...tab,
+        frozen: !(claimed && state === 'woke'),
+        ...(claimed && state === 'navigated' ? { url: 'https://example.com/' } : {})
+      }) } }, CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+    });
+    await repair([{ conversationId, token: 'suspension-claim', reason: 'stalled', suspended: true, requiresClaim: true }], {});
+    expect(claimed).toBe(true);
+    expect(reload).toHaveBeenCalledTimes(state === 'still-frozen' ? 1 : 0);
+    expect(call.mock.calls.filter(([url]) => url.includes('repairFailed='))).toHaveLength(state === 'still-frozen' ? 0 : 1);
+  });
+
 describe('accepted helper tab cleanup', () => {
   it('shares pending diagnostic reads and discards a result after disconnect', async () => {
     const source = backgroundSource.slice(backgroundSource.indexOf('function publishCompanionDiagnostics()'),
@@ -1055,6 +1086,52 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       expect(worker.tabsReload).not.toHaveBeenCalled();
       expect(worker.tabsCreate).not.toHaveBeenCalled();
       expect(receipts).toBe(0);
+    });
+
+  it.each(['empty', 'draft-before-claim', 'draft-after-claim', 'question-after-claim', 'unresponsive'] as const)(
+    'preserves the compaction draft at the browser claim boundary: %s', async scenario => {
+      let armed = false, handed = false, claimed = false, repaired = 0, failed = 0;
+      const fetch = vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/repairs/claim') { claimed = true; return response(200, { allowed: true }); }
+        if (url.pathname === '/status') {
+          if (url.searchParams.has('repaired')) repaired++;
+          if (url.searchParams.has('repairFailed')) failed++;
+          if (armed && !handed) {
+            handed = true;
+            return response(200, { repairs: [{ conversationId: CHAT, token: 'compaction-draft',
+              reason: 'compaction', requiresClaim: true }] });
+          }
+          return response(200, { repairs: [] });
+        }
+        return response(200, {});
+      });
+      const checks: Record<string, unknown>[] = [];
+      const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+        tabsQuery: async () => [{ id: 21, url: `https://chatgpt.com/c/${CHAT}` }],
+        tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${CHAT}` }),
+        tabsSendMessage: async (_id, message) => {
+          if (message.type !== 'clf-repair-check') return { ok: true };
+          checks.push(message);
+          if (scenario === 'unresponsive') return null;
+          return { safe: scenario !== 'draft-before-claim' &&
+            !(claimed && (scenario === 'draft-after-claim' || scenario === 'question-after-claim')),
+            revision: 1, turnId: 'source', questionId: claimed && scenario === 'question-after-claim' ? 'next' : 'question' };
+        } });
+      await worker.registerTab(21);
+      await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+      await worker.fireAlarm(); armed = true; await worker.fireAlarm();
+      const reloads = scenario === 'empty' || scenario === 'unresponsive' ? 1 : 0;
+      expect(worker.tabsReload).toHaveBeenCalledTimes(reloads);
+      expect(worker.tabsCreate).not.toHaveBeenCalled();
+      expect(repaired).toBe(reloads);
+      expect(claimed).toBe(scenario !== 'draft-before-claim');
+      expect(failed).toBe(scenario === 'draft-after-claim' || scenario === 'question-after-claim' ? 1 : 0);
+      expect(checks).toHaveLength(claimed ? 2 : 1);
+      expect(checks.every(message => message.draftOnly === true)).toBe(true);
+      if (claimed && scenario !== 'unresponsive') expect(checks[1]!.expected)
+        .toEqual({ revision: 1, turnId: 'source', questionId: 'question' });
     });
 
   it('reloads the registry-bound copy when one chat has two tabs', async () => {
@@ -3026,6 +3103,38 @@ describe('extension observation journal', () => {
       { route: '/goal/draft', client: '73' },
       { route: '/goal/ack', client: '73' }
     ]);
+  });
+
+  it('forwards the page-model helper health, and only the words the page may say', async () => {
+    // This field crosses three files, and that join is where two checkpoint fields have already
+    // been lost with every unit test still green — see scripts/verify-compact-chain.mjs. The
+    // page is the only thing that can see the MAIN-world helper, and the app is the only thing
+    // that can say a handoff will never reconcile its marker without it.
+    const conversationId = '22222222-3333-4444-5555-666666666666';
+    const seen: Array<string | null> = [];
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/activity') {
+        seen.push(url.searchParams.get('fiber'));
+        return response(200, { sessionId: 'session', entries: [], stream: [], nextSince: 0 });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      fetch
+    });
+
+    for (const fiber of ['absent', 'empty', 'ok']) {
+      await worker.send({ type: 'activity', conversationId, since: 0, fiber }, 73);
+    }
+    // Anything else is dropped rather than passed on for the app to validate a second time.
+    await worker.send({ type: 'activity', conversationId, since: 0, fiber: 'maybe' }, 73);
+    await worker.send({ type: 'activity', conversationId, since: 0 }, 73);
+
+    expect(seen).toEqual(['absent', 'empty', 'ok', null, null]);
   });
 
   it('selects only the exact owned Goal tab without activating Chrome or opening a duplicate', async () => {

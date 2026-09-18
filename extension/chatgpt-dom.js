@@ -1582,7 +1582,8 @@ var CLF_DOM = (() => {
   function activitySummaryRows(turn) {
     return safe(() => {
       const interactive = `${ACTIVITY_CONTROL}, [tabindex]:not([tabindex="-1"]), [contenteditable="true"], [aria-expanded], [aria-controls]`;
-      return toolBlocks(turn).filter(row => !row.closest(`${OWN_SURFACES}, ${interactive}, ${CONNECTOR}`) &&
+      return toolBlocks(turn).filter(row => !row.closest(`${OWN_SURFACES}, ${interactive}, ${CONNECTOR}, [data-clf-fiber-thought]`) &&
+        !row.querySelector('[data-clf-fiber-thought]') &&
         !row.querySelector(`${interactive}, ${CONNECTOR}, pre, code, table, details`) && canHideActivity(row));
     }, []);
   }
@@ -1616,15 +1617,14 @@ var CLF_DOM = (() => {
 
   /**
    * Find the layout child whose removal also removes its flex/grid gap. Never cross the
-   * turn section, a native fold/progress owner, another tool row, or unrelated controls.
+   * turn section, a native fold/progress owner, an uncovered row, or unrelated controls.
    */
-  function activityHideTarget(block, section, blocks, ownsControls = true) {
+  function activityHideTarget(block, section, blocks, covered, allowedControls) {
     if (!canHideActivity(block)) return null;
-    const allowedControls = ownsControls ? activityControls(block) : new Set();
     let target = block;
     for (let parent = target.parentElement; parent && parent !== section; parent = parent.parentElement) {
       if (parent.matches?.('[data-interrupted], [data-clf-progress]') || !canHideActivity(parent)) break;
-      if (blocks.some(other => other !== block && parent.contains(other))) break;
+      if (blocks.some(other => !covered.has(other) && parent.contains(other))) break;
       if ([...parent.querySelectorAll(ACTIVITY_CONTROL)].some(control => !allowedControls.has(control))) break;
       target = parent;
     }
@@ -1657,7 +1657,7 @@ var CLF_DOM = (() => {
     return targets;
   }
 
-  function hideActivity(turn, coveredBlocks, typedThoughtBlocks = [], summaryBlocks = []) {
+  function hideActivity(turn, coveredBlocks, typedThoughtBlocks = [], summaryBlocks = [], presentation = null) {
     const sections = turnNodes(turn);
     const blocks = toolBlocks(turn);
     const candidates = [...new Set([...blocks, ...(Array.isArray(typedThoughtBlocks) ? typedThoughtBlocks : [])])];
@@ -1668,35 +1668,91 @@ var CLF_DOM = (() => {
       ...(Array.isArray(summaryBlocks) ? summaryBlocks : [])
     ]);
     const summaries = new Set(Array.isArray(summaryBlocks) ? summaryBlocks : []);
+    const allowedControls = new Set(candidates.filter(block => covered.has(block) && !summaries.has(block))
+      .flatMap(block => [...activityControls(block)]));
     if (covered.size > 0) {
       for (const block of candidates) {
         if (!covered.has(block)) continue;
         const section = sections.find(candidate => candidate.contains(block));
-        const target = section && activityHideTarget(block, section, candidates, !summaries.has(block));
+        const target = section && activityHideTarget(block, section, candidates, covered, allowedControls);
         if (target) desired.get(section).add(target);
       }
     }
     syncHiddenActivity(turn, desired);
+    syncActivityLayout(turn, presentation);
   }
 
   /**
-   * The one provider fold shape proven by live inspection. Labels and hashed classes are
-   * deliberately absent: a closed button immediately owns one empty clipped height box.
-   * The content script still has to prove the response and final message before using it.
+   * The native activity disclosure owns an immediately adjacent clipped height box.
+   * Its translated caption and React's hashed classes are not identity. Public message
+   * anchors or a mounted canonical projection must separately prove the content we reveal.
    */
-  function collapsedActivityFold(turn) {
+  function activityFold(turn) {
     return safe(() => {
       const candidates = [];
       for (const section of turnNodes(turn)) {
-        for (const button of section.querySelectorAll('button[aria-expanded="false"]')) {
+        for (const button of section.querySelectorAll('button[aria-expanded="false"], button[aria-expanded="true"]')) {
+          if (button.closest(`${OWN_SURFACES}, .markdown, ${CONNECTOR}`)) continue;
           const clip = button.nextElementSibling;
           if (!clip || !clip.matches('div[data-item-anchor="start"][data-clip="true"][data-dimension="height"]')) continue;
-          if ([...clip.childNodes].some(node => node.nodeType === 1 || String(node.nodeValue || '').trim())) continue;
           candidates.push({ button, clip, section });
         }
       }
       return candidates.length === 1 ? candidates[0] : null;
     }, null);
+  }
+
+  function collapsedActivityFold(turn) {
+    const fold = activityFold(turn);
+    if (!fold || fold.button.getAttribute('aria-expanded') !== 'false' ||
+        [...fold.clip.childNodes].some(node => node.nodeType === 1 || String(node.nodeValue || '').trim())) return null;
+    return fold;
+  }
+
+  /** Presentation markers are rebuilt with the same paint as native suppression. Nothing
+   * clicks the disclosure, moves React children or changes its remembered open state. */
+  function syncActivityLayout(turn, presentation) {
+    const desired = new Map();
+    if (presentation) {
+      const fold = presentation.fold || activityFold(turn);
+      if (fold && (presentation.fold || (presentation.anchors || []).some(anchor => fold.clip.contains(anchor)))) {
+        desired.set(fold.button, 'header');
+        const hasContent = [...fold.clip.childNodes].some(node => node.nodeType === 1 || String(node.nodeValue || '').trim());
+        desired.set(fold.clip, hasContent ? 'clip' : 'empty-clip');
+      }
+      for (const gap of presentation.chunks || []) {
+        if (!gap.interim || gap.before || !gap.anchor?.isConnected) continue;
+        const section = turnNodes(turn).find(node => node.contains(gap.anchor));
+        if (!section) continue;
+        let step = null;
+        // A tool chunk is a sibling of its exact native interim. That message's trailing
+        // wrappers still carry native spacing after the chunk, producing the reported gap.
+        // Stop before another message, the activity clip or any native action container.
+        for (let parent = gap.anchor.parentElement; parent && parent !== section && parent !== fold?.clip; parent = parent.parentElement) {
+          const messages = [...parent.querySelectorAll('[data-clf-fiber-message]')].filter(node => !node.closest(OWN_SURFACES));
+          if (messages.length !== 1 || messages[0] !== gap.anchor ||
+              [...parent.querySelectorAll('button, summary, [role="toolbar"], [data-message-author-role="user"]')]
+                .some(node => !node.closest(OWN_SURFACES))) break;
+          desired.set(parent, 'step');
+          step = parent;
+        }
+        // Only the native list directly grouping these proven message wrappers loses its
+        // large inter-item gap. Paragraphs, code blocks and the final answer keep their CSS.
+        const stack = step?.parentElement;
+        if (stack && stack !== section && stack !== fold?.clip && !stack.closest('.markdown')) {
+          const style = getComputedStyle(stack);
+          if (style.display === 'flex' && style.flexDirection === 'column') desired.set(stack, 'stack');
+        }
+      }
+    }
+    for (const section of turnNodes(turn)) {
+      for (const node of section.querySelectorAll('[data-clf-activity-part]')) {
+        if (!desired.has(node)) node.removeAttribute('data-clf-activity-part');
+      }
+    }
+    for (const [node, value] of desired) {
+      if (node.getAttribute('data-clf-activity-part') !== value) node.setAttribute('data-clf-activity-part', value);
+    }
   }
 
   /** Keep the native folded progress owner whenever it contains prose/media/chunks. */
@@ -2448,6 +2504,7 @@ var CLF_DOM = (() => {
     firstUserMessage,
     hideProgress,
     hideActivity,
+    activityFold,
     collapsedActivityFold,
     canHideActivity,
     replaceActivity,

@@ -723,6 +723,28 @@
   display: none !important;
 }
 
+/* The activity transcript is always readable in Overwrite. These markers belong only
+   to the exact native fold/content proven by the current presentation pass. */
+[data-clf-activity-part='header'],
+[data-clf-activity-part='empty-clip'] {
+  display: none !important;
+}
+
+[data-clf-activity-part='clip'] {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+[data-clf-activity-part='step'] {
+  margin-block-end: 0 !important;
+  padding-block-end: 0 !important;
+}
+
+[data-clf-activity-part='stack'] {
+  row-gap: 0.45rem !important;
+}
+
 /* The reading column, not the thread.
  *
  * `replaceActivity` mounts this beside the turn's <article>, which is as wide as the whole thread
@@ -783,8 +805,8 @@
   display: none;
 }
 
-/* Public interim prose is projected only while the exact completed Worked fold hides its native
-   preamble nodes. It stays plain selectable text: no tool/status icon and no cloned native HTML. */
+/* Public interim prose is projected while the exact closed activity fold has unmounted its
+   native messages. It stays selectable text, including when the response has no final. */
 .clf-stream-assistant_message {
   align-items: flex-start;
   margin: 0.2rem 0 0.3rem;

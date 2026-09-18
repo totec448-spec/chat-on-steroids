@@ -87,8 +87,17 @@ function toolCall(seq: number, callId: string): SessionEvent {
   };
 }
 
-/** The rows the recorder writes for one Compact & Resume, in the order it observes them. */
-function compaction(seq: number): SessionEvent[] {
+/**
+ * The rows the recorder writes for one Compact & Resume, in the order it observes them.
+ *
+ * `escaped` is how ChatGPT's composer records the same two prompts since 2026-09-16: it
+ * round-trips inserted text through its own Markdown serializer, which escapes ASCII
+ * punctuation, so the marker arrives as `[[CLF-RESUME\:<token>]]`. These are the exact shapes
+ * read back out of a live install's session store.
+ */
+function compaction(seq: number, escaped = false): SessionEvent[] {
+  const mark = (kind: 'HANDOFF' | 'RESUME') =>
+    escaped ? `[[CLF-${kind}\\:${TOKEN}]]` : `[[CLF-${kind}:${TOKEN}]]`;
   return [
     {
       seq,
@@ -97,7 +106,7 @@ function compaction(seq: number): SessionEvent[] {
       kind: 'user_message',
       messageId: 'm-brief-request',
       turnId: 'turn-brief',
-      message: text(`[[CLF-HANDOFF:${TOKEN}]] Write the handoff brief for this session.`)
+      message: text(`${mark('HANDOFF')} Write the handoff brief for this session.`)
     },
     { seq: seq + 1, time: T0 + (seq + 1) * 1000, source: 'extension', kind: 'turn_start', turnId: 'turn-brief' },
     {
@@ -126,7 +135,7 @@ function compaction(seq: number): SessionEvent[] {
       source: 'extension',
       kind: 'user_message',
       messageId: 'm-bootstrap',
-      message: text(`[[CLF-RESUME:${TOKEN}]] Continue from this brief: keep the loop running.`)
+      message: text(`${mark('RESUME')} Continue from this brief: keep the loop running.`)
     }
   ];
 }
@@ -135,6 +144,14 @@ async function settle(ms = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** History paging yields to the browser frame after each bounded read. Timer
+ * ticks alone can all finish before that frame on Linux and macOS. */
+async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Promise<void> {
+  await settle();
+  await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
+  await settle();
 }
 
 async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; sessions?: SessionSummary[]; pro?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null } = {}) {
@@ -334,7 +351,7 @@ it('keeps a reaction on the native question across 100 interim messages, tool ca
   for (let page = 0; page < 3; page++) {
     pane.scrollTop = 0;
     pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
-    await settle();
+    await settleHistoryFrame(w);
   }
   const badges = [...w.document.querySelectorAll('.message-reaction')];
   expect(badges).toHaveLength(1);
@@ -1307,6 +1324,32 @@ it('folds a whole Compact & Resume into one row that says the new chat opened', 
   expect(card.textContent).toContain('keep the loop running');
   expect(card.textContent).toContain('Handoff saved');
   expect(card.textContent).toContain('Bootstrap sent into the new chat');
+});
+
+it('folds a Compact & Resume whose marker ChatGPT escaped as Markdown', async () => {
+  // Same fold, same assertions, but the two prompts are recorded the way the composer has
+  // written them since 2026-09-16. Every reader of the shared marker regex reads text that
+  // came back out of the page, so they all stopped matching at once: this card was not built
+  // at all, and the raw marker was left on screen in the rows it should have replaced.
+  const { w } = await boot([
+    { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },
+    toolCall(2, 'call-1'),
+    ...compaction(3, true),
+    toolCall(9, 'call-2')
+  ]);
+  const timeline = w.document.getElementById('timeline')!;
+
+  const cards = timeline.querySelectorAll('details.compaction');
+  expect(cards).toHaveLength(1);
+  expect(cards[0]!.querySelector('summary')!.textContent).toMatch(/^Compact & Resume:New chat opened at .* \(44 characters\)$/);
+  // Stripped in the form it was recorded in, so no half-removed marker survives either.
+  expect(timeline.textContent).not.toContain('[[CLF-');
+  expect(timeline.textContent).not.toContain('CLF-RESUME');
+  expect([...timeline.children].map((row) => row.className)).toEqual(['ev ev-tool_call', 'ev ev-compaction', 'ev ev-tool_call']);
+
+  cards[0]!.toggleAttribute('open', true);
+  expect(cards[0]!.textContent).toContain('Brief request');
+  expect(cards[0]!.textContent).toContain('keep the loop running');
 });
 
 it('retires a pending Skills picker when sending replaces its draft', async () => {
@@ -2911,7 +2954,12 @@ it('loads bounded earlier pages on deliberate upward scrolling without draining 
   for (const row of timeline.querySelectorAll<HTMLElement>('[data-timeline-key]')) row.getBoundingClientRect = () => {
     const top = [...timeline.querySelectorAll('[data-timeline-key]')].indexOf(row) * 20 - pane.scrollTop;
     return { top, bottom: top + 20, height: 20, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) };
-  };  const up = async () => { pane.scrollTop = 0; pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 })); await settle(); };
+  };
+  const up = async () => {
+    pane.scrollTop = 0;
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
+    await settleHistoryFrame(w);
+  };
   await up();
   expect(pane.scrollTop).toBe(600);
   expect(timeline.textContent).toContain('History item 301');
@@ -2953,7 +3001,9 @@ it('scrolls forward through evicted history with wheel, keyboard and scrollbar, 
     return { top, bottom: top + 20, height: 20 } as DOMRect;
   };
   for (let i = 0; i < 14 && !timeline.textContent?.includes('Bidirectional item 1.'); i++) {
-    pane.scrollTop = 0; pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 })); await settle();
+    pane.scrollTop = 0;
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
+    await settleHistoryFrame(w);
   }
   expect(timeline.textContent).toContain('Bidirectional item 1.');
   expect(timeline.textContent).not.toContain('Bidirectional item 400.');
@@ -2971,12 +3021,12 @@ it('scrolls forward through evicted history with wheel, keyboard and scrollbar, 
       pane.scrollTop += 100; pane.dispatchEvent(new w.Event('scroll'));
       w.dispatchEvent(new w.Event('pointerup'));
     }
-    await settle();
+    await settleHistoryFrame(w);
     expect(anchor.isConnected).toBe(true);
     expect(anchor.getBoundingClientRect().top).toBe(before);
     expect(timeline.querySelectorAll('[data-timeline-key]').length).toBeLessThanOrEqual(160);
     const count = read.mock.calls.length;
-    pane.dispatchEvent(new w.Event('scroll')); await settle();
+    pane.dispatchEvent(new w.Event('scroll')); await settleHistoryFrame(w);
     expect(read).toHaveBeenCalledTimes(count);
   };
   for (let page = 0; page < 14 && !timeline.textContent?.includes('Bidirectional item 400.'); page++) {
@@ -3018,9 +3068,7 @@ it('keeps a revised long answer reachable in both directions and never uses its 
   const page = async (deltaY: number) => {
     pane.scrollTop = deltaY < 0 ? 0 : pane.scrollHeight - pane.clientHeight;
     pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY }));
-    await settle();
-    await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
-    await settle();
+    await settleHistoryFrame(w);
   };
   for (let index = 0; index < 12 && !timeline.textContent?.includes('Detailed ratings.'); index++) await page(-100);
   expect(timeline.textContent).toContain('Detailed ratings.');
