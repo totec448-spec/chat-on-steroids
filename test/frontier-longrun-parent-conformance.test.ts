@@ -5,8 +5,11 @@ import {
   FRONTIER_LONGRUN_PARENT_GRANT_CONTRACT,
   FRONTIER_LONGRUN_PARENT_GRANT_KEY_ORDER,
   FRONTIER_LONGRUN_PARENT_MAX_SLOTS,
+  FRONTIER_LONGRUN_PARENT_MODEL,
   FRONTIER_LONGRUN_PARENT_OPERATION_CONTRACT,
   FRONTIER_LONGRUN_PARENT_OPERATION_KEY_ORDER,
+  FRONTIER_LONGRUN_PARENT_REASONING,
+  FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
   canonicalFrontierLongrunParentGrantBytes,
   canonicalFrontierLongrunParentOperationBytes,
   frontierLongrunParentGrantDigest,
@@ -28,7 +31,7 @@ const GRANT: FrontierLongrunParentGrantV1 = {
   contract: FRONTIER_LONGRUN_PARENT_GRANT_CONTRACT,
   schemaVersion: 1,
   verifierId: 'chat-on-steroids',
-  verifierContractVersion: 1,
+  verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
   grantId: 'a1000000000000000000000000000001',
   missionId: 'frontier-parent-conformance',
   missionDigest: MISSION_DIGEST,
@@ -43,7 +46,7 @@ const OPERATION: FrontierLongrunParentOperationV1 = {
   contract: FRONTIER_LONGRUN_PARENT_OPERATION_CONTRACT,
   schemaVersion: 1,
   verifierId: 'chat-on-steroids',
-  verifierContractVersion: 1,
+  verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
   operationId: 'a2000000000000000000000000000002',
   grantId: GRANT.grantId,
   grantDigest: frontierLongrunParentGrantDigest(GRANT),
@@ -61,12 +64,18 @@ const OPERATION: FrontierLongrunParentOperationV1 = {
 };
 
 const GRANT_CANONICAL = `nexora.cc.frontier-longrun-parent.v1:cc_frontier_longrun_parent_grant_v1
-{"contract":"cc_frontier_longrun_parent_grant_v1","schemaVersion":1,"verifierId":"chat-on-steroids","verifierContractVersion":1,"grantId":"a1000000000000000000000000000001","missionId":"frontier-parent-conformance","missionDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","maxSlots":8,"issuedAt":"2026-09-16T14:00:00.000Z","expiresAt":"2026-09-19T14:00:00.000Z","signingKeyFingerprint":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","operatorIntentDigest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`;
+{"contract":"cc_frontier_longrun_parent_grant_v1","schemaVersion":1,"verifierId":"chat-on-steroids","verifierContractVersion":2,"grantId":"a1000000000000000000000000000001","missionId":"frontier-parent-conformance","missionDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","maxSlots":8,"issuedAt":"2026-09-16T14:00:00.000Z","expiresAt":"2026-09-19T14:00:00.000Z","signingKeyFingerprint":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","operatorIntentDigest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`;
 
 const OPERATION_CANONICAL = `nexora.cc.frontier-longrun-parent.v1:cc_frontier_longrun_parent_operation_v1
-{"contract":"cc_frontier_longrun_parent_operation_v1","schemaVersion":1,"verifierId":"chat-on-steroids","verifierContractVersion":1,"operationId":"a2000000000000000000000000000002","grantId":"a1000000000000000000000000000001","grantDigest":"${frontierLongrunParentGrantDigest(GRANT)}","missionDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","slot":3,"action":"LONGRUN_PROMPT","mutationSeq":7,"inputId":"10000000-0000-4000-8000-000000000007","longrunText":"Frontier parent exact canonical fixture","longrunSha256":"${remoteSteeringSha256(TEXT_BYTES)}","longrunLength":39,"issuedAt":"2026-09-16T14:00:30.000Z","expiresAt":"2026-09-16T14:01:30.000Z","signingKeyFingerprint":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}`;
+{"contract":"cc_frontier_longrun_parent_operation_v1","schemaVersion":1,"verifierId":"chat-on-steroids","verifierContractVersion":2,"operationId":"a2000000000000000000000000000002","grantId":"a1000000000000000000000000000001","grantDigest":"${frontierLongrunParentGrantDigest(GRANT)}","missionDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","slot":3,"action":"LONGRUN_PROMPT","mutationSeq":7,"inputId":"10000000-0000-4000-8000-000000000007","longrunText":"Frontier parent exact canonical fixture","longrunSha256":"${remoteSteeringSha256(TEXT_BYTES)}","longrunLength":39,"issuedAt":"2026-09-16T14:00:30.000Z","expiresAt":"2026-09-16T14:01:30.000Z","signingKeyFingerprint":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}`;
 
-describe('Frontier Longrun parent V1 conformance', () => {
+describe('Frontier Longrun parent V2 verifier conformance', () => {
+  it('pins the fixed provider execution profile without a selector or display alias', () => {
+    expect(FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION).toBe(2);
+    expect(FRONTIER_LONGRUN_PARENT_MODEL).toBe('gpt-5-6-thinking');
+    expect(FRONTIER_LONGRUN_PARENT_REASONING).toBe('xhigh');
+  });
+
   it('freezes the exact canonical field orders and signing bytes', () => {
     expect(FRONTIER_LONGRUN_PARENT_GRANT_KEY_ORDER).toEqual([
       'contract','schemaVersion','verifierId','verifierContractVersion','grantId','missionId','missionDigest','maxSlots',
@@ -94,12 +103,24 @@ describe('Frontier Longrun parent V1 conformance', () => {
       contract: FRONTIER_LONGRUN_PARENT_ENVELOPE_CONTRACT,
       schemaVersion: 1,
       verifierId: 'chat-on-steroids',
-      verifierContractVersion: 1,
+      verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
       signingKeyFingerprint: fingerprint,
       grant: { payload: grant, signature: sign(null, canonicalFrontierLongrunParentGrantBytes(grant), privateKey).toString('base64') },
       operation: { payload: operation, signature: sign(null, canonicalFrontierLongrunParentOperationBytes(operation), privateKey).toString('base64') },
     };
     expect(validateFrontierLongrunParentEnvelope(envelope)).not.toBeNull();
+    const oldGrant = { ...grant, verifierContractVersion: 1 };
+    const oldOperation = { ...operation, verifierContractVersion: 1 };
+    expect(canonicalFrontierLongrunParentGrantBytes(oldGrant as never)).not.toEqual(canonicalFrontierLongrunParentGrantBytes(grant));
+    expect(canonicalFrontierLongrunParentOperationBytes(oldOperation as never)).not.toEqual(canonicalFrontierLongrunParentOperationBytes(operation));
+    expect(validateFrontierLongrunParentGrant(oldGrant)).toBeNull();
+    expect(validateFrontierLongrunParentOperation(oldOperation)).toBeNull();
+    expect(validateFrontierLongrunParentEnvelope({
+      ...envelope,
+      verifierContractVersion: 1,
+      grant: { ...envelope.grant, payload: oldGrant },
+      operation: { ...envelope.operation, payload: oldOperation },
+    })).toBeNull();
     expect(validateFrontierLongrunParentEnvelope({ ...envelope, extra: true })).toBeNull();
     expect(validateFrontierLongrunParentGrant({ ...grant, maxSlots: 7 })).toBeNull();
     expect(validateFrontierLongrunParentOperation({ ...operation, slot: 9 })).toBeNull();

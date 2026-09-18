@@ -275,6 +275,8 @@ function exactParentModel(session: Awaited<ReturnType<typeof getSession>>): 'con
   if (!session?.conversationId) return 'pending';
   const selected = session.selectedModel?.conversationId === session.conversationId ? session.selectedModel : null;
   if (!selected) return 'pending';
+  // The parent binds only to the provider-observed raw execution slug + effort. A display/group
+  // alias such as `5.6` is intentionally insufficient even when it names the same visible family.
   return selected.model.trim().toLowerCase() === FRONTIER_LONGRUN_PARENT_MODEL && selected.reasoningEffort === FRONTIER_LONGRUN_PARENT_REASONING
     ? 'confirmed' : 'mismatch';
 }
@@ -563,8 +565,8 @@ async function promptEffect(
   const session = await getSession(slot.sessionId);
   const view = await longrunSessionView(slot.sessionId);
   if (!session?.conversationId || session.origin?.kind === 'worker' || session.origin?.kind === 'helper' || view.blocked || view.superseded ||
-      view.modelClass !== 'astra' || exactParentModel(session) !== 'confirmed' || !view.finishToolEnabled) {
-    return refused('FRONTIER_LONGRUN_PARENT_SESSION_NOT_READY', 'the bound slot is not an ordinary live Astra session eligible for Longrun control', replay, await slotView(slot));
+      exactParentModel(session) !== 'confirmed' || !view.finishToolEnabled) {
+    return refused('FRONTIER_LONGRUN_PARENT_SESSION_NOT_READY', 'the bound slot is not an ordinary live session on the fixed Frontier profile eligible for Longrun control', replay, await slotView(slot));
   }
   if (!hooks.authorityStillLive()) return refused('FRONTIER_LONGRUN_PARENT_AUTHORITY_CHANGED', 'parent authority changed before the Longrun prompt could be queued', replay, await slotView(slot));
   try {

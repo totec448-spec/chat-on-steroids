@@ -34,7 +34,10 @@ const {
 const {
   FRONTIER_LONGRUN_PARENT_ENVELOPE_CONTRACT,
   FRONTIER_LONGRUN_PARENT_GRANT_CONTRACT,
+  FRONTIER_LONGRUN_PARENT_MODEL,
   FRONTIER_LONGRUN_PARENT_OPERATION_CONTRACT,
+  FRONTIER_LONGRUN_PARENT_REASONING,
+  FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
   canonicalFrontierLongrunParentGrantBytes,
   canonicalFrontierLongrunParentOperationBytes,
   frontierLongrunParentGrantDigest,
@@ -48,7 +51,6 @@ const {
   enqueueInput,
   listInputs,
   noteInputStartupError,
-  offerToolInput,
   resetInputForTests,
 } = await import('../src/main/session/input.js');
 const {
@@ -97,7 +99,7 @@ function signedOperation(
     contract: FRONTIER_LONGRUN_PARENT_OPERATION_CONTRACT,
     schemaVersion: 1,
     verifierId: 'chat-on-steroids',
-    verifierContractVersion: 1,
+    verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
     operationId: options.id ?? operationId(),
     grantId: grant.grantId,
     grantDigest: frontierLongrunParentGrantDigest(grant),
@@ -117,7 +119,7 @@ function signedOperation(
     contract: FRONTIER_LONGRUN_PARENT_ENVELOPE_CONTRACT,
     schemaVersion: 1,
     verifierId: 'chat-on-steroids',
-    verifierContractVersion: 1,
+    verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
     signingKeyFingerprint: fingerprint,
     grant: { payload: grant, signature: grantSignature },
     operation: { payload: operation, signature: sign(null, canonicalFrontierLongrunParentOperationBytes(operation), privateKey).toString('base64') },
@@ -134,11 +136,11 @@ async function bindCreate(fixture: ReturnType<typeof signedOperation>, conversat
   const owner = `page-${fixture.operation.slot}`;
   expect(await claimBrowserInput(row.id, owner, null)).toMatchObject({ id: row.id });
   const session = await createSession({ conversationId, title: `parent-slot-${fixture.operation.slot}` });
-  await observeSessionModel(session.id, conversationId, 'gpt-6-pro', Date.now(), 'pro');
+  await observeSessionModel(session.id, conversationId, 'gpt-5-6-thinking', Date.now(), 'xhigh');
   expect(await acknowledgeBrowserInput(row.id, owner, conversationId, `native-${fixture.operation.slot}`)).toBe(true);
   const status = signedOperation('SESSION_STATUS', fixture.operation.slot, fixture.operation.mutationSeq);
   await vi.waitFor(async () => {
-    expect((await relay(status)).frontier).toMatchObject({ slot: fixture.operation.slot, state: 'bound', session: { modelClass: 'astra' } });
+    expect((await relay(status)).frontier).toMatchObject({ slot: fixture.operation.slot, state: 'bound', session: { modelClass: 'other' } });
   });
   return { session, conversationId };
 }
@@ -199,7 +201,7 @@ beforeEach(async () => {
     contract: FRONTIER_LONGRUN_PARENT_GRANT_CONTRACT,
     schemaVersion: 1,
     verifierId: 'chat-on-steroids',
-    verifierContractVersion: 1,
+    verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
     grantId: 'f1000000000000000000000000000001',
     missionId: 'frontier-weekend-parent',
     missionDigest: 'a'.repeat(64),
@@ -218,10 +220,13 @@ afterEach(() => {
 });
 
 describe('Frontier Longrun parent verifier and slot runtime', () => {
-  it('creates through fixed gpt-6-pro/pro desktop input without returning local identity', async () => {
+  it('creates through fixed raw gpt-5-6-thinking/xhigh desktop input without returning local identity', async () => {
     const create = signedOperation('SESSION_CREATE', 1, 1);
     const result = await relay(create);
-    expect(result).toMatchObject({ status: 'accepted', action: 'SESSION_CREATE', sessionId: null, runId: null, frontier: { slot: 1, state: 'opening', session: null } });
+    expect(result).toMatchObject({
+      status: 'accepted', verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
+      action: 'SESSION_CREATE', sessionId: null, runId: null, frontier: { slot: 1, state: 'opening', session: null }
+    });
     expect(startPorts.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       id: create.operation.inputId,
       sessionId: null,
@@ -229,14 +234,16 @@ describe('Frontier Longrun parent verifier and slot runtime', () => {
       objective: CREATE_TEXT,
       automation: 'loop',
       mode: 'auto',
-      model: 'gpt-6-pro',
-      reasoningEffort: 'pro',
+      model: 'gpt-5-6-thinking',
+      reasoningEffort: 'xhigh',
     }));
+    expect(FRONTIER_LONGRUN_PARENT_MODEL).toBe('gpt-5-6-thinking');
+    expect(FRONTIER_LONGRUN_PARENT_REASONING).toBe('xhigh');
     expect(JSON.stringify(result)).not.toContain('conversation');
     expect(JSON.stringify(result)).not.toContain('session-');
   });
 
-  it('keeps an ACKed session model-pending until exact gpt-6-pro/pro recorder proof arrives', async () => {
+  it('keeps an ACKed session model-pending until exact raw gpt-5-6-thinking/xhigh recorder proof arrives', async () => {
     const create = signedOperation('SESSION_CREATE', 1, 1);
     await relay(create);
     const row = (await listInputs()).find(entry => entry.id === create.operation.inputId)!;
@@ -247,8 +254,26 @@ describe('Frontier Longrun parent verifier and slot runtime', () => {
     expect(await acknowledgeBrowserInput(row.id, 'page', conversationId, 'native')).toBe(true);
     const status = signedOperation('SESSION_STATUS', 1, 1);
     await vi.waitFor(async () => expect((await relay(status)).frontier?.state).toBe('model_pending'));
-    await recordChatObservations(conversationId, [{ kind: 'model_selection', model: 'gpt-6-pro', reasoningEffort: 'pro', time: Date.now() }]);
+    await recordChatObservations(conversationId, [{ kind: 'model_selection', model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh', time: Date.now() }]);
     await vi.waitFor(async () => expect((await relay(status)).frontier?.state).toBe('bound'));
+  });
+
+  it.each([
+    ['5.6', 'xhigh'],
+    ['gpt-5.6-sol', 'xhigh'],
+    ['gpt-5-6-thinking', 'high'],
+    ['gpt-6-pro', 'pro'],
+  ] as const)('rejects non-exact observed parent profile %s/%s', async (model, reasoningEffort) => {
+    const create = signedOperation('SESSION_CREATE', 1, 1);
+    await relay(create);
+    const row = (await listInputs()).find(entry => entry.id === create.operation.inputId)!;
+    await claimBrowserInput(row.id, 'page', null);
+    const conversationId = randomUUID();
+    const session = await createSession({ conversationId, title: 'model mismatch' });
+    await observeSessionModel(session.id, conversationId, model, Date.now(), reasoningEffort);
+    await acknowledgeBrowserInput(row.id, 'page', conversationId, 'native');
+    const status = signedOperation('SESSION_STATUS', 1, 1);
+    await vi.waitFor(async () => expect((await relay(status)).frontier?.state).toBe('model_mismatch'));
   });
 
   it('fails closed on explicit recorder model mismatch', async () => {
@@ -304,7 +329,7 @@ describe('Frontier Longrun parent verifier and slot runtime', () => {
     expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('cancelled');
     const conversationId = randomUUID();
     const session = await createSession({ conversationId, title: 'late ack' });
-    await observeSessionModel(session.id, conversationId, 'gpt-6-pro', Date.now(), 'pro');
+    await observeSessionModel(session.id, conversationId, 'gpt-5-6-thinking', Date.now(), 'xhigh');
     expect(await acknowledgeBrowserInput(row.id, 'late-page', conversationId, 'native-late')).toBe(true);
     const status = signedOperation('SESSION_STATUS', 1, 3);
     await vi.waitFor(async () => expect((await relay(status)).frontier?.state).toBe('stopped'));
@@ -313,19 +338,24 @@ describe('Frontier Longrun parent verifier and slot runtime', () => {
     expect(goalSwitchFor(conversationId)).toMatchObject({ enabled: false });
   });
 
-  it('preserves the original objective while a signed prompt uses same-turn tool injection', async () => {
+  it('preserves the original objective while a signed prompt follows Sol tool-free direct steering', async () => {
     const create = signedOperation('SESSION_CREATE', 1, 1);
     await relay(create);
     const { session, conversationId } = await bindCreate(create);
     expect(goalObjectiveFor(conversationId)).toBe(CREATE_TEXT);
-    await appendEvent(session.id, { time: Date.now(), source: 'extension', kind: 'turn_start', turnId: 'active-parent-turn' });
+    const startedAt = Date.now();
+    await appendEvent(session.id, { time: startedAt, source: 'extension', kind: 'turn_start', turnId: 'active-parent-turn' });
     const prompt = signedOperation('LONGRUN_PROMPT', 1, 2);
     expect(await relay(prompt)).toMatchObject({ status: 'accepted', action: 'LONGRUN_PROMPT' });
     const row = (await listInputs()).find(entry => entry.id === prompt.operation.inputId)!;
-    expect(row).toMatchObject({ sessionId: session.id, text: PROMPT_TEXT, automation: 'loop', transportIntent: 'tool' });
+    expect(row).toMatchObject({
+      sessionId: session.id,
+      text: PROMPT_TEXT,
+      automation: 'loop',
+      transportIntent: 'browser',
+      directTurn: { id: 'active-parent-turn', startedAt },
+    });
     expect(row.objective).toBeUndefined();
-    const batch = await offerToolInput(session.id, conversationId, 'wfr_parent_prompt', Date.now() + 1);
-    expect(batch.messages.map(message => message.text).join('\n')).toContain(PROMPT_TEXT);
     expect(goalObjectiveFor(conversationId)).toBe(CREATE_TEXT);
   });
 
@@ -336,7 +366,7 @@ describe('Frontier Longrun parent verifier and slot runtime', () => {
     await relay(second); const two = await bindCreate(second);
     const replacement = randomUUID();
     expect(await rebindSession(one.session.id, one.conversationId, replacement, 'parent-handoff-proof')).toBe(true);
-    await observeSessionModel(one.session.id, replacement, 'gpt-6-pro', Date.now(), 'pro');
+    await observeSessionModel(one.session.id, replacement, 'gpt-5-6-thinking', Date.now(), 'xhigh');
     const prompt = signedOperation('LONGRUN_PROMPT', 1, 2);
     expect(await relay(prompt)).toMatchObject({ status: 'accepted' });
     expect((await listInputs()).find(entry => entry.id === prompt.operation.inputId)?.sessionId).toBe(one.session.id);
@@ -438,13 +468,13 @@ describe('Frontier Longrun parent verifier and slot runtime', () => {
       automation: 'loop',
       mode: 'auto',
       dueAt: Date.now(),
-      model: 'gpt-6-pro',
-      reasoningEffort: 'pro',
+      model: 'gpt-5-6-thinking',
+      reasoningEffort: 'xhigh',
     });
     expect(await claimBrowserInput(planted.id, 'planted-page', null)).not.toBeNull();
     const conversationId = randomUUID();
     const session = await createSession({ conversationId, title: 'planted same id' });
-    await observeSessionModel(session.id, conversationId, 'gpt-6-pro', Date.now(), 'pro');
+    await observeSessionModel(session.id, conversationId, 'gpt-5-6-thinking', Date.now(), 'xhigh');
     expect(await acknowledgeBrowserInput(planted.id, 'planted-page', conversationId, 'native-planted')).toBe(true);
 
     resetRemoteSteeringForTests(); await restoreRemoteSteering();
@@ -465,7 +495,7 @@ describe('Frontier Longrun parent verifier and slot runtime', () => {
     resetRemoteSteeringForTests(); await restoreRemoteSteering();
     const status = signedOperation('SESSION_STATUS', 1, 1);
     expect(await relay(status)).toMatchObject({ status: 'accepted', frontier: { state: 'model_pending' } });
-    await recordChatObservations(conversationId, [{ kind: 'model_selection', model: 'gpt-6-pro', reasoningEffort: 'pro', time: Date.now() }]);
+    await recordChatObservations(conversationId, [{ kind: 'model_selection', model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh', time: Date.now() }]);
     await vi.waitFor(async () => expect((await relay(status)).frontier?.state).toBe('bound'));
 
     resetRemoteSteeringForTests(); await restoreRemoteSteering();

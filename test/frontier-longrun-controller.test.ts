@@ -5,7 +5,10 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import {
   FRONTIER_LONGRUN_PARENT_ENVELOPE_CONTRACT,
   FRONTIER_LONGRUN_PARENT_GRANT_CONTRACT,
+  FRONTIER_LONGRUN_PARENT_MODEL,
   FRONTIER_LONGRUN_PARENT_OPERATION_CONTRACT,
+  FRONTIER_LONGRUN_PARENT_REASONING,
+  FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
   frontierLongrunParentGrantDigest,
   frontierLongrunParentOperationDigest,
   type FrontierLongrunParentAction,
@@ -38,7 +41,7 @@ function envelope(action: FrontierLongrunParentAction, text = 'controller prompt
     contract: FRONTIER_LONGRUN_PARENT_GRANT_CONTRACT,
     schemaVersion: 1,
     verifierId: 'chat-on-steroids',
-    verifierContractVersion: 1,
+    verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
     grantId: '11000000000000000000000000000001',
     missionId: 'frontier-controller-test',
     missionDigest: 'a'.repeat(64),
@@ -54,7 +57,7 @@ function envelope(action: FrontierLongrunParentAction, text = 'controller prompt
     contract: FRONTIER_LONGRUN_PARENT_OPERATION_CONTRACT,
     schemaVersion: 1,
     verifierId: 'chat-on-steroids',
-    verifierContractVersion: 1,
+    verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
     operationId: '22000000000000000000000000000002',
     grantId: grant.grantId,
     grantDigest: frontierLongrunParentGrantDigest(grant),
@@ -74,7 +77,7 @@ function envelope(action: FrontierLongrunParentAction, text = 'controller prompt
     contract: FRONTIER_LONGRUN_PARENT_ENVELOPE_CONTRACT,
     schemaVersion: 1,
     verifierId: 'chat-on-steroids',
-    verifierContractVersion: 1,
+    verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION,
     signingKeyFingerprint: fingerprint,
     grant: { payload: grant, signature },
     operation: { payload: operation, signature },
@@ -83,12 +86,12 @@ function envelope(action: FrontierLongrunParentAction, text = 'controller prompt
 
 function relayOutcome(action: FrontierLongrunParentAction): RemoteSteeringOutcome {
   return {
-    verifierId: 'chat-on-steroids', verifierContractVersion: 1, status: 'accepted', reason: null, detail: null,
+    verifierId: 'chat-on-steroids', verifierContractVersion: FRONTIER_LONGRUN_PARENT_VERIFIER_CONTRACT_VERSION, status: 'accepted', reason: null, detail: null,
     operationId: null, operationDigest: null, action, runId: null, sessionId: null, replay: false,
     decidedAt: new Date().toISOString(), delivered: null, spawned: null, run: null, session: null, longrun: null,
     frontier: {
       slot: 1, state: action === 'LOOP_OFF' ? 'stopped' : 'bound',
-      session: { found: true, activeTurn: false, blocked: false, superseded: false, modelClass: 'astra', loopEnabled: action !== 'LOOP_OFF', loopMode: 'loop', objectivePresent: true, finishToolEnabled: true, pendingUserInput: false, pendingLongrunStart: false }
+      session: { found: true, activeTurn: false, blocked: false, superseded: false, modelClass: 'other', loopEnabled: action !== 'LOOP_OFF', loopMode: 'loop', objectivePresent: true, finishToolEnabled: true, pendingUserInput: false, pendingLongrunStart: false }
     }
   };
 }
@@ -105,13 +108,16 @@ function intentPayload(intent: 'start' | 'continue' | 'status' | 'stop', signed 
   };
 }
 
-function showPayload() {
+function showPayload(
+  model: string = FRONTIER_LONGRUN_PARENT_MODEL,
+  reasoning: string = FRONTIER_LONGRUN_PARENT_REASONING
+) {
   return {
     command: 'cc.remote.steering.longrun.show', status: 'ok',
     parent: {
       missionId: 'frontier-weekend', missionDigest: 'a'.repeat(64), maxSlots: 8, allocatedSlots: 2, remainingSlots: 6,
       focusSlot: 2, textClaimsUsed: 4, textClaimsRemaining: 60, issuedAt: '2026-09-16T14:00:00.000Z', expiresAt: '2026-09-19T14:00:00.000Z',
-      signingKeyFingerprint: fingerprint, operatorIntentDigest: 'b'.repeat(64), grantDigest: 'c'.repeat(64), model: 'gpt-6-pro', reasoning: 'pro', live: true, revoked: false,
+      signingKeyFingerprint: fingerprint, operatorIntentDigest: 'b'.repeat(64), grantDigest: 'c'.repeat(64), model, reasoning, live: true, revoked: false,
     },
     slots: [
       { slot: 1, label: 'nkb-review', lastMutationSeq: 2, textClaimsUsed: 1, focused: false },
@@ -237,6 +243,15 @@ describe('frontier_longrun controller adapter', () => {
     await expect(withControllerRequest(() => runFrontierLongrunController({ action: 'start', prompt: 'go', label: 'fixture' }, relay))).rejects.toThrow('malformed signed Longrun envelope');
     expect(relay).not.toHaveBeenCalled();
 
+    const oldVersion = intentPayload('start');
+    (oldVersion.envelope as any).verifierContractVersion = 1;
+    (oldVersion.envelope.grant.payload as any).verifierContractVersion = 1;
+    (oldVersion.envelope.operation.payload as any).verifierContractVersion = 1;
+    setFrontierLongrunCommandRunnerForTests(async () => ({ exitCode: 0, stdout: JSON.stringify(oldVersion), stderr: '', truncated: false, timedOut: false, durationMs: 1 }));
+    await expect(withControllerRequest(() => runFrontierLongrunController({ action: 'start', prompt: 'go', label: 'fixture' }, relay)))
+      .rejects.toThrow('malformed signed Longrun envelope');
+    expect(relay).not.toHaveBeenCalled();
+
     setFrontierLongrunCommandRunnerForTests(async () => ({ exitCode: 0, stdout: JSON.stringify(intentPayload('continue')), stderr: '', truncated: false, timedOut: false, durationMs: 1 }));
     await expect(withControllerRequest(() => runFrontierLongrunController({ action: 'start', prompt: 'go', label: 'fixture' }, relay))).rejects.toThrow('unexpected Longrun intent payload');
     expect(relay).not.toHaveBeenCalled();
@@ -260,6 +275,19 @@ describe('frontier_longrun controller adapter', () => {
     expect(result).toMatchObject({ kind: 'show', show: { parent: { mission: 'frontier-weekend', focus: 'vyper-gaming-production', allocated: 2, remaining: 6 } } });
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain('grantDigest'); expect(serialized).not.toContain(fingerprint); expect(serialized).not.toContain('"slot"');
+  });
+
+  it.each([
+    ['gpt-6-pro', 'pro'],
+    ['5.6', 'xhigh'],
+    ['gpt-5-6-thinking', 'high'],
+  ] as const)('rejects Command Center parent metadata on non-fixed profile %s/%s', async (model, reasoning) => {
+    const payload = showPayload(model, reasoning);
+    setFrontierLongrunCommandRunnerForTests(async () => ({
+      exitCode: 0, stdout: JSON.stringify(payload), stderr: '', truncated: false, timedOut: false, durationMs: 1
+    }));
+    await expect(withControllerRequest(() => runFrontierLongrunController({ action: 'show' }, vi.fn() as never)))
+      .rejects.toThrow('malformed Longrun parent metadata');
   });
 
   it('keeps frontier_longrun exposed under Remote Steering when command capability is off and read-only is on', async () => {
