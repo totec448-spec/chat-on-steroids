@@ -25,7 +25,10 @@
  */
 
 import { readDurable, writeDurableSnapshotSoon } from '../durable.js';
+import { logWarn } from '../logger.js';
 import { indexedSessions, readRecentEvents } from './store.js';
+import { attachRequestPlan, reconcileRequestPlans } from './request-plans.js';
+import { reconcileAgentRequestOwners } from '../agents.js';
 
 export interface RequestCorrelation {
   requestId: string;
@@ -190,6 +193,9 @@ export async function restoreRequestCorrelations(): Promise<void> {
   restoring = restoreRequestCorrelationsOnce();
   try {
     await restoring;
+    await reconcileRequestPlans(requestCorrelation).catch(error => {
+      logWarn(`request plan reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
     restored = true;
   } finally {
     restoring = null;
@@ -292,6 +298,21 @@ export function observeRequestCorrelations(
     return result;
   });
   if (changed) persist();
+  const attaching = new Set<string>();
+  for (let index = 0; index < inputs.length; index++) {
+    if (results[index] === 'refused') continue;
+    const requestId = inputs[index]!.requestId;
+    if (attaching.has(requestId)) continue;
+    attaching.add(requestId);
+    const owner = byRequest.get(requestId);
+    if (!owner) continue;
+    void attachRequestPlan(owner).catch(error => {
+      logWarn(`request plan attachment failed for ${requestId}: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+  if (attaching.size) void reconcileAgentRequestOwners().catch(error => {
+    logWarn(`request worker ownership reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
   return results;
 }
 

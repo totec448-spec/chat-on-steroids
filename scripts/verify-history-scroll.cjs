@@ -1,5 +1,6 @@
-/** Real renderer regression for dense activity paging. Synthetic data only.
- * node scripts/verify-history-scroll.cjs [--show] */
+/** Real renderer regression for dense activity paging. Synthetic data by default.
+ * node scripts/verify-history-scroll.cjs [--show] [--recording /path/to/event-snapshot.json]
+ * Optional recordings are read-only local evidence and never included in the repository. */
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -13,13 +14,16 @@ if (!process.versions.electron) {
 const { app, BrowserWindow } = require('electron');
 app.whenReady().then(async () => {
   const root = path.join(__dirname, '..');
-  const code = (await require('esbuild').build({ entryPoints: [path.join(root, 'src/renderer/chat.ts')],
+  const built = await require('esbuild').build({ entryPoints: [path.join(root, 'src/renderer/chat.ts')],
     bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'chat',
+    outfile: path.join(root, '.local/history-fixture.js'),
     plugins: [{ name: 'fixture-url-assets', setup(build) {
       build.onResolve({ filter: /\?url$/ }, args => ({ path: args.path, namespace: 'fixture-url' }));
       build.onLoad({ filter: /.*/, namespace: 'fixture-url' }, () => ({ contents: 'export default "";', loader: 'js' }));
-    } }] })).outputFiles[0].text;
-  const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
+    } }] });
+  const code = built.outputFiles.find(file => file.path.endsWith('.js')).text;
+  const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8') +
+    built.outputFiles.filter(file => file.path.endsWith('.css')).map(file => file.text).join('\n');
   const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*>/g, '')
     .replace('</head>', `<style>${css}</style></head>`);
@@ -61,7 +65,7 @@ app.whenReady().then(async () => {
     window.waitFor=async predicate=>{
       const deadline=performance.now()+5000;
       while(performance.now()<deadline){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,25));}
-      throw new Error('Timed out waiting for synthetic session refresh');
+      throw new Error('Timed out waiting for synthetic session refresh: '+JSON.stringify({reads:fixture.reads.slice(-10),geometry:geometry(),users:document.querySelectorAll('#timeline .ev-user_message').length}));
     };
     window.geometry=()=>{
       const pane=document.getElementById('chatBody'),timeline=document.getElementById('timeline');
@@ -79,18 +83,57 @@ app.whenReady().then(async () => {
     chat.initChat({state:()=>null,save:async()=>{}});chat.chatVisible(true);await frame();
     document.querySelector('#sessionList [data-id="history-fixture"]').click();
     for(let i=0;i<120&&!geometry().readerPresent;i++) await frame();
+    await waitFor(()=>document.querySelector('#timeline .ev-user_message'));
     await frame();
   })()`);
   win.webContents.debugger.attach('1.3');
   const initial = await win.webContents.executeJavaScript('geometry()');
-  assert.ok(initial.viewport > 0 && initial.height - initial.viewport < 80, 'Initial dense activity should fit the viewport: '+JSON.stringify(initial));
-  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {type:'mouseWheel',x:initial.x,y:initial.y,deltaY:-100,deltaX:0});
-  await new Promise(resolve=>setTimeout(resolve,250));
-  const older = await win.webContents.executeJavaScript('geometry()');
+  assert.ok(initial.viewport > 0 && initial.height > 4000, 'Opening fills visible history through collapsed batches without wheel input: '+JSON.stringify(initial));
+  let older = initial;
+  const stages = [];
+  for (let stage = 0; stage < 10 && older.height <= 4000; stage++) {
+    const before = older;
+    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {type:'mouseWheel',x:before.x,y:before.y,deltaY:-100,deltaX:0});
+    await new Promise(resolve=>setTimeout(resolve,250));
+    older = await win.webContents.executeJavaScript('geometry()');
+    assert.ok(older.readerPresent && Math.abs(older.readerTop-before.readerTop) <= 110,
+      'Each 30-row stage preserves the reader: '+JSON.stringify({before,older}));
+    stages.push(older);
+  }
   assert.equal(older.readerPresent,true,'Prepending must not evict the messages currently on screen');
   assert.ok(Math.abs(older.readerTop-initial.readerTop) <= 110, 'One wheel step must not jump to the earlier long task: '+JSON.stringify({initial,older}));
   assert.ok(older.height > 4000,'Earlier task must actually load above the reader: '+JSON.stringify({initial,older,reads:await win.webContents.executeJavaScript('fixture.reads')}));
   assert.equal(older.groups,1,'The overlapping activity remains one disclosure');
+  const expanded = await win.webContents.executeJavaScript(`(async()=>{
+    const pane=document.getElementById('chatBody'),timeline=document.getElementById('timeline');
+    const group=timeline.querySelector('.tool-group');
+    const collapsedHeight=group.getBoundingClientRect().height;
+    group.querySelector('summary').click();await frame();
+    const tools=group.querySelectorAll('.tool');
+    tools[100].querySelector('summary').click();await frame();
+    const output=tools[100].querySelector('.raw');
+    pane.scrollTop+=output.getBoundingClientRect().top-pane.getBoundingClientRect().top-100;await frame();
+    const rect=pane.getBoundingClientRect();
+    return {collapsedHeight,expandedHeight:group.getBoundingClientRect().height,
+      rawCount:timeline.querySelectorAll('.raw').length,top:pane.scrollTop,
+      x:Math.round(rect.left+rect.width/2),y:Math.round(rect.top+160)};
+  })()`);
+  assert.ok(expanded.collapsedHeight<60 && expanded.expandedHeight>4000,'Group height follows its actual disclosure');
+  assert.equal(expanded.rawCount,1,'Only the deliberately expanded call materializes its output');
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',x:expanded.x,y:expanded.y,deltaY:120,deltaX:0});
+  await new Promise(resolve=>setTimeout(resolve,200));
+  const collapsedAgain=await win.webContents.executeJavaScript(`(async()=>{
+    const pane=document.getElementById('chatBody'),group=document.querySelector('#timeline .tool-group');
+    const afterWheel=pane.scrollTop;
+    group.querySelector('summary').click();await frame();
+    const height=group.getBoundingClientRect().height;
+    const hiddenOutputHeight=group.querySelector('.raw').getBoundingClientRect().height;
+    pane.scrollTop=pane.scrollHeight;await frame();
+    return {afterWheel,height,hiddenOutputHeight};
+  })()`);
+  assert.ok(Math.abs(collapsedAgain.afterWheel-expanded.top-120)<2,'Native wheel over an expanded group travels its requested distance');
+  assert.equal(collapsedAgain.height,expanded.collapsedHeight,'Collapsing returns to one headline');
+  assert.equal(collapsedAgain.hiddenOutputHeight,0,'Collapsed output contributes no scroll geometry');
   const historicalRefresh=await win.webContents.executeJavaScript(`(async()=>{
     const listBefore=fixture.listReads;fixture.signal();
     await waitFor(()=>fixture.listReads>listBefore);await frame();
@@ -98,7 +141,7 @@ app.whenReady().then(async () => {
   })()`);
   assert.ok(historicalRefresh.listAfter>historicalRefresh.listBefore,'Historical refresh must perform a list read');
   assert.equal(historicalRefresh.readerTop,older.readerTop,'Historical repaint preserves the underfilled tail reserve');
-  const observations=[{phase:'initial',...initial},{phase:'older',...older}];
+  const observations=[{phase:'initial',...initial},...stages.map((stage,index)=>({phase:'older-'+index,...stage}))];
   for(let cycle=0;cycle<4;cycle++) {
     const before=await win.webContents.executeJavaScript('geometry()');
     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',x:before.x,y:before.y,deltaY:cycle%2 ? -100 : 100,deltaX:0});
@@ -154,7 +197,7 @@ app.whenReady().then(async () => {
   assert.equal(shortBefore.height,shortBefore.viewport,'Short conversation fits without overflow');
   await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',x:shortBefore.x,y:shortBefore.y,deltaY:-100,deltaX:0});
   const shortAfter=await win.webContents.executeJavaScript(`(async()=>{
-    await waitFor(()=>fixture.reads.at(-1)?.before===50);await frame();
+    await waitFor(()=>fixture.reads.some(read=>read.before===50));await frame();
     const after=geometry();
     fixture.history.push({seq:51,time:51,source:'extension',kind:'assistant_message',messageId:'short-live',message:{text:'Still live',chars:10,truncated:false},final:true});
     fixture.signal();await waitFor(()=>document.getElementById('timeline').textContent.includes('Still live'));
@@ -163,6 +206,41 @@ app.whenReady().then(async () => {
   assert.equal(shortAfter.top,0,'Wheel-up cannot scroll a fitting conversation');
   assert.equal(shortAfter.height,shortAfter.viewport,'Empty history does not create overflow');
   assert.equal(shortAfter.banner,false,'Short conversation never shows a navigation banner');
+  const interjection = await win.webContents.executeJavaScript(`(async()=>{
+    fixture.inputs=[{id:'interjection',sessionId:'history-fixture',text:'Pending correction beside current tools',
+      delivery:'tool',mode:'auto',state:'queued',createdAt:52,dueAt:52}];
+    fixture.signal();await waitFor(()=>document.querySelector('#inputQueue .pending-message'));await frame();
+    const pane=document.getElementById('chatBody'),timeline=document.getElementById('timeline');
+    const root=document.getElementById('timelineContent')||timeline;
+    // A legitimate underfilled-page reserve must stay below the entire transcript,
+    // including the input which is still awaiting its first tool receipt.
+    root.style.setProperty('--timeline-scroll-reserve','600px');
+    pane.scrollTop=pane.scrollHeight;await frame();
+    const pending=document.querySelector('#inputQueue .pending-message');
+    for(const animation of pending.getAnimations()) animation.finish();
+    await frame();
+    const last=timeline.lastElementChild;
+    const gap=pending.getBoundingClientRect().top-last.getBoundingClientRect().bottom;
+    const before=pending.getBoundingClientRect().top,scrollBefore=pane.scrollTop;
+    pane.scrollTop=Math.max(0,scrollBefore-80);await frame();
+    const movement=pending.getBoundingClientRect().top-before;
+    const pendingBeforeDelivery=pending.getBoundingClientRect().top;
+    const count=()=>[...document.querySelectorAll('#timeline .said.is-user,#inputQueue .pending-message')]
+      .filter(row=>row.textContent.includes('Pending correction beside current tools')).length;
+    fixture.history.push({seq:52,time:52,source:'app',kind:'user_message',messageId:'input:interjection',inputId:'interjection',
+      message:{text:fixture.inputs[0].text,chars:45,truncated:false}});
+    fixture.inputs[0]={...fixture.inputs[0],state:'tool',messageId:'input:interjection',offeredAt:52,historyAnchored:true,historySeq:52};
+    fixture.signal();await waitFor(()=>!document.querySelector('#inputQueue .pending-message'));await frame();
+    const delivered=[...timeline.querySelectorAll('[data-timeline-key]')].find(row=>row.dataset.timelineKey==='input:interjection')?.querySelector('.user-message-text');
+    return {gap,movement,scrollDelta:scrollBefore-(scrollBefore-80<0?0:scrollBefore-80),copies:count(),
+      deliveryDrift:delivered?Math.abs(delivered.getBoundingClientRect().top-pendingBeforeDelivery):null};
+  })()`);
+  assert.ok(interjection.gap >= 0 && interjection.gap < 60,
+    'Pending interjection stays adjacent to transcript content, never beyond reserved empty space: '+JSON.stringify(interjection));
+  assert.ok(Math.abs(interjection.movement-interjection.scrollDelta)<2,'Pending interjection moves with the transcript');
+  assert.equal(interjection.copies,1,'First tool delivery keeps exactly one interjection');
+  assert.ok(interjection.deliveryDrift!==null && interjection.deliveryDrift<2,
+    'First tool delivery preserves the interjection position: '+JSON.stringify(interjection));
   const revisedHistory=await win.webContents.executeJavaScript(`(async()=>{
     document.getElementById('newChat').click();await frame();
     fixture.history.splice(0,fixture.history.length,...Array.from({length:360},(_,i)=>({
@@ -179,7 +257,7 @@ app.whenReady().then(async () => {
     fixture.signal();await waitFor(()=>document.getElementById('inputQueue').textContent.includes('Still waiting input'));
     const pane=document.getElementById('chatBody'),timeline=document.getElementById('timeline');
     const checks=[];
-    for(let i=0;i<4&&!timeline.textContent.includes('Detailed review');i++) {
+    for(let i=0;i<12&&!timeline.textContent.includes('Detailed review');i++) {
       pane.scrollTop=0;await frame();const count=fixture.reads.length;
       pane.dispatchEvent(new WheelEvent('wheel',{deltaY:-100}));
       await waitFor(()=>fixture.reads.length>count);await frame();
@@ -198,7 +276,80 @@ app.whenReady().then(async () => {
   assert.equal(revisedHistory.copies,1,'The long answer has one canonical row');
   assert.ok(!revisedHistory.queue.includes('Already delivered input'),'Old timestamps cannot resurrect a committed input in the queue');
   assert.ok(revisedHistory.queue.includes('Still waiting input'),'The actual waiting input stays visible');
-  console.log(JSON.stringify({observations,historicalRefresh,latest,refresh,bottomRefresh,shortAfter},null,2));
+  assert.ok(await win.webContents.executeJavaScript('fixture.reads.every(read => read.limit === 30)'),
+    'Opening, history navigation and live deltas all use 30-row requests');
+  const recordingAt = process.argv.indexOf('--recording');
+  if (recordingAt >= 0) {
+    const recordingPath = process.argv[recordingAt + 1];
+    if (!recordingPath) throw new Error('--recording requires an event snapshot path');
+    const source = JSON.parse(fs.readFileSync(recordingPath, 'utf8'));
+    assert.ok(Array.isArray(source) && source.length > 0 && source.every(row =>
+      row && Number.isFinite(row.seq) && typeof row.kind === 'string'), 'Recording must contain stored events');
+    const compiled = require('esbuild').transformSync(fs.readFileSync(path.join(root, 'src/shared/chronology.ts'), 'utf8'),
+      { loader: 'ts', format: 'cjs' }).code;
+    const module = { exports: {} }; new Function('module', 'exports', compiled)(module, module.exports);
+    const { chronological, projectTimeline, positionOf } = module.exports;
+    const turns = {};
+    for (const row of [...source].sort((a,b)=>a.seq-b.seq)) {
+      if (row.kind === 'turn_start' && row.turnId && !turns[row.turnId]) turns[row.turnId] = {origin:positionOf(row),time:row.time};
+      if (row.kind === 'turn_end' && turns[row.turnId]) turns[row.turnId].endTime = Math.max(turns[row.turnId].endTime || 0,row.time);
+    }
+    const projected = projectTimeline(source, turns);
+    const keys = [...new Set(chronological(projected).flatMap(row => {
+      if (row.kind === 'tool_call') return [`message:tool_call\u0000${row.call.callId}`];
+      return ['user_message','assistant_message'].includes(row.kind) && row.messageId
+        ? [`message:${row.kind}\u0000${row.messageId}`] : [];
+    }))];
+    await win.webContents.executeJavaScript(`(async()=>{
+      document.getElementById('newChat').click();await frame();
+      fixture.history.splice(0,fixture.history.length,...${JSON.stringify(projected)});
+      fixture.inputs=[];fixture.session.events=fixture.history.length;fixture.session.updatedAt++;
+      window.recordingOrder = new Map(${JSON.stringify(keys)}.map((key,index)=>[key,index]));
+      document.querySelector('#sessionList [data-id="history-fixture"]').click();
+      await waitFor(()=>document.querySelectorAll('#timeline [data-timeline-key]').length>0);await frame();
+    })()`);
+    const recorded = await win.webContents.executeJavaScript(`(async()=>{
+      const pane=document.getElementById('chatBody'),timeline=document.getElementById('timeline');
+      const steps=[];
+      const order=()=>[...timeline.querySelectorAll('[data-timeline-key]')]
+        .map(row=>row.dataset.timelineKey).filter(key=>recordingOrder.has(key));
+      const checkOrder=()=>{
+        const keys=order();
+        if(new Set(keys).size!==keys.length) throw new Error('Duplicate canonical recording row');
+        for(let i=1;i<keys.length;i++) if(recordingOrder.get(keys[i-1])>recordingOrder.get(keys[i]))
+          throw new Error('Recording order changed across a history boundary');
+      };
+      checkOrder();
+      for(const direction of [-1,1]) for(let stage=0;stage<Math.ceil(fixture.history.length/30)+5;stage++) {
+        pane.scrollTop=direction<0?0:pane.scrollHeight;await frame();
+        const edge=pane.getBoundingClientRect().top;
+        const anchor=[...timeline.querySelectorAll('[data-timeline-key]')].find(row=>{
+          const rect=row.getBoundingClientRect();return !row.matches('.tool-group[open]') && rect.height>0 && rect.bottom>edge && rect.top<edge+pane.clientHeight;
+        });
+        const before=anchor?.getBoundingClientRect().top-edge;
+        const reads=fixture.reads.length;
+        pane.dispatchEvent(new WheelEvent('wheel',{deltaY:direction*100}));await frame();
+        if(fixture.reads.length===reads) break;
+        checkOrder();
+        const after=anchor?.getBoundingClientRect().top-pane.getBoundingClientRect().top;
+        if(anchor && (!anchor.isConnected || Math.abs(after-before)>2))
+          throw new Error('Recording viewport changed on '+direction+' page '+stage+': '+JSON.stringify({key:anchor.dataset.timelineKey,before,after,connected:anchor.isConnected}));
+        steps.push({direction,stage,rows:timeline.querySelectorAll('.ev').length,drift:anchor?Math.abs(after-before):0});
+      }
+      const retained=order();
+      const listReads=fixture.listReads;fixture.signal();await waitFor(()=>fixture.listReads>listReads);await frame();checkOrder();
+      if(JSON.stringify(order())!==JSON.stringify(retained)) throw new Error('Idle recording refresh reordered resident history');
+      const question=[...timeline.querySelectorAll('.ev-user_message')].at(-1);
+      question?.scrollIntoView({block:'center'});await frame();
+      return {sourceRows:fixture.history.length,steps,maxDrift:Math.max(0,...steps.map(step=>step.drift))};
+    })()`);
+    assert.ok(recorded.steps.length > 0, 'The recorded transcript must exercise history paging');
+    const screenshotPath = path.join(root, '.local', 'recorded-transcript-scroll.png');
+    fs.mkdirSync(path.dirname(screenshotPath), {recursive:true});
+    fs.writeFileSync(screenshotPath, (await win.webContents.capturePage()).toPNG());
+    console.log(JSON.stringify({recorded,screenshot:screenshotPath},null,2));
+  }
+  console.log(JSON.stringify({observations,expanded,collapsedAgain,interjection,historicalRefresh,latest,refresh,bottomRefresh,shortAfter},null,2));
   console.log(JSON.stringify({revisedHistory},null,2));
   console.log('Dense history scroll passed: real renderer, native wheel, overlap, reversals, scrollbar continuity and live refresh.');
   if(show) { win.webContents.debugger.detach(); return; }

@@ -104,13 +104,18 @@ describe('active Astra finish and user-input ownership', () => {
 
   it('aborts a slow finish decision for the real user injection without publishing its late response or ending the active turn', async () => {
     await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
-    let signal: AbortSignal | undefined;
-    hooks.followup.mockImplementationOnce((_id, currentSignal: AbortSignal) => {
-      signal = currentSignal;
-      return new Promise<string>(resolve => { releaseProvider = () => resolve('Obsolete automatic instruction'); });
+    // Startup persists several records before reaching the provider. Wait for
+    // that boundary, and make cleanup available even if startup is still pending.
+    const response = new Promise<string>(resolve => { releaseProvider = () => resolve('Obsolete automatic instruction'); });
+    const providerStarted = new Promise<AbortSignal>(resolve => {
+      hooks.followup.mockImplementationOnce((_id, currentSignal: AbortSignal) => {
+        resolve(currentSignal);
+        return response;
+      });
     });
     expect(await announceSessionFinish(hooks.caller.sessionId, 'Still verifying', Date.now())).toMatch(/^HELD:/);
-    await vi.waitFor(() => expect(hooks.followup).toHaveBeenCalledOnce());
+    const signal = await providerStarted;
+    expect(hooks.followup).toHaveBeenCalledOnce();
     expect(getSessionFinishDraft(hooks.caller.sessionId, turnId)?.stage).toBe('sending');
     expect(getSessionFinishDraft(other.id, turnId)).toBeNull();
     await setGoalSwitchNow(other.conversationId, 'goal', false);

@@ -13,11 +13,14 @@ import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { emptyEvidence, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import {
+  executionPrincipal,
   execOwner,
   execOwnershipFailure,
   noteExecOwner,
   resetExecOwnershipForTests
 } from '../src/main/codex/ownership.js';
+import { observeRequestCorrelation, resetCorrelationRegistryForTests } from '../src/main/session/correlation.js';
+import { resetRequestPlansForTests } from '../src/main/session/request-plans.js';
 import { resolveIn } from '../src/main/mcp/kernel.js';
 import { SandboxError, resolvePath } from '../src/main/sandbox.js';
 import {
@@ -66,6 +69,25 @@ function asConversation(agent: string | null, conversationId: string): CallConte
 const runAsConversation = <T>(agent: string | null, conversationId: string, fn: () => T): T =>
   runInCallContext(asConversation(agent, conversationId), fn);
 
+function asRequest(
+  requestId: string,
+  conversationId: string | null = null,
+  sessionId: string | null = null
+): CallContext {
+  return {
+    startedAt: Date.now(), transportKey: null, agent: null, allowUnattributed: true,
+    caller: { transportKey: null, requestId, conversationId, sessionId },
+    outcome: null, evidence: emptyEvidence()
+  } as CallContext;
+}
+
+const runAsRequest = <T>(
+  requestId: string,
+  fn: () => T,
+  conversationId: string | null = null,
+  sessionId: string | null = null
+): T => runInCallContext(asRequest(requestId, conversationId, sessionId), fn);
+
 beforeAll(async () => {
   base = await makeTempDir('clf-workspace-');
   approved = path.join(base, 'approved');
@@ -92,6 +114,8 @@ afterAll(async () => {
 beforeEach(() => {
   resetWorkspaces();
   resetExecOwnershipForTests();
+  resetCorrelationRegistryForTests();
+  resetRequestPlansForTests();
 });
 
 describe('live process ownership across chat replacement', () => {
@@ -112,6 +136,31 @@ describe('live process ownership across chat replacement', () => {
     expect(execOwner(103)).toBe('session-other');
     expect(execOwnershipFailure(103, 'session-other')).toBeNull();
   });
+
+  it('lets one request continue its terminal and upgrades that owner to the proven session', () => {
+    const temporary = executionPrincipal('wfr_exec_request', null, true);
+    expect(temporary).toBe('request:wfr_exec_request');
+    noteExecOwner(104, temporary);
+    expect(execOwnershipFailure(104, executionPrincipal('wfr_exec_request', null, true))).toBeNull();
+    expect(observeRequestCorrelation({
+      requestId: 'wfr_exec_request', conversationId: 'conv-request', sessionId: 'session-request',
+      messageId: 'msg-request', tool: 'write_stdin', observedAt: Date.now()
+    })).toBe('stored');
+    expect(executionPrincipal('wfr_exec_request', null, true)).toBe('session-request');
+    expect(execOwnershipFailure(104, 'session-request')).toBeNull();
+    expect(execOwnershipFailure(104, 'session-other')).toBe('different-owner');
+  });
+
+  it('keeps an unresolved request out of a process it did not open, then admits it after exact proof', () => {
+    noteExecOwner(105, 'session-owner');
+    expect(execOwnershipFailure(105, 'request:wfr_unknown')).toBe('unidentified');
+    expect(observeRequestCorrelation({
+      requestId: 'wfr_unknown', conversationId: 'conv-owner', sessionId: 'session-owner',
+      messageId: 'msg-owner', tool: 'write_stdin', observedAt: Date.now()
+    })).toBe('stored');
+    expect(execOwnershipFailure(105, 'request:wfr_unknown')).toBeNull();
+    expect(execOwnershipFailure(105, 'session-other')).toBe('different-owner');
+  });
 });
 
 describe('who a workspace belongs to', () => {
@@ -129,6 +178,50 @@ describe('who a workspace belongs to', () => {
   it('learns nothing when it does not know who is asking', async () => {
     await run(null, () => resolveIn(roots, '/workspace/project/src/main/patch.ts'));
     expect(workspaceEntries()).toEqual([]);
+  });
+
+  it('keeps an allowed unresolved workflow under its exact request id', async () => {
+    await runAsRequest('wfr_workspace_a', () => resolveIn(roots, '/workspace/project/src/main/patch.ts'));
+    expect(runAsRequest('wfr_workspace_a', workspaceKey)).toBe('request:wfr_workspace_a');
+    expect(runAsRequest('wfr_workspace_a', currentWorkspace)?.virtual).toBe('/workspace/project');
+    const relative = await runAsRequest('wfr_workspace_a', () => resolveIn(roots, 'src/renderer/chat.ts'));
+    expect(relative.virtual).toBe('/workspace/project/src/renderer/chat.ts');
+    await expect(runAsRequest('wfr_workspace_b', () => resolveIn(roots, 'src/renderer/chat.ts'))).rejects.toThrow(SandboxError);
+  });
+
+  it('aliases a request workspace to the durable chat when exact proof arrives', async () => {
+    await runAsRequest('wfr_workspace_upgrade', () => resolveIn(roots, '/workspace/project/notes.txt'));
+    expect(runAsRequest('wfr_workspace_upgrade', currentWorkspace, 'conv-workspace-upgrade')?.virtual).toBe('/workspace/project');
+    expect(workspaceForChat('conv-workspace-upgrade')?.virtual).toBe('/workspace/project');
+  });
+
+  it('adopts a request workspace when exact proof arrives after the original call returned', async () => {
+    await runAsRequest('wfr_workspace_late', () => resolveIn(roots, '/workspace/project/notes.txt'));
+    expect(observeRequestCorrelation({
+      requestId: 'wfr_workspace_late', conversationId: 'conv-workspace-late', sessionId: 'session-workspace-late',
+      messageId: 'msg-workspace-late', tool: 'read', observedAt: Date.now()
+    })).toBe('stored');
+
+    const adopted = runAsRequest(
+      'wfr_workspace_next', currentWorkspace, 'conv-workspace-late', 'session-workspace-late'
+    );
+    expect(adopted?.virtual).toBe('/workspace/project');
+    expect(workspaceForChat('conv-workspace-late')?.virtual).toBe('/workspace/project');
+  });
+
+  it('adopts a late request workspace after Compact & Resume changes the conversation', async () => {
+    await runAsRequest('wfr_workspace_before_resume', () => resolveIn(roots, '/workspace/project/notes.txt'));
+    expect(observeRequestCorrelation({
+      requestId: 'wfr_workspace_before_resume', conversationId: 'conv-before-resume',
+      sessionId: 'session-across-resume', messageId: 'msg-before-resume',
+      tool: 'read', observedAt: Date.now()
+    })).toBe('stored');
+
+    const adopted = runAsRequest(
+      'wfr_workspace_after_resume', currentWorkspace, 'conv-after-resume', 'session-across-resume'
+    );
+    expect(adopted?.virtual).toBe('/workspace/project');
+    expect(workspaceForChat('conv-after-resume')?.virtual).toBe('/workspace/project');
   });
 });
 

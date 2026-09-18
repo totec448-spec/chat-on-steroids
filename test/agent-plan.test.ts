@@ -5,12 +5,17 @@ import { createSession, flushSessions, initSessionStore, readSessionPlan, rebind
 import { agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES } from '../src/shared/agent-plan.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { prepareHandoff, resumeBootstrapMatches, resumeBootstrapText } from '../src/main/session/handoff.js';
+import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
+import { attachRequestPlan, reconcileRequestPlans, resetRequestPlansForTests, updateRequestPlan } from '../src/main/session/request-plans.js';
 
 let dir: string;
 const update = { plan: [{ step: 'Fix the ownership boundary', status: 'in_progress' as const, details: 'Keep one durable session across replacement chats.' }] };
-beforeAll(async () => { dir = await makeTempDir('clf-agent-plan-'); initSessionStore(dir); });
+beforeAll(async () => { dir = await makeTempDir('clf-agent-plan-'); initDurableStore(dir); initSessionStore(dir); });
 afterEach(() => vi.restoreAllMocks());
-afterAll(async () => { await flushSessions(); resetSessionStoreForTests(); await removeTempDir(dir); });
+afterAll(async () => {
+  await flushSessions(); await flushDurable(); resetRequestPlansForTests();
+  resetSessionStoreForTests(); resetDurableForTests(); await removeTempDir(dir);
+});
 
 it('adds a retrievable plan notice to the durable handoff only when a nonempty plan exists', async () => {
   const session = await createSession({ conversationId: 'plan-handoff' });
@@ -75,4 +80,58 @@ it('bounds untrusted disk content and validates plan structure before writing', 
   expect(agentPlanUpdateSchema.safeParse({ ...update, session_id: session.id }).success).toBe(false);
   expect(agentPlanUpdateSchema.safeParse({ plan: [{ step: ' ', status: 'pending' }] }).success).toBe(false);
   expect(await updateSessionPlan(session.id, 'plan-corrupt', update, 300)).toBe(true);
+});
+
+it('persists a request-scoped plan across restart and attaches it when exact chat proof arrives', async () => {
+  const conversationId = 'plan-request-owner';
+  const session = await createSession({ conversationId });
+  const requestId = 'wfr_plan_request_owner';
+  expect(await updateRequestPlan(requestId, update, 500)).toBe(true);
+
+  // Simulate an app restart after the tool succeeded but before Fiber proved the chat.
+  resetRequestPlansForTests();
+  await reconcileRequestPlans(id => id === requestId ? {
+    requestId, conversationId, sessionId: session.id, messageId: 'msg-plan-request',
+    tool: 'update_plan', observedAt: 600
+  } : null);
+  expect(await readSessionPlan(session.id)).toEqual({ ...update, updatedAt: 500 });
+
+  expect(await updateRequestPlan('wfr_plan_request_stale', { plan: [] }, 400)).toBe(true);
+  expect(await attachRequestPlan({ requestId: 'wfr_plan_request_stale', conversationId, sessionId: session.id }))
+    .toBe('stale');
+  expect(await readSessionPlan(session.id)).toEqual({ ...update, updatedAt: 500 });
+});
+
+it('recovers an accepted request plan after two handoffs without admitting post-handoff source work', async () => {
+  const session = await createSession({ conversationId: 'pending-plan-a' });
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+  try {
+    await updateRequestPlan('wfr_plan_before_handoff', update, 9_900);
+    clock.mockReturnValue(20_000);
+    expect(await rebindSession(session.id, 'pending-plan-a', 'pending-plan-b')).toBe(true);
+    clock.mockReturnValue(21_000);
+    await updateRequestPlan('wfr_plan_rogue_source', { plan: [] }, 20_900);
+    clock.mockReturnValue(30_000);
+    expect(await rebindSession(session.id, 'pending-plan-b', 'pending-plan-c')).toBe(true);
+    await flushSessions();
+    resetSessionStoreForTests();
+    initSessionStore(dir);
+    expect(await attachRequestPlan({ requestId: 'wfr_plan_before_handoff', conversationId: 'pending-plan-a', sessionId: session.id })).toBe('attached');
+    expect(await readSessionPlan(session.id)).toEqual({ ...update, updatedAt: 9_900 });
+    expect(await attachRequestPlan({ requestId: 'wfr_plan_rogue_source', conversationId: 'pending-plan-a', sessionId: session.id })).toBe('stale');
+    expect(await readSessionPlan(session.id)).toEqual({ ...update, updatedAt: 9_900 });
+  } finally { clock.mockRestore(); }
+});
+
+it('never replaces the successor plan with an older recovered request plan', async () => {
+  const session = await createSession({ conversationId: 'newer-plan-a' });
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+  try {
+    await updateRequestPlan('wfr_old_recovered_plan', update, 9_900);
+    clock.mockReturnValue(20_000);
+    expect(await rebindSession(session.id, 'newer-plan-a', 'newer-plan-b')).toBe(true);
+    expect(await updateSessionPlan(session.id, 'newer-plan-b', { plan: [] }, 20_100)).toBe(true);
+    expect(await attachRequestPlan({ requestId: 'wfr_old_recovered_plan', conversationId: 'newer-plan-a', sessionId: session.id })).toBe('stale');
+    expect(await readSessionPlan(session.id)).toEqual({ plan: [], updatedAt: 20_100 });
+  } finally { clock.mockRestore(); }
 });

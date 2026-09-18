@@ -34,6 +34,7 @@ import {
   onSwarmPersistNow,
   pauseSwarmForDisable,
   repairPrimeConversationAfterRecovery,
+  reconcileAgentRequestOwners,
   restoreRetiredWorkers,
   restoreSwarm,
   snapshotRetiredWorkers,
@@ -392,6 +393,8 @@ void app.whenReady().then(async () => {
   const savedContinuations = await readDurable<ContinuationSnapshot>(CONTINUATIONS_STATE);
   if (windowActivation.isDisabled()) return;
   await restoreContinuations(savedContinuations);
+  if (windowActivation.isDisabled()) return;
+  await reconcileAgentRequestOwners();
   if (windowActivation.isDisabled()) return;
 
   // Strict CSP for our own page. There is no remote content and no inline script.

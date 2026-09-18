@@ -764,6 +764,37 @@ it.each(['discarded', 'frozen', 'woke', 'navigated', 'loading', 'closed', 'missi
   }
 );
 
+it.each(['still-frozen', 'woke', 'navigated', 'new-document'] as const)(
+  'rechecks suspension after the app grants the reload (%s)', async state => {
+    const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const tab = { id: 71, url: `https://chatgpt.com/c/${conversationId}`, frozen: true };
+    const documents = { '71': 'suspended-document' };
+    let claimed = false;
+    const reload = vi.fn();
+    const call = vi.fn(async (url: string) => {
+      if (url === '/repairs/claim') {
+        claimed = true;
+        if (state === 'new-document') documents['71'] = 'replacement-document';
+      }
+      return { ok: true, data: { allowed: true } };
+    });
+    const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+      backgroundSource.indexOf('\nfunction conversationStillOpen('));
+    const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+      tabConversations: { '71': conversationId }, tabDocuments: documents,
+      conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
+      createChatTab: vi.fn(), call,
+      chrome: { tabs: { query: async () => [tab], reload, get: async () => ({ ...tab,
+        frozen: !(claimed && state === 'woke'),
+        ...(claimed && state === 'navigated' ? { url: 'https://example.com/' } : {})
+      }) } }, CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+    });
+    await repair([{ conversationId, token: 'suspension-claim', reason: 'stalled', suspended: true, requiresClaim: true }], {});
+    expect(claimed).toBe(true);
+    expect(reload).toHaveBeenCalledTimes(state === 'still-frozen' ? 1 : 0);
+    expect(call.mock.calls.filter(([url]) => url.includes('repairFailed='))).toHaveLength(state === 'still-frozen' ? 0 : 1);
+  });
+
 describe('accepted helper tab cleanup', () => {
   it('shares pending diagnostic reads and discards a result after disconnect', async () => {
     const source = backgroundSource.slice(backgroundSource.indexOf('function publishCompanionDiagnostics()'),
@@ -957,18 +988,20 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsReload).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['unattributed', 'assistant-error', 'silence', 'no-tab', 'goal'].flatMap(reason =>
-    ['unresolved', 'resolved-during-scan', 'claim-unavailable'].map(mode => ({ reason, mode }))))(
+  it.each(['unattributed', 'assistant-error', 'silence', 'no-tab', 'goal', 'compaction'].flatMap(reason =>
+    ['unresolved', 'resolved-during-scan', 'claim-unavailable', 'navigated-during-claim'].map(mode => ({ reason, mode }))))(
     'claims $reason recovery after the tab scan: $mode', async ({ reason, mode }) => {
       let armed = false;
       let handed = false;
       let resolved = false;
+      let navigated = false;
       const trace: string[] = [];
       const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
         const url = new URL(input);
         if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
         if (url.pathname === '/repairs/claim') {
           trace.push('claim');
+          if (mode === 'navigated-during-claim') navigated = true;
           expect(init.method).toBe('POST');
           expect(JSON.parse(String(init.body))).toEqual({ token: 'attribution-attempt' });
           return mode === 'claim-unavailable' ? response(503, {}) : response(200, { allowed: !resolved });
@@ -985,7 +1018,7 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
         return response(200, {});
       });
       const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
-        tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${CHAT}` }),
+        tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${navigated ? OTHER : CHAT}` }),
         tabsSendMessage: async (_id, message) => message.type === 'clf-repair-check'
           ? { safe: true, revision: 1, turnId: 'source', questionId: 'question' } : { ok: true },
         tabsQuery: async () => {
@@ -1053,6 +1086,52 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       expect(worker.tabsReload).not.toHaveBeenCalled();
       expect(worker.tabsCreate).not.toHaveBeenCalled();
       expect(receipts).toBe(0);
+    });
+
+  it.each(['empty', 'draft-before-claim', 'draft-after-claim', 'question-after-claim', 'unresponsive'] as const)(
+    'preserves the compaction draft at the browser claim boundary: %s', async scenario => {
+      let armed = false, handed = false, claimed = false, repaired = 0, failed = 0;
+      const fetch = vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/repairs/claim') { claimed = true; return response(200, { allowed: true }); }
+        if (url.pathname === '/status') {
+          if (url.searchParams.has('repaired')) repaired++;
+          if (url.searchParams.has('repairFailed')) failed++;
+          if (armed && !handed) {
+            handed = true;
+            return response(200, { repairs: [{ conversationId: CHAT, token: 'compaction-draft',
+              reason: 'compaction', requiresClaim: true }] });
+          }
+          return response(200, { repairs: [] });
+        }
+        return response(200, {});
+      });
+      const checks: Record<string, unknown>[] = [];
+      const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+        tabsQuery: async () => [{ id: 21, url: `https://chatgpt.com/c/${CHAT}` }],
+        tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${CHAT}` }),
+        tabsSendMessage: async (_id, message) => {
+          if (message.type !== 'clf-repair-check') return { ok: true };
+          checks.push(message);
+          if (scenario === 'unresponsive') return null;
+          return { safe: scenario !== 'draft-before-claim' &&
+            !(claimed && (scenario === 'draft-after-claim' || scenario === 'question-after-claim')),
+            revision: 1, turnId: 'source', questionId: claimed && scenario === 'question-after-claim' ? 'next' : 'question' };
+        } });
+      await worker.registerTab(21);
+      await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+      await worker.fireAlarm(); armed = true; await worker.fireAlarm();
+      const reloads = scenario === 'empty' || scenario === 'unresponsive' ? 1 : 0;
+      expect(worker.tabsReload).toHaveBeenCalledTimes(reloads);
+      expect(worker.tabsCreate).not.toHaveBeenCalled();
+      expect(repaired).toBe(reloads);
+      expect(claimed).toBe(scenario !== 'draft-before-claim');
+      expect(failed).toBe(scenario === 'draft-after-claim' || scenario === 'question-after-claim' ? 1 : 0);
+      expect(checks).toHaveLength(claimed ? 2 : 1);
+      expect(checks.every(message => message.draftOnly === true)).toBe(true);
+      if (claimed && scenario !== 'unresponsive') expect(checks[1]!.expected)
+        .toEqual({ revision: 1, turnId: 'source', questionId: 'question' });
     });
 
   it('reloads the registry-bound copy when one chat has two tabs', async () => {
@@ -1568,13 +1647,14 @@ describe('worker settings authority', () => {
     const token = '0123456789abcdef0123456789abcdef';
 
     await worker.send({ type: 'compact', conversationId: CHAT, ticket: true, automatic: true }, 44);
-    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceLost: true }, 44);
+    const sourceError = 'The browser could not insert the handoff request (native_edit_rejected).';
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceLost: true, sourceError }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDispatch: true }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, destinationDispatch: true }, 44);
 
     expect(posted).toEqual([
       expect.objectContaining({ conversationId: CHAT, ticket: true, automatic: true }),
-      expect.objectContaining({ conversationId: CHAT, token, sourceLost: true }),
+      expect.objectContaining({ conversationId: CHAT, token, sourceLost: true, sourceError }),
       expect.objectContaining({ conversationId: CHAT, token, sourceDispatch: true }),
       expect.objectContaining({ conversationId: CHAT, token, destinationDispatch: true })
     ]);
@@ -3025,6 +3105,38 @@ describe('extension observation journal', () => {
     ]);
   });
 
+  it('forwards the page-model helper health, and only the words the page may say', async () => {
+    // This field crosses three files, and that join is where two checkpoint fields have already
+    // been lost with every unit test still green — see scripts/verify-compact-chain.mjs. The
+    // page is the only thing that can see the MAIN-world helper, and the app is the only thing
+    // that can say a handoff will never reconcile its marker without it.
+    const conversationId = '22222222-3333-4444-5555-666666666666';
+    const seen: Array<string | null> = [];
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/activity') {
+        seen.push(url.searchParams.get('fiber'));
+        return response(200, { sessionId: 'session', entries: [], stream: [], nextSince: 0 });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      fetch
+    });
+
+    for (const fiber of ['absent', 'empty', 'ok']) {
+      await worker.send({ type: 'activity', conversationId, since: 0, fiber }, 73);
+    }
+    // Anything else is dropped rather than passed on for the app to validate a second time.
+    await worker.send({ type: 'activity', conversationId, since: 0, fiber: 'maybe' }, 73);
+    await worker.send({ type: 'activity', conversationId, since: 0 }, 73);
+
+    expect(seen).toEqual(['absent', 'empty', 'ok', null, null]);
+  });
+
   it('selects only the exact owned Goal tab without activating Chrome or opening a duplicate', async () => {
     const conversationId = '22222222-3333-4444-5555-666666666666';
     const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
@@ -3139,6 +3251,8 @@ describe('extension observation journal', () => {
     expect(closed).toEqual([]);
     await worker.closeTab(11);
     expect(closed).toEqual([conversationId]);
+    const closeRequest = fetch.mock.calls.find(([input]) => new URL(input).pathname === '/closed');
+    expect(JSON.parse(String(closeRequest?.[1]?.body))).toEqual({ conversationId, manual: true });
   });
 
   it('relays one exact recorded-call disclosure only while its document and route stay current', async () => {

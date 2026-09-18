@@ -9,8 +9,10 @@
 
 import http from 'node:http';
 import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Caller } from '../src/main/agents.js';
+import type { ToolContext } from '../src/main/mcp/kernel.js';
 import * as chatModels from '../src/main/chat-models.js';
 
 vi.mock('electron', () => ({
@@ -50,9 +52,9 @@ const {
   pendingCount,
   pendingWorkerSpawns,
   pauseSwarmForDisable,
-  DETACHED_SILENCE_MS,
+  WORKER_SILENCE_MS,
   endedWorkerNotice,
-  sleepSilentDetachedWorkers,
+  sleepSilentWorkers,
   sleepWorker,
   noteAgentAlive,
   noteAgentContextTokens,
@@ -802,6 +804,49 @@ describe('a worker whose chat never opened', () => {
 });
 
 describe('a worker whose chat closed', () => {
+  it.each([false, true])('sleeps after three minutes of real inactivity even with repeated page reports (detached=%s)', detached => {
+    startSwarm(1);
+    startWorker('worker-1');
+    const clock = vi.spyOn(Date, 'now');
+    const started = Date.now();
+    try {
+      clock.mockReturnValue(started);
+      noteAgentAlive('c-worker-1', 'call');
+      clock.mockReturnValue(started + 179_999);
+      if (detached) workerConversationGone('c-worker-1');
+      noteAgentAlive('c-worker-1', 'page');
+      expect(sleepSilentWorkers()).toEqual([]);
+      clock.mockReturnValue(started + 180_000);
+      noteAgentAlive('c-worker-1', 'page');
+      expect(sleepSilentWorkers()).toHaveLength(1);
+      const slept = swarmState().agents.find(agent => agent.id === 'worker-1')!;
+      expect(slept).toMatchObject({ state: 'sleeping', lastSeenAt: started });
+      clock.mockReturnValue(started + 360_000);
+      noteAgentAlive('c-worker-1', 'page');
+      noteAgentAlive('c-worker-1', 'turn', started);
+      expect(swarmState().agents.find(agent => agent.id === 'worker-1')).toMatchObject({ state: 'sleeping', lastSeenAt: started });
+      expect(sleepSilentWorkers()).toEqual([]);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('renews the three-minute deadline only for new accepted work, not replayed turn evidence', () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    const started = Date.now(), clock = vi.spyOn(Date, 'now');
+    try {
+      noteAgentAlive('c-worker-1', 'call');
+      clock.mockReturnValue(started + 120_000);
+      noteAgentAlive('c-worker-1', 'turn', started + 120_000);
+      clock.mockReturnValue(started + 180_000);
+      expect(sleepSilentWorkers()).toEqual([]);
+      clock.mockReturnValue(started + 299_999);
+      noteAgentAlive('c-worker-1', 'turn', started + 120_000);
+      expect(sleepSilentWorkers()).toEqual([]);
+      clock.mockReturnValue(started + 300_000);
+      expect(sleepSilentWorkers()).toHaveLength(1);
+    } finally { clock.mockRestore(); }
+  });
+
   it('detaches the exact bound worker rather than ending it: the turn is not the tab', () => {
     startSwarm(1);
     startWorker('worker-1');
@@ -825,7 +870,7 @@ describe('a worker whose chat closed', () => {
     // only path that can eventually release a worker whose page never returns.
     expect(noteAgentAlive('c-worker-1', 'call')?.revived).toBe(false);
     expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('detached');
-    expect(sleepSilentDetachedWorkers(Date.now() + DETACHED_SILENCE_MS - 1_000)).toEqual([]);
+    expect(sleepSilentWorkers(Date.now() + WORKER_SILENCE_MS - 1_000)).toEqual([]);
 
     // A page observation is the first-hand evidence that the browser view really came back.
     expect(noteAgentAlive('c-worker-1', 'page')?.revived).toBe(true);
@@ -869,7 +914,7 @@ describe('a worker whose chat closed', () => {
 
     // Nothing has been heard from it since the tab went. Its slot goes back, but nothing here
     // is evidence that it is done — the chat is intact and the prime can wake it in place.
-    expect(sleepSilentDetachedWorkers(Date.now() + DETACHED_SILENCE_MS + 1_000).length).toBe(1);
+    expect(sleepSilentWorkers(Date.now() + WORKER_SILENCE_MS + 1_000).length).toBe(1);
     const slept = swarmState().agents.find((agent) => agent.id === 'worker-1');
     expect(slept?.state).toBe('sleeping');
     expect(slept?.revivable).toBe(true);
@@ -1415,7 +1460,7 @@ describe('a worker that is sleeping', () => {
     expect(releaseQuiescentRun()).toBe(true);
 
     const saved = snapshotSwarm()!;
-    expect(saved.version).toBe(6);
+    expect(saved.version).toBe(7);
     expect(saved.runId).toBeNull();
     expect(saved.dormantRuns).toHaveLength(2);
 
@@ -1597,7 +1642,7 @@ describe('a worker that is sleeping', () => {
     // Once silence proves the detached turn has stopped, that already-accepted work must be
     // what wakes the worker. Leaving it merely sleeping strands the instruction until the
     // prime happens to send a second message, even though the first call already said queued.
-    sleepSilentDetachedWorkers(Date.now() + DETACHED_SILENCE_MS + 1_000);
+    sleepSilentWorkers(Date.now() + WORKER_SILENCE_MS + 1_000);
     const deferred = stageQueuedWorkerRevivals(['worker-1']);
     expect(deferred.waking).toEqual(['worker-1']);
     expect(await persistCriticalSwarmNow()).toBe(true);
@@ -2274,6 +2319,7 @@ describe('restart', () => {
 
 describe('through the MCP endpoint', () => {
   let endpoint: Awaited<ReturnType<typeof startMcpServer>>;
+  let toolContext: ToolContext;
   let nextId = 1;
 
   const post = (body: unknown, extraHeaders: Record<string, string> = {}): Promise<any> =>
@@ -2402,13 +2448,14 @@ describe('through the MCP endpoint', () => {
   };
 
   beforeEach(async () => {
-    endpoint = await startMcpServer(() => ({
+    toolContext = {
       roots: [],
       caps: { ...DEFAULT_CAPABILITIES },
       readOnly: true,
       sessionTools: false,
       agentTools: true
-    }));
+    };
+    endpoint = await startMcpServer(() => toolContext);
   });
 
   afterEach(async () => {
@@ -2466,6 +2513,117 @@ describe('through the MCP endpoint', () => {
     expect(text).toMatch(/UNIDENTIFIED_CALLER|could not/i);
     expect(swarmRunning()).toBe(false);
     expect(pendingWorkerSpawns()).toEqual([]);
+  });
+
+  it('keeps ordinary request-scoped patch and command access while a swarm is active', async () => {
+    const workspace = path.join(dir, 'unattributed-ordinary-tools');
+    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.mkdir(workspace, { recursive: true });
+    await fs.writeFile(path.join(workspace, 'state.txt'), 'before\n', 'utf8');
+    toolContext = {
+      roots: [{ name: 'workspace', path: workspace }],
+      caps: { ...DEFAULT_CAPABILITIES, create: true, edit: true, command: true },
+      readOnly: false,
+      sessionTools: true,
+      agentTools: true
+    };
+    await setEnabled(true, 3, true);
+    startSwarm(1);
+    const requestId = 'wfr_unattributed_ordinary_tools';
+    try {
+      const absolutePatch = [
+        '*** Begin Patch',
+        '*** Update File: /workspace/state.txt',
+        '@@',
+        '-before',
+        '+after absolute',
+        '*** End Patch'
+      ].join('\n');
+      const absolute = await ordinaryWithRequestId(requestId, 'apply_patch', { patch: absolutePatch });
+      expect(absolute.result?.isError, textOfReply(absolute)).not.toBe(true);
+
+      // The absolute patch taught this unresolved request its project. A later relative patch
+      // in the same model turn must retain that workspace even though no chat id exists yet.
+      const relativePatch = [
+        '*** Begin Patch',
+        '*** Update File: state.txt',
+        '@@',
+        '-after absolute',
+        '+after relative',
+        '*** End Patch'
+      ].join('\n');
+      const relative = await ordinaryWithRequestId(requestId, 'apply_patch', { patch: relativePatch });
+      expect(relative.result?.isError, textOfReply(relative)).not.toBe(true);
+      expect(await fs.readFile(path.join(workspace, 'state.txt'), 'utf8')).toBe('after relative\n');
+
+      const command = await ordinaryWithRequestId(requestId, 'exec_command', {
+        cmd: `node -e "process.stdout.write(require('node:fs').readFileSync('state.txt','utf8'))"`,
+        workdir: '/workspace',
+        yield_time_ms: 5_000
+      });
+      expect(command.result?.isError, textOfReply(command)).not.toBe(true);
+      expect(textOfReply(command)).toContain('after relative');
+
+      const agent = await ordinaryWithRequestId(requestId, 'agents', {
+        action: 'spawn', workers: [{ task: 'Review this request workspace before chat proof' }]
+      });
+      expect(agent.result?.isError, textOfReply(agent)).not.toBe(true);
+      const runId = agent.result.structuredContent.run_id;
+      expect(typeof runId).toBe('string');
+      expect(textOfReply(agent)).toContain('This request is now the prime');
+      expect(bindConversation('worker-1', 'request-owned-wire-worker', runId)).toBe(true);
+      expect(workspaceForChat('request-owned-wire-worker')?.real).toBe(workspace);
+      finishAgent({ conversationId: 'request-owned-wire-worker' }, 'Request-owned report delivered');
+      const outsider = await ordinaryWithRequestId('wfr_ordinary_outsider', 'read', { paths: ['/workspace/state.txt'] });
+      expect(textOfReply(outsider)).not.toContain('Request-owned report delivered');
+      const inbox = await ordinaryWithRequestId(requestId, 'read', { paths: ['/workspace/state.txt'] });
+      expect(inbox.result?.isError, textOfReply(inbox)).not.toBe(true);
+      expect(textOfReply(inbox)).toContain('Request-owned report delivered');
+      // Recovery notices depend on an eligible browser incident, not on whether
+      // this exact request can read its workspace and receive its worker report.
+      expect(textOfReply(inbox)).not.toContain('Agent/subagent operations and chat lifecycle finish signals still need exact identity');
+      const ack = await ordinaryWithRequestId(requestId, 'read', { paths: ['/workspace/state.txt'] });
+      expect(textOfReply(ack)).not.toContain('Request-owned report delivered');
+    } finally {
+      await setEnabled(true, 3, false);
+    }
+  });
+
+  it('reattaches a request fleet over MCP, selects its workers and returns the new incarnation when waking it', async () => {
+    await setEnabled(true, 3, true);
+    const conversationId = 'mcp-recovered-fleets';
+    const prove = (requestId: string) => recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: Date.now(), turnId: requestId },
+      { kind: 'tool_evidence', time: Date.now(), turnId: requestId,
+        calls: [{ messageId: `m-${requestId}`, tool: 'agents', order: 0, answered: false, requestId }] }
+    ]);
+    try {
+      await prove('wfr_mcp_original_fleet');
+      const original = await replyWithRequestId('wfr_mcp_original_fleet', 'spawn', { workers: [{ task: 'Existing work' }] });
+      const recovered = await replyWithRequestId('wfr_mcp_recovered_fleet', 'spawn', { workers: [{ task: 'Recovered work' }] });
+      expect(recovered.result?.isError, textOfReply(recovered)).not.toBe(true);
+      const firstRun = original.result.structuredContent.run_id;
+      const recoveredRun = recovered.result.structuredContent.run_id;
+      expect(bindConversation('worker-1', 'mcp-original-worker', firstRun)).toBe(true);
+      expect(bindConversation('worker-1', 'mcp-recovered-worker', recoveredRun)).toBe(true);
+      await prove('wfr_mcp_recovered_fleet');
+      const status = await replyWithRequestId('wfr_mcp_recovered_fleet', 'status', {});
+      expect(status.result.structuredContent.available_runs).toHaveLength(2);
+      const ambiguous = await replyWithRequestId('wfr_mcp_recovered_fleet', 'message', { to: 'worker-1', text: 'Ambiguous' });
+      expect(ambiguous.result.isError).toBe(true);
+      expect(textOfReply(ambiguous)).toContain('RUN_SELECTION_REQUIRED');
+      const message = await replyWithRequestId('wfr_mcp_recovered_fleet', 'message', { run_id: recoveredRun, to: 'worker-1', text: 'Only recovered worker' });
+      expect(message.result?.isError, textOfReply(message)).not.toBe(true);
+      expect(offerMessagesForConversation('mcp-original-worker')?.messages).toEqual([]);
+      expect(offerMessagesForConversation('mcp-recovered-worker')?.messages[0]?.text).toBe('Only recovered worker');
+      await asChat('mcp-recovered-worker', 'finish', { result: 'Done with first task' });
+      const wake = await replyWithRequestId('wfr_mcp_recovered_fleet', 'message', { run_id: recoveredRun, to: 'worker-1', text: 'Follow-up task' });
+      expect(wake.result?.isError, textOfReply(wake)).not.toBe(true);
+      const newRun = wake.result.structuredContent.run_id;
+      expect(newRun).not.toBe(recoveredRun);
+      expect(pendingWorkerRevivals().some(worker => worker.runId === newRun && worker.conversationId === 'mcp-recovered-worker')).toBe(true);
+      expect((await replyWithRequestId('wfr_mcp_recovered_fleet', 'status', { run_id: newRun })).result.structuredContent.run_id).toBe(newRun);
+    } finally { await setEnabled(true, 3, false); }
   });
 
   it('publishes each accepted MCP spawn to its own run when another prime is active', async () => {

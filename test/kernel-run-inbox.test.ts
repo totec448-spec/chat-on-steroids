@@ -4,9 +4,10 @@ const broker = vi.hoisted(() => ({ offer: vi.fn(), ack: vi.fn(), bareOffer: vi.f
 vi.mock('../src/main/agents.js', async (original) => ({
   ...await original<typeof import('../src/main/agents.js')>(),
   agentForCaller: () => 'worker-1', agentForFinishCaller: () => 'worker-1',
-  offerMessagesForConversation: broker.offer, acknowledgeOffersForConversation: broker.ack,
+  offerMessagesForCaller: broker.offer, acknowledgeOffersForCaller: broker.ack,
   offerMessages: broker.bareOffer, acknowledgeOffers: broker.bareAck,
   currentRunId: (conversationId?: string) => conversationId ? `run-${conversationId}` : null,
+  currentRunForCaller: (caller: { conversationId?: string | null }) => caller.conversationId ? `run-${caller.conversationId}` : null,
   releaseQuiescentRun: broker.release,
   noteAgentAlive: broker.alive
 }));
@@ -26,7 +27,7 @@ import { defaultConfig } from '../src/main/config.js';
 beforeEach(() => {
   vi.clearAllMocks();
   broker.alive.mockReturnValue(null);
-  broker.offer.mockImplementation((conversationId) => conversationId ? { agentId: 'worker-1', messages: [{ id: `m-${conversationId}`, from: 'prime', text: `private-${conversationId}`, offers: 1 }] } : null);
+  broker.offer.mockImplementation(({ conversationId }) => conversationId ? { agentId: 'worker-1', messages: [{ id: `m-${conversationId}`, from: 'prime', text: `private-${conversationId}`, offers: 1 }] } : null);
   broker.ack.mockReturnValue(null);
   broker.bareOffer.mockReturnValue([{ id: 'foreign', from: 'prime', text: 'foreign-private', offers: 1 }]);
 });

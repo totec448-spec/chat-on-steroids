@@ -18,8 +18,8 @@
  * So ordering is turn-local. A turn this log opened is a durable, bounded group — everything
  * in it carries the same generation id, which the extension mints per turn — and inside that
  * group the recorded times are all live observations of one run, directly comparable. Outside
- * it nothing moves: user messages, turn boundaries, and any event whose turn this window does
- * not contain keep the position `seq` gave them.
+ * it nothing moves: unowned messages and events retain their recorded position. Store reads
+ * carry the owning start as presentation metadata even when it lies outside the loaded page.
  *
  * Both consumers use this. The desktop transcript and the stream the extension injects back
  * into ChatGPT are the same record, and they must not be able to disagree about its order.
@@ -32,11 +32,46 @@ export interface Chronological {
   origin?: number;
   /** When the item logically happened: `startedAt` for a call, first appearance for prose. */
   time: number;
+  /** Provider creation time is presentation metadata, never an execution clock. */
+  authoredAt?: number;
+  /** Recorded owning start, supplied before pagination; null means no proven group. */
+  turnOrigin?: number | null;
+  messageId?: string;
   kind: string;
   turnId?: string | null;
   /** ChatGPT's own terminal flag for the one message that ended a turn. See `closing()`. */
   final?: boolean;
   state?: string;
+}
+
+export type TimelineTurns = Record<string, { origin: number; time: number; endTime?: number }>;
+
+/** The older canonical assistant key already contains this exact provider timestamp. */
+export function authoredTimeOf(entry: Chronological): number | undefined {
+  if (Number.isFinite(entry.authoredAt) && entry.authoredAt! > 0) return entry.authoredAt;
+  if (entry.kind !== 'assistant_message') return undefined;
+  const id = entry.messageId?.match(/^assistant:([a-f0-9-]{36})?:([a-f0-9-]{36})?:(\d{13})$/i);
+  return id && (id[1] || id[2]) ? Number(id[3]) : undefined;
+}
+
+/** Attach the session's recorded boundaries before selecting/rendering a small page.
+ * These fields affect presentation only; seq, origin, time and turnId stay untouched. */
+export function projectTimeline<T extends Chronological>(entries: readonly T[], turns: TimelineTurns = {}): T[] {
+  const starts = Object.values(turns).sort((a, b) => a.origin - b.origin);
+  return entries.map(entry => {
+    let boundary = entry.turnId ? turns[entry.turnId] : undefined;
+    if (!entry.turnId && entry.kind !== 'user_message' && entry.kind !== 'assistant_message' && entry.kind !== 'native_image') {
+      let low = 0, high = starts.length;
+      while (low < high) {
+        const mid = (low + high) >>> 1;
+        if (starts[mid]!.origin < positionOf(entry)) low = mid + 1; else high = mid;
+      }
+      const candidate = starts[low - 1];
+      if (candidate && (candidate.endTime === undefined || entry.time <= candidate.endTime)) boundary = candidate;
+    }
+    const authoredAt = authoredTimeOf(entry);
+    return { ...entry, turnOrigin: boundary?.origin ?? null, ...(authoredAt !== undefined ? { authoredAt } : {}) };
+  });
 }
 
 /** Where an entry sits in the log: its first appearance if it has revisions, else its seq. */
@@ -83,15 +118,14 @@ function closing<T extends Chronological>(group: readonly T[]): T | null {
 export function chronological<T extends Chronological>(entries: readonly T[]): T[] {
   const position = (entry: T): number => positionOf(entry);
   const bySeq = [...entries].sort((a, b) => position(a) - position(b) || a.seq - b.seq);
-  // Only turns this window actually opened. A tail delivered from a cursor can hold events of
-  // a turn whose `turn_start` is far behind it, and a group with no anchor has no bounded
-  // extent — its members could be reordered past events that are not part of it at all. Those
-  // keep their seq position, which is the honest answer for a window that cannot see the turn.
+  // A page retains the durable start even when the start row is outside its window.
+  // Old callers with no projection still use only boundaries they actually hold.
   const anchors = new Map<string, number>();
   // Where each opened turn stops, so an event that names no turn can be told whether it
   // happened inside one. A turn still running has no end and holds everything after it.
   const ends = new Map<number, number>();
   for (const entry of bySeq) {
+    if (entry.turnId && Number.isFinite(entry.turnOrigin)) anchors.set(entry.turnId, entry.turnOrigin!);
     if (entry.kind === 'turn_start' && entry.turnId && !anchors.has(entry.turnId)) {
       anchors.set(entry.turnId, position(entry));
     }
@@ -112,7 +146,7 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
   // canonical item, otherwise `seq`) rather than being flung to one end of its turn: a
   // missing timestamp is not evidence about when the thing happened.
   const byTime = (a: T, b: T): number => {
-    const apart = a.time - b.time;
+    const apart = (authoredTimeOf(a) ?? a.time) - (authoredTimeOf(b) ?? b.time);
     return Number.isFinite(apart) && apart !== 0
       ? apart
       : position(a) - position(b) || a.seq - b.seq;
@@ -136,11 +170,11 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
       currentPosition = entryPosition;
     }
     let inferredAnchor: number | undefined;
-    if (!entry.turnId && activeAnchor !== undefined) {
+    if (entry.turnOrigin !== null && !entry.turnId && entry.kind !== 'user_message' && activeAnchor !== undefined) {
       const end = ends.get(activeAnchor);
       if (end === undefined || entry.time <= end) inferredAnchor = activeAnchor;
     }
-    const anchor = (entry.turnId ? anchors.get(entry.turnId) : inferredAnchor) ?? entryPosition;
+    const anchor = entry.turnOrigin ?? (entry.turnId ? anchors.get(entry.turnId) : inferredAnchor) ?? entryPosition;
     const held = groups.get(anchor);
     if (held) held.push(entry);
     else groups.set(anchor, [entry]);

@@ -89,19 +89,24 @@ it('reads only an exact already-hydrated call revision without opening or scanni
   const projected = await readActivityEvents(a.id, 0);
   const ordinary = projected.events.find(event => event.kind === 'tool_call' && event.call.callId === 'ordinary-a')!;
   const processLaunch = projected.events.find(event => event.kind === 'tool_call' && event.call.callId === 'process-a')!;
+  // Presentation adds a derived turn position; details return the unchanged stored record.
+  const ordinaryRecord = { ...ordinary };
+  delete ordinaryRecord.turnOrigin;
 
   const openFile = vi.spyOn(fs, 'open');
   const readFile = vi.spyOn(fs, 'readFile');
   try {
-    await expect(readHydratedActivityCall(a.id, 'owner-a', 'ordinary-a', ordinary.seq)).resolves.toEqual(ordinary);
+    await expect(readHydratedActivityCall(a.id, 'owner-a', 'ordinary-a', ordinary.seq)).resolves.toEqual(ordinaryRecord);
     await expect(readHydratedActivityCall(a.id, 'owner-b', 'ordinary-a', ordinary.seq)).resolves.toBeNull();
     await expect(readHydratedActivityCall(a.id, 'owner-a', 'missing', ordinary.seq)).resolves.toBeNull();
 
     await completeProcessCall(a.id, 'process-a', { completedAt: 200, durationMs: 100, exitCode: 9 });
     const completed = (await readActivityEvents(a.id, processLaunch.seq + 1)).events
       .find(event => event.kind === 'tool_call' && event.call.callId === 'process-a')!;
+    const completedRecord = { ...completed };
+    delete completedRecord.turnOrigin;
     await expect(readHydratedActivityCall(a.id, 'owner-a', 'process-a', processLaunch.seq)).resolves.toBeNull();
-    await expect(readHydratedActivityCall(a.id, 'owner-a', 'process-a', completed.seq)).resolves.toEqual(completed);
+    await expect(readHydratedActivityCall(a.id, 'owner-a', 'process-a', completed.seq)).resolves.toEqual(completedRecord);
     expect(openFile).not.toHaveBeenCalled();
     expect(readFile).not.toHaveBeenCalled();
 

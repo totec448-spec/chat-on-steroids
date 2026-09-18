@@ -339,6 +339,34 @@ it('treats only known resume-bootstrap formatting artifacts as provenance-equiva
   expect(resumeBootstrapMatches(`${bootstrap} `, handoff)).toBe(false);
 });
 
+it('accepts the resume bootstrap after ChatGPT escaped it as Markdown', () => {
+  // 2026-09-16: the composer began round-tripping inserted text through ChatGPT's own Markdown
+  // serializer before sending it, which escapes ASCII punctuation. These three renderings are
+  // the exact bytes read back out of one install's session store — the first two from handoffs
+  // that died `dispatched-unresolved`, the third carrying both escapes at once.
+  const handoff = 'Keep the exact task wording and continue the same work.';
+  const bootstrap = resumeBootstrapText(handoff, 'ZIwLOydXHqbxClOPFpnRVQ');
+  expect(resumeBootstrapMatches(bootstrap, handoff)).toBe(true);
+  expect(resumeBootstrapMatches(bootstrap.replace('CLF-RESUME:', 'CLF-RESUME\\:'), handoff)).toBe(true);
+
+  const underscored = resumeBootstrapText(handoff, '_dv0eLoS94KLvIYtSXFyQA');
+  expect(resumeBootstrapMatches(underscored.replace(':_dv0eLoS', ':\\_dv0eLoS'), handoff)).toBe(true);
+
+  const both = resumeBootstrapText(handoff, 'iNHBs_C0p8fcQ9y7sG-I-A');
+  expect(resumeBootstrapMatches(
+    both.replace('CLF-RESUME:', 'CLF-RESUME\\:').replace('iNHBs_C0', 'iNHBs\\_C0'), handoff)).toBe(true);
+
+  // Escaping is admitted as presentation, never as a licence to differ: a brief whose words
+  // changed is still refused, escaped or not.
+  expect(resumeBootstrapMatches(
+    bootstrap.replace('CLF-RESUME:', 'CLF-RESUME\\:').replace('same work', 'different work'), handoff)).toBe(false);
+
+  const literal = 'Keep C:\\_work and the literal \\* glob unchanged.';
+  const literalBootstrap = resumeBootstrapText(literal, 'iNHBs_C0p8fcQ9y7sG-I-A');
+  expect(resumeBootstrapMatches(literalBootstrap.replace('CLF-RESUME:', 'CLF-RESUME\\:'), literal)).toBe(true);
+  expect(resumeBootstrapMatches(literalBootstrap.replace(/([!-/:-@[-`{-~])/g, '\\$1'), literal)).toBe(true);
+});
+
 it('does not publish committed-resume provenance when the durable rebind write fails', async () => {
   const from = 'eeeeeeee-5555-4555-8555-555555555555';
   const to = 'ffffffff-6666-4666-8666-666666666666';

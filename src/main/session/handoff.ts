@@ -10,6 +10,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Handoff } from '../../shared/session.js';
+import { continuationMarkerOf, unescapeMarkdown } from '../../shared/session.js';
 import { logInfo } from '../logger.js';
 import { getSession, readSessionPlan, saveHandoff } from './store.js';
 import { destinationContinuationMarker } from './handoff-prompt.js';
@@ -53,15 +54,25 @@ export function resumeBootstrapText(summary: string, token = ''): string {
  * ChatGPT's rendered text has historically changed ordinary indentation spaces into NBSP. One
  * Windows/DOM path then surfaced those bytes as the literal mojibake pair `Â ` (U+00C2 U+00A0)
  * in the recorder. That is presentation damage, not authored-content drift. Canonicalise only
- * those known space artifacts plus line endings; deliberately do not trim/collapse
+ * those known space artifacts plus line endings. An exact comparison precedes the narrow
+ * page-readback punctuation escape fallback below; deliberately do not trim/collapse
  * ordinary whitespace or normalize arbitrary Unicode, because this comparison is provenance.
  */
 export function resumeBootstrapMatches(recorded: string, summary: string): boolean {
   const canonical = (value: string): string =>
     value.replace(/\u00c2\u00a0/g, ' ').replace(/\u00a0/g, ' ').replace(/\r\n?/g, '\n');
+  const strip = (value: string): string => {
+    const prompt = userPromptText(value) ?? value;
+    const marker = continuationMarkerOf(prompt);
+    const end = marker?.marker.trimEnd().length ?? 0;
+    // Decode the marker independently so a marker-only escape does not rewrite literal
+    // backslashes in the brief. Keep the original exact two-newline framing requirement.
+    return marker?.kind === 'RESUME' && prompt === prompt.trimStart() && prompt.slice(end, end + 2) === '\n\n'
+      ? prompt.slice(end + 2) : prompt;
+  };
+  const expected = canonical(resumeBootstrapText(summary));
   const normalized = canonical(recorded);
-  const withoutMarker = (userPromptText(normalized) ?? normalized).replace(/^\[\[CLF-RESUME:[A-Za-z0-9_-]{16,64}\]\]\n\n/, '');
-  return withoutMarker === canonical(resumeBootstrapText(summary));
+  return strip(normalized) === expected || strip(unescapeMarkdown(normalized)) === expected;
 }
 
 /**

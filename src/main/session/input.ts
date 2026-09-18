@@ -171,6 +171,11 @@ async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
     if (selection?.conversationId === session?.conversationId && isAstraModel(selection?.model, selection?.reasoningEffort)) return false;
   }
   if (!entry.sessionId) return entry.transportIntent !== 'tool';
+  const session = await getSession(entry.sessionId);
+  // Departure suspends already accepted delivery through the final Send check.
+  // A new explicit immediate message remains a user action that may open the chat.
+  if (session?.browserRecoveryDismissedAt !== undefined &&
+      (!manualInput(entry) || entry.createdAt <= session.browserRecoveryDismissedAt)) return false;
   // Silence can leave the recorder's original turn open. Its durable ticket
   // proves the exact unchanged work; the native page must still be idle for Send.
   if (entry.silenceBoundary) return await eligibleStageEnd(entry) === entry.silenceBoundary.turnId;
@@ -984,14 +989,14 @@ async function recoveryCurrent(row: InputEntry): Promise<boolean> {
     !isChatBlocked(boundary.conversationId) && inFlightToolCalls(boundary.conversationId) === 0;
   if (!allowed()) return false;
   const session = await getSession(row.sessionId);
-  if (!session || session.conversationId !== boundary.conversationId ||
+  if (!session || session.browserRecoveryDismissedAt !== undefined || session.conversationId !== boundary.conversationId ||
       session.origin?.kind === 'worker' || session.origin?.kind === 'helper' ||
       (session.activeTurnId && session.activeTurnId !== boundary.turnId) || session.finishTurn?.released) return false;
   const [end] = await readRecentEvents(row.sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
   if (end?.turnId !== boundary.turnId || (end.kind === 'turn_end' && end.outcome === 'stopped')) return false;
   if (!await turnHasMcpCall(row.sessionId, boundary.conversationId, boundary.turnId)) return false;
   if (await readCompletedFinal(row.sessionId, boundary.conversationId)) return false;
-  const question = await readLatestUserMessage(row.sessionId);
+  const question = await readLatestUserMessage(row.sessionId, boundary.turnId);
   const [work] = await readRecentEvents(row.sessionId, 1, { kinds: RECOVERY_WORK_KINDS });
   return question?.messageId === row.recovery.questionId && !!work && workSequence(work) === boundary.workSeq &&
     allowed() && (await getSession(row.sessionId))?.conversationId === boundary.conversationId;
@@ -1004,7 +1009,7 @@ export function fileRecoveryInput(sessionId: string, conversationId: string, tur
     const current = await load();
     // Never overtake authored input, retry an ambiguous send, or reuse a spent source.
     if (current.some(row => row.sessionId === sessionId && !terminal(row))) return false;
-    const question = await readLatestUserMessage(sessionId);
+    const question = await readLatestUserMessage(sessionId, turnId);
     const [work] = await readRecentEvents(sessionId, 1, { kinds: RECOVERY_WORK_KINDS });
     if (!question?.messageId || !work || !currentOwner()) return false;
     if (current.some(row => row.sessionId === sessionId && row.recovery && row.silenceBoundary?.turnId === turnId &&
@@ -1083,7 +1088,8 @@ export function deferSilenceInput(id: string, conversationId: string, turnId: st
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === id && entry.state === 'queued' && entry.offeredAt === undefined);
-    if (!row?.sessionId || (await getSession(row.sessionId))?.conversationId !== conversationId || await eligibleStageEnd(row) !== turnId) return false;
+    const session = row?.sessionId ? await getSession(row.sessionId) : null;
+    if (!row?.sessionId || session?.conversationId !== conversationId || await eligibleStageEnd(row) !== turnId) return false;
     let boundary = row.silenceBoundary;
     if (!boundary) {
       // A manual failed-view send can be offered before automatic refresh. Its
@@ -1099,7 +1105,8 @@ export function deferSilenceInput(id: string, conversationId: string, turnId: st
     await commit(current.map(entry => entry === row ? { ...row,
       silenceBoundary: { ...boundary!, listenUntil: row.recovery
         ? row.recovery.busyUntil
-        : Date.now() + 5 * 60_000, nativeBusy: true } } : entry));
+        : Date.now() + recoveryBusyMs(session.selectedModel?.conversationId === conversationId &&
+            isProModel(session.selectedModel.model, session.selectedModel.reasoningEffort)), nativeBusy: true } } : entry));
     return true;
   });
 }
