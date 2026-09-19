@@ -884,6 +884,29 @@ describe('desktop input delivery and helper ownership', () => {
     ]);
   });
 
+  it.each([false, true])('carries a reserved opening into route binding before activity (project: %s)', async project => {
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      events: () => ({ ok: false }),
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack
+        ? { ok: true } : { input: claimed({ opening: true, projectId: project ? inputId : null }) } }),
+      bind: message => ({ ok: true, bound: 0, projectBound: message.projectInput?.id })
+    });
+    const send = vi.fn(() => {
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      userTurn(live!.document, 'bound-opening-user', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', send);
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(live.sent.filter(message => message.type === 'bind')).toContainEqual(expect.objectContaining({
+      conversationId: chatA, projectInput: { id: inputId, owner: 'input-owner' }
+    }));
+    expect(live.hook.desktopProjectInputForTest()).toBeNull();
+    expect(live.sent.filter(message => message.ack)).toHaveLength(1);
+  });
+
   it('carries the exact pending opening into first-call correlation and retires only its accepted claim', async () => {
     const firstRequest = 'wfr_opening_before_ack', secondRequest = 'wfr_after_opening_bind';
     live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {

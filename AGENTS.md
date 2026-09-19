@@ -1251,6 +1251,9 @@ advances only for final text/state changes; HTML, timestamps and other metadata 
 old final into a new completion. Legacy rows retain their first anchor until fresh final content.
 That content revision must follow the latest recorded work boundary, with no running local tool
 or newer user/turn overriding it, independently of observation order within a browser batch.
+The recorder's final-derived activity verdict uses that same `readCompletedFinal` check after
+the complete batch. A reload can mark a historical request-owned final `activeNow` while revising
+its HTML; that hint must neither consume the current work grant nor cancel or renew recovery.
 Replay lifecycle boundaries in publication sequence; display chronology must not erase an
 app-authored reopen after an earlier completed end. Restore the current generation by that
 same replay: a new start replaces the active turn, and its exact end clears it. An older

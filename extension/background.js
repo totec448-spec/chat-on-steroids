@@ -3227,8 +3227,12 @@ const HANDLERS = {
   async bind(message, _sender, source) {
     await load();
     if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    const conversationId = cleanConversationId(message.conversationId);
+    const binding = await bindPendingInputProject(message, source, conversationId);
+    if (!binding.ok) return binding;
     await noteTabConversation(source, message.conversationId);
-    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    if (!ownsDocument(source) || (binding.projectBound && !await currentConversationDocument(source, conversationId)))
+      return { ok: false, error: 'stale_document' };
     const key = tabKey(source);
     const bound = bindProvisional(key, String(message.conversationId || ''));
     const ackBound = bindCommandAckProvisional(key, String(message.conversationId || ''));
@@ -3236,9 +3240,13 @@ const HANDLERS = {
       await persistJournal();
     }
     if (ackBound > 0) await persistLive();
+    if (!ownsDocument(source) || (binding.projectBound && !await currentConversationDocument(source, conversationId)))
+      return { ok: false, error: 'stale_document' };
     if (ackBound > 0) await drainCommandAcks();
     if (bound > 0) await drain();
-    return { ok: true, bound, ackBound };
+    if (!ownsDocument(source) || (binding.projectBound && !await currentConversationDocument(source, conversationId)))
+      return { ok: false, error: 'stale_document' };
+    return { ok: true, bound, ackBound, projectBound: binding.projectBound };
   },
   async drain() {
     return drain();

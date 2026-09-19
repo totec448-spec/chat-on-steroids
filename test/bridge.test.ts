@@ -9143,6 +9143,50 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it.each(['pro', 'other'] as const)('preserves %s activity and recovery when reload revises older finals', async model => {
+    const { sessionActivityExpiresAt } = await import('../src/main/bridge.js');
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const oldFinal = { kind: 'assistant_message', messageId: 'reload-old-final', turnId: 'reload-old-turn',
+        text: 'Earlier task completed.', state: 'final', final: true, time: Date.now() };
+      await events(OTHER, [openTurn('reload-old-turn'), oldFinal, endTurn('reload-old-turn', 'completed')]);
+      await vi.advanceTimersByTimeAsync(1000);
+      await events(OTHER, [
+        { kind: 'user_message', messageId: 'reload-current-question', text: 'Continue the work.', time: Date.now() },
+        { kind: 'model_selection', model: model === 'pro' ? 'gpt-6-pro' : 'GPT-5.6 Sol',
+          reasoningEffort: model === 'pro' ? 'pro' : 'high', time: Date.now() }, openTurn('reload-current-turn')
+      ]);
+      await attributed(OTHER, false, Date.now());
+      const sessionId = (await request('GET', `/activity?conversationId=${OTHER}`)).body.sessionId;
+      const deadline = Date.now() + (model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS);
+      const activityExpiry = sessionActivityExpiresAt((await getSession(sessionId))!);
+      const countdown = (await sessionControlsFor(sessionId)).recovery;
+      expect(countdown).toEqual([{ kind: 'silence', deadline,
+        visibleAt: deadline - (model === 'pro' ? 5 * 60_000 : 30_000) }]);
+      await vi.advanceTimersByTimeAsync(model === 'pro' ? 7 * 60_000 : 60_000);
+      // Replacing the document republishes old request-owned finals with new HTML.
+      // activeNow describes that observation, not which response it may finish.
+      await events(OTHER, [{ ...oldFinal, time: Date.now(), activeNow: true,
+        renderedHtml: '<p>Earlier task completed.</p>' }]);
+      expect((await getSession(sessionId))?.activeTurnId).toBe('reload-current-turn');
+      expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(activityExpiry);
+      expect((await sessionControlsFor(sessionId)).recovery).toEqual(countdown);
+      expect((await request('GET', `/activity?conversationId=${OTHER}`)).body.recordedTurnId).toBe('reload-current-turn');
+      await vi.advanceTimersByTimeAsync(deadline - Date.now());
+      await sweepStaleSwarm(Date.now());
+      const repair = (await maintenanceBatch()).find(row => row.conversationId === OTHER);
+      expect(repair).toMatchObject({ reason: 'silence' });
+      await maintenanceBatch(repair!.token, 'reloaded');
+      const afterReload = (await sessionControlsFor(sessionId)).recovery;
+      expect(afterReload?.length).toBeGreaterThan(0);
+      await events(OTHER, [{ ...oldFinal, time: Date.now(), activeNow: true,
+        renderedHtml: '<p><strong>Earlier task completed.</strong></p>' }]);
+      expect((await sessionControlsFor(sessionId)).recovery).toEqual(afterReload);
+      expect(goalPendingReplyFor(OTHER)).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each(['pro', 'other'] as const)('keeps completed native %s replies idle when their request delivers trailing tools', async model => {
     const chat = model === 'pro' ? 'a2222222-1111-4111-8111-000000000091' : 'a2222222-1111-4111-8111-000000000092';
     const turnId = 'native-trailing-tools';

@@ -49,6 +49,11 @@ follow-up/recorder-repair changes from the shared worktree. It also retains the 
 #316 recovery/journal changes through three-way integration. Unrelated source is not rewritten;
 private local evidence and old private worklogs are not publication inputs.
 
+The final full-tree snapshot also preserves the later shared route-binding and reload-activity
+fixes. Opening-route binding commits the exact pending input before releasing its journal,
+rechecking the document after awaits. Historical final revisions use canonical completion
+after the entire batch, so they cannot clear a newer turn's activity or recovery deadline.
+
 ## Validation boundaries
 
 The new shell suite exercises the actual DOM adapter and MAIN helper, then sends their output
@@ -61,9 +66,10 @@ split network chunks, partial patches and quoted metadata. Classic fixtures rema
 The first shell regression run failed against the unchanged reader (13 failures); subsequent
 integration caught a missing slot stamp and an asynchronous startup-fixture gate before the
 new end-to-end checks passed. Full snapshot verification, build and CI are separate gates.
-The resumed public snapshot passed `npm run verify`: 5,496 tests passed and 45 were skipped,
+The final combined snapshot passed `npm run verify`: 5,501 tests passed and 45 were skipped,
 including the separately executed six socket-drain tests. TypeScript, public-history privacy,
-dependency notices and native-source metadata checks passed. `npm run build` also passed.
+dependency notices and native-source metadata checks passed. The production build and Windows
+installer packaging also passed through `npm run dist:x64`.
 
 The maintainer's live account has the classic interface. A fresh exact-code picker probe was
 not executed because its empty test page navigated to a real conversation before input; that
