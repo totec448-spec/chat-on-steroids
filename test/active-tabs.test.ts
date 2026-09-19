@@ -114,4 +114,45 @@ describe('active ChatGPT rendering leases', () => {
     await control.revoke();
     expect([...attached]).toEqual([]);
   });
+
+  it('keeps rendering through an approved same-document route without a detach gap', async () => {
+    const { control, chrome, attached, tabs } = setup();
+    const home = { ...A, url: 'https://chatgpt.com/?cos-input=owned' };
+    await control.set('policy', [A], (tab: typeof A) => tab.url === A.url || tab.url === home.url);
+    tabs.set(1, home);
+    await control.navigation(1, home);
+    expect([...attached]).toEqual([1]);
+    expect(chrome.debugger.detach).not.toHaveBeenCalled();
+    expect(chrome.debugger.attach).toHaveBeenCalledTimes(1);
+    expect(chrome.debugger.sendCommand).toHaveBeenCalledTimes(1);
+    await control.set('policy', [home]);
+    expect(chrome.debugger.attach).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['foreign-route', 'personal-site', 'full-load', 'no-owner'])('releases rendering on %s instead of inheriting another document or operation', async reason => {
+    const { control, attached, tabs } = setup();
+    await control.set('policy', [A], reason === 'no-owner' ? undefined : (tab: typeof A) => tab.url === A.url);
+    const next = { ...A, url: reason === 'personal-site' ? 'https://example.com/' : reason === 'foreign-route' ? B.url : A.url };
+    tabs.set(1, next);
+    await control.navigation(1, reason === 'full-load' ? undefined : next);
+    expect([...attached]).toEqual([]);
+    expect(control.owns(1)).toBe(false);
+  });
+
+  it('preserves a cancelled debugger lease across an approved route change and reconstruction', async () => {
+    const { control, attached, chrome, make, tabs } = setup();
+    const home = { ...A, url: 'https://chatgpt.com/?cos-input=owned' };
+    await control.set('policy', [A], () => true);
+    attached.delete(1);
+    await control.detached({ tabId: 1 });
+    tabs.set(1, home);
+    await control.navigation(1, home);
+    const restored = make();
+    await restored.set('policy', [home]);
+    expect(chrome.debugger.attach).toHaveBeenCalledTimes(1);
+    expect([...attached]).toEqual([]);
+    await restored.revoke();
+    await restored.set('policy', [home]);
+    expect(chrome.debugger.attach).toHaveBeenCalledTimes(2);
+  });
 });

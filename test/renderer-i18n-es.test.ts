@@ -30,7 +30,9 @@ describe('Spanish app interface', () => {
     const button = document.querySelector<HTMLButtonElement>('[data-language="es"]')!;
     const select = document.getElementById('uiLanguage') as HTMLSelectElement;
     expect(button.closest('[data-panel="setup"]')).not.toBeNull();
-    expect(button.textContent).toBe('Español');
+    expect(button.textContent).toBe('');
+    expect(button.getAttribute('aria-label')).toBe('Español');
+    expect(button.title).toBe('Español');
     expect(button.getAttribute('aria-pressed')).toBe('true');
     expect(select.value).toBe('es');
     expect(currentLanguage()).toBe('es');
@@ -70,7 +72,7 @@ describe('Spanish app interface', () => {
     authored.textContent = 'Save'; document.body.append(authored);
     const action = ui(document.createElement('button'), 'textContent', () => t('Remove {0}', ['<img src=x>']));
     document.body.append(action);
-    for (const locale of ['es', 'zh-CN', 'en', 'es'] as const) {
+    for (const locale of ['es', 'zh-CN', 'zh-TW', 'ja', 'en', 'es'] as const) {
       setLanguage(locale);
       expect(document.getElementById('chatInput')).toBe(input);
       expect(input.value).toBe('Save\nMi borrador 🙂 <script>literal</script>');

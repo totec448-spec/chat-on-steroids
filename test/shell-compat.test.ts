@@ -8,6 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 const domSource = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
 const fiberSource = readFileSync(new URL('../extension/fiber.js', import.meta.url), 'utf8');
 const contentSource = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
+const usageSource = readFileSync(new URL('../extension/usage.js', import.meta.url), 'utf8');
 const THREAD = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const USER = '11111111-1111-4111-8111-111111111111';
 const TURN = '22222222-2222-4222-8222-222222222222';
@@ -154,6 +155,16 @@ function addExchange(f: ReturnType<typeof fixture>, ordinal: number, text: strin
   f.doc.querySelector('[data-thread-find-target]')!.append(node);
   return { userId, answerId, entry, finish() { entry.turn.status = 'complete'; entry.turn.items[1]!.completed = true;
     entry.turn.items[1]!.content = 'Finished'; node.querySelector('[data-markdown-text-style]')!.textContent = 'Finished'; } };
+}
+
+function firstMissingPicker(f: ReturnType<typeof fixture>) {
+  return new Promise<void>(resolve => {
+    const receive = (event: MessageEvent) => {
+      if (event.data?.source !== 'clf-picker-reply' || event.data.picker !== null) return;
+      f.win.removeEventListener('message', receive as any); resolve();
+    };
+    f.win.addEventListener('message', receive as any);
+  });
 }
 
 it('reads the real shell composer, messages and tools through existing contracts without a cache', async () => {
@@ -324,8 +335,11 @@ it('delivers three successive shell inputs with exact receipts and completed ans
   expect(r.events().filter((e: any) => e.kind === 'turn_end' && e.outcome === 'completed')).toHaveLength(3);
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 }, 15000);
-it('bootstraps a shell worker with literal instructions and the exact native conversation', async () => {
+it.each([false, true])('bootstraps a shell worker with literal instructions and the exact native conversation (cold=%s)', async cold => {
   const f = fixture(), edit = editing(f), commandId = 'shell-worker-command';
+  const options = f.props.modelListConfig;
+  const missing = cold ? firstMissingPicker(f) : null;
+  if (cold) f.props.modelListConfig = null;
   f.doc.querySelector('[data-thread-find-target]')!.replaceChildren();
   page.reconfigure({ url: `https://chatgpt.com/?clf=${commandId}` });
   const text = '[[COS_CONTEXT:13]]\nPrivate setup\n[[/COS_CONTEXT]]\n\n# Worker\nRead **one** file.';
@@ -334,13 +348,148 @@ it('bootstraps a shell worker with literal instructions and the exact native con
     event.preventDefault(); submitted.push(edit.serialize()); addExchange(f, 4, submitted[0]!); edit.box.replaceChildren();
     f.win.history.pushState({}, '', `/c/${THREAD}`);
   });
-  const r = await recorder(f, { redeem: () => ({ ok: true, command: { id: commandId, type: 'worker', text,
+  const recording = recorder(f, { redeem: () => ({ ok: true, command: { id: commandId, type: 'worker', text,
     agent: 'worker-1', model: 'gpt-5-6-thinking', reasoningEffort: 'high' } }) });
+  if (missing) {
+    await missing; expect(submitted).toEqual([]);
+    f.props.modelListConfig = options; f.trigger.setAttribute('data-state', 'closed');
+  }
+  const r = await recording;
   await vi.waitFor(() => expect(r.sent).toContainEqual(expect.objectContaining({ type: 'ack', id: commandId, status: 'sent', conversationId: THREAD, agent: 'worker-1' })), { timeout: 5000 });
   expect(submitted).toEqual([text]);
   expect(r.sent.filter(m => m.type === 'ack' && m.status === 'failed')).toEqual([]);
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 }, 10000);
+it('opens a local project from a cold shell page and binds its exact first send before recording', async () => {
+  const f = fixture(), edit = editing(f), inputId = '88888888-1111-4111-8111-000000000001';
+  const options = f.props.modelListConfig; f.props.modelListConfig = null;
+  const missing = firstMissingPicker(f);
+  f.doc.querySelector('[data-thread-find-target]')!.replaceChildren();
+  page.reconfigure({ url: `https://chatgpt.com/?cos-input=${inputId}` });
+  const setup = '# Project instructions\n' + 'Preserve **literal** paths and project ownership.\n'.repeat(300);
+  const text = `[[COS_CONTEXT:${setup.length}]]\n${setup}\n[[/COS_CONTEXT]]\n\nInspect the project.`;
+  const input = { id: inputId, owner: 'project-owner', opening: true, projectId: OTHER, text,
+    model: 'gpt-5-6-thinking', reasoningEffort: 'high', purpose: 'user', images: [] };
+  const submitted: string[] = [];
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); submitted.push(edit.serialize());
+    const exchange = addExchange(f, 7, submitted[0]!);
+    exchange.entry.conversationId = `local-chatgpt:${OTHER}`;
+    f.queries.push({ queryKey: ['chatgpt-conversation-details', { clientConversationId: exchange.entry.conversationId, serverConversationId: THREAD }] });
+    edit.box.replaceChildren(); f.win.history.pushState({}, '', `/c/${THREAD}`);
+  });
+  const r = await recorder(f, {
+    desktop_input: m => ({ ok: true, data: m.authorize || m.ack || m.fail ? { ok: true } : { input } }),
+    bind: m => ({ ok: true, bound: 0, projectBound: m.projectInput?.id })
+  });
+  const delivery = r.runtime({ type: 'clf-desktop-input', id: inputId, conversationId: null });
+  await missing; expect(submitted).toEqual([]);
+  f.props.modelListConfig = options; f.trigger.setAttribute('data-state', 'closed');
+  await vi.waitFor(() => expect(submitted).toHaveLength(1));
+  await r.hook.refreshFiber(); r.hook.observe();
+  expect(await delivery).toEqual({ ok: true });
+  expect(submitted).toEqual([text]);
+  expect(r.sent.filter(m => m.type === 'desktop_input' && m.authorize)).toHaveLength(1);
+  expect(r.sent.filter(m => m.type === 'desktop_input' && m.ack)).toHaveLength(1);
+  expect(r.sent.filter(m => m.type === 'desktop_input' && m.fail)).toEqual([]);
+  expect(r.sent.filter(m => m.type === 'bind')).toContainEqual(expect.objectContaining({
+    conversationId: THREAD, projectInput: { id: inputId, owner: 'project-owner' }
+  }));
+  expect(r.hook.desktopProjectInputForTest()).toBeNull();
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+}, 10000);
+it('correlates an early shell stream request through the real observer and recorder without cached messages', async () => {
+  const f = fixture(), win = f.win as any;
+  const r = await recorder(f);
+  const frames = ['event: delta_encoding\ndata: "v1"\n\n',
+    `event: delta\ndata: ${JSON.stringify({ v: { conversation_id: THREAD, message: { metadata: { request_id: OTHER }, content: { parts: ['NEVER_COPY_STREAM_TEXT'] } } } })}\n\n`];
+  let index = 0;
+  win.TextDecoder = TextDecoder;
+  win.fetch = async () => ({ ok: true, url: 'https://chatgpt.com/backend-api/f/conversation',
+    headers: { get: () => 'text/event-stream' }, clone: () => ({ body: { getReader: () => ({
+      read: async () => index < frames.length ? { done: false, value: new TextEncoder().encode(frames[index++]!) } : { done: true },
+      cancel: async () => undefined
+    }) } }) });
+  win.eval(usageSource);
+  await win.fetch('/backend-api/f/conversation', { method: 'POST' });
+  await vi.waitFor(() => expect(r.sent.filter(m => m.type === 'correlate')).toContainEqual(expect.objectContaining({
+    conversationId: THREAD, calls: expect.arrayContaining([expect.objectContaining({ requestId: OTHER })])
+  })));
+  expect(f.queries).toEqual([]);
+  expect(JSON.stringify(r.sent)).not.toContain('NEVER_COPY_STREAM_TEXT');
+  win.__CLF_CONTENT_RECORDER__.stop();
+});
+it('sends a marked shell handoff once and captures its exact completed brief instead of the preceding answer', async () => {
+  const f = fixture(), edit = editing(f), token = '0123456789abcdef0123456789abcdef';
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  const prompt = `[[CLF-HANDOFF:${token}]]\n\nWrite the brief. Keep **Markdown** and C:\\work intact.`;
+  const brief = 'TASK: retain the requested project. RESULT: completed the first change. NEXT: verify the remaining work.';
+  const submitted: string[] = [], summaries: string[] = [];
+  let source: ReturnType<typeof addExchange>, state = 'not-attempted';
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); submitted.push(edit.serialize()); source = addExchange(f, 8, submitted[0]!); edit.box.replaceChildren();
+  });
+  const r = await recorder(f, { compact: m => {
+    if (m.sourceAttempt) { state = 'attempted-unresolved'; return { ok: true, data: { allowed: true } }; }
+    if (m.sourceDispatch) { state = 'dispatched-unresolved'; return { ok: true, data: { armed: true } }; }
+    if (m.sourceMessageId) { state = 'sent'; return { ok: true, data: {} }; }
+    if (typeof m.summary === 'string') { summaries.push(m.summary); return { ok: true, data: { job: { stage: 'opening', busy: true } } }; }
+    return { ok: true, data: { token, ...(m.ticket ? {} : { prompt }), sourceSend: { state },
+      job: { stage: 'handoff-pending', busy: true, automatic: false, sourceSend: { state } } } };
+  } });
+  const pending = r.hook.startCompact();
+  await vi.waitFor(() => expect(submitted).toEqual([prompt]), { timeout: 3000 });
+  await r.hook.refreshFiber(); r.hook.observe(); await pending;
+  expect(summaries).toEqual([]);
+  source!.finish(); source!.entry.turn.items[1]!.content = brief;
+  await r.hook.refreshFiber(); r.hook.observe();
+  await vi.waitFor(() => expect(summaries).toEqual([brief]));
+  expect(r.sent.filter(m => m.sourceDispatch)).toHaveLength(1);
+  expect(r.sent).toContainEqual(expect.objectContaining({ type: 'compact', token, sourceMessageId: source!.userId }));
+  await r.hook.refreshFiber(); r.hook.observe();
+  expect(submitted).toEqual([prompt]); expect(summaries).toEqual([brief]);
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+}, 10000);
+
+it.each(['streaming', 'cancelled', 'conflicting-conversation'])('does not promote an unproven shell final identity: %s', async scenario => {
+  const f = fixture();
+  f.entry.turn.status = scenario === 'cancelled' ? 'cancelled' : 'complete';
+  f.entry.turn.items[2].completed = scenario !== 'streaming';
+  if (scenario === 'conflicting-conversation') f.row.memoizedProps.conversationId = OTHER;
+  const { turns } = await f.ask();
+  expect(turns[0].messages.filter((message: any) => message.role === 'assistant').every((message: any) => message.stable === false)).toBe(true);
+});
+
+it('commits a shell resume through its exact native marker before releasing recorded history', async () => {
+  const f = fixture(), edit = editing(f), commandId = 'shell-resume-command', token = '0123456789abcdef0123456789abcdef';
+  f.doc.querySelector('[data-thread-find-target]')!.replaceChildren();
+  page.reconfigure({ url: `https://chatgpt.com/?clf=${commandId}` });
+  const text = `[[CLF-RESUME:${token}]]\n\nTASK: continue **the project**. NEXT: verify the remaining work.`;
+  let committed = false, historyBeforeCommit = false;
+  const submitted: string[] = [];
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); submitted.push(edit.serialize()); addExchange(f, 9, submitted[0]!); edit.box.replaceChildren();
+    f.win.history.pushState({}, '', `/c/${THREAD}`);
+  });
+  const r = await recorder(f, {
+    redeem: () => ({ ok: true, command: { id: commandId, type: 'resume', text, agent: null,
+      model: 'gpt-5-6-thinking', reasoningEffort: 'high' } }),
+    compact: m => {
+      if (m.destinationAttempt) return { ok: true, data: { allowed: true } };
+      if (m.destinationDispatch) return { ok: true, data: { armed: true } };
+      if (m.destinationMessageId && m.token === token && m.conversationId === THREAD) committed = true;
+      return { ok: true, data: { committed, conversationId: THREAD, commandId } };
+    },
+    events: m => { if (!committed && m.entries.some((entry: any) => entry.event?.kind === 'user_message')) historyBeforeCommit = true;
+      return { ok: true, pending: 0, durable: true }; }
+  });
+  await vi.waitFor(() => expect(r.sent).toContainEqual(expect.objectContaining({ type: 'ack', id: commandId, status: 'sent', conversationId: THREAD })), { timeout: 5000 });
+  expect(submitted).toEqual([text]); expect(committed).toBe(true); expect(historyBeforeCommit).toBe(false);
+  expect(r.sent.filter(m => m.destinationDispatch)).toHaveLength(1);
+  expect(r.sent).toContainEqual(expect.objectContaining({ type: 'compact', token, destinationMessageId: '99999999-1111-4111-8111-000000000091' }));
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+}, 10000);
+
 it('leaves classic messages readable when quoted markup contains shell-looking attributes', () => {
   const f = fixture(); f.doc.body.innerHTML = '<section data-testid="conversation-turn-1" data-turn="assistant"><div data-message-id="actual" data-message-author-role="assistant"><div class="markdown">real answer<div id="app-shell-sidebar"></div><div data-turn-key="quoted"></div></div></div></section>';
   expect(f.api.turns()).toHaveLength(1); expect(f.api.messages()[0].text).toContain('real answer');
@@ -365,6 +514,22 @@ it('discovers both native versions, selects exact worker lanes and restores the 
   expect(await f.api.selectModelSettings('future-pro', 'high')).toBe(false);
   expect(f.doc.querySelector('[data-model-picker-view]')).toBeNull();
   expect(f.api.visibleModelSelection()).toEqual({ model: 'future-pro', reasoningEffort: 'pro' });
+});
+it.each([false, true])('rechecks the cold shell picker owner when its account state hydrates (cancelled=%s)', async cancelled => {
+  const f = fixture(), options = f.props.modelListConfig;
+  f.props.modelListConfig = null;
+  const edit = editing(f); edit.box.textContent = 'Preserve this existing draft';
+  const missing = firstMissingPicker(f);
+  let current = true;
+  const result = f.api.selectModelSettings('gpt-5-6-thinking', 'high', () => current);
+  await missing;
+  current = !cancelled;
+  f.props.modelListConfig = options;
+  f.trigger.setAttribute('data-state', 'closed');
+  expect(await result).toBe(!cancelled);
+  expect(edit.box.textContent).toBe('Preserve this existing draft');
+  expect(f.doc.querySelector('[data-model-picker-view]')).toBeNull();
+  if (cancelled) expect(f.actions).not.toHaveBeenCalled();
 });
 it.each(['duplicate-version', 'duplicate-bucket', 'contradictory-selection', 'unknown-effort', 'disabled'])('rejects unknown/ambiguous picker evidence: %s', async mode => {
   const f = fixture();
