@@ -7423,7 +7423,7 @@
     },
     {
       "id": "gvdb",
-      "url": "https://gitlab.gnome.org/GNOME/gvdb/-/archive/2b42fc75f09dbe1cd1057580b5782b08f2dcb400/gvdb-2b42fc75f09dbe1cd1057580b5782b08f2dcb400.tar.gz",
+      "url": "https://codeload.github.com/GNOME/gvdb/tar.gz/2b42fc75f09dbe1cd1057580b5782b08f2dcb400",
       "version": "2b42fc75f09dbe1cd1057580b5782b08f2dcb400",
       "type": "archive",
       "targets": [
