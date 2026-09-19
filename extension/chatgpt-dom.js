@@ -2107,7 +2107,7 @@ var CLF_DOM = (() => {
     });
   }
 
-  const normalizeModelLabel = value => String(value || '').toLowerCase().replace(/[^a-z0-9.]/g, '');
+  const normalizeModelLabel = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}.]/gu, '');
   /** One bounded read through the existing MAIN-world helper; no provider API or setters. */
   function readPickerState() {
     return new Promise(resolve => {
@@ -2117,7 +2117,7 @@ var CLF_DOM = (() => {
         const data = event.data;
         if (event.source !== window || event.origin !== location.origin || data?.source !== 'clf-picker-reply' || data.nonce !== nonce || data.v !== 1) return;
         const state = data.picker;
-        const groupId = value => typeof value === 'string' && /^[a-zA-Z0-9._ -]{1,80}$/.test(value) && value.trim() === value && value.trim();
+        const groupId = value => typeof value === 'string' && value.length <= 80 && /^[\p{L}\p{N}._ -]+$/u.test(value) && value.trim() === value && value.trim();
         const valid = state && typeof state.version === 'string' && Number.isInteger(state.currentBucket) &&
           Array.isArray(state.versions) && state.versions.length > 0 && state.versions.length <= 20 &&
           state.versions.every(v => groupId(v.id) && typeof v.label === 'string' && v.label.length > 0 && v.label.length <= 80) &&
@@ -2136,10 +2136,15 @@ var CLF_DOM = (() => {
   }
   /** UI only transports a requested selection. Provider state proves identity and availability. */
   function modelPickerTrigger() {
-    const candidates = [...(composer()?.closest('form')?.querySelectorAll('button[aria-haspopup="menu"]') || [])]
-      .filter(node => !node.closest(`${OWN_SURFACES},[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 &&
+    const reported = '[data-codex-intelligence-trigger],[data-composer-navigation-target="reasoning"]';
+    const candidates = [...new Set([...(composer()?.closest('form')?.querySelectorAll('button[aria-haspopup="menu"]') || []),
+      ...document.querySelectorAll(reported)])]
+      .filter(node => node.matches('button,[role="button"]') && !node.closest(`${OWN_SURFACES},[data-testid^="conversation-turn"],[data-message-author-role],.markdown,[contenteditable],[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 &&
         node.id !== 'composer-plus-btn' && node.getAttribute('data-testid') !== 'composer-plus-btn');
-    return candidates.length === 1 ? candidates[0] : null;
+    const observed = candidates.filter(node => node.getAttribute('data-clf-picker-route') === location.pathname);
+    // Alternate native anchors are actionable only after MAIN identified their
+    // model owner. A quoted attribute or an effort value alone cannot authorize it.
+    return observed.length === 1 ? observed[0] : candidates.length === 1 && !candidates[0].matches(reported) ? candidates[0] : null;
   }
   /** Match the row's leading name, excluding secondary captions and decorations. */
   function pickerVersionNamed(row, expected) {
@@ -2191,6 +2196,9 @@ var CLF_DOM = (() => {
         motion = document.createElement('style');
         motion.textContent = '[role="menu"]:has(> [data-testid="composer-intelligence-picker-content"]),[role="dialog"]:has([data-testid="composer-intelligence-picker-content"]){animation:none!important}';
         document.head.append(motion);
+        // The read-only helper identifies the exact native owner when another menu
+        // shares the composer. Never select by translated captions or button order.
+        await readPickerState();
         // A cold home editor mounts before its native Chat/Work picker. Workers
         // enter here directly, without the New Chat reuse/catalog preparation.
         // Wait for that surface, then use the same owned Chat transition before
@@ -2210,7 +2218,11 @@ var CLF_DOM = (() => {
         // Escape belongs inside the picker focus trap, not to its outside trigger.
         // A dispatched key is only an attempt: native unmount/animation owns closure.
         if (!key(panel.contains(active) || dialog?.contains(active) ? active : panel, 'Escape')) return false;
-        return Boolean(await wait(() => !shown(picker()) && (!dialog?.isConnected || !shown(dialog))));
+        const closed = Boolean(await wait(() => !shown(picker()) && (!dialog?.isConnected || !shown(dialog))));
+        // Rebind passive selection proof to the closed trigger, not the removed
+        // menu node. Reading metadata never reopens or changes the picker.
+        if (closed && stillCurrent()) await readPickerState();
+        return closed && stillCurrent();
         } finally { motion?.remove(); motion = null; }
       },
       async version(version) {
@@ -2331,17 +2343,30 @@ var CLF_DOM = (() => {
     try {
       // Exact provider slug is preferred. Existing saved display slugs may resolve
       // only to an actually observed, available pair; never to an account default.
-      const matches = c => c.available && (!effort || c.effort === effort) && (!model || c.familyId === model || c.id === model || normalizeModelLabel(c.familyLabel) === normalizeModelLabel(model) || normalizeModelLabel(c.label) === normalizeModelLabel(model));
+      const name = normalizeModelLabel(model), candidates = [];
       for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
         const state = await ui.version(version.id); if (!state) return false;
-        const choices = state.choices.filter(matches);
-        if (!choices.length) continue;
-        const choice = choices.find(c => c.bucket === state.currentBucket) || choices[0];
-        const after = await ui.bucket(choice.bucket);
-        const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
-        selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
-        break;
+        for (const choice of state.choices) {
+          if (!choice.available || (effort && choice.effort !== effort)) continue;
+          const rank = !model || choice.familyId === model || choice.id === model ? 2
+            : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
+          if (rank) candidates.push({ version: version.id, choice, rank });
+        }
       }
+      // An earlier version's display name cannot shadow a later exact execution id.
+      // Captions such as High are effort labels, never model-name aliases. Repeated
+      // Latest/version entries may describe the same pair; distinct families may not.
+      const rank = Math.max(0, ...candidates.map(candidate => candidate.rank));
+      const matches = candidates.filter(candidate => candidate.rank === rank);
+      if (!matches.length || (model && new Set(matches.map(candidate => candidate.choice.familyId)).size !== 1) ||
+          (model && effort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1)) return false;
+      const wanted = matches.find(candidate => candidate.version === original.version && candidate.choice.bucket === original.currentBucket) || matches[0];
+      const state = await ui.version(wanted.version), choice = wanted.choice;
+      // Versions can change while traversing the UI. Revalidate before moving its slider.
+      if (!state?.choices.some(next => next.bucket === choice.bucket && next.available && next.id === choice.id && next.effort === choice.effort)) return false;
+      const after = await ui.bucket(choice.bucket);
+      const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
+      selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
     } finally {
       if (!selected && stillCurrent() && await ui.version(original.version)) await ui.bucket(original.currentBucket);
       closed = await ui.close();

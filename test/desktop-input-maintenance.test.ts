@@ -59,6 +59,79 @@ it('waits for an existing hydrating or busy ChatGPT tab rather than opening anot
   await h.inspectModels({ nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: true }, true);
   expect(h.create).not.toHaveBeenCalled();
 });
+it.each(['generating', 'draft', 'attachments', 'input_busy', 'composer_hidden'])('explicit refresh uses one helper without touching a %s user tab', async reason => {
+  const h = await worker([]);
+  const userTab = { id: 8, url: `https://chatgpt.com/c/${secondId}` }; h.tabs.push(userTab);
+  h.sendMessage.mockResolvedValue({ ready: false, reason } as never);
+  const request = { nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: true };
+  await h.inspectModels(request, true); await h.inspectModels(request, true);
+  expect(h.create).toHaveBeenCalledTimes(1);
+  expect(h.saved.modelCatalogOwner).toMatchObject({ nonce: firstId, tab: 2 });
+  expect(userTab.url).toBe(`https://chatgpt.com/c/${secondId}`);
+  expect(h.sendMessage.mock.calls.filter(([id, message]) => id === 8 && message.type !== 'clf-model-catalog-state')).toHaveLength(0);
+  expect(h.update.mock.calls.some(([id]) => id === 8)).toBe(false);
+  expect(h.remove).not.toHaveBeenCalled(); expect(h.reload).not.toHaveBeenCalled();
+});
+it.each(['passive', 'unreachable', 'hydrating', 'existing-helper', 'elected', 'expired'])('refresh never grants another tab for %s', async mode => {
+  const h = await worker([]);
+  h.tabs.push({ id: 8, url: mode === 'existing-helper' ? `https://chatgpt.com/?cos-model-catalog=${secondId}` : `https://chatgpt.com/c/${secondId}` });
+  if (mode === 'elected') h.saved.modelCatalogOwner = { nonce: firstId, tab: 8 };
+  h.sendMessage.mockImplementation(async () => {
+    if (mode === 'unreachable') throw new Error('No recorder');
+    return { ready: false, reason: mode === 'hydrating' ? 'composer_missing' : 'generating' } as never;
+  });
+  await h.inspectModels({ nonce: firstId, expiresAt: Date.now() + (mode === 'expired' ? -1 : 60000), allowOpen: mode !== 'passive' }, true);
+  expect(h.create).not.toHaveBeenCalled();
+  if (mode === 'passive') expect(h.fetch.mock.calls.some(([url, init]) => new URL(url).pathname === '/models' && JSON.parse(String(init?.body)).waiting === 'generating')).toBe(true);
+});
+it('never forwards page prose as a discovery reason', async () => {
+  const h = await worker([]); h.tabs.push({ id: 8, url: 'https://chatgpt.com/' });
+  h.sendMessage.mockResolvedValue({ ready: false, reason: 'private-page-text' } as never);
+  await h.inspectModels({ nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: true }, true);
+  const bodies = h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/models').map(([, init]) => String(init?.body));
+  expect(bodies).toHaveLength(1); expect(bodies[0]).not.toContain('private-page-text');
+  expect(JSON.parse(bodies[0]!)).toEqual({ nonce: firstId, waiting: 'inspection_failed' });
+  expect(h.create).not.toHaveBeenCalled();
+});
+it('completes busy-tab refresh through its single helper after hydration', async () => {
+  const h = await worker([]); h.tabs.push({ id: 8, url: `https://chatgpt.com/c/${secondId}` });
+  h.sendMessage.mockResolvedValue({ ready: false, reason: 'generating' } as never);
+  const request = { nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: true };
+  await h.inspectModels(request, true);
+  const tab = h.tabs.find(candidate => candidate.id !== 8)!;
+  tab.url = tab.pendingUrl; delete tab.pendingUrl;
+  const sender = { tab: { id: tab.id }, documentId: 'hydrated-catalog', frameId: 0, url: tab.url };
+  const source = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+  const models = [{ id: 'future', label: 'Future', efforts: ['high'] }];
+  h.sendMessage.mockImplementation(async (id, message) => {
+    if (message.type === 'clf-model-catalog-state') return { ready: id === tab.id, reason: id === 8 ? 'generating' : null } as never;
+    expect(id).toBe(tab.id);
+    return await h.catalog({ nonce: firstId, models }, sender, source);
+  });
+  await h.inspectModels(request, true);
+  expect(h.fetch.mock.calls.some(([url, init]) => new URL(url).pathname === '/models' && JSON.parse(String(init?.body)).models?.[0]?.id === 'future')).toBe(true);
+  expect(h.create).toHaveBeenCalledTimes(1);
+});
+it('retains the elected observation beyond 35 seconds until the app request deadline', async () => {
+  vi.useFakeTimers();
+  try {
+    const h = await worker([]);
+    const tab = { id: 8, url: `https://chatgpt.com/?cos-model-catalog=${firstId}` }; h.tabs.push(tab);
+    const sender = { tab: { id: 8 }, documentId: 'slow-picker', frameId: 0, url: tab.url };
+    const source = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+    let finish!: () => void;
+    h.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-model-catalog-state') return { ready: true } as never;
+      return await new Promise(resolve => { finish = () => resolve({ ok: true }); });
+    });
+    const work = h.inspectModels({ nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: true }, true);
+    await vi.advanceTimersByTimeAsync(36000);
+    expect(h.saved.modelCatalogTarget).toMatchObject({ nonce: firstId, tab: 8, documentId: 'slow-picker' });
+    expect((await h.catalog({ nonce: firstId, models: [{ id: 'actual', label: 'Actual', efforts: ['high'] }] }, sender, source)).ok).toBe(true);
+    finish(); await work;
+    expect(h.saved.modelCatalogTarget).toBeUndefined(); expect(h.create).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});
 it('elects the usable chat when an older Settings tab reports its composer hidden', async () => {
   const h = await worker([]);
   h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${firstId}#settings/Plugins` }, { id: 8, url: `https://chatgpt.com/c/${secondId}` });

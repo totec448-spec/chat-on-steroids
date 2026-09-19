@@ -7,6 +7,32 @@ const models = [{ id: 'gpt-example', label: 'GPT Example', efforts: ['none', 'me
 beforeEach(() => { resetChatModelsForTests(); saved.value = null; vi.useFakeTimers(); });
 afterEach(() => vi.useRealTimers());
 describe('durable observed ChatGPT model catalog', () => {
+  it('gives the first explicit promotion a fresh budget without extending repeated Refresh clicks', () => {
+    requestChatModels(false); const passive = pendingChatModelRequest()!;
+    vi.advanceTimersByTime(80000);
+    requestChatModels(true); const promoted = pendingChatModelRequest()!;
+    expect(promoted).toEqual({ ...passive, allowOpen: true, expiresAt: passive.expiresAt + 80000 });
+    vi.advanceTimersByTime(80000); requestChatModels(true);
+    expect(pendingChatModelRequest()).toEqual(promoted);
+    vi.advanceTimersByTime(40000);
+    expect(pendingChatModelRequest()).toBeNull(); expect(getChatModels().state).toBe('unavailable');
+  });
+  it('keeps nonce-bound waiting separate from model evidence and retains the last problem at expiry', () => {
+    requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });
+    requestChatModels(); const request = pendingChatModelRequest()!;
+    expect(observeChatModels({ nonce: request.nonce, waiting: 'generating' })).toBe(true);
+    expect(getChatModels()).toMatchObject({ state: 'pending', models, waiting: expect.stringContaining('generating') });
+    expect(pendingChatModelRequest()).toEqual(request);
+    expect(observeChatModels({ nonce: request.nonce, waiting: 'inspecting' })).toBe(true);
+    vi.advanceTimersByTime(120000);
+    expect(getChatModels()).toMatchObject({ state: 'ready', models, error: expect.stringMatching(/timed out.*generating/) });
+    expect(getChatModels().waiting).toBeUndefined();
+    requestChatModels();
+    expect(observeChatModels({ nonce: request.nonce, waiting: 'draft' })).toBe(false);
+    expect(observeChatModels({ nonce: pendingChatModelRequest()!.nonce, waiting: 'arbitrary-page-text' })).toBe(false);
+    observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });
+    expect(getChatModels().error).toBeUndefined(); expect(getChatModels().waiting).toBeUndefined();
+  });
   it('settles native picker close failure immediately while retaining observed choices', () => {
     requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });
     requestChatModels();

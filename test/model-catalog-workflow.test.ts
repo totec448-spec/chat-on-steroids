@@ -75,12 +75,12 @@ it('reports missing picker on the elected document without granting New Chat pre
   expect(await f.run(false)).toBe(true);
   expect(f.ask).toHaveBeenCalledWith(expect.objectContaining({ models: null, error: 'picker_unavailable' }));
 });
-it('clears restored home text and publishes the observed catalog', async () => {
+it('protects a draft even on an app-created catalog page', async () => {
   const f = fixture('hey\nOld finish instruction');
-  expect(await f.run()).toBe(true);
-  expect(f.clear).toHaveBeenCalledWith('hey\nOld finish instruction');
-  expect(f.composer.textContent).toBe('');
-  expect(f.ask).toHaveBeenCalledWith(expect.objectContaining({ type: 'model_catalog', nonce, models: expect.any(Array) }));
+  expect(await f.run()).toBe(false);
+  expect(f.clear).not.toHaveBeenCalled();
+  expect(f.composer.textContent).toBe('hey\nOld finish instruction');
+  expect(f.inspect).not.toHaveBeenCalled(); expect(f.ask).not.toHaveBeenCalled();
 });
 it('inspects an idle existing conversation without clearing or sending its composer', async () => {
   const f = fixture('', false, 'existing-chat');

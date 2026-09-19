@@ -93,6 +93,13 @@ checks. The separate macOS input-validation proposal in #309 is not incorporated
 
 ## Reports, review and proposed work
 
+[@redzrush101](https://github.com/redzrush101) and [@ehkogh](https://github.com/ehkogh)
+reported the model-discovery and alternate-interface failures in
+[#311](https://github.com/totec448-spec/chat-on-steroids/issues/311).
+@redzrush101's structural screenshot identified alternate reasoning-control anchors used by
+the independently implemented compatibility tests. The timeout and selection changes do not
+claim complete validation of that account's different editor or missing-message behavior.
+
 [@raxy24](https://github.com/raxy24)'s report in
 [#262](https://github.com/totec448-spec/chat-on-steroids/issues/262) led to the independently
 implemented fix for stale assignment metadata when reusing a sleeping worker.

@@ -18,8 +18,11 @@ const effortNames: Record<string, string> = { none: "Instant", minimal: "Minimal
 const composerEfforts = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'pro'] as const;
 const effortLabel = (effort: string): string => effortNames[effort] ? t(effortNames[effort]) : effort;
 function observedModel(value: string) {
-  const normalize = (text: string) => text.toLowerCase().replace(/[^a-z0-9.]/g, '');
-  const matches = catalog.models.filter(choice => choice.id === value || choice.aliases?.includes(value) || normalize(choice.label) === normalize(value));
+  const exact = catalog.models.filter(choice => choice.id === value || choice.aliases?.includes(value));
+  if (exact.length) return exact.length === 1 ? exact[0] : undefined;
+  const normalize = (text: string) => text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}.]/gu, '');
+  const name = normalize(value);
+  const matches = name ? catalog.models.filter(choice => normalize(choice.label) === name) : [];
   return matches.length === 1 ? matches[0] : undefined;
 }
 
@@ -80,7 +83,16 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
   const models = modelId === 'composerModel' ? composerModels() : catalog.models;
   let nextModel = modelValue ?? model.value;
   let nextEffort = effortValue ?? effort.value;
-  nextModel = observedModel(nextModel)?.id ?? nextModel;
+  const observed = observedModel(nextModel);
+  if (modelId !== 'composerModel' && observed?.id !== nextModel && observed?.aliases?.includes(nextModel)) {
+    // A saved execution alias is an exact lane request. The family effort union
+    // cannot prove which efforts that alias supports. Retain both requested values
+    // until the user deliberately selects a family; native selection proves the pair.
+    options(model, [...models, { id: nextModel, label: `${observed.label} · ${nextModel}` }], nextModel);
+    options(effort, [{ id: nextEffort, label: () => nextEffort ? effortLabel(nextEffort) : t('Keep requested model settings') }], nextEffort);
+    return;
+  }
+  nextModel = observed?.id ?? nextModel;
   if (models.length && !nextModel) {
     // A preference selects only a model/effort actually observed in this catalog.
     const preferred = models.find(item => /^gpt[ -]?6$/i.test(item.label) && item.efforts.includes('high'));
@@ -181,14 +193,17 @@ function paintComposerLabel(): void {
 
 function paintStatus(): void {
   paintComposerChoices();
-  const message = () => catalog.state === 'pending' ? t("Reading your account’s model choices…")
+  const error = () => catalog.error?.startsWith('Model discovery timed out. ')
+    ? t('Model discovery timed out. {0}', [t(catalog.error.slice('Model discovery timed out. '.length))]) : t(catalog.error ?? '');
+  const message = () => catalog.state === 'pending' ? t(catalog.waiting ?? "Reading your account’s model choices…")
+    : catalog.error ? (catalog.models.length ? t('Refresh failed. Previously observed choices remain available. {0}', [error()]) : error())
     : catalog.state === 'ready' ? t("Available in your ChatGPT account · checked {0}", [new Date(catalog.observedAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })])
-    : catalog.error ?? t("Connect to ChatGPT to load your models.");
+    : t("Connect to ChatGPT to load your models.");
   for (const id of ['chatModelStatus', 'composerModelStatus']) {
     const node = document.getElementById(id);
     if (node) {
-      ui(node, 'textContent', () => id === 'composerModelStatus' ? (catalog.state === 'pending' ? t("Loading models…") : catalog.error ?? t("Models unavailable · retry discovery")) : message());
-      if (id === 'composerModelStatus') node.hidden = catalog.state === 'ready';
+      ui(node, 'textContent', message);
+      if (id === 'composerModelStatus') node.hidden = catalog.state === 'ready' && !catalog.error;
     }
   }
   for (const id of ['refreshChatModels', 'refreshComposerModels']) {

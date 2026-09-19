@@ -41,11 +41,11 @@
   'use strict';
 
   /** Bumped when the descriptor shape changes, so a stale pair cannot half-understand. */
-  const VERSION = 13;
+  const VERSION = 14;
   // The MAIN world survives an extension reload because the ChatGPT document survives it.
   // Recovery may therefore execute this file again in a page that still has an older helper
-  // listener. Keep at most one listener for this protocol version; content.js rejects older
-  // versions, so a v5 listener can coexist harmlessly until the document itself navigates.
+  // listener. Retire it across versions too: picker/plugin replies use their own v1
+  // protocol, so an older listener can otherwise win with an empty or stale snapshot.
   const ACTIVE_HELPER = '__clfFiberHelper';
   const ASK = 'clf-fiber-ask';
   const REPLY = 'clf-fiber-reply';
@@ -1612,14 +1612,32 @@
     // The closed native trigger retains the same picker owner. Passive recording
     // must not depend on discovery opening its portal first.
     const form = document.querySelector('#prompt-textarea')?.closest('form');
-    const triggers = [...(form?.querySelectorAll('button[aria-haspopup="menu"]') || [])]
-      .filter(node => !node.closest(`${OWN_SURFACES},[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 &&
+    const reported = '[data-codex-intelligence-trigger],[data-composer-navigation-target="reasoning"]';
+    const triggers = [...new Set([...(form?.querySelectorAll('button[aria-haspopup="menu"]') || []), ...document.querySelectorAll(reported)])]
+      .filter(node => node.matches('button,[role="button"]') && !node.closest(`${OWN_SURFACES},[data-testid^="conversation-turn"],[data-message-author-role],.markdown,[contenteditable],[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 &&
         node.id !== 'composer-plus-btn' && node.getAttribute('data-testid') !== 'composer-plus-btn');
-    const node = document.querySelector('[data-testid="composer-intelligence-picker-content"]') || (triggers.length === 1 ? triggers[0] : null);
+    const candidates = [];
+    if (triggers.length <= 8) for (const trigger of triggers) {
+      try {
+        const picker = readPickerSnapshot(trigger);
+        if (picker) candidates.push({ node: trigger, picker });
+      } catch { /* An unrelated native menu is not picker evidence. */ }
+    }
+    const specific = candidates.filter(candidate => candidate.node.matches(reported));
+    const identified = specific.length === 1 ? specific[0] : candidates.length === 1 ? candidates[0] : null;
+    const native = triggers.filter(trigger => trigger.matches(reported));
+    const fallback = native.length === 1 ? native[0] : triggers.length === 1 ? triggers[0] : null;
+    const node = document.querySelector('[data-testid="composer-intelligence-picker-content"]') || identified?.node || fallback;
     let state = null;
-    try { state = readPickerSnapshot(node); } catch { /* Unknown state invalidates prior proof. */ }
-    const selected = state?.choices.find(choice => choice.bucket === state.currentBucket && choice.available) ||
-      (triggers.length === 1 && node === triggers[0] ? closedPickerSelection(node) : null);
+    try { state = node === identified?.node ? identified.picker : readPickerSnapshot(node); } catch { /* Unknown state invalidates prior proof. */ }
+    const selected = state ? state.choices.find(choice => choice.bucket === state.currentBucket && choice.available)
+      : (node && node === fallback ? closedPickerSelection(node) : null);
+    const provenTrigger = identified?.node || (selected && node === fallback ? fallback : null);
+    for (const trigger of triggers) {
+      if (trigger !== provenTrigger) trigger.removeAttribute('data-clf-picker-route');
+      else if (trigger.getAttribute('data-clf-picker-route') !== location.pathname) trigger.setAttribute('data-clf-picker-route', location.pathname);
+      if (trigger !== node) for (const attribute of ['data-clf-selected-model', 'data-clf-selected-effort', 'data-clf-selected-route']) trigger.removeAttribute(attribute);
+    }
     for (const [attribute, value] of [['data-clf-selected-model', selected?.id], ['data-clf-selected-effort', selected?.effort], ['data-clf-selected-route', selected && location.pathname]]) {
       if (!value) node?.removeAttribute(attribute);
       else if (node.getAttribute(attribute) !== value) node.setAttribute(attribute, value);
@@ -1630,8 +1648,12 @@
   // Its own ancestor carries the current execution model; its visible label
   // carries the selected effort. These are observation, never catalog discovery.
   function closedPickerSelection(node) {
-    const effort = ({ instant: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high',
-      'extra high': 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[String(node.textContent || '').trim().toLowerCase()];
+    const machine = node.getAttribute('data-selected-reasoning-effort');
+    // The reported alternate trigger exposes a locale-independent selected effort.
+    // Unknown explicit values invalidate proof rather than falling back to its caption.
+    const effort = machine !== null ? (['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(machine) ? machine : null)
+      : ({ instant: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high',
+        'extra high': 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[String(node.textContent || '').trim().toLowerCase()];
     if (!effort) return null;
     let model = null;
     for (let fiber = fiberOf(node), up = 0; fiber && up < MAX_CLIMB; up++, fiber = fiber.return) {
@@ -1654,7 +1676,7 @@
       if (data.versions.length > 20 || !Array.isArray(state.bucketSelections) || state.bucketSelections.length > 12) return null;
       const id = value => typeof value === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(value) ? value : null;
       // Native version groups may have spaces; execution slugs retain their strict contract.
-      const groupId = value => typeof value === 'string' && /^[a-zA-Z0-9._ -]{1,80}$/.test(value) && value.trim() === value && value.trim() ? value : null;
+      const groupId = value => typeof value === 'string' && value.length <= 80 && /^[\p{L}\p{N}._ -]+$/u.test(value) && value.trim() === value && value.trim() ? value : null;
       const label = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 80 ? value.trim() : null;
       const effortOf = choice => choice.category?.modelLane === 'pro' ? 'pro'
         : ['auto', 'instant'].includes(choice.category?.modelLane) ? 'none'
@@ -1662,8 +1684,10 @@
         : ({ min: 'low', standard: 'medium', extended: 'high', max: 'xhigh', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', ultra: 'ultra' })[choice.thinkingEffort] || null;
       const choices = state.bucketSelections.map(choice => {
         const name = label(choice.category?.shortLabel);
-        const familyId = groupId(choice.category?.modelVersion) || id(choice.modelSlug);
-        const family = data.versions.find(version => version.id === familyId);
+        // Native navigation groups may contain spaces or localized names. Those
+        // are not execution ids: retain the exact provider slug for such families.
+        const familyId = id(choice.category?.modelVersion) || id(choice.modelSlug);
+        const family = data.versions.find(version => version.id === choice.category?.modelVersion);
         return { bucket: choice.bucket, id: id(choice.modelSlug),
           label: name && (/^\d/.test(name) ? `GPT-${name}` : name), effort: effortOf(choice),
           familyId, familyLabel: label(family?.displayTextForIntelligence) || label(choice.modelConfig?.title) || (name && (/^\d/.test(name) ? `GPT-${name}` : name)),
@@ -1781,7 +1805,7 @@
   // Re-execution is a repair, not a marker check. A stale primitive marker could survive
   // while its listener did not, so keep the actual listener and always replace it.
   const prior = window[ACTIVE_HELPER];
-  if (prior && prior.version === VERSION && typeof prior.listener === 'function') {
+  if (prior && typeof prior.listener === 'function') {
     try {
       window.removeEventListener('message', prior.listener);
     } catch {
