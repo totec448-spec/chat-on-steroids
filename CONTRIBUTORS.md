@@ -4,7 +4,7 @@ Chat On Steroids is maintained by [@totec448-spec](https://github.com/totec448-s
 
 Some contributions were adapted into maintainer snapshot commits and their original PRs were closed without preserving GitHub commit attribution. That was our mistake. Reworking a patch does not erase its author's contribution. The record below restores explicit credit and links to the original work.
 
-## Incorporated code and designs
+## Incorporated contributions
 
 Listed alphabetically by GitHub handle. "Adapted" means the implementation changed during integration; it does not mean the entire original branch was merged.
 
@@ -16,7 +16,7 @@ Listed alphabetically by GitHub handle. "Adapted" means the implementation chang
 | [@becoolmin](https://github.com/becoolmin) | Preserving window size on reopen: [#122](https://github.com/totec448-spec/chat-on-steroids/pull/122), adapted into [#134](https://github.com/totec448-spec/chat-on-steroids/pull/134). Removing unused macOS media privacy declarations before bundle sealing: [#232](https://github.com/totec448-spec/chat-on-steroids/pull/232), adapted with strict plist readback and failure coverage. |
 | [@Bemirror99](https://github.com/Bemirror99) | Resume-shadow recovery and stale Fiber attribution fixes: merged [#19](https://github.com/totec448-spec/chat-on-steroids/pull/19) and [#20](https://github.com/totec448-spec/chat-on-steroids/pull/20). |
 | [@devrajmahar](https://github.com/devrajmahar) | Conversation-scoped generation reset, extracted with an independent SPA recovery regression from [#163](https://github.com/totec448-spec/chat-on-steroids/pull/163). The renderer rewrite and other feature changes were not incorporated. |
-| [@ehkogh](https://github.com/ehkogh) | Alternate ChatGPT shell editor/picker anchors, typed turn structure, local/server identity observation and workflow-stream formats from [#318](https://github.com/totec448-spec/chat-on-steroids/pull/318). Code and fixtures are adapted narrowly into the existing recorder and picker contracts, with independent cancellation, branch, duplicate-id and real-recorder regressions. The cache-history walker, inferred tool receipts and alternate presentation/upload changes are not incorporated. |
+| [@ehkogh](https://github.com/ehkogh) | Alternate ChatGPT shell editor/picker anchors, typed turn structure, local/server identity observation, literal-paste editor preservation and workflow-stream formats from [#318](https://github.com/totec448-spec/chat-on-steroids/pull/318). The native cache observation is adapted to exact selected-message request metadata only. Code and fixtures use the existing recorder and picker contracts, with independent cancellation, branch, duplicate-id, successive-send and worker-bootstrap regressions. The cache-history walker, inferred tool receipts and alternate activity/upload changes are not incorporated. |
 | [@Firefulcar](https://github.com/Firefulcar) | Claimed Compact & Resume leases: merged [#33](https://github.com/totec448-spec/chat-on-steroids/pull/33). Selected-browser startup routing: [#100](https://github.com/totec448-spec/chat-on-steroids/pull/100), adapted into [#91](https://github.com/totec448-spec/chat-on-steroids/pull/91). |
 | [@frytufrytu](https://github.com/frytufrytu) | Diagnosing and fixing blocked-handoff compaction recovery loops: [#127](https://github.com/totec448-spec/chat-on-steroids/pull/127), adapted with durable refusal and draft preservation into [#134](https://github.com/totec448-spec/chat-on-steroids/pull/134). |
 | [@gnustella-lab](https://github.com/gnustella-lab) | Brave Browser support: merged [#106](https://github.com/totec448-spec/chat-on-steroids/pull/106). |
@@ -34,6 +34,7 @@ Listed alphabetically by GitHub handle. "Adapted" means the implementation chang
 | [@nofihq](https://github.com/nofihq) | Waiting for late exact `session_finish` identity while sharing one bounded deadline with the finish hold: adapted from [#220](https://github.com/totec448-spec/chat-on-steroids/pull/220). Other response-branch and inbox changes were not incorporated. |
 | [@PatrickSys](https://github.com/PatrickSys) | Windows installer sandbox folder permissions: [#62](https://github.com/totec448-spec/chat-on-steroids/pull/62), incorporated into the 2.0.6 snapshot and retained in [#91](https://github.com/totec448-spec/chat-on-steroids/pull/91). |
 | [@pop15106](https://github.com/pop15106) | Correcting the unconditional Codex-quota claim in the README and hero: [#192](https://github.com/totec448-spec/chat-on-steroids/pull/192), adapted with current official usage documentation. |
+| [@redzrush101](https://github.com/redzrush101) | Affected-account diagnosis, repeated retests and privately supplied page captures for [#311](https://github.com/totec448-spec/chat-on-steroids/issues/311). Their evidence established the alternate composer/user-bubble structure and the remaining follow-up-send and worker-startup failures used by the independently implemented regression tests. This credits the diagnostic contribution; private exports are not published. |
 | [@TaeyanG4](https://github.com/TaeyanG4) | Handling plugin schemas when a Refresh control is unavailable: [#92](https://github.com/totec448-spec/chat-on-steroids/pull/92), adapted into [#91](https://github.com/totec448-spec/chat-on-steroids/pull/91). |
 | [@ventianima-lab](https://github.com/ventianima-lab) | Preserving the exact message, conversation and page-epoch identity accepted by a desktop-send ACK when later canonical text differs, so the same send retains its turn-start boundary: adapted from the [code and regression tests in #185](https://github.com/totec448-spec/chat-on-steroids/issues/185#issuecomment-5647883368). This narrow repair does not reconstruct earlier missing history or resolve every symptom in the issue. |
 | [@yahiaal](https://github.com/yahiaal) | Publishing larger Plugins catalogs within the existing schema byte budget: [#216](https://github.com/totec448-spec/chat-on-steroids/pull/216), adapted to include the optional local code-mode tool in refresh observation and legacy enrollment. |
@@ -113,6 +114,9 @@ reported the model-discovery and alternate-interface failures in
 @redzrush101's structural screenshot identified alternate reasoning-control anchors used by
 the independently implemented compatibility tests. The timeout and selection changes do not
 claim complete validation of that account's different editor or missing-message behavior.
+Their follow-up report and privately supplied page captures also identified the remaining
+Markdown-editor and user-bubble differences. Public fixtures use synthetic text and identities;
+the captures and account/session material are not included in the repository.
 
 [@raxy24](https://github.com/raxy24)'s report in
 [#262](https://github.com/totec448-spec/chat-on-steroids/issues/262) led to the independently

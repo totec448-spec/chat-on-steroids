@@ -41,7 +41,7 @@
   'use strict';
 
   /** Bumped when the descriptor shape changes, so a stale pair cannot half-understand. */
-  const VERSION = 15;
+  const VERSION = 16;
   // The MAIN world survives an extension reload because the ChatGPT document survives it.
   // Recovery may therefore execute this file again in a page that still has an older helper
   // listener. Retire it across versions too: picker/plugin replies use their own v1
@@ -1391,27 +1391,53 @@
    * exists for is the turn that rendered *no* row: climbing from a row cannot reach a turn
    * that has none, which is exactly the turn whose calls went missing.
    */
-  /** Only the exact native local/server pair is read from the cache. No cached messages,
-   * branch walk, retained client or inferred relationship to location.pathname. */
-  function shellConversation(fiber, localId, evidence) {
+  /** Read the currently mounted query owner; never retain a client across navigation. */
+  function shellQueries(fiber) {
+    try {
+      for (let at = fiber, up = 0; at && up < 400; up++, at = at.return) {
+        const client = at.memoizedProps?.client;
+        if (typeof client?.getQueryCache !== 'function') continue;
+        const queries = client.getQueryCache()?.getAll();
+        return Array.isArray(queries) && queries.length <= 512 ? queries : [];
+      }
+    } catch { /* Optional metadata must not cost the mounted transcript. */ }
+    return [];
+  }
+  /** Exact local/server pair only; a route or the latest cached chat is not a join. */
+  function shellConversation(queries, localId, evidence) {
     if (evidence.conflict || !localId?.startsWith('local-chatgpt:')) return evidence;
     let found = evidence.conversationId;
-    for (let at = fiber, up = 0; at && up < 400; up++, at = at.return) {
-      const client = at.memoizedProps?.client;
-      if (typeof client?.getQueryCache !== 'function') continue;
-      const queries = client.getQueryCache()?.getAll();
-      if (!Array.isArray(queries) || queries.length > 512) break;
-      for (const query of queries) {
-        const key = query?.queryKey;
-        if (!Array.isArray(key) || key.length !== 2 || key[0] !== 'chatgpt-conversation-details' || key[1]?.clientConversationId !== localId) continue;
-        const server = key[1].serverConversationId;
-        if (typeof server !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(server)) continue;
-        if (found && found !== server) return { conversationId: null, conflict: true };
-        found = server;
-      }
-      break;
+    for (const query of queries) {
+      const key = query?.queryKey;
+      if (!Array.isArray(key) || key.length !== 2 || key[0] !== 'chatgpt-conversation-details' || key[1]?.clientConversationId !== localId) continue;
+      const server = key[1].serverConversationId;
+      if (typeof server !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(server)) continue;
+      if (found && found !== server) return { conversationId: null, conflict: true };
+      found = server;
     }
     return { conversationId: found, conflict: false };
+  }
+  /** #318 identified this native cache. Read only metadata for ids explicitly named
+   * by the mounted exchange. No child traversal, cached prose or cached final status. */
+  function shellRequestMetadata(queries, entry, conversation) {
+    if (conversation.conflict || !conversation.conversationId) return [];
+    const ids = entry.turn.messageIds;
+    if (!Array.isArray(ids) || ids.length > MAX_ROWS || new Set(ids).size !== ids.length) return [];
+    const matches = queries.filter(query => Array.isArray(query?.queryKey) && query.queryKey.length === 2 &&
+      query.queryKey[0] === 'chatgpt-conversation' && query.queryKey[1] === conversation.conversationId);
+    if (matches.length !== 1) return [];
+    const data = matches[0].state?.data;
+    if (data?.conversation_id && data.conversation_id !== conversation.conversationId) return [];
+    const mapping = data?.mapping;
+    if (!mapping || typeof mapping !== 'object') return [];
+    const out = [];
+    for (const id of ids) {
+      if (typeof id !== 'string' || !id || id.length > MAX_TEXT || !own.call(mapping, id)) continue;
+      const node = mapping[id], message = node?.message;
+      if (node?.id !== id || message?.id !== id) continue;
+      out.push({ id, create_time: num(message.create_time), metadata: { request_id: str(message.metadata?.request_id) } });
+    }
+    return out;
   }
   /** Translate only publicly identified items in the mounted exchange. Missing item ids
    * stay missing; a stopped turn does not manufacture replies to its tool calls. */
@@ -1443,7 +1469,8 @@
       } else if (item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items)) {
         for (const step of item.items) {
           if (++work > MAX_ROWS) return null;
-          if (step?.type !== 'mcp-tool-call' || !ourApp(step.invocation?.server)) continue;
+          if (step?.type !== 'mcp-tool-call' || !OUR_APPS.some(app =>
+            step.invocation?.server === app || step.invocation?.server === app.replaceAll(' ', '_'))) continue;
           const id = str(step.callId), tool = toolName(step.invocation?.tool);
           if (!id || !tool) continue;
           if (!remember(id) || calls.length >= MAX_CALLS) return null;
@@ -1516,8 +1543,15 @@
           .map(message => ({ messageId: str(message.id), requestId: str(message.metadata && message.metadata.request_id),
             answered: codeReceipts.get(message.id) === true }));
         const calls = shell ? shell.calls : callsOf(messages, codeReceipts);
-        const requests = requestIdsOf(messages);
-        const conversation = shell ? shellConversation(fiber, shell.entry.conversationId, conversationEvidenceOf(fiber)) : conversationEvidenceOf(fiber);
+        const queries = shell ? shellQueries(fiber) : [];
+        const conversation = shell ? shellConversation(queries, shell.entry.conversationId, conversationEvidenceOf(fiber)) : conversationEvidenceOf(fiber);
+        const metadata = shell ? shellRequestMetadata(queries, shell.entry, conversation) : messages;
+        const requests = requestIdsOf(metadata);
+        if (shell) for (const call of calls) {
+          const source = metadata.find(message => message.id === call.messageId);
+          call.requestId = source?.metadata.request_id || null;
+          call.createTime = source?.create_time ?? null;
+        }
         const exactAnchors = new Map();
         const exactThoughtRows = new Map();
         const exactImageNodes = new Map();

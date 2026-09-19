@@ -74,12 +74,13 @@ var CLF_DOM = (() => {
   }
   function presentUserPrompts(readUserText) {
     return safe(() => {
-      for (const raw of document.querySelectorAll('[data-message-author-role="user"] :is(.whitespace-pre-wrap, .markdown):not([data-clf-user-text])')) {
+      for (const raw of document.querySelectorAll(`[data-message-author-role="user"] :is(.whitespace-pre-wrap, .markdown):not([data-clf-user-text]), ${SHELL_TURN} [data-content-search-unit-key$=":user"] [data-user-message-bubble] .whitespace-pre-wrap:not([data-clf-user-text])`)) {
         // Both native renderers can consume Markdown bytes. Parse the same
         // exact-id source used by receipts/recording, never reconstructed HTML.
-        const holder = raw.closest('[data-message-author-role="user"]');
-        const source = readUserText ? readUserText({ role: 'user', id: holder?.getAttribute('data-message-id'),
-          node: raw.closest(TURN), text: messageText(holder, 'user') }) : raw.textContent;
+        const classic = raw.closest('[data-message-author-role="user"]');
+        const holder = classic || raw.closest(SHELL_UNIT), id = messageIdOf(holder);
+        const source = !classic && (!id || !readUserText) ? null : readUserText ? readUserText({ role: 'user', id,
+          node: classic ? raw.closest(TURN) : holder, text: messageText(holder, 'user') }) : raw.textContent;
         // The native editor can prepend a blank paragraph to the exact provider
         // source. Ignore that outer whitespace only for display; the frame's
         // internal length/boundary and all receipt/recording bytes stay exact.
@@ -698,8 +699,14 @@ var CLF_DOM = (() => {
 
   /** Stop is a busy hint only; the exact provider terminal still owns turn completion. */
   function generating() {
-    return safe(() => nativeComposerControls(STOP).length > 0 ||
-      [...document.querySelectorAll(SHELL_TURN)].some(node => !node.closest(`${OWN_SURFACES},.markdown,[contenteditable]`) && node.getAttribute('data-clf-shell-running') === location.pathname), false);
+    return safe(() => {
+      if (nativeComposerControls(STOP).length > 0) return true;
+      // Historical interrupted exchanges can retain in_progress forever. Only the
+      // latest native response can describe this composer's current generation.
+      const latest = [...document.querySelectorAll(SHELL_TURN)].filter(node =>
+        !node.closest(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`)).at(-1);
+      return latest?.getAttribute('data-clf-shell-running') === location.pathname;
+    }, false);
   }
 
   function stopButton() {
@@ -1877,11 +1884,19 @@ var CLF_DOM = (() => {
       // paragraph: an extra block wrapper is not part of the authored prompt.
       // Text nodes keep markup literal; there is no paste fallback.
       const paragraph = document.createElement('p');
+      // @ehkogh/#318: the shell's Markdown serializer otherwise escapes text and
+      // hard breaks. Its native literalPaste mark preserves the submitted bytes.
+      const host = box.matches('[data-composer-markdown]') && box.closest('form[data-chatgpt-composer]')
+        ? document.createElement('span') : paragraph;
+      if (host !== paragraph) {
+        host.setAttribute('data-prompt-literal-paste', '');
+        paragraph.append(host);
+      }
       value.split('\n').forEach((line, index) => {
-        if (index) paragraph.append(document.createElement('br'));
-        paragraph.append(document.createTextNode(line));
+        if (index) host.append(document.createElement('br'));
+        host.append(document.createTextNode(line));
       });
-      if (value === '') paragraph.append(document.createElement('br'));
+      if (value === '') host.append(document.createElement('br'));
       if (!document.execCommand('insertHTML', false, paragraph.innerHTML)) return reject('native_edit_rejected');
       const compact = text => String(text || '').replace(/\s+/g, '');
       const expected = mode === 'append' ? existing + value : value;
