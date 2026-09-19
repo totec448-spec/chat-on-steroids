@@ -160,6 +160,7 @@ private struct WindowRow {
     let process: String
     let bounds: CGRect
     let onScreen: Bool
+    let minimized: Bool
     let layer: Int
 
     func json(foreground: CGWindowID?) -> JSONObject {
@@ -171,29 +172,43 @@ private struct WindowRow {
             "y": Int(bounds.origin.y.rounded()),
             "width": Int(bounds.width.rounded()),
             "height": Int(bounds.height.rounded()),
-            "state": id == foreground ? "foreground" : (onScreen ? "open" : "minimized")
+            "state": id == foreground ? "foreground" : (minimized ? "minimized" : "open")
         ]
     }
 }
 
-private func minimizedWindowIDs(in rows: [WindowRow]) -> Set<CGWindowID> {
+private func offscreenAXWindowStates(in rows: [WindowRow]) -> [CGWindowID: Bool] {
     // CGWindowIsOnscreen is also false for hidden apps and windows on another Space.
-    // Only AXMinimized plus the exact CG window number is strong enough to label a
-    // row "minimized" without flooding discovery with unrelated offscreen windows.
-    guard AXIsProcessTrusted() else { return [] }
+    // Keep those real app windows discoverable only when AX independently proves their
+    // identity. This avoids flooding discovery with unrelated layer-0 provider surfaces.
+    // The value records actual AXMinimized state so another Space/hidden app remains "open".
+    guard AXIsProcessTrusted() else { return [:] }
     let candidatePids = Set(rows.lazy.filter { !$0.onScreen }.map(\.pid)).prefix(64)
-    var ids = Set<CGWindowID>()
+    var states: [CGWindowID: Bool] = [:]
     let deadline = ProcessInfo.processInfo.systemUptime + 2.0
     pidLoop: for pid in candidatePids {
         if ProcessInfo.processInfo.systemUptime >= deadline { break }
         let app = axApplication(pid)
-        let windows = axElementValues(app, attribute: kAXWindowsAttribute as CFString, limit: 64)
-        for window in windows where axBool(window, kAXMinimizedAttribute as CFString, default: false) {
+        var windows = axElementValues(app, attribute: kAXWindowsAttribute as CFString, limit: 64)
+        // Chromium can expose AXFocusedWindow/AXMainWindow while AXWindows is temporarily
+        // unavailable during navigation. Those attributes are still exact AX window evidence.
+        if let focused = axElementAttribute(app, kAXFocusedWindowAttribute as CFString) { windows.append(focused) }
+        if let main = axElementAttribute(app, kAXMainWindowAttribute as CFString) { windows.append(main) }
+        for window in windows {
             if ProcessInfo.processInfo.systemUptime >= deadline { break pidLoop }
-            if let id = axWindowNumber(window) { ids.insert(id) }
+            let id: CGWindowID?
+            if let exact = axWindowNumber(window) {
+                id = rows.contains(where: { $0.id == exact && $0.pid == pid }) ? exact : nil
+            } else if let bounds = axBounds(window) {
+                id = unambiguousWindowID(bounds: bounds, pid: pid, rows: rows)
+            } else {
+                id = nil
+            }
+            guard let id else { continue }
+            states[id] = axBool(window, kAXMinimizedAttribute as CFString, default: false)
         }
     }
-    return ids
+    return states
 }
 
 private func allWindowRows(includeMinimized: Bool = true) -> [WindowRow] {
@@ -224,13 +239,27 @@ private func allWindowRows(includeMinimized: Bool = true) -> [WindowRow] {
             process: process,
             bounds: bounds,
             onScreen: onScreen,
+            minimized: false,
             layer: layer
         )
     }
     let visible = rows.filter { $0.onScreen }
     guard includeMinimized else { return visible }
-    let minimized = minimizedWindowIDs(in: rows)
-    return rows.filter { $0.onScreen || minimized.contains($0.id) }
+    let offscreenStates = offscreenAXWindowStates(in: rows)
+    return rows.compactMap { row in
+        if row.onScreen { return row }
+        guard let minimized = offscreenStates[row.id] else { return nil }
+        return WindowRow(
+            id: row.id,
+            pid: row.pid,
+            title: row.title,
+            process: row.process,
+            bounds: row.bounds,
+            onScreen: false,
+            minimized: minimized,
+            layer: row.layer
+        )
+    }
 }
 
 private func windowRow(_ id: CGWindowID) -> WindowRow? {
@@ -238,7 +267,18 @@ private func windowRow(_ id: CGWindowID) -> WindowRow? {
 }
 
 private func frontmostPID() -> pid_t? {
-    NSWorkspace.shared.frontmostApplication?.processIdentifier
+    // For trusted assistive control, query the system-wide AX focus directly. NSWorkspace's
+    // frontmostApplication is notification-backed and can be stale on a native worker or
+    // command-line helper whose run loop does not own the workspace notification source.
+    if AXIsProcessTrusted() {
+        let system = AXUIElementCreateSystemWide()
+        if let focused = axElementAttribute(system, kAXFocusedApplicationAttribute as CFString),
+           let pid = axPID(focused),
+           pid > 0 {
+            return pid
+        }
+    }
+    return NSWorkspace.shared.frontmostApplication?.processIdentifier
 }
 
 private func windowServerFrontWindowID(rows suppliedRows: [WindowRow]? = nil) -> CGWindowID? {
@@ -438,16 +478,52 @@ private func focusedAXElementWindowID(for pid: pid_t, rows suppliedRows: [Window
     return owningAXWindowID(element, pid: pid, rows: suppliedRows)
 }
 
-private func inputTargetMatches(_ row: WindowRow) -> Bool {
+private func windowServerTopWindowID(at point: CGPoint) -> CGWindowID? {
+    guard let ordered = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements],
+        kCGNullWindowID
+    ) as? [JSONObject] else { return nil }
+    for item in ordered {
+        guard let id = number(item[kCGWindowNumber as String])?.uint32Value,
+              let boundsDictionary = item[kCGWindowBounds as String] as? NSDictionary,
+              let bounds = CGRect(dictionaryRepresentation: boundsDictionary),
+              bounds.contains(point),
+              (number(item[kCGWindowAlpha as String])?.doubleValue ?? 1) > 0 else { continue }
+        return id
+    }
+    return nil
+}
+
+// Pointer delivery is spatial. Prove the exact active window without requiring the
+// keyboard-focused AX control, which Chromium may publish asynchronously after activation.
+private func pointerTargetMatches(_ row: WindowRow, point: CGPoint? = nil) -> Bool {
     guard frontmostPID() == row.pid else { return false }
     let rows = allWindowRows(includeMinimized: false)
     guard windowServerFrontWindowID(rows: rows) == row.id else { return false }
     guard focusedAXWindowID(for: row.pid, rows: rows) == row.id else { return false }
-    // Missing focused-control evidence is not agreement. AX can return nil on a timeout,
-    // an untyped value or an app transition; accepting that would turn an unprovable
-    // keyboard destination into global physical input.
+    if let point {
+        guard row.bounds.contains(point) else { return false }
+        guard windowServerTopWindowID(at: point) == row.id else { return false }
+    }
+    return true
+}
+
+// Keyboard delivery is not spatial. Keep the stronger focused-control ownership proof.
+private func inputTargetMatches(_ row: WindowRow) -> Bool {
+    guard pointerTargetMatches(row) else { return false }
+    let rows = allWindowRows(includeMinimized: false)
     guard focusedAXElementWindowID(for: row.pid, rows: rows) == row.id else { return false }
     return true
+}
+
+private func assertPointerTarget(_ id: CGWindowID, point: CGPoint? = nil) throws -> WindowRow {
+    guard let row = windowRow(id), row.onScreen else {
+        throw fail("INPUT_TARGET_LOST", "target window \(id) no longer exists on screen; no input was sent")
+    }
+    guard pointerTargetMatches(row, point: point) else {
+        throw fail("INPUT_TARGET_LOST", "window \(id) is no longer the exact active pointer target; no input was sent")
+    }
+    return row
 }
 
 private func assertInputTarget(_ id: CGWindowID) throws -> WindowRow {
@@ -487,12 +563,29 @@ private func matchingAXWindow(_ row: WindowRow, deadline suppliedDeadline: TimeI
         }
         if axWindowNumber(window) == row.id { return window }
     }
+    // Chromium may transiently stop publishing AXWindows across navigation while its focused
+    // or main AX window remains available. Resolve those independently by exact id or by the
+    // same unambiguous PID+geometry proof used elsewhere; never fall back to app identity alone.
+    for preferred in [
+        axElementAttribute(app, kAXFocusedWindowAttribute as CFString),
+        axElementAttribute(app, kAXMainWindowAttribute as CFString)
+    ].compactMap({ $0 }) {
+        if let exact = axWindowNumber(preferred) {
+            if exact == row.id { return preferred }
+            continue
+        }
+        if let bounds = axBounds(preferred),
+           convincinglyMatchesWindow(bounds, row.bounds),
+           unambiguousWindowID(bounds: bounds, pid: row.pid, rows: allWindowRows(includeMinimized: true)) == row.id {
+            return preferred
+        }
+    }
     var geometryCandidates: [(element: AXUIElement, distance: CGFloat)] = []
     for window in windows {
         guard ProcessInfo.processInfo.systemUptime < deadline else {
             throw fail("UIA_TIMEOUT", "accessibility window matching exceeded its bounded native deadline")
         }
-        guard let bounds = axBounds(window), convincinglyMatchesWindow(bounds, row.bounds) else { continue }
+        guard axWindowNumber(window) == nil, let bounds = axBounds(window), convincinglyMatchesWindow(bounds, row.bounds) else { continue }
         geometryCandidates.append((window, windowGeometryDistance(bounds, row.bounds)))
     }
     geometryCandidates.sort { $0.distance < $1.distance }
@@ -508,7 +601,7 @@ private func matchingAXWindow(_ row: WindowRow, deadline suppliedDeadline: TimeI
 private func focusWindow(_ id: CGWindowID) throws -> Bool {
     guard let row = windowRow(id) else { return false }
     try requireAccessibility()
-    if inputTargetMatches(row) { return true }
+    if pointerTargetMatches(row) { return true }
     guard let app = NSRunningApplication(processIdentifier: row.pid) else { return false }
     let window = try matchingAXWindow(row)
     var minimizedSettable = DarwinBoolean(false)
@@ -525,8 +618,14 @@ private func focusWindow(_ id: CGWindowID) throws -> Bool {
     setAXBooleanIfPossible(window, kAXFocusedAttribute as CFString, true)
     _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     let deadline = ProcessInfo.processInfo.systemUptime + 2.0
+    var consecutiveMatches = 0
     while ProcessInfo.processInfo.systemUptime < deadline {
-        if inputTargetMatches(row) { return true }
+        if pointerTargetMatches(row) {
+            consecutiveMatches += 1
+            if consecutiveMatches >= 3 { return true }
+        } else {
+            consecutiveMatches = 0
+        }
         usleep(20_000)
     }
     return false
@@ -671,10 +770,10 @@ private func click(_ point: CGPoint, button: CGMouseButton, count: Int, targetWi
     try requirePointOnActiveDisplay(point)
     let (down, up, _) = mouseTypes(button)
     for clickIndex in 1...count {
-        if let targetWindow { _ = try assertInputTarget(targetWindow) }
+        if let targetWindow { _ = try assertPointerTarget(targetWindow, point: point) }
         try postMouse(down, point: point, button: button, clickState: Int64(clickIndex))
         do {
-            if let targetWindow { _ = try assertInputTarget(targetWindow) }
+            if let targetWindow { _ = try assertPointerTarget(targetWindow, point: point) }
             try postMouse(up, point: point, button: button, clickState: Int64(clickIndex))
         } catch {
             // Release the button even if focus changed after mouse-down; never leave a
@@ -697,17 +796,17 @@ private func drag(
     let displays = try activeDisplayRects()
     for point in points { try requirePointOnActiveDisplay(point, displays: displays) }
     let (down, up, dragged) = mouseTypes(button)
-    if let targetWindow { _ = try assertInputTarget(targetWindow) }
+    if let targetWindow { _ = try assertPointerTarget(targetWindow, point: points[0]) }
     try postMouse(down, point: points[0], button: button)
     var current = points[0]
     do {
         for point in points.dropFirst() {
-            if let targetWindow { _ = try assertInputTarget(targetWindow) }
+            if let targetWindow { _ = try assertPointerTarget(targetWindow, point: point) }
             try postMouse(dragged, point: point, button: button)
             current = point
             usleep(12_000)
         }
-        if let targetWindow { _ = try assertInputTarget(targetWindow) }
+        if let targetWindow { _ = try assertPointerTarget(targetWindow, point: points[points.count - 1]) }
         try postMouse(up, point: points[points.count - 1], button: button)
     } catch {
         try? postMouse(up, point: current, button: button)
@@ -1048,16 +1147,20 @@ private func actUI(_ request: JSONObject) throws -> JSONObject {
 private func validateFrame(_ frame: JSONObject) throws {
     guard let region = rect(frame["region"]) else { throw fail("STALE_FRAME", "the coordinate frame is malformed") }
     if let windowID = number(frame["window"])?.uint32Value {
-        guard let row = windowRow(windowID), row.onScreen else {
-            throw fail("STALE_FRAME", "target window \(windowID) is no longer drawable")
+        // A captured window can become off-Space/hidden while remaining the exact AX-proven
+        // window. Permit activation from that state, but never physical input: focusWindow
+        // must first bring it back on-screen and assertFrameTarget then re-proves the exact
+        // WindowServer + AX pointer target before any mutation is emitted.
+        guard let row = windowRow(windowID) else {
+            throw fail("STALE_FRAME", "target window \(windowID) is no longer available")
         }
         let expected = rect(frame["windowGeometry"]) ?? region
         guard row.bounds.integral == expected.integral else {
             throw fail("STALE_FRAME", "target window \(windowID) moved or resized after the screenshot")
         }
         guard try focusWindow(windowID) else { throw fail("FOCUS_FAILED", "window \(windowID) could not be activated") }
-        guard let after = windowRow(windowID), after.bounds.integral == expected.integral else {
-            throw fail("STALE_FRAME", "target window \(windowID) changed geometry while it was activated")
+        guard let after = windowRow(windowID), after.onScreen, after.bounds.integral == expected.integral else {
+            throw fail("STALE_FRAME", "target window \(windowID) changed geometry or remained off-screen while it was activated")
         }
         _ = try assertFrameTarget(frame)
     } else {
@@ -1084,7 +1187,7 @@ private func assertFrameTarget(_ frame: JSONObject) throws -> CGWindowID? {
         guard row.bounds.integral == expected.integral else {
             throw fail("STALE_FRAME", "target window \(windowID) moved or resized after the screenshot")
         }
-        _ = try assertInputTarget(windowID)
+        _ = try assertPointerTarget(windowID)
         return windowID
     }
     guard let expectedDisplays = displayTopology(frame["displays"]) else {
@@ -1532,8 +1635,10 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
                     routes.append("sendinput")
                 case "scroll":
                     if let frame { _ = try assertFrameTarget(frame) }
-                    try movePointer(CGPoint(x: int(action["x"]), y: int(action["y"])))
+                    let scrollPoint = CGPoint(x: int(action["x"]), y: int(action["y"]))
+                    try movePointer(scrollPoint)
                     if let frame { _ = try assertFrameTarget(frame) }
+                    if let frameWindow { _ = try assertPointerTarget(frameWindow, point: scrollPoint) }
                     guard let event = CGEvent(
                         scrollWheelEvent2Source: nil,
                         units: .line,

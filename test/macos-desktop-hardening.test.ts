@@ -12,12 +12,50 @@ describe('macOS desktop safety hardening', () => {
     expect(swift).toContain('private func windowServerFrontWindowID');
     expect(swift).toContain('private func focusedAXWindowID');
     expect(swift).toContain('private func focusedAXElementWindowID');
+    expect(swift).toContain('private func assertPointerTarget');
     expect(swift).toContain('private func assertInputTarget');
     expect(swift).toContain('private func assertFrameTarget');
-    expect(swift).toMatch(/private func inputTargetMatches[\s\S]*frontmostPID\(\) == row\.pid/);
-    expect(swift).toMatch(/private func inputTargetMatches[\s\S]*windowServerFrontWindowID\(rows: rows\) == row\.id/);
-    expect(swift).toMatch(/private func inputTargetMatches[\s\S]*focusedAXWindowID\(for: row\.pid, rows: rows\) == row\.id/);
+    expect(swift).toMatch(/private func pointerTargetMatches[\s\S]*frontmostPID\(\) == row\.pid/);
+    expect(swift).toMatch(/private func pointerTargetMatches[\s\S]*windowServerFrontWindowID\(rows: rows\) == row\.id/);
+    expect(swift).toMatch(/private func pointerTargetMatches[\s\S]*focusedAXWindowID\(for: row\.pid, rows: rows\) == row\.id/);
+    expect(swift).toMatch(/private func pointerTargetMatches[\s\S]*windowServerTopWindowID\(at: point\) == row\.id/);
+    expect(swift).toMatch(/private func inputTargetMatches[\s\S]*pointerTargetMatches\(row\)/);
     expect(swift).toMatch(/private func inputTargetMatches[\s\S]*focusedAXElementWindowID\(for: row\.pid, rows: rows\) == row\.id/);
+  });
+
+  it('falls back to Workspace only when system-wide AX reports an invalid focused-app pid', () => {
+    expect(swift).toMatch(/kAXFocusedApplicationAttribute[\s\S]*let pid = axPID\(focused\),[\s\S]*pid > 0[\s\S]*return pid/);
+    expect(swift).toMatch(/private func frontmostPID[\s\S]*return NSWorkspace\.shared\.frontmostApplication\?\.processIdentifier/);
+  });
+
+  it('keeps AX-proven off-Space windows discoverable without weakening pointer proof', () => {
+    expect(swift).toContain('private func offscreenAXWindowStates');
+    expect(swift).toContain('let offscreenStates = offscreenAXWindowStates(in: rows)');
+    expect(swift).toContain('guard let minimized = offscreenStates[row.id] else { return nil }');
+    expect(swift).toContain('"state": id == foreground ? "foreground" : (minimized ? "minimized" : "open")');
+    expect(swift).toMatch(/offscreenAXWindowStates[\s\S]*unambiguousWindowID\(bounds: bounds, pid: pid, rows: rows\)/);
+    expect(swift).toMatch(/matchingAXWindow[\s\S]*kAXFocusedWindowAttribute[\s\S]*unambiguousWindowID/);
+    expect(swift).toMatch(/private func pointerTargetMatches[\s\S]*windowServerFrontWindowID\(rows: rows\) == row\.id/);
+  });
+
+  it('rejects contradictory positive AX ids before geometry fallback', () => {
+    expect(swift).toContain('id = rows.contains(where: { $0.id == exact && $0.pid == pid }) ? exact : nil');
+    expect(swift).toMatch(/if let exact = axWindowNumber\(preferred\)[\s\S]*if exact == row\.id[\s\S]*continue/);
+    expect(swift).toContain('guard axWindowNumber(window) == nil, let bounds = axBounds(window)');
+  });
+
+  it('includes floating windows in point occlusion proof', () => {
+    const start = swift.indexOf('private func windowServerTopWindowID');
+    const end = swift.indexOf('private func pointerTargetMatches');
+    const proof = swift.slice(start, end);
+    expect(proof).not.toContain('int(item[kCGWindowLayer as String]) == 0');
+    expect(proof).toContain('bounds.contains(point)');
+  });
+
+  it('allows only AX-proven off-Space frames to activate before requiring on-screen pointer proof', () => {
+    expect(swift).toMatch(/private func validateFrame[\s\S]*guard let row = windowRow\(windowID\)[\s\S]*focusWindow\(windowID\)[\s\S]*after\.onScreen[\s\S]*assertFrameTarget\(frame\)/);
+    expect(swift).toMatch(/private func assertFrameTarget[\s\S]*guard let row = windowRow\(windowID\), row\.onScreen/);
+    expect(swift).toMatch(/private func assertPointerTarget[\s\S]*guard let row = windowRow\(id\), row\.onScreen/);
   });
 
   it('revalidates a window-bound frame at every physical mutation boundary', () => {
@@ -25,8 +63,8 @@ describe('macOS desktop safety hardening', () => {
     expect(swift).toMatch(/case "click", "double_click":[\s\S]*assertFrameTarget\(frame\)[\s\S]*targetWindow: frameWindow/);
     expect(swift).toMatch(/case "scroll":[\s\S]*assertFrameTarget\(frame\)[\s\S]*event\.post/);
     expect(swift).toMatch(/case "drag":[\s\S]*assertFrameTarget\(frame\)[\s\S]*targetWindow: frameWindow/);
-    expect(swift).toMatch(/private func click[\s\S]*assertInputTarget\(targetWindow\)/);
-    expect(swift).toMatch(/private func drag[\s\S]*assertInputTarget\(targetWindow\)/);
+    expect(swift).toMatch(/private func click[\s\S]*assertPointerTarget\(targetWindow, point: point\)/);
+    expect(swift).toMatch(/private func drag[\s\S]*assertPointerTarget\(targetWindow, point:/);
   });
 
   it('bounds AX-derived strings and keeps surrogate pairs in one text event', () => {
