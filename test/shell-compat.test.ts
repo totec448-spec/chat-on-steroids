@@ -91,7 +91,69 @@ function fixture() {
       clearTimeout(timer); win.removeEventListener('message', receive as any); resolve(event.data); };
     win.addEventListener('message', receive as any); win.postMessage({ source, nonce }, win.location.origin);
   });
-  return { api: (win as any).CLF_DOM, doc, win, entry, row, top, props, versions, selections, trigger, actions, queries, ask };
+  return { api: (win as any).CLF_DOM, doc, win, entry, row, top, props, versions, selections, trigger, actions, queries, ask, chain };
+}
+
+// Models the observed Markdown editor's native text/break serialization, not
+// the app's receipt check. No exported scripts, credentials or chat text are used.
+function editing(f: ReturnType<typeof fixture>) {
+  const box = f.api.composer() as HTMLElement;
+  const serialize = (node: Node, literal = false, display = false): string => {
+    if (node.nodeType === 3) return literal || display ? node.textContent || '' : (node.textContent || '').replace(/[\\*_`#]/g, '\\$&');
+    if (!(node instanceof f.win.HTMLElement)) return '';
+    if (node.tagName === 'BR') return literal || display ? '\n' : '\\\n';
+    return [...node.childNodes].map(child => serialize(child, literal || node.matches('span[data-prompt-literal-paste]'), display)).join('');
+  };
+  Object.defineProperty(box, 'innerText', { get: () => serialize(box, false, true) });
+  f.doc.execCommand = vi.fn((command, _ui, html) => {
+    const selection = f.doc.getSelection();
+    if (f.doc.activeElement !== box || !selection) return false;
+    if (command === 'selectAll') { selection.selectAllChildren(box); return true; }
+    if (!['insertHTML', 'delete'].includes(command) || !selection.rangeCount) return false;
+    const range = selection.getRangeAt(0); range.deleteContents();
+    if (command === 'insertHTML') {
+      const template = f.doc.createElement('template'); template.innerHTML = html || ''; range.insertNode(template.content);
+    }
+    return true;
+  });
+  return { box, serialize: () => serialize(box) };
+}
+
+async function recorder(f: ReturnType<typeof fixture>, replies: Record<string, (m: any) => any> = {}) {
+  const win = f.win as any, sent: any[] = [];
+  let hook: any, listener: any;
+  win.CLF_TEST_HOOK = (value: any) => { hook = value; };
+  win.setInterval = () => 0;
+  win.chrome = { runtime: { id: 'shell-fixture', onMessage: { addListener(value: any) { listener = value; }, removeListener() {} },
+    sendMessage: async (message: any) => {
+      sent.push(message);
+      if (replies[message.type]) return replies[message.type]!(message);
+      if (message.type === 'status') return { connected: true, paired: true, pending: 0 };
+      if (message.type === 'activity') return { ok: true, data: { entries: [], stream: [], pendingTools: 0 } };
+      if (message.type === 'correlate') return { ok: true, data: { conversationId: THREAD, confirmed: message.calls.map((call: any) => call.requestId) } };
+      return { ok: true, pending: 0, durable: true };
+    } }, storage: { onChanged: { addListener() {}, removeListener() {} } } };
+  win.eval(contentSource);
+  await vi.waitFor(() => expect(hook).toBeTruthy());
+  await hook.refreshFiber(); await hook.pullActivity(); hook.observe(); await hook.flush();
+  return { sent, hook, runtime: (message: any) => new Promise<any>(resolve => listener(message, {}, resolve)),
+    events: () => sent.filter(m => m.type === 'events').flatMap(m => m.entries.map((entry: any) => entry.event)) };
+}
+
+function addExchange(f: ReturnType<typeof fixture>, ordinal: number, text: string) {
+  const id = (part: number) => `99999999-1111-4111-8111-${String(ordinal * 10 + part).padStart(12, '0')}`;
+  const userId = id(1), turnId = id(2), answerId = id(3);
+  const node = f.doc.createElement('div'); node.setAttribute('data-turn-key', userId);
+  node.innerHTML = `<div data-content-search-turn-key="${turnId}"><div data-content-search-unit-key="${turnId}:0:user"><div data-user-message-bubble><div class="whitespace-pre-wrap"></div></div></div><span hidden data-chatgpt-agent-turn-start></span><div data-content-search-unit-key="${turnId}:1:assistant"><div data-markdown-text-style="assistant-message"></div></div></div>`;
+  node.querySelector('.whitespace-pre-wrap')!.textContent = text;
+  const entry = { id: turnId, conversationId: THREAD, turn: { status: 'in_progress', messageIds: [userId, answerId], items: [
+    { type: 'user-message', messageId: userId, serverMessageId: userId, message: text },
+    { type: 'assistant-message', messageId: answerId, content: 'Working', phase: 'final_answer', completed: false }
+  ] } };
+  (node as any).__reactFiber$fixture = f.chain({ entry }, f.top);
+  f.doc.querySelector('[data-thread-find-target]')!.append(node);
+  return { userId, answerId, entry, finish() { entry.turn.status = 'complete'; entry.turn.items[1]!.completed = true;
+    entry.turn.items[1]!.content = 'Finished'; node.querySelector('[data-markdown-text-style]')!.textContent = 'Finished'; } };
 }
 
 it('reads the real shell composer, messages and tools through existing contracts without a cache', async () => {
@@ -130,6 +192,56 @@ it('reports an explicit per-call completion without a synthetic result message',
   const turn = (await f.ask()).turns[0]; expect(turn.calls[0].answered).toBe(true);
   expect(turn.messages).toHaveLength(2); expect(turn.endMessageId).toBeNull();
 });
+it('reads request metadata only for the mounted shell message ids in the exact native cache', async () => {
+  const f = fixture();
+  const message = { id: CALL, author: { role: 'assistant' }, recipient: 'api_tool.call_tool',
+    metadata: { request_id: OTHER }, create_time: 1700000000,
+    content: { content_type: 'code', text: '{"path":"/Chat On Steroids Core/link_x/read","args":{"secret":"NEVER_COPY"}}' } };
+  f.queries.push({ queryKey: ['chatgpt-conversation', THREAD], state: { data: { mapping: {
+    [CALL]: { id: CALL, message },
+    [OTHER]: { id: OTHER, message: { ...message, id: OTHER, metadata: { request_id: 'wfr_UNSELECTED' } } }
+  } } } });
+  const turn = (await f.ask()).turns[0];
+  expect(turn.requests).toEqual([{ requestId: OTHER, messageId: CALL, createTime: 1700000000 }]);
+  expect(turn.calls[0]).toMatchObject({ messageId: CALL, requestId: OTHER, answered: false });
+  expect(JSON.stringify(turn)).not.toContain('NEVER_COPY');
+  expect(JSON.stringify(turn)).not.toContain('wfr_UNSELECTED');
+  const recorded = await recorder(f);
+  await vi.waitFor(() => expect(recorded.sent).toContainEqual(expect.objectContaining({ type: 'correlate',
+    conversationId: THREAD, calls: expect.arrayContaining([expect.objectContaining({ requestId: OTHER })]) })));
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+  f.queries[0].queryKey[1] = OTHER;
+  expect((await f.ask()).turns[0].requests).toEqual([]);
+  f.queries[0].queryKey[1] = THREAD; f.queries[0].state.data.mapping[CALL].message.id = OTHER;
+  expect((await f.ask()).turns[0].requests).toEqual([]);
+});
+it.each(['duplicate-cache', 'conflicting-conversation', 'duplicate-id', 'unavailable-cache'])('keeps the transcript without ambiguous optional request metadata (%s)', async kind => {
+  const f = fixture();
+  const query = { queryKey: ['chatgpt-conversation', THREAD], state: { data: { conversation_id: THREAD, mapping: {
+    [CALL]: { id: CALL, message: { id: CALL, metadata: { request_id: OTHER } } }
+  } } } };
+  f.queries.push(query);
+  if (kind === 'duplicate-cache') f.queries.push(query);
+  if (kind === 'conflicting-conversation') query.state.data.conversation_id = OTHER;
+  if (kind === 'duplicate-id') f.entry.turn.messageIds.push(CALL);
+  if (kind === 'unavailable-cache') f.top.memoizedProps.client.getQueryCache = () => { throw new Error('retired'); };
+  const turn = (await f.ask()).turns[0];
+  expect(turn.requests).toEqual([]); expect(turn.messages).toHaveLength(2); expect(turn.endMessageId).toBeNull();
+});
+it('recognizes the shell recipient spelling without admitting similarly named connectors', async () => {
+  const f = fixture(), step = f.entry.turn.items[1].items[1];
+  step.invocation.server = 'Chat_On_Steroids_Core'; step.invocation.tool = 'read';
+  expect((await f.ask()).turns[0].calls).toHaveLength(1);
+  step.invocation.server = 'Chat_On_Steroids_Core_Backup';
+  expect((await f.ask()).turns[0].calls).toEqual([]);
+});
+it('retires shell busy evidence when its owner becomes unreadable or another question is mounted', async () => {
+  const f = fixture(); await f.ask(); expect(f.api.generating()).toBe(true);
+  f.entry.id = OTHER; await f.ask(); expect(f.api.generating()).toBe(false);
+  f.entry.id = TURN; await f.ask(); expect(f.api.generating()).toBe(true);
+  const next = addExchange(f, 5, 'Another question'); next.finish(); await f.ask();
+  expect(f.api.generating()).toBe(false);
+});
 it('never takes message content or final status from an unrelated cached branch', async () => {
   const f = fixture();
   f.queries.push({ queryKey: ['chatgpt-conversation', THREAD], state: { data: { mapping: { [USER]: {
@@ -159,6 +271,76 @@ it('uses typed running state rather than a translated Stop caption', async () =>
   await f.ask(); expect(f.api.generating()).toBe(true); expect(f.api.composerSubmitReady()).toBe(false);
   expect(f.api.stopButton()).toBeNull(); // No guessed action target.
 });
+it('preserves prepared multiline text through the shell editor serializer', () => {
+  const f = fixture(), edit = editing(f);
+  const value = '[[COS_CONTEXT:42]]\n# Worker instructions\n- Keep **literal** text, C:\\work and `<tag>`.\n[[/COS_CONTEXT]]\n\nContinue the task.';
+  expect(f.api.insertPrompt(value, true)).toBe(true);
+  expect(edit.serialize()).toBe(value);
+  expect(f.doc.execCommand).toHaveBeenCalledOnce();
+  expect(edit.box.querySelector('tag')).toBeNull();
+});
+it('hides only a verified shell prompt frame and restores a recycled user bubble', async () => {
+  const f = fixture(), unit = f.doc.querySelector('[data-content-search-unit-key$=":user"]')!;
+  const raw = unit.querySelector('.whitespace-pre-wrap')!;
+  const full = '[[COS_CONTEXT:13]]\nPrivate setup\n[[/COS_CONTEXT]]\n\nAuthored request';
+  f.entry.turn.items[0].message = full; raw.textContent = full;
+  f.api.presentUserPrompts();
+  expect(unit.querySelector('[data-clf-user-text]')).toBeNull(); // A layout key cannot authorize rewriting.
+  await f.ask();
+  f.api.presentUserPrompts((message: { id: string }) => message.id === USER ? full : null);
+  expect(unit.querySelector('[data-clf-user-text]')?.textContent).toBe('Authored request');
+  expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(true);
+  expect(f.api.messages().find((message: any) => message.id === USER)?.text).toBe(full);
+  f.entry.turn.items[0].message = 'A new question'; raw.textContent = 'A new question';
+  f.api.presentUserPrompts(() => 'A new question');
+  expect(unit.querySelector('[data-clf-user-text]')).toBeNull();
+  expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(false);
+});
+it('delivers three successive shell inputs with exact receipts and completed answers', async () => {
+  const f = fixture(), edit = editing(f);
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  let offered: any, latest: ReturnType<typeof addExchange>, count = 0;
+  const submitted: string[] = [];
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); const text = edit.serialize(); submitted.push(text);
+    latest = addExchange(f, ++count, text); edit.box.replaceChildren();
+  });
+  const r = await recorder(f, { desktop_input: m => ({ ok: true, data: m.authorize || m.ack || m.fail ? { ok: true } : { input: offered } }) });
+  for (let at = 1; at <= 3; at++) {
+    const text = at === 1 ? '[[COS_CONTEXT:13]]\nPrivate setup\n[[/COS_CONTEXT]]\n\n# First **request**' : `Follow-up ${at}\nKeep C:\\work and **literal** text.`;
+    offered = { id: `88888888-1111-4111-8111-${String(at).padStart(12, '0')}`, owner: `owner-${at}`, text,
+      model: 'gpt-5-6-thinking', reasoningEffort: 'high', purpose: 'user', images: [] };
+    const pending = r.runtime({ type: 'clf-desktop-input', id: offered.id, conversationId: THREAD });
+    await vi.waitFor(() => expect(submitted).toHaveLength(at), { timeout: 5000 });
+    await r.hook.refreshFiber(); r.hook.observe();
+    expect(await pending).toEqual({ ok: true });
+    expect(submitted.at(-1)).toBe(text);
+    expect(r.sent.filter(m => m.type === 'desktop_input' && m.ack && m.id === offered.id)).toHaveLength(1);
+    latest!.finish(); await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+    await vi.waitFor(() => expect(r.events()).toContainEqual(expect.objectContaining({ kind: 'assistant_message', providerMessageId: latest!.answerId, final: true })), { timeout: 3000 });
+    expect(f.api.generating()).toBe(false); expect(edit.box.textContent).toBe('');
+  }
+  expect(r.sent.filter(m => m.type === 'desktop_input' && m.fail)).toEqual([]);
+  expect(r.events().filter((e: any) => e.kind === 'turn_end' && e.outcome === 'completed')).toHaveLength(3);
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+}, 15000);
+it('bootstraps a shell worker with literal instructions and the exact native conversation', async () => {
+  const f = fixture(), edit = editing(f), commandId = 'shell-worker-command';
+  f.doc.querySelector('[data-thread-find-target]')!.replaceChildren();
+  page.reconfigure({ url: `https://chatgpt.com/?clf=${commandId}` });
+  const text = '[[COS_CONTEXT:13]]\nPrivate setup\n[[/COS_CONTEXT]]\n\n# Worker\nRead **one** file.';
+  const submitted: string[] = [];
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); submitted.push(edit.serialize()); addExchange(f, 4, submitted[0]!); edit.box.replaceChildren();
+    f.win.history.pushState({}, '', `/c/${THREAD}`);
+  });
+  const r = await recorder(f, { redeem: () => ({ ok: true, command: { id: commandId, type: 'worker', text,
+    agent: 'worker-1', model: 'gpt-5-6-thinking', reasoningEffort: 'high' } }) });
+  await vi.waitFor(() => expect(r.sent).toContainEqual(expect.objectContaining({ type: 'ack', id: commandId, status: 'sent', conversationId: THREAD, agent: 'worker-1' })), { timeout: 5000 });
+  expect(submitted).toEqual([text]);
+  expect(r.sent.filter(m => m.type === 'ack' && m.status === 'failed')).toEqual([]);
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+}, 10000);
 it('leaves classic messages readable when quoted markup contains shell-looking attributes', () => {
   const f = fixture(); f.doc.body.innerHTML = '<section data-testid="conversation-turn-1" data-turn="assistant"><div data-message-id="actual" data-message-author-role="assistant"><div class="markdown">real answer<div id="app-shell-sidebar"></div><div data-turn-key="quoted"></div></div></div></section>';
   expect(f.api.turns()).toHaveLength(1); expect(f.api.messages()[0].text).toContain('real answer');
