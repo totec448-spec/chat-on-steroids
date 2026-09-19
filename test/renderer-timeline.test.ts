@@ -9,7 +9,7 @@ import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import type { LocalProject } from '../src/shared/projects.js';
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({ update: vi.fn() }) }));
 vi.mock('../src/renderer/pet.js', () => ({ initPet: () => () => {} }));
-import { positionOf } from '../src/shared/chronology.js';
+import { positionOf, projectTimeline } from '../src/shared/chronology.js';
 
 /**
  * The session timeline as the user reads it while a chat is running.
@@ -675,6 +675,32 @@ it('keeps a transport-deferred immediate upload visible with cancellation instea
   await settle();
   expect(live.inputs[0]?.state).toBe('cancelled');
   expect(w.document.querySelector('[data-input-id="native-correction"]')).toBeNull();
+});
+
+it('keeps cancelled Continue attempts at their own times across a long session instead of stacking them under the current chat', async () => {
+  const rows: SessionEvent[] = [0, 1, 2, 3].map(index => ({
+    seq: index + 1, time: T0 + index * 60_000, source: 'extension', kind: 'user_message',
+    messageId: `night-question-${index}`, message: text(`NIGHT QUESTION ${index}`)
+  }));
+  const { w, live, append } = await boot(rows);
+  for (let index = 0; index < 3; index++) live.inputs.push({
+    id: `retired-continue-${index}`, sessionId: summary(rows).id, text: `UNSENT CONTINUE ${index}`,
+    mode: 'after-turn', dueAt: T0 + index * 60_000 + 1000, createdAt: T0 + index * 60_000 + 1000,
+    model: null, reasoningEffort: null, state: 'cancelled', owner: null, conversationId: `old-chat-${index}`,
+    error: 'Automatic Continue cancelled: the source turn, activity or setting changed.',
+    recovery: { questionId: `night-question-${index}`, pro: false, busyUntil: T0 + index * 60_000 + 61_000, phase: 'ready' }
+  });
+  await append([]);
+  expect(w.document.getElementById('inputQueue')!.textContent).not.toContain('UNSENT CONTINUE');
+  const timeline = w.document.getElementById('timeline')!;
+  for (let index = 0; index < 3; index++) {
+    const card = timeline.querySelector<HTMLElement>(`[data-input-id="retired-continue-${index}"]`)!;
+    expect(card).not.toBeNull();
+    expect(card.querySelector('time')?.textContent).toBe(new Date(live.inputs[index]!.createdAt).toLocaleString());
+    const content = timeline.textContent!;
+    expect(content.indexOf(`NIGHT QUESTION ${index}`)).toBeLessThan(content.indexOf(`UNSENT CONTINUE ${index}`));
+    expect(content.indexOf(`UNSENT CONTINUE ${index}`)).toBeLessThan(content.indexOf(`NIGHT QUESTION ${index + 1}`));
+  }
 });
 
 it.each(['trash', 'empty-save'])('removes a queued message during editing via %s even while a refresh is delayed', async action => {
@@ -3278,6 +3304,39 @@ it('keeps a revised long answer reachable in both directions and never uses its 
   expect(timeline.textContent).toContain('Detailed ratings.');
   expect(timeline.querySelectorAll('.ev-assistant_message')).toHaveLength(1);
   geometryChanges.disconnect();
+});
+
+it('keeps reloaded interim messages above their tool groups through live results and repaint', async () => {
+  const working = '11111111-1111-4111-8111-111111111111';
+  const exchange = '22222222-2222-4222-8222-222222222222';
+  const parent = '33333333-3333-4333-8333-333333333333';
+  const turns = { working: { origin: 1, time: T0 } };
+  const rows: SessionEvent[] = [
+    { seq: 1, time: T0, kind: 'turn_start', source: 'extension', turnId: 'working' },
+    { seq: 2, time: T0 + 2000, kind: 'assistant_message', source: 'extension', turnId: 'working',
+      messageId: `assistant:${parent}:${working}:${exchange}`, message: text('FIRST UPDATE'), final: false },
+    ...[3, 4].map(seq => ({ ...toolCall(seq, `before-${seq}`), turnId: 'working' })),
+    { seq: 7, origin: 5, time: T0 + 5000, kind: 'assistant_message', source: 'extension',
+      messageId: `assistant:${exchange}:${working}:${exchange}`, message: text('SECOND UPDATE'), final: false },
+    { ...toolCall(6, 'after-6'), turnId: 'working' },
+    { ...toolCall(8, 'after-8'), turnId: 'working' }
+  ];
+  const { w, append } = await boot(projectTimeline(rows, turns));
+  const timeline = w.document.getElementById('timeline')!;
+  const reading = () => [...timeline.children].filter(row => row.matches('.ev-assistant_message, .tool-group'));
+  expect(reading().map(row => row.classList.contains('tool-group') ? 'TOOLS' : row.textContent))
+    .toEqual([expect.stringContaining('FIRST UPDATE'), 'TOOLS', expect.stringContaining('SECOND UPDATE'), 'TOOLS']);
+  const group = reading()[3] as HTMLDetailsElement;
+  group.open = true;
+  group.dispatchEvent(new w.Event('toggle'));
+  await append(projectTimeline([{ ...toolCall(9, 'after-9'), turnId: 'working' }], turns, {}, rows));
+  expect(reading()[3]).toBe(group);
+  expect(group.open).toBe(true);
+  expect(group.querySelectorAll('.ev-tool_call')).toHaveLength(3);
+  await append([]);
+  expect(reading()[2]?.textContent).toContain('SECOND UPDATE');
+  expect(reading()[3]).toBe(group);
+  expect(timeline.querySelectorAll('.ev-assistant_message')).toHaveLength(2);
 });
 
 it('keeps long surrounding prose while materializing large tool results only on expansion', async () => {

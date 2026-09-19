@@ -36,7 +36,8 @@ export class BrowserControlBroker {
       .map(([id]) => id) : [] };
   }
 
-  async claim(browserId: string, id: string, epoch: string): Promise<BrowserCommand | null> {
+  async claim(browserId: string, id: string, epoch: string,
+    ownerProofs: ReadonlyArray<{ owner: string; sessionId: string }> = []): Promise<BrowserCommand | null> {
     const p = this.pending.get(id);
     if (!p || p.browserId !== browserId || epoch !== this.epoch || p.claimed || p.claiming) return null;
     p.claiming = true;
@@ -44,6 +45,12 @@ export class BrowserControlBroker {
     // Async policy reads cannot revive an expired/retired request.
     if (this.pending.get(id) !== p || p.command.expiresAt <= Date.now()) return null;
     if (!allowed) { p.finish({ error: 'BROWSER_PERMISSION_REVOKED: request was not dispatched.' }); return null; }
+    // Only the bridge supplies these proofs from the canonical request index. A browser's
+    // held-owner hints never authorize another session or the legacy anonymous principal.
+    const aliases = [...new Set(ownerProofs.slice(0, 32)
+      .filter(proof => proof.owner.startsWith('request:') && `session:${proof.sessionId}` === p.command.owner)
+      .map(proof => proof.owner))];
+    if (aliases.length) p.command.ownerAliases = aliases;
     p.claimed = true;
     return p.command;
   }

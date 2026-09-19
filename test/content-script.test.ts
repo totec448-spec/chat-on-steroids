@@ -8200,6 +8200,109 @@ describe('a content script reloaded into a turn already in flight', () => {
     expect(order.indexOf('bind')).toBeLessThan(order.indexOf('events'));
   });
 
+  it.each([true, false])('binds a separate final section only within the exact adopted question (same question: %s)', async sameQuestion => {
+    const source = 'g-split-final-source';
+    live = await harness(undefined, {
+      activity: () => activity({ activeTurnId: source, recordedTurnId: source,
+        recordedQuestionId: 'm-turn-live-user',
+        userAnchors: [{ seq: 1, time: 1700000000000, messageId: 'm-turn-live-user' }] })
+    }, midTurn);
+    live.hook.observe(); await settle();
+    const interim = live.document.querySelector<HTMLElement>('[data-turn-id="turn-live"]')!;
+    const partial = { turnId: 'turn-live', messages: [{ messageId: 'split-interim', rawMessageId: 'split-interim',
+      stable: true, rawText: 'Checking the implementation.', renderedHtml: '' }] };
+    await bindFiberTurns([{ section: interim, turn: partial }]);
+
+    if (!sameQuestion) userTurn(live.document, 'different-question', 'Answer a new question.');
+    const final = assistantTurn(live.document, 'separate-final-section', []);
+    prose(live.document, final, 'split-terminal', 'The requested work is complete.');
+    stopGenerating(live.document);
+    if (sameQuestion) { live.hook.observe(); await settle(); }
+    await bindFiberTurns([{ section: interim, turn: partial }, { section: final, turn: {
+      turnId: 'separate-final-section', endMessageId: 'split-terminal',
+      messages: [{ messageId: 'split-terminal', rawMessageId: 'split-terminal', stable: true,
+        rawText: 'The requested work is complete.', renderedHtml: '' }]
+    } }]);
+    await live.hook.flush();
+    const answer = emitted(live.sent, 'assistant_message').at(-1)?.event;
+    expect(answer).toMatchObject({
+      providerMessageId: 'split-terminal', final: true
+    });
+    if (sameQuestion) {
+      expect(answer?.turnId).toBe(source);
+      expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+        expect.objectContaining({ turnId: source, outcome: 'completed' })
+      ]);
+      expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+    } else {
+      const next = emitted(live.sent, 'turn_start').at(-1)?.event.turnId;
+      expect(next).toBeTypeOf('string');
+      expect(next).not.toBe(source);
+      expect(answer?.turnId).toBe(next);
+    }
+  });
+
+  it.each(['empty', 'refused'])('adopts exact recorded ownership arriving after an initially %s activity response', async initial => {
+    const source = 'g-late-adopted-final';
+    live = await harness(undefined, {
+      activity: () => initial === 'refused' ? { ok: false, error: 'no_such_session' }
+        : activity({ activeTurnId: null, recordedTurnId: null,
+          userAnchors: [{ seq: 1, time: 1700000000000, messageId: 'm-late-question' }] })
+    }, document => {
+      userTurn(document, 'late-question', 'Complete this task.', { sent: false });
+      const final = assistantTurn(document, 'late-final-section', []);
+      prose(document, final, 'late-terminal', 'The work is complete.');
+    });
+    const final = live.document.querySelector<HTMLElement>('[data-turn-id="late-final-section"]')!;
+    const terminal = { turnId: 'late-final-section', endMessageId: 'late-terminal', messages: [{
+      messageId: 'late-terminal', rawMessageId: 'late-terminal', stable: true,
+      rawText: 'The work is complete.', renderedHtml: ''
+    }] };
+    await bindFiberTurns([{ section: final, turn: terminal }]); await live.hook.flush();
+    live.reply.set('activity', () => activity({ activeTurnId: null, recordedTurnId: source,
+      recordedQuestionId: 'm-late-question',
+      userAnchors: [{ seq: 1, time: 1700000000000, messageId: 'm-late-question' }] }));
+    await live.hook.pullActivity();
+    await bindFiberTurns([{ section: final, turn: terminal }]); await live.hook.flush();
+    expect(emitted(live.sent, 'assistant_message').at(-1)?.event).toMatchObject({ turnId: source, final: true });
+    expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: source, outcome: 'completed' })
+    ]);
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+    expect(composerText(live.document)).toBe('');
+    // A stale activity reply after this document closed the turn cannot adopt it again.
+    await live.hook.pullActivity();
+    await bindFiberTurns([{ section: final, turn: terminal }]); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+    expect((await live.runtimeMessage({ type: 'clf-page-status' }) as any).generating).toBe(false);
+  });
+
+  it.each(['missing', 'different', 'stopped'])('refuses late adoption without a current eligible question (%s)', async variant => {
+    live = await harness(undefined, {
+      activity: () => activity({ activeTurnId: null, recordedTurnId: null })
+    }, document => {
+      userTurn(document, 'current-question', 'The current task.', { sent: false });
+      assistantTurn(document, 'current-answer', []);
+      if (variant === 'stopped') startGenerating(document, { send: false });
+    });
+    if (variant === 'stopped') {
+      live.document.querySelector<HTMLButtonElement>('[data-testid="stop-button"]')!.click();
+      stopGenerating(live.document);
+    }
+    live.reply.set('activity', () => activity({ activeTurnId: 'g-unproven-old-turn',
+      recordedTurnId: 'g-unproven-old-turn',
+      recordedQuestionId: variant === 'missing' ? null : variant === 'different' ? 'm-other-question' : 'm-current-question' }));
+    await live.hook.pullActivity();
+    const final = live.document.querySelector<HTMLElement>('[data-turn-id="current-answer"]')!;
+    await bindFiberTurns([{ section: final, turn: { turnId: 'current-answer', endMessageId: 'unowned-terminal',
+      messages: [{ messageId: 'unowned-terminal', rawMessageId: 'unowned-terminal', stable: true,
+        rawText: 'Historical answer.', renderedHtml: '' }] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'assistant_message').at(-1)?.event.turnId).toBeUndefined();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+  });
+
   it('waits for the existing response identity when New Chat navigates to a running chat', async () => {
     let answer: ((value: unknown) => void) | undefined;
     live = await harness('https://chatgpt.com/', {
@@ -12625,7 +12728,11 @@ describe('truthful quiet operation status', () => {
     const view = (workers: unknown) => live!.hook.stageView({ now: 10000, changedAt: 0, progress: { workers } });
     expect(view({ active: 1, finished: 2, failed: 0, names: ['Repository audit'] })).toMatchObject({ stage: 'Worker still running: Repository audit', detail: '2 finished · 1 running' });
     expect(view({ active: 2, finished: 1, failed: 1 })).toMatchObject({ stage: '2 workers still running', detail: '1 finished · 2 running · 1 failed' });
-    expect(view({ active: 0, finished: 2, failed: 1 })).toMatchObject({ stage: 'A worker needs attention' });
+    expect(view({ active: 0, finished: 2, failed: 1 })).toBeNull();
+    expect(live.hook.stageView({ now: 10000, changedAt: 0, generating: true,
+      progress: { workers: { active: 0, finished: 2, failed: 1 } } })).toMatchObject({
+      stage: 'Still waiting for the current operation to complete'
+    });
     expect(view({ active: 0, finished: 3, failed: 0 })).toBeNull(); // no invented consolidation
   });
   it('waits through short pauses and clears the status when real output resumes', async () => {

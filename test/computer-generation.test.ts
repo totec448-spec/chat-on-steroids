@@ -22,7 +22,7 @@ const fake = vi.hoisted(() => {
   const requests: Array<Record<string, any>> = [];
   const children: Array<Transport> = [];
   const clipboard = { writeText: vi.fn(async (_text: string) => {}), readText: vi.fn(async () => '') };
-  const overrides: { focusFailure: boolean; geometry: boolean } = { focusFailure: false, geometry: false };
+  const overrides = { focusFailure: false, geometry: false, semanticOnly: false };
   class Transport extends Emitter {
     readonly pid = 9000 + children.length;
     exitCode: number | null = null;
@@ -74,6 +74,10 @@ const fake = vi.hoisted(() => {
         elements: [{ runtimeKey: 'edge', name: 'Edge', role: 'Button', enabled: true, offscreen: false,
           bounds: { x: 1, y: 1, width: 1279, height: 719 } }]
       });
+      if (overrides.semanticOnly) Object.assign(reply, {
+        elements: [{ runtimeKey: 'semantic', name: 'Invoke fixture', role: 'Button', enabled: true, offscreen: true,
+          actions: ['invoke'], bounds: { x: 0, y: 0, width: 0, height: 0 } }]
+      });
       queueMicrotask(() => {
         if (addon) this.emit('message', { type: 'reply', reply });
         else {
@@ -117,6 +121,7 @@ describe.each(['stdio', 'addon'] as const)('Desktop reply provenance (%s)', (tra
     fake.clipboard.writeText.mockClear();
     fake.overrides.focusFailure = false;
     fake.overrides.geometry = false;
+    fake.overrides.semanticOnly = false;
     Object.defineProperty(process, 'platform', { ...platform, value: transport === 'addon' ? 'darwin' : 'linux' });
     vi.stubEnv('COS_MACOS_DESKTOP_HELPER', '');
     computer = await import('../src/main/computer/index.js');
@@ -155,6 +160,16 @@ describe.each(['stdio', 'addon'] as const)('Desktop reply provenance (%s)', (tra
     expect((await computer.getWindowState({ window: 77, maxElements: 1, includeScreenshot: false })).uiTruncated).toBe(true);
     expect((await computer.getWindowState({ window: 77, maxElements: 2, includeScreenshot: false })).uiTruncated).toBe(false);
     expect((await computer.getWindowState({ window: 77, includeUi: false, includeScreenshot: false })).uiTruncated).toBeUndefined();
+  });
+  it('retains semantic refs without inventing image coordinates for a zero-bounds control', async () => {
+    fake.overrides.semanticOnly = true;
+    const state = await computer.getWindowState({ window: 77 });
+    expect(state.elements[0]).toMatchObject({ actions: ['invoke'], imageBounds: null, imageCenter: null });
+    expect(state.elements[0]?.ref).toBeTruthy();
+  });
+  it('forwards targeted accessibility search to the same native snapshot transaction', async () => {
+    await computer.getWindowState({ window: 77, query: 'Save', role: 'Button', maxElements: 12, includeScreenshot: false });
+    expect(fake.requests).toEqual([expect.objectContaining({ op: 'snapshot', id: 77, query: 'Save', role: 'Button', maxResults: 12 })]);
   });
 
   it('retires a frame immediately on helper exit without starting a replacement', async () => {

@@ -66,4 +66,70 @@ describe('transcript pagination across recovered turns', () => {
     expect(chronological(missingEnd).map(row => row.seq)).toEqual(expected.filter(row => row.kind !== 'turn_end').map(row => row.seq));
     expect(missingEnd.slice(1).every(row => row.turnOrigin === null)).toBe(true);
   });
+
+  const working = '11111111-1111-4111-8111-111111111111';
+  const exchange = '22222222-2222-4222-8222-222222222222';
+  const parent = '33333333-3333-4333-8333-333333333333';
+  const nativeMessage = (seq: number, messageId: string, turnId?: string): Chronological => ({
+    seq, time: seq * 10, kind: 'assistant_message', source: 'extension', messageId, turnId
+  });
+
+  it('places reloaded interim prose between its tools using the recorded native response, without assigning a lifecycle owner', () => {
+    const at = 1789805531000;
+    const source = [
+      { seq: 1, time: at + 10, kind: 'turn_start', turnId: 'first' },
+      { ...nativeMessage(2, `assistant:${parent}:${working}:${exchange}`, 'first'), time: at + 20 },
+      { seq: 3, time: at + 30, kind: 'tool_call', turnId: 'first' },
+      // Native publication preceded the tool, but its canonical revision arrived later.
+      { ...nativeMessage(7, `assistant:${working}:${exchange}:${at + 40}`), origin: 4, time: at + 45 },
+      { seq: 5, time: at + 50, kind: 'tool_call', turnId: 'first' },
+      { seq: 6, time: at + 60, kind: 'tool_call', turnId: 'first' }
+    ];
+    const boundaries = { first: { origin: 1, time: at + 10 } };
+    const before = structuredClone(source);
+    const projected = projectTimeline(source, boundaries);
+    const read = chronological(projected);
+    expect(read.map(row => row.seq)).toEqual([1, 2, 3, 7, 5, 6]);
+    expect(projected.find(row => row.seq === 7)).toMatchObject({ seq: 7, origin: 4, time: at + 45, turnOrigin: 1 });
+    expect(projected.find(row => row.seq === 7)?.turnId).toBeUndefined();
+    expect(source).toEqual(before);
+  });
+
+  it('uses canonical response evidence outside a small page without borrowing the newest response', () => {
+    const original = nativeMessage(2, `assistant:${working}:${exchange}:1789805348151`, 'first');
+    const recovered = nativeMessage(12, `assistant:${parent}:${working}:${exchange}`);
+    const projected = projectTimeline([recovered], turns, {}, [original, recovered]);
+    expect(projected[0]).toMatchObject({ seq: 12, turnOrigin: 2 });
+    expect(projected[0]?.turnId).toBeUndefined();
+  });
+
+  it.each(['conflicting-turn', 'unknown-turn', 'different-agent', 'different-working', 'different-exchange', 'partial-key', 'raw-id'])(
+    'does not borrow response ownership from %s evidence', conflict => {
+      const original = nativeMessage(2, `assistant:${parent}:${working}:${exchange}`, 'first');
+      let recovered = nativeMessage(12, `assistant:${working}:${exchange}:1789805531502`);
+      const evidence: Chronological[] = [original];
+      if (conflict === 'conflicting-turn' || conflict === 'unknown-turn') evidence.push({
+        ...original, seq: 9, turnId: conflict === 'unknown-turn' ? 'absent' : 'second'
+      });
+      if (conflict === 'different-agent') recovered = { ...recovered, agent: 'worker-1' };
+      if (conflict === 'different-working') recovered.messageId = `assistant:${parent}:${exchange}:1789805531502`;
+      if (conflict === 'different-exchange') recovered.messageId = `assistant:${working}:${parent}:1789805531502`;
+      if (conflict === 'partial-key') recovered.messageId = `assistant:${working}::1789805531502`;
+      if (conflict === 'raw-id') recovered.messageId = exchange;
+      const [projected] = projectTimeline([recovered], turns, {}, evidence);
+      expect(projected?.turnOrigin).toBeNull();
+      expect(projected?.turnId).toBeUndefined();
+    }
+  );
+
+  it('accepts multiple exact native anchors only when the recorded lifecycle already identifies one response', () => {
+    const source = [
+      nativeMessage(2, `assistant:${parent}:${working}:${exchange}`, 'first'),
+      nativeMessage(9, `assistant:${working}:${exchange}:1789805531502`, 'second'),
+      nativeMessage(12, `assistant:${working}:${exchange}:1789806074481`)
+    ];
+    const sameResponse = { ...turns, second: { ...turns.second!, responseTurnId: 'first' } };
+    expect(projectTimeline(source, sameResponse).map(row => row.turnOrigin)).toEqual([2, 2, 2]);
+    expect(projectTimeline(source, turns).map(row => row.turnOrigin)).toEqual([2, 8, null]);
+  });
 });

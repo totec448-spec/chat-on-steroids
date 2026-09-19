@@ -974,6 +974,10 @@ receipts may settle a cancelled wait; that does not authorize a second message. 
 and history publication are independent: a recorder failure retries canonical history, not
 transport. Queued unclaimed input follows its durable session to the successor; already handed
 claims keep their original exact document until their outcome resolves.
+A generated Continue may stop blocking its session after a committed rebind proves its source
+chat is in that same session's history. The outbox cancels only its wait and retains the exact
+claim, authorization and late-receipt custody. An authored message, an unproved source or elapsed
+time alone cannot take this path. The same outbox expiry rule applies during normal use and restore.
 
 Desktop delivery captures the native user-message identity inside the same Send acceptance
 operation that proves its text and route. It must not discard that receipt and rediscover the
@@ -1209,6 +1213,13 @@ creation time separately from the local execution clock; legacy canonical assist
 their already-recorded creation stamp. Exact provider-UUID alias replay preserves that original
 stamp. These projection fields never change `seq`, `origin`, local activity or lifecycle ownership.
 
+Reloaded assistant prose can recover its display group from the exact native working/exchange
+UUID pair already retained in a canonically recorded assistant message with a known turn.
+Both parent-based and creation-time-based message keys retain this pair. Reads use the full
+canonical message map so an off-page anchor or conflicting owner cannot change the answer.
+Missing/partial identities, other agents and conflicting response boundaries remain unowned;
+this presentation relation neither merges messages nor assigns `turnId` or completion authority.
+
 The store derives `requestTurns` from exact MCP records that already name a generation, keeping
 the earliest proof position and retaining conflicts as null. Missing legacy indexes rebuild from
 the journal and canonical shards. The recorder reuses this proof after a final, restart or new
@@ -1413,6 +1424,13 @@ Read-only still masks mutation. Only an explicit `browser_tabs new` creates a ta
 attaching never activates one. A soft blue edge glow, without a hard border or text badge,
 identifies an attached tab; release removes the
 indicator and debugger without closing the page. Chrome's own permission/debugger UI remains.
+New tabs begin at their requested URL through `tabs.create`; debugger acquisition no longer
+precedes that navigation on a temporary `about:blank` page. Creation and attachment have separate
+receipts: `created: true` survives an `attachmentError`, retaining the same tab handle for inspection
+or deliberate attachment. A known attachment limit fails before creating a tab. The existing
+bounded readiness wait observes document commit, not completion of every subresource, and releases
+its listeners on closure. It never opens a replacement. Tab lists include pending URL/status and
+separate snapshot/input access hints. These are observations; live guards still own each operation.
 The root debugger session enables Chromium focus emulation while attached, so hidden pages
 continue rendering and accepting input without changing the selected tab or OS foreground.
 Detach removes that emulation. Observation `visibility`/`focused` describe the emulated page;
@@ -1422,9 +1440,29 @@ foreground behavior and are not a browser-tool fallback.
 `mcp/tools-browser.ts` registers eight Desktop tools through the normal kernel, including code
 mode and recording. Screen permits list/attach/release, snapshots, screenshots and diagnostics;
 control permits new/close/navigation/input and page JavaScript. Execution retains exact durable
-session ownership, or the configured shared unattributed principal. Live policy and caller
-attachment are checked at handout and before page input. Active executor/orchestration pages
-are protected from competing browser actions.
+session ownership, or a permitted `request:<id>` while exact attribution is pending. Only truly
+headerless calls use the legacy anonymous principal. At claim, the paired bridge resolves the
+browser's bounded held-request hints through the canonical correlation index. Only request
+principals proved to belong to the current durable session become aliases, including after
+Compact & Resume. Unknown requests and anonymous leases cannot be adopted by guessing. Live
+policy and caller attachment are checked at handout and before page input, including late proof.
+Active executor/orchestration pages are protected from competing browser actions.
+
+`browser_snapshot` can review any chosen HTTP(S) tab without acquiring a debugger, including
+active ChatGPT pages and tabs attached by another caller. This fixed isolated-world reader returns
+`inspectionOnly`, Chrome's opaque `documentId` and a `document:` frame handle, without actionable
+refs or a page UUID. It does not change focus, overlays or existing refs. `mode: inspect` chooses
+the same path on an owned attachment. A normal owned snapshot still returns page/frame-bound
+action refs. `selector` scopes either mode to the first matching CSS subtree; missing/invalid
+selectors report concrete errors instead of silently reading the whole page. `filter` remains a
+literal case-insensitive match. Inspection has an eight-second bound within the existing RPC and
+checks live permission before execution and publication. A late result cannot grant input.
+`format: dom` adds bounded element attributes, layout rectangles and computed CSS through the
+same reader, including noninteractive containers. It preserves the existing text/node/traversal
+budgets and input refs, omits password values and inline handlers, and marks clipped attributes.
+Core opening guidance and Desktop descriptions direct existing-browser reviews to this reader.
+External browser plugins may own a separate empty browser and cannot inherit Desktop's tab handles
+or repair a refused attachment by opening duplicate ChatGPT pages.
 
 `/browser-control` uses the existing authenticated bridge and a wake-only socket topic. The
 backend is statically imported by the module service worker: MV3 rejects dynamic `import()`.
@@ -1436,6 +1474,8 @@ profiles; multiple browsers require explicit selection. The MV3 custodian persis
 one pending result receipt in session storage. After worker reconstruction it renews debugger
 subscriptions; it does not auto-attach a debugger Chrome has cancelled. Detach/unpair/restart
 revoke custody. In-flight work cannot borrow a replacement lease.
+An attach refusal before acquisition removes only its provisional lease. Cleanup may detach
+only a debugger that this attach actually acquired; it cannot cancel the orchestration debugger.
 
 DOM refs belong to a page/frame observation. Real and SPA navigation invalidate old page ids,
 refs and screenshot coordinates. Isolated-world traversal covers open shadow roots and explicit
@@ -1494,6 +1534,9 @@ disconnected pages are skipped; the existing page-reply deadline bounds recorder
 Adopted generation recovery excludes historical assistant nodes above its user question, even
 when hydration remounts them. When a proven new question closes the adopted turn, its answer
 lookup ends before that exact new message, preserving legitimate completion of the prior answer.
+When the exact current question matches the generation, a newly mounted assistant section may
+replace its still-mounted interim section as the native response owner. Reordered or revised
+pre-Send sections cannot replace that owner; a newer question retains its own turn boundary.
 Interim prose, tool progress, refusal/error presentation, interrupted generation and final
 completion remain distinct. Navigation first retires the old epoch; no late callback may record
 or send for it. A settings overlay must not count as a usable hidden composer.
@@ -1503,6 +1546,11 @@ projection. Restart/reinstallation cannot mint a new turn for that same answer a
 detach its recorded MCP proof; adopting the recorded identity emits no new `turn_start`.
 `recordedQuestionId` carries that same response's native question across a partial transcript
 load. Adoption consumes an already-matching Send receipt instead of opening the response again.
+An empty or refused first activity reply does not permanently consume adoption: until this
+document has owned a generation, a later feed may restore the recorded turn when its exact
+question is the current native question. Manual Stop, a newer local generation, bootstrap
+custody or absent/conflicting question proof veto this late adoption. A completed turn cannot
+be re-adopted by a stale feed reply. This uses the existing activity and completion paths.
 An id-less New Chat page navigating to an existing conversation resolves this identity before
 observing its hydrated question or Stop control. An exact witnessed fresh Send keeps its existing
 opening authority; navigation and delayed adoption never fabricate another submitted message.
@@ -1715,6 +1763,11 @@ An adopted document's first Fiber transcript is a history baseline; subsequent n
 compared using the existing retained snapshot and stable message identities. Canonical `seq`
 remains a delivery cursor; `contentSeq`/origin tracks actual work. Explicit historical backfill
 has no new work stamp. Recent-work reads cannot let a late old-row revision hide newer work.
+An existing user message reserialized after reload keeps its work stamp unless the recorder
+observed it as newly authored. Its text and history cursor still update. A different user
+message identity remains new work. Historical text changes cannot cancel a pending Continue
+or consume its Stop deadline. The outbox retains the actual cancellation reason and logs
+the committed transition once; a cancelled card is not a delivery receipt.
 
 The existing repair's stable `progressId` is the Continue episode identity stored on its outbox
 row. Rehydration, cancellation and canonical revisions cannot mint a replacement for that same
@@ -2118,7 +2171,12 @@ Recorder activity distinguishes an accepted new `turn_start` from later captured
 Output alone cannot retract an explicit completed worker report, even when first captured
 after `finish`. A real new turn or exact tool call can wake that worker; fresh output may
 still recover a worker put to sleep only because it went quiet. No second durable clock is added.
-Invited/waking workers retain the existing delivery deadlines. A current canonical final
+Invited workers retain the existing bootstrap deadlines. A waking worker has one absolute
+three-minute delivery attempt; only proven delivery grants the existing additional silence
+budget. Redeeming does not renew the deadline, and expiry never authorizes another send.
+Timer and maintenance expiry share the same claim-based diagnostic and retain specific errors.
+Historical worker failures remain visible in status and history, but only live workers produce
+the transient waiting caption. A current canonical final
 uses the same completion reader as Continue/Goal and releases the worker before silence,
 including a textless native final or missing page-local turn identity.
 The bridge listens to existing broker state changes to retire old activity grants and repair
@@ -2321,9 +2379,10 @@ final bounded decision schema before publication. Goal may return stop/no reply.
 a continuation and has a bounded three-retry invalid-stop policy. API SSE is used when publishing
 progress; legacy plain streaming is compatibility handling, not another driver authority.
 Cancellation/timeout must release only that exact attempt and leave an honest error/retry state.
-Cancelled automatic finish drafts are historical outbox records, displayed at their creation time
+Cancelled automatic Continue and finish drafts are historical outbox records, displayed at their creation time
 with a timestamp. They must not remain beneath every newer message as though still awaiting Send.
 Keep manual failed-send notices and genuinely pending instructions in their existing controls.
+Creation time does not establish when the renderer first displayed a card or when it was cancelled.
 
 Reply obligations are durable and bounded (12 hours / 200 rows) with handled tombstones so old
 browser observations do not rearm discharged work. A provisional exact `turn:<id>` observation
@@ -2697,7 +2756,20 @@ windows have separate images/frames; same process alone is insufficient ownershi
 Public state retains observed window focus, accessibility truncation and provider failures;
 frame ids/dimensions precede long accessibility text. Pixels appear once in native MCP image
 blocks, never duplicated as data URLs in `structuredContent.value`. A text-provider failure
-preserves a usable screenshot and its explicit diagnostic. Offscreen/disabled controls are marked.
+preserves a usable screenshot and its explicit diagnostic. Conversely, `CAPTURE_FAILED` preserves
+requested UIA controls in the same transaction and reports `screenshot_error` with no image/frame
+authority. Screenshot-only requests, stale geometry and identity failures still fail explicitly;
+two failed observation channels are not success. Offscreen/disabled controls are marked.
+
+The Window2 result also retains native `state` (foreground/open/minimized). `get_window_state`
+accepts bounded `query` (name/automation id), `role` and `max_elements` search options. They imply
+text unless explicitly disabled and filter during traversal, rather than slicing the first 100
+controls. Filtered results issue fresh indexes. Zero-bounds controls with advertised UIA actions
+remain semantically targetable; they never receive image coordinates or supply document text.
+Operational Desktop errors expose their original code, nullable completion evidence and a concrete
+recovery step. Recovery never dispatches another input or treats a target failure as global
+read-only mode. Preserve exact identity, generation, geometry, clipboard and browser policy checks.
+See `docs/worklog-2026-09-19-computer-use-audit.md` for the forty-chat audit and regression coverage.
 
 For Chromium browser windows, `BrowserRootView` owns the current accessibility tree, including
 the address bar and displayed document. Legacy renderer HWNDs can expose old tabs with plausible
@@ -2715,11 +2787,16 @@ original native owner. Public coordinates are pixels within the selected returne
 its declared dimensions match its PNG. The existing native frame owner converts through the
 capture origin/scale without a second facade DPI conversion. Named punctuation follows the target
 thread's keyboard layout, clicks support counts 1–3, and drags interpolate over a bounded duration.
+Literal plus chords (`+`, `Control_L++`) and named `plus` use the same parser for native input and
+browser policy; malformed chords fail before any observation is consumed or input dispatched.
 Multiline text uses the existing Electron clipboard owner and targeted paste, with clipboard-write
 permission checked before the batch. Native Unicode typing refuses multiline text before input.
 Paste verifies target activation before replacing the clipboard and checks focus again at
 physical injection. Activation uses bounded actual foreground observation after one attempt;
 an immediate Windows return value alone cannot establish the result.
+The focus attempt temporarily joins distinct helper, foreground and target thread pairs and
+detaches only successful joins in reverse order, including exceptional exits. This changes
+activation preparation; the actual foreground and input-target checks still own permission to type.
 UIA actions resolve exact snapshot refs without a physical fallback for unsupported patterns.
 App enumeration joins installed and running apps only by exact native AUMID or executable path,
 including their windows and observed running status. Launch accepts a Shell app ID or explicit

@@ -5,7 +5,8 @@ import { z } from 'zod';
 
 const state = vi.hoisted(() => ({
   caps: {screen:true,control:true}, unattributed:true,
-  caller: null as null | {sessionId:string;conversationId:string},
+  caller: null as null | {sessionId?:string;conversationId?:string;requestId?:string},
+  proofs: new Map<string,{sessionId:string;conversationId:string}>(),
   attachment:'current', blocked:false, execute:vi.fn(), image:vi.fn(async()=> 'image/jpeg')
 }));
 vi.mock('../src/main/config.js',()=>({getConfig:()=>({multiAgent:{allowUnattributedCalls:state.unattributed}}),effectiveCapabilities:()=>state.caps}));
@@ -13,6 +14,7 @@ vi.mock('../src/main/mcp/call-context.js',()=>({currentCall:()=>({caller:state.c
 vi.mock('../src/main/mcp/kernel.js',()=>({fail:(text:string)=>({isError:true,content:[{type:'text',text}]}),failIdentity:(text:string)=>({isError:true,content:[{type:'text',text}]})}));
 vi.mock('../src/main/browser-control.js',()=>({browserControl:{execute:state.execute}}));
 vi.mock('../src/main/session/store.js',()=>({conversationAttachment:async()=>state.attachment}));
+vi.mock('../src/main/session/correlation.js',()=>({requestCorrelation:(id:string)=>state.proofs.get(id) ?? null}));
 vi.mock('../src/main/session/blocked-chats.js',()=>({isChatBlocked:()=>state.blocked}));
 vi.mock('../src/main/session/continuation.js',()=>({compactingConversation:()=>false}));
 vi.mock('../src/main/agents.js',()=>({dormantWorkerNotice:()=>null,endedWorkerNotice:()=>null,retiredWorkerForConversation:()=>null}));
@@ -32,9 +34,20 @@ const pageId='22222222-2222-4222-8222-222222222222';
 beforeEach(()=>{
   state.caps={screen:true,control:true};state.unattributed=true;state.caller=null;state.attachment='current';state.blocked=false;
   state.execute.mockReset().mockResolvedValue({value:{ok:true}});state.image.mockClear();
+  state.proofs.clear();
 });
 
 describe('Desktop browser invocation boundary',()=>{
+  it('admits bounded DOM detail inspection with screen permission alone',async()=>{
+    const reg=registrar();state.caps.control=false;
+    expect((await reg.call('browser_snapshot',{tabId,mode:'inspect',format:'dom',selector:'main',maxNodes:30,maxChars:4000})).isError).not.toBe(true);
+    expect(state.execute.mock.calls[0]![0]).toBe('browser_snapshot');
+    expect(state.execute.mock.calls[0]![1]).toMatchObject({format:'dom',selector:'main',maxNodes:30,maxChars:4000});
+    const schema=reg.tools.get('browser_snapshot')!.schema;
+    expect(schema.safeParse({tabId,format:'script'}).success).toBe(false);
+    expect(schema.safeParse({tabId,format:'dom',maxChars:24001}).success).toBe(false);
+  });
+
   it('applies live input policy to new/close even though tabs also has read operations',async()=>{
     const reg=registrar();state.caps.control=false;
     expect((await reg.call('browser_tabs',{action:'list'})).isError).not.toBe(true);
@@ -57,6 +70,23 @@ describe('Desktop browser invocation boundary',()=>{
     const call=state.execute.mock.calls[0]!;expect(call.slice(2,4)).toEqual(['session:session-a','chat-a']);
     expect(await call[4]()).toBe(true);state.attachment='superseded';expect(await call[4]()).toBe(false);
     state.attachment='current';state.blocked=true;expect(await call[4]()).toBe(false);
+  });
+  it('gives unresolved requests their own browser principal and upgrades only with exact proof',async()=>{
+    const reg=registrar();
+    state.caller={requestId:'request-a'};
+    await reg.call('browser_tabs',{action:'attach',tabId});
+    const original=state.execute.mock.calls[0]!;
+    expect(original[2]).toBe('request:request-a');
+    expect(await original[4]()).toBe(true);
+    state.caller={requestId:'request-b'};
+    await reg.call('browser_tabs',{action:'attach',tabId});
+    expect(state.execute.mock.calls[1]![2]).toBe('request:request-b');
+    state.proofs.set('request-a',{sessionId:'session-a',conversationId:'chat-a'});
+    state.caller={requestId:'request-a'};
+    await reg.call('browser_tabs',{action:'attach',tabId});
+    expect(state.execute.mock.calls[2]!.slice(2,4)).toEqual(['session:session-a','chat-a']);
+    state.blocked=true;
+    expect(await original[4]()).toBe(false);
   });
   it('validates action targets and required values before admitting a command',()=>{
     const schema=registrar().tools.get('browser_action')!.schema;

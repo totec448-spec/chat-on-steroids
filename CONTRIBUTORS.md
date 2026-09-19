@@ -78,6 +78,19 @@ Compaction uses the existing exactly attributed MCP activity grant and rechecks 
 storage reads. Health observations share one bounded map, including unannounced first sightings.
 The stacked blind-page reload subsystem from #280 is not added.
 
+The September 19 review adapts [@Maximapple](https://github.com/Maximapple)'s
+departed-chat Continue diagnosis ([#298](https://github.com/totec448-spec/chat-on-steroids/pull/298)),
+historical worker wait-caption fix ([#299](https://github.com/totec448-spec/chat-on-steroids/pull/299)),
+and wake expiry diagnostics and delivery allowance ([#305](https://github.com/totec448-spec/chat-on-steroids/pull/305)).
+The outbox repair retains exact late receipts and authored queue entries; it does not release
+uncertain sends by age. Waiting captions use live workers without changing historical counts.
+Timer and maintenance expiry share one diagnostic and a bounded, non-replaying wake attempt.
+
+[@okayamajwcc-coder](https://github.com/okayamajwcc-coder) / Masatoshi Shisaka contributed the
+Windows target-thread focus repair ([#308](https://github.com/totec448-spec/chat-on-steroids/pull/308)).
+It is adapted with cleanup covering attachment exceptions and the existing actual foreground
+checks. The separate macOS input-validation proposal in #309 is not incorporated by this review.
+
 ## Reports, review and proposed work
 
 [@raxy24](https://github.com/raxy24)'s report in

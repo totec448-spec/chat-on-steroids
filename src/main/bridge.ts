@@ -266,8 +266,11 @@ export const WORKER_BOOTSTRAP_LIMIT_MS = 120_000;
  * thirty-second floor, then has to focus or reopen the tab and type — and several wakes
  * from one prime message go one at a time. At thirty seconds the third of three was being
  * dropped as "waiting too long" while the text was on its way into the chat.
+ * Slow successful pickups have since been reported near the ordinary ninety-second
+ * deadline. Keep one absolute three-minute wake attempt; redeem never renews it and
+ * expiry does not authorize another send.
  */
-export const REVIVAL_DEADLINE_MS = COMMAND_DEADLINE_MS;
+export const REVIVAL_DEADLINE_MS = 3 * 60_000;
 /**
  * How long a delivered wake may go without the worker's first exact tool call.
  *
@@ -1839,7 +1842,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (typeof body.id !== 'string' || typeof body.epoch !== 'string' || body.id.length > 100 || body.epoch.length > 100)
       return json(res, 400, { error: 'invalid_browser_request' }, origin);
     if (body.action === 'claim') {
-      const command = await browserControl.claim(body.browserId, body.id, body.epoch);
+      if (body.owners !== undefined && (!Array.isArray(body.owners) || body.owners.length > 32 ||
+          !body.owners.every(owner => typeof owner === 'string' && owner.startsWith('request:') && owner.length <= 1024)))
+        return json(res, 400, { error: 'invalid_browser_owners' }, origin);
+      const proofs = ((body.owners || []) as string[]).flatMap(owner => {
+        const sessionId = requestCorrelation(owner.slice('request:'.length))?.sessionId;
+        return sessionId ? [{ owner, sessionId }] : [];
+      });
+      const command = await browserControl.claim(body.browserId, body.id, body.epoch, proofs);
       return json(res, command ? 200 : 409, { command }, origin);
     }
     if (body.action === 'check') {
@@ -8181,8 +8191,15 @@ function expire(command: Command): void {
     retire(command, 'its worker is no longer waiting to be woken');
     return;
   }
-  drop(command, command.lastError ?? 'the chat this app opened did not report back in time');
+  drop(command, commandExpiryReason(command));
   deliver();
+}
+
+/** Timer and sweep describe the same delivery evidence, preserving a recorded failure. */
+function commandExpiryReason(command: Command): string {
+  return command.lastError ?? (command.claimedAt === null
+    ? 'the browser did not claim this command before its deadline'
+    : 'the chat this app opened did not report back in time');
 }
 
 /** Finishes a command that has nothing left to do, timer and all. */
@@ -8429,7 +8446,8 @@ function tidyCommands(): void {
       ? now >= revivalDeadlineAt(command)
       : !automaticResume && now - command.createdAt > COMMAND_TTL_MS;
     if (stale) {
-      drop(command, 'it has been waiting too long to still be what the user expects');
+      drop(command, command.spec.type === 'revive' ? commandExpiryReason(command)
+        : 'it has been waiting too long to still be what the user expects');
     }
   }
 }

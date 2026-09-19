@@ -277,8 +277,8 @@ it.runIf(process.platform === 'win32').each([true, false])('routes sky through D
     callers.push(currentCall()!.caller.sessionId!);
     return { windows: [window], screen: { x: 0, y: 0, width: 2, height: 2 } } as never;
   });
-  vi.spyOn(desktopBackend, 'getWindowState').mockResolvedValue({ window, elements: [{ ref: 'fixture-ref', role: 'Button', name: 'Owned button', actions: ['invoke'] }],
-    screenshot: { frameId: 1, data, windowId: 77, region: { x: 0, y: 0, width: 2, height: 2 }, scale: 1 }, related: []
+  vi.spyOn(desktopBackend, 'getWindowState').mockResolvedValue({ window, elements: [{ ref: 'fixture-ref', role: 'Button', name: 'Owned button', actions: ['invoke'], bounds: { x: 0, y: 0, width: 2, height: 2 } }],
+    screenshot: { frameId: 1, data, width: 2, height: 2, windowId: 77, region: { x: 0, y: 0, width: 2, height: 2 }, scale: 1 }, related: []
   } as never);
   const action = vi.spyOn(desktopBackend, 'act').mockImplementation(async () => {
     callers.push(currentCall()!.caller.sessionId!);

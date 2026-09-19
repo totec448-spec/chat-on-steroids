@@ -99,6 +99,24 @@ function Find-UiElements($request) { throw 'UIA_FAILED: fixture provider unavail
 $request = '{"op":"snapshot","id":42,"includeScreenshot":true,"includeUi":true}' | ConvertFrom-Json
 $result = Handle-Request $request
 if ($result.ok -ne $true -or $result.width -ne 10 -or $result.uiUnavailable.code -ne 'UIA_FAILED') { throw 'accessibility failure discarded screenshot' }
+function Capture-Target($request, $forcedWindow) { throw 'CAPTURE_FAILED: target window is minimized' }
+function Find-UiElements($request) { return @{ snapshotId = 4; elements = @(@{name='Available control'}); visited=1; truncated=$false } }
+$result = Handle-Request $request
+if ($result.ok -ne $true -or $result.screenshotUnavailable.code -ne 'CAPTURE_FAILED' -or $result.elements[0].name -ne 'Available control' -or $result.width) { throw 'pixel failure discarded usable accessibility or invented pixels' }
+$request.includeScreenshot = $true; $request.includeUi = $false
+try { $null = Handle-Request $request; throw 'screenshot-only failure was hidden' } catch {
+  if ($_.Exception.Message -notmatch '^CAPTURE_FAILED:') { throw }
+}
+$request.includeUi = $true
+function Capture-Target($request, $forcedWindow) { throw 'STALE_FRAME: changed geometry' }
+try { $null = Handle-Request $request; throw 'stale geometry was hidden' } catch {
+  if ($_.Exception.Message -notmatch '^STALE_FRAME:') { throw }
+}
+function Capture-Target($request, $forcedWindow) { throw 'CAPTURE_FAILED: no pixels' }
+function Find-UiElements($request) { throw 'provider unavailable' }
+try { $null = Handle-Request $request; throw 'two unavailable channels were presented as success' } catch {
+  if ($_.Exception.Message -notmatch 'CAPTURE_FAILED:.*UIA_FAILED:') { throw }
+}
 Write-Output 'WINDOWS_INPUT_PROBE_OK'
 `;
     const dir = mkdtempSync(path.join(tmpdir(), 'cos-input-test-'));
