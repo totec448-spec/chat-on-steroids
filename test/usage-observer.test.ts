@@ -110,6 +110,28 @@ function harness() {
 }
 
 describe('MAIN-world usage projection', () => {
+  it('joins a UUID request from a complete root-add event, including socket delivery, without copying content', async () => {
+    const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', request_id = '11111111-2222-4333-8444-555555555555';
+    const frame = `data: ${JSON.stringify({ p: '', o: 'add', v: { conversation_id, message: { metadata: { request_id }, content: { parts: ['PRIVATE_TEST_TEXT'] } } } })}\n\n`;
+    await h.feedSse([frame.slice(0, 73), frame.slice(73)]);
+    expect(h.posts).toEqual([{ type: 'cos-request-origin', conversationId: conversation_id, requestIds: [request_id], observedAt: expect.any(Number) }]);
+    h.socket().receive([{ type: 'message', payload: { type: 'conversation-turn-stream', payload: {
+      type: 'stream-item', conversation_id, encoded_item: frame.replace(request_id, '66666666-2222-4333-8444-555555555555')
+    } } }]);
+    expect(h.posts[1]?.requestIds).toEqual(['66666666-2222-4333-8444-555555555555']);
+    expect(JSON.stringify(h.posts)).not.toContain('PRIVATE_TEST_TEXT');
+  });
+  it('does not join partial root patches or quoted UUID request metadata', async () => {
+    const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', request_id = '11111111-2222-4333-8444-555555555555';
+    for (const event of [
+      { p: '/message', o: 'add', v: { conversation_id, metadata: { request_id } } },
+      { p: '', o: 'replace', v: { conversation_id, metadata: { request_id } } },
+      { p: '', o: 'add', v: { conversation_id, message: { content: { metadata: { request_id } } } } },
+      { p: '', o: 'add', v: { conversation_id } },
+      { p: '/metadata', o: 'add', v: { request_id } }
+    ]) await h.feedSse([`data: ${JSON.stringify(event)}\n\n`]);
+    expect(h.posts).toEqual([]);
+  });
   it('observes the Pro socket handoff with exact inner/outer conversation proof and shares HTTP deduplication', async () => {
     const h = harness(), socket = h.socket();
     expect(socket).toBeInstanceOf(h.nativeSocket);

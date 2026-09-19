@@ -41,11 +41,11 @@
   'use strict';
 
   /** Bumped when the descriptor shape changes, so a stale pair cannot half-understand. */
-  const VERSION = 13;
+  const VERSION = 15;
   // The MAIN world survives an extension reload because the ChatGPT document survives it.
   // Recovery may therefore execute this file again in a page that still has an older helper
-  // listener. Keep at most one listener for this protocol version; content.js rejects older
-  // versions, so a v5 listener can coexist harmlessly until the document itself navigates.
+  // listener. Retire it across versions too: picker/plugin replies use their own v1
+  // protocol, so an older listener can otherwise win with an empty or stale snapshot.
   const ACTIVE_HELPER = '__clfFiberHelper';
   const ASK = 'clf-fiber-ask';
   const REPLY = 'clf-fiber-reply';
@@ -71,9 +71,11 @@
   /** Public generated-image descriptors retained per turn. Pixels never cross this boundary. */
   const MAX_GENERATED_IMAGES = 200;
   /** ChatGPT's own assistant turn sections, which is where a turn's message model hangs. */
-  const TURN_SECTION = 'section[data-testid^="conversation-turn"]';
+  // Shell anchors and typed items adapted from @ehkogh's #318. Keep one wire format.
+  const SHELL_TURN = '[data-app-shell-main-surface] [data-thread-find-target="conversation"] [data-turn-key]';
+  const TURN_SECTION = `section[data-testid^="conversation-turn"], ${SHELL_TURN}`;
   /** ChatGPT-rendered authored prose. Tool rows and this extension's own surfaces are excluded. */
-  const MARKDOWN = '.markdown';
+  const MARKDOWN = '.markdown, [data-content-search-unit-key$=":assistant"] [data-markdown-text-style="assistant-message"]';
   const TOOL = 'span[class*="tool-message"], div.pointer-events-none.contents';
   const GENERATED_IMAGE = '[class~="group/imagegen-image"] img';
   const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot';
@@ -242,10 +244,11 @@
         conversations.set(conversation, serverId);
       }
       const values = [props.clientThreadId, props.conversationId, conversation && conversation.id,
+        Array.isArray(props.entry?.turn?.items) ? props.entry.conversationId : null,
         conversations.get(conversation), turn && turn.clientThreadId, turn && turn.conversationId];
       for (let index = 0; index < values.length; index++) {
         const value = str(values[index]);
-        if (!value || value.startsWith('WEB:')) continue;
+        if (!value || value.startsWith('WEB:') || value.startsWith('local-chatgpt:')) continue;
         if (found && found !== value) return { conversationId: null, conflict: true };
         found = value;
       }
@@ -276,7 +279,8 @@
         preamble = candidates.find(candidate => item.key === `preamble-${candidate.id}`)?.id;
         if (!preamble) return null;
       }
-      for (const id of [direct, scoped, preamble]) {
+      const typed = item?.type === 'assistant-message' && scope.conversationId === conversationId ? str(item.messageId) : null;
+      for (const id of [direct, scoped, preamble, typed]) {
         if (!id) continue;
         if (!candidates.some(candidate => candidate.id === id)) return null;
         if (found && found !== id) return null;
@@ -1387,11 +1391,73 @@
    * exists for is the turn that rendered *no* row: climbing from a row cannot reach a turn
    * that has none, which is exactly the turn whose calls went missing.
    */
+  /** Only the exact native local/server pair is read from the cache. No cached messages,
+   * branch walk, retained client or inferred relationship to location.pathname. */
+  function shellConversation(fiber, localId, evidence) {
+    if (evidence.conflict || !localId?.startsWith('local-chatgpt:')) return evidence;
+    let found = evidence.conversationId;
+    for (let at = fiber, up = 0; at && up < 400; up++, at = at.return) {
+      const client = at.memoizedProps?.client;
+      if (typeof client?.getQueryCache !== 'function') continue;
+      const queries = client.getQueryCache()?.getAll();
+      if (!Array.isArray(queries) || queries.length > 512) break;
+      for (const query of queries) {
+        const key = query?.queryKey;
+        if (!Array.isArray(key) || key.length !== 2 || key[0] !== 'chatgpt-conversation-details' || key[1]?.clientConversationId !== localId) continue;
+        const server = key[1].serverConversationId;
+        if (typeof server !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(server)) continue;
+        if (found && found !== server) return { conversationId: null, conflict: true };
+        found = server;
+      }
+      break;
+    }
+    return { conversationId: found, conflict: false };
+  }
+  /** Translate only publicly identified items in the mounted exchange. Missing item ids
+   * stay missing; a stopped turn does not manufacture replies to its tool calls. */
+  function shellTurnSource(fiber, section, turnId) {
+    let entry = null;
+    for (let at = fiber, up = 0; at && up < 16; up++, at = at.return) {
+      if (Array.isArray(at.memoizedProps?.entry?.turn?.items)) { entry = at.memoizedProps.entry; break; }
+    }
+    if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_ROWS) return null;
+    const messages = [], calls = [], slots = [], seen = new Set();
+    const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
+    let work = 0;
+    for (const [index, item] of entry.turn.items.entries()) {
+      if (++work > MAX_ROWS) return null;
+      if (item?.type === 'user-message' || item?.type === 'assistant-message') {
+        const user = item.type === 'user-message', id = str(item.messageId) || (user ? str(item.serverMessageId) : null);
+        if (!id) continue;
+        if (!remember(id) || (user && item.serverMessageId && item.messageId && item.serverMessageId !== item.messageId)) return null;
+        const role = user ? 'user' : 'assistant', text = user ? item.message : item.content;
+        const final = !user && item.phase === 'final_answer';
+        const completed = final && item.completed === true && entry.turn.status === 'complete';
+        messages.push({ id, author: { role }, content: { content_type: 'text', parts: [typeof text === 'string' ? text : ''] },
+          channel: user ? null : final ? 'final' : 'commentary', end_turn: completed,
+          status: completed ? 'finished_successfully' : 'in_progress', metadata: {} });
+        const key = `${turnId}:${index}:${role}`;
+        const nodes = [...section.querySelectorAll('[data-content-search-unit-key]')].filter(node =>
+          node.closest('[data-turn-key]') === section && node.getAttribute('data-content-search-unit-key') === key);
+        if (nodes.length === 1) slots.push({ node: nodes[0], id });
+      } else if (item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items)) {
+        for (const step of item.items) {
+          if (++work > MAX_ROWS) return null;
+          if (step?.type !== 'mcp-tool-call' || !ourApp(step.invocation?.server)) continue;
+          const id = str(step.callId), tool = toolName(step.invocation?.tool);
+          if (!id || !tool) continue;
+          if (!remember(id) || calls.length >= MAX_CALLS) return null;
+          calls.push({ messageId: id, tool, order: calls.length, answered: step.completed === true, requestId: null, createTime: null });
+        }
+      }
+    }
+    return { entry, messages, calls, slots };
+  }
   function turnsOf(scanToken) {
     const out = [];
     let sections;
     try {
-      sections = document.querySelectorAll(TURN_SECTION);
+      sections = [...document.querySelectorAll(TURN_SECTION)].filter(section => !section.closest(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`));
     } catch {
       return out;
     }
@@ -1407,7 +1473,7 @@
     const groups = [];
     for (let at = 0; at < sections.length; at++) {
       const section = sections[at];
-      const id = str(section.getAttribute('data-turn-id'));
+      const id = section.matches?.(SHELL_TURN) ? str(section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key')) : str(section.getAttribute('data-turn-id'));
       const previous = groups[groups.length - 1];
       if (id && previous && previous.turnId === id) previous.sections.push(section);
       else groups.push({ turnId: id, sections: [section] });
@@ -1441,15 +1507,17 @@
       try {
         const fiber = fiberOf(section);
         if (!fiber) continue;
-        const messages = turnMessagesOf(fiber);
+        const shell = section.matches?.(SHELL_TURN) ? shellTurnSource(fiber, section, group.turnId) : null;
+        if (section.matches?.(SHELL_TURN) && !shell) continue;
+        const messages = shell ? shell.messages : turnMessagesOf(fiber);
         const codeReceipts = codeModeReceipts(messages || []);
         const codeModeCalls = (messages || []).filter(message => message && message.author &&
           message.author.role === 'assistant' && message.recipient === 'functions.exec').slice(0, MAX_CALLS)
           .map(message => ({ messageId: str(message.id), requestId: str(message.metadata && message.metadata.request_id),
             answered: codeReceipts.get(message.id) === true }));
-        const calls = callsOf(messages, codeReceipts);
+        const calls = shell ? shell.calls : callsOf(messages, codeReceipts);
         const requests = requestIdsOf(messages);
-        const conversation = conversationEvidenceOf(fiber);
+        const conversation = shell ? shellConversation(fiber, shell.entry.conversationId, conversationEvidenceOf(fiber)) : conversationEvidenceOf(fiber);
         const exactAnchors = new Map();
         const exactThoughtRows = new Map();
         const exactImageNodes = new Map();
@@ -1457,7 +1525,7 @@
         const before = turnBudget.remaining;
         const renderedMessages = renderedMessagesOf(group.sections, messages, turnBudget, exactAnchors, conversation.conversationId);
         responseBudget.remaining -= before - turnBudget.remaining;
-        const nativeActivities = nativeActivitiesOf(group.sections, messages, exactThoughtRows);
+        const nativeActivities = shell ? { events: [], notifications: [] } : nativeActivitiesOf(group.sections, messages, exactThoughtRows);
         const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes);
         const activities = nativeActivities.events;
         const endMessageId = turnEndMessageId(messages);
@@ -1489,6 +1557,16 @@
           const stamped = group.sections[sectionAt];
           if (stamped) desiredTurnStamps.set(stamped, `${scanToken}:${index}`);
         }
+        if (shell) {
+          for (const slot of shell.slots) {
+            desiredTurnStamps.set(slot.node, `${scanToken}:${index}`);
+            if (!conversation.conflict) desiredMessageStamps.set(slot.node, `${scanToken}:${index}:${encodeURIComponent(slot.id)}`);
+          }
+          // Busy hint only, never a completion receipt or a Stop action target.
+          const running = shell.entry.turn.status === 'in_progress' ? location.pathname : null;
+          if (running && section.getAttribute('data-clf-shell-running') !== running) section.setAttribute('data-clf-shell-running', running);
+          else if (!running) section.removeAttribute('data-clf-shell-running');
+        }
         if (!conversation.conflict) for (const [node, id] of exactAnchors) {
           desiredMessageStamps.set(node, `${scanToken}:${index}:${encodeURIComponent(id)}`);
         }
@@ -1514,7 +1592,7 @@
       const section = sections[at];
       try {
         if (!section || !section.getAttribute) continue;
-        for (const node of section.querySelectorAll('[data-clf-fiber-message], .markdown')) {
+        for (const node of section.querySelectorAll(`[data-clf-fiber-message], [data-content-search-unit-key], ${MARKDOWN}`)) {
           const wantedMessage = desiredMessageStamps.get(node);
           const currentMessage = node.getAttribute('data-clf-fiber-message');
           if (wantedMessage === undefined) {
@@ -1535,12 +1613,15 @@
             if (currentImage !== null) node.removeAttribute('data-clf-fiber-image');
           } else if (currentImage !== wantedImage) node.setAttribute('data-clf-fiber-image', wantedImage);
         }
-        const wanted = desiredTurnStamps.get(section);
-        const current = section.getAttribute('data-clf-fiber-turn');
-        if (wanted === undefined) {
-          if (current !== null && section.removeAttribute) section.removeAttribute('data-clf-fiber-turn');
-        } else if (current !== wanted && section.setAttribute) {
-          section.setAttribute('data-clf-fiber-turn', wanted);
+        if (!desiredTurnStamps.has(section)) section.removeAttribute('data-clf-shell-running');
+        for (const stamped of [section, ...section.querySelectorAll('[data-content-search-unit-key]')]) {
+          const wanted = desiredTurnStamps.get(stamped);
+          const current = stamped.getAttribute('data-clf-fiber-turn');
+          if (wanted === undefined) {
+            if (current !== null && stamped.removeAttribute) stamped.removeAttribute('data-clf-fiber-turn');
+          } else if (current !== wanted && stamped.setAttribute) {
+            stamped.setAttribute('data-clf-fiber-turn', wanted);
+          }
         }
       } catch {
         // One hostile/stale DOM node must not cost the remaining turns their evidence.
@@ -1611,15 +1692,33 @@
   function pickerSnapshot() {
     // The closed native trigger retains the same picker owner. Passive recording
     // must not depend on discovery opening its portal first.
-    const form = document.querySelector('#prompt-textarea')?.closest('form');
-    const triggers = [...(form?.querySelectorAll('button[aria-haspopup="menu"]') || [])]
-      .filter(node => !node.closest(`${OWN_SURFACES},[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 &&
+    const form = document.querySelector('#prompt-textarea, form[data-chatgpt-composer] [contenteditable="true"][role="textbox"]')?.closest('form');
+    const reported = '[data-codex-intelligence-trigger],[data-composer-navigation-target="reasoning"]';
+    const triggers = [...new Set([...(form?.querySelectorAll('button[aria-haspopup="menu"]') || []), ...document.querySelectorAll(reported)])]
+      .filter(node => node.matches('button,[role="button"]') && !node.closest(`${OWN_SURFACES},[data-testid^="conversation-turn"],[data-message-author-role],.markdown,[contenteditable],[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 &&
         node.id !== 'composer-plus-btn' && node.getAttribute('data-testid') !== 'composer-plus-btn');
-    const node = document.querySelector('[data-testid="composer-intelligence-picker-content"]') || (triggers.length === 1 ? triggers[0] : null);
+    const candidates = [];
+    if (triggers.length <= 8) for (const trigger of triggers) {
+      try {
+        const picker = readPickerSnapshot(trigger) || readShellPickerSnapshot(trigger);
+        if (picker) candidates.push({ node: trigger, picker });
+      } catch { /* An unrelated native menu is not picker evidence. */ }
+    }
+    const specific = candidates.filter(candidate => candidate.node.matches(reported));
+    const identified = specific.length === 1 ? specific[0] : candidates.length === 1 ? candidates[0] : null;
+    const native = triggers.filter(trigger => trigger.matches(reported));
+    const fallback = native.length === 1 ? native[0] : triggers.length === 1 ? triggers[0] : null;
+    const node = document.querySelector('[data-testid="composer-intelligence-picker-content"], [data-model-picker-view]') || identified?.node || fallback;
     let state = null;
-    try { state = readPickerSnapshot(node); } catch { /* Unknown state invalidates prior proof. */ }
-    const selected = state?.choices.find(choice => choice.bucket === state.currentBucket && choice.available) ||
-      (triggers.length === 1 && node === triggers[0] ? closedPickerSelection(node) : null);
+    try { state = identified?.picker || readPickerSnapshot(node); } catch { /* Unknown state invalidates prior proof. */ }
+    const selected = state ? state.choices.find(choice => choice.bucket === state.currentBucket && choice.available)
+      : (node && node === fallback ? closedPickerSelection(node) : null);
+    const provenTrigger = identified?.node || (selected && node === fallback ? fallback : null);
+    for (const trigger of triggers) {
+      if (trigger !== provenTrigger) trigger.removeAttribute('data-clf-picker-route');
+      else if (trigger.getAttribute('data-clf-picker-route') !== location.pathname) trigger.setAttribute('data-clf-picker-route', location.pathname);
+      if (trigger !== node) for (const attribute of ['data-clf-selected-model', 'data-clf-selected-effort', 'data-clf-selected-route']) trigger.removeAttribute(attribute);
+    }
     for (const [attribute, value] of [['data-clf-selected-model', selected?.id], ['data-clf-selected-effort', selected?.effort], ['data-clf-selected-route', selected && location.pathname]]) {
       if (!value) node?.removeAttribute(attribute);
       else if (node.getAttribute(attribute) !== value) node.setAttribute(attribute, value);
@@ -1630,8 +1729,12 @@
   // Its own ancestor carries the current execution model; its visible label
   // carries the selected effort. These are observation, never catalog discovery.
   function closedPickerSelection(node) {
-    const effort = ({ instant: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high',
-      'extra high': 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[String(node.textContent || '').trim().toLowerCase()];
+    const machine = node.getAttribute('data-selected-reasoning-effort');
+    // The reported alternate trigger exposes a locale-independent selected effort.
+    // Unknown explicit values invalidate proof rather than falling back to its caption.
+    const effort = machine !== null ? (['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(machine) ? machine : null)
+      : ({ instant: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high',
+        'extra high': 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[String(node.textContent || '').trim().toLowerCase()];
     if (!effort) return null;
     let model = null;
     for (let fiber = fiberOf(node), up = 0; fiber && up < MAX_CLIMB; up++, fiber = fiber.return) {
@@ -1654,7 +1757,7 @@
       if (data.versions.length > 20 || !Array.isArray(state.bucketSelections) || state.bucketSelections.length > 12) return null;
       const id = value => typeof value === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(value) ? value : null;
       // Native version groups may have spaces; execution slugs retain their strict contract.
-      const groupId = value => typeof value === 'string' && /^[a-zA-Z0-9._ -]{1,80}$/.test(value) && value.trim() === value && value.trim() ? value : null;
+      const groupId = value => typeof value === 'string' && value.length <= 80 && /^[\p{L}\p{N}._ -]+$/u.test(value) && value.trim() === value && value.trim() ? value : null;
       const label = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 80 ? value.trim() : null;
       const effortOf = choice => choice.category?.modelLane === 'pro' ? 'pro'
         : ['auto', 'instant'].includes(choice.category?.modelLane) ? 'none'
@@ -1662,8 +1765,10 @@
         : ({ min: 'low', standard: 'medium', extended: 'high', max: 'xhigh', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', ultra: 'ultra' })[choice.thinkingEffort] || null;
       const choices = state.bucketSelections.map(choice => {
         const name = label(choice.category?.shortLabel);
-        const familyId = groupId(choice.category?.modelVersion) || id(choice.modelSlug);
-        const family = data.versions.find(version => version.id === familyId);
+        // Native navigation groups may contain spaces or localized names. Those
+        // are not execution ids: retain the exact provider slug for such families.
+        const familyId = id(choice.category?.modelVersion) || id(choice.modelSlug);
+        const family = data.versions.find(version => version.id === choice.category?.modelVersion);
         return { bucket: choice.bucket, id: id(choice.modelSlug),
           label: name && (/^\d/.test(name) ? `GPT-${name}` : name), effort: effortOf(choice),
           familyId, familyLabel: label(family?.displayTextForIntelligence) || label(choice.modelConfig?.title) || (name && (/^\d/.test(name) ? `GPT-${name}` : name)),
@@ -1678,6 +1783,36 @@
       const chosen = choices.find(c => c.bucket === currentBucket);
       if (selected?.modelSlug !== chosen.id || effortOf(selected) !== chosen.effort) return null;
       return { version, currentBucket, versions, choices };
+    }
+    return null;
+  }
+
+  /** @ehkogh/#318: the shell's evaluated powers normalize into the existing picker
+   * contract. Execution ids remain families here: a mixed Latest group is not one model. */
+  function readShellPickerSnapshot(node) {
+    for (let fiber = node && fiberOf(node), up = 0; fiber && up < MAX_CLIMB; up++, fiber = fiber.return) {
+      const p = fiber.memoizedProps;
+      if (!Array.isArray(p?.powerSelections)) continue;
+      const selected = p.selectedPowerSelection ?? p.selectedLabelCandidate, options = p.modelListConfig?.options;
+      if (!selected || !Array.isArray(options) || options.length > 20 || p.powerSelections.length > 12) return null;
+      const id = value => typeof value === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(value) ? value : null;
+      const group = value => typeof value === 'string' && /^[\p{L}\p{N}._ -]{1,80}$/u.test(value) && value.trim() === value ? value : null;
+      const label = value => typeof value === 'string' && value.trim() && value.length <= 80 ? value.trim() : null;
+      const effort = value => ({ none:'none', instant:'none', minimal:'minimal', min:'low', low:'low', standard:'medium', medium:'medium', extended:'high', high:'high', xhigh:'xhigh', max:'max', ultra:'ultra', pro:'pro' })[value] || null;
+      const current = options.filter(o => o?.selected === true);
+      if (current.length !== 1) return null;
+      const version = group(current[0].id);
+      const versions = options.filter(o => o && o.disabled !== true).map(o => ({ id: group(o.id), label: label(o.label) }));
+      const choices = p.powerSelections.map(c => ({ bucket: c?.powerSettingIndex, id: id(c?.model),
+        label: label(c?.modelLabel), familyId: id(c?.model), familyLabel: label(c?.modelLabel), effort: effort(c?.reasoningEffort),
+        available: p.modelSelectionDisabled !== true && c?.disabled !== true &&
+          (!c?.availability || c.availability.status === 'available') && !p.modelSwitcherDenialsBySlug?.[c?.model] }));
+      if (!version || !versions.length || versions.some(v => !v.id || !v.label) || !choices.length ||
+          choices.some(c => !Number.isInteger(c.bucket) || !c.id || !c.label || !c.effort) ||
+          new Set(versions.map(v => v.id)).size !== versions.length || new Set(choices.map(c => c.bucket)).size !== choices.length || !versions.some(v => v.id === version)) return null;
+      const matches = choices.filter(c => c.id === id(selected.model) && c.effort === effort(selected.reasoningEffort));
+      if (matches.length !== 1 || (selected.powerSettingIndex !== undefined && selected.powerSettingIndex !== matches[0].bucket)) return null;
+      return { version, currentBucket: matches[0].bucket, versions, choices };
     }
     return null;
   }
@@ -1781,7 +1916,7 @@
   // Re-execution is a repair, not a marker check. A stale primitive marker could survive
   // while its listener did not, so keep the actual listener and always replace it.
   const prior = window[ACTIVE_HELPER];
-  if (prior && prior.version === VERSION && typeof prior.listener === 'function') {
+  if (prior && typeof prior.listener === 'function') {
     try {
       window.removeEventListener('message', prior.listener);
     } catch {

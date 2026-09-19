@@ -170,7 +170,8 @@ class FakeNode {
   }
 
   querySelectorAll(selector: string): FakeNode[] {
-    return this.all.get(selector) ?? [];
+    // @ehkogh/#318: flat classic fixtures must understand the adapter's union selectors.
+    return this.all.get(selector) ?? [...new Set(selector.split(/,\s*/).flatMap(part => this.all.get(part) ?? []))];
   }
 
   querySelector(selector: string): FakeNode | null {
@@ -188,7 +189,7 @@ class FakeNode {
   }
 
   closest(selector: string): FakeNode | null {
-    return this.closestMatches.has(selector) ? this : null;
+    return selector.split(/,\s*/).some(part => this.closestMatches.has(part)) ? this : null;
   }
 
   /** Flat fakes: a node only ever contains itself, which is all toolBlocks() asks. */
@@ -217,7 +218,7 @@ interface DomApi {
 
 function loadDom(sections: FakeNode[], pathname = '/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'): DomApi {
   const document = {
-    querySelectorAll: (selector: string) => (selector === TURN_SELECTOR ? sections : []),
+    querySelectorAll: (selector: string) => (selector.split(/,\s*/).includes(TURN_SELECTOR) ? sections : []),
     querySelector: () => null
   };
   const context = vm.createContext({ document, location: { pathname } });
@@ -2083,7 +2084,7 @@ describe('extension command delivery', () => {
       const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
         tabsQuery: async () => [tab],
         tabsGet: async () => scenario === 'navigated' ? { id: 41, url: 'https://example.com/' } : tab });
-      if (scenario === 'healthy') worker.tabsSendMessage.mockResolvedValue({ ok: true, recorderVersion: 13 });
+      if (scenario === 'healthy') worker.tabsSendMessage.mockResolvedValue({ ok: true, recorderVersion: 15 });
       // Startup restoration is a separate path; exercise the later maintenance pass.
       await worker.installed('update');
       worker.scriptingExecuteScript.mockClear();
@@ -2136,7 +2137,7 @@ describe('extension command delivery', () => {
     const session = new FakeStorageArea();
     const worker = loadWorker({ local, session });
     worker.tabsQuery.mockResolvedValueOnce([{ id: 41 }]);
-    worker.tabsSendMessage.mockResolvedValueOnce({ ok: true, recorderVersion: 13 });
+    worker.tabsSendMessage.mockResolvedValueOnce({ ok: true, recorderVersion: 15 });
 
     await worker.installed('update');
 
@@ -2147,7 +2148,7 @@ describe('extension command delivery', () => {
     expect(worker.scriptingInsertCSS).not.toHaveBeenCalled();
   });
 
-  it('repairs a missing MAIN-world Fiber helper on demand for the sending tab only', async () => {
+  it('repairs the matching recorder and helper together for the requesting document only', async () => {
     const local = new FakeStorageArea(paired);
     const session = new FakeStorageArea();
     const worker = loadWorker({ local, session });
@@ -2155,14 +2156,33 @@ describe('extension command delivery', () => {
     const repaired = await worker.send({ type: 'repair_fiber' }, 73);
 
     expect(repaired).toMatchObject({ ok: true });
-    expect(worker.scriptingExecuteScript).toHaveBeenCalledWith({
-      target: { tabId: 73, documentIds: ['document-73-0'] },
-      world: 'MAIN',
-      files: ['fiber.js']
-    });
+    const target = { tabId: 73, documentIds: ['document-73-0'] };
+    expect(worker.scriptingExecuteScript.mock.calls).toEqual([
+      [{ target, files: ['chatgpt-dom.js'] }],
+      [{ target, world: 'MAIN', files: ['fiber.js'] }],
+      [{ target, files: ['content.js'] }]
+    ]);
+    expect(worker.scriptingInsertCSS).toHaveBeenCalledWith({ target, files: ['overlay.css'] });
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
 
     await worker.navigateTab(73, 'https://example.com/left');
     expect(await worker.send({ type: 'repair_fiber' }, 73)).toMatchObject({ ok: false, error: 'tab_closed' });
+  });
+
+  it.each([1, 2, 3])('stops paired helper repair when Chrome loses the target during injection %s', async stage => {
+    const session = new FakeStorageArea();
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session });
+    let injections = 0;
+    worker.scriptingExecuteScript.mockImplementation(async () => {
+      if (++injections === stage) throw new Error('The target document no longer exists');
+      return [];
+    });
+    expect(await worker.send({ type: 'repair_fiber' }, 73)).toMatchObject({ ok: false });
+    expect(worker.scriptingExecuteScript).toHaveBeenCalledTimes(stage);
+    expect(worker.scriptingInsertCSS).not.toHaveBeenCalled();
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
   });
 
   it('has no way to ask the app for work at all', async () => {
@@ -2267,7 +2287,7 @@ describe('extension revival delivery', () => {
 
   const liveRecorder = async (_tabId: number, message: Record<string, unknown>) =>
     message.type === 'clf-recorder-ping'
-      ? { ok: true, recorderVersion: 13 }
+      ? { ok: true, recorderVersion: 15 }
       : { ok: true, claimed: true };
 
   it('scans before opening and routes to the oldest exact worker tab', async () => {

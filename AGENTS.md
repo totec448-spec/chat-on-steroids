@@ -1251,6 +1251,9 @@ advances only for final text/state changes; HTML, timestamps and other metadata 
 old final into a new completion. Legacy rows retain their first anchor until fresh final content.
 That content revision must follow the latest recorded work boundary, with no running local tool
 or newer user/turn overriding it, independently of observation order within a browser batch.
+The recorder's final-derived activity verdict uses that same `readCompletedFinal` check after
+the complete batch. A reload can mark a historical request-owned final `activeNow` while revising
+its HTML; that hint must neither consume the current work grant nor cancel or renew recovery.
 Replay lifecycle boundaries in publication sequence; display chronology must not erase an
 app-authored reopen after an earlier completed end. Restore the current generation by that
 same replay: a new start replaces the active turn, and its exact end clears it. An older
@@ -1602,20 +1605,52 @@ proof for other features. All continuation paths still require their exact sourc
 Direct Chrome selection is observed even with the picker closed. The existing MAIN scan reads
 the current native picker state, including September's retained `dropdownContent.props`, then
 stamps exact model/effort and document/route for the isolated reader. The older closed-trigger
-model/effort join remains supported. Ambiguous triggers and unrecognized state remain unknown.
+model/effort join remains supported. The reported `data-codex-intelligence-trigger` and
+`data-composer-navigation-target="reasoning"` anchors also require native model-owner proof;
+`data-selected-reasoning-effort` supplies a machine effort without reading translated captions.
+The alternate shell uses an id-less editable textbox under `form[data-chatgpt-composer]` and
+`data-model-picker-view` for its portal. Its evaluated `powerSelections`, current selection and
+version options normalize into the same bounded picker snapshot. Mixed-version powers retain
+their execution ids rather than merging unrelated models into a synthetic Latest family.
+Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
+previous listener across protocol versions, because the picker/plugin reply protocols are shared.
+The matched recorder/MAIN helper version is 15. Shell exchanges are read only under the native
+main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
+per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
+do not become invented messages. Only a completed final item in a successfully completed turn
+can end it; cancellation or an unknown turn status never acknowledges unfinished tool calls.
+The only query-cache read is a bounded exact local/server conversation pair, not message history
+or a guessed branch. UUID workflow ids and complete root-add stream envelopes feed the existing
+request-origin owner. The shell keeps its native activity/answer presentation; this adapter does
+not introduce an alternate Overwrite, upload or composer-serialization subsystem.
 The closed snapshot describes only the selected native version's buckets; it is selection
 evidence, never a complete catalog. Discovery elects an idle composer, reads the account-evaluated
 choices once per enabled native version, and restores the original model/effort before publication.
-Busy or drafting pages defer discovery without publishing a partial catalog or opening a replacement
-tab. Passive selection observation continues during generation and preserves drafts. OS wake is dispatch, not
+Busy or drafting pages are never used for discovery. Explicit Refresh may open one separately
+owned helper when every existing user page positively reports generation, a protected draft or
+attachments, another input operation, or a hidden composer. Missing recorder replies, hydration,
+an existing helper or an already spent tab election grant no additional opening. Passive discovery
+never opens this helper. Discovery never clears text, including restored helper drafts. A loaded
+elected helper wakes the existing maintenance owner; no new poller is added.
+Passive selection observation continues during generation and preserves drafts. OS wake is dispatch, not
 discovery completion: the IPC request returns pending and the bounded observation deadline owns
 the result, so a stalled launch cannot hold Refresh/Send indefinitely.
 
 Successful catalogs retain their observation time and persist across restart. Discovery is a
-bounded nonce-scoped operation (120 seconds, at most 20 accepted models); failed refresh leaves
+bounded nonce-scoped operation (120 seconds, at most 20 accepted models). First explicit promotion
+of a passive request renews its budget once without replacing the nonce; repeated Refresh clicks
+cannot extend it. The same deadline retains the exact browser result route through a slow scan,
+instead of discarding its custody after 35 seconds. Bounded waiting reasons never count as model
+evidence and preserve the last concrete problem at timeout. A failed refresh leaves
 the last successful catalog visibly distinguishable from a fresh observation. Cached metadata
 is useful selection UI, not fresh send authorization. Model and reasoning selection must both
 be confirmed after relevant native changes; navigation invalidates that confirmation.
+Saved worker/helper execution aliases remain exact, including their requested effort: a family's
+effort union cannot authorize rewriting an alias into another lane. Selecting a family explicitly
+enables its observed effort choices. Display-name matching retains Unicode letters and numbers,
+requires a nonempty unique name, and cannot shadow exact provider ids or treat effort captions
+as model identities. Localized/spaced native version ids remain navigation metadata; unsupported
+execution-id characters use the observed execution slug rather than producing an invalid catalog.
 Selection and discovery also await the native picker and its owned dialog closing within the
 existing three-second observer bound. Escape targets that picker focus trap; dispatch alone
 is not closure. A stuck picker refuses success before strict composer focus/insertion checks.
@@ -1754,7 +1789,10 @@ say to ignore them. Unsent eligible tickets survive restart. A never-authorized 
 browser preparation releases the same ticket, without replaying a possibly consumed Stop.
 Authorized ambiguous sends retain their exact receipt custody and are never automatically
 resent. Native user Stop stays distinct from automation Stop. New work, final, question/input,
-changed binding, running tools, block or compaction revokes obsolete recovery. Turning ordinary
+changed binding, block or compaction revokes obsolete recovery. Running or settling tools hold
+Stop/Send admission without cancelling the frozen ticket: an unassigned call can belong to
+another chat. Recheck that temporary hold across asynchronous validation; recorded work in
+the source chat still retires its obsolete ticket. Turning ordinary
 Continue off revokes it only if neither Goal nor Loop independently enables recovery. Drafts,
 attachments and exact document/epoch are checked before Stop and Send. Countdown presentation
 projects the existing waiting/pickup deadline; it owns no timer or delivery authority.
@@ -1927,6 +1965,10 @@ empty may mean loading, and neither creates a reload grant. An absent/empty stat
 for fifteen seconds before it is logged; recovery is logged only after an announced degradation.
 Ninety seconds without a report, or a clock moving behind the last observation, restarts that
 grace. Elapsed time without a page report is not continued evidence of degradation.
+On-demand helper repair refreshes the DOM adapter, MAIN reader and matching isolated recorder
+through the existing restoration path, pinned to the requesting Chrome document. The recorder's
+version guard retains an equal healthy instance. Repairing only MAIN can strand a cached recorder
+on an older protocol after unpacked-extension edits; no new page reload or timer is authorized.
 First sightings and announced states share one bounded map, reset with the bridge. Repeated no-tab/stalled refusals
 are logged once per chat/cause/minute; handout logs and confirmed browser-action logs remain distinct.
 Assistant-error repairs retain their three-minute cooldown. Attribution, silence, Goal,
