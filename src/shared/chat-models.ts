@@ -21,5 +21,7 @@ export type ChatModelCatalog = {
   requestedAt: number | null;
   observedAt: number | null;
   models: ChatModelOption[];
+  /** Request progress is not an account observation and never grants Send permission. */
+  waiting?: string;
   error?: string;
 };

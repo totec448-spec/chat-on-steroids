@@ -23,7 +23,12 @@
  */
 
 var CLF_DOM = (() => {
-  const TURN = 'section[data-testid^="conversation-turn"]';
+  // @ehkogh/#318: an alternate exchange contains both roles. Keep the native
+  // structure intact; the MAIN reader supplies exact message ids on its slots.
+  const SHELL_TURN = '[data-app-shell-main-surface] [data-thread-find-target="conversation"] [data-turn-key]';
+  const SHELL_UNIT = '[data-content-search-unit-key]';
+  const TURN = `section[data-testid^="conversation-turn"], ${SHELL_TURN}`;
+  const PICKER = '[data-testid="composer-intelligence-picker-content"], [data-model-picker-view]';
   // ChatGPT has used both shapes in the live renderer: the older tool-message span
   // and, as of 2026-08-15, a display-contents row wrapping the visible tool label.
   // Keep both explicit structural anchors; hashed CSS-module names remain off limits.
@@ -35,7 +40,7 @@ var CLF_DOM = (() => {
   const STOP =
     'button[data-testid="stop-button"], button[data-testid="composer-stop-button"], ' +
     'button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop answering"]';
-  const SEND = 'button[data-testid="send-button"], form button[aria-label^="Send" i]';
+  const SEND = 'button[data-testid="send-button"], form button[aria-label^="Send" i], form[data-chatgpt-composer] button[type="submit"]';
   /** The composer's own trailing controls, where the send and dictation buttons live. */
   const TRAILING =
     '[data-testid="composer-trailing-actions"], [data-testid="composer-footer-actions"], ' +
@@ -193,7 +198,7 @@ var CLF_DOM = (() => {
         if (parts.length > 0) return parts.join('\n');
       }
       if (role === 'assistant') {
-        const parts = [...node.querySelectorAll('.markdown')]
+        const parts = [...node.querySelectorAll('.markdown, [data-markdown-text-style="assistant-message"]')]
           .filter((part) => !(part.closest && part.closest('[data-interrupted]')))
           .filter((part) => !(part.closest && part.closest(TOOL)))
           .map((part) => text(part))
@@ -387,7 +392,8 @@ var CLF_DOM = (() => {
     'data-turn',
     'data-turn-id',
     'data-testid',
-    'aria-label'
+    'aria-label', 'data-turn-key', 'data-content-search-turn-key', 'data-content-search-unit-key',
+    'data-clf-fiber-turn', 'data-clf-fiber-message'
   ];
 
   function invalidateFrom(record) {
@@ -396,6 +402,8 @@ var CLF_DOM = (() => {
     const element = target.nodeType === 1 ? target : target.parentElement;
     const section = element && typeof element.closest === 'function' ? element.closest(TURN) : null;
     if (section) sectionCache.delete(section);
+    const slot = element?.closest?.(SHELL_UNIT);
+    if (slot) sectionCache.delete(slot);
   }
 
   function ensureCacheObserver() {
@@ -438,10 +446,10 @@ var CLF_DOM = (() => {
     const memo = memoOf(section);
     if (memo && memo.rows) return memo.rows;
     const rows = [];
-    for (const node of section.querySelectorAll('[data-message-id]')) {
-      const id = node.getAttribute('data-message-id');
+    for (const node of [...(section.matches?.(SHELL_UNIT) ? [section] : []), ...section.querySelectorAll(`[data-message-id], ${SHELL_UNIT}`)]) {
+      const id = messageIdOf(node);
       if (!id) continue;
-      const roleAttr = node.getAttribute('data-message-author-role') || '';
+      const roleAttr = node.getAttribute('data-message-author-role') || shellRole(node);
       const readable = roleAttr === 'user' || roleAttr === 'assistant';
       rows.push({ id, roleAttr, text: readable ? messageText(node, roleAttr) : null, node });
     }
@@ -465,12 +473,35 @@ var CLF_DOM = (() => {
     return parts;
   }
 
+  const shellRole = node => /:(user|assistant)$/.exec(node?.getAttribute?.('data-content-search-unit-key') || '')?.[1] || '';
+  function turnIdOf(section) {
+    return section?.matches?.(SHELL_TURN) ? section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key') || null
+      : section?.getAttribute?.('data-turn-id') || null;
+  }
+  function messageIdOf(node) {
+    const explicit = node?.getAttribute?.('data-message-id');
+    if (explicit) return explicit;
+    // The slot's layout key is not a message UUID. Only a current same-exchange
+    // MAIN stamp can join it to the actual typed item; stale stamps fail closed.
+    const section = node?.closest?.(SHELL_TURN), turn = section?.getAttribute('data-clf-fiber-turn');
+    const stamp = node?.getAttribute?.('data-clf-fiber-message');
+    if (!turn || node.getAttribute('data-clf-fiber-turn') !== turn || !stamp?.startsWith(`${turn}:`)) return null;
+    try { return decodeURIComponent(stamp.slice(turn.length + 1)) || null; } catch { return null; }
+  }
   function turns() {
     return safe(() => {
       const out = [];
       let previous = null;
       for (const node of document.querySelectorAll(TURN)) {
-        const id = node.getAttribute('data-turn-id');
+        if (node.closest?.(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`)) continue;
+        const id = turnIdOf(node);
+        if (node.matches?.(SHELL_TURN)) {
+          const users = [...node.querySelectorAll('[data-content-search-unit-key$=":user"]')].filter(slot => slot.closest('[data-turn-key]') === node);
+          if (users.length !== 1 || !id) continue;
+          out.push({ node: users[0], nodes: [users[0]], id, role: 'user' });
+          if (node.querySelector('[data-chatgpt-agent-turn-start], [data-content-search-unit-key$=":assistant"]')) out.push({ node, nodes: [node], id, role: 'assistant' });
+          previous = null; continue;
+        }
         const role = node.getAttribute('data-turn');
         if (previous && id && previous.id === id && previous.role === role) {
           previous.nodes.push(node);
@@ -483,7 +514,9 @@ var CLF_DOM = (() => {
     }, []);
   }
 
-  const presentationTurns = turns;
+  // This compatibility change records the alternate page, it does not replace its
+  // activity/answer UI. Classic Overwrite behavior keeps its own exact anchors.
+  const presentationTurns = () => turns().filter(turn => !turn.node.closest?.(SHELL_TURN));
 
   const turnNodes = (turn) =>
     turn && Array.isArray(turn.nodes) && turn.nodes.length > 0 ? turn.nodes : turn && turn.node ? [turn.node] : [];
@@ -547,6 +580,7 @@ var CLF_DOM = (() => {
           if (seen.has(row.id)) continue;
           const role = row.roleAttr || turn.role;
           if (role !== 'user' && role !== 'assistant') continue;
+          if (section.closest?.(SHELL_TURN) && role !== turn.role) continue;
           seen.add(row.id);
           explicit++;
           out.push({
@@ -568,7 +602,7 @@ var CLF_DOM = (() => {
       // fallback when there is no explicit assistant message and only collect
       // markdown outside progress/tool containers. content.js itself waits until the
       // turn has stopped generating before recording this as the final answer.
-      if (turn.role === 'assistant' && explicit === 0) {
+      if (turn.role === 'assistant' && explicit === 0 && !nodes[0]?.matches?.(SHELL_TURN)) {
         const parts = [];
         for (const section of nodes) {
           for (const value of sectionParts(section)) {
@@ -664,7 +698,8 @@ var CLF_DOM = (() => {
 
   /** Stop is a busy hint only; the exact provider terminal still owns turn completion. */
   function generating() {
-    return safe(() => nativeComposerControls(STOP).length > 0, false);
+    return safe(() => nativeComposerControls(STOP).length > 0 ||
+      [...document.querySelectorAll(SHELL_TURN)].some(node => !node.closest(`${OWN_SURFACES},.markdown,[contenteditable]`) && node.getAttribute('data-clf-shell-running') === location.pathname), false);
   }
 
   function stopButton() {
@@ -1392,7 +1427,13 @@ var CLF_DOM = (() => {
   }
 
   function composer() {
-    return safe(() => document.querySelector('#prompt-textarea'), null);
+    return safe(() => {
+      const classic = document.querySelector('#prompt-textarea');
+      if (classic) return classic;
+      const candidates = [...document.querySelectorAll('form[data-chatgpt-composer] [contenteditable="true"][role="textbox"]')]
+        .filter(node => !node.closest(`${OWN_SURFACES},[data-turn-key],.markdown,[hidden],[aria-hidden="true"],[inert]`));
+      return candidates.length === 1 ? candidates[0] : null;
+    }, null);
   }
 
   /**
@@ -1513,6 +1554,7 @@ var CLF_DOM = (() => {
     return safe(() => {
       for (const turn of turns()) {
         for (const section of turnNodes(turn)) {
+          if (section.matches?.(SHELL_UNIT) && shellRole(section) === 'user' && messageIdOf(section)) return section;
           for (const node of section.querySelectorAll('[data-message-id]')) {
             const role = node.getAttribute('data-message-author-role') || turn.role;
             if (role === 'assistant') return null;
@@ -2107,7 +2149,7 @@ var CLF_DOM = (() => {
     });
   }
 
-  const normalizeModelLabel = value => String(value || '').toLowerCase().replace(/[^a-z0-9.]/g, '');
+  const normalizeModelLabel = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}.]/gu, '');
   /** One bounded read through the existing MAIN-world helper; no provider API or setters. */
   function readPickerState() {
     return new Promise(resolve => {
@@ -2117,7 +2159,7 @@ var CLF_DOM = (() => {
         const data = event.data;
         if (event.source !== window || event.origin !== location.origin || data?.source !== 'clf-picker-reply' || data.nonce !== nonce || data.v !== 1) return;
         const state = data.picker;
-        const groupId = value => typeof value === 'string' && /^[a-zA-Z0-9._ -]{1,80}$/.test(value) && value.trim() === value && value.trim();
+        const groupId = value => typeof value === 'string' && value.length <= 80 && /^[\p{L}\p{N}._ -]+$/u.test(value) && value.trim() === value && value.trim();
         const valid = state && typeof state.version === 'string' && Number.isInteger(state.currentBucket) &&
           Array.isArray(state.versions) && state.versions.length > 0 && state.versions.length <= 20 &&
           state.versions.every(v => groupId(v.id) && typeof v.label === 'string' && v.label.length > 0 && v.label.length <= 80) &&
@@ -2136,10 +2178,15 @@ var CLF_DOM = (() => {
   }
   /** UI only transports a requested selection. Provider state proves identity and availability. */
   function modelPickerTrigger() {
-    const candidates = [...(composer()?.closest('form')?.querySelectorAll('button[aria-haspopup="menu"]') || [])]
-      .filter(node => !node.closest(`${OWN_SURFACES},[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 &&
+    const reported = '[data-codex-intelligence-trigger],[data-composer-navigation-target="reasoning"]';
+    const candidates = [...new Set([...(composer()?.closest('form')?.querySelectorAll('button[aria-haspopup="menu"]') || []),
+      ...document.querySelectorAll(reported)])]
+      .filter(node => node.matches('button,[role="button"]') && !node.closest(`${OWN_SURFACES},[data-testid^="conversation-turn"],[data-message-author-role],.markdown,[contenteditable],[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 &&
         node.id !== 'composer-plus-btn' && node.getAttribute('data-testid') !== 'composer-plus-btn');
-    return candidates.length === 1 ? candidates[0] : null;
+    const observed = candidates.filter(node => node.getAttribute('data-clf-picker-route') === location.pathname);
+    // Alternate native anchors are actionable only after MAIN identified their
+    // model owner. A quoted attribute or an effort value alone cannot authorize it.
+    return observed.length === 1 ? observed[0] : candidates.length === 1 && !candidates[0].matches(reported) ? candidates[0] : null;
   }
   /** Match the row's leading name, excluding secondary captions and decorations. */
   function pickerVersionNamed(row, expected) {
@@ -2155,7 +2202,7 @@ var CLF_DOM = (() => {
   }
   function modelPickerAccess(stillCurrent) {
     const shown = node => node && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
-    const picker = () => document.querySelector('[data-testid="composer-intelligence-picker-content"]');
+    const picker = () => document.querySelector(PICKER);
     const trigger = modelPickerTrigger;
     let motion = null;
     const openPicker = () => {
@@ -2189,8 +2236,11 @@ var CLF_DOM = (() => {
         // focus scope indefinitely. Suppress only this owned picker animation for
         // this operation; native state still closes/unmounts it and proves release.
         motion = document.createElement('style');
-        motion.textContent = '[role="menu"]:has(> [data-testid="composer-intelligence-picker-content"]),[role="dialog"]:has([data-testid="composer-intelligence-picker-content"]){animation:none!important}';
+        motion.textContent = '[role="menu"]:has(> [data-testid="composer-intelligence-picker-content"]),[role="dialog"]:has([data-testid="composer-intelligence-picker-content"]),[role="menu"]:has([data-model-picker-view]),[role="menu"][data-model-picker-view]{animation:none!important}';
         document.head.append(motion);
+        // The read-only helper identifies the exact native owner when another menu
+        // shares the composer. Never select by translated captions or button order.
+        await readPickerState();
         // A cold home editor mounts before its native Chat/Work picker. Workers
         // enter here directly, without the New Chat reuse/catalog preparation.
         // Wait for that surface, then use the same owned Chat transition before
@@ -2210,7 +2260,11 @@ var CLF_DOM = (() => {
         // Escape belongs inside the picker focus trap, not to its outside trigger.
         // A dispatched key is only an attempt: native unmount/animation owns closure.
         if (!key(panel.contains(active) || dialog?.contains(active) ? active : panel, 'Escape')) return false;
-        return Boolean(await wait(() => !shown(picker()) && (!dialog?.isConnected || !shown(dialog))));
+        const closed = Boolean(await wait(() => !shown(picker()) && (!dialog?.isConnected || !shown(dialog))));
+        // Rebind passive selection proof to the closed trigger, not the removed
+        // menu node. Reading metadata never reopens or changes the picker.
+        if (closed && stillCurrent()) await readPickerState();
+        return closed && stillCurrent();
         } finally { motion?.remove(); motion = null; }
       },
       async version(version) {
@@ -2222,7 +2276,7 @@ var CLF_DOM = (() => {
         // The picker may already show the version list (including a checked row).
         // Select that row to return to its effort view; never assume the slider is open.
         if (!versionRows().length) {
-          const toggle = [...picker().querySelectorAll('[role="menuitem"][aria-expanded]')].filter(shown);
+          const toggle = [...picker().querySelectorAll('[role="menuitem"][aria-expanded], [role="menuitem"][data-model-picker-view-toggle]')].filter(shown);
           if (toggle.length !== 1) return null;
           toggle[0].click();
         }
@@ -2252,7 +2306,7 @@ var CLF_DOM = (() => {
   // The current native picker or closed trigger carries the MAIN-world snapshot.
   // The route stamp prevents a retained composer from lending another chat proof.
   function visibleModelSelection() {
-    const node = document.querySelector('[data-testid="composer-intelligence-picker-content"]') || modelPickerTrigger();
+    const node = document.querySelector(PICKER) || modelPickerTrigger();
     if (node?.getAttribute('data-clf-selected-route') !== location.pathname) return null;
     const model = node?.getAttribute('data-clf-selected-model'), reasoningEffort = node?.getAttribute('data-clf-selected-effort');
     return model && /^[a-zA-Z0-9._-]{1,80}$/.test(model) && ['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(reasoningEffort)
@@ -2331,17 +2385,30 @@ var CLF_DOM = (() => {
     try {
       // Exact provider slug is preferred. Existing saved display slugs may resolve
       // only to an actually observed, available pair; never to an account default.
-      const matches = c => c.available && (!effort || c.effort === effort) && (!model || c.familyId === model || c.id === model || normalizeModelLabel(c.familyLabel) === normalizeModelLabel(model) || normalizeModelLabel(c.label) === normalizeModelLabel(model));
+      const name = normalizeModelLabel(model), candidates = [];
       for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
         const state = await ui.version(version.id); if (!state) return false;
-        const choices = state.choices.filter(matches);
-        if (!choices.length) continue;
-        const choice = choices.find(c => c.bucket === state.currentBucket) || choices[0];
-        const after = await ui.bucket(choice.bucket);
-        const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
-        selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
-        break;
+        for (const choice of state.choices) {
+          if (!choice.available || (effort && choice.effort !== effort)) continue;
+          const rank = !model || choice.familyId === model || choice.id === model ? 2
+            : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
+          if (rank) candidates.push({ version: version.id, choice, rank });
+        }
       }
+      // An earlier version's display name cannot shadow a later exact execution id.
+      // Captions such as High are effort labels, never model-name aliases. Repeated
+      // Latest/version entries may describe the same pair; distinct families may not.
+      const rank = Math.max(0, ...candidates.map(candidate => candidate.rank));
+      const matches = candidates.filter(candidate => candidate.rank === rank);
+      if (!matches.length || (model && new Set(matches.map(candidate => candidate.choice.familyId)).size !== 1) ||
+          (model && effort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1)) return false;
+      const wanted = matches.find(candidate => candidate.version === original.version && candidate.choice.bucket === original.currentBucket) || matches[0];
+      const state = await ui.version(wanted.version), choice = wanted.choice;
+      // Versions can change while traversing the UI. Revalidate before moving its slider.
+      if (!state?.choices.some(next => next.bucket === choice.bucket && next.available && next.id === choice.id && next.effort === choice.effort)) return false;
+      const after = await ui.bucket(choice.bucket);
+      const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
+      selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
     } finally {
       if (!selected && stillCurrent() && await ui.version(original.version)) await ui.bucket(original.currentBucket);
       closed = await ui.close();
@@ -2430,6 +2497,10 @@ var CLF_DOM = (() => {
     });
   }
   return {
+    TURN_SELECTOR: TURN,
+    AUTHORED_SELECTOR: '[data-message-author-role="assistant"], .markdown, [data-content-search-unit-key], [data-markdown-text-style="assistant-message"]',
+    turnIdOf,
+    messageIdOf,
     userPromptText,
     userMessageReaction,
     presentUserPrompts,

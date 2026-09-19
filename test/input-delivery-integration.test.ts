@@ -1603,6 +1603,38 @@ describe('IPC input delivery and Goal control integration', () => {
     await input.offerToolInput(session.id, conversationId, 'overlapping-request', 0);
     expect(goal.goalSwitchFor(conversationId).enabled).toBe(false);
   });
+  it.each([2700, 24000])('keeps one reserved session per intentional send even when opening text is identical (%s chars)', async size => {
+    const store = await import('../src/main/session/store.js');
+    const before = new Set((await store.listAllSessions()).map(session => session.id));
+    const requests = [message(null, 'off'), message(null, 'off')].map(request => ({ ...request,
+      text: 'Keep the literal `code`, $variables and multilingual text: Grüße 世界.\n'.repeat(400).slice(0, size) }));
+    for (const request of requests) {
+      expect((await handlers.get('sessions:send')!(null, request)).ok).toBe(true);
+      const owner = `document-${request.id}`, conversationId = randomUUID(), messageId = randomUUID();
+      const claim = await post('/input/claim', { id: request.id, owner, conversationId: null, requiresAuthorization: true });
+      expect(claim.body.input).toMatchObject({ id: request.id, sessionId: request.id, opening: true });
+      expect((await post('/input/claim', { id: request.id, owner, conversationId: null, authorize: true })).body.ok).toBe(true);
+      const receipt = { id: request.id, owner, conversationId, messageId };
+      expect((await post('/input/bind', receipt)).body.ok).toBe(true);
+      const evidence = await post('/events', { conversationId, events: [
+        { kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() },
+        { kind: 'user_message', messageId, text: claim.body.input.text, time: Date.now() }
+      ] });
+      expect(evidence.status).toBe(200);
+      expect((await post('/input/ack', receipt)).body.ok).toBe(true);
+      // An acknowledgement or route-binding replay must never mint a second owner.
+      expect((await post('/input/bind', receipt)).body.ok).toBe(true);
+      expect((await post('/input/ack', receipt)).body.ok).toBe(true);
+      expect((await store.findSessionByConversation(conversationId, { requireUnique: true }))?.id).toBe(request.id);
+      expect((await input.listInputs()).find(row => row.id === request.id)).toMatchObject({
+        state: 'sent', sessionId: request.id, deliveredSessionId: request.id, conversationId, messageId
+      });
+      const users = await store.readRecentEvents(request.id, 10, { kinds: ['user_message'] });
+      expect(users).toHaveLength(1);
+    }
+    expect((await store.listAllSessions()).filter(session => !before.has(session.id)).map(session => session.id).sort())
+      .toEqual(requests.map(request => request.id).sort());
+  });
   it('binds a new chat through HTTP ACK, applies its choice once, and pushes session change', async () => {
     const request = message(null, 'goal');
     await handlers.get('sessions:send')!(null, request);
@@ -2106,7 +2138,7 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
     } finally { clock.mockRestore(); }
   });
 
-  it('withdraws Continue while a newly admitted local tool is running', async () => {
+  it('holds Continue during a local tool and cancels it when that source records new work', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     const calls = await import('../src/main/mcp/call-context.js');
     let release: (() => void) | undefined;
@@ -2117,6 +2149,8 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
         evidence: calls.emptyEvidence(), caller: { conversationId, requestId: randomUUID(), transportKey: null } },
         () => new Promise<void>(resolve => { release = resolve; }));
       expect(await input.claimBrowserInput(row.id, 'busy-tool-doc', conversationId, true)).toBeNull();
+      expect((await input.listInputs()).find(entry => entry.id === row.id)?.state).toBe('queued');
+      await attributedMcp(conversationId);
       expect((await input.listInputs()).find(entry => entry.id === row.id)?.state).toBe('cancelled');
     } finally { release?.(); await running; clock.mockRestore(); }
   });
@@ -2162,6 +2196,58 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
       expect((await input.listInputs()).find(entry => entry.id === row.id)?.state).toBe('cancelled');
       expect(goal.goalPendingReplyFor(conversationId)?.replyId ?? null).toBe(mode === 'off' ? null : messageId);
     } finally { clock.mockRestore(); }
+  });
+
+  it.each(['running', 'settling'] as const)('keeps the same Continue ticket while an unrelated tool is still unassigned (%s)', async phase => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const calls = await import('../src/main/mcp/call-context.js');
+    let release!: () => void;
+    let work: Promise<void> | undefined;
+    try {
+      const { row, conversationId } = await silent('gpt-5.6-pro', ms => { now += ms; });
+      const context = { startedAt: now, transportKey: null, agent: null, outcome: null,
+        evidence: calls.emptyEvidence(), caller: { conversationId: null as string | null, requestId: randomUUID(), transportKey: null } };
+      const pending = new Promise<void>(resolve => { release = resolve; });
+      if (phase === 'running') work = calls.trackInFlight(context, () => pending);
+      else { calls.holdWhileSettling(context, pending); work = pending; }
+      expect((await input.pendingBrowserInputs()).some(entry => entry.id === row.id)).toBe(false);
+      expect(await input.claimBrowserInput(row.id, 'held-doc', conversationId, true)).toBeNull();
+      input.resetInputForTests();
+      expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({
+        state: 'queued', owner: null, recovery: row.recovery, silenceBoundary: row.silenceBoundary
+      });
+      // Exact evidence assigns the tool to a different chat while the call is still live.
+      context.caller.conversationId = randomUUID();
+      expect((await input.pendingBrowserInputs()).find(entry => entry.id === row.id)).toBeDefined();
+      expect(await input.claimBrowserInput(row.id, 'held-doc', conversationId, true)).not.toBeNull();
+      expect(await input.authorizeBrowserInput(row.id, 'held-doc', conversationId)).toBe(true);
+      expect(await input.authorizeBrowserInput(row.id, 'held-doc', conversationId)).toBe(false);
+    } finally { release?.(); await work; clock.mockRestore(); }
+  });
+
+  it('retains a claimed Continue across unrelated activity without granting Stop or Send', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const calls = await import('../src/main/mcp/call-context.js');
+    let release!: () => void;
+    let work: Promise<void> | undefined;
+    try {
+      const { row, conversationId, turnId } = await silent('gpt-5.6-pro', ms => { now += ms; });
+      expect(await input.deferSilenceInput(row.id, conversationId, turnId)).toBe(true);
+      now = row.recovery!.busyUntil;
+      expect(await input.claimBrowserInput(row.id, 'claimed-doc', conversationId, true)).not.toBeNull();
+      work = calls.trackInFlight({ startedAt: now, transportKey: null, agent: null, outcome: null,
+        evidence: calls.emptyEvidence(), caller: { conversationId: null, requestId: randomUUID(), transportKey: null } },
+        () => new Promise<void>(resolve => { release = resolve; }));
+      expect(await input.advanceRecoveryInput(row.id, 'claimed-doc', conversationId, 'stop')).toBe(false);
+      expect(await input.authorizeBrowserInput(row.id, 'claimed-doc', conversationId)).toBe(false);
+      expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'browser', owner: 'claimed-doc' });
+      release(); await work;
+      expect(await input.advanceRecoveryInput(row.id, 'claimed-doc', conversationId, 'stop')).toBe(true);
+      expect(await input.advanceRecoveryInput(row.id, 'claimed-doc', conversationId, 'stop')).toBe(false);
+      expect(await input.advanceRecoveryInput(row.id, 'claimed-doc', conversationId, 'stopped')).toBe(true);
+      expect(await input.authorizeBrowserInput(row.id, 'claimed-doc', conversationId)).toBe(true);
+      expect(await input.authorizeBrowserInput(row.id, 'claimed-doc', conversationId)).toBe(false);
+    } finally { release?.(); await work; clock.mockRestore(); }
   });
 
   it.each(['gpt-5.6-sol', 'gpt-5.6-pro'])('keeps Continue and its Stop deadline when reload re-observes the same question with different text (%s)', async model => {

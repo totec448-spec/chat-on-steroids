@@ -15,7 +15,8 @@
   let latest = null;
   let requestOrder = 0, latestOrder = 0;
   const CONVERSATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const REQUEST = /^wfr_[a-zA-Z0-9_-]{1,96}$/;
+  // @ehkogh/#318: the alternate shell also uses bare UUID workflow ids.
+  const REQUEST = /^(?:wfr_[a-zA-Z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i;
   const CONVERSATION_FIELD = /(?:^|[,{\s])\"conversation_id\"\s*:\s*\"([0-9a-f-]{36})\"/gi;
   // Passive evidence only: no polling, and no full response survives a scan. Retain a
   // small replay window for document_start -> content-script readiness and deduplicate
@@ -108,8 +109,12 @@
           .map(line => line.slice(5).trimStart()).join('\n');
         event = JSON.parse(data);
       } catch { return; }
-      if (event?.conversation_id !== conversationId) return;
-      const requestIds = new Set([event.metadata?.request_id, event.message?.metadata?.request_id]
+      // A complete root-add envelope is self-contained evidence. Never join partial
+      // patches across events or read ids from arbitrary nested tool/model content.
+      const body = event?.o === 'add' && (event.p === '' || event.p === undefined) &&
+        event.v && typeof event.v === 'object' && !Array.isArray(event.v) ? event.v : event;
+      if (body?.conversation_id !== conversationId) return;
+      const requestIds = new Set([body.metadata?.request_id, body.message?.metadata?.request_id]
         .filter(id => typeof id === 'string' && REQUEST.test(id)));
       return requestIds.size ? { conversationId, requestIds: [...requestIds] } : null;
   }
@@ -163,7 +168,7 @@
   function inspectSocketMessage(event) {
     // Pro hands its HTTP stream to the native conversation-turn-stream socket.
     // Observe only complete server envelopes; never subscribe, send or join deltas.
-    if (typeof event.data !== 'string' || event.data.length > 2 * 1024 * 1024 || !event.data.includes('wfr_')) return;
+    if (typeof event.data !== 'string' || event.data.length > 2 * 1024 * 1024 || !event.data.includes('request_id')) return;
     let rows;
     try { rows = JSON.parse(event.data); } catch { return; }
     if (!Array.isArray(rows) || rows.length > 32) return;
