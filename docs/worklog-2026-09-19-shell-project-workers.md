@@ -32,6 +32,9 @@ expiry, malformed input or unknown encoding retires that state. Both conversatio
 ids must still occur in one complete root value. Partial values are never reconstructed, cached
 answers are never imported, and no tool result or worker identity is invented. The broker,
 permission rules, inbox transport and status lifecycle are unchanged.
+Self-contained, explicitly marked root-add messages retain their previous support when a socket
+handoff has no repeated encoding prologue. This does not authorize subsequent inherited headers;
+an explicitly unsupported encoding still refuses them. A regression covers HTTP and socket delivery.
 
 Recorder, MAIN helper and background restoration move together to version 17. The public app
 and companion version remain 2.1.14; updating requires the matching extension and a fresh or
@@ -53,8 +56,9 @@ An isolated Chromium 153 run passed native cold-picker hydration, actual Respons
 early identity, literal HTML editing, picker selection/restoration, and three successive sends
 with exactly one receipt each and verified finals. All page/transport data in that run is synthetic.
 The earlier signed-in Compatibility Check was restored to its original Pro selection with an
-empty composer and closed. Full repository verification passed 5,517 tests plus six isolated
+empty composer and closed. Final repository verification passed 5,518 tests plus six isolated
 shutdown tests, with 45 skipped. TypeScript, privacy, dependency notices and native-source checks
-passed. The Windows x64 production build and installer completed successfully. CI and installed
-runtime receipts remain separate gates; the affected-account/NixOS workflow remains for the
-reporters to confirm.
+passed. The explicit-root compatibility correction also passed 109 targeted tests. The Windows x64
+production build and installer were repeated successfully for the final source. The PR's exact-head
+CI and installed-runtime receipts remain separate gates. The affected-account/NixOS workflow
+remains for the reporters to confirm.

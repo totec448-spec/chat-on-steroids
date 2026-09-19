@@ -97,13 +97,23 @@
       let event;
       try {
         event = JSON.parse(lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n'));
-      } catch { if (type === 'delta' || type === 'delta_encoding') stream.header = null; return; }
+      } catch {
+        if (type === 'delta' || type === 'delta_encoding') stream.header = null;
+        if (type === 'delta_encoding') stream.encoding = false;
+        return;
+      }
       if (type === 'delta_encoding') {
-        stream.header = event === 'v1' ? { c: 0, p: '', o: 'add' } : null;
+        stream.encoding = event === 'v1';
+        stream.header = stream.encoding ? { c: 0, p: '', o: 'add' } : null;
         return;
       }
       let body;
-      if (type === 'delta') {
+      if (type === 'delta' && stream.encoding === false) return;
+      if (type === 'delta' && !stream.header && event?.p === '' && event?.o === 'add') {
+        // A handoff may omit the prologue. Preserve the existing self-contained
+        // root-add reader, without granting header inheritance to later values.
+        body = event.v;
+      } else if (type === 'delta') {
         // Native v1 omits repeated headers, including on complete root messages.
         // Keep only format state in this stream, never prior message values.
         if (!stream.header || !event || typeof event !== 'object' || Array.isArray(event)) { stream.header = null; return; }
