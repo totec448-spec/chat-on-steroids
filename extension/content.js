@@ -3010,7 +3010,7 @@
   // 11: adds exact typed thought-notification ids and ephemeral DOM stamps for selective
   //     presentation suppression. Caption text and per-call adjacency remain non-authority.
   // 12: adds exact provider-message/sediment generated-image descriptors and DOM pixel stamps.
-  const FIBER_VERSION = 12;
+  const FIBER_VERSION = 13;
   const FIBER_TIMEOUT_MS = 1500;
   const FIBER_MAX_ROWS = 400;
   /** Assistant turns whose per-call evidence is accepted from one scan. */
@@ -3306,7 +3306,15 @@
     }
     const keptImages = images.filter(image => !conflictingImages.has(`${image.messageId}\u0000${image.assetId}`));
     const endMessageId = cap(raw.endMessageId, 200);
-    if (kept.length === 0 && requests.length === 0 && keptMessages.length === 0 && keptActivities.length === 0 &&
+    const codeModeCalls = [], codeIds = new Set();
+    for (const entry of (Array.isArray(raw.codeModeCalls) ? raw.codeModeCalls : []).slice(0, FIBER_MAX_CALLS)) {
+      const messageId = cap(entry && entry.messageId, 200);
+      if (!messageId) continue;
+      if (codeIds.has(messageId)) return null;
+      codeIds.add(messageId);
+      codeModeCalls.push({ messageId, tool: 'functions.exec', requestId: cap(entry.requestId, 100), answered: entry.answered === true });
+    }
+    if (codeModeCalls.length === 0 && kept.length === 0 && requests.length === 0 && keptMessages.length === 0 && keptActivities.length === 0 &&
         keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId) {
       return null;
     }
@@ -3317,6 +3325,7 @@
       conversationConflict: raw.conversationConflict === true,
       endMessageId,
       calls: kept,
+      codeModeCalls,
       requests,
       messages: keptMessages,
       activities: keptActivities,
@@ -8459,7 +8468,7 @@
     // summary of a machine state that had already moved on.
     // Automatic runs stop the turn exactly like a press does. They are *started* by a turn
     // being in flight, so refusing to interrupt one would refuse every automatic run.
-    const barrier = await stopAndSettle(forId, forEpoch, forRun, sameTurn);
+    const barrier = await stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic);
     // Every await above can span an SPA navigation. `conversationId` is mutable global
     // state, so continuing after A -> B would otherwise post B to /compact and type A's
     // handoff instruction into B's composer. The new chat's reset already owns its UI state;
@@ -8545,7 +8554,7 @@
    * not hear about it, and the handoff would describe a machine that no longer exists by
    * the time the fresh chat reads it.
    */
-  async function stopAndSettle(forId, forEpoch, forRun, sameTurn) {
+  async function stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic) {
     const current = () =>
       alive &&
       nativeRun === forRun &&
@@ -8553,6 +8562,67 @@
       epoch === forEpoch &&
       CLF_DOM.conversationId() === forId && sameTurn();
     if (!forId || !current()) return 'This chat changed before compaction could start.';
+    if (automatic && CLF_DOM.generating()) {
+      // A local result can file the ticket before ChatGPT receives that result. Stopping
+      // here used to lose completed work from the brief. Require native receipt first;
+      // pendingTools === 0 only proves that execution on this machine has drained.
+      const awaitingResults = new Map();
+      const awaitingRequests = new Set();
+      const sourceNodes = new Set();
+      const received = () => {
+        const pageTurn = generationTurn();
+        const source = fiberTurnFor(pageTurn);
+        if (!source) return false;
+        for (const node of pageTurn.nodes || [pageTurn.node]) if (node) sourceNodes.add(node);
+        // The response may add a sibling while the parent result lands in its original
+        // section. Retain those exact nodes; fresh scan stamps still own every lookup.
+        const sources = new Set([source]);
+        for (const node of sourceNodes) {
+          const prior = fiberTurnForNode(node);
+          if (prior) sources.add(prior);
+        }
+        // Enclosing native calls retain their own message receipt even before any
+        // child path materializes, and are never reported as local MCP invocations.
+        const calls = [...sources].flatMap(turn => [...turn.calls, ...turn.codeModeCalls]);
+        const ids = new Set();
+        for (const call of calls) {
+          if (ids.has(call.messageId)) return false;
+          ids.add(call.messageId);
+        }
+        for (const turn of sources) {
+          // Request evidence can precede the first labelled connector row. It is only
+          // a pre-row fence; repeated calls sharing that id still need individual receipts.
+          for (const request of turn.requests) {
+            if (!calls.some(call => call.requestId === request.requestId)) awaitingRequests.add(request.requestId);
+          }
+        }
+        for (const call of calls) {
+          const pending = awaitingResults.get(call.messageId);
+          if (pending && (pending.tool !== call.tool ||
+              (pending.requestId && call.requestId && pending.requestId !== call.requestId))) return false;
+          if (call.answered) {
+            awaitingResults.delete(call.messageId);
+            if (call.requestId) awaitingRequests.delete(call.requestId);
+          } else if (!pending) awaitingResults.set(call.messageId, call);
+        }
+        // A missing row or a failed scan cannot acknowledge a call seen earlier.
+        return awaitingResults.size === 0 && awaitingRequests.size === 0;
+      };
+      received();
+      nativePhase = 'settling';
+      renderControl();
+      const ready = await waitUntil(async () => {
+        if (!current()) return true;
+        const count = await peekPendingTools(forId);
+        if (!current()) return true;
+        if (count !== 0) return false;
+        const fresh = await refreshFiber(null, true);
+        if (!current()) return true;
+        return fresh && received();
+      }, TOOL_SETTLE_MS);
+      if (!current()) return 'This chat changed while compaction was waiting for tool results.';
+      if (!ready) return 'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.';
+    }
     // INTERRUPTING — stop the turn rather than wait it out. That is the whole request, by
     // hand or automatically: this happens because the turn is long, not because it is
     // nearly done.

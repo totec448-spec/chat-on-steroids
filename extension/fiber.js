@@ -41,7 +41,7 @@
   'use strict';
 
   /** Bumped when the descriptor shape changes, so a stale pair cannot half-understand. */
-  const VERSION = 12;
+  const VERSION = 13;
   // The MAIN world survives an extension reload because the ChatGPT document survives it.
   // Recovery may therefore execute this file again in a page that still has an older helper
   // listener. Keep at most one listener for this protocol version; content.js rejects older
@@ -1267,7 +1267,66 @@
    * no whole objects. `content.text` is never parsed — only the anchored path is read off
    * the front of it, exactly as `requestOf` already does.
    */
-  function callsOf(messages) {
+  /** Native Code Mode chains child requests/results before one functions.exec result.
+   * A child's parent_id is then chronology, not its individual response receipt.
+   * Resolve the exact enclosing call without reading code or result payloads. */
+  function codeModeReceipts(messages) {
+    const byId = new Map();
+    for (const message of messages) {
+      const id = str(message && message.id);
+      if (id) byId.set(id, byId.has(id) ? null : message);
+    }
+    const owners = new Map();
+    const scope = message => {
+      const meta = message && message.metadata;
+      const request = str(meta && meta.request_id), working = str(meta && meta.working_turn_id),
+        exchange = str(meta && meta.turn_exchange_id);
+      return request && working && exchange ? `${request}\u0000${working}\u0000${exchange}` : null;
+    };
+    const ownerOf = message => {
+      const trail = [], visited = new Set();
+      let cursor = message, owner = null;
+      while (cursor && trail.length < MAX_CALLS) {
+        const id = str(cursor.id);
+        if (!id || byId.get(id) !== cursor || visited.has(id)) break;
+        visited.add(id);
+        const role = cursor.author && cursor.author.role;
+        if (role === 'assistant' && cursor.recipient === 'functions.exec') {
+          owner = { id, scope: scope(cursor), valid: cursor.status === 'finished_successfully' && !!scope(cursor) };
+          break;
+        }
+        // An earlier completed enclosing call cannot own a later ordinary invocation.
+        if (trail.length && role === 'tool' && cursor.author.name === 'functions.exec') break;
+        if (owners.has(id)) { owner = owners.get(id); break; }
+        if (!((role === 'assistant' && cursor.recipient === 'api_tool.call_tool') ||
+            (role === 'tool' && cursor.recipient === 'all' &&
+              (cursor.author.name === 'api_tool.call_tool' || cursor.author.name === 'functions.exec')))) break;
+        trail.push(cursor);
+        cursor = byId.get(str(cursor.metadata && cursor.metadata.parent_id));
+      }
+      for (let index = trail.length - 1; index >= 0; index--) {
+        if (owner) owner = { ...owner, valid: owner.valid && scope(trail[index]) === owner.scope };
+        owners.set(trail[index].id, owner);
+      }
+      return owner;
+    };
+    const completed = new Set();
+    for (const message of messages) {
+      if (message && message.author && message.author.role === 'tool' && message.author.name === 'functions.exec' &&
+          message.recipient === 'all' && message.status === 'finished_successfully' && byId.get(message.id) === message) {
+        const owner = ownerOf(message);
+        if (owner && owner.valid) completed.add(owner.id);
+      }
+    }
+    const receipts = new Map();
+    for (const message of messages) {
+      const owner = ownerOf(message);
+      if (owner) receipts.set(message.id, owner.valid && completed.has(owner.id));
+    }
+    return receipts;
+  }
+
+  function callsOf(messages, codeReceipts) {
     if (!Array.isArray(messages)) return [];
     const out = [];
     const seen = new Set();
@@ -1297,7 +1356,7 @@
       // for two different requests, which is the same piece of evidence spent twice.
       if (seen.has(id)) duplicated.add(id);
       seen.add(id);
-      const hasResult = Boolean(completed) || answered.has(id);
+      const hasResult = codeReceipts.has(id) ? codeReceipts.get(id) : Boolean(completed) || answered.has(id);
       out.push({
         messageId: id,
         tool,
@@ -1383,7 +1442,12 @@
         const fiber = fiberOf(section);
         if (!fiber) continue;
         const messages = turnMessagesOf(fiber);
-        const calls = callsOf(messages);
+        const codeReceipts = codeModeReceipts(messages || []);
+        const codeModeCalls = (messages || []).filter(message => message && message.author &&
+          message.author.role === 'assistant' && message.recipient === 'functions.exec').slice(0, MAX_CALLS)
+          .map(message => ({ messageId: str(message.id), requestId: str(message.metadata && message.metadata.request_id),
+            answered: codeReceipts.get(message.id) === true }));
+        const calls = callsOf(messages, codeReceipts);
         const requests = requestIdsOf(messages);
         const conversation = conversationEvidenceOf(fiber);
         const exactAnchors = new Map();
@@ -1398,7 +1462,7 @@
         const activities = nativeActivities.events;
         const endMessageId = turnEndMessageId(messages);
         if (
-          calls.length === 0 &&
+          codeModeCalls.length === 0 && calls.length === 0 &&
           requests.length === 0 &&
           renderedMessages.length === 0 &&
           activities.length === 0 && nativeActivities.notifications.length === 0 && generatedImages.length === 0 && !endMessageId
@@ -1411,6 +1475,7 @@
           conversationConflict: conversation.conflict,
           endMessageId,
           calls,
+          codeModeCalls,
           requests,
           messages: renderedMessages,
           activities,

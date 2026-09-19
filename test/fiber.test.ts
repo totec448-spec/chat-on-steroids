@@ -248,6 +248,7 @@ interface TurnEvidence {
   conversationConflict?: boolean;
   endMessageId?: string | null;
   calls: TurnCall[];
+  codeModeCalls?: Array<{ messageId: string; requestId: string | null; answered: boolean }>;
   requests?: Array<{ requestId: string; messageId: string | null; createTime: number | null }>;
   messages: Array<{
     messageId: string;
@@ -484,8 +485,8 @@ describe('reading a row out of the page', () => {
 
   it('keeps the version it was built for on the reply', async () => {
     const { version, rows } = await scan([row([request('req-1', 'read_file')])]);
-    expect(version).toBe(12);
-    expect(rows[0]!.v).toBe(12);
+    expect(version).toBe(13);
+    expect(rows[0]!.v).toBe(13);
   });
   it('counts only TobisComputer requests in the complete turn, not api_tool metadata calls', async () => {
     const mine1 = request('req-1', 'read_file');
@@ -526,6 +527,32 @@ describe('reading a row out of the page', () => {
  * source: a turn that rendered nothing still says exactly what it asked for.
  */
 describe('the calls a turn says it made', () => {
+  it.each(['pending', 'complete', 'wrong-request', 'missing-parent', 'duplicate-result', 'wrong-tool'])(
+    'waits for the exact enclosing native Code Mode result (%s)', async mode => {
+      const root: Message = { id: 'code-root', author: { role: 'assistant' }, recipient: 'functions.exec',
+        status: 'finished_successfully', metadata: { request_id: 'wfr_01a009', turn_exchange_id: 'batch', working_turn_id: 'work' } };
+      const first = request('batch-first', 'read', { parent: root.id });
+      const second = request('batch-second', 'read', { parent: first.id });
+      const firstResult = answer('batch-result-first', second.id, 'read');
+      const secondResult = answer('batch-result-second', firstResult.id, 'read');
+      firstResult.author.name = secondResult.author.name = 'api_tool.call_tool';
+      const result: Message = { id: 'code-result', author: { role: 'tool', name: 'functions.exec' },
+        recipient: 'all', status: 'finished_successfully', metadata: { parent_id: secondResult.id } };
+      for (const message of [first, second, firstResult, secondResult, result]) {
+        message.metadata = { ...message.metadata, request_id: 'wfr_01a009', turn_exchange_id: 'batch', working_turn_id: 'work' };
+      }
+      if (mode === 'wrong-request') result.metadata!.request_id = 'another-request';
+      if (mode === 'missing-parent') result.metadata!.parent_id = 'unseen-parent';
+      if (mode === 'wrong-tool') result.author.name = 'some_other.exec';
+      const following = request('ordinary-after-code', 'read', { parent: result.id });
+      const messages = [root, first, second, firstResult, secondResult,
+        ...(mode === 'pending' ? [] : [result]), ...(mode === 'duplicate-result' ? [result] : []),
+        ...(mode === 'complete' ? [following] : [])];
+      const { turns } = await scan([], [{ id: 'native-code-batch', messages }]);
+      expect(turns[0]!.calls.map(call => call.answered)).toEqual(mode === 'complete' ? [true, true, false] : [false, false]);
+      expect(turns[0]!.codeModeCalls).toEqual([{ messageId: root.id, requestId: 'wfr_01a009', answered: mode === 'complete' }]);
+    });
+
   /**
    * The live regression: 1.7.1 renamed the connector and split it in two, and this test
    * spelled only the old name. Every request on every page stopped being recognised as
