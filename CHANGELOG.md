@@ -11,6 +11,8 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## Unreleased
 
+- Preserve prepared text, follow-up sends and worker bootstraps in the alternate ChatGPT Markdown editor; hide verified setup frames in its user bubbles.
+- Read exact selected-message request metadata and connector recipient names in the alternate shell, and prevent an older unfinished exchange from keeping its composer busy.
 - Preserve current activity and recovery deadlines when reload republishes an older final answer.
 - Bind a pending new chat to its project before route binding releases its queued observations.
 - Recover the exact missing tab when a sleeping worker is woken, and stop old prime history from blocking current chat recovery.
