@@ -1614,15 +1614,23 @@ version options normalize into the same bounded picker snapshot. Mixed-version p
 their execution ids rather than merging unrelated models into a synthetic Latest family.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
-The matched recorder/MAIN helper version is 15. Shell exchanges are read only under the native
+The matched recorder/MAIN helper version is 16. Shell exchanges are read only under the native
 main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
 can end it; cancellation or an unknown turn status never acknowledges unfinished tool calls.
-The only query-cache read is a bounded exact local/server conversation pair, not message history
-or a guessed branch. UUID workflow ids and complete root-add stream envelopes feed the existing
-request-origin owner. The shell keeps its native activity/answer presentation; this adapter does
-not introduce an alternate Overwrite, upload or composer-serialization subsystem.
+The bounded query-cache read supplies the exact local/server conversation pair and request metadata
+only for message ids explicitly named by the mounted exchange in its exact conversation cache.
+It never follows child links or imports cached prose/completion. Duplicate/conflicting caches
+abstain, and an unavailable optional cache leaves mounted messages readable. Typed connector names
+accept the provider's exact underscore recipient spelling as well as the original app name.
+Only the latest exchange's running hint describes the composer; unfinished historical exchanges
+cannot block a completed current answer. UUID workflow ids and complete root-add stream envelopes
+feed the existing request-origin owner. The shell's Markdown editor receives prepared text through
+its native literalPaste mark in the same single HTML edit, preserving punctuation and line breaks.
+Classic editor insertion is unchanged. Shell prompt presentation requires the current exact
+message stamp and the same strict context-frame parser, retaining original recording bytes.
+The shell keeps its native activity/answer presentation; no alternate Overwrite or upload owner is added.
 The closed snapshot describes only the selected native version's buckets; it is selection
 evidence, never a complete catalog. Discovery elects an idle composer, reads the account-evaluated
 choices once per enabled native version, and restores the original model/effort before publication.

@@ -2084,7 +2084,7 @@ describe('extension command delivery', () => {
       const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
         tabsQuery: async () => [tab],
         tabsGet: async () => scenario === 'navigated' ? { id: 41, url: 'https://example.com/' } : tab });
-      if (scenario === 'healthy') worker.tabsSendMessage.mockResolvedValue({ ok: true, recorderVersion: 15 });
+      if (scenario === 'healthy') worker.tabsSendMessage.mockResolvedValue({ ok: true, recorderVersion: 16 });
       // Startup restoration is a separate path; exercise the later maintenance pass.
       await worker.installed('update');
       worker.scriptingExecuteScript.mockClear();
@@ -2137,7 +2137,7 @@ describe('extension command delivery', () => {
     const session = new FakeStorageArea();
     const worker = loadWorker({ local, session });
     worker.tabsQuery.mockResolvedValueOnce([{ id: 41 }]);
-    worker.tabsSendMessage.mockResolvedValueOnce({ ok: true, recorderVersion: 15 });
+    worker.tabsSendMessage.mockResolvedValueOnce({ ok: true, recorderVersion: 16 });
 
     await worker.installed('update');
 
@@ -2287,7 +2287,7 @@ describe('extension revival delivery', () => {
 
   const liveRecorder = async (_tabId: number, message: Record<string, unknown>) =>
     message.type === 'clf-recorder-ping'
-      ? { ok: true, recorderVersion: 15 }
+      ? { ok: true, recorderVersion: 16 }
       : { ok: true, claimed: true };
 
   it('scans before opening and routes to the oldest exact worker tab', async () => {
