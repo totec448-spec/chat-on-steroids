@@ -66,10 +66,15 @@ split network chunks, partial patches and quoted metadata. Classic fixtures rema
 The first shell regression run failed against the unchanged reader (13 failures); subsequent
 integration caught a missing slot stamp and an asynchronous startup-fixture gate before the
 new end-to-end checks passed. Full snapshot verification, build and CI are separate gates.
-The final combined snapshot passed `npm run verify`: 5,501 tests passed and 45 were skipped,
+The combined production snapshot passed `npm run verify`: 5,501 tests passed and 45 were skipped,
 including the separately executed six socket-drain tests. TypeScript, public-history privacy,
 dependency notices and native-source metadata checks passed. The production build and Windows
 installer packaging also passed through `npm run dist:x64`.
+
+The final shared-tree additions strengthen route-binding rejection/race coverage and prove
+separate session ownership for intentional sends with identical short or long opening text.
+Both updated suites passed all 389 tests, and TypeScript passed again. Production code did
+not change in that last addition; final-head CI remains required before merging.
 
 The maintainer's live account has the classic interface. A fresh exact-code picker probe was
 not executed because its empty test page navigated to a real conversation before input; that
