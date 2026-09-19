@@ -485,8 +485,8 @@ describe('reading a row out of the page', () => {
 
   it('keeps the version it was built for on the reply', async () => {
     const { version, rows } = await scan([row([request('req-1', 'read_file')])]);
-    expect(version).toBe(16);
-    expect(rows[0]!.v).toBe(16);
+    expect(version).toBe(17);
+    expect(rows[0]!.v).toBe(17);
   });
   it('counts only TobisComputer requests in the complete turn, not api_tool metadata calls', async () => {
     const mine1 = request('req-1', 'read_file');

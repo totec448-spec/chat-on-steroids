@@ -11,6 +11,8 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## Unreleased
 
+- Resume new project chats and worker startup when the alternate shell's account picker finishes loading after its first inspection.
+- Capture early request identity from complete v1 stream messages with omitted format headers, preserving exact conversation ownership for worker status and messages.
 - Preserve prepared text, follow-up sends and worker bootstraps in the alternate ChatGPT Markdown editor; hide verified setup frames in its user bubbles.
 - Read exact selected-message request metadata and connector recipient names in the alternate shell, and prevent an older unfinished exchange from keeping its composer busy.
 - Preserve current activity and recovery deadlines when reload republishes an older final answer.

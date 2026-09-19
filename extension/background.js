@@ -3890,7 +3890,7 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
  * receive both its static manifest injection and this recovery injection.
  */
 const CHATGPT_TAB_URLS = ['https://chatgpt.com/*', 'https://chat.openai.com/*'];
-const PAGE_RECORDER_VERSION = 16;
+const PAGE_RECORDER_VERSION = 17;
 
 let deferredRecoveryWork = null;
 

@@ -491,6 +491,11 @@ two simultaneous clones and 16 request ids per stream; only server metadata is a
 The native WebSocket `conversation-turn-stream` handoff uses the same complete-event parser,
 requiring its outer conversation to match the inner event. It observes existing messages on
 ChatGPT secure sockets without sending, subscribing or polling; envelopes and frames are bounded.
+Native v1 delta headers may omit repeated channel/path/operation fields. The observer retains
+only those bounded format fields per HTTP response, or per linked conversation/turn socket
+stream. Missing predecessors, malformed/unknown encoding and retired streams discard that
+state. Identity still requires both ids in one complete root value; partial values, message
+text and cached answer branches never supply the join.
 A 64-pair document cache deduplicates both transports and replays IDs at content readiness.
 Content requires the matching route and document epoch, retaining one-shot stream proof through
 temporary ACK failures for at most 15 minutes using the existing observer/backoff. Missing stream
@@ -1614,7 +1619,7 @@ version options normalize into the same bounded picker snapshot. Mixed-version p
 their execution ids rather than merging unrelated models into a synthetic Latest family.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
-The matched recorder/MAIN helper version is 16. Shell exchanges are read only under the native
+The matched recorder/MAIN helper version is 17. Shell exchanges are read only under the native
 main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
@@ -1670,6 +1675,9 @@ Picker access first waits for native hydration and prepares the owned Chat surfa
 the shared DOM adapter, including direct worker startup. A remembered Work surface must not
 be mistaken for unavailable Chat models and fail before prompt insertion. Startup failure
 reports tell the prime to resolve the cause before requesting a replacement worker.
+The existing readiness observer refreshes MAIN ownership proof as the account picker hydrates.
+A first empty snapshot must not leave an otherwise ready shell waiting for a stamp that only
+another snapshot can create. Cancellation and the same document/draft checks remain required.
 
 Discovery elects an existing visible composer. An explicitly authorized helper may transfer
 its still-empty document and opening authority to the first user input, rather than opening a

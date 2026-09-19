@@ -2241,6 +2241,9 @@ var CLF_DOM = (() => {
       const timer = setTimeout(() => finish(null), timeout); void check();
     });
     const state = predicate => wait(async () => { const value = await readPickerState(); return value && (!predicate || predicate(value)) ? value : null; });
+    // The shell trigger needs MAIN ownership proof. A cold account can hydrate
+    // after the first reply, so DOM readiness must refresh that proof as well.
+    const readyTrigger = () => wait(async () => { await readPickerState(); return trigger(); }, 15000);
     const key = (node, value) => { if (!node || !stillCurrent()) return false; node.focus(); node.dispatchEvent(new KeyboardEvent('keydown', { key: value, code: value, bubbles: true, cancelable: true })); return true; };
     return {
       state,
@@ -2255,14 +2258,13 @@ var CLF_DOM = (() => {
         document.head.append(motion);
         // The read-only helper identifies the exact native owner when another menu
         // shares the composer. Never select by translated captions or button order.
-        await readPickerState();
         // A cold home editor mounts before its native Chat/Work picker. Workers
         // enter here directly, without the New Chat reuse/catalog preparation.
         // Wait for that surface, then use the same owned Chat transition before
         // interpreting account choices. Work's picker is not a denied Chat model.
-        if (!await wait(trigger, 15000) || !await prepareChatModelSurface(stillCurrent)) return null;
+        if (!await readyTrigger() || !await prepareChatModelSurface(stillCurrent)) return null;
         // A retained exit-animation node is not an open native menu.
-        if (!openPicker()) { const button = await wait(trigger, 15000); if (!key(button, 'Enter') || !await wait(openPicker)) return null; }
+        if (!openPicker()) { const button = await readyTrigger(); if (!key(button, 'Enter') || !await wait(openPicker)) return null; }
         return state();
       },
       async close() {
