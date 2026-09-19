@@ -13,6 +13,8 @@ export interface BrowserCommand {
   id: string;
   epoch: string;
   owner: string;
+  /** Exact request principals proved to belong to owner by the main-process correlation index. */
+  ownerAliases?: string[];
   conversationId: string | null;
   tool: BrowserTool;
   args: Record<string, unknown>;

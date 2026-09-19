@@ -25,10 +25,11 @@ describe('Windows Window2 interface', () => {
   it('exposes exactly the thirteen methods and defaults to image-only state', async () => {
     const { api, backend } = fixture();
     expect(WINDOWS_API_METHODS).toHaveLength(13);
-    expect(await api.list_windows()).toEqual([window]);
+    expect(await api.list_windows()).toEqual([{ ...window, state: 'open' }]);
     const state = await api.get_window_state({ window });
     expect(backend.getWindowState).toHaveBeenLastCalledWith(expect.objectContaining({ includeScreenshot: true, includeUi: false }));
     expect(state.accessibility).toBeNull();
+    expect(state.window).toMatchObject({ state: 'open' });
     expect(state.screenshots[0]).toEqual({ id: 'frame-1', url: 'data:image/png;base64,AA==', width: 300, height: 225, originX: 100, originY: 200, zIndex: 0 });
     await expect(api.get_window_state({ window, include_screenshot: false, include_text: false })).rejects.toThrow('At least one');
   });
@@ -71,6 +72,19 @@ describe('Windows Window2 interface', () => {
     await expect(api.perform_secondary_action({ window, element_index: 0, action: 'Invoke' })).rejects.toThrow('ACTION_UNAVAILABLE');
     await api.perform_secondary_action({ window, element_index: 0, action: 'tOgGlE' });
     expect(backend.act).toHaveBeenLastCalledWith([{ type: 'ui_action', ref: 'ref-1', action: 'toggle' }], { window: 42, app: window.app });
+  });
+  it('retains semantic controls with explicit screenshot failure and no stale pixel authority', async () => {
+    const { api, result, backend } = fixture();
+    await api.get_window_state({ window });
+    result.screenshot = null;
+    result.related = [];
+    Object.assign(result, { screenshotUnavailable: { code: 'CAPTURE_FAILED', message: 'Window is minimized' } });
+    const state = await api.get_window_state({ window, include_text: true });
+    expect(state).toMatchObject({ screenshots: [], screenshot_error: { code: 'CAPTURE_FAILED' }, accessibility: { tree: expect.stringContaining('Toggle') } });
+    await expect(api.click({ window, screenshotId: 'frame-1', x: 1, y: 1 })).rejects.toThrow('STALE_SCREENSHOT');
+    expect(backend.act).not.toHaveBeenCalled();
+    await api.perform_secondary_action({ window, element_index: 0, action: 'Toggle' });
+    expect(backend.act).toHaveBeenCalledOnce();
   });
   it('preserves element click button/count, raw wheel units and literal multiline text', async () => {
     const { api, backend } = fixture();
@@ -134,7 +148,7 @@ describe('Windows Window2 interface', () => {
     const { api, backend, result } = fixture();
     const inaccessible: WindowInfo = { ...nativeWindow, id: 99, app: undefined, process: 'protected' };
     vi.mocked(backend.listWindows).mockResolvedValue({ windows: [inaccessible, nativeWindow], screen: shot.region });
-    expect(await api.list_windows()).toEqual([window]);
+    expect(await api.list_windows()).toEqual([{ ...window, state: 'open' }]);
     result.window = inaccessible;
     await expect(api.get_window({ id: 99 })).rejects.toThrow('WINDOW_IDENTITY_UNAVAILABLE');
   });
@@ -145,6 +159,30 @@ describe('Windows Window2 interface', () => {
     expect(state.screenshots[0]).toMatchObject({ width: 150, height: 112, originX: -900, originY: -300 });
     await api.click({ window, x: 75, y: 38 });
     expect(backend.act).toHaveBeenLastCalledWith([{ type: 'click', x: 75, y: 38, button: 'left', count: 1 }], { frameId: 1, window: 42, app: window.app });
+  });
+  it('exposes minimized state before capture and searches beyond the first accessibility page', async () => {
+    const { api, result, backend } = fixture();
+    result.window = { ...nativeWindow, state: 'minimized' };
+    expect(await api.get_window({ id: 42 })).toMatchObject({ state: 'minimized' });
+    const state = await api.get_window_state({ window, include_screenshot: false, query: 'Save', role: 'Button', max_elements: 12 });
+    expect(backend.getWindowState).toHaveBeenLastCalledWith(expect.objectContaining({ includeUi: true, includeScreenshot: false, query: 'Save', role: 'Button', maxElements: 12 }));
+    expect(state.accessibility?.tree).toBeTruthy();
+    await expect(api.get_window_state({ window, query: 'Save', include_text: false })).rejects.toThrow('include_text');
+  });
+  it.each([['+', ['+']], ['Control_L++', ['Control_L', '+']], ['Control_L+ +', ['Control_L', '+']], ['Control_L+plus', ['Control_L', 'plus']]])('accepts the literal plus in %s', async (key, keys) => {
+    const { api, backend } = fixture();
+    await api.press_key({ window, key });
+    expect(backend.act).toHaveBeenCalledExactlyOnceWith([{ type: 'keypress', keys }], { window: 42, app: window.app });
+  });
+  it('rejects malformed chords without consuming a usable observation', async () => {
+    const { api, backend } = fixture();
+    await api.get_window_state({ window });
+    for (const key of ['Control_L+', 'Control_L++a', '++', 'Control_L+++']) {
+      await expect(api.press_key({ window, key })).rejects.toThrow('INVALID_KEY');
+    }
+    expect(backend.act).not.toHaveBeenCalled();
+    await api.click({ window, x: 1, y: 1 });
+    expect(backend.act).toHaveBeenCalledOnce();
   });
   it('keeps popup z-order and rejects overflow/outside coordinates before native input', async () => {
     const { api, result, backend } = fixture();

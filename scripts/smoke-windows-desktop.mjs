@@ -112,11 +112,17 @@ app.whenReady().then(async()=>{
     assert.ok(textState.accessibility?.tree,'Explicit accessibility tree missing');
     const invokeLine=textState.accessibility.tree.split('\\n').find(line=>line.includes('"Smoke Invoke"')&&line.includes('[Invoke'));
     assert.ok(invokeLine,'Owned button/action missing from indexed tree: '+textState.accessibility.tree);
-    const elementIndex=Number(invokeLine.trim().split(':')[0]);
+    let elementIndex=Number(invokeLine.trim().split(':')[0]);
     assert.ok(Number.isInteger(elementIndex));
     const textOnly=await api.get_window_state({window,include_text:true,include_screenshot:false});
     assert.equal(textOnly.screenshots.length,0);
     assert.equal(textOnly.accessibility.tree,textState.accessibility.tree);
+    const searched=await api.get_window_state({window,query:'Smoke Invoke',role:'Button',max_elements:5,include_screenshot:false});
+    const matches=searched.accessibility.tree.split('\\n').filter(Boolean);
+    assert.equal(matches.length,1,'Native search did not filter controls');
+    assert.ok(matches[0].includes('"Smoke Invoke"')&&matches[0].includes('[Invoke'),'Filtered native control lost its action');
+    elementIndex=Number(matches[0].trim().split(':')[0]);
+    assert.equal(elementIndex,0,'Filtered native indexes did not start at zero');
     const apiAfter=await activeWindow();
     assert.equal(apiAfter.window?.id,before.window?.id,'Windows API observation changed foreground');
     await api.perform_secondary_action({window,element_index:elementIndex,action:'Invoke'});

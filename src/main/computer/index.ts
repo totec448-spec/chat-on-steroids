@@ -1015,7 +1015,7 @@ async function findUiLocked(
     let imageBounds: Rect | null = null;
     let imageCenter: { x: number; y: number } | null = null;
     if (
-      frame &&
+      frame && bounds.width > 0 && bounds.height > 0 &&
       // A screen fallback can contain an occluding application's pixels even though the
       // semantic tree belongs to the requested window. Keep refs and desktop bounds, but
       // do not claim those controls occupy pixels the screenshot may not show.
@@ -1070,6 +1070,8 @@ async function findUiLocked(
 
 export async function getWindowState(opts: {
   window?: number;
+  query?: string;
+  role?: string;
   maxWidth?: number;
   maxElements?: number;
   includeScreenshot?: boolean;
@@ -1081,6 +1083,7 @@ export async function getWindowState(opts: {
   screenshot: Screenshot | null;
   elements: UiElementInfo[];
   uiUnavailable: { code: string; message: string } | null;
+  screenshotUnavailable?: { code: string; message: string };
   uiTruncated?: boolean;
   accessibility?: AccessibilityContext;
   related?: Array<{ window: WindowInfo; screenshot: Screenshot | null; error?: string }>;
@@ -1100,6 +1103,8 @@ export async function getWindowState(opts: {
         ...(opts.window === undefined ? {} : { id: opts.window }),
         includeScreenshot,
         includeUi,
+        ...(opts.query === undefined ? {} : { query: opts.query }),
+        ...(opts.role === undefined ? {} : { role: opts.role }),
         includeRelated: process.platform === 'win32' && opts.includeRelated === true,
         maxWidth: limit,
         maxResults: Math.min(100, Math.max(1, Math.floor(opts.maxElements ?? 60))),
@@ -1108,7 +1113,10 @@ export async function getWindowState(opts: {
       const value = reply['window'];
       const window = value && typeof value === 'object' ? (value as WindowInfo) : null;
       if (!window) throw new ComputerError('WINDOW_NOT_FOUND: no matching visible window is available');
-      const shot = file ? await screenshotFromReply(reply, file, window.id) : null;
+      const pixelFailure = reply['screenshotUnavailable'] as Record<string, unknown> | undefined;
+      const screenshotUnavailable = includeScreenshot && includeUi && pixelFailure?.code === 'CAPTURE_FAILED' && typeof pixelFailure.message === 'string'
+        ? { code: 'CAPTURE_FAILED', message: pixelFailure.message.slice(0, 500) } : undefined;
+      const shot = file && !screenshotUnavailable ? await screenshotFromReply(reply, file, window.id) : null;
       const frame = shot ? frameById(shot.frameId) : null;
       const unavailableValue = reply['uiUnavailable'];
       const uiUnavailable =
@@ -1122,7 +1130,7 @@ export async function getWindowState(opts: {
         ? await findUiLocked({ window: window.id, maxResults: opts.maxElements ?? 60 }, frame, reply)
         : { window: window.id, snapshotId: null, elements: [] as UiElementInfo[], accessibility: undefined };
       const related: Array<{ window: WindowInfo; screenshot: Screenshot | null; error?: string }> = [];
-      if (process.platform === 'win32' && opts.includeRelated && Array.isArray(reply['relatedWindows'])) {
+      if (process.platform === 'win32' && opts.includeRelated && !screenshotUnavailable && Array.isArray(reply['relatedWindows'])) {
         for (const relatedWindow of (reply['relatedWindows'] as WindowInfo[]).slice(0, 3)) {
           if (!Number.isSafeInteger(relatedWindow.id) || relatedWindow.id <= 0 || relatedWindow.id === window.id) continue;
           try {
@@ -1144,6 +1152,7 @@ export async function getWindowState(opts: {
         screenshot: shot,
         elements: found.elements,
         uiUnavailable,
+        ...(screenshotUnavailable ? { screenshotUnavailable } : {}),
         ...(includeUi && uiUnavailable === null && typeof reply['truncated'] === 'boolean' ? { uiTruncated: reply['truncated'] } : {}),
         ...(found.accessibility ? { accessibility: found.accessibility } : {}),
         ...(related.length > 0 ? { related } : {})

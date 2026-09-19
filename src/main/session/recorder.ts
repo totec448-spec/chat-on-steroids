@@ -2000,7 +2000,7 @@ async function recordSupersededMessages(
           ...(item.reaction !== undefined ? { reaction: item.reaction } : {}),
           messageId: item.messageId
         },
-        { preferTime: item.authoredTime === true }
+        { preferTime: item.authoredTime === true, work: false }
       );
     } else if (item.kind === 'assistant_message') {
       const state = item.state ?? (item.final === true ? 'final' : 'streaming');
@@ -2109,7 +2109,7 @@ async function recordChatObservationsNow(
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
           ...(item.reaction !== undefined ? { reaction: item.reaction } : {}),
           messageId: item.messageId
-        }, { preferTime: item.authoredTime === true });
+        }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (!written.changed) continue;
         if (item.authoredNow === true) {
           activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);

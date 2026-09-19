@@ -388,8 +388,21 @@ async function retireRemovedSessionReceipts(current: InputEntry[], pendingOnly =
 async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
   const next = await Promise.all(current.map(async (row): Promise<InputEntry> => {
     if (companionOf(current, row)) return row;
-    if (row.recovery && !terminal(row) && row.sendAuthorizedAt === undefined && !await recoveryCurrent(row))
-      return { ...row, state: 'cancelled', error: 'Automatic Continue cancelled: the source turn, activity or setting changed.' };
+    if (row.recovery && row.state === 'browser' && row.sendAuthorizedAt !== undefined &&
+        row.sessionId && row.conversationId && row.silenceBoundary?.conversationId === row.conversationId &&
+        !row.companionInputId) {
+      const session = await getSession(row.sessionId);
+      // A committed handoff ends this generated Continue's wait in its old chat.
+      // Keep the original claim and authorization for an exact late receipt; this
+      // neither proves non-delivery nor authorizes a replay. Authored queue rows
+      // still follow the session, and time alone never releases an uncertain send.
+      if (session?.conversationId && session.conversationId !== row.conversationId &&
+          session.chatIds.includes(row.conversationId)) return { ...row, state: 'cancelled' };
+    }
+    if (row.recovery && !terminal(row) && row.sendAuthorizedAt === undefined) {
+      const reason = await recoveryInvalidReason(row);
+      if (reason) return { ...row, state: 'cancelled', error: `Automatic Continue cancelled: ${reason}.` };
+    }
     if (row.finishOwner && !terminal(row) && !(await finishInputCurrent(row)))
       return { ...row, state: 'cancelled', error: 'Automatic follow-up cancelled because its active turn or setting changed.' };
     if (row.purpose === 'decision') return row;
@@ -432,7 +445,12 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
     const root = companionOf(next, next[i]!);
     if (root && root.state !== next[i]!.state) next[i] = { ...next[i]!, state: root.state, error: root.error };
   }
-  if (next.some((row, index) => row !== current[index])) await commit(next);
+  if (next.some((row, index) => row !== current[index])) {
+    await commit(next);
+    for (const [index, row] of next.entries()) if (row.recovery && row.state === 'cancelled' &&
+      current[index]?.state !== 'cancelled')
+      logInfo(`input ${row.id}: ${row.error ?? 'Automatic Continue wait retired after its session left the chat.'} conversation=${row.conversationId} turn=${row.silenceBoundary?.turnId}`);
+  }
   return entries!;
 }
 async function commit(next: InputEntry[]): Promise<void> {
@@ -981,23 +999,36 @@ function releaseRecoveryClaim(row: InputEntry): InputEntry {
     recovery: { ...row.recovery!, phase: row.recovery!.phase === 'ready' ? 'ready' : 'resumed' } };
 }
 async function recoveryCurrent(row: InputEntry): Promise<boolean> {
+  return await recoveryInvalidReason(row) === null;
+}
+/** Keep the rejection on the existing outbox receipt so an audit can identify the veto. */
+async function recoveryInvalidReason(row: InputEntry): Promise<string | null> {
   const boundary = row.silenceBoundary;
-  if (!row.recovery || !row.sessionId || !boundary || Date.now() - row.createdAt >= 12 * 60 * 60_000) return false;
-  const allowed = () => deliveryHooks?.recoveryAllowed?.(row.sessionId!, boundary.conversationId) === true &&
-    !isChatBlocked(boundary.conversationId) && inFlightToolCalls(boundary.conversationId) === 0;
-  if (!allowed()) return false;
+  if (!row.recovery || !row.sessionId || !boundary) return 'the recovery source is missing';
+  if (Date.now() - row.createdAt >= 12 * 60 * 60_000) return 'the twelve-hour recovery window expired';
+  const unavailable = () => isChatBlocked(boundary.conversationId) ? 'this chat is blocked' :
+    inFlightToolCalls(boundary.conversationId) > 0 ? 'a local tool is running' :
+    deliveryHooks?.recoveryAllowed?.(row.sessionId!, boundary.conversationId) !== true ? 'automatic continuation is off or paused' : null;
+  const reason = unavailable();
+  if (reason) return reason;
   const session = await getSession(row.sessionId);
-  if (!session || session.browserRecoveryDismissedAt !== undefined || session.conversationId !== boundary.conversationId ||
-      session.origin?.kind === 'worker' || session.origin?.kind === 'helper' ||
-      (session.activeTurnId && session.activeTurnId !== boundary.turnId) || session.finishTurn?.released) return false;
+  if (!session || session.conversationId !== boundary.conversationId) return 'the session moved to another chat';
+  if (session.browserRecoveryDismissedAt !== undefined) return 'the browser chat was closed';
+  if (session.origin?.kind === 'worker' || session.origin?.kind === 'helper') return 'this task has a separate recovery owner';
+  if (session.activeTurnId && session.activeTurnId !== boundary.turnId) return 'another turn started';
+  if (session.finishTurn?.released) return 'the turn was released';
   const [end] = await readRecentEvents(row.sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
-  if (end?.turnId !== boundary.turnId || (end.kind === 'turn_end' && end.outcome === 'stopped')) return false;
-  if (!await turnHasMcpCall(row.sessionId, boundary.conversationId, boundary.turnId)) return false;
-  if (await readCompletedFinal(row.sessionId, boundary.conversationId)) return false;
+  if (end?.turnId !== boundary.turnId) return 'the recorded turn changed';
+  if (end.kind === 'turn_end' && end.outcome === 'stopped') return 'the user stopped the turn';
+  if (!await turnHasMcpCall(row.sessionId, boundary.conversationId, boundary.turnId)) return 'the source has no confirmed local tool call';
+  if (await readCompletedFinal(row.sessionId, boundary.conversationId)) return 'the complete answer arrived';
   const question = await readLatestUserMessage(row.sessionId, boundary.turnId);
   const [work] = await readRecentEvents(row.sessionId, 1, { kinds: RECOVERY_WORK_KINDS });
-  return question?.messageId === row.recovery.questionId && !!work && workSequence(work) === boundary.workSeq &&
-    allowed() && (await getSession(row.sessionId))?.conversationId === boundary.conversationId;
+  if (question?.messageId !== row.recovery.questionId) return 'another user message arrived';
+  if (!work || workSequence(work) !== boundary.workSeq) return 'the source received new work';
+  const changed = unavailable();
+  if (changed) return changed;
+  return (await getSession(row.sessionId))?.conversationId === boundary.conversationId ? null : 'the session moved to another chat';
 }
 
 /** Shared unfinished-response ticket; mode policy belongs to the bridge hook. */

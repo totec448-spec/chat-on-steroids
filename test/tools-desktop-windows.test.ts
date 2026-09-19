@@ -21,6 +21,7 @@ vi.mock('../src/main/computer/windows-api.js', async importOriginal => {
   } };
 });
 import { registerWindowsDesktopTools } from '../src/main/mcp/tools-desktop-windows.js';
+import { ComputerError } from '../src/main/computer/index.js';
 
 function surface(over: Partial<Capabilities> = {}) {
   const caps = { screen: true, control: true, clipboardRead: true, clipboardWrite: true, ...over } as Capabilities;
@@ -155,18 +156,49 @@ describe('Windows Desktop public registrar', () => {
     await expect(api.call('get_window_state', { window })).rejects.toThrow(/DESKTOP_RESULT_TOO_LARGE/);
   });
 
-  it.each(['Control_L+w', 'Control_L+t'])('checks %s against the exact browser target and directs testing into a separate window', async key => {
+  it.each(['Control_L+w', 'Control_L+t'])('checks %s against the exact browser target and directs testing to background tab tools', async key => {
     const api = surface();
     native.getWindowState.mockResolvedValue({ window: { id: 71, title: 'Owned browser popup', process: 'chrome' } });
     const result = await api.call('press_key', { window, key });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('New window control');
-    expect(result.content[0].text).toContain('verify a separate window id');
-    expect(result.content[0].text).toContain('Never fall back to replacing a ChatGPT page through its address bar');
+    expect(result.content[0].text).toContain('browser_tabs new');
+    expect(result.content[0].text).toContain('browser_snapshot');
+    expect(result.content[0].text).toContain('No keys were sent');
     expect(native.getWindowState).toHaveBeenCalledExactlyOnceWith({ window: 71, includeScreenshot: false, includeUi: false });
     expect(native.apis).toHaveLength(0);
     native.getWindowState.mockResolvedValue({ window: { id: 71, title: 'Editor', process: 'notepad' } });
     await api.call('press_key', { window, key });
     expect(native.apis[0].press_key).toHaveBeenCalledExactlyOnceWith({ window, key });
+  });
+  it('returns actionable native failure details without repeating input or inventing completion', async () => {
+    const api = surface();
+    await api.call('list_windows');
+    const error = Object.assign(new ComputerError('PARTIAL_BATCH: completed_count=1 failed_index=1 routes=uia. STALE_FRAME: window resized'), {
+      completedCount: 1, failedIndex: 1, completedRoutes: ['uia']
+    });
+    native.apis[0].click.mockRejectedValueOnce(error);
+    const failure = await api.call('click', { window, x: 10, y: 10 });
+    expect(failure.isError).toBe(true);
+    expect(failure.structuredContent.error).toMatchObject({ code: 'STALE_FRAME', completed_count: 1, failed_index: 1, completed_routes: ['uia'] });
+    expect(failure.content[0].text).toContain('get_window_state');
+    expect(failure.content[0].text).toContain('Do not repeat');
+    expect(native.apis[0].click).toHaveBeenCalledOnce();
+    expect(native.apis[0].get_window_state).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['CAPTURE_FAILED', 'include_screenshot:false'],
+    ['WINDOW_NOT_FOUND', 'list_windows'],
+    ['FOCUS_FAILED', 'list_windows'],
+    ['UIA_FAILED', 'include_text:false']
+  ])('makes %s recoverable without treating it as disabled tools', async (code, recovery) => {
+    const api = surface();
+    await api.call('list_windows');
+    native.apis[0].get_window_state.mockRejectedValueOnce(new ComputerError(`${code}: fixture failure`));
+    const failure = await api.call('get_window_state', { window });
+    expect(failure.isError).toBe(true);
+    expect(failure.structuredContent.error).toMatchObject({ code, completed_count: null });
+    expect(failure.content[0].text).toContain(recovery);
+    expect(native.apis[0].get_window_state).toHaveBeenCalledOnce();
+    expect(native.apis[0].activate_window).not.toHaveBeenCalled();
   });
 });

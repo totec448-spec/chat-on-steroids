@@ -1,7 +1,9 @@
-/** Executed only in a debugger-created isolated world. No extension token enters the page. */
+/** Fixed DOM reader/target helper in an isolated world. No extension token enters the page. */
 export function browserPage(operation, args) {
   const key = '__cosBrowserControl';
-  let state = globalThis[key];
+  // Inspection must not overwrite another caller's interactive references or overlay.
+  const inspection = operation === 'inspect';
+  let state = inspection ? { refs: new Map(), next: 0, pageId: args.pageId } : globalThis[key];
   if (!state || state.pageId !== args.pageId) {
     const overlay = state?.overlay?.isConnected ? state.overlay : null;
     state = globalThis[key] = { pageId: args.pageId, refs: new Map(), next: 0, overlay };
@@ -51,17 +53,46 @@ export function browserPage(operation, args) {
   }
   if (operation === 'removeOverlay') { state.overlay?.remove(); state.overlay = null; return true; }
 
-  if (operation === 'snapshot') {
+  if (operation === 'snapshot' || inspection) {
+    let root = document.body || document.documentElement;
+    if (args.selector) {
+      let scopeError;
+      try { root = document.querySelector(args.selector); }
+      catch { scopeError = 'BROWSER_SELECTOR_INVALID: selector must be valid CSS.'; }
+      if (!scopeError && !root) scopeError = 'BROWSER_SELECTOR_NOT_FOUND: the requested subtree is absent. Inspect the page or choose a current selector.';
+      if (scopeError) {
+        // scripting.executeScript does not serialize a thrown page exception as a result.
+        if (inspection) return { error: scopeError };
+        fail(scopeError);
+      }
+    }
     // An explicit new snapshot replaces refs, preventing ref reuse after node replacement.
     state.refs.clear();
-    const lines = []; let chars = 0, visited = 0, emitted = 0, truncated = false;
+    const lines = []; let chars = 0, visited = 0, emitted = 0, elements = 0, truncated = false;
     const append = line => {
       if (emitted >= args.maxNodes || chars + line.length + 1 > args.maxChars) { truncated = true; return false; }
       lines.push(line); chars += line.length + 1; emitted++; return true;
     };
     const filter = (args.filter || '').toLocaleLowerCase();
+    const dom = args.format === 'dom';
+    const details = node => {
+      const attributes = [];let attributeChars = 0, seen = 0;
+      for (const attribute of node.attributes) {
+        if (++seen > 100) {truncated = true;break;}
+        if (!/^(?:id|class|role|name|type|href|src|title|placeholder|contenteditable|tabindex|disabled|hidden|aria-[\w-]+|data-[\w-]+)$/.test(attribute.name)) continue;
+        const name = attribute.name.slice(0,100), value = attribute.value.slice(0,300);
+        if (name.length < attribute.name.length || value.length < attribute.value.length) truncated = true;
+        const text = `${name}=${JSON.stringify(value)}`;
+        if (attributes.length >= 16 || attributeChars + text.length > 1600) {truncated = true;break;}
+        attributes.push(text);attributeChars += text.length;
+      }
+      const rect = node.getBoundingClientRect(), style = getComputedStyle(node);
+      const box = [rect.left,rect.top,rect.width,rect.height].map(v=>Math.round(v*10)/10);
+      const css = ['display','visibility','position','overflow','pointer-events','opacity'].map(name=>`${name}=${compact(style.getPropertyValue(name),80)}`).join(' ');
+      return `<${node.tagName.toLowerCase()}${attributes.length?' '+attributes.join(' '):''}> rect=${JSON.stringify(box)} ${css}`;
+    };
     const implicit = { A: 'link', BUTTON: 'button', TEXTAREA: 'textbox', SELECT: 'combobox', CANVAS: 'canvas', IMG: 'img', H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', SUMMARY: 'button' };
-    const stack = [{ node: document.body || document.documentElement, depth: 0, namedParent: false }];
+    const stack = [{ node: root, depth: 0, namedParent: false }];
     while (stack.length) {
       if (++visited > 15000 || emitted >= args.maxNodes || chars >= args.maxChars) { truncated = true; break; }
       const { node, depth, namedParent } = stack.pop();
@@ -82,8 +113,9 @@ export function browserPage(operation, args) {
       if (!role && (editingHost || node.tabIndex >= 0 || node.hasAttribute('onclick'))) role = editingHost ? 'textbox' : 'interactive';
       const named = role && ['button','link','textbox','checkbox','radio','combobox','slider','img','heading','interactive'].includes(role);
       let name = '';
-      if (role) {
-        name = label(node);
+      if (role || dom) {
+        name = role ? label(node) : '';
+        const detail = dom ? details(node) : '';
         // Native option popups need no DOM visibility or individual ref: select
         // consumes the parent ref and exact values. Bound discovery at its owner.
         const options = [];
@@ -97,15 +129,16 @@ export function browserPage(operation, args) {
           }
           if (node.options.length > options.length) truncated = true;
         }
-        const matches = !filter || `${role} ${name}`.toLocaleLowerCase().includes(filter);
+        const matches = !filter || `${role || ''} ${name} ${detail}`.toLocaleLowerCase().includes(filter);
         if (matches || options.some(option => option.toLocaleLowerCase().includes(filter))) {
-          const id = `${args.pageId}:${args.frameId}:e${++state.next}`;
+          const id = role && !inspection ? `${args.pageId}:${args.frameId}:e${++state.next}` : null;
           const flags = [node.matches(':disabled,[aria-disabled="true"]') ? 'disabled' : '', node.checked ? 'checked' : '', node.getAttribute('aria-expanded') ? `expanded=${node.getAttribute('aria-expanded')}` : '', document.activeElement === node ? 'focused' : ''].filter(Boolean);
           const value = ['INPUT','TEXTAREA','SELECT'].includes(node.tagName) && node.type !== 'password' ? compact(node.value, 200) : '';
           const href = node.tagName === 'A' ? compact(node.getAttribute('href'), 300) : '';
-          const line = `${'  '.repeat(Math.min(depth, 16))}[${id}] ${role} ${JSON.stringify(name)}${value ? ` value=${JSON.stringify(value)}` : ''}${href ? ` href=${JSON.stringify(href)}` : ''}${flags.length ? ` (${flags.join(', ')})` : ''}`;
+          const line = `${'  '.repeat(Math.min(depth, 16))}${id ? `[${id}] ` : ''}${detail ? detail+' ' : ''}${role ? `${role} ${JSON.stringify(name)}` : ''}${value ? ` value=${JSON.stringify(value)}` : ''}${href && !dom ? ` href=${JSON.stringify(href)}` : ''}${flags.length ? ` (${flags.join(', ')})` : ''}`;
           if (!append(line)) break;
-          state.refs.set(id, node);
+          elements++;
+          if (id) state.refs.set(id, node);
           for (const option of options) {
             if ((matches || option.toLocaleLowerCase().includes(filter)) && !append(`${'  '.repeat(Math.min(depth + 1, 16))}${option}`)) break;
           }
@@ -122,13 +155,13 @@ export function browserPage(operation, args) {
         // A name supplied by ARIA/labels does not include the container's body.
         // Only suppress text actually represented by a short content-derived name.
         const consumesText = named && ['button','link','heading','img'].includes(role) && name === textOf(node) && name.length < 200;
-        while (child && stack.length < 15000 && count++ < 15000) { stack.push({ node: child, depth: depth + (role ? 1 : 0), namedParent: namedParent || !!consumesText }); child = child.previousSibling; }
+        while (child && stack.length < 15000 && count++ < 15000) { stack.push({ node: child, depth: depth + (role || dom ? 1 : 0), namedParent: namedParent || !!consumesText }); child = child.previousSibling; }
         if (child) truncated = true;
       }
     }
     return { title: compact(document.title, 500), url: location.href.slice(0, 8192), readyState: document.readyState,
       visibility: document.visibilityState, focused: document.hasFocus(), pointerLocked: !!document.pointerLockElement,
-      text: lines.join('\n'), truncated, visited, elements: state.refs.size, refs: [...state.refs.keys()] };
+      text: lines.join('\n'), truncated, visited, elements, refs: [...state.refs.keys()] };
   }
 
   const element = resolve(args.ref);

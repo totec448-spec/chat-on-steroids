@@ -1730,7 +1730,101 @@ describe('native progress silence authority', () => {
     await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
   }
 
+  it('keeps authored queued work ahead of automatic Continue after a committed handoff', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const recovery = (await input.listInputs()).find(row => row.recovery)!;
+      expect(await input.claimBrowserInput(recovery.id, 'old-document', source.conversationId, true)).not.toBeNull();
+      expect(await input.authorizeBrowserInput(recovery.id, 'old-document', source.conversationId)).toBe(true);
+      const queued = await input.enqueueInput({ ...message(source.session.id, 'off'), mode: 'after-turn', text: 'Check the original requirement next.' });
+      const destination = randomUUID(), nextTurn = randomUUID();
+      expect(await rebindSession(source.session.id, source.conversationId, destination)).toBe(true);
+      input.resetInputForTests();
+      await post('/events', { conversationId: destination, events: [
+        { kind: 'model_selection', model: 'gpt-5.6-sol', time: ++now },
+        { kind: 'user_message', messageId: randomUUID(), text: 'Continue the original task', time: now, authoredNow: true },
+        { kind: 'turn_start', turnId: nextTurn, time: now }
+      ] });
+      await attributedMcp(destination);
+      expect(await input.fileRecoveryInput(source.session.id, destination, nextTurn, false, () => true)).toBe(false);
+      expect((await input.listInputs()).find(row => row.id === queued.id)).toEqual(queued);
+      expect((await input.listInputs()).find(row => row.id === recovery.id)?.state).toBe('cancelled');
+      await post('/events', { conversationId: destination, events: [
+        { kind: 'assistant_message', turnId: nextTurn, messageId: randomUUID(), text: 'The current task is done.', state: 'final', final: true, time: ++now },
+        { kind: 'turn_end', turnId: nextTurn, outcome: 'completed', time: ++now }
+      ] });
+      expect((await input.pendingBrowserInputs()).find(row => row.id === queued.id)).toMatchObject({ conversationId: destination, supersededConversationId: source.conversationId });
+      expect(await input.claimBrowserInput(queued.id, 'next-document', destination, true)).toMatchObject({ text: queued.text });
+      expect(await input.authorizeBrowserInput(queued.id, 'next-document', destination)).toBe(true);
+    } finally { clock.mockRestore(); }
+  });
+
+  it.each(['authored', 'foreign', 'unnamed', 'missing-session', 'companion'] as const)(
+    'keeps an uncertain %s browser claim through a handoff and restart', async kind => {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const pending = (await input.listInputs()).find(row => row.recovery)!;
+      expect(await input.claimBrowserInput(pending.id, 'retained-owner', source.conversationId, true)).not.toBeNull();
+      expect(await input.authorizeBrowserInput(pending.id, 'retained-owner', source.conversationId)).toBe(true);
+      const claimed = (await input.listInputs()).find(row => row.id === pending.id)!;
+      if (kind === 'authored') { delete claimed.recovery; delete claimed.silenceBoundary; claimed.text = 'An authored browser message'; }
+      if (kind === 'foreign') { claimed.conversationId = randomUUID(); claimed.silenceBoundary!.conversationId = claimed.conversationId; }
+      if (kind === 'unnamed') claimed.conversationId = null;
+      if (kind === 'missing-session') claimed.sessionId = randomUUID();
+      if (kind === 'companion') claimed.companionInputId = randomUUID();
+      const rows = claimed.companionInputId ? [claimed, { ...claimed, id: claimed.companionInputId,
+        companionInputId: undefined, recovery: undefined, silenceBoundary: undefined, text: 'An authored companion' }] : [claimed];
+      await writeDurableNow('session-input', rows);
+      expect(await rebindSession(source.session.id, source.conversationId, randomUUID())).toBe(true);
+      input.resetInputForTests();
+      const restored = await input.listInputs();
+      expect(restored).toEqual(rows);
+      expect(await input.claimBrowserInput(claimed.id, 'replacement-owner', source.conversationId, true)).toBeNull();
+    });
+
   for (const model of ['gpt-5.6-sol', 'gpt-5.6-pro']) {
+    it.each([false, true])(`releases only a departed automatic Continue and preserves its exact late receipt (${model}, restored: %s)`, async restored => {
+      let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      try {
+        const source = await open(model);
+        expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, model.endsWith('pro'), () => true)).toBe(true);
+        const pending = (await input.listInputs()).find(row => row.sessionId === source.session.id && row.recovery)!;
+        expect(await input.claimBrowserInput(pending.id, 'departed-document', source.conversationId, true)).not.toBeNull();
+        expect(await input.authorizeBrowserInput(pending.id, 'departed-document', source.conversationId)).toBe(true);
+        const authorized = (await input.listInputs()).find(row => row.id === pending.id)!;
+
+        now += 16 * 60_000;
+        expect((await input.listInputs()).find(row => row.id === pending.id)).toEqual(authorized);
+        expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, model.endsWith('pro'), () => true)).toBe(false);
+        const destination = randomUUID(), nextTurn = randomUUID();
+        expect(await rebindSession(source.session.id, source.conversationId, destination)).toBe(true);
+        if (restored) input.resetInputForTests();
+        await post('/events', { conversationId: destination, events: [
+          { kind: 'model_selection', model, time: ++now },
+          { kind: 'user_message', messageId: randomUUID(), text: 'Finish the original task in this chat', time: now, authoredNow: true },
+          { kind: 'turn_start', turnId: nextTurn, time: now }
+        ] });
+        await attributedMcp(destination);
+        expect(await input.fileRecoveryInput(source.session.id, destination, nextTurn, model.endsWith('pro'), () => true)).toBe(true);
+        const rows = await input.listInputs();
+        expect(rows.find(row => row.id === pending.id)).toEqual({ ...authorized, state: 'cancelled' });
+        const successor = rows.find(row => row.sessionId === source.session.id && row.state === 'queued')!;
+        expect(successor.conversationId).toBe(destination);
+        expect(await input.claimBrowserInput(successor.id, 'successor-document', destination, true)).not.toBeNull();
+        expect(await input.claimBrowserInput(pending.id, 'new-document', destination, true)).toBeNull();
+        expect(await input.acknowledgeBrowserInput(pending.id, 'wrong-document', source.conversationId, 'late-confirmation')).toBe(false);
+        expect(await input.acknowledgeBrowserInput(pending.id, 'departed-document', destination, 'late-confirmation')).toBe(false);
+        expect(await input.acknowledgeBrowserInput(pending.id, 'departed-document', source.conversationId, 'late-confirmation')).toBe(true);
+        expect((await input.listInputs()).find(row => row.id === pending.id)).toMatchObject({
+          state: 'cancelled', conversationId: source.conversationId, owner: authorized.owner,
+          sendAuthorizedAt: authorized.sendAuthorizedAt, messageId: 'late-confirmation', deliveredSessionId: source.session.id
+        });
+        expect((await getSession(source.session.id))?.conversationId).toBe(destination);
+      } finally { clock.mockRestore(); }
+    });
+
     it.each(['none', 'previous', 'request'] as const)(`never intervenes in ${model} without current-turn MCP (%s)`, async proof => {
       let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
       try {
@@ -2070,6 +2164,63 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
     } finally { clock.mockRestore(); }
   });
 
+  it.each(['gpt-5.6-sol', 'gpt-5.6-pro'])('keeps Continue and its Stop deadline when reload re-observes the same question with different text (%s)', async model => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const { row, conversationId, turnId, session } = await silent(model, ms => { now += ms; });
+      const store = await import('../src/main/session/store.js');
+      for (const [index, text] of ['Finish the requested task…', 'Finish the requested task\nwith the existing results.'].entries()) {
+        await post('/events', { conversationId, events: [{ kind: 'user_message',
+          messageId: row.recovery!.questionId, text, ...(index === 0 ? { authoredNow: false } : {}), time: ++now }] });
+        expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({
+          state: 'queued', silenceBoundary: { workSeq: row.silenceBoundary!.workSeq },
+          recovery: { busyUntil: row.recovery!.busyUntil }
+        });
+        expect((await store.readLatestUserMessage(session.id))?.message.text).toBe(text);
+      }
+      expect(await input.deferSilenceInput(row.id, conversationId, turnId)).toBe(true);
+      now = row.recovery!.busyUntil - 1;
+      expect((await input.pendingBrowserInputs()).some(entry => entry.id === row.id)).toBe(false);
+      now++;
+      expect((await input.pendingBrowserInputs()).find(entry => entry.id === row.id)?.recovery?.stop).toBe(true);
+      expect(await input.claimBrowserInput(row.id, 'reloaded-question-doc', conversationId, true)).not.toBeNull();
+      expect(await input.advanceRecoveryInput(row.id, 'reloaded-question-doc', conversationId, 'stop')).toBe(true);
+      expect(await input.advanceRecoveryInput(row.id, 'reloaded-question-doc', conversationId, 'stop')).toBe(false);
+      expect(await input.authorizeBrowserInput(row.id, 'reloaded-question-doc', conversationId)).toBe(false);
+      expect(await input.advanceRecoveryInput(row.id, 'reloaded-question-doc', conversationId, 'stopped')).toBe(true);
+      expect(await input.authorizeBrowserInput(row.id, 'reloaded-question-doc', conversationId)).toBe(true);
+      expect(await input.authorizeBrowserInput(row.id, 'reloaded-question-doc', conversationId)).toBe(false);
+      const nextQuestion = randomUUID(), nextTurn = randomUUID();
+      expect(await input.acknowledgeBrowserInput(row.id, 'reloaded-question-doc', conversationId, nextQuestion)).toBe(true);
+      expect(await input.acknowledgeBrowserInput(row.id, 'reloaded-question-doc', conversationId, nextQuestion)).toBe(true);
+      expect((await input.listInputs()).filter(entry => entry.id === row.id && entry.state === 'sent')).toHaveLength(1);
+      await post('/events', { conversationId, events: [
+        { kind: 'turn_end', turnId, outcome: 'interrupted', reason: 'automation_silence', time: ++now },
+        { kind: 'user_message', messageId: nextQuestion, text: row.text, authoredNow: true, time: ++now },
+        { kind: 'turn_start', turnId: nextTurn, time: now }
+      ] });
+      await attributedMcp(conversationId);
+      const bridge = await import('../src/main/bridge.js');
+      now += (model === 'gpt-5.6-pro' ? 600_000 : 120_000) - 1;
+      await bridge.sweepStaleSwarm(now);
+      const pending = () => post('/status', { openConversations: [conversationId] });
+      expect((await pending()).body.repairs.some((repair: any) => repair.conversationId === conversationId)).toBe(false);
+      now += 2;
+      await bridge.sweepStaleSwarm(now);
+      const repair = (await pending()).body.repairs.find((repair: any) => repair.conversationId === conversationId);
+      expect(repair?.reason).toBe('silence');
+      expect((await post('/repairs/claim', { token: repair.token })).body.allowed).toBe(true);
+      await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
+      const next = (await input.listInputs()).find(entry => entry.sessionId === session.id && entry.state === 'queued' && entry.recovery)!;
+      expect(next.id).not.toBe(row.id);
+      expect(next.recovery?.questionId).toBe(nextQuestion);
+      expect(next.silenceBoundary?.turnId).toBe(nextTurn);
+      expect(await input.deferSilenceInput(next.id, conversationId, nextTurn)).toBe(true);
+      now = next.recovery!.busyUntil;
+      expect((await input.pendingBrowserInputs()).find(entry => entry.id === next.id)?.recovery?.stop).toBe(true);
+    } finally { clock.mockRestore(); }
+  });
+
   it('keeps the recovery message and source immutable under user queue operations', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {
@@ -2174,7 +2325,7 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
     } finally { clock.mockRestore(); }
   });
 
-  it.each(['final', 'stop', 'question', 'activity', 'setting', 'rebind', 'input'] as const)(
+  it.each(['final', 'stop', 'question', 'edited-question', 'activity', 'setting', 'block', 'rebind', 'input'] as const)(
     'cancels a pending recovery on %s before any send or stop', async change => {
       let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
       try {
@@ -2185,15 +2336,21 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
         ] });
         if (change === 'stop') await post('/events', { conversationId, events: [{ kind: 'turn_end', turnId, outcome: 'stopped', time: now }] });
         if (change === 'question') await post('/events', { conversationId, events: [{ kind: 'user_message', messageId: randomUUID(), text: 'A newer instruction', time: now }] });
+        if (change === 'edited-question') await post('/events', { conversationId, events: [{ kind: 'user_message',
+          messageId: row.recovery!.questionId, text: 'An explicitly authored change', authoredNow: true, time: now }] });
         if (change === 'activity') await attributedMcp(conversationId);
         if (change === 'setting') {
           await goal.setGoalSwitchNow(conversationId, mode === 'off' ? 'goal' : mode, false);
           await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: false } });
         }
+        if (change === 'block') (await import('../src/main/session/blocked-chats.js')).setChatBlocked(conversationId, true);
         if (change === 'rebind') await rebindSession(session.id, conversationId, randomUUID());
         if (change === 'input') await input.enqueueInput({ ...message(session.id, 'off'), mode: 'after-turn' });
         expect(await input.claimBrowserInput(row.id, 'late-doc', conversationId, true)).toBeNull();
-        expect((await input.listInputs()).find(entry => entry.id === row.id)?.state).toBe('cancelled');
+        const cancelled = (await input.listInputs()).find(entry => entry.id === row.id)!;
+        expect(cancelled.state).toBe('cancelled');
+        if (change === 'block') expect(cancelled.error).toBe('Automatic Continue cancelled: this chat is blocked.');
+        if (change === 'question') expect(cancelled.error).toBe('Automatic Continue cancelled: another user message arrived.');
       } finally { clock.mockRestore(); }
     });
 });

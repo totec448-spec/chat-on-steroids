@@ -38,6 +38,18 @@ describe('browser RPC custody', () => {
     expect(await claim).toBeNull();
     expect(await work).toMatchObject({error:expect.stringContaining('NOT_DISPATCHED')});
   });
+  it('aliases only request owners with exact proof for the current durable session', async () => {
+    const {broker,epoch}=setup();
+    const work=broker.execute('browser_tabs',{action:'list'},'session:A','chat-A',async()=>true);
+    const [request]=broker.poll(browser,'Chrome',true).requests;
+    const command=await broker.claim(browser,request!,epoch,[
+      {owner:'request:old-turn',sessionId:'A'}, {owner:'request:foreign',sessionId:'B'},
+      {owner:'unattributed',sessionId:'A'}, {owner:'session:B',sessionId:'A'}
+    ]);
+    expect(command?.ownerAliases).toEqual(['request:old-turn']);
+    expect(command?.owner).toBe('session:A');
+    broker.result(browser,request!,epoch,{value:true});await work;
+  });
 
   it('rechecks current permission after handout before page input', async () => {
     const {broker,epoch} = setup(); let allowed = true;
