@@ -11,6 +11,8 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## Unreleased
 
+- Keep background chat preparation rendering through its owned same-document navigation, without changing the selected browser tab.
+- Add Japanese interface translations and compact, keyboard-accessible language flags in Setup.
 - Resume new project chats and worker startup when the alternate shell's account picker finishes loading after its first inspection.
 - Capture early request identity from complete v1 stream messages with omitted format headers, preserving exact conversation ownership for worker status and messages.
 - Preserve prepared text, follow-up sends and worker bootstraps in the alternate ChatGPT Markdown editor; hide verified setup frames in its user bubbles.

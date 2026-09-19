@@ -1415,13 +1415,22 @@ adapter; do not make each feature guess a different composer or terminal message
 lightweight debugger focus-emulation leases, plus exact still-pending input openings and the
 elected model-catalog operation. At most 64 ChatGPT tabs receive rendering protection. No
 Runtime/Network capture, synthetic input, global Chrome flags or selected-tab/OS focus change
-is involved. Idle/personal tabs and pins alone earn no lease. Navigation, policy retirement,
-failed status, unpair or wake-socket loss release it through existing lifecycle events;
+is involved. Idle/personal tabs and pins alone earn no lease. Input election refreshes this same
+policy before native preparation and its offer. A reused page retains its exact document,
+navigation epoch and starting URL while preparing, including its one authorized New Chat
+transition; it cannot depend on an input marker that preparation has not written yet.
+Chrome can emit loading+URL for a same-document history change. The background owner uses a
+bounded, document-targeted scripting read of the new location and Chrome's InjectionResult
+document/frame identity before preserving that route. The existing policy must still approve
+it. Unknown/replaced documents lose their lease, and a late proof cannot retire a replacement.
+Confirmed document navigation, policy retirement, failed status, unpair or wake-socket loss
+release it through existing lifecycle events;
 ordinary idle/reuse/close policy remains unchanged. Session storage retains attachment cleanup
 custody and cancellation, never activity authority. Chrome/user debugger cancellation is not
 retried until that activity scope ends. Browser tools cannot borrow these attachments.
-`test/active-tabs.test.ts` covers custody/races; `scripts/verify-active-tabs.mjs` verifies native
-background animation pause/resume and release in isolated Chromium without observing the target
+`test/active-tabs.test.ts` and `test/desktop-input-maintenance.test.ts` cover custody, election,
+document proof and races; `scripts/verify-active-tabs.mjs` verifies native background animation
+pause/resume, same-document handoff and reload/release in isolated Chromium without observing the target
 through a debugger. This fixture is not signed-in ChatGPT or installed-runtime acceptance.
 
 ### Direct background browser control
@@ -2623,9 +2632,15 @@ names render as plain chips; unresolved file citations do not gain invented loca
 Tool result rendering preserves structured text/image/resource distinctions within bounds.
 App-owned external/local links cross their validated main-process route.
 
-English, Spanish and Simplified Chinese are explicit UI translations (`i18n.ts`, `locales/{es,zh-CN}.json`),
-with the selected locale in `cos.ui.language`. Changing language repaints owned labels while
-retaining drafts/selections; never translate authored messages, provider text or file paths.
+English, Spanish, Simplified Chinese, Traditional Chinese and Japanese use the existing UI
+catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja}.json`), with the selected locale in
+`cos.ui.language`. Setup uses SVG flags only, with native language names in tooltips and
+accessible labels; Appearance retains the named language dropdown. Both controls share the
+same persisted preference. `translate="no"` protects text and attributes, including native
+language names. Japanese has its own system-font fallbacks and CJK wrapping. Changing language
+repaints owned labels while retaining drafts/selections; never translate authored messages,
+provider text or file paths. Catalog checks cover all source keys and numbered placeholders;
+`scripts/verify-setup-guide.cjs` exercises narrow/zoomed layouts and native keyboard selection.
 Bindings live only in a WeakMap keyed by their DOM node. Language changes walk the current
 document, including hidden panels and bound text nodes. Never retain or periodically dereference
 an index of every past label: WeakRef sweeps keep detached trees alive during allocation-heavy
