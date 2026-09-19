@@ -110,6 +110,17 @@ function harness() {
 }
 
 describe('MAIN-world usage projection', () => {
+  it('retains self-contained explicit root delta identity when a socket handoff has no encoding prologue', async () => {
+    const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const frame = (request_id: string) => `event: delta\ndata: ${JSON.stringify({ p: '', o: 'add', c: 0,
+      v: { conversation_id, message: { metadata: { request_id } } } })}\n\n`;
+    await h.feedSse([frame('wfr_explicit_http')]);
+    h.socket().receive([{ type: 'message', payload: { type: 'conversation-turn-stream', payload: {
+      type: 'stream-item', conversation_id, turn_id: 'handoff', stream_item_id: 'first', parent_stream_item_id: 'http-last',
+      encoded_item: frame('wfr_explicit_handoff')
+    } } }]);
+    expect(h.posts.map(row => row.requestIds)).toEqual([['wfr_explicit_http'], ['wfr_explicit_handoff']]);
+  });
   it('reads complete messages with inherited v1 delta headers before any cache or later status event', async () => {
     const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     const delta = (value: unknown) => `event: delta\ndata: ${JSON.stringify(value)}\n\n`;
