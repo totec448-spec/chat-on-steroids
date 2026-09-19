@@ -999,7 +999,12 @@ function releaseRecoveryClaim(row: InputEntry): InputEntry {
     recovery: { ...row.recovery!, phase: row.recovery!.phase === 'ready' ? 'ready' : 'resumed' } };
 }
 async function recoveryCurrent(row: InputEntry): Promise<boolean> {
-  return await recoveryInvalidReason(row) === null;
+  const conversationId = row.silenceBoundary?.conversationId;
+  // Unassigned calls conservatively block every chat while attribution settles.
+  // They cannot prove that this frozen source resumed. Hold the ticket, rechecking
+  // around asynchronous validation; actual recorded work still retires it below.
+  return !!conversationId && inFlightToolCalls(conversationId) === 0 &&
+    await recoveryInvalidReason(row) === null && inFlightToolCalls(conversationId) === 0;
 }
 /** Keep the rejection on the existing outbox receipt so an audit can identify the veto. */
 async function recoveryInvalidReason(row: InputEntry): Promise<string | null> {
@@ -1007,7 +1012,6 @@ async function recoveryInvalidReason(row: InputEntry): Promise<string | null> {
   if (!row.recovery || !row.sessionId || !boundary) return 'the recovery source is missing';
   if (Date.now() - row.createdAt >= 12 * 60 * 60_000) return 'the twelve-hour recovery window expired';
   const unavailable = () => isChatBlocked(boundary.conversationId) ? 'this chat is blocked' :
-    inFlightToolCalls(boundary.conversationId) > 0 ? 'a local tool is running' :
     deliveryHooks?.recoveryAllowed?.(row.sessionId!, boundary.conversationId) !== true ? 'automatic continuation is off or paused' : null;
   const reason = unavailable();
   if (reason) return reason;
