@@ -91,7 +91,20 @@ Windows target-thread focus repair ([#308](https://github.com/totec448-spec/chat
 It is adapted with cleanup covering attachment exceptions and the existing actual foreground
 checks. The separate macOS input-validation proposal in #309 is not incorporated by this review.
 
+The September 19 backlog integration also adapts [@Maximapple](https://github.com/Maximapple)'s
+reporting-gap correction in [#284](https://github.com/totec448-spec/chat-on-steroids/pull/284),
+missing-tab worker wake and parked-prime recovery in [#314](https://github.com/totec448-spec/chat-on-steroids/pull/314),
+and marked-continuation diagnostics in [#315](https://github.com/totec448-spec/chat-on-steroids/pull/315).
+The wake adaptation rechecks command ownership, live message debt and cancellation after storage reads;
+marker diagnostics report commitment only after settlement. These adaptations retain the existing
+browser recovery and continuation owners.
+
 ## Reports, review and proposed work
+
+[@TomerGamerTV](https://github.com/TomerGamerTV)'s slow observation-journal report in
+[#301](https://github.com/totec448-spec/chat-on-steroids/issues/301) led to the independently
+implemented per-delivery timeout correction and durable retry regressions. General request
+deadlines and server request-body/header limits were not increased.
 
 [@raxy24](https://github.com/raxy24)'s report in
 [#262](https://github.com/totec448-spec/chat-on-steroids/issues/262) led to the independently

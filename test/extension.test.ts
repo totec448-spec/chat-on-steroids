@@ -2525,6 +2525,97 @@ describe('extension revival delivery', () => {
 });
 
 describe('extension observation journal', () => {
+  it.each([false, true])('retains a slow durable event batch beyond ten seconds, including a split retry: %s', async split => {
+    vi.useFakeTimers();
+    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    const signals: AbortSignal[] = [];
+    const posted: Array<{ events: Array<{ text: string }> }> = [];
+    let release = () => {};
+    let delayed = false;
+    const worker = loadWorker({ local, session, fetch: async (input, init = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname !== '/events') return response(404, {});
+      const batch = JSON.parse(String(init.body));
+      posted.push(batch);
+      if (split && posted.length === 1) return response(413, { error: 'body_too_large' });
+      if (delayed) return response(200, { stored: batch.events.length });
+      delayed = true;
+      const signal = init.signal as AbortSignal;
+      signals.push(signal);
+      return new Promise<ReturnType<typeof response>>((resolve, reject) => {
+        const abort = () => reject(signal.reason);
+        signal.addEventListener('abort', abort, { once: true });
+        release = () => {
+          signal.removeEventListener('abort', abort);
+          resolve(response(200, { stored: batch.events.length }));
+        };
+      });
+    } });
+    let pending: Promise<unknown> | undefined;
+    try {
+      await worker.registerTab(61);
+      pending = worker.send({ type: 'events', conversationId: chat, entries: ['first', 'second'].map(text => ({
+        conversationId: chat, event: { kind: 'progress', time: Date.now(), text }
+      })) }, 61);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(signals).toHaveLength(1);
+      expect(signals[0]!.aborted).toBe(false);
+      expect(journalOf(session).map(entry => entry.event.text)).toEqual(['first', 'second']);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      await pending;
+      expect(journalOf(session)).toEqual([]);
+      expect(posted.map(batch => batch.events.map(event => event.text))).toEqual(
+        split ? [['first', 'second'], ['first'], ['second']] : [['first', 'second']]
+      );
+    } finally {
+      release();
+      await pending;
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps an event batch durable when its extended deadline expires and drains it on a later successful attempt', async () => {
+    vi.useFakeTimers();
+    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    const signals: AbortSignal[] = [];
+    let healthy = false;
+    const worker = loadWorker({ local, session, fetch: async (input, init = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname !== '/events') return response(404, {});
+      if (healthy) return response(200, { stored: 1 });
+      const signal = init.signal as AbortSignal;
+      signals.push(signal);
+      return new Promise<ReturnType<typeof response>>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    } });
+    try {
+      await worker.registerTab(61);
+      const pending = worker.send({ type: 'events', conversationId: chat, entries: [{
+        conversationId: chat, event: { kind: 'progress', time: Date.now(), text: 'preserve this observation' }
+      }] }, 61);
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(signals).toHaveLength(1);
+      expect(signals[0]!.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(signals[0]!.aborted).toBe(true);
+      expect(journalOf(session).map(entry => entry.event.text)).toEqual(['preserve this observation']);
+      healthy = true;
+      const retry = worker.send({ type: 'status' }, 61);
+      await vi.advanceTimersByTimeAsync(0);
+      await retry;
+      expect(journalOf(session)).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('delivers another chat and its Goal while a slow chat holds one slot, without overlapping same-chat batches', async () => {
     const a = '11111111-2222-3333-4444-555555555555';
     const b = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';

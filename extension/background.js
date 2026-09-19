@@ -28,11 +28,13 @@ const activeTabs = globalThis.chrome?.debugger ? createActiveTabs(chrome) : null
 const PORTS = [8765, 8766, 8767, 8768, 8769];
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
+/** A journal receipt follows durable session writes, which can outlast an ordinary read. */
+const EVENTS_REQUEST_TIMEOUT_MS = 60_000;
 /**
  * The deadline for the one route that waits on a model rather than on the app's own state.
  *
- * Every other request this worker makes is answered from something the app already has, so the
- * ordinary ten seconds is a generous ceiling for it. `/goal/open` is different: it holds the
+ * Ordinary reads use ten seconds; journal delivery has its own durable-write budget.
+ * `/goal/open` is different: it holds the
  * connection open for a whole OpenRouter completion, which the app itself allows 180s for. A
  * shorter deadline here does not cancel that work — the app keeps going and the account is
  * still billed for the answer — it only guarantees nobody is left to receive it.
@@ -713,6 +715,7 @@ async function deliverJournalBatch(batch) {
   const { conversationId, mine, agent, agentCommandId } = batch;
   const result = await call('/events', {
     method: 'POST',
+    timeoutMs: EVENTS_REQUEST_TIMEOUT_MS,
     body: JSON.stringify({
       conversationId,
       agent,
@@ -726,6 +729,7 @@ async function deliverJournalBatch(batch) {
     const half = mine.slice(0, Math.floor(mine.length / 2));
     const retry = await call('/events', {
       method: 'POST',
+      timeoutMs: EVENTS_REQUEST_TIMEOUT_MS,
       body: JSON.stringify({ conversationId, agent, agentCommandId, events: half.map((entry) => entry.event) })
     });
     noteDelivery(retry, half.length, conversationId);
