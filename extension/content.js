@@ -36,7 +36,7 @@
   // before touching the shared DOM. Otherwise old and new composer observers can continually
   // remove and reinsert each other's controls, starving transport/timers and freezing the tab.
   // A healthy incumbent in this context still wins the static/recovery injection race.
-  const RECORDER_VERSION = 16;
+  const RECORDER_VERSION = 18;
   const recorderHandle = {
     version: RECORDER_VERSION,
     healthy: () => false,
@@ -3016,7 +3016,7 @@
   // 11: adds exact typed thought-notification ids and ephemeral DOM stamps for selective
   //     presentation suppression. Caption text and per-call adjacency remain non-authority.
   // 12: adds exact provider-message/sediment generated-image descriptors and DOM pixel stamps.
-  const FIBER_VERSION = 16;
+  const FIBER_VERSION = 18;
   const FIBER_TIMEOUT_MS = 1500;
   const FIBER_MAX_ROWS = 400;
   /** Assistant turns whose per-call evidence is accepted from one scan. */

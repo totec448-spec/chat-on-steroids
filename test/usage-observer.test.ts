@@ -110,6 +110,57 @@ function harness() {
 }
 
 describe('MAIN-world usage projection', () => {
+  it('retains self-contained explicit root delta identity when a socket handoff has no encoding prologue', async () => {
+    const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const frame = (request_id: string) => `event: delta\ndata: ${JSON.stringify({ p: '', o: 'add', c: 0,
+      v: { conversation_id, message: { metadata: { request_id } } } })}\n\n`;
+    await h.feedSse([frame('wfr_explicit_http')]);
+    h.socket().receive([{ type: 'message', payload: { type: 'conversation-turn-stream', payload: {
+      type: 'stream-item', conversation_id, turn_id: 'handoff', stream_item_id: 'first', parent_stream_item_id: 'http-last',
+      encoded_item: frame('wfr_explicit_handoff')
+    } } }]);
+    expect(h.posts.map(row => row.requestIds)).toEqual([['wfr_explicit_http'], ['wfr_explicit_handoff']]);
+  });
+  it('reads complete messages with inherited v1 delta headers before any cache or later status event', async () => {
+    const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const delta = (value: unknown) => `event: delta\ndata: ${JSON.stringify(value)}\n\n`;
+    await h.feedSse(['event: delta_encoding\ndata: "v1"\n\n',
+      delta({ p: '', o: 'add', c: 0, v: { conversation_id, message: { metadata: {} } } }),
+      delta({ c: 1, v: { conversation_id, message: { metadata: { request_id: 'wfr_early_shell' }, content: { parts: ['NEVER_PROJECT_CONTENT'] } } } }),
+      delta({ v: { conversation_id, message: { metadata: { request_id: 'wfr_next_shell' } } } })]);
+    expect(h.posts.map(row => row.requestIds)).toEqual([['wfr_early_shell'], ['wfr_next_shell']]);
+    expect(JSON.stringify(h.posts)).not.toContain('NEVER_PROJECT_CONTENT');
+  });
+  it('never treats an inherited nested delta as a root or stitches partial identity fields', async () => {
+    const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const delta = (value: unknown) => `event: delta\ndata: ${JSON.stringify(value)}\n\n`;
+    const value = { conversation_id, message: { metadata: { request_id: 'wfr_not_root' } } };
+    await h.feedSse(['event: delta_encoding\ndata: "v1"\n\n',
+      delta({ p: '/message/content', o: 'add', v: {} }), delta({ v: value }),
+      delta({ p: '', o: 'add', v: { conversation_id } }),
+      delta({ p: '/message/metadata/request_id', o: 'add', v: 'wfr_partial' })]);
+    expect(h.posts).toEqual([]);
+    await h.feedSse(['event: delta_encoding\ndata: "future"\n\n', delta({ p: '', o: 'add', v: value })]);
+    expect(h.posts).toEqual([]);
+    await h.feedSse([delta({ v: value })]); // A different HTTP response owns no prior headers.
+    expect(h.posts).toEqual([]);
+  });
+  it('decodes linked socket stream items separately for each native turn and rejects missing predecessors', () => {
+    const h = harness(), socket = h.socket(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const send = (turn_id: string, stream_item_id: string, parent_stream_item_id: string | null, encoded_item: string) => socket.receive([
+      { type: 'message', payload: { type: 'conversation-turn-stream', payload: {
+        type: 'stream-item', conversation_id, turn_id, stream_item_id, parent_stream_item_id, encoded_item
+      } } }
+    ]);
+    const delta = (value: unknown) => `event: delta\ndata: ${JSON.stringify(value)}\n\n`;
+    const value = (request_id: string) => ({ conversation_id, message: { metadata: { request_id } } });
+    send('turn-a', 'a0', null, 'event: delta_encoding\ndata: "v1"\n\n');
+    send('turn-a', 'a1', 'a0', delta({ v: value('wfr_socket_early') }));
+    send('turn-a', 'a1', 'a0', delta({ v: value('wfr_duplicate') }));
+    send('turn-b', 'b1', null, delta({ v: value('wfr_foreign_turn') }));
+    send('turn-a', 'a3', 'missing', delta({ v: value('wfr_missing_parent') }));
+    expect(h.posts.map(row => row.requestIds)).toEqual([['wfr_socket_early']]);
+  });
   it('joins a UUID request from a complete root-add event, including socket delivery, without copying content', async () => {
     const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', request_id = '11111111-2222-4333-8444-555555555555';
     const frame = `data: ${JSON.stringify({ p: '', o: 'add', v: { conversation_id, message: { metadata: { request_id }, content: { parts: ['PRIVATE_TEST_TEXT'] } } } })}\n\n`;

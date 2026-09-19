@@ -41,7 +41,7 @@
   'use strict';
 
   /** Bumped when the descriptor shape changes, so a stale pair cannot half-understand. */
-  const VERSION = 16;
+  const VERSION = 18;
   // The MAIN world survives an extension reload because the ChatGPT document survives it.
   // Recovery may therefore execute this file again in a page that still has an older helper
   // listener. Retire it across versions too: picker/plugin replies use their own v1
@@ -1563,6 +1563,13 @@
         const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes);
         const activities = nativeActivities.events;
         const endMessageId = turnEndMessageId(messages);
+        // The shell supplies the completed final item's own exact message id,
+        // without the classic thought-parent/timestamp tuple. Preserve that
+        // identity for handoff capture; streaming and cancelled items stay weak.
+        if (shell && !conversation.conflict && conversation.conversationId && endMessageId) {
+          const terminal = renderedMessages.find(message => message.role === 'assistant' && message.rawMessageId === endMessageId);
+          if (terminal) terminal.stable = true;
+        }
         if (
           codeModeCalls.length === 0 && calls.length === 0 &&
           requests.length === 0 &&
