@@ -21,6 +21,9 @@ than resolving the tag again. The commit archive has different directory/compres
 bytes from the recipe's tagged archive, so adjust the cache filename/hash accordingly.
 TIFF and Fontconfig include mirrored source archives where original download endpoints
 were unavailable. Windows libxml2's recipe directory must resolve to `2.15`.
+GVDB uses GNOME's GitHub mirror at the same pinned commit after the GitLab archive
+endpoint returned HTTP 406. Its archive bytes, size and SHA-256 are unchanged; all
+14 archived files also match that commit's Git tree.
 
 ## macOS and Linux
 
