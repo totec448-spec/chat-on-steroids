@@ -419,6 +419,77 @@ it('correlates an early shell stream request through the real observer and recor
   expect(JSON.stringify(r.sent)).not.toContain('NEVER_COPY_STREAM_TEXT');
   win.__CLF_CONTENT_RECORDER__.stop();
 });
+it('sends a marked shell handoff once and captures its exact completed brief instead of the preceding answer', async () => {
+  const f = fixture(), edit = editing(f), token = '0123456789abcdef0123456789abcdef';
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  const prompt = `[[CLF-HANDOFF:${token}]]\n\nWrite the brief. Keep **Markdown** and C:\\work intact.`;
+  const brief = 'TASK: retain the requested project. RESULT: completed the first change. NEXT: verify the remaining work.';
+  const submitted: string[] = [], summaries: string[] = [];
+  let source: ReturnType<typeof addExchange>, state = 'not-attempted';
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); submitted.push(edit.serialize()); source = addExchange(f, 8, submitted[0]!); edit.box.replaceChildren();
+  });
+  const r = await recorder(f, { compact: m => {
+    if (m.sourceAttempt) { state = 'attempted-unresolved'; return { ok: true, data: { allowed: true } }; }
+    if (m.sourceDispatch) { state = 'dispatched-unresolved'; return { ok: true, data: { armed: true } }; }
+    if (m.sourceMessageId) { state = 'sent'; return { ok: true, data: {} }; }
+    if (typeof m.summary === 'string') { summaries.push(m.summary); return { ok: true, data: { job: { stage: 'opening', busy: true } } }; }
+    return { ok: true, data: { token, ...(m.ticket ? {} : { prompt }), sourceSend: { state },
+      job: { stage: 'handoff-pending', busy: true, automatic: false, sourceSend: { state } } } };
+  } });
+  const pending = r.hook.startCompact();
+  await vi.waitFor(() => expect(submitted).toEqual([prompt]), { timeout: 3000 });
+  await r.hook.refreshFiber(); r.hook.observe(); await pending;
+  expect(summaries).toEqual([]);
+  source!.finish(); source!.entry.turn.items[1]!.content = brief;
+  await r.hook.refreshFiber(); r.hook.observe();
+  await vi.waitFor(() => expect(summaries).toEqual([brief]));
+  expect(r.sent.filter(m => m.sourceDispatch)).toHaveLength(1);
+  expect(r.sent).toContainEqual(expect.objectContaining({ type: 'compact', token, sourceMessageId: source!.userId }));
+  await r.hook.refreshFiber(); r.hook.observe();
+  expect(submitted).toEqual([prompt]); expect(summaries).toEqual([brief]);
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+}, 10000);
+
+it.each(['streaming', 'cancelled', 'conflicting-conversation'])('does not promote an unproven shell final identity: %s', async scenario => {
+  const f = fixture();
+  f.entry.turn.status = scenario === 'cancelled' ? 'cancelled' : 'complete';
+  f.entry.turn.items[2].completed = scenario !== 'streaming';
+  if (scenario === 'conflicting-conversation') f.row.memoizedProps.conversationId = OTHER;
+  const { turns } = await f.ask();
+  expect(turns[0].messages.filter((message: any) => message.role === 'assistant').every((message: any) => message.stable === false)).toBe(true);
+});
+
+it('commits a shell resume through its exact native marker before releasing recorded history', async () => {
+  const f = fixture(), edit = editing(f), commandId = 'shell-resume-command', token = '0123456789abcdef0123456789abcdef';
+  f.doc.querySelector('[data-thread-find-target]')!.replaceChildren();
+  page.reconfigure({ url: `https://chatgpt.com/?clf=${commandId}` });
+  const text = `[[CLF-RESUME:${token}]]\n\nTASK: continue **the project**. NEXT: verify the remaining work.`;
+  let committed = false, historyBeforeCommit = false;
+  const submitted: string[] = [];
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); submitted.push(edit.serialize()); addExchange(f, 9, submitted[0]!); edit.box.replaceChildren();
+    f.win.history.pushState({}, '', `/c/${THREAD}`);
+  });
+  const r = await recorder(f, {
+    redeem: () => ({ ok: true, command: { id: commandId, type: 'resume', text, agent: null,
+      model: 'gpt-5-6-thinking', reasoningEffort: 'high' } }),
+    compact: m => {
+      if (m.destinationAttempt) return { ok: true, data: { allowed: true } };
+      if (m.destinationDispatch) return { ok: true, data: { armed: true } };
+      if (m.destinationMessageId && m.token === token && m.conversationId === THREAD) committed = true;
+      return { ok: true, data: { committed, conversationId: THREAD, commandId } };
+    },
+    events: m => { if (!committed && m.entries.some((entry: any) => entry.event?.kind === 'user_message')) historyBeforeCommit = true;
+      return { ok: true, pending: 0, durable: true }; }
+  });
+  await vi.waitFor(() => expect(r.sent).toContainEqual(expect.objectContaining({ type: 'ack', id: commandId, status: 'sent', conversationId: THREAD })), { timeout: 5000 });
+  expect(submitted).toEqual([text]); expect(committed).toBe(true); expect(historyBeforeCommit).toBe(false);
+  expect(r.sent.filter(m => m.destinationDispatch)).toHaveLength(1);
+  expect(r.sent).toContainEqual(expect.objectContaining({ type: 'compact', token, destinationMessageId: '99999999-1111-4111-8111-000000000091' }));
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+}, 10000);
+
 it('leaves classic messages readable when quoted markup contains shell-looking attributes', () => {
   const f = fixture(); f.doc.body.innerHTML = '<section data-testid="conversation-turn-1" data-turn="assistant"><div data-message-id="actual" data-message-author-role="assistant"><div class="markdown">real answer<div id="app-shell-sidebar"></div><div data-turn-key="quoted"></div></div></div></section>';
   expect(f.api.turns()).toHaveLength(1); expect(f.api.messages()[0].text).toContain('real answer');

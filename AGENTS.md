@@ -1628,11 +1628,14 @@ version options normalize into the same bounded picker snapshot. Mixed-version p
 their execution ids rather than merging unrelated models into a synthetic Latest family.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
-The matched recorder/MAIN helper version is 17. Shell exchanges are read only under the native
+The matched recorder/MAIN helper version is 18. Shell exchanges are read only under the native
 main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
 can end it; cancellation or an unknown turn status never acknowledges unfinished tool calls.
+The shell's exact completed final message retains stable identity for handoff capture even
+without the classic thought-parent/timestamp tuple. The native terminal item and nonconflicting
+conversation must agree; streaming and cancelled items never gain that proof.
 The bounded query-cache read supplies the exact local/server conversation pair and request metadata
 only for message ids explicitly named by the mounted exchange in its exact conversation cache.
 It never follows child links or imports cached prose/completion. Duplicate/conflicting caches

@@ -11,6 +11,7 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## Unreleased
 
+- Capture completed alternate-shell handoff briefs using their exact native final-message identity; retain cancellation and conversation guards.
 - Keep background chat preparation rendering through its owned same-document navigation, without changing the selected browser tab.
 - Add Japanese interface translations and compact, keyboard-accessible language flags in Setup.
 - Resume new project chats and worker startup when the alternate shell's account picker finishes loading after its first inspection.

@@ -6,7 +6,7 @@ source/tests/worklogs without changing the shared index or working files. Integr
 working changes' actual base, retaining the later public fixes already present on main.
 
 The final source includes cold-picker ownership refresh, early complete-stream request identity,
-the explicit-root socket-handoff compatibility case, and matched recorder/helper version 17.
+the explicit-root socket-handoff compatibility case, and matched recorder/helper version 18.
 It also includes background rendering protection before input preparation and across proven
 same-document navigation, Japanese translations, compact native-labeled language flags, and
 the associated regression tests and real-browser verification scripts.
@@ -30,6 +30,21 @@ with 45 skipped. TypeScript, privacy, dependency notices and native-source check
 Native Chromium passed all seven background-rendering checks, all 54 setup/header layouts with
 keyboard selection and persistence, and all seven shell editing/identity/send checks. The
 Windows x64 build, installer and packaged native-runtime smoke check passed on the same source.
+
+A subsequent reporter screenshot showed a handoff waiting for its response. The added shell
+source-flow regression reproduced a capture defect: typed final items carry their exact native
+message identity but lack the classic thought-parent/time tuple, so the adapter marked the final
+unstable and the handoff reader rejected it. The adapter now preserves stable identity only for
+that exact completed final in a nonconflicting native conversation. Streaming/cancelled answers
+remain weak. The source test checks one dispatch and exact brief capture instead of the previous
+answer; the destination test checks native marker commitment before history publication. The
+recorder/helper version advances to 18 so old loaded readers are replaced together.
+The handoff source/destination and negative cases pass together with 1,073 neighboring tests.
+Native Chromium also confirms the completed final retains capture proof. The rebuilt Windows
+package and packaged smoke pass. The final full run initially had one Windows capture resource-
+state error while 5,546 other tests passed; all 20 tests in that native suite passed when rerun
+alone, followed by the six shutdown tests. That failed first run remains in the local evidence;
+the unchanged final source is checked again through full verification and all platform CI.
 
 Both the PR's final revision and its merged commit must pass all platform CI checks before
 installation. Installed payload hashes and live application/companion checks are separate gates.
