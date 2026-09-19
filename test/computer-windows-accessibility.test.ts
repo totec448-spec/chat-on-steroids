@@ -27,6 +27,14 @@ public class FixtureWindowPeer : WindowAutomationPeer {
   public FixtureWindowPeer(FixtureWindow owner) : base(owner) { window = owner; }
   protected override string GetClassNameCore() { return window.BrowserRoot ? "BrowserRootView" : base.GetClassNameCore(); }
 }
+public class SemanticOnlyButton : Button {
+  protected override AutomationPeer OnCreateAutomationPeer() { return new SemanticOnlyButtonPeer(this); }
+}
+public class SemanticOnlyButtonPeer : ButtonAutomationPeer {
+  public SemanticOnlyButtonPeer(SemanticOnlyButton owner) : base(owner) { }
+  protected override Rect GetBoundingRectangleCore() { return new Rect(0, 0, 0, 0); }
+  protected override bool IsOffscreenCore() { return true; }
+}
 public static class AccessibilityFixture {
   [STAThread] public static void Main() {
     var application = new Application();
@@ -47,6 +55,11 @@ public static class AccessibilityFixture {
     var document = new RichTextBox { Height = 60, Visibility = Visibility.Collapsed };
     document.Document = new FlowDocument(new Paragraph(new Run("Page document body " + new string('d', 20000))));
     AutomationProperties.SetAutomationId(document, "document"); panel.Children.Add(document);
+    var semantic = new SemanticOnlyButton { Content = "Semantic only", Height = 20 };
+    AutomationProperties.SetAutomationId(semantic, "semantic-only"); semantic.Click += delegate { invoked++; }; panel.Children.Add(semantic);
+    for (int index = 0; index < 110; index++) panel.Children.Add(new Button { Content = "Filler " + index, Height = 1 });
+    var deep = new Button { Content = "Deep needle", Height = 20 };
+    AutomationProperties.SetAutomationId(deep, "deep-needle"); panel.Children.Add(deep);
     window.Loaded += delegate {
       var targetHandle = new WindowInteropHelper(window).Handle;
       var popup = new HwndSource(new HwndSourceParameters("") { ParentWindow = targetHandle, WindowStyle = unchecked((int)0x90000000), ExtendedWindowStyle = 0x08000080, Width = 100, Height = 50, PositionX = -10000, PositionY = -10000 });
@@ -80,7 +93,7 @@ describe.runIf(process.platform === 'win32')('Windows semantic accessibility act
       const probe = String.raw`
 $runtime = [System.Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
 $wpf = Join-Path $runtime 'WPF'
-$refs = @('System.dll', (Join-Path $runtime 'System.Xaml.dll'), (Join-Path $wpf 'PresentationFramework.dll'), (Join-Path $wpf 'PresentationCore.dll'), (Join-Path $wpf 'WindowsBase.dll'))
+$refs = @('System.dll', (Join-Path $runtime 'System.Xaml.dll'), (Join-Path $wpf 'PresentationFramework.dll'), (Join-Path $wpf 'PresentationCore.dll'), (Join-Path $wpf 'WindowsBase.dll'), (Join-Path $wpf 'UIAutomationProvider.dll'), (Join-Path $wpf 'UIAutomationTypes.dll'))
 $exe = Join-Path $PSScriptRoot 'fixture.exe'
 Add-Type -TypeDefinition ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'fixture.cs'))) -ReferencedAssemblies $refs -OutputAssembly $exe -OutputType WindowsApplication
 $info = New-Object System.Diagnostics.ProcessStartInfo
@@ -180,6 +193,14 @@ try {
   $owned.StandardInput.WriteLine('document'); $owned.StandardInput.Flush(); $null = $owned.StandardOutput.ReadLine()
   $browser = Find-UiElements @{ id = $id; maxResults = 100 }
   if ($browser.document_text -notmatch '^Page document body') { throw 'browser page document text missing' }
+  $semantic = Handle-Request @{ op = 'snapshot'; id = $id; includeScreenshot = $false; includeUi = $true; query = 'semantic-only'; role = 'button'; maxResults = 5 }
+  if ($semantic.elements.Count -ne 1 -or $semantic.elements[0].bounds.width -ne 0 -or 'invoke' -notin $semantic.elements[0].actions) { throw 'semantic control without pixel bounds was lost' }
+  $beforeInvoke = [int](Read-State)[3]
+  $row = $semantic.elements[0]
+  $invoked = Handle-Request @{ op = 'act'; targetWindow = $id; actions = @(@{ type = 'ui_action'; window = $id; snapshotId = $semantic.snapshotId; runtimeKey = $row.runtimeKey; action = 'invoke' }) }
+  if (-not $invoked.ok -or $invoked.routes[0] -ne 'uia' -or [int](Read-State)[3] -ne ($beforeInvoke + 1)) { throw 'zero-bounds semantic invocation failed' }
+  $deep = Handle-Request @{ op = 'snapshot'; id = $id; includeScreenshot = $false; includeUi = $true; query = 'deep-needle'; role = 'button'; maxResults = 5 }
+  if ($deep.elements.Count -ne 1 -or $deep.elements[0].automationId -ne 'deep-needle' -or $deep.visited -le 100) { throw 'filtered traversal stopped at the first 100 controls' }
   Write-Output 'WINDOWS_ACCESSIBILITY_PROBE_OK'
 } finally {
   if (-not $owned.HasExited) {

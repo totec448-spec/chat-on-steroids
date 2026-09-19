@@ -1,7 +1,7 @@
 /** Codex Window2 vocabulary backed by this app's existing native Desktop owner. */
 import { z } from 'zod';
 import { act, getWindowState, ComputerError } from '../computer/index.js';
-import { createWindowsComputerApi, WINDOWS_API_METHODS, WINDOWS_API_SCHEMAS, type WindowsComputerApi } from '../computer/windows-api.js';
+import { createWindowsComputerApi, parseWindowsKeyChord, WINDOWS_API_METHODS, WINDOWS_API_SCHEMAS, type WindowsComputerApi } from '../computer/windows-api.js';
 import { browserTabChord, isBrowserProcess } from '../computer/browser-chords.js';
 import { currentCall, noteCount } from './call-context.js';
 import { getConfig } from '../config.js';
@@ -64,13 +64,13 @@ function apiForCaller(method: string): WindowsComputerApi {
 }
 
 const DESCRIPTIONS: Record<string, string> = {
-  list_windows: 'List open Windows app/window objects. Choose one returned window before input.',
+  list_windows: 'List Windows app/window objects with current state (foreground, open or minimized). Choose one returned window before input. A minimized window needs text-only inspection or activation before a screenshot.',
   get_window: 'Resolve a returned window by id and optional app identity.',
   list_apps: 'List installed and running Windows apps with their exact owned windows.',
   launch_app: 'Launch an observed app id or explicit .exe path/name, without command arguments. Observe its window afterward.',
-  get_window_state: 'Observe a window without activation, even when covered. Returns focus, indexed accessibility with truncation/errors, and native window/popup images. Browser document_text is page text, never the address bar; absent if no document was observed. Width/height and pointing coordinates use returned image pixels; do not rescale for DPI. Screenshots default on, text off.',
+  get_window_state: 'Observe without activation. Images default on; include_text adds controls. query matches name/automation id; role filters type; max_elements limits matches. Search implies text. include_screenshot:false skips pixels. Use returned image coordinates.',
   click: 'Click image-pixel x/y in the selected screenshot or current element_index; supports mouse_button and click_count. Omit screenshotId for the main image. Refresh state after input.',
-  press_key: 'Press a keysym-style key or chord (Control_L+s) in the exact window. Automatically activates its target.',
+  press_key: 'Press a keysym-style key or chord (Control_L+s) in the exact window. The plus key accepts plus, + or Control_L++. Automatically activates its target.',
   type_text: 'Type literal text in the exact window. Multiline text uses clipboard paste and the existing clipboard-write permission.',
   scroll: 'Scroll by horizontal/vertical wheel deltas at image-pixel x/y in the selected screenshot; positive Y scrolls down.',
   set_value: 'Replace the value of an indexed editable control from the latest accessibility state.',
@@ -104,12 +104,57 @@ function desktopResult(method: string, value: unknown): ToolResult {
 }
 
 async function refuseBrowserChord(key: string, window: { id: number }): Promise<string | null> {
-  const chord = browserTabChord(key.split('+').map(name => name.trim()));
+  const chord = browserTabChord(parseWindowsKeyChord(key));
   if (!chord) return null;
   // Popup HWNDs may be absent from the ordinary top-level window list.
   const target = (await getWindowState({ window: window.id, includeScreenshot: false, includeUi: false })).window;
   if (!isBrowserProcess(target.process)) return null;
-  return `BROWSER_TAB_CHORD: ${chord} would manage tabs/windows or browser history in ${JSON.stringify(target.title)} (${target.process}). No keys were sent. For testing, observe the browser menu and choose its New window control, then list_windows and get_window_state to verify a separate window id before navigating there. Never fall back to replacing a ChatGPT page through its address bar.`;
+  return `BROWSER_TAB_CHORD: ${chord} manages browser tabs/windows or history in ${JSON.stringify(target.title)} (${target.process}). No keys were sent. Use browser_tabs list to choose an exact tab; browser_snapshot reads it directly. Use browser_tabs new for a requested test page, or attach then browser_navigate for an existing eligible tab. These operations run in the background without changing the user's selected tab.`;
+}
+
+/** Describe a usable next observation without dispatching another action. */
+function nativeFailure(error: unknown): ToolResult | null {
+  if (!(error instanceof ComputerError)) return null;
+  // Partial completion wraps the native code. Keep the original message and exact
+  // completed-action evidence; zero completed actions does not prove zero effects.
+  const code = /^(?:PARTIAL_BATCH:[^\r\n]*?\. )?([A-Z][A-Z0-9_]*):/.exec(error.message)?.[1];
+  if (!code) return null;
+  let recovery: string;
+  switch (code) {
+    case 'CAPTURE_FAILED':
+      recovery = 'Use get_window_state({window,include_screenshot:false,include_text:true}) for accessible controls. Inspect list_windows for the current state. A minimized target can be restored with activate_window when needed for the task, then observed again. Repeating the same capture cannot restore it.';
+      break;
+    case 'WINDOW_NOT_FOUND':
+    case 'STALE_WINDOW':
+    case 'WINDOW_APP_MISMATCH':
+    case 'RELATED_WINDOW_GONE':
+      recovery = 'Call list_windows and select the current returned app/window identity. A closed window or dialog needs a new target; do not reuse its old id.';
+      break;
+    case 'FOCUS_FAILED':
+      recovery = 'Call list_windows to inspect the foreground and get_window_state on the target and its owned dialogs. Resolve the relevant dialog or window state before another action.';
+      break;
+    case 'STALE_FRAME':
+    case 'STALE_SCREENSHOT':
+    case 'STALE_WINDOW_STATE':
+    case 'STALE_REF':
+    case 'STALE_UI_REF':
+    case 'STALE_UI_SNAPSHOT':
+    case 'UNKNOWN_UI_REF':
+      recovery = 'Call get_window_state on the current target and inspect the result. Choose fresh screenshot coordinates or indexes from include_text:true; the previous observation no longer authorizes input.';
+      break;
+    case 'ELEMENT_NOT_FOUND':
+      recovery = 'Use get_window_state with include_text:true and query (control name or automation id) or role to locate the control beyond a truncated tree. Use an index from that new result.';
+      break;
+    case 'UIA_FAILED':
+      recovery = 'Use get_window_state({window,include_text:false}) to inspect the target pixels. An unavailable accessibility provider does not imply screenshots or other tools are disabled.';
+      break;
+    default:
+      return null;
+  }
+  const detail = { code, message: error.message, recovery, completed_count: error.completedCount ?? null,
+    failed_index: error.failedIndex ?? null, completed_routes: error.completedRoutes ?? null };
+  return { ...fail(`${error.message}\nNext step: ${recovery}\nDo not repeat completed input. Inspect the current result before deciding which action is still needed.`),
+    structuredContent: { error: detail } };
 }
 
 export function registerWindowsDesktopTools(reg: SurfaceRegistrar): void {
@@ -128,12 +173,24 @@ export function registerWindowsDesktopTools(reg: SurfaceRegistrar): void {
       }
       if (method === 'press_key') {
         const keys = input as { key: string; window: { id: number } };
-        const refusal = await refuseBrowserChord(keys.key, keys.window);
-        if (refusal) return fail(refusal);
+        try {
+          const refusal = await refuseBrowserChord(keys.key, keys.window);
+          if (refusal) return fail(refusal);
+        } catch (error) {
+          const failure = nativeFailure(error);
+          if (failure) return failure;
+          throw error;
+        }
       }
       const api = apiForCaller(method);
       const invoke = api[method] as (args: unknown) => Promise<unknown>;
-      const value = await invoke(input);
+      let value: unknown;
+      try { value = await invoke(input); }
+      catch (error) {
+        const failure = nativeFailure(error);
+        if (failure) return failure;
+        throw error;
+      }
       if (Array.isArray(value)) noteCount(value.length);
       return desktopResult(method, value);
     }));

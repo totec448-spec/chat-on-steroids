@@ -12,7 +12,7 @@ export const WINDOWS_API_SCHEMAS = {
   get_window: z.object({ id: z.number().int().positive(), app: z.string().min(1).optional() }),
   list_apps: z.object({}),
   launch_app: z.object({ app: z.string().min(1).max(32768) }),
-  get_window_state: z.object({ window: windowSchema, include_screenshot: z.boolean().optional(), include_text: z.boolean().optional() }),
+  get_window_state: z.object({ window: windowSchema, include_screenshot: z.boolean().optional(), include_text: z.boolean().optional(), query: z.string().max(256).optional(), role: z.string().max(100).optional(), max_elements: z.number().int().min(1).max(100).optional() }),
   click: z.object({ window: windowSchema, click_count: z.number().int().min(1).max(3).optional(), element_index: z.number().int().nonnegative().optional(), mouse_button: z.enum(['left', 'right', 'middle', 'l', 'r', 'm']).optional(), screenshotId, x: point.x.optional(), y: point.y.optional() }),
   press_key: z.object({ window: windowSchema, key: z.string().min(1).max(200) }),
   type_text: z.object({ window: windowSchema, text: z.string().max(100000) }),
@@ -23,12 +23,13 @@ export const WINDOWS_API_SCHEMAS = {
   activate_window: z.object({ window: windowSchema })
 } as const;
 export const WINDOWS_API_METHODS = WINDOWS_COMPUTER_METHODS;
-export type WindowsWindow = z.infer<typeof windowSchema>;
+export type WindowsWindow = z.infer<typeof windowSchema> & { state?: WindowInfo['state'] };
 export interface WindowsWindowState {
   window: WindowsWindow;
   focused: boolean | null;
   accessibility: null | { tree: string; truncated: boolean | null; document_text?: string; focused_element?: string; selected_elements?: string[]; selected_text?: string };
   accessibility_error?: { code: string; message: string };
+  screenshot_error?: { code: string; message: string };
   screenshots: Array<{ id: string; url: string; width: number; height: number; originX: number; originY: number; zIndex: number }>;
 }
 export interface WindowsComputerBackend {
@@ -43,10 +44,21 @@ type State = { app: string; frames: Map<string, Frame>; primary?: string; refs: 
 function publicWindow(value: WindowInfo): WindowsWindow {
   const app = value.app || value.appUserModelId || value.processPath;
   if (!app) throw new ComputerError('WINDOW_IDENTITY_UNAVAILABLE: observe a window with an exact native app identity.');
-  return { app, id: value.id, title: value.title };
+  return { app, id: value.id, title: value.title, ...(value.state ? { state: value.state } : {}) };
 }
 function targetableWindows(values: WindowInfo[]): WindowsWindow[] {
   return values.filter(value => value.app || value.appUserModelId || value.processPath).map(publicWindow);
+}
+
+/** The same chord tokens feed both the browser policy and native keyboard layout resolver. */
+export function parseWindowsKeyChord(key: string): string[] {
+  const keys = key.trim().split('+').map(part => part.trim());
+  // A final literal plus is written + or Control_L++; empty interior keys remain invalid.
+  if (keys.length >= 2 && keys.at(-1) === '' && keys.at(-2) === '') keys.splice(-2, 2, '+');
+  if (keys.length > 6 || keys.some(part => !part || part.length > 20)) {
+    throw new ComputerError('INVALID_KEY: use up to six key names; write the plus key as plus or Control_L++.');
+  }
+  return keys;
 }
 
 /** Create once per caller principal. Cached state contains no image bytes or UI text. */
@@ -113,12 +125,15 @@ export function createWindowsComputerApi(backend: WindowsComputerBackend = { act
     async get_window_state(input: unknown): Promise<WindowsWindowState> {
       const args = parse('get_window_state', input);
       const includeScreenshot = args.include_screenshot !== false;
-      const includeUi = args.include_text === true;
+      const hasTextOptions = args.query !== undefined || args.role !== undefined || args.max_elements !== undefined;
+      const includeUi = args.include_text ?? hasTextOptions;
+      if (hasTextOptions && !includeUi) throw new ComputerError('INVALID_ARGUMENT: query, role and max_elements need include_text:true, or omit include_text.');
       if (!includeScreenshot && !includeUi) throw new ComputerError('At least one of include_screenshot or include_text must be true.');
       const pending: { state?: State } = {};
       states.delete(args.window.id); states.set(args.window.id, pending);
       while (states.size > 32) states.delete(states.keys().next().value!);
-      const result = await backend.getWindowState({ window: args.window.id, includeScreenshot, includeUi, includeRelated: includeScreenshot, maxElements: 100 });
+      const result = await backend.getWindowState({ window: args.window.id, includeScreenshot, includeUi, includeRelated: includeScreenshot, maxElements: args.max_elements ?? 100,
+        ...(args.query === undefined ? {} : { query: args.query }), ...(args.role === undefined ? {} : { role: args.role }) });
       if (states.get(args.window.id) !== pending) throw new ComputerError('STALE_WINDOW_STATE: observation was superseded.');
       const window = publicWindow(result.window);
       if (window.app !== args.window.app) throw new ComputerError('STALE_WINDOW: app identity changed.');
@@ -135,7 +150,7 @@ export function createWindowsComputerApi(backend: WindowsComputerBackend = { act
         if (shot === result.screenshot) state.primary = id;
         screenshots.push({ id, url: `data:image/png;base64,${shot.data}`, width: shot.width, height: shot.height, originX: shot.region.x, originY: shot.region.y, zIndex: screenshots.length });
       }
-      const lines = result.elements.map((e, i) => `${'\t'.repeat(Math.min(30, e.depth ?? 0))}${i}: ${e.role} ${JSON.stringify(e.name)}${e.actions?.length ? ` [${e.actions.map(a => labels[a]).join(', ')}]` : ''}${e.offscreen ? ' [offscreen]' : ''}${e.enabled === false ? ' [disabled]' : ''}`);
+      const lines = result.elements.map((e, i) => `${'\t'.repeat(Math.min(30, e.depth ?? 0))}${i}: ${e.role} ${JSON.stringify(e.name)}${e.actions?.length ? ` [${e.actions.map(a => labels[a]).join(', ')}]` : ''}${e.offscreen ? ' [offscreen]' : ''}${e.enabled === false ? ' [disabled]' : ''}${e.bounds.width <= 0 || e.bounds.height <= 0 ? ' [no pixel bounds]' : ''}`);
       const focusedIndex = result.elements.findIndex(e => e.ref === result.accessibility?.focusedElement || e.focused);
       const selected = lines.filter((_line, i) => result.elements[i]?.selected);
       const accessibility = !includeUi || result.uiUnavailable ? null : {
@@ -153,6 +168,7 @@ export function createWindowsComputerApi(backend: WindowsComputerBackend = { act
         window,
         focused: result.screenshot?.focused ?? (result.window.state ? result.window.state === 'foreground' : null),
         screenshots,
+        ...(result.screenshotUnavailable ? { screenshot_error: result.screenshotUnavailable } : {}),
         ...(includeUi && result.uiUnavailable ? { accessibility_error: result.uiUnavailable } : {}),
         accessibility
       };
@@ -170,8 +186,7 @@ export function createWindowsComputerApi(backend: WindowsComputerBackend = { act
       }
     },
     async press_key(input: unknown): Promise<void> {
-      const a = parse('press_key', input); const keys = a.key.split('+').map(k => k.trim());
-      if (keys.length > 6 || keys.some(k => !k || k.length > 20)) throw new ComputerError('Invalid key chord: use up to six key names of at most twenty characters.');
+      const a = parse('press_key', input); const keys = parseWindowsKeyChord(a.key);
       await mutate(a.window, { type: 'keypress', keys });
     },
     async type_text(input: unknown): Promise<void> {

@@ -10,13 +10,16 @@ import { build } from 'esbuild';
 import { WebSocket, WebSocketServer } from 'ws';
 import sharp from 'sharp';
 
-const output = path.resolve('outputs/browser-control');
+const output = path.resolve(process.env.COS_BROWSER_CONTROL_OUTPUT || 'outputs/browser-control');
 const run = path.join(output,randomUUID());
 await fs.mkdir(run,{recursive:true});
 await build({entryPoints:['src/main/browser-control.ts'],bundle:true,platform:'node',format:'esm',packages:'external',outfile:path.join(run,'broker.mjs')});
 const {BrowserControlBroker} = await import(pathToFileURL(path.join(run,'broker.mjs')).href);
 const wakeClients = new Set();
 const broker = new BrowserControlBroker(() => {for (const ws of wakeClients) ws.send('wake');});
+// Fixture proof comes from this server, never from browser-supplied session identities.
+// The production paired bridge's correlation lookup is covered by its HTTP integration test.
+const requestOwners = new Map();
 const apiKey = randomUUID();
 const page = `<!doctype html><meta charset=utf-8><title>Browser Control Fixture</title><style>body{font:18px system-ui;padding:35px;background:#f2f6fe}button,input,textarea,select{font:inherit;margin:12px;padding:12px}button:hover{background:#aacaff}#drag{width:80px;height:50px;background:#9be}#drop{width:180px;height:60px;border:2px dashed #368}iframe{width:500px;height:150px}</style>
 <h1>Background fixture</h1><button id=click>Increment counter</button><output id=count>0</output><br><label>Notes<textarea id=notes></textarea></label><label>Choice<select id=choice><option value=one>One</option><option value=two>Two</option></select></label><div id=shadow></div><iframe id=child></iframe>
@@ -26,7 +29,8 @@ const server = http.createServer(async (req,res) => {
     const chunks=[];for await (const chunk of req) chunks.push(chunk);
     const body=JSON.parse(Buffer.concat(chunks).toString());let value;
     if(body.action==='poll') value={...broker.poll(body.browserId,body.name,body.enabled),policy:{read:true,write:true}};
-    else if(body.action==='claim') value={command:await broker.claim(body.browserId,body.id,body.epoch)};
+    else if(body.action==='claim') value={command:await broker.claim(body.browserId,body.id,body.epoch,
+      (body.owners || []).flatMap(owner=>requestOwners.has(owner)?[{owner,sessionId:requestOwners.get(owner)}]:[]))};
     else if(body.action==='check') value={allowed:await broker.check(body.browserId,body.id,body.epoch)};
     else if(body.action==='result') value={ok:broker.result(body.browserId,body.id,body.epoch,body.result)};
     res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(value));return;
@@ -44,8 +48,10 @@ for(const file of ['browser-control.js','browser-control-page.js']) await fs.cop
 await fs.writeFile(path.join(extension,'manifest.json'),JSON.stringify({manifest_version:3,name:'CoS isolated browser fixture',version:'1.0.0',permissions:['debugger','tabs','storage','scripting'],host_permissions:[`${base}/*`,`http://localhost:${port}/*`],background:{service_worker:'fixture.js',type:'module'}}));
 await fs.writeFile(path.join(extension,'fixture.js'),`import {createBrowserControl} from './browser-control.js';
 const transport=async(_path,init)=>{try{const r=await fetch(${JSON.stringify(base+'/rpc')},{...init,headers:{'x-fixture-key':${JSON.stringify(apiKey)},'content-type':'application/json'}});return {ok:r.ok,status:r.status,data:await r.json()};}catch{return {ok:false,status:0};}};
-globalThis.control=createBrowserControl(chrome,transport);
-globalThis.restartControl=async()=>{globalThis.control=createBrowserControl(chrome,transport);await control.ready();await control.pump();};
+globalThis.protectedTabs=new Set();
+const createControl=()=>createBrowserControl(chrome,transport,id=>protectedTabs.has(id));
+globalThis.control=createControl();
+globalThis.restartControl=async()=>{globalThis.control=createControl();await control.ready();await control.pump();};
 chrome.debugger.onEvent.addListener((...args)=>void control.event(...args).catch(console.error));chrome.debugger.onDetach.addListener((...args)=>void control.detached(...args).catch(console.error));
 const ws=new WebSocket(${JSON.stringify(`ws://127.0.0.1:${port}`)});ws.onopen=()=>void control.pump();ws.onmessage=()=>void control.pump().catch(console.error);`);
 const executable = process.env.COS_TEST_CHROMIUM || path.join(process.env.LOCALAPPDATA || '', 'ms-playwright','chromium-1243','chrome-win64','chrome.exe');
@@ -72,6 +78,35 @@ try {
   await cdp('Target.activateTarget',{targetId:sentinel.targetId});
   const target=await until(async()=>{const list=await tool('browser_tabs',{action:'list'});return list.value.tabs.find(t=>t.url===base+'/fixture');},'Fixture navigation');
   const tabId=target.tabId;
+  const worker=(await cdp('Target.getTargets')).targetInfos.find(t=>t.type==='service_worker'&&t.url.endsWith('/fixture.js'));assert.ok(worker);
+  let workerSession=(await cdp('Target.attachToTarget',{targetId:worker.targetId,flatten:true})).sessionId;
+  // The same extension's orchestration debugger already owns the page. Reviews must
+  // not steal or detach it, and an attachment refusal must leave it operational.
+  const nativeTabId=Number(tabId.split(':').at(-1));
+  await cdp('Runtime.evaluate',{expression:`(async()=>{protectedTabs.add(${nativeTabId});await chrome.debugger.attach({tabId:${nativeTabId}},'1.3');await chrome.debugger.sendCommand({tabId:${nativeTabId}},'Emulation.setFocusEmulationEnabled',{enabled:true});})()`,awaitPromise:true},workerSession);
+  const inspection=(await tool('browser_snapshot',{tabId,selector:'body',maxNodes:100,maxChars:8000})).value;
+  assert.equal(inspection.inspectionOnly,true);assert.ok(inspection.documentId);assert.equal(inspection.pageId,undefined);
+  assert.ok(inspection.text.includes('Increment counter'));assert.ok(!inspection.text.includes(':e1]'));
+  const protectedList=(await tool('browser_tabs',{action:'list'})).value.tabs.find(t=>t.tabId===tabId);
+  assert.deepEqual(protectedList.access,{snapshot:'inspect',input:'protected'});
+  const dom=(await tool('browser_snapshot',{tabId,format:'dom',selector:'#click',maxNodes:10,maxChars:3000})).value;
+  assert.equal(dom.inspectionOnly,true);assert.equal(dom.documentId,inspection.documentId);
+  assert.match(dom.text,/<button id="click"> rect=\[[\d.,-]+\]/);assert.match(dom.text,/display=inline-block/);
+  assert.ok(!dom.text.includes('onclick='));assert.ok(!dom.text.includes(':e1]'));
+  report.checks.push('protected-page attributes, layout and computed CSS through the fixed DOM reader; list exposes read versus input access');
+  const sameDocument=(await tool('browser_snapshot',{tabId,frameId:inspection.frameId,selector:'#notes'})).value;
+  assert.equal(sameDocument.documentId,inspection.documentId);
+  for(const [selector,code] of [['[','BROWSER_SELECTOR_INVALID'],['#missing-fixture','BROWSER_SELECTOR_NOT_FOUND']]) {
+    const invalid=await broker.execute('browser_snapshot',{tabId,selector},'session:fixture',null,async()=>true);
+    assert.ok(invalid.error?.includes(code),JSON.stringify(invalid));
+  }
+  const protectedAttach=await broker.execute('browser_tabs',{action:'attach',tabId},'session:fixture',null,async()=>true);
+  assert.match(protectedAttach.error,/EXECUTOR_TAB/);
+  const preserved=await cdp('Runtime.evaluate',{expression:`chrome.debugger.getTargets().then(t=>t.some(t=>t.tabId===${nativeTabId}&&t.attached))`,awaitPromise:true,returnByValue:true},workerSession);
+  assert.equal(preserved.result.value,true);
+  await cdp('Runtime.evaluate',{expression:`(async()=>{protectedTabs.delete(${nativeTabId});await chrome.debugger.detach({tabId:${nativeTabId}});})()`,awaitPromise:true},workerSession);
+  await cdp('Target.detachFromTarget',{sessionId:workerSession});
+  report.checks.push('protected-tab DOM inspection without ownership or debugger loss; document-targeted reads; concrete CSS scope errors');
   await tool('browser_tabs',{action:'attach',tabId});
   let snap=await snapshot(tabId);assert.ok(snap.text.includes('Background fixture'));assert.ok(refFor(snap,'Shadow action'));report.checks.push('existing tab attachment; DOM and shadow-root references');
   if(process.env.COS_BROWSER_FOCUS_PROBE==='1') {
@@ -91,7 +126,11 @@ try {
     await tool('browser_tabs',{action:'release',tabId});
     process.exitCode=0;
   } else {
-  const foreign=await broker.execute('browser_snapshot',{tabId},'session:foreign',null,async()=>true);assert.match(foreign.error,/TAB_OWNED/);report.checks.push('foreign caller refused');
+  const foreign=await tool('browser_snapshot',{tabId},'session:foreign');assert.equal(foreign.value.inspectionOnly,true);
+  const foreignInput=await broker.execute('browser_action',{tabId,pageId:snap.pageId,action:'key',key:'A'},'session:foreign',null,async()=>true);assert.match(foreignInput.error,/TAB_OWNED/);
+  const scoped=(await tool('browser_snapshot',{tabId,mode:'inspect',format:'dom',selector:'#notes'})).value;
+  assert.equal(scoped.inspectionOnly,true);assert.ok(scoped.text.includes('textbox'));assert.ok(!scoped.text.includes('Increment counter'));
+  report.checks.push('foreign DOM reviews and scoped inspection preserve owner refs; foreign input refused');
   assert.equal(snap.visibility,'visible');assert.equal(snap.focused,true);
   const clickStarted=Date.now();
   await tool('browser_action',{tabId,pageId:snap.pageId,action:'click',ref:refFor(snap,'Increment counter')});
@@ -146,6 +185,7 @@ try {
   const shot=await tool('browser_screenshot',{tabId,fullPage:false});
   const bytes=Buffer.from(shot.image.data,'base64');const meta=await sharp(bytes).metadata();assert.equal(meta.width,shot.value.width);assert.equal(meta.height,shot.value.height);await fs.writeFile(path.join(output,'browser-control-fixture.jpg'),bytes);report.checks.push('native background screenshot; image geometry verified');
   const coordinateClick={tabId,pageId:shot.value.pageId,action:'click',screenshotId:shot.value.screenshotId,x:(buttonRect.left+buttonRect.width/2)*shot.value.scale,y:(buttonRect.top+buttonRect.height/2)*shot.value.scale};
+  await tool('browser_snapshot',{tabId,mode:'inspect',selector:'#click'});
   await tool('browser_action',coordinateClick);
   const staleShot=await broker.execute('browser_action',coordinateClick,'session:fixture',null,async()=>true);assert.match(staleShot.error,/SCREENSHOT/);
   assert.equal((await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'document.querySelector("#count").textContent'})).value.value,'2');report.checks.push('viewport image coordinates click once; consumed screenshot is refused');
@@ -170,15 +210,39 @@ try {
   await until(async()=>(await tool('browser_evaluate',{tabId,pageId:childSnap.pageId,frameId:child.frameId,expression:'document.body.dataset.clicked'})).value.value==='yes','Frame click effect',2500);report.checks.push('cross-origin frame reference click with parent viewport conversion');
   const bounded=(await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'(()=>{const a=[];a[4000000000]="last";return {array:a,long:"x".repeat(1000000)};})()'})).value;
   assert.ok(JSON.stringify(bounded).length<25000);assert.deepEqual(bounded.value.array,['last']);report.checks.push('sparse arrays and large evaluation strings remain bounded');
-  const worker=(await cdp('Target.getTargets')).targetInfos.find(t=>t.type==='service_worker'&&t.url.endsWith('/fixture.js'));assert.ok(worker);
-  const workerSession=(await cdp('Target.attachToTarget',{targetId:worker.targetId,flatten:true})).sessionId;
+  workerSession=(await cdp('Target.attachToTarget',{targetId:worker.targetId,flatten:true})).sessionId;
   await cdp('Runtime.evaluate',{expression:'restartControl()',awaitPromise:true},workerSession);
   const restored=await snapshot(tabId);assert.notEqual(restored.pageId,snap.pageId);snap=restored;
-  const restoredForeign=await broker.execute('browser_snapshot',{tabId},'session:foreign',null,async()=>true);assert.match(restoredForeign.error,/TAB_OWNED/);report.checks.push('worker state reconstruction retains exact tab custody and renews observations');
+  const restoredForeign=await tool('browser_snapshot',{tabId},'session:foreign');assert.equal(restoredForeign.value.inspectionOnly,true);
+  const restoredInput=await broker.execute('browser_action',{tabId,pageId:snap.pageId,action:'key',key:'A'},'session:foreign',null,async()=>true);assert.match(restoredInput.error,/TAB_OWNED/);
+  report.checks.push('worker state reconstruction retains exact tab custody and renews observations');
   await cdp('Runtime.evaluate',{expression:`chrome.debugger.detach({tabId:${Number(tabId.split(':').at(-1))}})`,awaitPromise:true},workerSession);
-  const cancelled=await broker.execute('browser_snapshot',{tabId},'session:fixture',null,async()=>true);assert.match(cancelled.error,/DETACHED|NOT_OWNED/);
+  // Chrome need not notify this extension about its own explicit detach. The next
+  // owned read detects debugger loss; if a notification won, it already uses inspection.
+  const cancelled=await broker.execute('browser_snapshot',{tabId},'session:fixture',null,async()=>true);
+  if(cancelled.error) assert.match(cancelled.error,/DETACHED|NOT_OWNED/);
+  else assert.equal(cancelled.value.inspectionOnly,true);
+  const cancelledInput=await broker.execute('browser_action',{tabId,pageId:snap.pageId,action:'key',key:'A'},'session:fixture',null,async()=>true);assert.match(cancelledInput.error,/DETACHED|NOT_OWNED/);
   assert.equal((await tool('browser_tabs',{action:'list'})).value.tabs.find(t=>t.tabId===tabId).claimed,false);
+  assert.equal((await tool('browser_snapshot',{tabId})).value.inspectionOnly,true);
   await tool('browser_tabs',{action:'attach',tabId});snap=await snapshot(tabId);report.checks.push('lost native debugger attachment retires custody even without its notification');
+  await tool('browser_tabs',{action:'release',tabId});
+  const requestOwner='request:fixture-before-proof';
+  await tool('browser_tabs',{action:'attach',tabId},requestOwner);
+  const requestSnap=(await tool('browser_snapshot',{tabId,maxNodes:300,maxChars:16000},requestOwner)).value;
+  const requestAction={tabId,pageId:requestSnap.pageId,action:'fill',ref:refFor(requestSnap,'Notes'),text:'request-owned'};
+  await tool('browser_action',requestAction,requestOwner);
+  for(const owner of ['request:other','session:fixture']) {
+    const denied=await broker.execute('browser_action',requestAction,owner,null,async()=>true);assert.match(denied.error,/TAB_OWNED/);
+  }
+  requestOwners.set(requestOwner,'fixture');
+  await tool('browser_action',{...requestAction,text:'session-owned after proof'});
+  assert.equal((await tool('browser_tabs',{action:'list'})).value.tabs.find(t=>t.tabId===tabId).owned,true);
+  await cdp('Runtime.evaluate',{expression:'restartControl()',awaitPromise:true},workerSession);
+  snap=await snapshot(tabId);
+  assert.notEqual(snap.pageId,requestSnap.pageId);
+  assert.equal((await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'document.querySelector("#notes").value'})).value.value,'session-owned after proof');
+  report.checks.push('unattributed request input; isolation from another request; exact later session proof preserves tab and data through worker reconstruction');
   await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'(history.pushState({},"","#spa"),true)'});
   snap=await snapshot(tabId);
   assert.equal((await tool('browser_evaluate',{tabId,pageId:snap.pageId,expression:'document.querySelectorAll("[data-cos-browser-control]").length'})).value.value,1);report.checks.push('SPA navigation retains a single blue ownership overlay');
@@ -188,8 +252,13 @@ try {
   const stalePage=snap.pageId,staleRef=refFor(snap,'Increment counter');
   await tool('browser_navigate',{tabId,pageId:snap.pageId,action:'url',url:base+'/other'});
   const stale=await broker.execute('browser_action',{tabId,pageId:stalePage,action:'click',ref:staleRef},'session:fixture',null,async()=>true);assert.match(stale.error,/STALE/);report.checks.push('navigation revokes stale input');
+  const beforeNew=(await tool('browser_tabs',{action:'list'})).value;
   const created=await tool('browser_tabs',{action:'new',url:base+'/fixture'});assert.ok(created.value.tabId);
-  await snapshot(created.value.tabId);await tool('browser_tabs',{action:'close',tabId:created.value.tabId});report.checks.push('new background tab and exact owned close');
+  assert.equal(created.value.created,true);assert.equal(created.value.attached,true);assert.equal(created.value.url,base+'/fixture');
+  const afterNew=(await tool('browser_tabs',{action:'list'})).value;
+  assert.equal(afterNew.total,beforeNew.total+1);
+  assert.equal(afterNew.tabs.filter(t=>t.url==='about:blank').length,beforeNew.tabs.filter(t=>t.url==='about:blank').length);
+  await snapshot(created.value.tabId);await tool('browser_tabs',{action:'close',tabId:created.value.tabId});report.checks.push('one new tab at the requested URL; separate creation/attachment receipt; no additional blank page; exact owned close');
   const closed=await broker.execute('browser_snapshot',{tabId:created.value.tabId},'session:fixture',null,async()=>true);assert.match(closed.error,/BROWSER_TAB_CLOSED/);
   await tool('browser_tabs',{action:'release',tabId});const after=(await tool('browser_tabs',{action:'list'})).value.tabs.find(t=>t.tabId===tabId);assert.ok(after&&!after.claimed);report.checks.push('release retains existing user tab');
   const released=await cdp('Runtime.evaluate',{expression:`chrome.scripting.executeScript({target:{tabId:${Number(tabId.split(':').at(-1))}},func:()=>document.visibilityState})`,awaitPromise:true,returnByValue:true},workerSession);

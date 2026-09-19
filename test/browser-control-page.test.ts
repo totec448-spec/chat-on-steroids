@@ -20,6 +20,55 @@ function page(html: string) {
 afterEach(()=>{for(const dom of windows.splice(0))dom.window.close();});
 
 describe('browser DOM observations and exact targets',()=>{
+  it('reads element attributes, layout and styles without acquiring or replacing input refs',()=>{
+    const {run,ref,w}=page('<main id="chat" data-turn-id="turn-42"><button id="stop" class="primary" aria-expanded="false" style="position:fixed">Stop</button></main>');
+    const target=ref(run<Snapshot>('snapshot'),'button "Stop"');
+    const before=w.document.activeElement;
+    const details=run<Snapshot>('inspect',{selector:'main',format:'dom'});
+    expect(details.text).toContain('<main id="chat" data-turn-id="turn-42">');
+    expect(details.text).toContain('<button id="stop" class="primary" aria-expanded="false">');
+    expect(details.text).toContain('rect=[10,10,200,80]');
+    expect(details.text).toContain('position=fixed');
+    expect(details.text).not.toContain('[page:frame:');
+    expect(w.document.activeElement).toBe(before);
+    expect(run('focus',{ref:target,keyTarget:true})).toBe(true);
+  });
+
+  it('bounds DOM details, filters attributes and never emits password values or inline scripts',()=>{
+    const {run}=page('<main><input id="secret" type="password" value="never-emit-secret" onclick="never-emit-handler()"><button data-testid="exact-target">Run</button></main>');
+    const details=run<Snapshot>('inspect',{format:'dom'});
+    expect(details.text).not.toContain('never-emit');
+    expect(run<Snapshot>('inspect',{format:'dom',filter:'exact-target'}).text).toContain('data-testid="exact-target"');
+    const huge=page(`<main id="${'x'.repeat(10000)}">${'<div data-state="ready">Text</div>'.repeat(100)}</main>`).run<Snapshot>('inspect',{format:'dom',maxNodes:3,maxChars:1000});
+    expect(huge.truncated).toBe(true);
+    expect(huge.text.length).toBeLessThanOrEqual(1000);
+    expect(huge.text.split('\n').length).toBeLessThanOrEqual(3);
+  });
+
+  it('inspects a scoped subtree without replacing interactive refs or changing focus',()=>{
+    const {run,ref,w}=page('<aside>Unrelated history</aside><main><button>Review target</button><p>Visible update</p></main>');
+    const target=ref(run<Snapshot>('snapshot'),'Review target');
+    const before=w.document.activeElement;
+    const inspection=run<Snapshot & {refs:string[]}>('inspect',{selector:'main',pageId:'inspection'});
+    expect(inspection.text).toContain('Visible update');
+    expect(inspection.text).not.toContain('Unrelated history');
+    expect(inspection.text).not.toContain('[inspection:');
+    expect(inspection.elements).toBe(1);
+    expect(inspection.refs).toEqual([]);
+    expect(w.document.activeElement).toBe(before);
+    expect(run('focus',{ref:target,keyTarget:true})).toBe(true);
+  });
+
+  it('reports missing or invalid snapshot scopes without widening to the whole document',()=>{
+    const {run}=page('<main><button>Target</button></main>');
+    expect(run('inspect',{selector:'#missing'})).toMatchObject({error:expect.stringContaining('SELECTOR_NOT_FOUND')});
+    expect(run('inspect',{selector:'['})).toMatchObject({error:expect.stringContaining('SELECTOR_INVALID')});
+    expect(()=>run('snapshot',{selector:'#missing'})).toThrow(/SELECTOR_NOT_FOUND/);
+    expect(()=>run('snapshot',{selector:'['})).toThrow(/SELECTOR_INVALID/);
+    const scoped=run<Snapshot>('snapshot',{selector:'main'});
+    expect(scoped.text).toContain('button "Target"');
+  });
+
   it('exposes an editing host once rather than inventing textboxes for inherited editable children',()=>{
     const {run,w}=page('<div contenteditable="true" aria-label="Composer"><p>First line</p><p>Second line</p></div>');
     Object.defineProperty(w.HTMLElement.prototype,'isContentEditable',{get(){return this.closest('[contenteditable]')?.getAttribute('contenteditable')==='true';}});

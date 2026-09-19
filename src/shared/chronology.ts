@@ -40,6 +40,7 @@ export interface Chronological {
   inputId?: string;
   kind: string;
   source?: string;
+  agent?: string;
   call?: { requestId?: string | null; conversationId?: string | null; attribution?: string };
   turnId?: string | null;
   /** ChatGPT's own terminal flag for the one message that ended a turn. See `closing()`. */
@@ -161,12 +162,46 @@ export function authoredTimeOf(entry: Chronological): number | undefined {
   return id && (id[1] || id[2]) ? Number(id[3]) : undefined;
 }
 
+/** Both canonical formats retain the native response's working/exchange UUIDs.
+ * The parent or creation stamp identifies a message inside it, not another response. */
+function assistantResponseKey(entry: Chronological): string | undefined {
+  if (entry.kind !== 'assistant_message' || entry.source !== 'extension') return undefined;
+  const parts = entry.messageId?.split(':');
+  if (parts?.length !== 4 || parts[0] !== 'assistant') return undefined;
+  const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+  const timestamped = /^\d{13}$/.test(parts[3]!);
+  if (!timestamped && !uuid.test(parts[1]!)) return undefined;
+  const working = parts[timestamped ? 1 : 2]!, exchange = parts[timestamped ? 2 : 3]!;
+  if (!uuid.test(working) || !uuid.test(exchange)) return undefined;
+  return `${entry.agent ?? ''}\u0000${working.toLowerCase()}:${exchange.toLowerCase()}`;
+}
+
 /** Attach the session's recorded boundaries before selecting/rendering a small page.
  * These fields affect presentation only; seq, origin, time and turnId stay untouched. */
-export function projectTimeline<T extends Chronological>(entries: readonly T[], turns: TimelineTurns = {}, requests: RequestTurns = {}): T[] {
+export function projectTimeline<T extends Chronological>(
+  entries: readonly T[], turns: TimelineTurns = {}, requests: RequestTurns = {},
+  messages: Iterable<Chronological> = entries
+): T[] {
   const starts = Object.values(turns).sort((a, b) => a.origin - b.origin);
+  // Reload can lose the document-local owner of later public prose. An earlier
+  // canonical message of that exact native response still proves its display group.
+  // Resolve from all canonical messages, including anchors/conflicts outside this
+  // page. This neither coalesces sibling messages nor grants a lifecycle turnId.
+  const responses = new Map<string, TimelineTurns[string] | null>();
+  for (const message of messages) {
+    if (!message.turnId) continue;
+    const key = assistantResponseKey(message);
+    if (!key) continue;
+    const boundary = turns[responseTurnId(turns, message.turnId)] ?? null;
+    if (!responses.has(key)) responses.set(key, boundary);
+    else if (!boundary || responses.get(key)?.origin !== boundary.origin) responses.set(key, null);
+  }
   return entries.map(entry => {
     let boundary = entry.turnId ? turns[responseTurnId(turns, entry.turnId)] : undefined;
+    if (!entry.turnId) {
+      const response = assistantResponseKey(entry);
+      if (response) boundary = responses.get(response) ?? undefined;
+    }
     // Older recorders dropped the local turn after its end. Its earlier exact request
     // proof still places the call, including when that proof lies outside this page.
     const requestOwner = !entry.turnId && entry.kind === 'tool_call' && entry.source === 'mcp' && entry.call?.attribution === 'request_id'

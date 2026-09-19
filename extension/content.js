@@ -1783,19 +1783,22 @@
    * whole point of this batch is that the local session log stops containing those.
    */
   function generationTurn(turns = CLF_DOM.turns()) {
+    const question = turns.findLastIndex(turn => turn.role === 'user');
+    const ownsQuestion = Boolean(openedUserMessageId && question >= 0 &&
+      CLF_DOM.messagesIn(turns[question]).some(message => message.role === 'user' && message.id === openedUserMessageId));
     // Hydration may remount an old answer with a new node after our baseline.
     // An adopted generation still belongs after the latest question; DOM novelty
     // above that boundary cannot establish or retain its assistant owner.
     if (unwitnessedGeneration) {
-      const question = turns.findLastIndex(turn => turn.role === 'user');
       if (question >= 0) turns = turns.slice(question + 1);
     }
-    if (genNode) {
-      const held = turnForNode(genNode, turns);
-      if (held) return held;
-      genNode = null;
-    }
     const latest = currentAssistantTurn(turns);
+    const heldTurn = genNode ? turnForNode(genNode, turns) : null;
+    // One question can publish interim and final prose in different sections.
+    // Keep the held section unless the exact same question proves a newer one
+    // can belong to this response; its novelty is still checked below.
+    if (heldTurn && (!ownsQuestion || heldTurn === latest)) return heldTurn;
+    if (!heldTurn) genNode = null;
     if (!latest) return null;
     // Any node of the logical turn, not just the first. ChatGPT splits one answer across
     // sibling sections, and a new sibling appended to a section that was already there is
@@ -1805,6 +1808,8 @@
       genNode = node;
       return latest;
     }
+    // Reordered or revised pre-Send history cannot replace a still-mounted owner.
+    if (heldTurn) return heldTurn;
     for (const held of priorMarks) {
       if (!latest.nodes && held.node !== latest.node) continue;
       if (latest.nodes && latest.nodes.indexOf(held.node) < 0) continue;
@@ -6227,12 +6232,15 @@
       job = data.job || null;
       operationProgress = data.progress || null;
       pendingTools = Number.isFinite(Number(data.pendingTools)) ? Number(data.pendingTools) : 0;
-      // The generation this chat has open in the app, if any. Only ever *read* by
-      // resumeOpenTurn(), on the boot pull, and only to work out whether this document is
-      // standing in the middle of a turn a previous one opened. See adoptTurnId.
+      // The durable response can arrive after boot's empty/refused activity
+      // reply. Until this document has owned a turn, exact question proof may
+      // still restore it through this same feed, even after native completion.
       appActiveTurnId = typeof data.activeTurnId === 'string' && data.activeTurnId ? data.activeTurnId : null;
       if (!generating && pendingTools > 0 && appActiveTurnId === turnId && fiberSettled?.reason === 'thinking_failed') noteTurnProgress();
-      if (resumeIdentityPending) {
+      const recordedQuestionId = typeof data.recordedQuestionId === 'string' ? data.recordedQuestionId : null;
+      const lateAdoption = !generating && !turnId && genCount === 0 && !userStopped && !commandAttempt &&
+        recordedQuestionId && stopQuestionMatches(recordedQuestionId);
+      if (resumeIdentityPending || lateAdoption) {
         // Runtime activity can expire while the durable generation still owns
         // this question. Reload must retain that identity without turning the
         // expired activity projection into a new user send.
@@ -6243,8 +6251,7 @@
         const stopReady = !data.stopTurn || (data.stopTurn.turnId === recordedTurnId && stopQuestionMatches(data.stopTurn.userMessageId));
         if (!recordedTurnId || stopReady) {
           resumeIdentityPending = false;
-          if (recordedTurnId) adoptOpenTurn(recordedTurnId, data.stopTurn?.userMessageId ??
-            (typeof data.recordedQuestionId === 'string' ? data.recordedQuestionId : null));
+          if (recordedTurnId) adoptOpenTurn(recordedTurnId, data.stopTurn?.userMessageId ?? recordedQuestionId);
         }
       }
       tokens = Number.isFinite(Number(data.tokens)) ? Number(data.tokens) : 0;
@@ -7993,11 +8000,13 @@
     if (progress?.tools?.count > 0 && now - progress.tools.since >= 3000)
       return frame(progress.tools.count === 1 ? 'Waiting for a local tool to finish' : `Waiting for ${progress.tools.count} local tools to finish`);
     const workers = progress?.workers;
-    if (workers && (workers.active > 0 || workers.failed > 0)) {
+    // Failed workers remain in history and the agent panel. Only live workers
+    // explain this wait; a historical failure must not pin it across handoffs.
+    if (workers?.active > 0) {
       const summary = `${workers.finished} finished · ${workers.active} running${workers.failed ? ` · ${workers.failed} failed` : ''}`;
       // Running siblings are not proof that the prime is blocked on them.
-      return frame(workers.active === 1 ? `Worker still running: ${workers.names?.[0] || 'Worker'}` : workers.active > 1
-        ? `${workers.active} workers still running` : 'A worker needs attention', summary);
+      return frame(workers.active === 1 ? `Worker still running: ${workers.names?.[0] || 'Worker'}`
+        : `${workers.active} workers still running`, summary);
     }
     return input.generating ? frame('Still waiting for the current operation to complete') : null;
   }
