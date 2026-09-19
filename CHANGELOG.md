@@ -9,11 +9,12 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## [2.1.14] — dead to openai/anthropic. JOIN THE RESISTANCE @dummerspast39 on x
+## [2.1.14] — Death to Open AI and Anthropic. Join the resistance @dummerspast39 x
 
 - Add the optional animated Tur Tur Sahur desktop companion.
 - Show normal and unattributed reload warnings only in the last 30 seconds; retain the five-minute Pro warning.
 - Improve automatic Continue, queued-message recovery, native Stop handling and recorded turn ownership.
+- Wait for native tool-result receipt before automatic compaction interrupts a response, preserving just-completed work for the handoff.
 - Improve browser snapshots, select controls and safe tab release.
 - Refine the project workspace, Skills picker, appearance, connection controls and worker overview.
 - Preserve completed terminal output and improve tool-permission guidance.
