@@ -2171,15 +2171,25 @@ function inspectRequestedModels(request) {
   if (modelCatalogFlight) return modelCatalogFlight;
   const intent = connectionEpoch;
   const wanted = request && /^[a-f0-9-]{36}$/i.test(request.nonce) && Number.isFinite(request.expiresAt) && Date.now() < request.expiresAt ? request : null;
+  const current = () => wanted && intent === connectionEpoch && token && !disconnected && Date.now() < wanted.expiresAt;
+  const waiting = async reason => {
+    if (!current()) return;
+    // Bounded machine reasons, never page text. Progress cannot publish model choices.
+    const known = ['generating', 'input_busy', 'draft', 'attachments', 'composer_missing', 'composer_hidden',
+      'inspection_busy', 'page_unreachable', 'page_changed', 'opening', 'inspecting', 'inspection_failed', 'result_unconfirmed'];
+    try { await call('/models', { method: 'POST', body: JSON.stringify({ nonce: wanted.nonce, waiting: known.includes(reason) ? reason : 'inspection_failed' }) }); }
+    catch { /* The original app deadline still owns a broken transport. */ }
+  };
   let targetNonce = null;
   modelCatalogFlight = (async () => {
     const observed = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
     const owner = (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
-    if (wanted && owner?.nonce === wanted.nonce && owner.opening) return;
+    if (wanted && !current()) return;
+    if (wanted && owner?.nonce === wanted.nonce && owner.opening) { await waiting('opening'); return; }
     // One request retains its elected tab through MV3 suspension. A missing or
     // navigated-away tab is an unfinished request, never another create instruction.
     if (owner?.nonce === wanted?.nonce && Number.isInteger(owner?.tab) &&
-        (owner.handedToInput || !observed.some(tab => tab.id === owner.tab))) return;
+        (owner.handedToInput || !observed.some(tab => tab.id === owner.tab))) { await waiting('page_changed'); return; }
     const tabs = wanted ? observed : observed.filter(tab => catalogTabNonce(tab));
     if (!wanted && !tabs.length) return;
     // Reuse a loaded idle document without navigation. A dedicated helper marker
@@ -2188,15 +2198,24 @@ function inspectRequestedModels(request) {
     const proofs = await Promise.all(tabs.map(candidate => catalogProbe(candidate.id, catalogTabNonce(candidate))));
     let tab = tabs.find((candidate, index) => proofs[index]?.ready === true &&
       (!owner || owner.nonce !== wanted?.nonce || candidate.id === owner.tab));
-    if (wanted && Date.now() >= wanted.expiresAt) return;
+    if (wanted && !current()) return;
     if (!wanted && !tab) return;
     if (!tab) {
-      // An existing helper may be temporarily busy. Retain it and wait.
-      if (wanted.allowOpen === false || owner?.nonce === wanted.nonce || tabs.length) return;
+      const blocked = ['generating', 'input_busy', 'draft', 'attachments', 'composer_hidden'];
+      const proof = owner?.nonce === wanted.nonce ? proofs[tabs.findIndex(candidate => candidate.id === owner.tab)] : proofs[0];
+      await waiting(proof?.reason || 'page_unreachable');
+      // Only an explicit Refresh may bypass positively identified busy user pages.
+      // A missing recorder, hydrating page, retained helper or spent election never
+      // grants another tab. One persisted reservation survives repeated clicks/MV3.
+      const bypassBusy = wanted.allowOpen === true && tabs.length > 0 &&
+        tabs.every((candidate, index) => !catalogTabNonce(candidate) && proofs[index]?.ready === false && blocked.includes(proofs[index]?.reason));
+      if (!current() || wanted.allowOpen === false || owner?.nonce === wanted.nonce || (tabs.length && !bypassBusy)) return;
       await chrome.storage.session.set({ modelCatalogOwner: { nonce: wanted.nonce, opening: true } });
+      if (!current()) return;
       tab = await createChatTab(`https://chatgpt.com/?cos-model-catalog=${wanted.nonce}`, true);
       await chrome.storage.session.set({ modelCatalogOwner: { nonce: wanted.nonce, tab: tab.id } });
       await chrome.tabs.update(tab.id, { autoDiscardable: false });
+      await waiting('opening');
       return;
     }
     // Keep the elected warm document for another discovery or the first authored
@@ -2227,7 +2246,10 @@ function inspectRequestedModels(request) {
       try {
         return await Promise.race([
           documentId ? chrome.tabs.sendMessage(tab.id, message, { documentId }) : chrome.tabs.sendMessage(tab.id, message),
-          new Promise(resolve => { timer = setTimeout(resolve, Math.max(0, Math.min(35000, wanted.expiresAt - Date.now()))); })
+          // The app's deadline already bounds this non-blocking flight. A separate
+          // 35-second cutoff discarded exact observation custody while a slow native
+          // version scan was still running, making its later valid result unreceivable.
+          new Promise(resolve => { timer = setTimeout(resolve, Math.max(0, wanted.expiresAt - Date.now())); })
         ]);
       } finally { clearTimeout(timer); }
     };
@@ -2238,11 +2260,14 @@ function inspectRequestedModels(request) {
       ...(Number.isSafeInteger(tabEpochs[key]) ? { navigationEpoch: tabEpochs[key] } : {}) });
     if (intent !== connectionEpoch || !token || disconnected || Date.now() >= wanted.expiresAt) return;
     await activeTabs?.set(`catalog:${wanted.nonce}`, [tab]);
+    await waiting('inspecting');
+    if (!current()) return;
     const inspected = await send({ type: 'clf-model-catalog', nonce: wanted.nonce, expiresAt: wanted.expiresAt });
     // Work->Chat is an in-document transition owned by the content script.
     // Failure never grants navigation to New Chat or a replacement helper tab.
     if (inspected === true || inspected?.ok === true) await retireCatalogTabs();
-  })().catch(() => undefined).finally(async () => {
+    else await waiting(inspected?.reason || 'result_unconfirmed');
+  })().catch(() => waiting('inspection_failed')).finally(async () => {
     if (targetNonce) await activeTabs?.set(`catalog:${targetNonce}`, []).catch(() => undefined);
     if (targetNonce) await releaseModelCatalogTarget(targetNonce);
     modelCatalogFlight = null;
@@ -3301,20 +3326,16 @@ const HANDLERS = {
     });
     return await current() ? result : { ok: false, error: 'stale_document' };
   },
-  /** Reinstall the least-trusted MAIN-world reader when a live content script loses it. */
+  /** Repair both sides of the reader protocol in this exact browser document. */
   async repair_fiber(_message, _sender, source) {
     await load();
     if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: source.tab, documentIds: [source.documentId] },
-        world: 'MAIN',
-        files: ['fiber.js']
-      });
-      return ownsDocument(source) ? { ok: true } : { ok: false, error: 'stale_document' };
-    } catch {
-      return { ok: false, error: 'fiber_repair_failed' };
-    }
+    // An unpacked extension can retain a cached recorder while executeScript reads
+    // a newer helper from disk. Repairing only MAIN repeats that protocol mismatch
+    // forever, so Continue never obtains its required fresh native-final check.
+    const repaired = await restoreChatgptTab(source.tab, () => ownsDocument(source), source.documentId);
+    return !ownsDocument(source) ? { ok: false, error: 'stale_document' } :
+      repaired ? { ok: true } : { ok: false, error: 'fiber_repair_failed' };
   },
   async closed(message, _sender, source) {
     // releaseTab drains the queue and posts /closed itself, and only when this was the
@@ -3762,8 +3783,10 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
     // must re-read the outbox instead of leaving that unclaimed offer until the
     // 30-second alarm. Reuse the elected tab and single maintenance flight; the
     // app's current claim/receipt still decides whether anything may be sent.
-    void load().then(() => {
+    void load().then(async () => {
       if (Object.values(inputOpenings).some(opening => opening.tab === id)) return maintain(true);
+      const owner = (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
+      if (owner?.tab === id && !owner.handedToInput) return maintain(true);
     }).catch(() => undefined);
     void (async () => {
       const key = String(id);
@@ -3859,7 +3882,7 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
  * receive both its static manifest injection and this recovery injection.
  */
 const CHATGPT_TAB_URLS = ['https://chatgpt.com/*', 'https://chat.openai.com/*'];
-const PAGE_RECORDER_VERSION = 13;
+const PAGE_RECORDER_VERSION = 15;
 
 let deferredRecoveryWork = null;
 
@@ -4116,17 +4139,20 @@ function recoverDeferredRevivals() {
   return tracked;
 }
 
-async function restoreChatgptTab(id, current = () => true) {
+async function restoreChatgptTab(id, current = () => true, documentId = null) {
   if (!current()) return false;
+  const target = { tabId: id, ...(documentId ? { documentIds: [documentId] } : {}) };
   try {
-    const live = await tabReply(id, { type: 'clf-recorder-ping' });
+    // A failed helper round-trip requests the matching pair even if its recorder
+    // still pings. The recorder's own version guard retains a healthy equal peer.
+    const live = documentId ? null : await tabReply(id, { type: 'clf-recorder-ping' });
     if (!current()) return false;
     if (live && live.ok === true && live.recorderVersion === PAGE_RECORDER_VERSION) {
       // Healthy content.js does not prove the independently running MAIN-world helper is
       // still present. Request-id ownership depends on fiber.js, and re-executing it is
       // idempotent because the helper keeps one listener per protocol version.
       try {
-        await chrome.scripting.executeScript({ target: { tabId: id }, world: 'MAIN', files: ['fiber.js'] });
+        await chrome.scripting.executeScript({ target, world: 'MAIN', files: ['fiber.js'] });
       } catch {
         // The tab can navigate between the ping and repair. Static injection covers it.
       }
@@ -4139,19 +4165,19 @@ async function restoreChatgptTab(id, current = () => true) {
   try {
     if (!current()) return false;
     // Rebuild the isolated-world DOM adapter before the recorder that consumes it.
-    await chrome.scripting.executeScript({ target: { tabId: id }, files: ['chatgpt-dom.js'] });
+    await chrome.scripting.executeScript({ target, files: ['chatgpt-dom.js'] });
     if (!current()) return false;
     // Keep the React/Fiber reader in ChatGPT's own world, exactly like the static manifest
     // declaration. An older helper may still answer too; the nonce/version gate in
     // content.js makes those replies harmless, and a future version bump rejects them.
-    await chrome.scripting.executeScript({ target: { tabId: id }, world: 'MAIN', files: ['fiber.js'] });
+    await chrome.scripting.executeScript({ target, world: 'MAIN', files: ['fiber.js'] });
     if (!current()) return false;
-    await chrome.scripting.executeScript({ target: { tabId: id }, files: ['content.js'] });
+    await chrome.scripting.executeScript({ target, files: ['content.js'] });
     if (!current()) return false;
-    await chrome.scripting.insertCSS({ target: { tabId: id }, files: ['overlay.css'] });
+    await chrome.scripting.insertCSS({ target, files: ['overlay.css'] });
     // Successful injection means this exact tab is recovering. Its document registration will
     // re-run revival routing; opening a second tab during that handoff recreates the race.
-    return true;
+    return current();
   } catch {
     // Injection failure does not transfer ownership to a replacement tab.
     return false;

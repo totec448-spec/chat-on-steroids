@@ -21,6 +21,7 @@ the app refuses the extension and asks you to reload the matching copy.
 - Add the optional animated Tur Tur Sahur desktop companion.
 - Show normal and unattributed reload warnings only in the last 30 seconds; retain the five-minute Pro warning.
 - Improve automatic Continue, queued-message recovery, native Stop handling and recorded turn ownership.
+- Keep automatic Continue queued while temporary tool activity clears, and repair mismatched browser recorder/helper versions together.
 - Wait for native tool-result receipt before automatic compaction interrupts a response, preserving just-completed work for the handoff.
 - Improve browser snapshots, select controls and safe tab release.
 - Refine the project workspace, Skills picker, appearance, connection controls and worker overview.

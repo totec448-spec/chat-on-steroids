@@ -16,6 +16,7 @@ Listed alphabetically by GitHub handle. "Adapted" means the implementation chang
 | [@becoolmin](https://github.com/becoolmin) | Preserving window size on reopen: [#122](https://github.com/totec448-spec/chat-on-steroids/pull/122), adapted into [#134](https://github.com/totec448-spec/chat-on-steroids/pull/134). Removing unused macOS media privacy declarations before bundle sealing: [#232](https://github.com/totec448-spec/chat-on-steroids/pull/232), adapted with strict plist readback and failure coverage. |
 | [@Bemirror99](https://github.com/Bemirror99) | Resume-shadow recovery and stale Fiber attribution fixes: merged [#19](https://github.com/totec448-spec/chat-on-steroids/pull/19) and [#20](https://github.com/totec448-spec/chat-on-steroids/pull/20). |
 | [@devrajmahar](https://github.com/devrajmahar) | Conversation-scoped generation reset, extracted with an independent SPA recovery regression from [#163](https://github.com/totec448-spec/chat-on-steroids/pull/163). The renderer rewrite and other feature changes were not incorporated. |
+| [@ehkogh](https://github.com/ehkogh) | Alternate ChatGPT shell editor/picker anchors, typed turn structure, local/server identity observation and workflow-stream formats from [#318](https://github.com/totec448-spec/chat-on-steroids/pull/318). Code and fixtures are adapted narrowly into the existing recorder and picker contracts, with independent cancellation, branch, duplicate-id and real-recorder regressions. The cache-history walker, inferred tool receipts and alternate presentation/upload changes are not incorporated. |
 | [@Firefulcar](https://github.com/Firefulcar) | Claimed Compact & Resume leases: merged [#33](https://github.com/totec448-spec/chat-on-steroids/pull/33). Selected-browser startup routing: [#100](https://github.com/totec448-spec/chat-on-steroids/pull/100), adapted into [#91](https://github.com/totec448-spec/chat-on-steroids/pull/91). |
 | [@frytufrytu](https://github.com/frytufrytu) | Diagnosing and fixing blocked-handoff compaction recovery loops: [#127](https://github.com/totec448-spec/chat-on-steroids/pull/127), adapted with durable refusal and draft preservation into [#134](https://github.com/totec448-spec/chat-on-steroids/pull/134). |
 | [@gnustella-lab](https://github.com/gnustella-lab) | Brave Browser support: merged [#106](https://github.com/totec448-spec/chat-on-steroids/pull/106). |
@@ -105,6 +106,13 @@ browser recovery and continuation owners.
 [#301](https://github.com/totec448-spec/chat-on-steroids/issues/301) led to the independently
 implemented per-delivery timeout correction and durable retry regressions. General request
 deadlines and server request-body/header limits were not increased.
+
+[@redzrush101](https://github.com/redzrush101) and [@ehkogh](https://github.com/ehkogh)
+reported the model-discovery and alternate-interface failures in
+[#311](https://github.com/totec448-spec/chat-on-steroids/issues/311).
+@redzrush101's structural screenshot identified alternate reasoning-control anchors used by
+the independently implemented compatibility tests. The timeout and selection changes do not
+claim complete validation of that account's different editor or missing-message behavior.
 
 [@raxy24](https://github.com/raxy24)'s report in
 [#262](https://github.com/totec448-spec/chat-on-steroids/issues/262) led to the independently
