@@ -1350,8 +1350,15 @@
     // a single refused `bind` permanent: the worker kept the tab pointed at the *previous*
     // conversation, and nothing ever asked again. That is what left the popup showing the
     // old chat's id beside the new chat's URL while the app had no session for either.
-    const reply = await ask({ type: 'bind', conversationId: id });
-    if (reply && reply.ok === true) boundId = id;
+    const forEpoch = epoch, projectInput = desktopProjectInput;
+    const current = () => alive && epoch === forEpoch && conversationId === id && CLF_DOM.conversationId() === id;
+    // Route binding can release events journalled before Send. It must commit the
+    // reserved opening just like events/correlate, before the recorder sees them.
+    const reply = await ask({ type: 'bind', conversationId: id, projectInput }, current);
+    if (current() && reply?.ok === true) {
+      boundId = id;
+      retireBoundProjectInput(projectInput, reply.projectBound);
+    }
   }
 
   /**
