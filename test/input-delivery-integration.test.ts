@@ -1603,6 +1603,38 @@ describe('IPC input delivery and Goal control integration', () => {
     await input.offerToolInput(session.id, conversationId, 'overlapping-request', 0);
     expect(goal.goalSwitchFor(conversationId).enabled).toBe(false);
   });
+  it.each([2700, 24000])('keeps one reserved session per intentional send even when opening text is identical (%s chars)', async size => {
+    const store = await import('../src/main/session/store.js');
+    const before = new Set((await store.listAllSessions()).map(session => session.id));
+    const requests = [message(null, 'off'), message(null, 'off')].map(request => ({ ...request,
+      text: 'Keep the literal `code`, $variables and multilingual text: Grüße 世界.\n'.repeat(400).slice(0, size) }));
+    for (const request of requests) {
+      expect((await handlers.get('sessions:send')!(null, request)).ok).toBe(true);
+      const owner = `document-${request.id}`, conversationId = randomUUID(), messageId = randomUUID();
+      const claim = await post('/input/claim', { id: request.id, owner, conversationId: null, requiresAuthorization: true });
+      expect(claim.body.input).toMatchObject({ id: request.id, sessionId: request.id, opening: true });
+      expect((await post('/input/claim', { id: request.id, owner, conversationId: null, authorize: true })).body.ok).toBe(true);
+      const receipt = { id: request.id, owner, conversationId, messageId };
+      expect((await post('/input/bind', receipt)).body.ok).toBe(true);
+      const evidence = await post('/events', { conversationId, events: [
+        { kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() },
+        { kind: 'user_message', messageId, text: claim.body.input.text, time: Date.now() }
+      ] });
+      expect(evidence.status).toBe(200);
+      expect((await post('/input/ack', receipt)).body.ok).toBe(true);
+      // An acknowledgement or route-binding replay must never mint a second owner.
+      expect((await post('/input/bind', receipt)).body.ok).toBe(true);
+      expect((await post('/input/ack', receipt)).body.ok).toBe(true);
+      expect((await store.findSessionByConversation(conversationId, { requireUnique: true }))?.id).toBe(request.id);
+      expect((await input.listInputs()).find(row => row.id === request.id)).toMatchObject({
+        state: 'sent', sessionId: request.id, deliveredSessionId: request.id, conversationId, messageId
+      });
+      const users = await store.readRecentEvents(request.id, 10, { kinds: ['user_message'] });
+      expect(users).toHaveLength(1);
+    }
+    expect((await store.listAllSessions()).filter(session => !before.has(session.id)).map(session => session.id).sort())
+      .toEqual(requests.map(request => request.id).sort());
+  });
   it('binds a new chat through HTTP ACK, applies its choice once, and pushes session change', async () => {
     const request = message(null, 'goal');
     await handlers.get('sessions:send')!(null, request);

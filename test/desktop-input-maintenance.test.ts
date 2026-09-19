@@ -255,13 +255,13 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
     },
     fetch, URL, URLSearchParams, AbortController, setTimeout, clearTimeout, TextEncoder, console
   });
-  vm.runInContext(`${source}\nglobalThis.testMaintenance = { load, maintain, releaseTab, serializeTab, noteTabConversation, createChatTab, authorizeDocument, ackDesktopInput, drainCommandAcks, inspectRequestedModels, desktopInput: HANDLERS.desktop_input, catalog: HANDLERS.model_catalog, events: HANDLERS.events, correlate: HANDLERS.correlate, applyRequestedBrowserPreferences };`, context);
+  vm.runInContext(`${source}\nglobalThis.testMaintenance = { load, maintain, releaseTab, serializeTab, noteTabConversation, createChatTab, authorizeDocument, ackDesktopInput, drainCommandAcks, inspectRequestedModels, desktopInput: HANDLERS.desktop_input, catalog: HANDLERS.model_catalog, events: HANDLERS.events, bind: HANDLERS.bind, correlate: HANDLERS.correlate, applyRequestedBrowserPreferences };`, context);
   const api = context.testMaintenance as { releaseTab(...args: any[]): Promise<any>; serializeTab(tab: number, operation: () => Promise<any>): Promise<any>; noteTabConversation(source: any, conversationId: string): Promise<any>; applyRequestedBrowserPreferences(request: object): Promise<void>; authorizeDocument(sender: unknown, message: unknown): Promise<any>; catalog(message: unknown, sender: unknown, source: unknown): Promise<any>; load(): Promise<void>; maintain(): Promise<void>; createChatTab(url: string, background: boolean): Promise<Tab> };
   await api.load();
   Object.assign(api, { query });
   const updated = (id: number, change: object) => tabUpdated.addListener.mock.calls[0]![0](id, change);
   vm.runInContext('Object.assign(testMaintenance, { offerStopTurns, noteTabConversation, ackCommand })', context);
-  return { ...api, updated, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
+  return { ...api, updated, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
 }
 
 describe('one browser maintenance flight per desktop outbox publication', () => {
@@ -1056,6 +1056,33 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect((await h.events({ ...message, projectInput: { id: firstId, owner: '7:another-document:1' } }, sender, source)).ok).toBe(false);
     expect(h.fetch).not.toHaveBeenCalled();
   });
+  it('binds the reserved opening before route promotion releases provisional history', async () => {
+    const h = await worker([]);
+    const conversationId = 'dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb';
+    const tab = { id: 7, url: `https://chatgpt.com/?cos-input=${firstId}` }; h.tabs.push(tab);
+    const sender = { tab: { id: 7 }, documentId: 'opening-document', frameId: 0, url: tab.url };
+    const source = await h.authorizeDocument(sender, { navigationEpoch: 0 });
+    const event = { kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() };
+    await h.events({ entries: [{ event }] }, sender, source);
+    expect(h.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/events')).toBe(false);
+    tab.url = `https://chatgpt.com/c/${conversationId}`;
+    const message = { conversationId, projectInput: { id: firstId, owner: '7:opening-document:0' } };
+    const original = h.fetch.getMockImplementation()!;
+    let accepted = false;
+    h.fetch.mockImplementation(async (url, init) => new URL(url).pathname === '/input/bind'
+      ? { ok: true, status: 200, json: async () => ({ ok: accepted }) } : original(url, init));
+
+    expect((await h.bind(message, sender, source)).ok).toBe(false);
+    expect(h.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/events')).toBe(false);
+    accepted = true;
+    expect(await h.bind(message, sender, source)).toMatchObject({ ok: true, projectBound: firstId });
+    const routes = h.fetch.mock.calls.map(([url]) => new URL(url).pathname);
+    expect(routes.indexOf('/events')).toBeGreaterThan(routes.lastIndexOf('/input/bind'));
+    const histories = h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/events');
+    expect(histories).toHaveLength(1);
+    expect(JSON.parse(String(histories[0]![1]?.body))).toMatchObject({ conversationId, events: [event] });
+    expect(h.create).not.toHaveBeenCalled(); expect(h.sendMessage).not.toHaveBeenCalled();
+  });
   it('binds an exact fresh opening before publishing its first request correlation', async () => {
     const h = await worker([]);
     const conversationId = 'dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb';
@@ -1078,7 +1105,7 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     const routes = h.fetch.mock.calls.map(([url]) => new URL(url).pathname);
     expect(routes.indexOf('/correlations')).toBeGreaterThan(routes.lastIndexOf('/input/bind'));
   });
-  it.each(['wrong-owner', 'new-document', 'new-route'] as const)('does not publish an opening correlation after %s takes ownership', async reason => {
+  it.each(['wrong-owner', 'new-document', 'new-route'] as const)('does not publish an opening binding or correlation after %s takes ownership', async reason => {
     const h = await worker([]);
     const conversationId = 'eeeeeeee-ffff-4aaa-8bbb-cccccccccccc';
     h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${conversationId}` });
@@ -1097,6 +1124,10 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
 
     expect((await h.correlate(message, sender, source)).ok).toBe(false);
     expect(h.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/correlations')).toBe(false);
+    h.tabs[0]!.url = sender.url;
+    await h.authorizeDocument(sender, { navigationEpoch: 2 });
+    expect((await h.bind(message, sender, source)).ok).toBe(false);
+    expect(h.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/events')).toBe(false);
   });
   it('acknowledges preferences without replaying a change over a newer popup value', async () => {
     const h = await worker([]);
