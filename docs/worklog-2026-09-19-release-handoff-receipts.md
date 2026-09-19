@@ -55,3 +55,15 @@ checked by the pull request's cross-platform CI before the release tag is publis
 
 The release remains version 2.1.14. Its title is taken verbatim from the requested release
 notes. Publication uses a fresh commit based on public main, without the private local history.
+
+## Release source availability
+
+PR #312 passed all three CI platforms and was merged. The first publishing run stopped
+at the native-source archive because GNOME's GVDB GitLab endpoint returned HTTP 406.
+The run was cancelled before publication while the requested release title was corrected.
+
+GNOME's GitHub mirror supplies the same pinned commit and byte-identical 24,716-byte
+archive, SHA-256 `069a00aa1fc893f18423602f4e095583be5a220429f6e8a58d70511490b4b019`.
+All 14 archived files were independently checked against the commit's Git blob identities.
+Only the download URL changes; the source revision, archive size, hash and license notices
+remain unchanged. The complete source pack is rebuilt before another publishing attempt.
