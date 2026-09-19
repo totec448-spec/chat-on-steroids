@@ -393,6 +393,37 @@ beforeEach(async () => {
 // ------------------------------------------------------------------ origin
 
 describe('direct browser control over the paired bridge', () => {
+  it('recovers request-owned browser tabs only from exact server-side correlation, including a resumed session', async () => {
+    browserControl.reset(); await pair();
+    const browserId = randomUUID(), conversationId = randomUUID(), foreignChat = randomUUID();
+    const session = await createSession({ conversationId });
+    const requestId = `wfr_browser_owner_${randomUUID()}`, foreignRequest = `wfr_browser_foreign_${randomUUID()}`;
+    for (const [chat, proofId] of [[conversationId, requestId], [foreignChat, foreignRequest]]) {
+      const proof = await request('POST', '/correlations', { body: { conversationId: chat, calls: [
+        { requestId: proofId, messageId: randomUUID(), tool: 'browser_tabs', order: 0, answered: false }
+      ] } });
+      expect(proof.body.confirmed).toContain(proofId);
+    }
+    const resumed = randomUUID();
+    expect(await sessionStoreModule.rebindSession(session.id, conversationId, resumed)).toBe(true);
+    const poll = { action: 'poll', browserId, name: 'Fixture', enabled: true };
+    const hello = await request('POST', '/browser-control', { body: poll });
+    const result = browserControl.execute('browser_tabs', { action: 'list' }, `session:${session.id}`, resumed, async () => true);
+    try {
+      const listed = await request('POST', '/browser-control', { body: poll });
+      const claim = { action: 'claim', browserId, id: listed.body.requests[0], epoch: hello.body.epoch };
+      expect((await request('POST', '/browser-control', { body: { ...claim, owners: [{ owner: `request:${foreignRequest}`, sessionId: session.id }] } })).status).toBe(400);
+      const claimed = await request('POST', '/browser-control', { body: { ...claim,
+        owners: [`request:${requestId}`, `request:${foreignRequest}`, 'request:unproved']
+      } });
+      expect(claimed.status).toBe(200);
+      expect(claimed.body.command).toMatchObject({ owner: `session:${session.id}`, conversationId: resumed,
+        ownerAliases: [`request:${requestId}`] });
+      expect((await request('POST', '/browser-control', { body: { ...claim, action: 'result', result: { value: true } } })).status).toBe(200);
+      expect(await result).toEqual({ value: true });
+    } finally { browserControl.reset(); await result; }
+  });
+
   it('requires extension authentication and transfers each exact command once', async () => {
     browserControl.reset();
     const browserId = randomUUID();
@@ -3915,7 +3946,7 @@ describe('delivering a bootstrap', () => {
     expect(opened).toHaveLength(1);
   });
 
-  it('expires an owner-null revival at the revival deadline with the same worker and inbox intact', async () => {
+  it.each(['timer', 'sweep'] as const)('expires an owner-null revival at the revival deadline with the same worker and inbox intact (%s)', async expiry => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -3928,19 +3959,36 @@ describe('delivering a bootstrap', () => {
       finishAgent({ conversationId }, 'reported, waiting for more');
       wake([{ to: 'worker-1', text: 'stay queued if the page never redeems' }]);
       const { id } = await waitForRevival();
+      const priorLogs = new Set(getLog());
 
-      await vi.advanceTimersByTimeAsync(REVIVAL_DEADLINE_MS);
+      // A slow browser pickup outlives an ordinary command without gaining a
+      // second command, message or tab. Its original absolute wake still expires.
+      const slowPickup = COMMAND_DEADLINE_MS + 1_000;
+      await vi.advanceTimersByTimeAsync(slowPickup);
+      expect(swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find(agent => agent.id === 'worker-1'))
+        .toMatchObject({ state: 'waking', pending: 1 });
+      expect(pendingCommands().filter(entry => entry.id === id)).toHaveLength(1);
+      expect(opened).toHaveLength(1);
+      const remaining = REVIVAL_DEADLINE_MS - slowPickup;
+      if (expiry === 'timer') await vi.advanceTimersByTimeAsync(remaining);
+      else {
+        vi.setSystemTime(Date.now() + remaining);
+        const checked = await request('POST', '/commands/revivals/pending', { body: { entries: [{ id, conversationId }] } });
+        expect(checked.body).toEqual({ pending: [] });
+      }
       await vi.runAllTicks();
       const worker = swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((agent) => agent.id === 'worker-1')!;
       expect(worker).toMatchObject({ state: 'sleeping', revivable: true, pending: 1 });
       expect(pendingCommands().some((entry) => entry.id === id)).toBe(false);
-
+      const failure = getLog().find(entry => !priorLogs.has(entry) && entry.message.includes('gave up on revive:'));
+      expect(failure?.message).toContain('the browser did not claim this command before its deadline');
+      expect(failure?.message).not.toContain('did not report back in time');
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('does not renew the absolute waking deadline when a document redeems', async () => {
+  it.each(['timer', 'sweep'] as const)('does not renew the absolute waking deadline when a document redeems (%s)', async expiry => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -3953,6 +4001,7 @@ describe('delivering a bootstrap', () => {
       finishAgent({ conversationId }, 'reported, waiting for more');
       wake([{ to: 'worker-1', text: 'document can own this only for the ACK deadline' }]);
       const { id } = await waitForRevival();
+      const priorLogs = new Set(getLog());
 
       const claimed = await request('POST', '/commands/redeem', {
         body: { id, client: 'claimed-revival-document', conversationId }
@@ -3963,13 +4012,21 @@ describe('delivering a bootstrap', () => {
         revivable: false
       });
 
-      await vi.advanceTimersByTimeAsync(REVIVAL_DEADLINE_MS);
+      if (expiry === 'timer') await vi.advanceTimersByTimeAsync(REVIVAL_DEADLINE_MS);
+      else {
+        vi.setSystemTime(Date.now() + REVIVAL_DEADLINE_MS);
+        const checked = await request('POST', '/commands/revivals/pending', { body: { entries: [{ id, conversationId }] } });
+        expect(checked.body).toEqual({ pending: [] });
+      }
       await vi.runAllTicks();
       const worker = swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((agent) => agent.id === 'worker-1')!;
       expect(worker.state).toBe('sleeping');
       expect(worker.revivable).toBe(true);
       expect(worker.pending).toBe(1);
       expect(pendingCommands().some((entry) => entry.id === id)).toBe(false);
+      const failure = getLog().find(entry => !priorLogs.has(entry) && entry.message.includes('gave up on revive:'));
+      expect(failure?.message).toContain('did not report back in time');
+      expect(failure?.message).not.toContain('did not claim this command');
     } finally {
       vi.useRealTimers();
     }

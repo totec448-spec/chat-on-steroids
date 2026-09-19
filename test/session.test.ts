@@ -46,6 +46,7 @@ import {
   pruneSessions,
   readAsset,
   readEvents,
+  readActivityEvents,
   readRecentEvents,
   readLatestUserMessage,
   turnHasMcpCall,
@@ -542,6 +543,46 @@ describe('session store', () => {
     expect((await getSession(session.id))?.timelineTurns?.first).toEqual({ origin: start.seq, time: 100,
       endTime: 180, endOrigin: 4, questionId: 'first-question' });
     expect(await fs.readFile(path.join(folder, 'events.jsonl'), 'utf8')).toBe(journal);
+  });
+
+  it.each([false, true])('keeps reloaded interim prose before later tools across every read path and restart (%s)', async restart => {
+    const session = await createSession({ title: 'native interim ordering', conversationId: 'interim-order' });
+    const working = '11111111-1111-4111-8111-111111111111';
+    const exchange = '22222222-2222-4222-8222-222222222222';
+    const parent = '33333333-3333-4333-8333-333333333333';
+    const text = (value: string) => ({ text: value, chars: value.length, truncated: false });
+    const start = await appendEvent(session.id, { kind: 'turn_start', source: 'extension', time: 100, turnId: 'working' });
+    await upsertMessageEvent(session.id, { kind: 'assistant_message', source: 'extension', time: 110,
+      messageId: `assistant:${parent}:${working}:${exchange}`, turnId: 'working', message: text('First update'), final: false });
+    const later = await appendEvent(session.id, { kind: 'tool_call', source: 'mcp', time: 150, turnId: 'working',
+      call: { callId: 'later-tool', tool: 'read', requestId: 'interim-request', conversationId: 'interim-order',
+        attribution: 'request_id', attributionMethod: 'request_id', args: text('{}'), result: text('ok'), outcome: 'ok', durationMs: 1,
+        summary: { kind: 'read', title: 'Later tool', tone: 'neutral' } } });
+    const interim = await upsertMessageEvent(session.id, { kind: 'assistant_message', source: 'extension', time: 140,
+      messageId: `assistant:${exchange}:${working}:${exchange}`, message: text('Second update'), final: false });
+    await flushSessions();
+    const folder = path.join(sessionsRoot(), session.id);
+    const journal = await fs.readFile(path.join(folder, 'events.jsonl'), 'utf8');
+    const shardName = createHash('sha256').update(`assistant_message\u0000${interim.event.messageId}`).digest('hex') + '.json';
+    const shard = await fs.readFile(path.join(folder, 'messages', shardName), 'utf8');
+    if (restart) resetSessionStoreForTests();
+    const full = await readEvents(session.id);
+    expect(full.map(row => row.seq)).toEqual([start.seq, 2, interim.event.seq, later.seq]);
+    for (const page of [
+      await readRecentEvents(session.id, 2, { orderByOrigin: true }),
+      await readRecentEvents(session.id, 2, { after: 2, orderByOrigin: true }),
+      await readEvents(session.id, { from: 3, limit: 2 }),
+      (await readActivityEvents(session.id, 3, 2)).events
+    ]) {
+      expect(page.map(row => row.seq)).toEqual([interim.event.seq, later.seq]);
+      expect(page[0]).toMatchObject({ origin: interim.event.origin, time: 140, turnOrigin: start.seq });
+      expect(page[0]?.turnId).toBeUndefined();
+    }
+    const summary = await getSession(session.id);
+    expect(summary?.activeTurnId).toBe('working');
+    expect(summary?.lastAssistantFinalAt).toBeNull();
+    expect(await fs.readFile(path.join(folder, 'events.jsonl'), 'utf8')).toBe(journal);
+    expect(await fs.readFile(path.join(folder, 'messages', shardName), 'utf8')).toBe(shard);
   });
 
   it('preserves the legacy authored position when a reload changes the provider timestamp for the same UUID', async () => {

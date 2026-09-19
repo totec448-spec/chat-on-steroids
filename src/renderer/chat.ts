@@ -3378,7 +3378,8 @@ function scheduleReload(): void {
 
 /** Retired automatic drafts belong to their creation time, never the live composer queue. */
 function historicalAutomaticInput(entry: InputEntry): boolean {
-  return !!entry.finishOwner && !entry.finishOwner.userRequested && entry.state === 'cancelled' && !!entry.error;
+  return (!!entry.recovery || (!!entry.finishOwner && !entry.finishOwner.userRequested)) &&
+    entry.state === 'cancelled' && !!entry.error;
 }
 
 function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {

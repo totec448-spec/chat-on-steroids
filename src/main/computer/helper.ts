@@ -456,12 +456,23 @@ public static class Clf {
     if (IsIconic(h)) ShowWindow(h, 9);
     uint dummy;
     uint fore = GetWindowThreadProcessId(GetForegroundWindow(), out dummy);
+    uint target = GetWindowThreadProcessId(h, out dummy);
     uint self = GetCurrentThreadId();
-    bool attached = fore != 0 && fore != self && AttachThreadInput(self, fore, true);
+    var attached = new List<Tuple<uint, uint>>();
+    Action<uint, uint> attach = (from, to) => {
+      if (from == 0 || to == 0 || from == to) return;
+      foreach (var pair in attached)
+        if ((pair.Item1 == from && pair.Item2 == to) || (pair.Item1 == to && pair.Item2 == from)) return;
+      if (AttachThreadInput(from, to, true)) attached.Add(Tuple.Create(from, to));
+    };
     try {
+      attach(self, fore);
+      attach(self, target);
+      attach(fore, target);
       return SetForegroundWindow(h);
     } finally {
-      if (attached) AttachThreadInput(self, fore, false);
+      for (int i = attached.Count - 1; i >= 0; i--)
+        AttachThreadInput(attached[i].Item1, attached[i].Item2, false);
     }
   }
 
@@ -565,7 +576,7 @@ function Try-Focus([int64]$id) {
 function Assert-Focused([int64]$id) {
   if (-not (Try-Focus $id)) {
     $foreground = [Clf]::ForegroundId()
-    throw "FOCUS_FAILED: requested $id but foreground is $foreground after asking Windows to activate it. Another window is holding focus; click it away or retry."
+    throw "FOCUS_FAILED: requested $id but foreground is $foreground after asking Windows to activate it. Inspect list_windows and the target's owned dialogs before retrying."
   }
 }
 
@@ -858,10 +869,14 @@ function Find-UiElements($request) {
         $matches = $matches -and (-not $role -or $control.ToLowerInvariant().Contains($role))
         if ($matches) {
           $r = $current.BoundingRectangle
-          if ($r.Width -gt 0 -and $r.Height -gt 0) {
+          $hasBounds = $r.Width -gt 0 -and $r.Height -gt 0 -and -not [double]::IsInfinity($r.X) -and -not [double]::IsInfinity($r.Y)
+          $availableActions = @()
+          try { $availableActions = @(Get-UiActions $element $current) } catch { }
+          # UIA Invoke/Toggle/Select/Scroll can work without a drawable rectangle,
+          # for example in minimized windows or virtualized lists. Retain their
+          # exact semantic identity; zero bounds never authorize a physical click.
+          if ($hasBounds -or $availableActions.Count -gt 0) {
             $runtimeKey = Ui-RuntimeKey $element
-            $availableActions = @()
-            try { $availableActions = @(Get-UiActions $element $current) } catch { }
             $entry = @{
               runtimeKey = $runtimeKey
               name = $name
@@ -872,10 +887,10 @@ function Find-UiElements($request) {
               focused = [bool]$current.HasKeyboardFocus
               depth = $depth
               actions = $availableActions
-              bounds = @{
+              bounds = if ($hasBounds) { @{
                 x = [int][Math]::Round($r.X); y = [int][Math]::Round($r.Y)
                 width = [int][Math]::Round($r.Width); height = [int][Math]::Round($r.Height)
-              }
+              } } else { @{ x = 0; y = 0; width = 0; height = 0 } }
             }
             try {
               $selected = $element.GetCachedPropertyValue([System.Windows.Automation.SelectionItemPattern]::IsSelectedProperty, $true)
@@ -887,7 +902,7 @@ function Find-UiElements($request) {
             # Select within this traversal, then read just one provider. Browser
             # toolbar editors precede the page and must never become document_text.
             # Native editors remain useful when no Document provider is observed.
-            $priority = if ($current.IsPassword) { 0 }
+            $priority = if (-not $hasBounds -or $current.IsPassword) { 0 }
               elseif ($control -eq 'Document') { 3 }
               elseif ($browserDocument) { 0 }
               elseif ($current.HasKeyboardFocus) { 2 }
@@ -965,7 +980,7 @@ function Capture-Target($request, [Nullable[int64]]$forcedWindow) {
     $w = [int]$request.region.width; $h = [int]$request.region.height
   } elseif ($null -ne $id) {
     try { $r = [Clf]::Rect([int64]$id) -split ',' } catch {
-      throw "WINDOW_NOT_FOUND: window $id is no longer open, so there is nothing to capture. Call observe what=windows for the current windows."
+      throw "WINDOW_NOT_FOUND: window $id is no longer open, so there is nothing to capture. Call list_windows for the current windows."
     }
     $x = [int]$r[0]; $y = [int]$r[1]; $w = [int]$r[2]; $h = [int]$r[3]
     $windowGeometry = @{ x = $x; y = $y; width = $w; height = $h }
@@ -1132,8 +1147,17 @@ function Handle-Request($request) {
         $result.relatedWindows = @([Clf]::RelatedWindows($id) | ForEach-Object { Convert-WindowRow $_ })
       }
       if ($request.includeScreenshot) {
-        $capture = Capture-Target $request ([Nullable[int64]]$id)
-        foreach ($key in $capture.Keys) { $result[$key] = $capture[$key] }
+        try {
+          $capture = Capture-Target $request ([Nullable[int64]]$id)
+          foreach ($key in $capture.Keys) { $result[$key] = $capture[$key] }
+        } catch {
+          $message = $_.Exception.GetBaseException().Message
+          # A missing compositor surface does not invalidate this window's UIA provider.
+          # Keep both channels in this transaction; never restore/focus the user's window.
+          # Geometry, identity and screenshot-only failures still require a fresh observation.
+          if (-not $request.includeUi -or $message -notmatch '^CAPTURE_FAILED:') { throw }
+          $result.screenshotUnavailable = @{ code = 'CAPTURE_FAILED'; message = $message.Substring(0, [Math]::Min(500, $message.Length)) }
+        }
       }
       if ($request.includeUi) {
         $uiRequest = @{
@@ -1158,6 +1182,9 @@ function Handle-Request($request) {
           $result.uiUnavailable = @{ code = 'UIA_FAILED'; message = $_.Exception.Message }
           $result.elements = @()
         }
+      }
+      if ($result.screenshotUnavailable -and $result.uiUnavailable) {
+        throw ($result.screenshotUnavailable.message + '; UIA_FAILED: ' + $result.uiUnavailable.message)
       }
     }
     'focus' {

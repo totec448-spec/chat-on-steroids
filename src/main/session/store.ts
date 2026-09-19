@@ -1267,8 +1267,11 @@ export function upsertMessageEvent(
       const full = {
         ...nextEvent,
         // Cursor revisions publish richer markup/identity without manufacturing work.
-        // A changed interim or the first final still advances this durable content stamp.
-        contentSeq: options.work === false && nextEvent.kind === 'assistant_message' && !nextEvent.final
+        // A reload may reserialize an existing user bubble. Its updated text belongs
+        // in history, but only a just-authored observation may revoke its recovery.
+        // A new question identity and the first final still advance this work stamp.
+        contentSeq: options.work === false &&
+          ((nextEvent.kind === 'user_message' && !!previous) || (nextEvent.kind === 'assistant_message' && !nextEvent.final))
           ? previous ? workSequence(previous) : 0
           : sameMessage && previous && (nextEvent.kind !== 'assistant_message' ||
           (previous.kind === 'assistant_message' && (previous.final === true || previous.state === 'final') === nextEvent.final))
@@ -1537,7 +1540,7 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
       // presentation chronology inside that bounded page; otherwise chronology may move a later
       // row ahead of an earlier seq at the slice boundary and advancing the cursor would skip it.
       const page = cached.sort((left, right) => left.seq - right.seq).slice(0, limit);
-      return chronological(projectTimeline(page, timeline?.timelineTurns, timeline?.requestTurns));
+      return chronological(projectTimeline(page, timeline?.timelineTurns, timeline?.requestTurns, active.messages.values()));
     }
   }
   let raw: string;
@@ -1588,9 +1591,9 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
   // transcript order everywhere.
   if (options.from !== undefined) {
     const page = out.sort((left, right) => left.seq - right.seq).slice(0, limit);
-    return chronological(projectTimeline(page, timeline?.timelineTurns, timeline?.requestTurns));
+    return chronological(projectTimeline(page, timeline?.timelineTurns, timeline?.requestTurns, messages.values()));
   }
-  return chronological(projectTimeline(out, timeline?.timelineTurns, timeline?.requestTurns)).slice(0, limit);
+  return chronological(projectTimeline(out, timeline?.timelineTurns, timeline?.requestTurns, messages.values())).slice(0, limit);
 }
 
 /**
@@ -1863,7 +1866,7 @@ async function readRecentEventsFromDisk(
   const selected = forward ? candidates.slice(0, cap) : candidates.slice(Math.max(0, candidates.length - cap));
   if (damaged > 0) logWarn(`session ${sessionId}: skipped ${damaged} unreadable recent event line(s)`);
   const timeline = active?.summary ?? (await readDurableSnapshot(sessionId))?.summary;
-  return chronological(projectTimeline(selected, timeline?.timelineTurns, timeline?.requestTurns));
+  return chronological(projectTimeline(selected, timeline?.timelineTurns, timeline?.requestTurns, messages.values()));
 }
 
 /** Browser projection joins committed writes without forcing the debounced metadata to disk.
@@ -1902,7 +1905,7 @@ export async function readActivityEvents(sessionId: string, since: number, limit
           (!resumeUserMessage || position > (resumeUserMessage.origin ?? resumeUserMessage.seq))) resumeUserMessage = event;
     }
     const resumeBoundary = resumeUserMessage ? resumeUserMessage.origin ?? resumeUserMessage.seq : 0;
-    return { events: chronological(projectTimeline(selected, entry.summary.timelineTurns, entry.summary.requestTurns)), reset: reset || (cursor === 0 && candidates.length > cap), resumeBoundary,
+    return { events: chronological(projectTimeline(selected, entry.summary.timelineTurns, entry.summary.requestTurns, entry.messages.values())), reset: reset || (cursor === 0 && candidates.length > cap), resumeBoundary,
       openingUserMessage, resumeUserMessage };
   });
 }
