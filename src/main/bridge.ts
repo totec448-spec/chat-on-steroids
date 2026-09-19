@@ -125,6 +125,7 @@ import {
   agentConversation,
   agentForConversation,
   agentInfoForOwnedConversation,
+  liveAgentForOwnedConversation,
   primeForOwnedConversation,
   agentForOwnedConversation,
   isWorkerConversation,
@@ -2932,18 +2933,26 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     if (typeof body['destinationMessageId'] === 'string') {
       const entry = continuationByToken(checkpointToken);
-      if (!entry) return json(res, 409, { error: 'no_such_continuation' }, origin);
+      if (!entry) {
+        noticeMarkedReplacement(id, checkpointToken, 'unknown continuation');
+        return json(res, 409, { error: 'no_such_continuation' }, origin);
+      }
       const bound = await bindContinuationDestinationMessageNow(
         checkpointToken,
         id,
         body['destinationMessageId'].slice(0, 200)
       );
-      if (!bound) return json(res, 409, { error: 'destination_message_conflict' }, origin);
+      if (!bound) {
+        noticeMarkedReplacement(id, checkpointToken, 'destination message conflict');
+        return json(res, 409, { error: 'destination_message_conflict' }, origin);
+      }
       const result = await commitContinuationResult(checkpointToken, id);
       if (result.status === 'retryable') {
+        noticeMarkedReplacement(id, checkpointToken, 'commit pending after a retryable failure');
         return json(res, 503, { error: 'resume_commit_retryable', retryable: true }, origin);
       }
       if (result.status === 'rejected') {
+        noticeMarkedReplacement(id, checkpointToken, 'commit rejected');
         if (await abortRejectedResume(checkpointToken, result.reason)) {
           const refused = commands.find(
             (candidate) => candidate.spec.type === 'resume' && candidate.spec.token === checkpointToken
@@ -2957,6 +2966,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       );
       if (command) retire(command, 'the marked replacement message committed the continuation');
       if (result.status === 'committed') armResumedChat(entry.sessionId, result.conversationId);
+      noticeMarkedReplacement(id, checkpointToken, 'committed');
       return json(
         res,
         200,
@@ -5323,7 +5333,32 @@ export function queueWorkerRevival(
   });
   // Start the waking clock at broker admission, not only after a browser accepts the command.
   armDeadline(command);
+  void askForTheTabToWakeIn(command, bridgeLifecycleEpoch).catch(error => {
+    logWarn(`bridge: could not inspect the tab for worker wake ${command.id}: ${String(error)}`);
+  });
   return describe(command, null);
+}
+
+/** A new wake owns one recovery episode when its sleeping worker has lost its page. */
+async function askForTheTabToWakeIn(command: Command, lifecycle: number): Promise<void> {
+  const spec = command.spec;
+  if (spec.type !== 'revive') return;
+  const current = (): boolean => {
+    if (bridgeLifecycleEpoch !== lifecycle || bridgeShutdownRequested || !commands.includes(command) ||
+      command.owner !== null || revivalDeliveryProven(command)) return false;
+    const revival = revivalFor(spec.agent, spec.runId);
+    return revival?.conversationId === spec.conversationId && revival.messageIds.length > 0 &&
+      !liveConversations().some(entry => entry.conversationId === spec.conversationId);
+  };
+  if (!current()) return;
+  const session = await findSessionByConversation(spec.conversationId, { requireUnique: true });
+  // The read may outlive the wake, a manual departure, a rebind or the bridge itself.
+  if (!current() || !session || session.conversationId !== spec.conversationId ||
+    !departureAllowsRepair(session) || !tabRecoveryWanted(spec.conversationId) ||
+    (!session.activeTurnId && session.lastTurnOutcome === 'stopped')) return;
+  if (queueBrowserRecovery(spec.conversationId, session.id, `no-tab:wake:${command.id}`, 'no-tab')) {
+    logInfo(`bridge: ${spec.agent} (${spec.conversationId}) has no tab for its pending wake — asking the browser to open it once`);
+  }
 }
 
 /**
@@ -6199,6 +6234,18 @@ const TURN_SCOPED_REPAIRS: ReadonlySet<Repair['reason']> = new Set(['unattribute
 
 const repairsInFlight = new Map<string, Repair>();
 
+/** Replayed transcript markers are diagnostics, not new continuation attempts. */
+const markedReplacementNotices = new Set<string>();
+function noticeMarkedReplacement(conversationId: string, token: string, outcome: string): void {
+  const key = `${conversationId}:${token}:${outcome}`;
+  if (markedReplacementNotices.has(key)) return;
+  markedReplacementNotices.add(key);
+  if (markedReplacementNotices.size > 500) {
+    for (const old of [...markedReplacementNotices].slice(0, 100)) markedReplacementNotices.delete(old);
+  }
+  logInfo(`bridge: marked replacement ${conversationId} (${token.slice(0, 8)}): ${outcome}`);
+}
+
 /** Explicit departure suspends every automatic page repair until a real return. */
 function departureAllowsRepair(session: SessionSummary): boolean {
   return session.browserRecoveryDismissedAt === undefined;
@@ -6698,8 +6745,11 @@ function nonDiscardableAgentConversations(): string[] {
 
 /** Page observations are diagnostics, never new recovery or ownership authority. */
 const FIBER_HEALTH_GRACE_MS = 15_000;
+// Hidden pages report every 30 seconds. A missing three-poll stretch is not evidence
+// that a newly opened page has had a broken helper for that whole interval.
+const FIBER_HEALTH_GAP_MS = 90_000;
 const fiberHealth = new Map<string, {
-  state: 'absent' | 'empty'; since: number; announced: 'absent' | 'empty' | null;
+  state: 'absent' | 'empty'; since: number; lastSeenAt: number; announced: 'absent' | 'empty' | null;
 }>();
 
 function noteFiberHealth(conversationId: string, raw: string | null, now = Date.now()): void {
@@ -6709,14 +6759,15 @@ function noteFiberHealth(conversationId: string, raw: string | null, now = Date.
     fiberHealth.delete(conversationId);
     if (!seen?.announced) return;
   } else {
-    if (!seen || seen.state !== raw || now < seen.since) {
-      fiberHealth.set(conversationId, { state: raw, since: now, announced: seen?.announced ?? null });
+    if (!seen || seen.state !== raw || now < seen.lastSeenAt || now - seen.lastSeenAt >= FIBER_HEALTH_GAP_MS) {
+      fiberHealth.set(conversationId, { state: raw, since: now, lastSeenAt: now, announced: seen?.announced ?? null });
       // Bound first sightings too: transient pages may never earn a log entry.
       if (fiberHealth.size > 200) {
         for (const old of [...fiberHealth.keys()].slice(0, 50)) fiberHealth.delete(old);
       }
       return;
     }
+    seen.lastSeenAt = now;
     if (now - seen.since < FIBER_HEALTH_GRACE_MS || seen.announced === raw) return;
     seen.announced = raw;
   }
@@ -7308,10 +7359,11 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
  * indistinguishable from a close the extension never reported.
  */
 async function queueMissingTab(conversationId: string, working: boolean, now = Date.now()): Promise<void> {
-  const agent = agentInfoForOwnedConversation(conversationId);
   // Read after closeConversation() has ended the session, so `endedAt` is this exact close.
   const session = await findSessionByConversation(conversationId);
-  const name = agent?.id ?? conversationId;
+  const agent = agentInfoForOwnedConversation(conversationId);
+  const slot = liveAgentForOwnedConversation(conversationId);
+  const name = agent ? `${agent.id} (${conversationId})` : conversationId;
   const declined = (why: string): void => {
     noticeRefusal(`no-tab:${conversationId}:${why}`, `bridge: ${name} closed its last tab — not reopened: ${why}`);
   };
@@ -7320,10 +7372,15 @@ async function queueMissingTab(conversationId: string, working: boolean, now = D
   if (!departureAllowsRepair(session)) return declined('the user closed its page');
   if (!session.activeTurnId && session.lastTurnOutcome === 'stopped') return declined('the user stopped its turn');
   if (!tabRecoveryWanted(conversationId)) return declined('tab recovery is off for this chat');
-  if (agent && agent.state !== 'detached') return declined(`its ${agent.role} slot is ${agent.state}, not working`);
-  if (!agent && !goalActiveFor(conversationId) && (session.toolCalls ?? 0) === 0) return declined('it has never called a tool');
-  if (!working && agent?.role !== 'worker' && !(goalActiveFor(conversationId) && goalPendingReplyFor(conversationId))) return declined('no turn is running in it');
-  const wentAt = agent?.detachedAt ?? session.endedAt ?? now;
+  // A parked prime is ordinary history. A live waking worker still needs a page
+  // only while this exact run and conversation have undelivered wake text.
+  const wakePending = slot?.state === 'waking' && pendingWorkerRevivals().some(revival =>
+    revival.conversationId === conversationId && revival.runId === slot.runId && revival.messageIds.length > 0);
+  if (slot && slot.state !== 'detached' && !wakePending)
+    return declined(`its ${slot.role} slot is ${slot.state}, not working`);
+  if (!slot && !goalActiveFor(conversationId) && (session.toolCalls ?? 0) === 0) return declined('it has never called a tool');
+  if (!working && slot?.role !== 'worker' && !(goalActiveFor(conversationId) && goalPendingReplyFor(conversationId))) return declined('no turn is running in it');
+  const wentAt = slot?.detachedAt ?? session.endedAt ?? now;
   if (queueBrowserRecovery(conversationId, session.id, `no-tab:${wentAt}`, 'no-tab', 0, now)) {
     logInfo(`bridge: ${name} has no tab — asking the browser to open the exact chat once`);
   } else {
@@ -7348,7 +7405,7 @@ async function queueMissingTab(conversationId: string, working: boolean, now = D
 async function queueStalledTabRecovery(conversationId: string, now = Date.now()): Promise<void> {
   const agent = agentInfoForOwnedConversation(conversationId);
   const session = await findSessionByConversation(conversationId, { requireUnique: true });
-  const name = agent?.id ?? conversationId;
+  const name = agent ? `${agent.id} (${conversationId})` : conversationId;
   const declined = (why: string): void => {
     noticeRefusal(`stalled:${conversationId}:${why}`, `bridge: ${name} is a stalled browser tab — not reloaded: ${why}`);
   };
@@ -8923,6 +8980,7 @@ export function resetBridgeForTests(): void {
   awaitingReturn.clear();
   lastAttributedCallAt.clear();
   fiberHealth.clear();
+  markedReplacementNotices.clear();
   refusalNoticedAt.clear();
   pickupWatch.clear();
   compactionWatch.clear();

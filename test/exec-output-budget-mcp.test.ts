@@ -17,10 +17,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
-import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
+import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { startMcpServer, type McpEndpoint } from '../src/main/mcp/server.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
-import { initSessionStore, resetSessionStoreForTests, unsetSessionRootForTests } from '../src/main/session/store.js';
+import { flushRecorder, resetRecorderForTests } from '../src/main/session/recorder.js';
+import { flushSessions, initSessionStore, resetSessionStoreForTests, unsetSessionRootForTests } from '../src/main/session/store.js';
+import { removeTempDir } from './helpers.js';
 
 /** Bytes the probe command writes to stdout. Comfortably past both budgets under test. */
 const PROBE_BYTES = 200_000;
@@ -42,10 +44,15 @@ let endpoint: McpEndpoint | null = null;
 afterEach(async () => {
   if (endpoint) await endpoint.stop().catch(() => undefined);
   endpoint = null;
+  // HTTP completion precedes asynchronous recorder publication. Join its writes
+  // before forgetting their queues or deleting the directory they still own.
+  await flushRecorder();
+  await Promise.all([flushSessions(), flushDurable()]);
+  resetRecorderForTests();
   resetSessionStoreForTests();
   unsetSessionRootForTests();
   resetDurableForTests();
-  if (dir) await fs.rm(dir, { recursive: true, force: true });
+  if (dir) await removeTempDir(dir);
   dir = '';
 });
 
