@@ -2008,10 +2008,13 @@ function registerTravelParentTool(reg: SurfaceRegistrar): void {
       description:
         'Fresh-chat control for one already-attended Travel Parent root. Actions are closed: show bounded root metadata; ' +
         'create_longrun derives one fixed Frontier Longrun child for command_center, nkb, or vyper from mission text plus an ' +
-        'assistant-chosen semantic label; revoke explicitly stops future Travel Parent issuance. create_longrun defaults to 72 hours ' +
+        'assistant-chosen semantic label; revoke explicitly stops future Travel Parent issuance. Before create_longrun, callers MUST use ' +
+        'frontier_longrun show and reuse/continue a live singleton Longrun parent instead of repeatedly creating Travel Parent children. ' +
+        'create_longrun also enforces that singleton preflight before any child issuance. create_longrun defaults to 72 hours ' +
         'and accepts only 1..72 whole hours. This tool has no root-create action and accepts no path, cwd, argv, executable, root/grant, ' +
         'session/slot, provider/model/reasoning, routing, landing, shell, credential, commit, push, merge, deploy or release selector. ' +
-        'CoS derives the hidden retry id, mission id, fixed operator intent and temporary files locally, and invokes only the pinned Command Center commands.',
+        'CoS derives the hidden retry id, mission id, fixed operator intent and temporary files locally, and invokes only the pinned Command Center commands. ' +
+        'Mobile ChatGPT connector permission prompts are separate from Travel Parent expiry/recertification and do not renew the attended root.',
       inputSchema,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }
     },
@@ -2021,10 +2024,27 @@ function registerTravelParentTool(reg: SurfaceRegistrar): void {
       }
       const result = await runTravelParentController(input);
       if (result.kind === 'show') {
+        const byScope = result.parent.remainingChildrenByScope;
+        const renewal = result.renewal.state === 'not_due'
+          ? `Attended PC renewal is not due; current expiry is ${result.parent.expiresAt}.`
+          : result.renewal.state === 'due_within_24h'
+            ? `Attended PC renewal is due within 24 hours; current expiry is ${result.parent.expiresAt}.`
+            : result.renewal.state === 'revoked'
+              ? 'The Travel Parent is revoked; attended PC recertification is required before future child issuance.'
+              : 'The Travel Parent is expired; attended PC recertification is required before future child issuance.';
         return {
           content: [{
             type: 'text' as const,
-            text: `Travel Parent is ${result.parent.revoked ? 'revoked' : result.parent.live ? 'live' : 'expired'}; ${result.parent.childrenUsedTotal} of ${result.parent.maxChildrenTotal} lifetime child slots are used.`
+            text: `Travel Parent is ${result.parent.revoked ? 'revoked' : result.parent.live ? 'live' : 'expired'}; ${result.parent.remainingChildrenTotal} of ${result.parent.maxChildrenTotal} lifetime child slots remain (command_center ${byScope.command_center}, nkb ${byScope.nkb}, vyper ${byScope.vyper}). ${renewal}`
+          }],
+          structuredContent: result,
+        };
+      }
+      if (result.kind === 'create_longrun_blocked') {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: 'A singleton Frontier Longrun parent is already live. Use frontier_longrun show/status/continue for the existing parent; do not retry travel_parent create_longrun while it remains live. The requested mission was not attached to the existing parent.'
           }],
           structuredContent: result,
         };

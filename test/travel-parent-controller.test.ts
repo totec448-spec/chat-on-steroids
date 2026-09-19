@@ -8,6 +8,11 @@ import {
   FRONTIER_LONGRUN_PARENT_MODEL,
   FRONTIER_LONGRUN_PARENT_REASONING,
 } from '../src/main/frontier-longrun-parent-contract.js';
+import {
+  resetFrontierLongrunControllerForTests,
+  setFrontierLongrunCommandBindingForTests,
+  setFrontierLongrunCommandRunnerForTests,
+} from '../src/main/frontier-longrun-controller.js';
 import { emptyEvidence, runInCallContext } from '../src/main/mcp/call-context.js';
 import { createRegistrar } from '../src/main/mcp/kernel.js';
 import { registerCoreTools } from '../src/main/mcp/tools-core.js';
@@ -109,6 +114,52 @@ function showPayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function longrunParentPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    missionId: 'existing-longrun',
+    missionDigest: digest('1'),
+    maxSlots: 8,
+    allocatedSlots: 0,
+    remainingSlots: 8,
+    focusSlot: null,
+    textClaimsUsed: 0,
+    textClaimsRemaining: 64,
+    issuedAt: '2026-09-18T14:00:00.000Z',
+    expiresAt: '2026-09-21T14:00:00.000Z',
+    signingKeyFingerprint: digest('2'),
+    operatorIntentDigest: digest('3'),
+    grantDigest: digest('4'),
+    model: FRONTIER_LONGRUN_PARENT_MODEL,
+    reasoning: FRONTIER_LONGRUN_PARENT_REASONING,
+    live: true,
+    revoked: false,
+    ...overrides,
+  };
+}
+
+function longrunShowPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    command: 'cc.remote.steering.longrun.show',
+    status: 'ok',
+    parent: longrunParentPayload(),
+    slots: [],
+    reason: null,
+    warnings: [],
+    ...overrides,
+  };
+}
+
+function longrunAbsentPayload() {
+  return {
+    command: 'cc.remote.steering.longrun.show',
+    status: 'refused',
+    parent: null,
+    slots: [],
+    reason: 'FRONTIER_LONGRUN_PARENT_ABSENT',
+    warnings: ['absent'],
+  };
+}
+
 function revokePayload(replay = false, overrides: Record<string, unknown> = {}) {
   return {
     command: 'cc.remote.steering.travel-parent.revoke',
@@ -150,10 +201,18 @@ beforeEach(async () => {
   await fs.writeFile(nodePath, 'fixture');
   await fs.writeFile(cliPath, 'fixture');
   setTravelParentCommandBindingForTests({ nodePath, cliPath, cwd: directory });
+  setFrontierLongrunCommandBindingForTests({ nodePath, cliPath, cwd: directory });
+  setFrontierLongrunCommandRunnerForTests(async () => ({
+    exitCode: 0,
+    stdout: JSON.stringify(longrunAbsentPayload()),
+    stderr: '', truncated: false, timedOut: false, durationMs: 1
+  }));
 });
 
 afterEach(async () => {
   resetTravelParentControllerForTests();
+  resetFrontierLongrunControllerForTests();
+  vi.useRealTimers();
   await removeTempDir(directory);
 });
 
@@ -210,6 +269,86 @@ describe('travel_parent controller adapter', () => {
     expect(JSON.stringify(result)).not.toContain(digest('f'));
     await expect(fs.lstat(missionFile)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.lstat(intentFile)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('blocks a live singleton Longrun before temp files or Travel Parent child issuance', async () => {
+    const travelRunner = vi.fn();
+    setTravelParentCommandRunnerForTests(travelRunner as never);
+    setFrontierLongrunCommandRunnerForTests(async (_command, args) => {
+      expect(args.slice(0, 2)).toEqual([cliPath, 'cc.remote.steering.longrun.show']);
+      expect(args).toContain('--controller-request-id');
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify(longrunShowPayload()),
+        stderr: '', truncated: false, timedOut: false, durationMs: 1
+      };
+    });
+    const before = await travelTempFiles();
+
+    const result = await withRequest(() => runTravelParentController({
+      action: 'create_longrun', scope: 'vyper', mission: 'new mission', label: 'new-mission'
+    }));
+
+    expect(result).toEqual({
+      kind: 'create_longrun_blocked',
+      scope: 'vyper',
+      label: 'new-mission',
+      reason: 'frontier_longrun_parent_live',
+      nextAction: 'frontier_longrun',
+      existing: { mission: 'existing-longrun', expiresAt: '2026-09-21T14:00:00.000Z', focus: null },
+      guidance: expect.stringContaining('requested mission was not attached'),
+    });
+    expect(travelRunner).not.toHaveBeenCalled();
+    expect(await travelTempFiles()).toEqual(before);
+  });
+
+  it.each([
+    ['absent', longrunAbsentPayload()],
+    ['expired', longrunShowPayload({ parent: longrunParentPayload({ live: false, revoked: false }) })],
+    ['revoked', longrunShowPayload({ parent: longrunParentPayload({ live: false, revoked: true }) })],
+  ] as const)('permits create when the singleton Longrun is %s', async (_state, preflightPayload) => {
+    setFrontierLongrunCommandRunnerForTests(async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify(preflightPayload),
+      stderr: '', truncated: false, timedOut: false, durationMs: 1
+    }));
+    const travelRunner = vi.fn(async (_command: string, args: readonly string[]) => {
+      const missionId = argAfter(args, '--mission-id');
+      const mission = await fs.readFile(argAfter(args, '--mission-file'), 'utf8');
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify(createPayload('vyper', missionId, mission)),
+        stderr: '', truncated: false, timedOut: false, durationMs: 1
+      };
+    });
+    setTravelParentCommandRunnerForTests(travelRunner as never);
+
+    await expect(withRequest(() => runTravelParentController({
+      action: 'create_longrun', scope: 'vyper', mission: 'mission', label: 'fixture'
+    }))).resolves.toMatchObject({ kind: 'create_longrun', scope: 'vyper', label: 'fixture' });
+    expect(travelRunner).toHaveBeenCalledTimes(1);
+    expect(travelRunner.mock.calls[0]![1][1]).toBe('cc.remote.steering.travel-parent.longrun.create');
+  });
+
+  it.each([
+    ['malformed parent', longrunShowPayload({ parent: { broken: true } })],
+    ['indeterminate absence', longrunShowPayload({ parent: null })],
+    ['refused state', { ...longrunAbsentPayload(), reason: 'FRONTIER_LONGRUN_PARENT_REVOKED' }],
+  ] as const)('fails closed on %s before temp files or Travel Parent child issuance', async (_case, preflightPayload) => {
+    setFrontierLongrunCommandRunnerForTests(async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify(preflightPayload),
+      stderr: '', truncated: false, timedOut: false, durationMs: 1
+    }));
+    const travelRunner = vi.fn();
+    setTravelParentCommandRunnerForTests(travelRunner as never);
+    const before = await travelTempFiles();
+
+    await expect(withRequest(() => runTravelParentController({
+      action: 'create_longrun', scope: 'vyper', mission: 'mission', label: 'fixture'
+    }))).rejects.toThrow(/preflight (failed closed|returned indeterminate)/);
+    expect(travelRunner).not.toHaveBeenCalled();
+    expect(await travelTempFiles()).toEqual(before);
   });
 
   it('keeps exact retries on one hidden request id and changes it when semantic inputs change', async () => {
@@ -331,6 +470,8 @@ describe('travel_parent controller adapter', () => {
   });
 
   it('uses only pinned show/revoke commands, accepts no conversation identity, and strictly projects bounded metadata', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-18T14:00:00.000Z'));
     const calls: readonly string[][] = [] as unknown as string[][];
     setTravelParentCommandRunnerForTests(async (_command, args) => {
       (calls as string[][]).push([...args]);
@@ -343,12 +484,53 @@ describe('travel_parent controller adapter', () => {
       [cliPath, 'cc.remote.steering.travel-parent.show'],
       [cliPath, 'cc.remote.steering.travel-parent.revoke', '--confirm'],
     ]);
-    expect(show).toMatchObject({ kind: 'show', parent: { childrenUsedTotal: 1, live: true, revoked: false } });
+    expect(show).toMatchObject({
+      kind: 'show',
+      parent: {
+        childrenUsedTotal: 1,
+        remainingChildrenTotal: 8,
+        remainingChildrenByScope: { command_center: 3, nkb: 3, vyper: 2 },
+        live: true,
+        revoked: false,
+      },
+      renewal: { state: 'not_due', attendedPcRequired: false },
+    });
     expect(revoke).toMatchObject({ kind: 'revoke', replay: false, parent: { live: false, revoked: true } });
     const serialized = JSON.stringify({ show, revoke });
     for (const hidden of ['signingKeyFingerprint','operatorIntentDigest','travelParentDigest','certificateDigest','grantDigest']) {
       expect(serialized).not.toContain(hidden);
     }
+  });
+
+  it('projects zero capacity for disallowed scopes and warns at the exact 24-hour attended-renewal boundary', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-18T14:00:00.000Z'));
+    let expiresAt = '2026-09-19T14:00:00.000Z';
+    setTravelParentCommandRunnerForTests(async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify(showPayload({
+        parent: parentPayload({
+          allowedScopes: ['command_center', 'vyper'],
+          childrenUsedTotal: 3,
+          childrenUsedByScope: { command_center: 1, nkb: 0, vyper: 2 },
+          expiresAt,
+        })
+      })),
+      stderr: '', truncated: false, timedOut: false, durationMs: 1
+    }));
+
+    await expect(runTravelParentController({ action: 'show' })).resolves.toMatchObject({
+      parent: {
+        remainingChildrenTotal: 3,
+        remainingChildrenByScope: { command_center: 2, nkb: 0, vyper: 1 },
+      },
+      renewal: { state: 'due_within_24h', attendedPcRequired: true },
+    });
+
+    vi.setSystemTime(new Date('2026-09-18T13:59:59.999Z'));
+    await expect(runTravelParentController({ action: 'show' })).resolves.toMatchObject({
+      renewal: { state: 'not_due', attendedPcRequired: false },
+    });
   });
 
   it('refuses malformed/refused show and revoke payloads instead of projecting them', async () => {
@@ -383,7 +565,7 @@ describe('travel_parent controller adapter', () => {
   });
 
   it('publishes a closed schema with no caller path, authority, session, or model selectors', async () => {
-    const published: Array<{ name: string; inputSchema: Record<string, any>; annotations?: { destructiveHint?: boolean } }> = [];
+    const published: Array<{ name: string; description?: string; inputSchema: Record<string, any>; annotations?: { destructiveHint?: boolean } }> = [];
     const ctx: ToolContext = {
       roots: [],
       caps: { ...DEFAULT_CAPABILITIES, command: false },
@@ -399,6 +581,8 @@ describe('travel_parent controller adapter', () => {
     await server.close();
     const travelTool = published.find(tool => tool.name === 'travel_parent')!;
     expect(travelTool.annotations?.destructiveHint).toBe(true);
+    expect(travelTool.description).toContain('callers MUST use frontier_longrun show');
+    expect(travelTool.description).toContain('permission prompts are separate from Travel Parent expiry/recertification');
     const schema = travelTool.inputSchema;
     const schemaText = JSON.stringify(schema);
     for (const forbidden of [

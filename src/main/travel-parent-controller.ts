@@ -19,6 +19,10 @@ import {
   FRONTIER_LONGRUN_PARENT_MODEL,
   FRONTIER_LONGRUN_PARENT_REASONING,
 } from './frontier-longrun-parent-contract.js';
+import {
+  FrontierLongrunControllerError,
+  runFrontierLongrunController,
+} from './frontier-longrun-controller.js';
 import { currentCall } from './mcp/call-context.js';
 
 export type TravelParentScope = 'command_center' | 'nkb' | 'vyper';
@@ -36,12 +40,21 @@ export interface TravelParentProjection {
   readonly allowedScopes: readonly TravelParentScope[];
   readonly childrenUsedTotal: number;
   readonly childrenUsedByScope: Readonly<Record<TravelParentScope, number>>;
+  readonly remainingChildrenTotal: number;
+  readonly remainingChildrenByScope: Readonly<Record<TravelParentScope, number>>;
   readonly maxChildrenTotal: 9;
   readonly maxChildrenPerScope: 3;
   readonly issuedAt: string;
   readonly expiresAt: string;
   readonly live: boolean;
   readonly revoked: boolean;
+}
+
+export type TravelParentRenewalState = 'not_due' | 'due_within_24h' | 'expired' | 'revoked';
+
+export interface TravelParentRenewalGuidance {
+  readonly state: TravelParentRenewalState;
+  readonly attendedPcRequired: boolean;
 }
 
 export interface TravelParentLongrunProjection {
@@ -55,7 +68,25 @@ export interface TravelParentLongrunProjection {
 }
 
 export type TravelParentControllerResult =
-  | { readonly kind: 'show'; readonly parent: TravelParentProjection; readonly warnings: readonly string[] }
+  | {
+      readonly kind: 'show';
+      readonly parent: TravelParentProjection;
+      readonly renewal: TravelParentRenewalGuidance;
+      readonly warnings: readonly string[];
+    }
+  | {
+      readonly kind: 'create_longrun_blocked';
+      readonly scope: TravelParentScope;
+      readonly label: string;
+      readonly reason: 'frontier_longrun_parent_live';
+      readonly nextAction: 'frontier_longrun';
+      readonly existing: {
+        readonly mission: string;
+        readonly expiresAt: string;
+        readonly focus: string | null;
+      };
+      readonly guidance: string;
+    }
   | {
       readonly kind: 'create_longrun';
       readonly scope: TravelParentScope;
@@ -84,6 +115,7 @@ const MAX_MISSION_BYTES = 16_000;
 const MAX_OUTPUT_BYTES = 100_000;
 const DEFAULT_TTL_HOURS = 72;
 const MAX_TTL_HOURS = 72;
+const RENEWAL_WARNING_MS = 24 * 60 * 60 * 1_000;
 const TRAVEL_PARENT_MAX_TTL_SECONDS = 7 * 24 * 60 * 60;
 const TRAVEL_PARENT_REQUEST_DOMAIN = 'nexora.cos.travel-parent.longrun-request.v1:';
 const SCOPES: readonly TravelParentScope[] = ['command_center', 'nkb', 'vyper'];
@@ -245,6 +277,15 @@ function strictParent(value: unknown): TravelParentProjection {
       throw new TravelParentControllerError('Command Center returned child usage outside the Travel Parent scope set');
     }
   }
+  const remainingChildrenByScope = {
+    command_center: allowedScopes.includes('command_center') ? 3 - childrenUsedByScope.command_center : 0,
+    nkb: allowedScopes.includes('nkb') ? 3 - childrenUsedByScope.nkb : 0,
+    vyper: allowedScopes.includes('vyper') ? 3 - childrenUsedByScope.vyper : 0,
+  };
+  const remainingChildrenTotal = Math.min(
+    9 - total,
+    remainingChildrenByScope.command_center + remainingChildrenByScope.nkb + remainingChildrenByScope.vyper
+  );
   const issuedAt = timestamp(parent.issuedAt, 'Travel Parent issuedAt');
   const expiresAt = timestamp(parent.expiresAt, 'Travel Parent expiresAt');
   const parentWindowSeconds = (Date.parse(expiresAt) - Date.parse(issuedAt)) / 1000;
@@ -258,6 +299,8 @@ function strictParent(value: unknown): TravelParentProjection {
     allowedScopes: [...allowedScopes],
     childrenUsedTotal: total,
     childrenUsedByScope,
+    remainingChildrenTotal,
+    remainingChildrenByScope,
     maxChildrenTotal: 9,
     maxChildrenPerScope: 3,
     issuedAt,
@@ -265,6 +308,14 @@ function strictParent(value: unknown): TravelParentProjection {
     live: parent.live,
     revoked: parent.revoked,
   };
+}
+
+function renewalGuidance(parent: TravelParentProjection, nowMs = Date.now()): TravelParentRenewalGuidance {
+  if (parent.revoked) return { state: 'revoked', attendedPcRequired: true };
+  const remainingMs = Date.parse(parent.expiresAt) - nowMs;
+  if (!parent.live || remainingMs <= 0) return { state: 'expired', attendedPcRequired: true };
+  if (remainingMs <= RENEWAL_WARNING_MS) return { state: 'due_within_24h', attendedPcRequired: true };
+  return { state: 'not_due', attendedPcRequired: false };
 }
 
 function strictChild(
@@ -333,7 +384,8 @@ function strictShowPayload(value: unknown): Extract<TravelParentControllerResult
   if (payload.status !== 'ok' || parsedReason !== null || payload.parent === null) {
     throw new TravelParentControllerError(`Command Center refused Travel Parent show: ${parsedReason ?? 'TRAVEL_PARENT_SHOW_REFUSED'}`);
   }
-  return { kind: 'show', parent: strictParent(payload.parent), warnings };
+  const parent = strictParent(payload.parent);
+  return { kind: 'show', parent, renewal: renewalGuidance(parent), warnings };
 }
 
 function strictRevokePayload(value: unknown): Extract<TravelParentControllerResult, { kind: 'revoke' }> {
@@ -474,6 +526,37 @@ async function withInputFiles<T>(mission: Buffer, body: (missionFile: string, in
   }
 }
 
+async function preflightLongrunSingleton(): Promise<{
+  mission: string;
+  live: boolean;
+  revoked: boolean;
+  expiresAt: string;
+  focus: string | null;
+} | null> {
+  try {
+    const result = await runFrontierLongrunController(
+      { action: 'show' },
+      async () => { throw new TravelParentControllerError('Longrun singleton preflight unexpectedly attempted a relay'); }
+    );
+    if (result.kind !== 'show' || result.show.parent === null) {
+      throw new TravelParentControllerError('Longrun singleton preflight returned indeterminate parent state');
+    }
+    if (result.show.parent.live && result.show.parent.revoked) {
+      throw new TravelParentControllerError('Longrun singleton preflight returned inconsistent live/revoked state');
+    }
+    return result.show.parent;
+  } catch (error) {
+    if (error instanceof FrontierLongrunControllerError &&
+        error.message === 'Command Center refused Longrun show: FRONTIER_LONGRUN_PARENT_ABSENT') {
+      return null;
+    }
+    if (error instanceof TravelParentControllerError) throw error;
+    throw new TravelParentControllerError(
+      `Longrun singleton preflight failed closed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
 export async function runTravelParentController(input: TravelParentControllerInput): Promise<TravelParentControllerResult> {
   if (input.action === 'show') {
     return strictShowPayload(await invokeCc(['cc.remote.steering.travel-parent.show']));
@@ -492,6 +575,23 @@ export async function runTravelParentController(input: TravelParentControllerInp
   const missionDigest = createHash('sha256').update(mission).digest('hex');
   const requestId = childRequestId(scope, label, missionDigest, mission.length, ttlSeconds);
   const missionId = missionIdFor(scope, label);
+
+  const existingLongrun = await preflightLongrunSingleton();
+  if (existingLongrun?.live) {
+    return {
+      kind: 'create_longrun_blocked',
+      scope,
+      label,
+      reason: 'frontier_longrun_parent_live',
+      nextAction: 'frontier_longrun',
+      existing: {
+        mission: existingLongrun.mission,
+        expiresAt: existingLongrun.expiresAt,
+        focus: existingLongrun.focus,
+      },
+      guidance: 'A singleton Frontier Longrun parent is already live. Use frontier_longrun show/status/continue for that parent. The requested mission was not attached to it; do not retry travel_parent create_longrun while it remains live.',
+    };
+  }
 
   return withInputFiles(mission, async (missionFile, intentFile) => {
     const payload = await invokeCc([
