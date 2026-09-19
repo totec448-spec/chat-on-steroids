@@ -2017,7 +2017,21 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    turn. Binding, policy and source proof are rechecked after reads; old/unscoped banners and
    manual Stop cannot grant the exception.
 2. **Ask for a brief safely.** Wait for running local tools, not the recorder's attribution
-   tail. The source-tool fence prevents work continuing on A after handoff. Mark send attempt
+   tail. Before automatic Stop, require a fresh native source-turn scan and receipt of its
+   issued connector calls; local completion alone can precede delivery to ChatGPT. Missing
+   scans or vanished calls cannot acknowledge an observed pending result. The bounded wait
+   leaves an unsent automatic ticket durable when receipt remains unknown. Recheck the exact
+   source question, route and document across every await, then retain the local-tool drain.
+   Mixed visible/pre-row calls retain their outstanding request evidence, and automatic Stop
+   also waits for local execution to drain before the final native scan. Native Code Mode
+   child messages require their exact enclosing `functions.exec` result: the provider chains
+   batch results through one another, so their direct parent ids alone are not individual
+   receipts. The Fiber reader validates the complete parent chain and matching request,
+   working-turn and exchange identities without inspecting payloads. A previous Code Mode
+   result cannot acknowledge a later ordinary call.
+   Fiber protocol 13 also carries enclosing native call identities separately from MCP
+   evidence, so an unfinished same-request batch stays pending before its first child row.
+   The source-tool fence prevents work continuing on A after handoff. Mark send attempt
    before clicking; dispatch is granted only once the native Send button is ready, through its
    existing pre-Send authorization callback. Attempted/dispatched/sent checkpoints are not interchangeable. Retry a
    known pre-dispatch failure, but never click again merely because the receipt is missing.
