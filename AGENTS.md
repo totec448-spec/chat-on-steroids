@@ -1516,6 +1516,10 @@ messages. Two transport slots, one batch per conversation and fair batch electio
 hot/stalled chat blocking another. Command ACK custody precedes later observations from that
 route. Reconnection restores eligible documents before creating new work; browser restart is
 a different lifetime from MV3 suspension (§2).
+`deliverJournalBatch` gives both the initial `/events` request and its 413 split retry sixty
+seconds for durable acceptance. Timeout preserves the observations for later retry; it does
+not acknowledge them or change the ordinary ten-second request budget. The HTTP server's
+request-body/header limits remain separate from the receipt wait. Tests: `extension.test.ts`.
 
 An idle composer or missing Stop button alone does not prove a completed answer. Turn state
 combines native message/terminal evidence with exact user/assistant identities and live tools.
@@ -1921,10 +1925,15 @@ again after the main claim so a newly resumed or replaced document is not reload
 Page-model helper health is diagnostic only: unknown until a scan/definitive repair result,
 empty may mean loading, and neither creates a reload grant. An absent/empty state must persist
 for fifteen seconds before it is logged; recovery is logged only after an announced degradation.
+Ninety seconds without a report, or a clock moving behind the last observation, restarts that
+grace. Elapsed time without a page report is not continued evidence of degradation.
 First sightings and announced states share one bounded map, reset with the bridge. Repeated no-tab/stalled refusals
 are logged once per chat/cause/minute; handout logs and confirmed browser-action logs remain distinct.
 Assistant-error repairs retain their three-minute cooldown. Attribution, silence, Goal,
 compaction and no-tab follow their own eligibility and schedules.
+Marked continuation outcomes use a bounded per-chat/token/outcome diagnostic set. Replayed
+markers do not repeat the same notice, and commitment is logged only after actual settlement.
+Neither these notices nor page-helper observations grant a browser action.
 Recoverable notice equality ignores a trailing native Retry button label while retaining the
 original recorded error text. Canonical-question ownership still separates genuinely new work.
 The renderer keeps acknowledged Reloaded/Reopened receipts visible after tools resume, colors
@@ -2197,6 +2206,11 @@ The bridge listens to existing broker state changes to retire old activity grant
 tokens synchronously, whether sleep came from MCP, an observed final or maintenance. A later
 wake does not revive those tokens. New repair requests for sleeping/terminal workers are refused;
 their stored conversation, report, workspace and pending work remain available.
+A newly admitted wake may request recovery of its exact absent chat through that same owner.
+After the session read, recheck the command object, lifecycle, unclaimed browser ownership,
+undelivered messages, page absence, manual departure, Stop and current recovery settings.
+Only a live broker slot grants or refuses worker recovery; parked prime history cannot veto
+a later ordinary turn. Tests: `bridge.test.ts`, including cancellation during the storage read.
 
 Revival reserves the new assignment with its current inbox task preview, a neutral worker-id
 label and no completion result. The previous spawn label/result must not describe new work.

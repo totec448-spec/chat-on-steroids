@@ -9,6 +9,13 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## Unreleased
+
+- Recover the exact missing tab when a sleeping worker is woken, and stop old prime history from blocking current chat recovery.
+- Restart the page-helper warning grace after a long reporting gap or a backward clock adjustment.
+- Record bounded, accurate Compact & Resume marker outcomes without repeating the same notice on every reload.
+- Give observation-journal deliveries and split retries a 60-second durable-write allowance while preserving unacknowledged observations after timeout.
+
 ## [2.1.14] — Death to Anthropic and OpenAI. Join the resistance @dummerspast39 x
 
 - Add the optional animated Tur Tur Sahur desktop companion.
