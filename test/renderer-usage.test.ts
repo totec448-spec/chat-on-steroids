@@ -18,7 +18,11 @@ afterEach(() => { dom?.window.close(); vi.unstubAllGlobals(); vi.resetModules();
 it('cycles the week start locally, keeps exact counts, and restores the weekday after reload', async () => {
   dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
-  const data: UsageOverview = { contextTokenCap: 256_000, tokens: 0, models: [], days: [], sessions: 1, limits: [],
+  const data: UsageOverview = { contextTokenCap: 256_000, tokens: 0, models: [], days: [], sessions: 1,
+    limits: [
+      { model: 'gpt-6-pro', scope: 'model', remaining: 123, remainingPercent: null, resetAt: null, windowSeconds: 604800, observedAt: Date.now() },
+      { model: 'deep_research', scope: 'feature', remaining: 250, remainingPercent: null, resetAt: null, windowSeconds: null, observedAt: Date.now() }
+    ],
     messages: { through: new Date(2026, 8, 21, 12).getTime(), days: [
       { date: '2026-09-19', gpt56: 1234, gpt6: 12 }, { date: '2026-09-20', gpt56: 10, gpt6: 3 }, { date: '2026-09-21', gpt56: 1, gpt6: 1 }
     ] } };
@@ -31,12 +35,20 @@ it('cycles the week start locally, keeps exact counts, and restores the weekday 
   await usage.refreshUsage();
   expect(element('usageWeekStart').textContent).toContain('Since Monday');
   expect(element('usageMessages6').textContent).toBe('1');
+  expect(element('usageStatus').textContent).toBe('');
+  const quotas = element('usageLimits').textContent;
+  expect(quotas).toContain('123 remaining');
+  expect(quotas).toContain('250 remaining');
+  expect(element('usageMessageCounts').textContent).toContain('sent');
+  expect(element('usageMessageCounts').textContent).not.toContain('remaining');
   const button = element('usageWeekStart') as HTMLButtonElement;
   for (let i = 0; i < 5; i++) button.click(); // Saturday.
   expect(button.textContent).toContain('Since Saturday');
   expect(element('usageMessages6').textContent).toBe('16');
   expect(element('usageMessages56').textContent).toBe((1245).toLocaleString('en')); // Never a rounded 1.2K.
   expect(element('usageMessagePeriod').textContent).toContain(new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(2026, 8, 19)));
+  expect(button.title).toContain(element('usageMessagePeriod').textContent);
+  expect(element('usageLimits').textContent).toBe(quotas);
   expect(dom.window.localStorage.getItem('cos.usage.weekStart')).toBe('6');
   expect(getUsage).toHaveBeenCalledTimes(1);
   setLanguage('ja');
@@ -55,6 +67,7 @@ it('cycles the week start locally, keeps exact counts, and restores the weekday 
   const restored = await import('../src/renderer/usage.js'); restored.initUsage(); await restored.refreshUsage();
   expect(element('usageWeekStart').textContent).toContain('Since Saturday');
   expect(element('usageMessages6').textContent).toBe('16');
+  expect(element('usageStatus').textContent).toBe('');
 });
 
 it.each(['7', '-1', '1.5', 'invalid', ''])('ignores invalid persisted weekday %j', async saved => {

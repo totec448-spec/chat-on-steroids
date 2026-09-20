@@ -611,6 +611,46 @@ describe('provisioning', () => {
     expect((await request('GET', '/status', { auth: second })).status).toBe(200);
   });
 
+  it('lets concurrent automatic browser profiles share one valid credential without revoking one another', async () => {
+    const replies = await Promise.all(Array.from({ length: 6 }, () => request('POST', '/pair', { auth: null, body: { reuse: true } })));
+    expect(replies.every(reply => reply.status === 200)).toBe(true);
+    const credentials = replies.map(reply => reply.body.token as string);
+    expect(new Set(credentials).size).toBe(1);
+    for (const auth of credentials) expect((await request('GET', '/status', { auth })).status).toBe(200);
+    resetSecretsCacheForTests();
+    const restored = await request('POST', '/pair', { auth: null, body: { reuse: true } });
+    expect(restored.body.token).toBe(credentials[0]);
+    await unpair();
+    expect((await request('GET', '/status', { auth: credentials[0] })).status).toBe(401);
+    expect((await request('POST', '/pair', { auth: null, body: { reuse: true } })).status).toBe(409);
+    const reconnect = await request('POST', '/pair', { auth: null, body: { reconnect: true } });
+    expect(reconnect.status).toBe(200);
+    expect(reconnect.body.token).not.toBe(credentials[0]);
+    expect((await request('GET', '/status', { auth: credentials[0] })).status).toBe(401);
+  });
+
+  it('does not report successful pairing when Disconnect supersedes a delayed credential write', async () => {
+    let entered!: () => void;
+    let release!: () => void;
+    const writing = new Promise<void>(resolve => { entered = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    vi.mocked(safeStorage.encryptStringAsync).mockImplementationOnce(async value => {
+      entered();
+      await held;
+      return Buffer.from(value, 'utf8');
+    });
+    const pairing = request('POST', '/pair', { auth: null, body: { reuse: true } });
+    await writing;
+    const disconnecting = unpair();
+    release();
+    const paired = await pairing;
+    await disconnecting;
+    expect(paired.status).toBe(409);
+    expect(paired.body.token).toBeUndefined();
+    expect((await request('GET', '/hello', { auth: null })).body.disconnected).toBe(true);
+    expect((await request('POST', '/pair', { auth: null, body: { reuse: true } })).status).toBe(409);
+  });
+
   it('drops the token when the user disconnects the browser', async () => {
     await pair();
     expect((await request('GET', '/status')).status).toBe(200);
@@ -2016,8 +2056,8 @@ describe('automatic compaction', () => {
     });
   });
 
-  it.each(['finished', 'stopped', 'auto-off', 'pro', 'blocked'] as const)(
-    'refuses compaction from trailing tools without a page turn when %s', async scenario => {
+  it.each(['finished', 'stopped', 'auto-off', 'pro', 'blocked', 'closed'] as const)(
+    'checks compaction authority when fresh tools follow a page-local end (%s)', async scenario => {
       await pair();
       const conversationId = randomUUID();
       await withThreshold(10_000, async () => {
@@ -2044,20 +2084,31 @@ describe('automatic compaction', () => {
           messageId: 'guarded-native-final', providerMessageId: '11111111-2222-4333-8444-555555555555',
           text: 'The requested work is complete.', state: 'final', final: true, activeNow: true
         }] } });
+        const endedAt = Date.now();
         await request('POST', '/events', { body: { conversationId, events: [{
-          kind: 'turn_end', time: Date.now(), turnId: 'guarded-page-turn',
+          kind: 'turn_end', time: endedAt, turnId: 'guarded-page-turn',
           outcome: scenario === 'stopped' ? 'stopped' : scenario === 'finished' ? 'completed' : 'failed'
         }] } });
         if (scenario === 'auto-off') await request('POST', '/settings', { body: { conversationId, autoCompact: false } });
         if (scenario === 'blocked') setChatBlocked(conversationId, true);
+        if (scenario === 'closed') await request('POST', '/closed', { body: { conversationId, manual: true } });
+        // This case requires a call STARTED after the end. Fast hosts can execute
+        // both within one millisecond; disk speed is not ownership evidence.
+        const later = Math.max(Date.now(), endedAt + 1);
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(later);
         try {
           await call('x'.repeat(44_000));
           await settled();
           expect((await getSession(sessionId))?.contextTokens).toBeGreaterThan(10_000);
           if (scenario === 'finished') expect(await sessionStoreModule.readCompletedFinal(sessionId, conversationId))
             .toMatchObject({ messageId: 'guarded-native-final' });
-          expect(continuationForSession(sessionId)).toBeNull();
-        } finally { if (scenario === 'blocked') setChatBlocked(conversationId, false); }
+          if (scenario === 'stopped') await vi.waitFor(() =>
+            expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, from: conversationId }));
+          else expect(continuationForSession(sessionId)).toBeNull();
+        } finally {
+          clock.mockRestore();
+          if (scenario === 'blocked') setChatBlocked(conversationId, false);
+        }
       });
     });
 
@@ -7266,7 +7317,7 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it.each(['normal', 'pro'] as const)('pauses a manually closed %s chat until a real page return restores recovery', async model => {
+  it.each(['normal', 'pro'] as const)('shows fresh MCP activity in a closed %s chat without restoring browser authority', async model => {
     const previous = getConfig();
     await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true },
       multiAgent: { ...previous.multiAgent, recoverAgentTabs: false } });
@@ -7288,9 +7339,9 @@ describe('unattributed activity recovery', () => {
       const session = (await findSessionByConversation(OTHER))!;
       const { sessionActivityExpiresAt } = await import('../src/main/bridge.js');
       const { sessionWorkingAt } = await import('../src/shared/session-activity.js');
-      const assertInactive = async () => {
+      const assertInactive = async (working = false) => {
         const summary = (await getSession(session.id))!;
-        expect(sessionWorkingAt({ ...summary, activityExpiresAt: sessionActivityExpiresAt(summary) }, Date.now())).toBe(false);
+        expect(sessionWorkingAt({ ...summary, activityExpiresAt: sessionActivityExpiresAt(summary) }, Date.now())).toBe(working);
         expect(await sessionControlsFor(session.id)).toMatchObject({ activeTurnId: null, canInject: false, recovery: [] });
       };
       for (let cycle = 0; cycle < 2; cycle++) {
@@ -7299,7 +7350,12 @@ describe('unattributed activity recovery', () => {
         expect(await maintenance()).toBeNull();
         await vi.advanceTimersByTimeAsync(30_000);
         await call();
-        await assertInactive();
+        await assertInactive(true);
+        // A normal chat's display lasts three minutes, even though its reload
+        // clock is two. A closed page has no reload/Continue authority at either boundary.
+        await vi.advanceTimersByTimeAsync(model === 'pro' ? 8 * 60_000 : 150_000);
+        await sweepStaleSwarm(Date.now());
+        await assertInactive(true);
         // Neither this exact call nor reading app controls pretends that a tab is open.
         expect(liveConversations().some(row => row.conversationId === OTHER)).toBe(false);
         if (cycle === 0) {
@@ -7354,10 +7410,10 @@ describe('unattributed activity recovery', () => {
       for (const owner of [PRIME, null, OTHER]) await trackInFlight({ startedAt: Date.now(), transportKey: null,
         agent: null, outcome: null, evidence: emptyEvidence(),
         caller: { conversationId: owner, requestId: `offline-running-${owner}`, transportKey: null } }, async () => {
-        expect(active()).toBe(!manual && owner === OTHER);
+        expect(active()).toBe(owner === OTHER);
         if (owner === OTHER) {
           await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS * 2);
-          expect(active()).toBe(!manual);
+          expect(active()).toBe(true);
           if (manual) expect((await sessionControlsFor(session.id)).activeTurnId).toBeNull();
           expect(liveConversations().some(row => row.conversationId === OTHER)).toBe(false);
           expect(await maintenance()).toBeNull();
@@ -9268,6 +9324,60 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it.each(['normal', 'pro'] as const)('renews %s activity and silence recovery when the stopped request keeps working after its finish hold was released', async model => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true },
+      multiAgent: { ...previous.multiAgent, recoverAgentTabs: false } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), turnId = 'stop-with-continued-mcp', requestId = `wfr_stop_${++requests}`;
+      await events(chat, [
+        { kind: 'user_message', messageId: 'stop-question', text: 'Finish the requested work.', time: Date.now(), authoredNow: true },
+        { kind: 'model_selection', model: model === 'pro' ? 'gpt-6-pro' : 'GPT-5.6 Sol', reasoningEffort: model === 'pro' ? 'pro' : 'high', time: Date.now() },
+        openTurn(turnId),
+        { kind: 'tool_evidence', time: Date.now(), turnId, calls: [{ messageId: 'stop-call', tool: 'read', order: 0, answered: false, requestId }] }
+      ]);
+      const session = (await findSessionByConversation(chat))!;
+      const { sessionActivityExpiresAt } = await import('../src/main/bridge.js');
+      const { sessionWorkingAt } = await import('../src/shared/session-activity.js');
+      const { releaseSessionFinish } = await import('../src/main/session/finish.js');
+      const call = (startedAt = Date.now()) => recordToolCall({ tool: 'read', args: { paths: ['/project/a.ts'] },
+        content: [{ type: 'text' as const, text: 'ok' }], outcome: 'ok' as const, durationMs: 1, startedAt, requestId });
+      await call();
+      await vi.advanceTimersByTimeAsync(1000);
+      const stoppedAt = Date.now();
+      const originalDeadline = sessionActivityExpiresAt((await getSession(session.id))!);
+      await releaseSessionFinish(session.id, turnId, 'stop');
+      await events(chat, [endTurn(turnId, 'stopped')]);
+      // A stopped page view cannot erase the activity already earned by real MCP.
+      // It still blocks input/reload until exact subsequent work reopens the source.
+      expect(sessionActivityExpiresAt((await getSession(session.id))!)).toBe(originalDeadline);
+      expect((await sessionControlsFor(session.id)).activeTurnId).toBeNull();
+      expect((await sessionControlsFor(session.id)).canInject).toBe(false);
+      await call(stoppedAt - 1);
+      expect((await getSession(session.id))?.activeTurnId).toBeNull();
+      expect(sessionActivityExpiresAt((await getSession(session.id))!)).toBe(originalDeadline);
+      await vi.advanceTimersByTimeAsync(1000);
+      await call();
+      const resumed = (await getSession(session.id))!;
+      expect(resumed.activeTurnId).toBe(turnId);
+      expect(resumed.finishTurn?.released).toBe(true);
+      expect(sessionWorkingAt({ ...resumed, activityExpiresAt: sessionActivityExpiresAt(resumed) }, Date.now())).toBe(true);
+      expect(sessionActivityExpiresAt(resumed)).toBe(Date.now() + (model === 'pro' ? PRO_ACTIVITY_MS : 3 * 60_000));
+      expect((await maintenanceBatch()).filter(row => row.conversationId === chat)).toEqual([]);
+      await vi.advanceTimersByTimeAsync((model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS) + 1);
+      await sweepStaleSwarm(Date.now());
+      const repair = (await maintenanceBatch()).find(row => row.conversationId === chat);
+      expect(repair).toMatchObject({ conversationId: chat, reason: 'silence' });
+      expect((await request('POST', '/repairs/claim', { body: { token: repair!.token } })).body.allowed).toBe(true);
+      // A subsequently discovered real final consumes the same source and its repair.
+      await recordFinalForTest(chat, turnId);
+      await events(chat, [endTurn(turnId, 'completed')]);
+      expect(sessionActivityExpiresAt((await getSession(session.id))!)).toBeNull();
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
   for (const outcome of ['completed', 'stopped', 'failed', 'unknown']) it(`ends Pro activity immediately on ${outcome} and revives only from a newer exact call`, async () => {
     const timingChat = `a2222222-1111-4111-8111-00000000000${['completed', 'stopped', 'failed', 'unknown'].indexOf(outcome)}`;
     vi.useFakeTimers();
@@ -9285,7 +9395,7 @@ describe('unattributed activity recovery', () => {
       expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBeNull();
       await vi.advanceTimersByTimeAsync(1_000);
       await attributed(timingChat, false, Date.now());
-      expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(outcome === 'stopped' ? null : Date.now() + PRO_ACTIVITY_MS);
+      expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(Date.now() + PRO_ACTIVITY_MS);
     } finally { vi.useRealTimers(); }
   });
 
@@ -9317,7 +9427,7 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  for (const fence of ['stop', 'block']) it(`does not revive Pro activity across an explicit ${fence}`, async () => {
+  for (const fence of ['stop', 'block']) it(`keeps new Pro work visible after Stop while enforcing the ${fence} action fence`, async () => {
     const timingChat = `a3333333-1111-4111-8111-00000000000${fence === 'stop' ? 1 : 2}`;
     vi.useFakeTimers();
     try {
@@ -9330,7 +9440,8 @@ describe('unattributed activity recovery', () => {
       await events(timingChat, [endTurn('pro-stopped', 'stopped')]);
       await vi.advanceTimersByTimeAsync(1_000);
       await attributed(timingChat, false, Date.now());
-      expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBeNull();
+      expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(fence === 'block' ? null : Date.now() + PRO_ACTIVITY_MS);
+      expect((await sessionControlsFor(sessionId)).automation).toBe('off');
     } finally { setChatBlocked(timingChat, false); vi.useRealTimers(); }
   });
 
@@ -12470,4 +12581,30 @@ it('retires an already armed ordinary Goal repair when its conversation is now f
     await sweepStaleSwarm(Date.now());
     expect(((await request('GET', '/status')).body.repairs ?? []).filter((r: any) => r.conversationId === chat)).toEqual([]);
   } finally { resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); vi.useRealTimers(); }
+});
+
+it('preserves pending commands and durable ACK receipts across a port switch', async () => {
+  await pair();
+  const failed = await compactedSession('ea000001-1111-4222-8333-444444444444', 'Receipt retained');
+  const failedCommand = queueResume(failed.sessionId, failed.token)!;
+  await redeem(failedCommand.id, 'port-switch-client');
+  const ackBody = { id: failedCommand.id, client: 'port-switch-client', status: 'failed', error: 'fixture tab closed' };
+  const ack = await request('POST', '/commands/ack', { body: ackBody });
+  expect(ack.status).toBe(200);
+  const queued = await compactedSession('ea000002-1111-4222-8333-444444444444', 'Pending command retained');
+  queueResume(queued.sessionId, queued.token);
+  await flushDurable();
+  const before = await readDurable('bridge-commands'); const pending = pendingCommands();
+  expect((before as any).receipts.length).toBeGreaterThan(0);
+  const ports = await import('../src/main/bridge-ports.js');
+  const selection = vi.spyOn(ports, 'bridgePortSelection').mockReturnValue({ candidates: [0], overridden: false });
+  try {
+    const { updateConfig } = await import('../src/main/config.js');
+    const { publishBridgePortChange } = await import('../src/main/bridge.js');
+    await updateConfig(config => ({ ...config, ui: { ...config.ui, browserBridgePort: 8767 } }), undefined, publishBridgePortChange);
+    base = `http://127.0.0.1:${bridgePort()}`;
+    expect(pendingCommands()).toEqual(pending);
+    expect(await readDurable('bridge-commands')).toEqual(before);
+    expect((await request('POST', '/commands/ack', { body: ackBody })).body).toEqual(ack.body);
+  } finally { selection.mockRestore(); }
 });

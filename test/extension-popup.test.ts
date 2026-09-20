@@ -28,6 +28,10 @@ it('reports only app reachability from compatible health and pairing', () => {
   expect(document.getElementById('state')!.textContent).not.toContain('Connected');
   (popup!.window as any).paintHeader({ connected: false });
   expect(document.getElementById('state')!.textContent).toBe('App not reachable');
+  expect(document.getElementById('unpairBtn')).toBeNull();
+  (popup!.window as any).paintHeader({ connected: true, paired: false, disconnected: true, compatible: true, port: 8765 });
+  expect(document.getElementById('retryBtn')!.textContent).toBe('Connect');
+  expect((document.getElementById('retryBtn') as HTMLButtonElement).hidden).toBe(false);
 });
 
 it('explains manual mismatch recovery with both versions', () => {

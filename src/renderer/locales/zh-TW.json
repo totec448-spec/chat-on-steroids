@@ -1,5 +1,11 @@
 {
-  "Verified messages": "已驗證訊息",
+  "Auto": "自動",
+  "Browser bridge port": "瀏覽器橋接連接埠",
+  "Auto uses the first available port. A fixed port must be available.": "自動使用第一個可用連接埠。固定連接埠必須可用。",
+  "Controlled by CLF_BRIDGE_PORTS. Change the environment override to choose a port here.": "由 CLF_BRIDGE_PORTS 控制。請變更環境變數覆寫設定以在此選擇連接埠。",
+  "Browser bridge could not start: {0}": "瀏覽器橋接無法啟動：{0}",
+  "Messages and limits": "訊息與使用限額",
+  "sent": "已傳送",
   "Since {0}": "自{0}起",
   "Change start day": "變更起始日",
   "Local time · {0} → {1}": "本地時間 · {0} → {1}",

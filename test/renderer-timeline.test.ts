@@ -1618,7 +1618,7 @@ it.each(['composer', 'bubble'])('clears New Chat drafts and removes a delivery c
   const cancel = vi.fn(async (id: string) => { live.inputs = live.inputs.map(row => row.id === id ? { ...row, state: 'cancelled' as const, error: 'Not sent: this delivery was cancelled before Send was authorized.' } : row); return { ok: true, data: true }; });
   (w as any).api.cancelInput = cancel;
   expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Cancel delivery');
-  if (control === 'composer') w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
+  if (control === 'composer') w.document.getElementById('chatSend')!.click();
   else (w.document.querySelector('#inputQueue [title="Cancel delivery"]') as HTMLButtonElement).click();
   await settle();
   expect(cancel).toHaveBeenCalledWith(live.inputs[0]!.id);
@@ -2071,7 +2071,7 @@ it('shows Stop immediately for a queued first send, switches to Send for a new d
   expect(send.dataset.action).toBe('stop');
   const cancel = vi.fn(async (id: string) => { live.inputs = live.inputs.map(row => row.id === id ? { ...row, state: 'cancelled' } : row); return { ok: true, data: true }; });
   (w as any).api.cancelInput = cancel;
-  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  send.click();
   await settle();
   expect(cancel).toHaveBeenCalledWith(live.sent[0]!.id);
   expect(send.dataset.action).toBe('send');
@@ -2584,6 +2584,24 @@ it('routes an armed empty-composer plan through the planner and paints only its 
   expect(live.sent[0]).toMatchObject({ text: 'Write SVG paths', stages: ['Validate the SVG'] });
 });
 
+it('does not turn an empty or repeated form submission into a Stop request', async () => {
+  const { w, live } = await boot([]);
+  const api = (w as any).api;
+  const stop = vi.fn(async () => ({ ok: true, data: {} }));
+  api.stopSessionTurn = stop;
+  const form = w.document.getElementById('composer')!;
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(stop).not.toHaveBeenCalled();
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'A single correction'; input.dispatchEvent(new w.Event('input'));
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(live.sent.map(row => row.text)).toEqual(['A single correction']);
+  expect(stop).not.toHaveBeenCalled();
+});
+
 it('keeps actual-turn Stop through two authored sends and stops only the captured active turn', async () => {
   const { w, live } = await boot([]);
   const api = (w as any).api;
@@ -2606,7 +2624,7 @@ it('keeps actual-turn Stop through two authored sends and stops only the capture
   expect(live.sent.map(row => row.text)).toEqual(['First new direction', 'Second new direction']);
   expect(live.sent.every(row => row.sessionId === '2026-09-02-test0001' && row.mode === 'auto')).toBe(true);
   // A queued follow-up does not replace the real active turn as Stop's authority.
-  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  send.click();
   await settle();
   expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn');
   expect(cancel).not.toHaveBeenCalled();
@@ -2623,7 +2641,7 @@ it('does not retarget an awaiting Stop after leaving and reselecting the same ch
   api.stopSessionTurn = stop;
   let resolve!: (value: any) => void;
   api.getSessionControls = () => new Promise(done => { resolve = done; });
-  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  w.document.getElementById('chatSend')!.click();
   api.getSessionControls = original;
   w.document.getElementById('newChat')!.click();
   (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click();

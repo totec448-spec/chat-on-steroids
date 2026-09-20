@@ -54,13 +54,13 @@ export function toast(message: string): void {
   toastTimer = window.setTimeout(() => node.remove(), 3200);
 }
 
-/** Unwraps an IPC reply, showing the main process's own error text on failure. */
+/** Unwraps IPC replies, translating known app errors and preserving unknown error text. */
 export async function run<T>(
   promise: Promise<{ ok: true; data: T } | { ok: false; error: string }>
 ): Promise<T | null> {
   const reply = await promise;
   if (!reply.ok) {
-    toast(reply.error);
+    toast(t(reply.error));
     return null;
   }
   return reply.data;

@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { rawPromises as fs, rawRealpathNative } from './rawfs.js';
+import { effectiveCapabilities, getConfig } from './config.js';
+import { approvedManagedSkillLink, sameSkillLink, type ApprovedSkillLink } from './skill-links.js';
 import {
   MAX_SKILL_BYTES,
   MAX_SKILL_CHARS,
@@ -225,20 +227,39 @@ async function recordAt(candidateRoot: string, id: string): Promise<SkillRecord 
   const filename = path.join(directory, SKILL_FILENAME);
   try {
     const directoryStat = await fs.lstat(directory);
-    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) return null;
-    const directoryReal = process.platform === 'win32' ? await rawRealpathNative(directory) : await fs.realpath(directory);
-    if (!sameNativePath(directoryReal, directory)) return null;
+    let linked: ApprovedSkillLink | null = null;
+    let directoryReal: string;
+    if (directoryStat.isSymbolicLink()) {
+      const config = getConfig();
+      if (!effectiveCapabilities(config).read) return null;
+      linked = await approvedManagedSkillLink(candidateRoot, id, config.roots);
+      if (!linked) return null;
+      directoryReal = linked.real;
+    } else {
+      if (!directoryStat.isDirectory()) return null;
+      directoryReal = process.platform === 'win32' ? await rawRealpathNative(directory) : await fs.realpath(directory);
+      if (!sameNativePath(directoryReal, directory)) return null;
+    }
     const fileStat = await fs.lstat(filename);
     if (!fileStat.isFile() || fileStat.isSymbolicLink()) return null;
     const fileReal = process.platform === 'win32' ? await rawRealpathNative(filename) : await fs.realpath(filename);
-    if (!sameNativePath(fileReal, filename)) return null;
-    const snapshot = await readTextSnapshot(filename);
+    if (!sameNativePath(fileReal, path.join(directoryReal, SKILL_FILENAME))) return null;
+    // Once a linked package has been approved, read the canonical file itself. Opening through
+    // the alias here would leave a retarget window between realpath() and open(). The alias is
+    // still checked again below so a concurrent retarget invalidates the record.
+    const snapshot = await readTextSnapshot(fileReal);
     const currentFile = identityOf(await fs.lstat(filename));
     const currentDirectory = identityOf(await fs.lstat(directory));
     if (!sameIdentity(snapshot.identity, currentFile) ||
         !sameIdentity(identityOf(directoryStat), currentDirectory)) return null;
     const currentReal = process.platform === 'win32' ? await rawRealpathNative(filename) : await fs.realpath(filename);
-    if (!sameNativePath(currentReal, filename)) return null;
+    if (!sameNativePath(currentReal, path.join(directoryReal, SKILL_FILENAME))) return null;
+    if (linked) {
+      const config = getConfig();
+      if (!effectiveCapabilities(config).read) return null;
+      const currentLink = await approvedManagedSkillLink(candidateRoot, id, config.roots);
+      if (!currentLink || !sameSkillLink(linked, currentLink)) return null;
+    }
     const metadata = metadataFor(snapshot.text, id);
     return {
       summary: { id, ...metadata, path: `/skills/${id}/${SKILL_FILENAME}` },

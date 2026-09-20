@@ -25,6 +25,7 @@ const { requestCorrelation, resetCorrelationRegistryForTests } = await import('.
 const { recordRequestEvidence, recordChatObservations, noteChatOrigin, resetRecorderForTests, flushRecorder } = await import('../src/main/session/recorder.js');
 const broker = await import('../src/main/agents.js');
 const { startMcpServer } = await import('../src/main/mcp/server.js');
+const { inFlightMcpRequests } = await import('../src/main/mcp/call-context.js');
 const scripts = ['fiber', 'chatgpt-dom', 'content'].map(name => readFileSync(new URL(`../extension/${name}.js`, import.meta.url), 'utf8'));
 let directory: string, endpoint: Awaited<ReturnType<typeof startMcpServer>>;
 const pages = new Set<JSDOM>();
@@ -61,7 +62,7 @@ async function agents(requestId: string, args: object) {
   return result;
 }
 
-async function publishPage(conversationId: string, requestId: string, shape: 'live' | 'paired' | 'code') {
+async function publishPage(conversationId: string, requestId: string, shape: 'live' | 'paired' | 'code' | 'buffered') {
   const user = randomUUID(), turn = randomUUID(), invocation = randomUUID(), resultId = randomUUID();
   const page = new JSDOM(`<main data-app-shell-main-surface><div data-thread-find-target="conversation">
     <div data-turn-key="${user}"><div data-content-search-turn-key="${turn}">
@@ -96,6 +97,24 @@ async function publishPage(conversationId: string, requestId: string, shape: 'li
     renderedConversation: { mapping, current_node: resultId }, renderedTurns: [{ id: turn, turn: entry.turn }]
   }]] } } };
   doc.querySelector('[data-turn-key]').__reactFiber$fixture = { memoizedProps: { entry }, return: paired ? top : owner };
+  if (shape === 'buffered') {
+    const node = doc.querySelector('[data-turn-key]');
+    const previousEntry = structuredClone(entry), previousMapping = structuredClone(mapping);
+    const previousMetadata = previousMapping[invocation]?.message.metadata;
+    if (!previousMetadata || !('request_id' in previousMetadata)) throw new Error('Fixture invocation metadata is missing');
+    previousMetadata.request_id = `wfr_${randomUUID()}`;
+    const state: any = { current: null };
+    const roots: any[] = [0, 1].map(() => ({ tag: 3, return: null, stateNode: state }));
+    const owners: any[] = [previousEntry, entry].map((value, index) => ({ tag: 0,
+      return: roots[index], memoizedProps: { conversationId },
+      updateQueue: { memoCache: { data: [[{ renderedConversation: { mapping: index ? mapping : previousMapping, current_node: resultId },
+        renderedTurns: [{ id: turn, turn: value.turn }] }]] } } }));
+    const rows: any[] = [previousEntry, entry].map((value, index) => ({ tag: 0, return: owners[index], memoizedProps: { entry: value } }));
+    const hosts: any[] = rows.map(parent => ({ tag: 5, return: parent, stateNode: node, memoizedProps: {} }));
+    for (const pair of [roots, owners, rows, hosts]) { pair[0].alternate = pair[1]; pair[1].alternate = pair[0]; }
+    for (const index of [0, 1]) { roots[index].child = owners[index]; owners[index].child = rows[index]; rows[index].child = hosts[index]; }
+    state.current = roots[1]; node.__reactFiber$fixture = hosts[0];
+  }
   win.postMessage = (data: unknown) => queueMicrotask(() => win.dispatchEvent(new win.MessageEvent('message', { data, source: win, origin: win.location.origin })));
   win.setInterval = () => 0;
   let hook: any;
@@ -128,8 +147,19 @@ async function publishPage(conversationId: string, requestId: string, shape: 'li
   win.__CLF_CONTENT_RECORDER__.stop(); page.window.close(); pages.delete(page);
 }
 
+async function callWhileIdentityCommits(conversationId: string, requestId: string, args: object) {
+  await vi.waitFor(() => expect(inFlightMcpRequests()).toBe(0));
+  const reply = agents(requestId, args);
+  await vi.waitFor(() => expect(inFlightMcpRequests()).toBeGreaterThan(0));
+  // The handler is already waiting. Only the committed page model can identify
+  // this fresh request; the DOM pointer still holds the preceding React branch.
+  await publishPage(conversationId, requestId, 'buffered');
+  return reply;
+}
+
 it('delivers live messages, consumes their receipts, then wakes and reports from the same shell worker', async () => {
-  const prime = randomUUID(), worker = randomUUID(), primeRequest = `wfr_${randomUUID()}`, workerRequest = `wfr_${randomUUID()}`;
+  const prime = randomUUID(), worker = randomUUID();
+  let primeRequest = `wfr_${randomUUID()}`, workerRequest = `wfr_${randomUUID()}`;
   const spawned = await agents(primeRequest, { action: 'spawn', workers: [{ task: 'Read-only transport diagnostic' }] });
   const run = spawned.structuredContent.run_id;
   // The bridge's exact native bootstrap receipt is the boundary simulated here.
@@ -142,13 +172,15 @@ it('delivers live messages, consumes their receipts, then wakes and reports from
   expect((await getSession(child!.id))?.origin?.fromSessionId).toBe(parent!.id);
   expect((await agents(workerRequest, { action: 'status' })).structuredContent.self).toBe('worker-1');
 
-  await agents(primeRequest, { action: 'message', to: 'worker-1', text: 'PRIME_TO_WORKER_RECEIVED' });
+  primeRequest = `wfr_${randomUUID()}`;
+  await callWhileIdentityCommits(prime, primeRequest, { action: 'message', to: 'worker-1', text: 'PRIME_TO_WORKER_RECEIVED' });
   expect(broker.pendingCount('worker-1', run)).toBe(1);
   const nested = await call(workerRequest, 'exec', { code: 'const status = await tools.agents({action:"status"}); text(status.structuredContent);' });
   expect(nested.isError, textOf(nested)).not.toBe(true);
   expect(textOf(nested)).toContain('worker-1');
   expect(textOf(nested).match(/PRIME_TO_WORKER_RECEIVED/g)).toHaveLength(1);
-  await agents(workerRequest, { action: 'message', to: 'prime', text: 'WORKER_TO_PRIME_OK' });
+  workerRequest = `wfr_${randomUUID()}`;
+  await callWhileIdentityCommits(worker, workerRequest, { action: 'message', to: 'prime', text: 'WORKER_TO_PRIME_OK' });
   expect(broker.pendingCount('worker-1', run)).toBe(0);
   expect(textOf(await agents(primeRequest, { action: 'status' }))).toContain('WORKER_TO_PRIME_OK');
   await agents(primeRequest, { action: 'status' });

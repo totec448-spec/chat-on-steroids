@@ -53,6 +53,15 @@ it('keeps commands stable when another package with the same name appears or dis
   expect((await listSkillLibrary()).skills).toEqual([]);
 });
 
+it('deduplicates a managed package link against the same discovered SKILL.md', async () => {
+  const source = path.join(project, '.agents/skills/review');
+  await write(path.join(source, 'SKILL.md'), contents('Review'));
+  await fs.symlink(source, path.join(root, 'skills', 'review'), process.platform === 'win32' ? 'junction' : 'dir');
+  const library = await listSkillLibrary({ projectPath: project });
+  expect(library.skills).toHaveLength(1);
+  expect(library.skills[0]).toMatchObject({ id: 'review', managed: true, path: '/skills/review/SKILL.md' });
+});
+
 it('honors layered config and both YAML policy styles while keeping package resources out of discovery', async () => {
   await write(path.join(project, '.agents/skills/review/SKILL.md'), contents('Review'));
   await write(path.join(project, '.agents/skills/review/references/example/SKILL.md'), contents('Example only'));

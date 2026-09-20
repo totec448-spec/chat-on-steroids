@@ -52,6 +52,9 @@ import { CHAT_ACTIVE_MS, CHAT_SILENCE_MS, continuationMarkerOf, isReasoningEffor
 import { isChatBlocked, chatBlockedAt } from './session/blocked-chats.js';
 export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
 import { effectiveCapabilities, getConfig, updateConfig } from './config.js';
+import { BROWSER_BRIDGE_PORTS } from '../shared/browser-bridge.js';
+import { bridgePortSelection } from './bridge-ports.js';
+import type { Config } from '../shared/types.js';
 import { getSecret, secureStorageStatus, setSecret } from './secrets.js';
 import {
   acceptGoalReplyNow,
@@ -204,23 +207,7 @@ import { requestCorrelation } from './session/correlation.js';
 import { bindAgentWorkspace } from './workspace.js';
 
 /** Fixed candidates so the extension can find the app without being told a port. */
-export const DEFAULT_PORTS = [8765, 8766, 8767, 8768, 8769];
-/**
- * The shipped range is fixed on purpose, but the test suite runs many bridges in parallel
- * forks on a machine where an installed app already holds 8765. A test whose own bind lost
- * that race used to fall through to the real app's bridge: 401s at best, and at worst a
- * test POSTing observations into the user's actual history. `CLF_BRIDGE_PORTS=0` asks the
- * OS for a free port per bridge instead, so no run can collide with another or with the app.
- */
-const PORTS = ((): number[] => {
-  const raw = process.env.CLF_BRIDGE_PORTS;
-  if (!raw) return DEFAULT_PORTS;
-  const parsed = raw
-    .split(',')
-    .map((part) => Number.parseInt(part.trim(), 10))
-    .filter((value) => Number.isInteger(value) && value >= 0 && value <= 65535);
-  return parsed.length > 0 ? parsed : DEFAULT_PORTS;
-})();
+export const DEFAULT_PORTS = BROWSER_BRIDGE_PORTS;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** Durable settled-turn orphan safety net. */
 export const STALE_SWARM_MS = 2 * 60_000;
@@ -302,6 +289,13 @@ const COMMANDS_STATE = 'bridge-commands';
  * that could disagree with the token after a crash.
  */
 const BROWSER_DISCONNECTED = '!browser-disconnected';
+let browserCredentialEpoch = 0;
+let browserCredentialQueue: Promise<void> = Promise.resolve();
+function withBrowserCredentials<T>(operation: () => Promise<T>): Promise<T> {
+  const work = browserCredentialQueue.then(operation, operation);
+  browserCredentialQueue = work.then(() => undefined, () => undefined);
+  return work;
+}
 
 /**
  * How recently a ChatGPT tab must have talked to this app to count as open.
@@ -712,6 +706,8 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
   const stored = await getSecret('bridgeToken');
   return {
     running: server !== null,
+    portOverridden: bridgePortSelection().overridden,
+    error: bridgeError,
     port,
     paired: stored !== null && stored !== BROWSER_DISCONNECTED,
     present: browserPresent(),
@@ -763,12 +759,15 @@ export async function unpair(): Promise<void> {
   // secrets store looks like, and those are intentionally allowed to provision silently.
   // This impossible-as-a-token sentinel preserves the user's explicit intent across both
   // the extension's next poll and an app restart.
-  await setSecret('bridgeToken', BROWSER_DISCONNECTED);
-  clearCompanionDiagnostics();
-  browserWake?.revoke();
-  browserControl.reset();
-  logInfo('bridge: browser disconnected');
-  changed();
+  ++browserCredentialEpoch;
+  await withBrowserCredentials(async () => {
+    await setSecret('bridgeToken', BROWSER_DISCONNECTED);
+    clearCompanionDiagnostics();
+    browserWake?.revoke();
+    browserControl.reset();
+    logInfo('bridge: browser disconnected');
+    changed();
+  });
 }
 
 // ------------------------------------------------------------------ helpers
@@ -1489,6 +1488,7 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string)
   await revokeSilenceInputs(sessionId);
   endActivity(id);
   repairsInFlight.delete(id);
+  if (!alreadyQueued) logInfo(`bridge: desktop Stop requested for session ${sessionId}, conversation ${id}, turn ${expectedTurnId}, command ${command.id}; native cancellation is unconfirmed`);
   wakeBrowserWork();
   changed();
   if (!alreadyQueued) {
@@ -1722,6 +1722,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   }
 
   if (route === '/pair' && req.method === 'POST') {
+    const credentialEpoch = browserCredentialEpoch;
     if (!protocolCompatible(req)) {
       return json(
         res,
@@ -1768,12 +1769,27 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // "open a fresh chat" command. It can still not read a file, run anything, or change
     // a permission — the bridge has no route that does. A web page cannot: originOf
     // refuses anything that is not a chrome-extension:// origin, above.
-    const token = randomBytes(32).toString('base64url');
-    await setSecret('bridgeToken', token);
-    noteBrowserSeen();
-    logInfo('bridge: browser extension connected and provisioned');
-    changed();
-    return json(res, 200, { token }, origin);
+    // Automatic provisioning joins the current connection generation. Multiple
+    // browser profiles must not continually revoke each other. Legacy pairing and
+    // explicit reconnect still rotate the token; Disconnect revokes every profile.
+    const reuse = !reconnect && Boolean(body && typeof body === 'object' && !Array.isArray(body) &&
+      (body as Record<string, unknown>)['reuse'] === true);
+    const provisioned = await withBrowserCredentials(async () => {
+      const stored = await getSecret('bridgeToken');
+      if (credentialEpoch !== browserCredentialEpoch || (stored === BROWSER_DISCONNECTED && !reconnect)) return null;
+      const reused = reuse && !!stored && stored !== BROWSER_DISCONNECTED;
+      const token = reused ? stored : randomBytes(32).toString('base64url');
+      if (!reused) await setSecret('bridgeToken', token);
+      if (credentialEpoch !== browserCredentialEpoch) return null;
+      return { token, reused };
+    });
+    if (!provisioned) return json(res, 409, { error: 'browser_disconnected' }, origin);
+    const appeared = noteBrowserSeen();
+    if (!provisioned.reused) {
+      logInfo('bridge: browser extension connected and provisioned');
+    }
+    if (!provisioned.reused || appeared) changed();
+    return json(res, 200, { token: provisioned.token }, origin);
   }
 
   // A deliberate revocation is different from a stale credential. The extension repairs a
@@ -2285,9 +2301,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (manual) {
         const session = await findSessionByConversation(id);
         if (session) await revokeSilenceInputs(session.id);
-        endActivity(id);
         if (repairsInFlight.get(id)?.state !== 'done') repairsInFlight.delete(id);
-        logInfo(`bridge: ${id} was closed deliberately; activity and automatic recovery are paused until its page returns`);
+        logInfo(`bridge: ${id} was closed deliberately; automatic browser recovery is paused until its page returns`);
       } else await queueMissingTab(id, working);
     }
     return json(res, 200, { ok: true }, origin);
@@ -4479,6 +4494,8 @@ let bridgeShutdownRequested = false;
  * the other half of an expired revival before its broker transition is durable.
  */
 let bridgeRecovering = false;
+let bridgeError: string | null = null;
+const bridgeDrains = new Set<Promise<void>>();
 let dropSpawnRequestListener: (() => void) | null = null;
 let dropReviveRequestListener: (() => void) | null = null;
 
@@ -4531,10 +4548,10 @@ async function closeCancelledBridgeStart(instance: http.Server, actual: number |
   return null;
 }
 
-async function startBridgeOnce(epoch: number): Promise<number | null> {
-  bridgeRecovering = true;
+/** A prepared listener has a real socket, but cannot serve application requests until published. */
+function createBridgeListener(): http.Server {
   const instance = http.createServer((req, res) => {
-    if (bridgeRecovering) {
+    if (server !== instance || bridgeRecovering || !bridgeDesiredRunning) {
       json(res, 503, { error: 'bridge_recovering', retryable: true }, originOf(req).origin);
       return;
     }
@@ -4545,122 +4562,233 @@ async function startBridgeOnce(epoch: number): Promise<number | null> {
   });
   instance.headersTimeout = 15_000;
   instance.requestTimeout = 30_000;
+  return instance;
+}
 
-  for (const candidate of PORTS) {
-    const bound = await new Promise<boolean>((resolve) => {
-      const onError = (): void => resolve(false);
+type PreparedBridge = { instance: http.Server; actual: number };
+
+async function prepareBridgeListener(candidates: readonly number[], epoch: number): Promise<PreparedBridge> {
+  const instance = createBridgeListener();
+  let failure: NodeJS.ErrnoException | undefined;
+  for (const candidate of candidates) {
+    if (epoch !== bridgeLifecycleEpoch || bridgeShutdownRequested) break;
+    if (server && candidate === port) return { instance: server, actual: candidate };
+    const bound = await new Promise<boolean>(resolve => {
+      const onError = (error: NodeJS.ErrnoException): void => { failure = error; resolve(false); };
       instance.once('error', onError);
       instance.listen(candidate, '127.0.0.1', () => {
         instance.removeListener('error', onError);
         resolve(true);
       });
     });
-    if (bound) {
-      // Port 0 means the OS picked one; the socket knows which.
-      const address = instance.address();
-      const actual = typeof address === 'object' && address ? address.port : candidate;
-      if (epoch !== bridgeLifecycleEpoch) return closeCancelledBridgeStart(instance, actual);
-      server = instance;
-      port = actual;
-      instance.on('error', (err) => logWarn(`bridge server error: ${err.message}`));
-      // Commands from the previous run come back first, so a bootstrap that has already
-      // failed three times keeps its history. Registering the spawn handler then replays
-      // any worker chat the broker is still owed — a run restored from disk at startup
-      // has nobody to ask until this moment — and queue() folds a replayed worker into
-      // the restored command for the same worker rather than opening a second tab.
-      try {
-        await restoreCommands();
-      } catch (err) {
-        // Recovery is part of opening the bridge, not best-effort work after it. In particular,
-        // an expired revival cannot be pruned until its broker half is durably stopped. Leaving
-        // the loopback server published after that barrier failed creates a half-started bridge:
-        // later startBridge() calls see `server` and never retry recovery, while unrelated queue
-        // writes can erase the only durable revival row. Close this socket and make the next
-        // start perform recovery from the same durable files again.
-        if (server === instance) server = null;
-        if (port === actual) port = null;
-        bridgeRecovering = false;
-        await new Promise<void>((resolve) => instance.close(() => resolve()));
-        logWarn(`bridge startup recovery failed: ${err instanceof Error ? err.message : String(err)}`);
-        return null;
-      }
-      // A stop can arrive while durable command recovery awaits disk/broker state. Recovery may
-      // finish for consistency, but it must not cross the publication boundary afterwards: no
-      // replay listeners, no timers, and especially no browser delivery belong to a stopped app.
-      if (epoch !== bridgeLifecycleEpoch) return closeCancelledBridgeStart(instance, actual);
-      // A settings-driven stop/start is not a process restart: the in-memory commands survive,
-      // so restoreCommands() quite correctly skips their durable duplicates. stopBridge(),
-      // however, cleared their memory-only deadline timers. Re-arm those retained leases from
-      // their durable claimedAt before delivery is allowed to inspect the queue; otherwise an
-      // expired lease looks queued again and can open the same bootstrap a second time, while
-      // a still-live lease can sit forever with no timer to end it.
-      rearmRetainedCommandDeadlines();
-      dropSwarmChangeListener?.();
-      dropSwarmChangeListener = onSwarmChange(retireInactiveWorkerRecovery);
-      retireInactiveWorkerRecovery();
-      dropSpawnRequestListener?.();
-      dropSpawnRequestListener = onSpawnRequest((workers) => {
-        for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task, worker.model, worker.reasoningEffort, worker.runId);
-      });
-      // The same replay contract for waking a worker that already has a chat. A run restored
-      // from disk can hold a worker left in `waking` by a crash mid-revival; registering here
-      // is the first moment anything can reopen that tab for it.
-      dropReviveRequestListener?.();
-      dropReviveRequestListener = onReviveRequest((revivals: WorkerRevival[]) => {
-        for (const revival of revivals) queueWorkerRevival(revival.id, revival.conversationId, revival.messageIds, revival.runId);
-      });
-      // When a run ends — cleared in the app, finished, or taken over by another chat —
-      // its worker chats must stop existing everywhere at once. A queued bootstrap that
-      // outlives its run is a tab that opens later, introduces itself as a worker of
-      // something that is gone, and cannot join.
-      //
-      // `onSwarmEnd` keeps a set of listeners, so the disposer is held and released on
-      // stop. Without that, a settings save that stops and starts the bridge left the
-      // previous listener registered and the next run end cancelled commands and typed
-      // stop notices once per restart the app had ever done.
-      dropSwarmEndListener?.();
-      dropSwarmEndListener = onSwarmEnd((reason, _retired, runId) => {
-        // Cancelling the queue stops the worker chats that have not opened yet. The ones
-        // already open are not typed into: driving somebody's conversation to tell it to
-        // stop is a second control channel, and the app has no business writing into a chat
-        // it did not open for this. A worker whose run is gone finds that out the moment it
-        // calls the connector, which is the only place it can act from anyway.
-        cancelWorkerCommands(reason, undefined, runId);
-      });
-      if (staleSwarmTimer) clearInterval(staleSwarmTimer);
-      staleSwarmTimer = setInterval(() => {
-        void runStaleSwarmSweep().catch((err: Error) => logWarn(`stale swarm sweep failed: ${err.message}`));
-      }, STALE_SWARM_SWEEP_MS);
-      staleSwarmTimer.unref?.();
-      // The recorder decides when a call is Unattributed; this owns what that is worth.
-      setCallAttributionListener(noteCallAttribution);
-      // Restored obligations get their first pickup grace from serving startup,
-      // not module evaluation. Their durable acceptance still owns expiry.
-      pickupWatchFloor = Date.now();
-      compactionWatchFloor = pickupWatchFloor;
-      bridgeRecovering = false;
-      // Anything restored from the previous run goes out now rather than waiting for a
-      // browser to come and ask.
-      browserWake = attachBrowserWake(instance,
-        (req) => !bridgeRecovering && server === instance && originOf(req).ok,
-        async (candidate) => {
-          const stored = await getSecret('bridgeToken');
-          return !!stored && stored !== BROWSER_DISCONNECTED && safeEqual(candidate, stored);
-        });
-      deliver();
-      logInfo(`bridge listening on 127.0.0.1:${actual}`);
-      changed();
-      return actual;
-    }
+    if (!bound) continue;
+    const address = instance.address();
+    const actual = typeof address === 'object' && address ? address.port : candidate;
+    instance.on('error', err => logWarn(`bridge server error: ${err.message}`));
+    if (epoch === bridgeLifecycleEpoch && !bridgeShutdownRequested) return { instance, actual };
+    await drainBridgeListener(instance);
+    break;
   }
+  if (epoch !== bridgeLifecycleEpoch || bridgeShutdownRequested) throw new Error('Browser bridge change cancelled.');
+  if (candidates.length === 1 && failure?.code === 'EADDRINUSE') {
+    throw new Error(`Port ${candidates[0]} is already in use (EADDRINUSE).`);
+  }
+  throw new Error(`Port${candidates.length === 1 ? '' : 's'} ${candidates.join(', ')}: ${failure?.message ?? 'unavailable'}`);
+}
+
+function attachBridgeWake(instance: http.Server): void {
+  browserWake = attachBrowserWake(instance,
+    req => !bridgeRecovering && server === instance && originOf(req).ok,
+    async candidate => {
+      const stored = await getSecret('bridgeToken');
+      return !!stored && stored !== BROWSER_DISCONNECTED && safeEqual(candidate, stored);
+    });
+}
+
+/** Called inside the serialized config transaction, with its validated latest proposal. */
+export function publishBridgePortChange(next: Config, previous: Config, persist: () => Promise<Config>): Promise<Config> {
+  if ((next.ui.browserBridgePort ?? 'auto') === (previous.ui.browserBridgePort ?? 'auto')) return persist();
+  const selection = bridgePortSelection(next.ui.browserBridgePort);
+  if (selection.overridden) return Promise.reject(new Error('Browser bridge port is controlled by CLF_BRIDGE_PORTS.'));
+  return enqueueBridgeLifecycle(async () => {
+    if (bridgeShutdownRequested) throw new Error('Browser bridge is shutting down.');
+    const epoch = bridgeLifecycleEpoch;
+    const prepared = await prepareBridgeListener(selection.candidates, epoch);
+    let published = false;
+    try {
+      if (epoch !== bridgeLifecycleEpoch || bridgeShutdownRequested) throw new Error('Browser bridge change cancelled.');
+      const config = await persist();
+      // A shutdown during disk publication keeps the saved choice, but never revives the listener.
+      if (epoch !== bridgeLifecycleEpoch || bridgeShutdownRequested) return config;
+      const old = server;
+      if (prepared.instance === old) { published = true; return config; }
+      if (!old) {
+        bridgeDesiredRunning = true;
+        await startBridgeOnce(epoch, prepared);
+        published = server === prepared.instance;
+        return config;
+      }
+      browserWake?.dispose();
+      browserControl.reset();
+      if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
+      browserPresenceTimer = null;
+      lastSeenAt = null;
+      clearCompanionDiagnostics();
+      server = prepared.instance;
+      port = prepared.actual;
+      bridgeError = null;
+      attachBridgeWake(server);
+      published = true;
+      // Draining cannot hold the config queue: an admitted old request may itself save settings.
+      const drain = drainBridgeListener(old);
+      bridgeDrains.add(drain);
+      void drain.finally(() => bridgeDrains.delete(drain));
+      deliver();
+      changed();
+      logInfo(`bridge listening on 127.0.0.1:${port}`);
+      return config;
+    } finally {
+      if (!published && prepared.instance !== server) await drainBridgeListener(prepared.instance);
+    }
+  });
+}
+
+async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promise<number | null> {
+  bridgeRecovering = true;
+  try {
+    prepared ??= await prepareBridgeListener(bridgePortSelection(getConfig().ui.browserBridgePort).candidates, epoch);
+  } catch (error) {
+    bridgeRecovering = false;
+    if (epoch === bridgeLifecycleEpoch && !bridgeShutdownRequested) {
+      bridgeError = error instanceof Error ? error.message : String(error);
+      logWarn(bridgeError);
+      changed();
+    }
+    return null;
+  }
+  const { instance, actual } = prepared;
+  if (epoch !== bridgeLifecycleEpoch) return closeCancelledBridgeStart(instance, actual);
+  server = instance;
+  port = actual;
+  // Commands from the previous run come back first, so a bootstrap that has already
+  // failed three times keeps its history. Registering the spawn handler then replays
+  // any worker chat the broker is still owed — a run restored from disk at startup
+  // has nobody to ask until this moment — and queue() folds a replayed worker into
+  // the restored command for the same worker rather than opening a second tab.
+  try {
+    await restoreCommands();
+  } catch (err) {
+    // Recovery is part of opening the bridge, not best-effort work after it. In particular,
+    // an expired revival cannot be pruned until its broker half is durably stopped. Leaving
+    // the loopback server published after that barrier failed creates a half-started bridge:
+    // later startBridge() calls see `server` and never retry recovery, while unrelated queue
+    // writes can erase the only durable revival row. Close this socket and make the next
+    // start perform recovery from the same durable files again.
+    if (server === instance) server = null;
+    if (port === actual) port = null;
+    bridgeRecovering = false;
+    await new Promise<void>((resolve) => instance.close(() => resolve()));
+    logWarn(`bridge startup recovery failed: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+  // A stop can arrive while durable command recovery awaits disk/broker state. Recovery may
+  // finish for consistency, but it must not cross the publication boundary afterwards: no
+  // replay listeners, no timers, and especially no browser delivery belong to a stopped app.
+  if (epoch !== bridgeLifecycleEpoch) return closeCancelledBridgeStart(instance, actual);
+  // A settings-driven stop/start is not a process restart: the in-memory commands survive,
+  // so restoreCommands() quite correctly skips their durable duplicates. stopBridge(),
+  // however, cleared their memory-only deadline timers. Re-arm those retained leases from
+  // their durable claimedAt before delivery is allowed to inspect the queue; otherwise an
+  // expired lease looks queued again and can open the same bootstrap a second time, while
+  // a still-live lease can sit forever with no timer to end it.
+  rearmRetainedCommandDeadlines();
+  dropSwarmChangeListener?.();
+  dropSwarmChangeListener = onSwarmChange(retireInactiveWorkerRecovery);
+  retireInactiveWorkerRecovery();
+  dropSpawnRequestListener?.();
+  dropSpawnRequestListener = onSpawnRequest((workers) => {
+    for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task, worker.model, worker.reasoningEffort, worker.runId);
+  });
+  // The same replay contract for waking a worker that already has a chat. A run restored
+  // from disk can hold a worker left in `waking` by a crash mid-revival; registering here
+  // is the first moment anything can reopen that tab for it.
+  dropReviveRequestListener?.();
+  dropReviveRequestListener = onReviveRequest((revivals: WorkerRevival[]) => {
+    for (const revival of revivals) queueWorkerRevival(revival.id, revival.conversationId, revival.messageIds, revival.runId);
+  });
+  // When a run ends — cleared in the app, finished, or taken over by another chat —
+  // its worker chats must stop existing everywhere at once. A queued bootstrap that
+  // outlives its run is a tab that opens later, introduces itself as a worker of
+  // something that is gone, and cannot join.
+  //
+  // `onSwarmEnd` keeps a set of listeners, so the disposer is held and released on
+  // stop. Without that, a settings save that stops and starts the bridge left the
+  // previous listener registered and the next run end cancelled commands and typed
+  // stop notices once per restart the app had ever done.
+  dropSwarmEndListener?.();
+  dropSwarmEndListener = onSwarmEnd((reason, _retired, runId) => {
+    // Cancelling the queue stops the worker chats that have not opened yet. The ones
+    // already open are not typed into: driving somebody's conversation to tell it to
+    // stop is a second control channel, and the app has no business writing into a chat
+    // it did not open for this. A worker whose run is gone finds that out the moment it
+    // calls the connector, which is the only place it can act from anyway.
+    cancelWorkerCommands(reason, undefined, runId);
+  });
+  if (staleSwarmTimer) clearInterval(staleSwarmTimer);
+  staleSwarmTimer = setInterval(() => {
+    void runStaleSwarmSweep().catch((err: Error) => logWarn(`stale swarm sweep failed: ${err.message}`));
+  }, STALE_SWARM_SWEEP_MS);
+  staleSwarmTimer.unref?.();
+  // The recorder decides when a call is Unattributed; this owns what that is worth.
+  setCallAttributionListener(noteCallAttribution);
+  // Restored obligations get their first pickup grace from serving startup,
+  // not module evaluation. Their durable acceptance still owns expiry.
+  pickupWatchFloor = Date.now();
+  compactionWatchFloor = pickupWatchFloor;
   bridgeRecovering = false;
-  logWarn(`bridge could not bind any of ports ${PORTS.join(', ')}; the browser extension will not connect`);
-  return null;
+  // Anything restored from the previous run goes out now rather than waiting for a
+  // browser to come and ask.
+  attachBridgeWake(instance);
+  bridgeError = null;
+  deliver();
+  logInfo(`bridge listening on 127.0.0.1:${actual}`);
+  changed();
+  return actual;
+}
+
+function drainBridgeListener(instance: http.Server): Promise<void> {
+  if (!instance.listening) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    // Stop admission and drain accepted extension writes. Abruptly destroying sockets here
+    // could lose an /events or /closed item after Chrome had already handed it to the app.
+    // Keep shutdown bounded because a wedged localhost client must not pin Electron forever.
+    let settled = false;
+    const force = setTimeout(() => {
+      if (settled) return;
+      // Force first, report second: what breaks the deadlock must not sit behind a call that
+      // can throw. See the same ordering, and the same reason, in mcp/server.ts.
+      instance.closeAllConnections();
+      logWarn('bridge drain timed out after 15s; forcing remaining connections closed');
+    }, 15_000);
+    force.unref?.();
+    // One sweep is not enough. Chrome holds its keep-alive socket open between polls, so a
+    // connection that is merely *between* requests when stop is called is idle a millisecond
+    // later and would otherwise sit here until the 15s force. Sweeping repeatedly retires each
+    // socket the moment its in-flight request finishes, which is the drain that was intended.
+    const sweep = setInterval(() => instance.closeIdleConnections?.(), 100);
+    sweep.unref?.();
+    instance.closeIdleConnections?.();
+    instance.close(() => {
+      settled = true;
+      clearInterval(sweep);
+      clearTimeout(force);
+      resolve();
+    });
+  });
 }
 
 export async function stopBridge(): Promise<void> {
   if (!bridgeDesiredRunning && bridgeStopRequest) return bridgeStopRequest;
-  if (!bridgeDesiredRunning && !server && !bridgeStartRequest) return;
 
   // Invalidate first, before waiting in the lifecycle queue. The currently executing start sees
   // this epoch change at its next await boundary and closes itself before replay/delivery.
@@ -4671,7 +4799,7 @@ export async function stopBridge(): Promise<void> {
     // server that request is keeping (or is about to bring) up.
     if (bridgeDesiredRunning || epoch !== bridgeLifecycleEpoch) return;
     const instance = server;
-    if (!instance) return;
+    if (!instance) { await Promise.all(bridgeDrains); return; }
     browserWake?.dispose();
     browserWake = null;
     browserControl.reset();
@@ -4701,33 +4829,7 @@ export async function stopBridge(): Promise<void> {
     silenceTimer = null;
     setCallAttributionListener(null);
     clearUnattributedIncident();
-    await new Promise<void>((resolve) => {
-      // Stop admission and drain accepted extension writes. Abruptly destroying sockets here
-      // could lose an /events or /closed item after Chrome had already handed it to the app.
-      // Keep shutdown bounded because a wedged localhost client must not pin Electron forever.
-      let settled = false;
-      const force = setTimeout(() => {
-        if (settled) return;
-        // Force first, report second: what breaks the deadlock must not sit behind a call that
-        // can throw. See the same ordering, and the same reason, in mcp/server.ts.
-        instance.closeAllConnections();
-        logWarn('bridge drain timed out after 15s; forcing remaining connections closed');
-      }, 15_000);
-      force.unref?.();
-      // One sweep is not enough. Chrome holds its keep-alive socket open between polls, so a
-      // connection that is merely *between* requests when stop is called is idle a millisecond
-      // later and would otherwise sit here until the 15s force. Sweeping repeatedly retires each
-      // socket the moment its in-flight request finishes, which is the drain that was intended.
-      const sweep = setInterval(() => instance.closeIdleConnections?.(), 100);
-      sweep.unref?.();
-      instance.closeIdleConnections?.();
-      instance.close(() => {
-        settled = true;
-        clearInterval(sweep);
-        clearTimeout(force);
-        resolve();
-      });
-    });
+    await Promise.all([drainBridgeListener(instance), ...bridgeDrains]);
     logInfo('bridge stopped');
     changed();
   });
@@ -5586,7 +5688,7 @@ function grantActivity(conversationId: string, sessionId: string, at = Date.now(
   if (!sessionId) return;
   const previous = activeUntil.get(conversationId);
   const ownership = turn ?? (previous?.sessionId === sessionId ? previous : { turnId: null, model: 'unknown' as const });
-  if (ownership.model === 'pro' && (isChatBlocked(conversationId) || stopRequestedFor(conversationId))) return;
+  if (isChatBlocked(conversationId) || (ownership.model === 'pro' && stopRequestedFor(conversationId) && !ownership.mcpBacked)) return;
   const evidenceAt = previous?.sessionId === sessionId && previous.turnId === ownership.turnId ? Math.max(previous.evidenceAt, at) : at;
   const mcpBacked = ownership.mcpBacked || (previous?.sessionId === sessionId && previous.turnId === ownership.turnId && previous.mcpBacked);
   activeUntil.set(conversationId, { sessionId, evidenceAt, until: evidenceAt + (ownership.model === 'pro' ? PRO_SILENCE_MS : window), turnId: ownership.turnId, model: ownership.model,
@@ -5632,6 +5734,11 @@ function silenceWindowMs(grant: Pick<ActivityGrant, 'model' | 'thinkingFailed'>)
   return grant.model === 'pro' ? grant.thinkingFailed ? 5 * 60_000 : PRO_SILENCE_MS : CHAT_SILENCE_MS;
 }
 
+/** Display can outlive the silence deadline without granting a browser action. */
+function activityDeadline(grant: Pick<ActivityGrant, 'model' | 'evidenceAt'>): number {
+  return grant.evidenceAt + (grant.model === 'pro' ? PRO_ACTIVITY_MS : CHAT_ACTIVE_MS);
+}
+
 /** Runtime presentation of the same exact Pro work grant that owns silence recovery. */
 export function sessionInputActivity(summary: SessionSummary): InputActivity {
   const id = summary.conversationId;
@@ -5639,6 +5746,7 @@ export function sessionInputActivity(summary: SessionSummary): InputActivity {
   const grant = activeUntil.get(id);
   const expiry = sessionActivityExpiresAt(summary);
   const mcpWindow = grant?.sessionId === summary.id && grant.mcpBacked && !grant.thinkingFailed &&
+    (summary.activeTurnId || summary.lastTurnOutcome !== 'stopped') &&
     (!summary.activeTurnId || summary.activeTurnId === grant.turnId) && grant.until > Date.now();
   const exact = !!mcpWindow || runningToolProgress(id) !== null ||
     liveConversations().some(row => row.sessionId === summary.id && row.conversationId === id && !!row.activeTurnId);
@@ -5648,13 +5756,13 @@ export function sessionInputActivity(summary: SessionSummary): InputActivity {
     (expiry !== undefined && expiry !== null && expiry > Date.now()) };
 }
 export function sessionActivityExpiresAt(summary: SessionSummary): number | null | undefined {
-  if (summary.browserRecoveryDismissedAt !== undefined) return null;
   const id = summary.conversationId;
+  if (id && isChatBlocked(id)) return null;
   const grant = id ? activeUntil.get(id) : undefined;
   // Admission is already live work, even before a long call has a recorded result.
   // Use exact running ownership, never the conservative anonymous safety counter.
   // This projection does not mint a recovery grant or reopen a browser binding.
-  if (id && summary.activeTurnId && !summary.finishTurn?.released && runningToolProgress(id)) {
+  if (id && (summary.activeTurnId || (grant?.sessionId === summary.id && grant.mcpBacked)) && runningToolProgress(id)) {
     const pro = grant?.sessionId === summary.id ? grant.model === 'pro' :
       summary.selectedModel?.conversationId === id && isProModel(summary.selectedModel.model, summary.selectedModel.reasoningEffort);
     return Date.now() + (pro ? PRO_ACTIVITY_MS : CHAT_ACTIVE_MS);
@@ -5662,7 +5770,7 @@ export function sessionActivityExpiresAt(summary: SessionSummary): number | null
   // An abandoned open recorder turn is not fresh work, even if a later picker selection
   // differs from the model that owned the retired grant.
   if (!grant || grant.sessionId !== summary.id || grant.thinkingFailed) return null;
-  return grant.evidenceAt + (grant.model === 'pro' ? PRO_ACTIVITY_MS : CHAT_ACTIVE_MS);
+  return activityDeadline(grant);
 }
 
 async function extendedSilenceWindowFor(conversationId: string, sessionId?: string): Promise<boolean> {
@@ -5816,12 +5924,12 @@ async function considerAutomaticCompaction(conversationId: string, sessionId: st
   compactionFilings.add(conversationId);
   try {
     const summary = await getSession(sessionId).catch(() => null);
-    if (!summary || summary.conversationId !== conversationId || summary.browserRecoveryDismissedAt !== undefined || !autoCompactionReady(summary)) return;
+    if (!summary || summary.conversationId !== conversationId || summary.endedAt !== null || summary.browserRecoveryDismissedAt !== undefined || !autoCompactionReady(summary)) return;
     if (await conversationWasSuperseded(conversationId)) return;
     if (failedTurn && !await failedCompactionTurnCurrent(conversationId, sessionId, failedTurn)) return;
     // Re-read after the awaits: the turn may have ended, or a page may have filed by hand.
     const current = await getSession(sessionId);
-    if (!current || current.conversationId !== conversationId || current.browserRecoveryDismissedAt !== undefined || !autoCompactionReady(current)) return;
+    if (!current || current.conversationId !== conversationId || current.endedAt !== null || current.browserRecoveryDismissedAt !== undefined || !autoCompactionReady(current)) return;
     if (failedTurn && !await failedCompactionTurnCurrent(conversationId, sessionId, failedTurn)) return;
     if ((!failedTurn && !hasCurrentWork()) || continuationForSession(sessionId) || goalFencedChat(conversationId) ||
         stopRequestedFor(conversationId) || !getConfig().compaction.auto || !automaticCompactionAllowed(current)) return;
@@ -5937,7 +6045,7 @@ function armResumedChat(sessionId: string, conversationId: string): void {
 async function restoreReturnedPageActivity(conversationId: string, sessionId: string): Promise<void> {
   const session = await getSession(sessionId);
   if (session?.conversationId !== conversationId || session.browserRecoveryDismissedAt !== undefined ||
-      !session.activeTurnId || session.finishTurn?.released || session.lastToolCallAt === null || activeUntil.has(conversationId)) return;
+      !session.activeTurnId || session.lastToolCallAt === null || activeUntil.has(conversationId)) return;
   const selected = session.selectedModel;
   const grant: ActivityGrant = { sessionId, turnId: session.activeTurnId,
     evidenceAt: session.lastToolCallAt, until: session.lastToolCallAt,
@@ -5975,7 +6083,11 @@ function forgetActivity(conversationId: string): void {
  */
 function armSilenceSweep(now = Date.now()): void {
   let earliest = Number.POSITIVE_INFINITY;
-  for (const grant of activeUntil.values()) if (grant.until > now) earliest = Math.min(earliest, grant.until);
+  for (const grant of activeUntil.values()) {
+    if (grant.until > now) earliest = Math.min(earliest, grant.until);
+    const visibleUntil = activityDeadline(grant);
+    if (!grant.thinkingFailed && visibleUntil > now) earliest = Math.min(earliest, visibleUntil);
+  }
   if (!Number.isFinite(earliest)) {
     if (silenceTimer) clearTimeout(silenceTimer);
     silenceTimer = null;
@@ -6275,8 +6387,8 @@ async function silenceSourceCurrent(conversationId: string, grant: ActivityGrant
       await readCompletedFinal(grant.sessionId, conversationId, grant.turnId)) return false;
   const boundary = await readRecoveryBoundary(grant.sessionId, grant.turnId);
   const session = await getSession(grant.sessionId);
-  return session?.conversationId === conversationId && session.browserRecoveryDismissedAt === undefined &&
-    !session.finishTurn?.released && !isChatBlocked(conversationId) && !stopRequestedFor(conversationId) &&
+  return session?.conversationId === conversationId && session.endedAt === null && session.browserRecoveryDismissedAt === undefined &&
+    !isChatBlocked(conversationId) && !stopRequestedFor(conversationId) &&
     (!session.activeTurnId || session.activeTurnId === grant.turnId) &&
     !!boundary && boundary.kind !== 'user_message' && boundary.turnId === grant.turnId &&
     !(boundary.kind === 'turn_end' && boundary.outcome === 'stopped');
@@ -6484,7 +6596,8 @@ async function noteRecoveryObservations(
   // renewing the work clock or changing an already known turn's model.
   const recorded = sessionId ? await getSession(sessionId) : null;
   if (recorded?.browserRecoveryDismissedAt !== undefined) {
-    endActivity(conversationId);
+    // Departure already consumed the old activity. A late page batch cannot
+    // erase newer server-side work which arrived while its tab was closed.
     if (repairsInFlight.get(conversationId)?.state !== 'done') repairsInFlight.delete(conversationId);
     return;
   }
@@ -6587,7 +6700,7 @@ async function noteRecoveryObservations(
       (['stalled', 'failed', 'unknown', 'interrupted', 'error'].includes(lastEnd) &&
         (recoveryInputAllowed(sessionId, conversationId) || loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(sessionId))));
   const mcpTerminal = !thinkingFailed && !terminalGrant?.thinkingFailed && terminalGrant?.turnId && activity.endedTurnId === terminalGrant.turnId && sessionId && activity.terminal &&
-    lastEnd !== 'stopped' && await turnHasMcpCall(sessionId, conversationId, terminalGrant.turnId);
+    await turnHasMcpCall(sessionId, conversationId, terminalGrant.turnId);
   const finalTurn = activity.endedTurnId ?? terminalGrant?.turnId;
   // A replacement page can first reveal the exact final after a completed end
   // control. That history backfill is not fresh activity, but its canonical
@@ -6919,7 +7032,7 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     const pro = await extendedSilenceWindowFor(conversationId, grant.sessionId);
     const afterTurn = recoveryInputAllowed(grant.sessionId, conversationId) || loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(grant.sessionId);
     if (activeUntil.get(conversationId) !== grant) continue;
-    if (afterTurn && runningToolCalls(conversationId) > 0) {
+    if (runningToolProgress(conversationId) || (afterTurn && runningToolCalls(conversationId) > 0)) {
       grant.until = now + GOAL_QUIET_MS;
       deferred = true;
       continue;
@@ -6944,8 +7057,7 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     // Not a chat the user wants brought back: its silence is spent the same way, without the
     // reload that would otherwise be its one chance.
     if (!grant.thinkingFailed && !tabRecoveryWanted(conversationId) && !afterTurn) {
-      if (pro && now < grant.evidenceAt + PRO_ACTIVITY_MS) {
-        grant.until = grant.evidenceAt + PRO_ACTIVITY_MS;
+      if (now < activityDeadline(grant)) {
         deferred = true;
         continue;
       }
@@ -6983,7 +7095,13 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     // Use the same source verdict as countdown/claim. Otherwise a newer question
     // makes the handout disappear while this scheduler keeps recreating it.
     if (!await silenceSourceCurrent(conversationId, grant)) {
-      if (activeUntil.get(conversationId) === grant) spent.push(conversationId);
+      if (activeUntil.get(conversationId) === grant) {
+        // The same work can still be displayed after a close or pending Stop.
+        // Preserve its original silence deadline so a real page return does
+        // not pretend to be fresh work or start another waiting window.
+        if (!grant.thinkingFailed && now < activityDeadline(grant)) deferred = true;
+        else spent.push(conversationId);
+      }
       continue;
     }
     if (activeUntil.get(conversationId) !== grant) continue;
@@ -7511,13 +7629,6 @@ function noteCallAttribution(
       repairsInFlight.delete(conversationId);
       return;
     }
-    // Exact results retain their historical owner after an explicit user close,
-    // but cannot renew activity, wake the worker, or authorize automatic recovery.
-    if (filedSession?.browserRecoveryDismissedAt !== undefined) return;
-    // A late attributed result remains history after Stop; it cannot reopen the
-    // stopped browser turn's activity/recovery clock. A new recorded turn owns
-    // its own activeTurnId and can receive fresh activity normally.
-    if (!filedSession?.activeTurnId && filedSession?.lastTurnOutcome === 'stopped') return;
     const callOwner = recordedRequestTurn(filedSession?.requestTurns, requestId, conversationId);
     if (callOwner && filedSession?.activeTurnId && responseTurnId(filedSession.timelineTurns, callOwner.turnId) !==
         responseTurnId(filedSession.timelineTurns, filedSession.activeTurnId)) return;
@@ -7526,7 +7637,8 @@ function noteCallAttribution(
     // settle an exact request that still delivers trailing connector work.
     const previous = activeUntil.get(conversationId);
     const continuingMcp = previous?.sessionId === sessionId && previous.mcpBacked && !previous.thinkingFailed &&
-      (!!filedSession?.activeTurnId ? filedSession.activeTurnId === previous.turnId : previous.until > Date.now());
+      (!!filedSession?.activeTurnId ? filedSession.activeTurnId === previous.turnId :
+        filedSession?.lastTurnOutcome !== 'stopped' && previous.until > Date.now());
     if (completedFinalAt !== null) {
       if (previous?.sessionId === sessionId && !filedSession?.activeTurnId) endActivity(conversationId);
       const repair = repairsInFlight.get(conversationId);
@@ -7535,12 +7647,17 @@ function noteCallAttribution(
     }
     const selection = filedSession?.selectedModel;
     const pro = previous?.model === 'pro' || ((!previous || previous.model === 'unknown') && selection?.conversationId === conversationId && isProModel(selection.model, selection.reasoningEffort));
-    if (pro && (isChatBlocked(conversationId) || stopRequestedFor(conversationId) || filedSession?.finishTurn?.released ||
-        (!continuingMcp && !filedSession?.activeTurnId && filedSession?.lastTurnEndAt != null && startedAt <= filedSession.lastTurnEndAt))) return;
+    if (isChatBlocked(conversationId) ||
+        (!continuingMcp && !filedSession?.activeTurnId && filedSession?.lastTurnEndAt != null && startedAt <= filedSession.lastTurnEndAt)) return;
     // The exact call is stronger than browser lifecycle state: the model is still working even
     // when Chrome, the tab or a reload destroyed the page's local turn projection.
     const sourceTurnId = filedSession?.activeTurnId ?? previous?.turnId ??
       goalPendingReplyFor(conversationId)?.silenceSourceTurnId ?? filedSession?.finishTurn?.turnId ?? null;
+    grantActivity(conversationId, sessionId, continuingMcp ? Date.now() : pro ? Math.min(Date.now(), startedAt) : Date.now(), CHAT_SILENCE_MS,
+      { turnId: sourceTurnId, model: pro ? 'pro' : previous?.model ?? 'unknown', mcpBacked: true });
+    // Exact calls are visible work even without a page. They cannot turn that
+    // display into a worker wake, browser repair or continuation after departure.
+    if (filedSession?.browserRecoveryDismissedAt !== undefined || filedSession?.endedAt !== null) return;
     // A completed tool is real work too. Long-running calls must leave a full quiet
     // window for the model to process their result, without reviving historical finals.
     if (!isChatBlocked(conversationId)) {
@@ -7550,8 +7667,6 @@ function noteCallAttribution(
     }
     void revokeSilenceInputs(sessionId).catch(error => logWarn(`input: could not withdraw silence pickup: ${String(error)}`));
     void revokeSilenceLoop(conversationId).catch(error => logWarn(`goal: could not withdraw silence pickup: ${String(error)}`));
-    grantActivity(conversationId, sessionId, continuingMcp ? Date.now() : pro ? Math.min(Date.now(), startedAt) : Date.now(), CHAT_SILENCE_MS,
-      { turnId: sourceTurnId, model: pro ? 'pro' : previous?.model ?? 'unknown', mcpBacked: true });
     noteRecoveryActivity(conversationId);
     notePickupActivity(conversationId);
     // Scoped to the repair this fact is evidence about. An attributed call proves the request-id
@@ -8939,6 +9054,7 @@ export function resetBridgeForTests(): void {
   commandRedeems.clear();
   bridgeRecovering = false;
   bridgeShutdownRequested = false;
+  bridgeError = null;
   clearUnattributedIncident();
   activeUntil.clear();
   awaitingReturn.clear();

@@ -41,7 +41,7 @@
   'use strict';
 
   /** Bumped when the descriptor shape changes, so a stale pair cannot half-understand. */
-  const VERSION = 20;
+  const VERSION = 21;
   // The MAIN world survives an extension reload because the ChatGPT document survives it.
   // Recovery may therefore execute this file again in a page that still has an older helper
   // listener. Retire it across versions too: picker/plugin replies use their own v1
@@ -158,15 +158,60 @@
     return raw === null ? 0 : Math.max(0, Math.min(999, Math.round(raw)));
   }
 
-  /**
-   * The React Fiber node for a DOM element.
-   *
-   * React hangs it off a property whose name carries a per-build random suffix, so the
-   * key has to be discovered rather than named.
-   */
+  // One synchronous observation owns these path views. Never retain a React tree
+  // between requests or mutate its return pointers when a memoized child is shared.
+  let currentPaths = null;
+  function committedPath(fiber) {
+    const path = [], seen = new Set();
+    let at = fiber, base = null, paired = false;
+    const view = (node, parent) => ({ memoizedProps: node.memoizedProps,
+      memoizedState: node.memoizedState, updateQueue: node.updateQueue, return: parent });
+    const remember = (node, value) => {
+      currentPaths?.set(node, value);
+      if (node.alternate) currentPaths?.set(node.alternate, value);
+    };
+    while (at && path.length < 400) {
+      if (seen.has(at)) return null;
+      seen.add(at);
+      const cached = currentPaths?.get(at);
+      if (cached && cached.root.current === cached.current) { base = cached; break; }
+      paired ||= !!at.alternate;
+      if (at.tag === 3) {
+        const root = at.stateNode, current = root?.current;
+        if (!current || (current !== at && current !== at.alternate)) return null;
+        base = { root, current, node: current, view: view(current, null) };
+        remember(at, base);
+        break;
+      }
+      path.push(at); at = at.return;
+    }
+    // Older unpaired owner facades have no root bookkeeping. A double-buffered
+    // or actual React tree must prove its committed root, including on unmount.
+    if (!base) return !paired && !at && path.every(node => typeof node.tag !== 'number') ? fiber : null;
+    let budget = 4096;
+    for (let index = path.length - 1; index >= 0; index--) {
+      const wanted = path[index];
+      let selected = null;
+      // Walk only this parent's child list, never an arbitrary subtree or cache.
+      // Return links can still name the previous parent after a React bailout.
+      for (let child = base.node.child; child; child = child.sibling) {
+        if (--budget < 0) return null;
+        if (child !== wanted && child !== wanted.alternate) continue;
+        if (selected) return null;
+        selected = child;
+      }
+      if (!selected || base.root.current !== base.current) return null;
+      base = { root: base.root, current: base.current, node: selected, view: view(selected, base.view) };
+      remember(wanted, base);
+    }
+    return base.view;
+  }
+
+  /** The DOM's original Fiber pointer may be the previous render. Read the
+   * root-selected child path, preserving current ancestors of shared children. */
   function fiberOf(node) {
     for (const key in node) {
-      if (key.charCodeAt(0) === 95 && key.indexOf('__reactFiber$') === 0) return node[key];
+      if (key.charCodeAt(0) === 95 && key.indexOf('__reactFiber$') === 0) return committedPath(node[key]);
     }
     return null;
   }
@@ -2168,6 +2213,9 @@
     if (!data || typeof data !== 'object' || ![ASK, 'clf-picker-ask', 'clf-plugin-ask'].includes(data.source)) return;
     const nonce = typeof data.nonce === 'string' ? data.nonce.slice(0, 64) : '';
     if (!nonce) return;
+    const previousPaths = currentPaths;
+    currentPaths = new WeakMap();
+    try {
     if (data.source === 'clf-plugin-ask') {
       let plugin = null;
       try { plugin = pluginSnapshot(); } catch { /* Unrecognized installed settings. */ }
@@ -2189,6 +2237,7 @@
         // Nothing further to try. The other side times out and keeps ChatGPT's labels.
       }
     }
+    } finally { currentPaths = previousPaths; }
   };
   // Re-execution is a repair, not a marker check. A stale primitive marker could survive
   // while its listener did not, so keep the actual listener and always replace it.

@@ -2873,13 +2873,14 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .usage-summary span, .muted { color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); }
 .usage-section { margin: 0 0 38px; }
 .usage-section h2 { display: flex; align-items: center; justify-content: space-between; font-size: calc(15px * var(--text-scale, 1)); margin-bottom: 15px; text-transform: none; letter-spacing: 0; }
-.usage-messages { padding-bottom: 24px; border-bottom: 1px solid var(--line); }
 .usage-messages h2 { gap: 12px; flex-wrap: wrap; }
-.usage-week-start { display: inline-flex; align-items: center; gap: 12px; }
-.usage-message-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin: 24px 0 16px; }
-.usage-message-counts dt { color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); }
-.usage-message-counts dd { margin: 6px 0 0; font-size: calc(36px * var(--text-scale, 1)); font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-#usageMessagePeriod { margin: 0; line-height: 1.5; }
+.usage-week-start { min-height: 42px; max-width: 100%; gap: 18px; padding: 10px 14px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); font-size: calc(14px * var(--text-scale, 1)); }
+.usage-week-start:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.usage-message-counts { margin: 0; }
+.usage-message-counts .usage-limit { align-items: center; }
+.usage-message-counts dt { font-weight: 600; }
+.usage-message-counts dd { display: flex; align-items: baseline; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin: 0; font-variant-numeric: tabular-nums; }
+.usage-message-counts strong { font-size: calc(20px * var(--text-scale, 1)); font-weight: 600; overflow-wrap: anywhere; }
 .usage-limit { display: flex; justify-content: space-between; padding: 18px 0; border-bottom: 1px solid var(--line); gap: 20px; }
 .usage-limit > div { display: grid; gap: 6px; }
 .usage-limit > div:last-child { text-align: right; }
@@ -3076,6 +3077,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .usage-panel .setting-text b, .usage-panel .setting-text em { white-space: normal; }
 .usage-summary:empty { min-height: 110px; border: 0; }
 .usage-status { line-height: 1.5; margin: 0; }
+.usage-status:empty { display: none; }
 @media (max-width: 850px) {
   .usage-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 0; }
   .usage-summary > div:nth-child(2) { border-right: 0; }
