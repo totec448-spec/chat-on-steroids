@@ -1,4 +1,10 @@
 {
+  "Connector instructions": "Instrucciones del conector",
+  "Your own instructions": "Tus propias instrucciones",
+  "e.g. Always run the test suite before saying a change works.": "p. ej. Ejecuta siempre las pruebas antes de afirmar que un cambio funciona.",
+  "Added to Core and Desktop connector instructions, marked as yours. Saved when you leave the editor. Kept across app updates. Leave empty for none.": "Se añaden a las instrucciones de los conectores Core y Desktop, identificadas como tuyas. Se guardan al salir del editor y se conservan al actualizar la aplicación. Deja el campo vacío para no añadir ninguna.",
+  "Reload the connector or start a new ChatGPT conversation to load changed instructions.": "Vuelve a cargar el conector o inicia una nueva conversación de ChatGPT para cargar las instrucciones modificadas.",
+  "Instructions saved. Reload the connector or start a new ChatGPT conversation to load them.": "Instrucciones guardadas. Vuelve a cargar el conector o inicia una nueva conversación de ChatGPT para cargarlas.",
   "Verified messages": "Mensajes verificados",
   "Since {0}": "Desde el {0}",
   "Change start day": "Cambiar día de inicio",

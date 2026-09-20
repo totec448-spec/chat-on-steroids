@@ -2712,8 +2712,10 @@ Authored prose uses automatic text direction; shell/code remain LTR with logical
 Theme and layout preferences do not change backend authority.
 Settings places ChatGPT model defaults second and Workers & recovery third, after Continuation
 sources. Appearance has its own Settings navigation page, including the language selector and
-existing setup profiles. The connector-instructions editor
-is removed. Settings saves preserve existing stored MCP instructions for compatibility.
+existing setup profiles. Settings → Connector instructions edits the persistent `mcp.instructions`
+field through the existing settings save flow. It permits up to 4000 characters; empty adds nothing.
+Core and Desktop append the text last, attributed to the user. Saving changed instructions reminds
+the user to reload the connector or start a new ChatGPT conversation to load them.
 Dropdowns use native customizable selects (`appearance: base-select`) with theme-matched
 top-layer pickers, wrapping option labels and native keyboard/focus semantics. Continuation timing
 stacks its label and full-width control within the composer menu. `scripts/verify-dropdown-layout.cjs`

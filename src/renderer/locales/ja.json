@@ -1,4 +1,10 @@
 {
+  "Connector instructions": "コネクタの指示",
+  "Your own instructions": "独自の指示",
+  "e.g. Always run the test suite before saying a change works.": "例：変更が動作すると報告する前に、必ずテストを実行してください。",
+  "Added to Core and Desktop connector instructions, marked as yours. Saved when you leave the editor. Kept across app updates. Leave empty for none.": "Core と Desktop コネクタの指示に、あなたの指示として追記されます。エディタから移動すると保存され、アプリの更新後も保持されます。追加しない場合は空欄にしてください。",
+  "Reload the connector or start a new ChatGPT conversation to load changed instructions.": "変更した指示を読み込むには、コネクタを再読み込みするか、ChatGPT で新しい会話を開始してください。",
+  "Instructions saved. Reload the connector or start a new ChatGPT conversation to load them.": "指示を保存しました。読み込むには、コネクタを再読み込みするか、ChatGPT で新しい会話を開始してください。",
   "Verified messages": "確認済みメッセージ",
   "Since {0}": "{0}から",
   "Change start day": "開始曜日を変更",

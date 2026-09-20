@@ -2933,8 +2933,8 @@ export function chatSettingsPatch(current: Config): {
       loopPrompt:
         $<HTMLTextAreaElement>('goalLoopPrompt').value.trim() || DEFAULT_GOAL_LOOP_SYSTEM_PROMPT
     },
-    // The retired editor no longer owns this stored configuration.
-    mcp: current.mcp ?? { instructions: '' }
+    // Empty is a real choice: it means "add nothing of mine".
+    mcp: { instructions: $<HTMLTextAreaElement>('mcpInstructions').value.trim() }
   };
 }
 
@@ -3285,7 +3285,8 @@ const CHAT_INPUTS = [
   'goalReasoning',
   'goalPrompt',
   'goalObjectivePrompt',
-  'goalLoopPrompt'
+  'goalLoopPrompt',
+  'mcpInstructions'
 ];
 
 /** Writes app state into this panel's controls. Called from the renderer's apply(). */

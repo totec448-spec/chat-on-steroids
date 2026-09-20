@@ -110,7 +110,7 @@ let applying = false;
  * its `change` event saves it. Only that exact dirty case is protected; an idle/focused-but-clean
  * field still follows persisted state normally.
  */
-function applyValue(control: HTMLInputElement | HTMLSelectElement, next: string, previous?: string): void {
+function applyValue(control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, next: string, previous?: string): void {
   const dirty = document.activeElement === control && previous !== undefined && control.value !== previous;
   if (!dirty) control.value = next;
 }
@@ -540,6 +540,8 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
       toast(t("Multi-agent off. Reconnect the connector in ChatGPT (then start a new chat) to drop the agents tool."));
     } else if (toolSurfaceChanged) {
       toast(t("Tools changed. Start a new ChatGPT conversation to guarantee the new tool list is loaded."));
+    } else if ((previous.mcp?.instructions ?? '') !== patch.mcp.instructions && next.config.mcp?.instructions === patch.mcp.instructions) {
+      toast(t("Instructions saved. Reload the connector or start a new ChatGPT conversation to load them."));
     }
   } else await refresh();
 }
@@ -1059,6 +1061,14 @@ function apply(next: AppState): void {
   );
   applyValue($<HTMLInputElement>('binaryPath'), config.tunnel.binaryPath, previousState?.config.tunnel.binaryPath);
   applyValue($<HTMLSelectElement>('chatBrowser'), config.ui.chatBrowser ?? 'chrome', previousState?.config.ui.chatBrowser ?? 'chrome');
+  // An older acknowledgement must not replace a later queued edit before another settings save.
+  const instructionsInput = $<HTMLTextAreaElement>('mcpInstructions');
+  const instructions = requestedSettings?.mcp.instructions ?? config.mcp?.instructions ?? '';
+  const previousInstructions = previousState?.config.mcp?.instructions ?? '';
+  // A failed save refreshes persisted state after blur. Keep the unsaved draft available to retry.
+  if (!previousState || instructionsInput.value.trim() === previousInstructions || instructionsInput.value.trim() === instructions) {
+    applyValue(instructionsInput, instructions, previousState ? previousInstructions : undefined);
+  }
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));

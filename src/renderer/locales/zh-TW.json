@@ -1,4 +1,10 @@
 {
+  "Connector instructions": "連接器指令",
+  "Your own instructions": "你的自訂指令",
+  "e.g. Always run the test suite before saying a change works.": "例如：在宣告修改有效之前，一律執行測試套件。",
+  "Added to Core and Desktop connector instructions, marked as yours. Saved when you leave the editor. Kept across app updates. Leave empty for none.": "附加到 Core 和 Desktop 連接器的指令末尾，並標明由你提供。離開編輯器時儲存，應用程式更新後仍會保留。留空則不新增。",
+  "Reload the connector or start a new ChatGPT conversation to load changed instructions.": "重新載入連接器或開始新的 ChatGPT 對話，以載入修改後的指令。",
+  "Instructions saved. Reload the connector or start a new ChatGPT conversation to load them.": "指令已儲存。請重新載入連接器或開始新的 ChatGPT 對話以載入指令。",
   "Verified messages": "已驗證訊息",
   "Since {0}": "自{0}起",
   "Change start day": "變更起始日",
