@@ -1630,6 +1630,9 @@ mutations so hidden tabs notice Stop transitions without waiting for a throttled
 Submission observes native Send readiness and acceptance within one 30-second deadline, freezes
 the editor/text/document, and clicks once. It never substitutes synthetic Enter. Goal-token and
 desktop-input authorization run when Send becomes ready, followed by a fresh local owner check.
+Desktop/helper preparation waits for a writable editor before claiming and again after model
+selection. Visibility and picker closure alone cannot prove editing is enabled. The existing
+bounded page observer owns both waits; insertion failures retain their bounded predicate.
 Goal preparation/rollback reuses the existing exact composer draft lease; identical text in a
 replacement editor or a user's intervening edit never grants cleanup authority.
 
@@ -1672,7 +1675,7 @@ version options normalize into the same bounded picker snapshot. Mixed-version p
 their execution ids rather than merging unrelated models into a synthetic Latest family.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
-The matched recorder/MAIN helper version is 19. Shell exchanges are read only under the native
+The matched recorder/MAIN helper version is 20. Shell exchanges are read only under the native
 main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
@@ -1692,6 +1695,20 @@ explicit current-node parent path back to that user; no guessed child or unselec
 Public thought summaries/preambles require unique public typed counterparts and real selected
 source message ids. Hidden/raw analysis stays excluded. Preambles retain the existing stable
 message identity rules. Missing or contradictory metadata remains unavailable.
+Mounted tool items retain an exact invocation/result source relation even when their selected
+message list contains only the result. The reader validates the provider call, connector and
+tool before taking its invocation metadata. A native `dynamic-tool-call` explicitly naming
+`functions.exec` supplies request metadata only, never code or a fabricated result receipt.
+Provisional shell exchanges may expose the same live mapping before their client conversation
+resolves. Those descriptors carry `requestOwnerRequired`: only a witnessed local Send or an
+accepted Resume owner can confirm the request against the concrete route before tool evidence
+is published. A native click can request that first scan without an app-managed Send promise;
+its exact receipt is consumed after the scan rather than waiting for another page mutation.
+For classic turns, `fiber.js` retains text messages explicitly marked
+`is_thinking_preamble_message:true` on assistant/all commentary even when ChatGPT sets
+`is_visually_hidden_from_conversation:true` during streaming. This flag describes presentation;
+it must not truncate or discard public updates. Other hidden messages, `is_visually_hidden:true`,
+analysis, thought payloads and tool routing remain excluded. `test/fiber.test.ts` covers both sides.
 Only the latest exchange's running hint describes the composer; unfinished historical exchanges
 cannot block a completed current answer. UUID workflow ids and complete root-add stream envelopes
 feed the existing request-origin owner. The shell's Markdown editor receives prepared text through
@@ -2272,6 +2289,9 @@ without inventing a conversation ID. Exact correlation plus the durable session'
 frontend reattaches it automatically, including when proof arrives after Compact & Resume.
 Observation batches, MCP ingress/completion and startup after continuation recovery use this
 same reconciliation; there is no new timer or alternate identity credential.
+That reconciliation also fills an already-recorded worker's missing parent session before
+publishing the prime attachment, including sleeping workers. Existing non-null parents, names
+and task text remain intact. The recorder notifies its consumers after this origin is committed.
 
 Several recovered fleets may belong to the same real prime. Keep each run, worker conversation
 and inbox intact; parked histories are keyed by their last run incarnation, not just the prime.

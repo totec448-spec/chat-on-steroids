@@ -33,7 +33,8 @@ var CLF_DOM = (() => {
   // and, as of 2026-08-15, a display-contents row wrapping the visible tool label.
   // Keep both explicit structural anchors; hashed CSS-module names remain off limits.
   const TOOL_LEGACY = 'span[class*="tool-message"]';
-  const TOOL = `${TOOL_LEGACY}, div.pointer-events-none.contents`;
+  const STATUS_V5 = 'div:has(> [data-testid="cot-v5-tool-icon-pile"])';
+  const TOOL = `${TOOL_LEGACY}, div.pointer-events-none.contents, ${STATUS_V5}`;
   // MAIN-world scan stamps only a row whose own message group proves api_tool.
   // A translated label or a generic built-in tool button never establishes identity.
   const CONNECTOR = '[data-clf-fiber]';
@@ -1083,6 +1084,8 @@ var CLF_DOM = (() => {
     if (node.querySelector && node.querySelector(CONNECTOR)) return true;
     if (node.closest && node.closest(CONNECTOR)) return true;
     if (node.querySelector && node.querySelector('.markdown')) return false;
+    // The semantic icon pile owns the new status row even before its caption arrives.
+    if (node.matches?.(STATUS_V5)) return true;
     const label = (node.textContent || '').replace(/\s+/g, ' ').trim();
     return label.length > 0 && label.length <= 200;
   }
@@ -1455,13 +1458,18 @@ var CLF_DOM = (() => {
   function composerSubmitReady() {
     return safe(() => {
       const box = composer();
-      if (!box || !box.isConnected) return false;
+      if (!composerWritable()) return false;
       if (generating() || stopButton()) return false;
       if ((box.textContent || '').trim() !== '') return false;
-      if (box.getAttribute('aria-disabled') === 'true') return false;
-      if (box.getAttribute('contenteditable') === 'false') return false;
       return true;
     }, false);
+  }
+
+  /** A visible editor can still be read-only while the provider mounts or changes models. */
+  function composerWritable() {
+    const box = composer();
+    return !!box?.isConnected && box.getAttribute('aria-disabled') !== 'true' &&
+      box.getAttribute('contenteditable') !== 'false';
   }
 
   /** The composer as a whole, used as the root to watch for React replacing it. */
@@ -2593,6 +2601,7 @@ var CLF_DOM = (() => {
     errors,
     composer,
     composerSubmitReady,
+    composerWritable,
     composerBox,
     pageTheme,
     composerActions,

@@ -160,3 +160,10 @@ This is a growing attribution record, not a complete list of everyone who has he
 Keep original authorship when merging a contribution. When adapting or consolidating contributed work, name the original author and PR, and preserve appropriate `Co-authored-by` trailers using the contributor's public GitHub noreply identity. Reports and review deserve explicit acknowledgment without inventing code authorship. See [CONTRIBUTING.md](CONTRIBUTING.md#credit-and-attribution).
 
 The September 2026 attribution correction adds a new public record and retroactive co-author credit for incorporated work. It does not rewrite released commits or imply that contributors authored the correction's prose. GitHub's automatic contributor displays are separate from this maintained record.
+
+The September 20 shell-attribution follow-up retains [@ehkogh](https://github.com/ehkogh)'s
+original shell adapter contribution from [#318](https://github.com/totec448-spec/chat-on-steroids/pull/318).
+[@redzrush101](https://github.com/redzrush101)'s additional private captures and messaging retests
+for [#311](https://github.com/totec448-spec/chat-on-steroids/issues/311) helped isolate missing
+native request attribution and late parent-session projection. The new regressions are synthetic;
+private exports, account data and runtime identifiers are not published.
