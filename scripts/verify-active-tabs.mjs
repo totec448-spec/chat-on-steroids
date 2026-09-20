@@ -137,6 +137,33 @@ try {
   await until(async () => (await read('work')).visibility === 'hidden', 'Real reload released the old document');
   assert.equal(await evaluate(`(await chrome.debugger.getTargets()).some(t=>t.tabId===work.id&&t.attached)`), false);
   report.checks.push('same-URL document reload released its old rendering lease');
+  // Match the worker placement contract: its separate window is minimized before
+  // the native hydration callback is scheduled. Scripting observes without a
+  // debugger on the page, so inspection cannot accidentally supply the lease.
+  await evaluate(`(async()=>{
+    const window=await chrome.windows.create({url:${JSON.stringify(base + '/cold-worker')},focused:false});
+    await chrome.windows.update(window.id,{state:'minimized',focused:false});
+    globalThis.worker=(await chrome.tabs.query({windowId:window.id}))[0];
+  })()`);
+  await until(async () => Number.isFinite((await read('worker'))?.frames), 'Cold worker document');
+  await evaluate(`chrome.scripting.executeScript({target:{tabId:worker.id},world:'MAIN',func:()=>{
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      const form=document.createElement('form');form.dataset.chatgptComposer='';
+      const editor=document.createElement('div');editor.contentEditable='true';editor.setAttribute('role','textbox');
+      form.append(editor);document.body.append(form);document.body.dataset.handoff='editor-ready';
+    }));
+  }})`);
+  await new Promise(resolve => setTimeout(resolve, 250));
+  const cold = await read('worker');
+  assert.notEqual(cold.handoff, 'editor-ready');
+  assert.equal(cold.visibility, 'hidden');
+  assert.equal((await evaluate(`chrome.runtime.sendMessage({tabId:worker.id})`)).ok, true);
+  await until(async () => (await read('worker')).handoff === 'editor-ready', 'Minimized worker editor hydration');
+  assert.equal(await evaluate(`(await chrome.tabs.query({active:true,windowId:sentinel.windowId}))[0].id===sentinel.id`), true);
+  assert.equal((await evaluate('chrome.windows.get(worker.windowId)')).state, 'minimized');
+  assert.equal((await evaluate('chrome.runtime.sendMessage({})')).ok, true);
+  assert.equal(await evaluate(`(await chrome.debugger.getTargets()).some(t=>t.tabId===worker.id&&t.attached)`), false);
+  report.checks.push('a newly minimized worker mounted its editor only after rendering custody, without restoring or focusing its window');
   report.ok = true;
   await fs.writeFile(path.join(output, 'verification.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));

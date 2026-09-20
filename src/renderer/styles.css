@@ -2873,6 +2873,13 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .usage-summary span, .muted { color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); }
 .usage-section { margin: 0 0 38px; }
 .usage-section h2 { display: flex; align-items: center; justify-content: space-between; font-size: calc(15px * var(--text-scale, 1)); margin-bottom: 15px; text-transform: none; letter-spacing: 0; }
+.usage-messages { padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.usage-messages h2 { gap: 12px; flex-wrap: wrap; }
+.usage-week-start { display: inline-flex; align-items: center; gap: 12px; }
+.usage-message-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin: 24px 0 16px; }
+.usage-message-counts dt { color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); }
+.usage-message-counts dd { margin: 6px 0 0; font-size: calc(36px * var(--text-scale, 1)); font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+#usageMessagePeriod { margin: 0; line-height: 1.5; }
 .usage-limit { display: flex; justify-content: space-between; padding: 18px 0; border-bottom: 1px solid var(--line); gap: 20px; }
 .usage-limit > div { display: grid; gap: 6px; }
 .usage-limit > div:last-child { text-align: right; }

@@ -1,4 +1,9 @@
 {
+  "Verified messages": "Mensajes verificados",
+  "Since {0}": "Desde el {0}",
+  "Change start day": "Cambiar día de inicio",
+  "Local time · {0} → {1}": "Hora local · {0} → {1}",
+  "Counts recorded native messages with verified model selection. Tool injections and messages without model evidence are excluded.": "Cuenta los mensajes nativos registrados cuya selección de modelo está verificada. Se excluyen las inyecciones en herramientas y los mensajes sin constancia del modelo.",
   "Chat automatically refreshed": "Chat actualizado automáticamente",
   "This turn already received its automatic error reload.": "Este turno ya recibió su recarga automática por error.",
   "We reload on an error only once per chat and turn. Further errors wait for tool calls to stop and the silence window before another reload.": "Solo recargamos por error una vez por chat y turno. Los siguientes errores esperan a que terminen las llamadas a herramientas y transcurra el período de inactividad antes de otra recarga.",
@@ -310,7 +315,7 @@
   "Inject now": "Insertar ahora",
   "Send directly": "Enviar directamente",
   "After this turn": "Después de este turno",
-  "Pro Loop delivery": "Envío de Bucle en Pro",
+  "Continuation timing": "Cuándo continuar",
   "Only finish": "Solo al finalizar",
   "After this turn + finish": "Después de este turno y al finalizar",
   "Send": "Enviar",

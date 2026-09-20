@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { usageMessageTotals } from '../src/shared/usage.js';
 const store = vi.hoisted(() => ({ listUsageSessions: vi.fn(), readEvents: vi.fn() }));
 vi.mock('../src/main/session/store.js', () => store);
 const catalog = vi.hoisted(() => ({ getChatModels: vi.fn() }));
@@ -19,6 +20,82 @@ beforeEach(async () => {
   usage = await import('../src/main/session/usage.js');
 });
 afterEach(() => vi.restoreAllMocks());
+describe('verified native message counts', () => {
+  const message = (messageId: string | undefined, model: string | undefined, time: number, extra = {}) =>
+    ({ kind: 'user_message', messageId, model, time, message: { text: '' }, ...extra });
+  beforeEach(() => {
+    now = new Date(2026, 8, 21, 12).getTime(); // Monday, in the machine's local timezone.
+    store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 20, estimatedTokens: 0,
+      selectedModel: { model: 'gpt-6-pro', observedAt: now } }]);
+  });
+
+  it('counts proven native sends including image-only messages, without borrowing model or tool evidence', async () => {
+    store.readEvents.mockResolvedValue([
+      message('sol', 'gpt-5-6-thinking', now), message('old-pro', 'gpt-5-6-pro', now),
+      message('astra', 'gpt-6-astra', now), message('image-only', 'gpt-6-pro', now),
+      message('input:injected', 'gpt-6-pro', now, { inputDelivery: 'confirmed' }),
+      message('unconfirmed', 'gpt-6-pro', now, { inputDelivery: 'offered' }),
+      message('no-model', undefined, now), message(undefined, 'gpt-6-pro', now),
+      message('unrecognized', 'gpt-6-pro-future', now),
+      { kind: 'tool_call', time: now, call: { callId: 'tool', conversationId: 'chat', model: 'gpt-6-pro', args: { text: '' }, result: { text: '' }, summary: { title: '' } } }
+    ]);
+    const result = await usage.usageOverview();
+    expect(usageMessageTotals(result.messages, 1)).toMatchObject({ gpt56: 2, gpt6: 2 });
+    expect(result.tokens).toBe(0);
+  });
+
+  it('uses the original timestamp and an inclusive midnight boundary, excluding older and future sends', async () => {
+    const saturday = new Date(2026, 8, 19).getTime();
+    store.readEvents.mockResolvedValue([
+      message('before', 'gpt-6-pro', saturday - 1), message('at-start', 'gpt-6-pro', saturday),
+      message('now', 'gpt-6-pro', now), message('future', 'gpt-6-pro', now + 1),
+      message('old-replayed', 'gpt-6-pro', now, { authoredAt: new Date(2026, 8, 12).getTime() }),
+      message('bad-time', 'gpt-6-pro', now, { authoredAt: NaN }),
+      message('zero-time', 'gpt-6-pro', now, { authoredAt: 0 })
+    ]);
+    const result = await usage.usageOverview();
+    expect(result.messages.through).toBe(now);
+    expect(usageMessageTotals(result.messages, 6)).toEqual({ date: '2026-09-19', gpt56: 0, gpt6: 2 });
+    expect(usageMessageTotals(result.messages, 1)).toMatchObject({ gpt6: 1 });
+    now++;
+    expect(usageMessageTotals((await usage.usageOverview()).messages, 1)).toMatchObject({ gpt6: 2 });
+    expect(store.readEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it('deduplicates native identities across replays and copied history, abstaining on conflicting evidence', async () => {
+    store.listUsageSessions.mockResolvedValue(['one', 'two'].map(id => ({ id, updatedAt: 1, events: 4, estimatedTokens: 0 })));
+    const native = message('native-id', 'gpt-6-pro', now);
+    store.readEvents.mockResolvedValueOnce([native, native, message('conflicting', 'gpt-6-pro', now)])
+      .mockResolvedValueOnce([native, message('conflicting', 'gpt-5.6', now)]);
+    const first = await usage.usageOverview();
+    expect(usageMessageTotals(first.messages, 1)).toMatchObject({ gpt56: 0, gpt6: 1 });
+    first.messages.days[0]!.gpt6 = 999;
+    expect(usageMessageTotals((await usage.usageOverview()).messages, 1)).toMatchObject({ gpt6: 1 });
+    expect(store.readEvents).toHaveBeenCalledTimes(2);
+  });
+
+  it('reuses verified timestamps after restart and advances the week without rereading unchanged recordings', async () => {
+    store.readEvents.mockResolvedValue([message('native', 'gpt-6-pro', now)]);
+    await usage.usageOverview();
+    const saved = structuredClone(durable.writeDurableSoon.mock.calls.at(-1)![1]);
+    vi.resetModules(); durable.readDurable.mockResolvedValue(saved); store.readEvents.mockClear();
+    usage = await import('../src/main/session/usage.js');
+    expect(usageMessageTotals((await usage.usageOverview()).messages, 1)).toMatchObject({ gpt6: 1 });
+    now = new Date(2026, 8, 28).getTime();
+    expect(usageMessageTotals((await usage.usageOverview()).messages, 1)).toEqual({ date: '2026-09-28', gpt56: 0, gpt6: 0 });
+    expect(store.readEvents).not.toHaveBeenCalled();
+  });
+
+  it('incorporates late verified model evidence and removes deleted recordings from counts', async () => {
+    store.readEvents.mockResolvedValue([message('native', undefined, now)]);
+    expect(usageMessageTotals((await usage.usageOverview()).messages, 1)).toMatchObject({ gpt6: 0 });
+    store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 2, events: 20, estimatedTokens: 0 }]);
+    store.readEvents.mockResolvedValue([message('native', 'gpt-6-pro', now)]);
+    expect(usageMessageTotals((await usage.usageOverview()).messages, 1)).toMatchObject({ gpt6: 1 });
+    store.listUsageSessions.mockResolvedValue([]);
+    expect((await usage.usageOverview()).messages.days).toEqual([]);
+  });
+});
 describe('passive usage limits and canonical token totals', () => {
   it('counts only the outer code-mode exchange while retaining ordinary calls sharing its request', async () => {
     const time = new Date(2026, 8, 5, 12).getTime();
@@ -212,7 +289,7 @@ describe('passive usage limits and canonical token totals', () => {
     expect(await usage.usageOverview()).toMatchObject({ contextTokenCap: 256_000, tokens: 128_000 });
     expect(store.readEvents).toHaveBeenCalledTimes(1);
   });
-  it.each([4, 5, 6, 7])('rebuilds old cache version %i and reuses the corrected cache after restart', async (version) => {
+  it.each([4, 5, 6, 7, 8])('rebuilds old cache version %i and reuses the corrected cache after restart', async (version) => {
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     durable.readDurable.mockResolvedValue({ version, rows: [{ id: 'one', revision: `${timezone}:1:1:2000000`, days: [['2026-09-05', [{ model: 'gpt-6-pro', reasoningEffort: null, assumed: false, tokens: 1_000_000 }]]] }] });
     store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 1, estimatedTokens: 2_000_000 }]);
@@ -220,7 +297,7 @@ describe('passive usage limits and canonical token totals', () => {
     expect((await usage.usageOverview()).tokens).toBe(128_000);
     expect(store.readEvents).toHaveBeenCalledTimes(1);
     const persisted = durable.writeDurableSoon.mock.calls.at(-1)![1];
-    expect(persisted.version).toBe(8);
+    expect(persisted.version).toBe(9);
     vi.resetModules(); durable.readDurable.mockResolvedValue(persisted); store.readEvents.mockClear();
     usage = await import('../src/main/session/usage.js');
     expect((await usage.usageOverview()).tokens).toBe(128_000);

@@ -1,4 +1,9 @@
 {
+  "Verified messages": "已验证消息",
+  "Since {0}": "自{0}起",
+  "Change start day": "更改起始日",
+  "Local time · {0} → {1}": "本地时间 · {0} → {1}",
+  "Counts recorded native messages with verified model selection. Tool injections and messages without model evidence are excluded.": "统计已记录且模型选择已验证的原生消息。不包括工具注入消息或缺少模型凭据的消息。",
   "Chat automatically refreshed": "聊天已自动刷新",
   "This turn already received its automatic error reload.": "本轮已因错误自动刷新过一次。",
   "We reload on an error only once per chat and turn. Further errors wait for tool calls to stop and the silence window before another reload.": "每个聊天的每一轮只会因错误自动刷新一次。再次出现错误时，会等待工具调用停止并经过静默窗口后再刷新。",
@@ -320,7 +325,7 @@
   "Inject now": "立即注入",
   "Send directly": "直接发送",
   "After this turn": "本轮结束后",
-  "Pro Loop delivery": "Pro 循环发送时机",
+  "Continuation timing": "继续时机",
   "Only finish": "仅在完成时",
   "After this turn + finish": "本轮结束后或完成时",
   "Send": "发送",

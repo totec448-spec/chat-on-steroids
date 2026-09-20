@@ -501,6 +501,11 @@ Content requires the matching route and document epoch, retaining one-shot strea
 temporary ACK failures for at most 15 minutes using the existing observer/backoff. Missing stream
 metadata retains the Fiber path. Fetch reattachment at DOM readiness captures each downstream
 wrapper separately and deduplicates responses to avoid recursion through page instrumentation.
+The native `f/conversation/resume` stream uses the same complete-event reader. Observer version 2
+has an explicit refresh/disposal handle, also reached by existing MAIN-helper restoration.
+Replacing a versioned instance cancels its readers and retires listeners; a provider's wrapper
+can still delegate through an inactive instance. A legacy boolean has no disposal handle and
+requires a fresh document; `__cosUsageObserverNeedsReload` records that fact without an extra reload grant.
 Popup request diagnostics derive from the newest exact native/Fiber turn; older scanned turns
 cannot leave a stale current-ID success. Worker queue custody, app receipt, owner confirmation
 and actual recorded tool activity remain distinct facts.
@@ -938,6 +943,14 @@ Its reason and deadline belong to the existing outbox/Goal obligation; do not ad
 
 The displayed follow-up order also governs browser and finish-tool delivery: an ineligible
 head cannot be skipped by a later checkpoint. Immediate injection keeps its explicit semantics.
+The outbox freezes `queuedTurn` (conversation and active turn) at admission, before asynchronous
+readiness checks, using the recorded turn or the bridge's retained exact activity grant when
+a native UI end precedes the final. Generated finish checkpoints inherit that reference. Its verified
+completion can release the queued head even when the browser observed it before enqueue and
+delivered its journal later. A timestamp alone cannot reject the turn the input was waiting for.
+The reference never proves completion, revives a cancelled row or follows a different frontend;
+current settled state, exact claims and one consumed completion per message remain mandatory.
+Other turns and legacy rows without that reference keep the later-completion requirement.
 A native-only head releases an existing finish hold so the answer can finish before browser
 delivery. Every model's automatic Goal pickup, draft and final Send authorization defer to queued
 or claimed user input. Send authorization spends that exact source's Goal obligation durably;
@@ -1073,8 +1086,12 @@ composition retain their ordinary editing behavior.
   caller's local session. Short headlines, bounded details and statuses appear above the queue;
   at most one step is in progress. Older calls/retired frontends cannot overwrite newer state.
   Completion animates then dismisses the card; completed reloads stay hidden while the document
-  and history remain. Prepared handoffs include an exact-session notice to inspect the saved
-  plan. This card neither delivers instructions nor completes/deletes queued checkpoints.
+  and history remain. Prepared handoffs freeze the saved plan's explanation, steps, details
+  and statuses into the brief; they never direct the replacement to the removed `session` tool.
+  `handoff.ts` budgets that same snapshot and exact continuation marker inside the existing
+  message limit, preserving the brief's ends with an explicit middle-omission notice when needed.
+  Plan statuses are reported progress, not verification evidence. This card neither delivers
+  instructions nor completes/deletes queued checkpoints.
   Before attribution, `request-plans.ts` durably retains the latest complete plan for each
   request (256 entries / seven days) and attaches it on proof or restart. The session's rebind
   commit records `retiredChatAt` alongside its existing lineage. Recovery may attach a historical
@@ -1105,12 +1122,17 @@ instructions and checkpoints take priority. A successful finish response can del
 checkpoint; empty holds can wait without inventing new work. “End turn” durably releases the
 hold so ChatGPT may finish; it does not pretend native generation has stopped.
 
-For Astra, **both Goal and Loop use the Loop decision path at the finish boundary** and inject
-the resulting instruction through tools. A completed final answer sends another browser message
-only when Pro Loop explicitly enables after-turn delivery (§17). `automaticFinishEnabled()` is shared by generation and queued-input
-validity: only the effective per-chat Goal/Loop switch authorizes an automatic decision.
+For Astra, **Goal and Loop retain their selected decision policy at the finish boundary**,
+including that mode's configured backend, prompt and objective. A continuation uses the existing
+tool outbox. Goal's completed/no-reply decision durably releases the exact finish hold without
+inventing a native final or turn end. A completed final can start a browser decision when either
+mode enables after-turn delivery, or when the finish tool is disabled (§17).
+`automaticFinishEnabled()` is shared by generation and queued-input validity: only the effective
+per-chat Goal/Loop switch authorizes an automatic decision.
 Implicit or explicit Off remains notification-only; the legacy global finish action grants no
-authority. A durable switch change invalidates a pending decision before it can enqueue work.
+authority. Mode/objective changes revoke a pending decision before it can enqueue work, including
+Goal-to-Loop-to-Goal while the provider is running. A generated finish input retains its mode;
+restored legacy inputs without one represent the old Loop policy and cannot be delivered as Goal.
 
 Finish decision generation deduplicates by actual recorded work/input revision, not a new
 request timestamp or repeated hold call. User input, changed settings, turn release, block or
@@ -1365,7 +1387,7 @@ totals. Recorded results, overflow assets and actual MCP responses retain their 
 Code-mode children are recorded with dispatcher-proven `nested: true`: they remain audit/tool
 activity but contribute neither context tokens nor Usage billing calls. Only the outer exchange
 counts. Legacy rows lack this proof and keep their old estimate; request ids and timing are not
-safe nesting identities. Usage cache version 8 enforces the distinction on recorded new calls.
+safe nesting identities. Usage cache version 9 retains the distinction on recorded new calls.
 
 `extension/usage.js` observes bounded allowed account-usage responses in MAIN world, including
 already available state; it does not retain raw account payloads. App `session/usage.ts` accepts
@@ -1388,6 +1410,23 @@ with an event-loop yield between reads, and quitting cancels the warmup before c
 The loading message explains a potentially slow post-update rebuild and that the app remains usable.
 These charts are not a provider invoice, exact
 token consumption or proof of current prices/entitlements.
+
+The separate **Verified messages** section counts native user-message IDs with recorded
+model selection proof for GPT-5.6 and GPT-6. It uses provider `authoredAt`, otherwise the
+original delivery time; tool-injected `input:` rows, unconfirmed offers, unknown model IDs,
+missing model proof and future timestamps cannot contribute. Replayed/copied native IDs
+count once; conflicting model/time evidence abstains. Never borrow token attribution's
+legacy default, a current picker, or a later tool's model to increase these counts.
+Cache version 9 retains these minimal ID/model/time facts alongside token totals, so a
+new week or a weekday click needs no extra transcript read. The renderer receives only
+seven local calendar days of counts and their snapshot end time. Its single weekday
+button cycles the start day, default Monday, persisted in `cos.usage.weekStart`; the range
+begins at the most recent occurrence of that weekday at local midnight, including today.
+Calendar arithmetic preserves daylight-saving transitions. Exact integers and the local
+date/time range are shown; they are recorded sends, not a provider quota or reset claim.
+`session-usage`, `usage-week` and `renderer-usage` tests cover evidence, boundaries and
+preference restoration. `scripts/verify-usage-week.cjs` exercises Chromium keyboard input
+and narrow/zoomed layouts with isolated data.
 
 ## 13. Extension, account models and browser preferences
 
@@ -1419,6 +1458,11 @@ is involved. Idle/personal tabs and pins alone earn no lease. Input election ref
 policy before native preparation and its offer. A reused page retains its exact document,
 navigation epoch and starting URL while preparing, including its one authorized New Chat
 transition; it cannot depend on an input marker that preparation has not written yet.
+Fresh worker/resume commands also project their exact created-tab custody and current app
+`commandIds` into this policy before a provider conversation exists. The initial pending URL
+retains its custody until load completes, which wakes the same maintenance owner. The first
+registered document pins the grant; foreign markers/routes, replacements, retirement and expiry
+cannot inherit it. A bound conversation uses ordinary live-chat policy, not the old command marker.
 Chrome can emit loading+URL for a same-document history change. The background owner uses a
 bounded, document-targeted scripting read of the new location and Chrome's InjectionResult
 document/frame identity before preserving that route. The existing policy must still approve
@@ -1628,7 +1672,7 @@ version options normalize into the same bounded picker snapshot. Mixed-version p
 their execution ids rather than merging unrelated models into a synthetic Latest family.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
-The matched recorder/MAIN helper version is 18. Shell exchanges are read only under the native
+The matched recorder/MAIN helper version is 19. Shell exchanges are read only under the native
 main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
@@ -1641,13 +1685,23 @@ only for message ids explicitly named by the mounted exchange in its exact conve
 It never follows child links or imports cached prose/completion. Duplicate/conflicting caches
 abstain, and an unavailable optional cache leaves mounted messages readable. Typed connector names
 accept the provider's exact underscore recipient spelling as well as the original app name.
+Before history hydration, a bounded read of published React hook/compiler values can find the
+native `renderedConversation`/`renderedTurns` snapshot. Its conversation owner, actual user and
+same turn object must match. Only the newest exact turn may add early request metadata from its
+explicit current-node parent path back to that user; no guessed child or unselected prose is read.
+Public thought summaries/preambles require unique public typed counterparts and real selected
+source message ids. Hidden/raw analysis stays excluded. Preambles retain the existing stable
+message identity rules. Missing or contradictory metadata remains unavailable.
 Only the latest exchange's running hint describes the composer; unfinished historical exchanges
 cannot block a completed current answer. UUID workflow ids and complete root-add stream envelopes
 feed the existing request-origin owner. The shell's Markdown editor receives prepared text through
 its native literalPaste mark in the same single HTML edit, preserving punctuation and line breaks.
 Classic editor insertion is unchanged. Shell prompt presentation requires the current exact
 message stamp and the same strict context-frame parser, retaining original recording bytes.
-The shell keeps its native activity/answer presentation; no alternate Overwrite or upload owner is added.
+Shell Overwrite uses the existing chronological renderer. Exact native message slots and typed
+preamble object relations anchor local tool chunks after the user, while native prose remains
+in place. A slot and its inner Markdown expose only one anchor; recycled/unreadable owners lose
+their stamps. There is no parallel renderer or upload owner.
 The closed snapshot describes only the selected native version's buckets; it is selection
 evidence, never a complete catalog. Discovery elects an idle composer, reads the account-evaluated
 choices once per enabled native version, and restores the original model/effort before publication.
@@ -2351,16 +2405,21 @@ that exact exhausted source, including an unreconciled open recorder turn, only 
 question/work exists and the current model's continuation setting permits it.
 
 Ordinary non-Pro Goal/Loop considers verified **completed final answers**, not interrupted
-turns or generic composer idleness. Pro Loop defaults to **Only finish**. Its per-chat switch
-can opt into **After this turn + finish**; the preference survives toggles, restart and resume.
-The desktop shows this choice as soon as its account-observed composer selection is Pro and
-Loop is selected, including before the first message. A new-chat opening freezes `loopAfterTurn`
+turns or generic composer idleness. With the finish tool enabled, both Astra Goal and Loop,
+and older Pro Loop, default to **Only finish** and may opt into **After this turn + finish**.
+`shared/finish.ts::supportsFinishAutomation()` supplies the same model/mode eligibility to main
+and renderer. Disabling the finish tool makes after-turn effective for both modes and hides
+the unavailable timing choice in desktop and extension, without changing the saved preference.
+Re-enabling it restores that preference, which also survives toggles, restart and resume.
+The desktop offers the choice for an account-observed eligible composer model before the first
+message. A new-chat opening freezes `loopAfterTurn`
 in its existing outbox entry; pending edits and the exact send receipt transfer it to the chat
 switch through the same serialized automation path. Retry retains that explicit preference.
-Astra Goal remains finish-only. At `session_finish`, both modes use the Loop decision policy
-and inject through the eligible tool response (§11).
+The legacy `loopAfterTurn`/`proLoopDelivery` field names remain wire/storage compatibility names;
+they do not select Loop. Changing delivery retains the selected mode. Extension menu rendering
+includes delivery availability and preference in its existing repaint key.
 
-Opted-in Pro Loop uses the existing Goal reply ledger for real finals. Unfinished responses
+After-turn Goal and Loop use the existing Goal reply ledger for real finals. Unfinished responses
 use shared Continue recovery (§14), requiring a local MCP call in the exact source turn. No automatic Goal/Loop
 decision is generated from silence or a failed response.
 **User decision, 2026-09-13:** every automatic Loop continuation requires at least one recorded,
@@ -2656,7 +2715,7 @@ sources. Appearance has its own Settings navigation page, including the language
 existing setup profiles. The connector-instructions editor
 is removed. Settings saves preserve existing stored MCP instructions for compatibility.
 Dropdowns use native customizable selects (`appearance: base-select`) with theme-matched
-top-layer pickers, wrapping option labels and native keyboard/focus semantics. Pro Loop delivery
+top-layer pickers, wrapping option labels and native keyboard/focus semantics. Continuation timing
 stacks its label and full-width control within the composer menu. `scripts/verify-dropdown-layout.cjs`
 checks the real Electron layout and opened pickers at normal and enlarged zoom.
 Appearance and other Settings selects use paint containment so native dropdown repaints
@@ -2820,6 +2879,11 @@ implement an embedded browser.
 `diagnostics.ts` tests the chain hop by hop. Transient health evidence must not produce repeated
 replacement tunnels or claim a broken provider was repaired. Update checks (§20), browser wake
 and MCP connection have separate lifecycles.
+Tunnel authentication failure requires a failed control-plane request and its actual HTTP
+401/403 or explicit legacy authorization error. Parse structured severity, message and error
+fields before deciding; retry delays, counters, ordinary 400/503 responses, local MCP probes
+and optional Harpoon diagnostics cannot revoke the tunnel. A genuine rejection retires its
+process once and retains an explicit access error; ordinary network retry remains client-owned.
 
 ### Native Desktop
 
