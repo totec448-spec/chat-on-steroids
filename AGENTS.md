@@ -395,7 +395,11 @@ bounded UTF-8 import/read and metadata catalog. `skill-access.ts` exposes only t
 directory as `/skills` to Core, including nested code-mode calls. Current capability/Read-only
 guards still apply. This root is not saved in config, does not satisfy connection folder setup,
 and never becomes the default or learned project cwd, including native paths through an
-overlapping approved root. Desktop and external plugins receive no managed root.
+overlapping approved root. A package directory under the managed root may be a symlink/junction
+only while its final target remains inside an ordinary currently approved root. `/skills/<id>`
+then acts as a package-bounded alias for that target; resource paths are revalidated at use and
+cannot traverse above the linked package. The managed root itself and linked `SKILL.md` files
+remain non-linkable. Desktop and external plugins receive no managed root.
 
 Skills open through leading `/` completion in the composer; the attachment popup's Skills button
 inserts that leading slash and focuses the input while preserving existing draft text. Commands and Skills are
