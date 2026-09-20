@@ -305,12 +305,7 @@
         </section>
         <section class="panel usage-panel" data-panel="usage">
           <div class="settings-heading"><span class="eyebrow">YOUR ACTIVITY</span><h1>Usage</h1><p>Model availability and the work recorded in this workspace.</p></div>
-          <section class="usage-section usage-messages" aria-labelledby="usageMessagesTitle">
-            <h2><span id="usageMessagesTitle">Verified messages</span><button class="btn usage-week-start" id="usageWeekStart" type="button" title="Change start day"><span id="usageWeekStartLabel"></span><span aria-hidden="true">›</span></button></h2>
-            <dl class="usage-message-counts" id="usageMessageCounts" aria-live="polite" translate="no"><div><dt>GPT-5.6</dt><dd id="usageMessages56">—</dd></div><div><dt>GPT-6</dt><dd id="usageMessages6">—</dd></div></dl>
-            <p class="muted" id="usageMessagePeriod"></p>
-          </section>
-          <p class="muted usage-status" id="usageStatus" role="status">Updating usage in the background. After an update, this can take a few minutes. You can keep using the app.</p><div class="usage-summary" id="usageSummary"></div>
+          <div class="usage-summary" id="usageSummary"></div>
           <section class="usage-section"><h2>Token activity per day</h2><div id="usageHeatmap" class="usage-heatmap"></div><p class="muted">Estimated context processed per tool call · last 52 weeks</p></section>
           <section class="usage-section"><h2>Cost estimate per day</h2>
             <details id="usageFormulaDetails"><summary>Edit cost formula</summary>
@@ -321,7 +316,19 @@
             <div id="usageRates"></div></details>
             <p id="usageCost" class="muted">Set per-model cached-input rates to compare costs.</p><div id="usageDays"></div>
           </section>
-          <section class="usage-section"><h2>Remaining usage per model <button class="btn" id="refreshUsage" type="button">Refresh</button></h2><p class="muted">Reported by ChatGPT. Shared pools and feature quotas are listed separately. Missing data means not reported.</p><div id="modelUsage"></div></section>
+          <section class="usage-section usage-messages" aria-labelledby="usageMessagesTitle">
+            <h2><span id="usageMessagesTitle">Messages and limits</span><button class="btn" id="refreshUsage" type="button">Refresh</button></h2>
+            <button class="btn usage-week-start" id="usageWeekStart" type="button" title="Change start day" aria-describedby="usageMessagePeriod"><span id="usageWeekStartLabel"></span><span aria-hidden="true">›</span></button>
+            <span class="sr-only" id="usageMessagePeriod"></span>
+            <p class="muted usage-status" id="usageStatus" role="status">Updating usage in the background. After an update, this can take a few minutes. You can keep using the app.</p>
+            <div id="modelUsage">
+              <dl class="usage-message-counts" id="usageMessageCounts" aria-live="polite">
+                <div class="usage-limit"><dt translate="no">GPT-5.6</dt><dd><strong id="usageMessages56" translate="no">—</strong><span class="muted">sent</span></dd></div>
+                <div class="usage-limit"><dt translate="no">GPT-6</dt><dd><strong id="usageMessages6" translate="no">—</strong><span class="muted">sent</span></dd></div>
+              </dl>
+              <div id="usageLimits"></div>
+            </div>
+          </section>
         </section>
         <!-- ============================================================ Home -->
         <section class="panel" data-panel="home">
