@@ -60,7 +60,7 @@ export async function run<T>(
 ): Promise<T | null> {
   const reply = await promise;
   if (!reply.ok) {
-    toast(reply.error);
+    toast(t(reply.error));
     return null;
   }
   return reply.data;
