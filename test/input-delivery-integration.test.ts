@@ -128,7 +128,10 @@ it('keeps automatic Continue attached to the native question after injected corr
   } finally { clock.mockRestore(); }
 });
 
-it.each([false, true])('retires Goal only when queued input commits its exact source, including restored aliases (%s)', async alias => {
+it.each([
+  { model: 'gpt-5.6-sol', alias: false }, { model: 'gpt-5.6-sol', alias: true },
+  { model: 'gpt-6-pro', alias: false }, { model: 'gpt-6-pro', alias: true }
+])('retires Goal only when queued input commits its exact source ($model, restored alias: $alias)', async ({ model, alias }) => {
   const store = await import('../src/main/session/store.js');
   const durable = await import('../src/main/durable.js');
   let now = Date.now();
@@ -142,7 +145,7 @@ it.each([false, true])('retires Goal only when queued input commits its exact so
     const row = await input.enqueueInput({ ...message(session.id, 'off'), automation: undefined, mode: 'after-turn' });
     now += 10;
     await post('/events', { conversationId, events: [
-      { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+      { kind: 'model_selection', model, time: now },
       { kind: 'turn_start', turnId: 'queue-source', time: now },
       { kind: 'assistant_message', turnId: 'queue-source', messageId: 'queue-source-answer', text: 'Current result', state: 'final', final: true, time: now + 1 },
       { kind: 'turn_end', turnId: 'queue-source', outcome: 'completed', time: now + 2 }
@@ -252,6 +255,84 @@ it.each([false, true])('collects an exact recorded helper final across document 
     await expect(answer).resolves.toBe('{"next":"continue"}');
     expect(await input.pendingBrowserInputs()).toEqual([]);
   } finally { controller.abort(); await answer.catch(() => undefined); }
+});
+
+it.each([
+  { mode: 'auto', earlyEnd: false }, { mode: 'after-turn', earlyEnd: false }, { mode: 'finish', earlyEnd: false },
+  { mode: 'auto', earlyEnd: true }, { mode: 'after-turn', earlyEnd: true }, { mode: 'finish', earlyEnd: true }
+] as const)('delivers $mode queued during a delayed report of the current final (early end: $earlyEnd)', async ({ mode, earlyEnd }) => {
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID(), turnId = randomUUID();
+    const session = await createSession({ title: 'Delayed final and follow-up', conversationId });
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+      { kind: 'user_message', messageId: randomUUID(), text: 'Inspect the current task', time: now },
+      { kind: 'turn_start', turnId, time: now }
+    ] });
+    await attributedMcp(conversationId);
+    const completedAt = now + 1000;
+    now += 2000;
+    if (earlyEnd) {
+      await post('/events', { conversationId, events: [{ kind: 'turn_end', turnId, outcome: 'completed', time: completedAt }] });
+      // A UI end without its final retains the same exact MCP-backed work grant.
+      expect(await input.sessionInputPolicy(session.id)).toMatchObject({ canInject: true, injectionTurnId: turnId, settled: false });
+    }
+    // The browser has finished, but its journal has not reached the app yet.
+    expect((await getSession(session.id))?.activeTurnId).toBe(earlyEnd ? null : turnId);
+    const row = await input.enqueueInput({ ...message(session.id, 'off'), mode });
+    const next = mode === 'auto' ? null : await input.enqueueInput({ ...message(session.id, 'off'), mode, text: 'A later checkpoint' });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(false);
+    const finalEvents = [
+      { kind: 'assistant_message', turnId, messageId: randomUUID(), text: 'The task is complete.',
+        state: 'final', final: true, activeNow: true, time: completedAt },
+      { kind: 'turn_end', turnId, outcome: 'completed', time: completedAt }
+    ];
+    await post('/events', { conversationId, events: finalEvents });
+    expect(await input.sessionInputPolicy(session.id)).toMatchObject({ browserAllowed: true, settled: true });
+    input.resetInputForTests();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(true);
+    expect((await input.listInputs()).find(item => item.id === row.id)?.queuedTurn).toEqual({ conversationId, turnId });
+    const { trackInFlight, emptyEvidence } = await import('../src/main/mcp/call-context.js');
+    await trackInFlight({ startedAt: now, transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
+      caller: { requestId: randomUUID(), transportKey: null, conversationId } }, async () => {
+      expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(false);
+      expect(await input.claimBrowserInput(row.id, 'running-tool-document', conversationId, true)).toBeNull();
+    });
+    const claim = await input.claimBrowserInput(row.id, 'followup-document', conversationId, true);
+    expect(claim?.id).toBe(row.id);
+    expect(claim?.completedTurnId).toBe(turnId);
+    expect(await input.authorizeBrowserInput(row.id, 'followup-document', conversationId)).toBe(true);
+    expect(await input.authorizeBrowserInput(row.id, 'followup-document', conversationId)).toBe(false);
+    expect(await input.acknowledgeBrowserInput(row.id, 'followup-document', conversationId, randomUUID())).toBe(true);
+    await post('/events', { conversationId, events: finalEvents });
+    input.resetInputForTests();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === row.id || item.id === next?.id)).toBe(false);
+    if (next) expect((await input.listInputs()).find(item => item.id === next.id)?.state).toBe('queued');
+  } finally { clock.mockRestore(); }
+});
+
+it.each(['after-turn', 'finish'] as const)('does not release %s queued after the answer was already recorded, including replay', async mode => {
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID(), turnId = randomUUID();
+    const session = await createSession({ title: 'Already completed queue boundary', conversationId });
+    const events = [
+      { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+      { kind: 'user_message', messageId: randomUUID(), text: 'Original question', time: now },
+      { kind: 'turn_start', turnId, time: now },
+      { kind: 'assistant_message', turnId, messageId: randomUUID(), text: 'Already complete.', state: 'final', final: true, time: now },
+      { kind: 'turn_end', turnId, outcome: 'completed', time: now }
+    ];
+    await post('/events', { conversationId, events });
+    now += 2000;
+    const row = await input.enqueueInput({ ...message(session.id, 'off'), mode });
+    expect(row.queuedTurn).toBeUndefined();
+    await post('/events', { conversationId, events });
+    input.resetInputForTests();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(false);
+    expect(await input.claimBrowserInput(row.id, 'old-answer-document', conversationId, true)).toBeNull();
+  } finally { clock.mockRestore(); }
 });
 
 it('does not pin an idle chat to tool transport because another call is unattributed', async () => {
@@ -1603,6 +1684,38 @@ describe('IPC input delivery and Goal control integration', () => {
     await input.offerToolInput(session.id, conversationId, 'overlapping-request', 0);
     expect(goal.goalSwitchFor(conversationId).enabled).toBe(false);
   });
+  it.each([2700, 24000])('keeps one reserved session per intentional send even when opening text is identical (%s chars)', async size => {
+    const store = await import('../src/main/session/store.js');
+    const before = new Set((await store.listAllSessions()).map(session => session.id));
+    const requests = [message(null, 'off'), message(null, 'off')].map(request => ({ ...request,
+      text: 'Keep the literal `code`, $variables and multilingual text: Grüße 世界.\n'.repeat(400).slice(0, size) }));
+    for (const request of requests) {
+      expect((await handlers.get('sessions:send')!(null, request)).ok).toBe(true);
+      const owner = `document-${request.id}`, conversationId = randomUUID(), messageId = randomUUID();
+      const claim = await post('/input/claim', { id: request.id, owner, conversationId: null, requiresAuthorization: true });
+      expect(claim.body.input).toMatchObject({ id: request.id, sessionId: request.id, opening: true });
+      expect((await post('/input/claim', { id: request.id, owner, conversationId: null, authorize: true })).body.ok).toBe(true);
+      const receipt = { id: request.id, owner, conversationId, messageId };
+      expect((await post('/input/bind', receipt)).body.ok).toBe(true);
+      const evidence = await post('/events', { conversationId, events: [
+        { kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() },
+        { kind: 'user_message', messageId, text: claim.body.input.text, time: Date.now() }
+      ] });
+      expect(evidence.status).toBe(200);
+      expect((await post('/input/ack', receipt)).body.ok).toBe(true);
+      // An acknowledgement or route-binding replay must never mint a second owner.
+      expect((await post('/input/bind', receipt)).body.ok).toBe(true);
+      expect((await post('/input/ack', receipt)).body.ok).toBe(true);
+      expect((await store.findSessionByConversation(conversationId, { requireUnique: true }))?.id).toBe(request.id);
+      expect((await input.listInputs()).find(row => row.id === request.id)).toMatchObject({
+        state: 'sent', sessionId: request.id, deliveredSessionId: request.id, conversationId, messageId
+      });
+      const users = await store.readRecentEvents(request.id, 10, { kinds: ['user_message'] });
+      expect(users).toHaveLength(1);
+    }
+    expect((await store.listAllSessions()).filter(session => !before.has(session.id)).map(session => session.id).sort())
+      .toEqual(requests.map(request => request.id).sort());
+  });
   it('binds a new chat through HTTP ACK, applies its choice once, and pushes session change', async () => {
     const request = message(null, 'goal');
     await handlers.get('sessions:send')!(null, request);
@@ -2106,7 +2219,7 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
     } finally { clock.mockRestore(); }
   });
 
-  it('withdraws Continue while a newly admitted local tool is running', async () => {
+  it('holds Continue during a local tool and cancels it when that source records new work', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     const calls = await import('../src/main/mcp/call-context.js');
     let release: (() => void) | undefined;
@@ -2117,6 +2230,8 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
         evidence: calls.emptyEvidence(), caller: { conversationId, requestId: randomUUID(), transportKey: null } },
         () => new Promise<void>(resolve => { release = resolve; }));
       expect(await input.claimBrowserInput(row.id, 'busy-tool-doc', conversationId, true)).toBeNull();
+      expect((await input.listInputs()).find(entry => entry.id === row.id)?.state).toBe('queued');
+      await attributedMcp(conversationId);
       expect((await input.listInputs()).find(entry => entry.id === row.id)?.state).toBe('cancelled');
     } finally { release?.(); await running; clock.mockRestore(); }
   });
@@ -2162,6 +2277,58 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
       expect((await input.listInputs()).find(entry => entry.id === row.id)?.state).toBe('cancelled');
       expect(goal.goalPendingReplyFor(conversationId)?.replyId ?? null).toBe(mode === 'off' ? null : messageId);
     } finally { clock.mockRestore(); }
+  });
+
+  it.each(['running', 'settling'] as const)('keeps the same Continue ticket while an unrelated tool is still unassigned (%s)', async phase => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const calls = await import('../src/main/mcp/call-context.js');
+    let release!: () => void;
+    let work: Promise<void> | undefined;
+    try {
+      const { row, conversationId } = await silent('gpt-5.6-pro', ms => { now += ms; });
+      const context = { startedAt: now, transportKey: null, agent: null, outcome: null,
+        evidence: calls.emptyEvidence(), caller: { conversationId: null as string | null, requestId: randomUUID(), transportKey: null } };
+      const pending = new Promise<void>(resolve => { release = resolve; });
+      if (phase === 'running') work = calls.trackInFlight(context, () => pending);
+      else { calls.holdWhileSettling(context, pending); work = pending; }
+      expect((await input.pendingBrowserInputs()).some(entry => entry.id === row.id)).toBe(false);
+      expect(await input.claimBrowserInput(row.id, 'held-doc', conversationId, true)).toBeNull();
+      input.resetInputForTests();
+      expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({
+        state: 'queued', owner: null, recovery: row.recovery, silenceBoundary: row.silenceBoundary
+      });
+      // Exact evidence assigns the tool to a different chat while the call is still live.
+      context.caller.conversationId = randomUUID();
+      expect((await input.pendingBrowserInputs()).find(entry => entry.id === row.id)).toBeDefined();
+      expect(await input.claimBrowserInput(row.id, 'held-doc', conversationId, true)).not.toBeNull();
+      expect(await input.authorizeBrowserInput(row.id, 'held-doc', conversationId)).toBe(true);
+      expect(await input.authorizeBrowserInput(row.id, 'held-doc', conversationId)).toBe(false);
+    } finally { release?.(); await work; clock.mockRestore(); }
+  });
+
+  it('retains a claimed Continue across unrelated activity without granting Stop or Send', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const calls = await import('../src/main/mcp/call-context.js');
+    let release!: () => void;
+    let work: Promise<void> | undefined;
+    try {
+      const { row, conversationId, turnId } = await silent('gpt-5.6-pro', ms => { now += ms; });
+      expect(await input.deferSilenceInput(row.id, conversationId, turnId)).toBe(true);
+      now = row.recovery!.busyUntil;
+      expect(await input.claimBrowserInput(row.id, 'claimed-doc', conversationId, true)).not.toBeNull();
+      work = calls.trackInFlight({ startedAt: now, transportKey: null, agent: null, outcome: null,
+        evidence: calls.emptyEvidence(), caller: { conversationId: null, requestId: randomUUID(), transportKey: null } },
+        () => new Promise<void>(resolve => { release = resolve; }));
+      expect(await input.advanceRecoveryInput(row.id, 'claimed-doc', conversationId, 'stop')).toBe(false);
+      expect(await input.authorizeBrowserInput(row.id, 'claimed-doc', conversationId)).toBe(false);
+      expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'browser', owner: 'claimed-doc' });
+      release(); await work;
+      expect(await input.advanceRecoveryInput(row.id, 'claimed-doc', conversationId, 'stop')).toBe(true);
+      expect(await input.advanceRecoveryInput(row.id, 'claimed-doc', conversationId, 'stop')).toBe(false);
+      expect(await input.advanceRecoveryInput(row.id, 'claimed-doc', conversationId, 'stopped')).toBe(true);
+      expect(await input.authorizeBrowserInput(row.id, 'claimed-doc', conversationId)).toBe(true);
+      expect(await input.authorizeBrowserInput(row.id, 'claimed-doc', conversationId)).toBe(false);
+    } finally { release?.(); await work; clock.mockRestore(); }
   });
 
   it.each(['gpt-5.6-sol', 'gpt-5.6-pro'])('keeps Continue and its Stop deadline when reload re-observes the same question with different text (%s)', async model => {

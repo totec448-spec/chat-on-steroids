@@ -19,7 +19,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../src/shared/user-prompt.js';
 import { nativeHandoffPrompt } from '../src/main/session/handoff-prompt.js';
-import { handoffPlanNotice, resumeBootstrapText } from '../src/main/session/handoff.js';
+import { resumeBootstrapText } from '../src/main/session/handoff.js';
 
 vi.mock('electron', () => ({
   safeStorage: {
@@ -38,7 +38,7 @@ const { bridgePort, pendingCommands, resetBridgeForTests, resumeJobFor, setBrows
   await import('../src/main/bridge.js');
 const durable = await import('../src/main/durable.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableSoon } = durable;
-const { getSession, initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
+const { getSession, initSessionStore, resetSessionStoreForTests, updateSessionPlan } = await import('../src/main/session/store.js');
 const { resetRecorderForTests, sessionForConversation } = await import('../src/main/session/recorder.js');
 const { resetSwarm } = await import('../src/main/agents.js');
 const {
@@ -473,8 +473,7 @@ describe('a brief longer than the app can type', () => {
     await record();
     const { token: continuation } = await press();
     const head = 'TASK — keep all of this.\n', tail = '\nNEXT — continue exactly here.';
-    const noticeBudget = handoffPlanNotice('x'.repeat(64)).length;
-    const overhead = resumeBootstrapText('', continuation).length + noticeBudget;
+    const overhead = resumeBootstrapText('', continuation).length;
     const brief = head + 'dense operational detail '.repeat(6500).slice(0,
       MAX_CHATGPT_MESSAGE_CHARS - overhead - head.length - tail.length - 8) + tail;
 
@@ -486,7 +485,33 @@ describe('a brief longer than the app can type', () => {
     expect(text).not.toContain('[[COS_CONTEXT:');
     expect(text).not.toMatch(/middle of this brief.*left out/);
     expect(text.length).toBeLessThanOrEqual(MAX_CHATGPT_MESSAGE_CHARS);
-    expect(text.length).toBeGreaterThan(MAX_CHATGPT_MESSAGE_CHARS - noticeBudget - 100);
+    expect(text.length).toBeGreaterThan(MAX_CHATGPT_MESSAGE_CHARS - 100);
+  });
+
+  it('delivers the saved plan with the exact continuation marker inside the message limit', async () => {
+    await connect();
+    const sessionId = await record();
+    const plan = { explanation: 'Validation still needs to finish.', plan: [
+      { step: 'Implement the change', status: 'completed' as const, details: 'Preserve unrelated working-tree edits.' },
+      { step: 'Run the outstanding checks', status: 'in_progress' as const, details: 'Reuse the existing terminal; do not relaunch the build.' }
+    ] };
+    await updateSessionPlan(sessionId, CHAT_A, plan, Date.now());
+    const { token: continuation } = await press();
+    const brief = 'TASK: finish the original work.\n' + 'verified detail '.repeat(8_000) + '\nNEXT: inspect the retained build result.';
+    const stored = await capture(continuation, brief);
+    expect(stored.status).toBe(200);
+    const text = (await redeem(stored.body.commandId, 'page-plan')).body.command.text as string;
+    expect(text).toContain(`[[CLF-RESUME:${continuation}]]`);
+    expect(text).toContain('TASK: finish the original work.');
+    expect(text).toContain('NEXT: inspect the retained build result.');
+    expect(text).toContain(plan.explanation);
+    for (const step of plan.plan) {
+      expect(text).toContain(step.step);
+      expect(text).toContain(step.status);
+      expect(text).toContain(step.details);
+    }
+    expect(text).not.toContain('session(action=');
+    expect(text.length).toBeLessThanOrEqual(MAX_CHATGPT_MESSAGE_CHARS);
   });
 });
 

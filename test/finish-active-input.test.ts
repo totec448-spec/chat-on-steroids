@@ -130,14 +130,14 @@ describe('active Astra finish and user-input ownership', () => {
     await expectExactInjection(correction);
   });
 
-  it('retires a queued finish instruction on Off while the user correction retains exclusive tool custody', async () => {
+  it.each(['off', 'loop'] as const)('retires a queued Goal finish instruction on %s while the user correction retains exclusive tool custody', async mode => {
     await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
     await announceSessionFinish(hooks.caller.sessionId, 'Still verifying', Date.now());
     await settleSessionFinishForTests();
     const [automatic] = await listInputs();
     expect(automatic).toMatchObject({ state: 'queued', finishOwner: { turnId } });
     await expectStillWorking();
-    await setGoalSwitchNow(hooks.caller.conversationId, 'goal', false);
+    await setGoalSwitchNow(hooks.caller.conversationId, mode === 'off' ? 'goal' : mode, mode !== 'off');
     expect((await listInputs()).find(row => row.id === automatic!.id)?.state).toBe('cancelled');
     const correction = await injectCorrection();
     await flushDurable(); resetInputForTests();

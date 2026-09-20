@@ -3658,6 +3658,12 @@ export function primeForOwnedConversation(conversationId: string): string | null
   return dormantAgentForConversation(conversationId)?.owner.primeConversationId ?? null;
 }
 
+/** A currently occupied slot; parked history must not grant or refuse browser recovery. */
+export function liveAgentForOwnedConversation(conversationId: string): AgentInfo | null {
+  const agent = agentForConversationId(conversationId);
+  return agent ? { ...agent.info } : null;
+}
+
 /** Read-only exact owner metadata for recorder/origin reconstruction across parked histories. */
 export function agentInfoForOwnedConversation(conversationId: string): AgentInfo | null {
   const primes = allFamilies().filter(owner => !unpublishedRuns.has(owner as Run) && owner.primeConversationId === conversationId)

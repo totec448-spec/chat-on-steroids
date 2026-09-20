@@ -92,7 +92,16 @@ function lineReader(onLine: (line: string) => void): (chunk: Buffer) => void {
   };
 }
 
-const AUTH_FAILURE = /\b(401|403|unauthorized|invalid[_ ]api[_ ]key|invalid_request_error|forbidden)\b/i;
+/** Only a rejected control-plane request can invalidate the tunnel credentials. */
+function tunnelAuthRejected(message: string, error: string, statusCode?: unknown): boolean {
+  const controlPlane = /^(?:poll failed(?:;\s*backing off)?|tunnel metadata fetch failed)$/i.test(message) ||
+    /\bcontrolplane (?:client|responder):/i.test(error);
+  if (!controlPlane) return false;
+  if (typeof statusCode === 'number') return statusCode === 401 || statusCode === 403;
+  // Older clients omit status_code. Match an actual response status or auth error,
+  // never numbers from retry delays, identifiers or unrelated structured fields.
+  return /\b(?:(?:unexpected status(?: code)?|HTTP)\s*:?\s*(?:401|403)|401\s+Unauthorized|403\s+Forbidden|unauthorized|forbidden|invalid[_ ]api[_ ]key|tunnel_use_forbidden)\b/i.test(error);
+}
 
 /**
  * Errors that mean "this PC cannot reach OpenAI right now", as opposed to "the tunnel
@@ -540,21 +549,19 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
     };
     current = run;
 
+    const rejectAuthentication = (): void => {
+      stopped = true;
+      current = null;
+      clearTimer();
+      retirement = stopTree(proc).then(() => undefined);
+      opts.report({
+        state: 'auth-failed',
+        detail: 'OpenAI refused access to this tunnel. Check its account, organization, API key and tunnel ID in Connection settings.'
+      });
+    };
+
     const handleLine = (line: string): void => {
       if (stopped || current !== run) return;
-      if (AUTH_FAILURE.test(line)) {
-        // A bad key or tunnel ID will not fix itself, so this one is terminal.
-        stopped = true;
-        current = null;
-        clearTimer();
-        retirement = stopTree(proc).then(() => undefined);
-        opts.report({
-          state: 'auth-failed',
-          detail: 'The tunnel rejected the API key or tunnel ID. Check both in Connection settings.'
-        });
-        return;
-      }
-
       // tunnel-client emits structured JSON. Do not treat the mere presence of an
       // `error` field as an ERROR-level event: some healthy startup WARN records carry
       // internal diagnostics there. In particular, loopback Harpoon auto-registration
@@ -573,6 +580,10 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
         if (isBenignHarpoonChannelEvent(level, message, event)) return;
         if (level === 'ERROR' || level === 'FATAL' || level === 'WARN') {
           const errText = event['error'] ? String(event['error']) : '';
+          if (tunnelAuthRejected(message, errText, event['status_code'])) {
+            rejectAuthentication();
+            return;
+          }
           run.lastError = `${level} ${message}${errText ? `: ${errText}` : ''}`.slice(0, 400);
           if (isUnreachableError(`${message}: ${errText}`)) {
             // Retry chatter. noteUnreachable logs one plain line per run rather than a
@@ -587,6 +598,10 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
         // Older clients or crash paths may still print plain text.
       }
       if (/\b(error|fatal|warn)\b/i.test(line)) {
+        if (tunnelAuthRejected('', line)) {
+          rejectAuthentication();
+          return;
+        }
         run.lastError = line.slice(0, 400);
         if (isUnreachableError(line)) noteUnreachable(run, line);
         else logWarn(`${tag}: ${run.lastError}`);

@@ -68,7 +68,7 @@ export function createActiveTabs(chrome) {
   }
   function project() {
     const wanted = new Map();
-    for (const tabs of scopes.values()) for (const tab of tabs) if (valid(tab) && wanted.size < 64) wanted.set(tab.id, tab);
+    for (const scope of scopes.values()) for (const tab of scope.tabs) if (valid(tab) && wanted.size < 64) wanted.set(tab.id, tab);
     for (const [id, state] of states) {
       if (wanted.get(id)?.url === state.url) continue;
       state.cancelled = true;
@@ -80,16 +80,29 @@ export function createActiveTabs(chrome) {
   }
   return {
     // These are projections of existing owners, not persisted activity or opening authority.
-    set(scope, tabs) {
-      if (tabs.length) scopes.set(scope, tabs.filter(valid).slice(0, 64));
+    set(scope, tabs, eligible = null) {
+      if (tabs.length) scopes.set(scope, { tabs: tabs.filter(valid).slice(0, 64), eligible });
       else scopes.delete(scope);
       return project();
     },
     owns(id) { return states.has(id) || [...retiring].some(s => s.id === id); },
     revoke() { scopes.clear(); return project(); },
-    navigation(id) {
+    navigation(id, tab = null) {
       if (!states.has(id) && ![...retiring].some(s => s.id === id)) return Promise.resolve();
-      for (const [key, tabs] of scopes) scopes.set(key, tabs.filter(tab => tab.id !== id));
+      let retained = false;
+      for (const scope of scopes.values()) {
+        const keep = scope.tabs.some(previous => previous.id === id) && tab?.id === id && valid(tab) && scope.eligible?.(tab) === true;
+        scope.tabs = scope.tabs.flatMap(previous => previous.id !== id ? [previous] : keep ? [tab] : []);
+        retained ||= keep;
+      }
+      // SPA routing keeps the browser document. Its existing owner can approve
+      // the new route without suspending rendering during native New Chat.
+      // Full document loads pass no tab and always release the old lease.
+      const state = states.get(id);
+      if (retained && state) {
+        if (cancelled.get(id) === state.url) cancelled.set(id, tab.url);
+        state.url = tab.url;
+      }
       return project();
     },
     detached({ tabId }) {

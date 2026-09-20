@@ -102,7 +102,9 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-it('persists Pro Loop delivery across toggles and restart without granting Goal browser continuation', async () => {
+it('preserves the Astra delivery preference across Goal/Loop, restart and finish-setting changes', async () => {
+  const config = (await import('../src/main/config.js')).getConfig();
+  await saveConfig({ ...config, ui: { ...config.ui, finishTool: true } });
   const id = 'pro-loop-delivery-test';
   const session = await createSession({ conversationId: id });
   await observeSessionModel(session.id, id, 'gpt-6-pro', Date.now(), 'pro');
@@ -118,6 +120,14 @@ it('persists Pro Loop delivery across toggles and restart without granting Goal 
   await goal.setGoalSwitchNow(id, 'loop', true);
   expect(goal.loopAfterTurnFor(id)).toBe(true);
   await goal.setGoalSwitchNow(id, 'goal', true);
+  expect(await goal.astraFinishOnly(session.id, id)).toBe(false);
+  await goal.setGoalSwitchNow(id, 'goal', true, false);
+  expect(await goal.astraFinishOnly(session.id, id)).toBe(true);
+  await saveConfig({ ...config, ui: { ...config.ui, finishTool: false } });
+  expect(await goal.astraFinishOnly(session.id, id)).toBe(false);
+  expect(goal.loopAfterTurnFor(id)).toBe(true);
+  expect(goal.goalSwitchFor(id).afterTurn).toBe(false);
+  await saveConfig({ ...config, ui: { ...config.ui, finishTool: true } });
   expect(await goal.astraFinishOnly(session.id, id)).toBe(true);
 });
 
@@ -2488,7 +2498,9 @@ it('publishes actual opening response deltas before one validated final result',
   expect(await result).toMatchObject({ reply: goal.humanReply('Inspect then implement') });
 });
 
-it('never owes or generates a browser continuation for Astra even with Goal armed', async () => {
+it('keeps Astra Goal finish-only while the finish tool is enabled and after-turn is not selected', async () => {
+  const config = (await import('../src/main/config.js')).getConfig();
+  await saveConfig({ ...config, ui: { ...config.ui, finishTool: true } });
   const conversationId = 'aaaaaaaa-1111-4222-8333-123456789abc';
   const session = await createSession({ conversationId, title: 'Astra finish-only' });
   await observeSessionModel(session.id, conversationId, 'gpt-6-pro', Date.now());
@@ -2500,6 +2512,31 @@ it('never owes or generates a browser continuation for Astra even with Goal arme
   goal.beginGoalDraft(conversationId, draft.token);
   await vi.waitFor(() => expect(goal.goalViewFor(conversationId)?.stage).toBe('no-reply'));
   expect(fetch).not.toHaveBeenCalled();
+});
+
+it.each(['goal', 'loop'] as const)('runs Astra %s through its ordinary decision after a turn when finish is disabled or after-turn is selected', async mode => {
+  const config = (await import('../src/main/config.js')).getConfig();
+  for (const finishTool of [false, true]) {
+    await saveConfig({ ...config, ui: { ...config.ui, finishTool } });
+    const conversationId = `astra-${mode}-${finishTool}`;
+    const session = await createSession({ conversationId });
+    await observeSessionModel(session.id, conversationId, 'gpt-6-pro', Date.now());
+    await goal.setGoalSwitchNow(conversationId, mode, true, finishTool);
+    await appendEvent(session.id, { kind: 'user_message', source: 'extension', time: Date.now(),
+      message: { text: 'Finish the requested checks', chars: 27, truncated: false } });
+    await recordLoopMcpProof(session.id, 'astra-turn');
+    await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, replyId: 'astra-final', turnId: 'astra-turn', eventSeq: 10, blocked: false });
+    expect(goal.goalPendingReplyFor(conversationId)?.replyId).toBe('astra-final');
+    const fetcher = vi.fn(async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      expect(body.messages[0].content).toBe(mode === 'goal' ? config.goal.prompt : config.goal.loopPrompt);
+      return decision(mode === 'goal' ? 'stop' : 'continue', mode === 'loop' ? 'Continue the requested checks' : '');
+    });
+    globalThis.fetch = fetcher as typeof fetch;
+    goal.startGoalDraft({ conversationId, sessionId: session.id, turnId: 'astra-turn' });
+    expect((await settled(conversationId)).stage).toBe(mode === 'goal' ? 'no-reply' : 'ready');
+    expect(fetcher).toHaveBeenCalledOnce();
+  }
 });
 
 describe('a custom OpenAI-compatible provider', () => {

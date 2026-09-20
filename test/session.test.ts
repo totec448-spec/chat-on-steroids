@@ -404,8 +404,11 @@ describe('session store', () => {
 
   it('finds an attachment beyond the 5,000-session maintenance scan cap', async () => {
     const seed = await createSession({ title: 'catalog seed', conversationId: null });
-    const seedSummary = await getSession(seed.id);
-    expect(seedSummary).not.toBeNull();
+    await flushSessions();
+    // Clone an actual persisted checkpoint, including its private version/watermark
+    // fields. A public summary is a legacy fixture and causes 5,001 real migrations.
+    const seedSummary = JSON.parse(await fs.readFile(path.join(sessionsRoot(), seed.id, 'meta.json'), 'utf8'));
+    const seedStat = await fs.stat(path.join(sessionsRoot(), seed.id, 'meta.json'));
     // Force the next lookup to rebuild from the durable catalog rather than the live seed.
     resetSessionStoreForTests();
 
@@ -414,7 +417,23 @@ describe('session store', () => {
     const targetId = names[names.length - 1] as string;
     const realReaddir = fs.readdir.bind(fs);
     const realReadFile = fs.readFile.bind(fs);
+    const realStat = fs.stat.bind(fs);
     const rootPath = sessionsRoot();
+    const virtualNames = new Set(names);
+    const virtualId = (file: string): string | null => {
+      const parts = path.relative(rootPath, file).split(path.sep);
+      return parts.length === 2 && virtualNames.has(parts[0]!) ? parts[0]! : null;
+    };
+    const statSpy = vi.spyOn(fs, 'stat').mockImplementation(
+      (async (target: Parameters<typeof fs.stat>[0], ...args: unknown[]) => {
+        const file = String(target);
+        if (virtualId(file)) {
+          if (path.basename(file) === 'meta.json') return seedStat;
+          throw Object.assign(new Error('synthetic catalog has no message history'), { code: 'ENOENT' });
+        }
+        return (realStat as (...callArgs: unknown[]) => ReturnType<typeof fs.stat>)(target, ...args);
+      }) as typeof fs.stat
+    );
     const readdirSpy = vi.spyOn(fs, 'readdir').mockImplementation(
       (async (target: Parameters<typeof fs.readdir>[0], ...args: unknown[]) => {
         if (String(target) === rootPath) return names;
@@ -424,8 +443,8 @@ describe('session store', () => {
     const readSpy = vi.spyOn(fs, 'readFile').mockImplementation(
       (async (target: Parameters<typeof fs.readFile>[0], ...args: unknown[]) => {
         const file = String(target);
-        const id = path.basename(path.dirname(file));
-        if (file.endsWith('meta.json') && id.startsWith('catalog-')) {
+        const id = virtualId(file);
+        if (path.basename(file) === 'meta.json' && id) {
           return JSON.stringify({
             ...seedSummary,
             id,
@@ -440,9 +459,13 @@ describe('session store', () => {
 
     try {
       expect((await findSessionByConversation(conversationId, { requireUnique: true }))?.id).toBe(targetId);
+      expect((await realReaddir(rootPath)).some(name => virtualNames.has(name))).toBe(false);
     } finally {
       readSpy.mockRestore();
       readdirSpy.mockRestore();
+      statSpy.mockRestore();
+      resetSessionStoreForTests();
+      await deleteSession(seed.id);
     }
   }, 90_000);
 
@@ -1861,8 +1884,9 @@ describe('handoff storage', () => {
 
   it('finds the newest handoff even when its session is beyond the 5,000-folder maintenance cap', async () => {
     const seed = await createSession({ title: 'handoff catalog seed' });
-    const seedSummary = await getSession(seed.id);
-    expect(seedSummary).not.toBeNull();
+    await flushSessions();
+    const seedSummary = JSON.parse(await fs.readFile(path.join(sessionsRoot(), seed.id, 'meta.json'), 'utf8'));
+    const seedStat = await fs.stat(path.join(sessionsRoot(), seed.id, 'meta.json'));
     resetSessionStoreForTests();
 
     const names = Array.from({ length: 5001 }, (_, index) => `handoff-${String(index).padStart(5, '0')}`);
@@ -1870,7 +1894,23 @@ describe('handoff storage', () => {
     const handoffId = '2026-08-24-deadbeef';
     const realReaddir = fs.readdir.bind(fs);
     const realReadFile = fs.readFile.bind(fs);
+    const realStat = fs.stat.bind(fs);
     const rootPath = sessionsRoot();
+    const virtualNames = new Set(names);
+    const virtualId = (file: string): string | null => {
+      const parts = path.relative(rootPath, file).split(path.sep);
+      return parts.length === 2 && virtualNames.has(parts[0]!) ? parts[0]! : null;
+    };
+    const statSpy = vi.spyOn(fs, 'stat').mockImplementation(
+      (async (target: Parameters<typeof fs.stat>[0], ...args: unknown[]) => {
+        const file = String(target);
+        if (virtualId(file)) {
+          if (path.basename(file) === 'meta.json') return seedStat;
+          throw Object.assign(new Error('synthetic catalog has no message history'), { code: 'ENOENT' });
+        }
+        return (realStat as (...callArgs: unknown[]) => ReturnType<typeof fs.stat>)(target, ...args);
+      }) as typeof fs.stat
+    );
     const readdirSpy = vi.spyOn(fs, 'readdir').mockImplementation(
       (async (target: Parameters<typeof fs.readdir>[0], ...args: unknown[]) => {
         if (String(target) === rootPath) return names;
@@ -1880,8 +1920,8 @@ describe('handoff storage', () => {
     const readSpy = vi.spyOn(fs, 'readFile').mockImplementation(
       (async (target: Parameters<typeof fs.readFile>[0], ...args: unknown[]) => {
         const file = String(target);
-        const id = path.basename(path.dirname(file));
-        if (file.endsWith('meta.json') && id.startsWith('handoff-')) {
+        const id = virtualId(file);
+        if (path.basename(file) === 'meta.json' && id) {
           return JSON.stringify({
             ...seedSummary,
             id,
@@ -1891,7 +1931,7 @@ describe('handoff storage', () => {
             lastHandoffAt: id === targetId ? 20_000 : null
           });
         }
-        if (file.endsWith(`${path.sep}handoffs${path.sep}${handoffId}.json`)) {
+        if (file === path.join(rootPath, targetId, 'handoffs', `${handoffId}.json`)) {
           return JSON.stringify(handoff(targetId, handoffId, 20_000));
         }
         return (realReadFile as (...callArgs: unknown[]) => ReturnType<typeof fs.readFile>)(target, ...args);
@@ -1900,9 +1940,12 @@ describe('handoff storage', () => {
 
     try {
       expect((await latestHandoff())?.id).toBe(handoffId);
+      expect((await realReaddir(rootPath)).some(name => virtualNames.has(name))).toBe(false);
     } finally {
       readdirSpy.mockRestore();
       readSpy.mockRestore();
+      statSpy.mockRestore();
+      resetSessionStoreForTests();
       await deleteSession(seed.id);
     }
   }, 90_000);

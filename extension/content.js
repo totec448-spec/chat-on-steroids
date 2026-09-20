@@ -36,7 +36,7 @@
   // before touching the shared DOM. Otherwise old and new composer observers can continually
   // remove and reinsert each other's controls, starving transport/timers and freezing the tab.
   // A healthy incumbent in this context still wins the static/recovery injection race.
-  const RECORDER_VERSION = 13;
+  const RECORDER_VERSION = 19;
   const recorderHandle = {
     version: RECORDER_VERSION,
     healthy: () => false,
@@ -1350,8 +1350,15 @@
     // a single refused `bind` permanent: the worker kept the tab pointed at the *previous*
     // conversation, and nothing ever asked again. That is what left the popup showing the
     // old chat's id beside the new chat's URL while the app had no session for either.
-    const reply = await ask({ type: 'bind', conversationId: id });
-    if (reply && reply.ok === true) boundId = id;
+    const forEpoch = epoch, projectInput = desktopProjectInput;
+    const current = () => alive && epoch === forEpoch && conversationId === id && CLF_DOM.conversationId() === id;
+    // Route binding can release events journalled before Send. It must commit the
+    // reserved opening just like events/correlate, before the recorder sees them.
+    const reply = await ask({ type: 'bind', conversationId: id, projectInput }, current);
+    if (current() && reply?.ok === true) {
+      boundId = id;
+      retireBoundProjectInput(projectInput, reply.projectBound);
+    }
   }
 
   /**
@@ -2691,8 +2698,7 @@
     void flush();
   }
 
-  const turnIdOf = (section) =>
-    section && section.getAttribute ? section.getAttribute('data-turn-id') : null;
+  const turnIdOf = (section) => CLF_DOM.turnIdOf(section);
 
   /**
    * Watches for connector rows as ChatGPT inserts them, rather than waiting for a tick.
@@ -2807,7 +2813,7 @@
         return false;
       });
       if (!relevant) return;
-      const authoredSelector = '[data-message-author-role="assistant"], .markdown';
+      const authoredSelector = CLF_DOM.AUTHORED_SELECTOR;
       const nativeAuthoredNode = (node) => {
         const element = node && node.nodeType === 1 ? node : node?.parentElement;
         return Boolean(element && !ownStreamNode(element) &&
@@ -2880,7 +2886,7 @@
     });
   }
 
-  const TURN_SECTION = 'section[data-testid^="conversation-turn"]';
+  const TURN_SECTION = CLF_DOM.TURN_SELECTOR;
   let seededPath = null;
 
   /**
@@ -3010,7 +3016,7 @@
   // 11: adds exact typed thought-notification ids and ephemeral DOM stamps for selective
   //     presentation suppression. Caption text and per-call adjacency remain non-authority.
   // 12: adds exact provider-message/sediment generated-image descriptors and DOM pixel stamps.
-  const FIBER_VERSION = 13;
+  const FIBER_VERSION = 19;
   const FIBER_TIMEOUT_MS = 1500;
   const FIBER_MAX_ROWS = 400;
   /** Assistant turns whose per-call evidence is accepted from one scan. */
@@ -7433,7 +7439,8 @@
     // view does not carry because they are this tab's rather than the app's. The draft is
     // deliberately absent — the textarea already holds it, and Save is kept in step by the
     // input listener, so typing a goal repaints nothing.
-    const painted = JSON.stringify([view, menuBusy, objectiveBusy, objectiveError]);
+    const painted = JSON.stringify([view, menuBusy, objectiveBusy, objectiveError,
+      goalConfig?.proLoopDelivery, goalConfig?.afterTurn]);
     // Unchanged, so the sheet on screen is already the right sheet. Only its position is
     // still worth re-deciding: the composer it hangs off moves as ChatGPT grows it.
     if (painted === menuPainted && root.firstChild) return void placeMenu(root, control.button);
@@ -7489,10 +7496,10 @@
     }
     // Under the switch, and above the task it points at.
     if (view.mode) root.append(buildMode(view.mode));
-    if (goalConfig?.mode === 'loop' && goalConfig.proLoopDelivery && composerChat().state === 'chat') {
+    if (goalConfig?.proLoopDelivery && composerChat().state === 'chat') {
       const delivery = document.createElement('button');
       delivery.type = 'button'; delivery.className = 'clf-menu-action';
-      delivery.textContent = goalConfig.afterTurn ? 'Pro Loop: After this turn + finish' : 'Pro Loop: Only finish';
+      delivery.textContent = `${goalConfig.mode === 'loop' ? 'Loop' : 'Goal'}: ${goalConfig.afterTurn ? 'After this turn + finish' : 'Only finish'}`;
       delivery.disabled = menuBusy || !!goalConfig.blocked;
       delivery.addEventListener('click', event => {
         event.preventDefault(); event.stopPropagation();
@@ -7880,7 +7887,7 @@
     const current = bootstrap && bootstrapOwner?.conversationId === conversationId &&
       bootstrapOwner.epoch === epoch && CLF_DOM.conversationId() === conversationId;
     const message = current && node ? CLF_DOM.messages().find(message => message.role === 'user' &&
-      message.id === node.getAttribute('data-message-id')) : null;
+      message.id === CLF_DOM.messageIdOf(node)) : null;
     const source = message && bootstrapOwner.messageId === message.id
       ? userMessageSource(message) : null;
     const identity = source ? `${conversationId}:${epoch}:${message.id}:${bootstrap}` : null;
@@ -10702,7 +10709,7 @@
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(claimed)) return;
     const raw = Array.isArray(event.data.requestIds) ? event.data.requestIds : [];
     if (raw.length === 0 || raw.length > 16) return;
-    const requestIds = [...new Set(raw.filter((id) => typeof id === 'string' && /^wfr_[a-zA-Z0-9_-]{1,96}$/.test(id)))];
+    const requestIds = [...new Set(raw.filter((id) => typeof id === 'string' && /^(?:wfr_[a-zA-Z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.test(id)))];
     if (requestIds.length === 0) return;
     const observedAt = Number.isFinite(event.data.observedAt) ? event.data.observedAt : Date.now();
     confirmStreamRequestOrigin(claimed, requestIds, observedAt);
@@ -11208,18 +11215,25 @@
   function catalogPageReady() {
     // A catalog covers every native version, not just the selected group's buckets.
     // Elect an idle composer before inspecting those groups and restoring selection.
-    return alive && !desktopInputBusy && !generating && !CLF_DOM.generating() &&
-      CLF_DOM.composerVisible() && !CLF_DOM.hasComposerAttachments() &&
-      (catalogHelper() || !CLF_DOM.composer()?.textContent?.trim());
+    return catalogPageBlocker() === null;
+  }
+  function catalogPageBlocker() {
+    if (!alive) return 'page_changed';
+    if (desktopInputBusy) return 'input_busy';
+    if (generating || CLF_DOM.generating()) return 'generating';
+    if (!CLF_DOM.composer()) return 'composer_missing';
+    if (!CLF_DOM.composerVisible()) return 'composer_hidden';
+    if (CLF_DOM.hasComposerAttachments()) return 'attachments';
+    if (CLF_DOM.composer().textContent?.trim()) return 'draft';
+    return null;
   }
   function catalogHelper() {
     return !conversationId && location.pathname === '/' &&
-      !!new URL(location.href).searchParams.get('cos-model-catalog') && !CLF_DOM.turns().length;
+      /^[a-f0-9-]{36}$/i.test(new URL(location.href).searchParams.get('cos-model-catalog') || '') && !CLF_DOM.turns().length;
   }
   async function inspectAppModelCatalog(message) {
     const ownedEpoch = epoch;
-    // This dedicated helper is app-owned. ChatGPT restores the home-page draft
-    // here; clear that stale text before discovery, as for a fresh send bootstrap.
+    // Discovery never owns authored text, including a draft restored on its helper.
     if (modelCatalogBusy || !/^[a-f0-9-]{36}$/i.test(message.nonce) || Date.now() >= message.expiresAt) return false;
     modelCatalogBusy = true;
     try {
@@ -11227,12 +11241,10 @@
     // The owned helper registers before React mounts its composer. Hold this one
     // request on the existing DOM readiness observer instead of waiting for the
     // next 30-second service-worker maintenance pass.
-    if (!catalogPageReady() && catalogHelper()) {
+    if (['composer_missing', 'composer_hidden'].includes(catalogPageBlocker()) && catalogHelper()) {
       await waitPageView(catalogPageReady, () => current() && catalogHelper(), 15000);
     }
     if (!current() || !catalogPageReady()) return false;
-    const restoredText = CLF_DOM.composer().textContent;
-    if (catalogHelper() && restoredText?.trim() && !CLF_DOM.clearPromptExact(restoredText)) return false;
     // Work swaps the composer as well as its picker. Complete that owned transition
     // before binding the exact Chat composer used by the remaining inspection.
     const switchCurrent = () => current() && !generating && !CLF_DOM.generating() && !desktopInputBusy &&
@@ -11271,7 +11283,8 @@
         return true;
       }
       if (message.type === 'clf-model-catalog') {
-        void inspectAppModelCatalog(message).then(result => sendResponse(typeof result === 'object' ? result : { ok: result })).catch(() => sendResponse({ ok: false }));
+        void inspectAppModelCatalog(message).then(result => sendResponse({ ok: result === true,
+          ...(!result ? { reason: catalogPageBlocker() || 'page_changed' } : {}) })).catch(() => sendResponse({ ok: false, reason: 'inspection_failed' }));
         return true;
       }
       if (message.type === 'clf-plugin-refresh') {
@@ -11282,7 +11295,8 @@
         sendResponse({ safe: !pluginRefreshBusy && ownsPluginRefreshPage(message.id) && CLF_DOM.pluginManagementIdle() }); return false;
       }
       if (message.type === 'clf-model-catalog-state') {
-        sendResponse({ ready: !modelCatalogBusy && (catalogPageReady() || (catalogHelper() && !CLF_DOM.composer())) });
+        const reason = modelCatalogBusy ? 'inspection_busy' : catalogPageBlocker();
+        sendResponse({ ready: !modelCatalogBusy && (!reason || (reason === 'composer_missing' && catalogHelper())), reason });
         return false;
       }
       if (message.type === 'clf-input-reuse-state') {
