@@ -845,7 +845,9 @@ export function authorizeBrowserInput(id: string, owner: string, conversationId:
     // Recorder work is serialized independently and can arrive during the durable
     // claim write. Keep the spent claim, but never publish stale Send permission.
     if (row.recovery && !await recoveryCurrent(row)) return false;
-    if (row.completedTurnId && row.sessionId && conversationId)
+    // Recovery still has a native final veto after this await. Its browser claim
+    // holds Goal until either the exact send receipt or a known pre-click abort.
+    if (!row.recovery && row.completedTurnId && row.sessionId && conversationId)
       await consumeGoalReplyForInputNow(conversationId, row.sessionId, row.completedTurnId);
     return !row.recovery || await recoveryCurrent(row);
   });
@@ -1493,6 +1495,16 @@ export function failBrowserInput(id: string, owner: string, error: string): Prom
       await commit(current.map(row => row === entry ? releaseRecoveryClaim(row) : row));
       return true;
     }
+    // The document reports this only while its native Send has never been attempted.
+    // A final can arrive after authorization and veto that click. Retain the spent
+    // claim, but do not let an unsent Continue consume the final's Goal/Loop decision.
+    if (entry.recovery && entry.requiresAuthorization === true && error === 'After-turn pickup was withdrawn before Send.') {
+      await commit(current.map(row => row === entry
+        ? { ...row, state: 'failed', completedTurnId: undefined, error } : row));
+      return true;
+    }
+    // A generic transport failure supplies no proof that native Send was skipped.
+    if (entry.recovery && entry.sendAuthorizedAt !== undefined) return false;
     const pickupCancelled = !!(entry.silenceBoundary || entry.completedTurnId) && entry.requiresAuthorization === true &&
       entry.sendAuthorizedAt === undefined && error === 'After-turn pickup was withdrawn before Send.';
     // Losing a document before Send does not lose a still-valid refresh ticket.

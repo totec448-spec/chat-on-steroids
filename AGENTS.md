@@ -1416,7 +1416,7 @@ The loading message explains a potentially slow post-update rebuild and that the
 These charts are not a provider invoice, exact
 token consumption or proof of current prices/entitlements.
 
-The separate **Verified messages** section counts native user-message IDs with recorded
+The bottom **Messages and limits** section counts native user-message IDs with recorded
 model selection proof for GPT-5.6 and GPT-6. It uses provider `authoredAt`, otherwise the
 original delivery time; tool-injected `input:` rows, unconfirmed offers, unknown model IDs,
 missing model proof and future timestamps cannot contribute. Replayed/copied native IDs
@@ -1425,10 +1425,14 @@ legacy default, a current picker, or a later tool's model to increase these coun
 Cache version 9 retains these minimal ID/model/time facts alongside token totals, so a
 new week or a weekday click needs no extra transcript read. The renderer receives only
 seven local calendar days of counts and their snapshot end time. Its single weekday
-button cycles the start day, default Monday, persisted in `cos.usage.weekStart`; the range
+button above the rows cycles the start day, default Monday, persisted in `cos.usage.weekStart`; the range
 begins at the most recent occurrence of that weekday at local midnight, including today.
-Calendar arithmetic preserves daylight-saving transitions. Exact integers and the local
-date/time range are shown; they are recorded sends, not a provider quota or reset claim.
+Calendar arithmetic preserves daylight-saving transitions. Compact family rows show exact
+integers labeled sent alongside reported model/shared/feature limits. Missing catalog quotas
+do not create placeholder rows. The local date/time range stays in the weekday button's tooltip
+and accessible description; these counts are recorded sends, not a provider quota or reset claim.
+Usage starts with its summary and charts. Successful loading clears the transient status without
+leaving a gap; token-attribution/cache implementation notes are not persistent page copy.
 `session-usage`, `usage-week` and `renderer-usage` tests cover evidence, boundaries and
 preference restoration. `scripts/verify-usage-week.cjs` exercises Chromium keyboard input
 and narrow/zoomed layouts with isolated data.
@@ -1918,7 +1922,11 @@ the committed transition once; a cancelled card is not a delivery receipt.
 The existing repair's stable `progressId` is the Continue episode identity stored on its outbox
 row. Rehydration, cancellation and canonical revisions cannot mint a replacement for that same
 episode. Genuine resumed work must earn a fresh full silence window. Browser preparation alone
-does not consume the source as a delivered message; authorized or confirmed delivery does.
+does not consume the source. Authored queued input spends completion at authorization; Continue
+keeps the source exclusive until its native receipt, because a late final can still veto its
+click. The exact document's known pre-Send withdrawal retires that Continue without spending
+the final's Goal/Loop obligation. The failed attempt retains its spent authorization and cannot
+be resent or receive an ACK. A generic timeout or missing receipt cannot grant this exception.
 Stop and Send permission are checked again after their durable claim writes. A stale result
 does not issue permission and cannot replay the spent claim. Native page checks fence the
 same question, turn, work revision and document immediately before the actual input.
@@ -1957,6 +1965,8 @@ origin, bearer, payload bounds and operation identity. The wake socket only prom
 Automatic provisioning requests `reuse: true` to join the current credential generation across
 browser profiles. Legacy pairing and explicit reconnect still rotate credentials. Pair writes
 serialize with Disconnect, whose epoch rejects an older in-flight provisioning result.
+The extension popup's Advanced section has no Disconnect action. Its existing Connect action
+still recovers a deliberately disconnected installation; stored revocation remains authoritative.
 Status, event upload, activity, claims, receipts and bounded attachment chunks have distinct
 contracts; a successful status read is not proof that a browser action happened.
 
@@ -2746,6 +2756,8 @@ same persisted preference. `translate="no"` protects text and attributes, includ
 language names. Japanese has its own system-font fallbacks and CJK wrapping. Changing language
 repaints owned labels while retaining drafts/selections; never translate authored messages,
 provider text or file paths. Catalog checks cover all source keys and numbered placeholders;
+`dom.run()` translates catalogued IPC errors before displaying a toast; unknown error strings
+and successful payloads stay literal.
 `scripts/verify-setup-guide.cjs` exercises narrow/zoomed layouts and native keyboard selection.
 Bindings live only in a WeakMap keyed by their DOM node. Language changes walk the current
 document, including hidden panels and bound text nodes. Never retain or periodically dereference
@@ -2896,8 +2908,12 @@ Disconnect immediately publishes `disconnecting` and coalesces repeated clicks i
 transition. MCP drain protects only complete requests admitted to the adapter: idle TCP,
 partial headers and incomplete bodies are closed without waiting for HTTP timeouts. Accepted
 responses flush before tunnel retirement; no ordinary force timer truncates committed work.
-Final shutdown can bound an already-running drain directly, rather than queueing its deadline
-behind that drain. Activity logs record Disconnect admission and the accepted-response count.
+Final shutdown bypasses unfinished startup/keychain work and directly joins one shared teardown,
+including tunnel retirement. It can shorten an already-running HTTP drain to its final budget;
+it must not declare the phase complete while that drain or its transport cleanup is pending.
+Late startup results retire their own handles without publishing them; late tunnel handles wait
+for the accepted-response drain first. Activity logs record Disconnect admission and the
+accepted-response count.
 
 The sidebar footer owns global connection controls in a compact popover outside the translucent
 sidebar stacking context. Its sidebar-themed surface is 160 CSS pixels wide, with
@@ -2953,6 +2969,11 @@ helper generation. Recheck those after asynchronous image work and before every 
 in a batch. A replaced helper/window/display invalidates old coordinates and refs. Bound
 decoded images, report actual visible crops, and never label a visible screen crop as a hidden
 window capture. Coordinate clamping and physical input respect the current display/button map.
+
+macOS AX window matching uses geometry only when the AX window number is absent. A contradictory
+explicit ID cannot borrow another window's bounds. `verify-macos-window-matching.mjs` executes
+the production Swift matching functions with synthetic AX responses when Swift is available;
+this checks matching policy, not live focus/Space transitions or packaged Mac input acceptance.
 
 Windows uses source-owned Windows.Graphics.Capture for exact HWND compositor pixels, including
 covered GPU windows, without activation or a visible-screen fallback. Minimized/unavailable

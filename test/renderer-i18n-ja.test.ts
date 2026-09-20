@@ -107,6 +107,19 @@ describe('Japanese app interface and compact setup languages', () => {
     for (const source of ['__proto__', 'toString', 'exec_command', 'gpt-6-astra']) expect(t(source)).toBe(source);
   });
 
+  it('translates app-owned IPC failures while preserving unknown errors and successful replies', async () => {
+    window.localStorage.setItem('cos.ui.language', 'ja');
+    const { run } = await import('../src/renderer/dom.js');
+    expect(await run(Promise.resolve({ ok: false, error: 'Secure credential storage is unavailable.' }))).toBeNull();
+    expect(document.querySelector('.toast')?.textContent).toBe(ja['Secure credential storage is unavailable.']);
+    const nativeError = 'NATIVE_ERROR: /Save/<img src=x> {0}\n  details';
+    expect(await run(Promise.resolve({ ok: false, error: nativeError }))).toBeNull();
+    expect(document.querySelector('.toast')?.textContent).toBe(nativeError);
+    expect(document.querySelector('.toast img')).toBeNull();
+    expect(await run(Promise.resolve({ ok: true, data: 'Settings' }))).toBe('Settings');
+    expect(document.querySelectorAll('.toast')).toHaveLength(1);
+  });
+
   it('falls back to English for invalid saved data and can select Japanese when storage fails', async () => {
     window.localStorage.setItem('cos.ui.language', 'invalid');
     expect((await import('../src/renderer/i18n.js')).currentLanguage()).toBe('en');
@@ -121,17 +134,4 @@ describe('Japanese app interface and compact setup languages', () => {
     expect((document.getElementById('uiLanguage') as HTMLSelectElement).value).toBe('ja');
     expect(t('Settings')).toBe('設定');
   });
-  it('translates app-authored IPC errors while leaving unknown errors unchanged', async () => {
-    window.localStorage.setItem('cos.ui.language', 'ja');
-    const { initLanguage } = await import('../src/renderer/i18n.js');
-    initLanguage();
-    const { run } = await import('../src/renderer/dom.js');
-    const translated = 'Secure credential storage is unavailable.';
-    expect(await run(Promise.resolve({ ok: false as const, error: translated }))).toBeNull();
-    expect(document.querySelector('.toast')?.textContent).toBe(ja[translated]);
-    const unknown = 'NATIVE_ERROR_NOT_IN_CATALOG';
-    expect(await run(Promise.resolve({ ok: false as const, error: unknown }))).toBeNull();
-    expect(document.querySelector('.toast')?.textContent).toBe(unknown);
-  });
-
 });

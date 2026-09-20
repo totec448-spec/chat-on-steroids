@@ -38,10 +38,12 @@ function paintMessages(): void {
   const totals = usageMessageTotals(snapshot.messages, weekStart);
   ui($('usageMessages56'), 'textContent', () => totals.gpt56.toLocaleString(currentLanguage()));
   ui($('usageMessages6'), 'textContent', () => totals.gpt6.toLocaleString(currentLanguage()));
-  ui($('usageMessagePeriod'), 'textContent', () => {
+  const period = () => {
     const format = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' });
     return t('Local time · {0} → {1}', [format.format(from), format.format(through)]);
-  });
+  };
+  ui($('usageMessagePeriod'), 'textContent', period);
+  ui($('usageWeekStart'), 'title', () => `${t('Change start day')}\n${period()}`);
 }
 export async function refreshUsage(): Promise<void> {
   document.getElementById('usageTooltip')?.remove();
@@ -51,7 +53,7 @@ export async function refreshUsage(): Promise<void> {
   ui(status, 'textContent', () => t("Updating usage in the background. After an update, this can take a few minutes. You can keep using the app."));
   status.setAttribute('role', 'status');
   try {
-    const [value, catalog] = await Promise.all([run(window.api.getUsage()), run(window.api.getChatModels())]);
+    const value = await run(window.api.getUsage());
     if (generation !== loadGeneration) return;
     if (!value) { ui(status, 'textContent', () => t("Usage could not be loaded. Try Refresh.")); return; }
     snapshot = value;
@@ -60,12 +62,8 @@ export async function refreshUsage(): Promise<void> {
     for (const [label, number] of [['Processed tokens · est.', value.tokens], ['Peak daily tokens', Math.max(0, ...value.days.map((day) => day.tokens))], ['Conversations', value.sessions], ['Active days', value.days.filter((day) => day.tokens > 0).length]] as const) {
       const item = el('div'); item.dataset.usageMetric = label; usageHint(item, () => `${Math.round(number).toLocaleString()} ${t(label).toLowerCase()}`); item.append(el('strong', '', count.format(number)), el('span', '', () => t(label))); summary.append(item);
     }
-    const limits = $('modelUsage'); limits.replaceChildren();
+    const limits = $('usageLimits'); limits.replaceChildren();
     const modelRows = value.limits.filter((row) => row.scope === 'model');
-    const knownModels = catalog?.models ?? [];
-    for (const model of knownModels.filter((item) => !modelRows.some((row) => row.model === item.id))) {
-      const row = el('div', 'usage-limit'); row.append(el('strong', '', model.label), el('span', 'muted', () => t("Not reported by ChatGPT"))); limits.append(row);
-    }
     for (const entry of [...modelRows, ...value.limits.filter((row) => row.scope !== 'model')]) {
       const stale = Date.now() - entry.observedAt > 10 * 60000 || (entry.resetAt !== null && entry.resetAt <= Date.now());
       const row = el('div', 'usage-limit');
@@ -80,11 +78,10 @@ export async function refreshUsage(): Promise<void> {
       if (entry.remainingPercent !== null && !stale) { const progress = document.createElement('progress'); progress.max = 100; progress.value = entry.remainingPercent; ui(progress, 'aria-label', () => t("{0}: {1}% remaining", [displayName(), entry.remainingPercent])); detail.append(progress); }
       row.append(name, detail); limits.append(row);
     }
-    if (!modelRows.length) limits.append(el('p', 'muted', () => t("ChatGPT has not reported per-model message balances. Shared usage and feature quotas do not establish a model-specific balance.")));
     const totalCost = el('div'); totalCost.append(el('strong', '', '—'), el('span', '', () => t("Estimated equivalent · USD"))); totalCost.id = 'usageTotalCost'; usageHint(totalCost, ''); summary.prepend(totalCost);
     paintRates();
     paintCost();
-    ui(status, 'textContent', () => t("Recorded model attribution; missing history assumes GPT-5.6 High. Unchanged recordings reuse saved totals."));
+    ui(status, 'textContent', () => '');
   } catch {
     if (generation === loadGeneration) ui(status, 'textContent', () => t("Usage could not be loaded. Try Refresh."));
   } finally { if (generation === loadGeneration) $('refreshUsage').removeAttribute('disabled'); }

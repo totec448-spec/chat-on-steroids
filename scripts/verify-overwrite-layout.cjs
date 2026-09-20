@@ -39,6 +39,9 @@ app.whenReady().then(async () => {
           '<div><div class="pointer-events-none contents"><button>Called tool</button></div></div></div>' +
           '<div class="native-notification"><div class="pointer-events-none contents" data-clf-fiber-thought="fixture:0:thought-layout-notification">' +
           '<button>Inspected the implementation and verified the changes</button></div></div>' +
+          '<div class="native-captions">' + ['', 'Inspecting changes', 'Long completed status '.repeat(16)].map(label =>
+            '<div class="native-notification"><div><span data-testid="cot-v5-tool-icon-pile"><svg></svg></span><span>' + label + '</span></div></div>').join('') + '</div>' +
+          '<div class="native-result"><span data-testid="cot-v5-tool-icon-pile"><svg></svg></span><button>Open native search results</button></div>' +
           '<div class="native-final"><div class="markdown" data-clf-fiber-message="fixture:0:final">Final answer stays in ChatGPT.</div>' +
           '<pre><code>Native code remains usable.</code></pre><button aria-label="Copy response">Copy response</button></div>';
         thread.append(section);
@@ -70,12 +73,15 @@ app.whenReady().then(async () => {
         const final = section.querySelector('.native-final');
         const copy = final.querySelector('button'); let copied = 0; copy.onclick = () => copied++;
         const thoughts = CLF_DOM.thoughtActivityRows(turn, 'fixture', 0, ['thought-layout-notification']);
+        const captions = CLF_DOM.activitySummaryRows(turn);
         const nativeTools = CLF_DOM.toolBlocks(turn).filter(block => block.closest('.native-call'));
-        CLF_DOM.hideActivity(turn, nativeTools, thoughts, [], placement);
+        CLF_DOM.hideActivity(turn, nativeTools, thoughts, captions, placement);
         const shown = node => getComputedStyle(node).display !== 'none' && node.getBoundingClientRect().height > 0;
         const geometry = () => ({ gap: next.getBoundingClientRect().top - tool.getBoundingClientRect().bottom,
           headerHidden: !shown(fold.button), toolHidden: !shown(section.querySelector('.native-call')),
           notificationHeight: section.querySelector('.native-notification').getBoundingClientRect().height,
+          captionsHeight: section.querySelector('.native-captions').getBoundingClientRect().height,
+          resultUsable: shown(section.querySelector('.native-result button')),
           clipped: fold.clip.scrollHeight > fold.clip.clientHeight && getComputedStyle(fold.clip).overflow === 'hidden',
           firstHeight: first.getBoundingClientRect().height, nextHeight: next.getBoundingClientRect().height,
           width: root.getBoundingClientRect().width, nativeFinal: final === section.querySelector('.native-final') });
@@ -83,16 +89,18 @@ app.whenReady().then(async () => {
         copy.click(); tool.open = false;
         const retainedState = fold.button.getAttribute('aria-expanded');
         CLF_DOM.hideActivity(turn, []);
-        const restored = shown(fold.button) && shown(section.querySelector('.native-notification')) &&
+        const restored = shown(fold.button) && shown(section.querySelector('.native-notification')) && shown(section.querySelector('.native-captions')) &&
           section.querySelectorAll('[data-clf-activity-part], [data-clf-native-hidden]').length === 0 &&
           fold.button.getAttribute('aria-expanded') === retainedState && fold.clip.style.height === '${mode === 'open' ? 400 : 0}px';
-        CLF_DOM.hideActivity(turn, nativeTools, thoughts, [], placement);
+        CLF_DOM.hideActivity(turn, nativeTools, thoughts, captions, placement);
         return { width:${width}, mode:'${mode}', closed, expanded, copied, restored };
       })()`);
       for (const state of [result.closed, result.expanded]) {
         assert.ok(state.gap >= 0 && state.gap <= 12, 'Tool-to-interim spacing: ' + JSON.stringify(result));
         assert.equal(state.headerHidden, true); assert.equal(state.toolHidden, true); assert.equal(state.clipped, false);
         assert.equal(state.notificationHeight, 0, 'Thinking notification leaves no empty layout slot');
+        assert.equal(state.captionsHeight, 0, 'New status captions leave no empty slots, including empty/long labels');
+        assert.equal(state.resultUsable, true, 'Interactive native result remains usable');
         assert.ok(state.firstHeight > 0 && state.nextHeight > 0); assert.equal(state.nativeFinal, true);
         assert.ok(state.width <= width + 1, 'No horizontal overflow');
       }
