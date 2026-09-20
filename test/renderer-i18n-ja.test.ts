@@ -121,4 +121,17 @@ describe('Japanese app interface and compact setup languages', () => {
     expect((document.getElementById('uiLanguage') as HTMLSelectElement).value).toBe('ja');
     expect(t('Settings')).toBe('設定');
   });
+  it('translates app-authored IPC errors while leaving unknown errors unchanged', async () => {
+    window.localStorage.setItem('cos.ui.language', 'ja');
+    const { initLanguage } = await import('../src/renderer/i18n.js');
+    initLanguage();
+    const { run } = await import('../src/renderer/dom.js');
+    const translated = 'Secure credential storage is unavailable.';
+    expect(await run(Promise.resolve({ ok: false as const, error: translated }))).toBeNull();
+    expect(document.querySelector('.toast')?.textContent).toBe(ja[translated]);
+    const unknown = 'NATIVE_ERROR_NOT_IN_CATALOG';
+    expect(await run(Promise.resolve({ ok: false as const, error: unknown }))).toBeNull();
+    expect(document.querySelector('.toast')?.textContent).toBe(unknown);
+  });
+
 });
