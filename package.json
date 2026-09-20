@@ -14,7 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify": "npm run verify:ci",
-    "verify:ci": "npm run rg && npm run verify:privacy && npm run verify:notices && npm run typecheck && node -e \"require('electron')\" && vitest run --exclude test/mcp-shutdown.test.ts && vitest run test/mcp-shutdown.test.ts",
+    "verify:ci": "npm run rg && npm run verify:privacy && npm run verify:notices && npm run typecheck && node -e \"require('electron')\" && vitest run --exclude test/mcp-shutdown.test.ts --exclude test/computer.test.ts && vitest run --maxWorkers=1 test/computer.test.ts test/mcp-shutdown.test.ts",
     "verify:notices": "node scripts/generate-third-party-notices.mjs --check && node scripts/package-native-sources.mjs --check",
     "verify:privacy": "node scripts/verify-public-history.mjs",
     "verify:tunnel-current": "node scripts/verify-current-tunnel.mjs",

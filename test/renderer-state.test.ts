@@ -767,6 +767,50 @@ it('saves a custom deployment id and returns to the known OpenRouter model', asy
   expect(mounted.calls[2].goal).toMatchObject({ provider: { kind: 'openrouter' }, model: 'deepseek/deepseek-v4-flash' });
 });
 
+it('offers all six bridge ports, saves numbers, and distinguishes saved choice from the override listener', async () => {
+  const mounted = await mountChat(); const w = mounted.window;
+  const select = w.document.getElementById('browserBridgePort') as HTMLSelectElement;
+  expect([...select.options].map(option => option.value)).toEqual(['auto', '8765', '8766', '8767', '8768', '8769']);
+  expect(select.value).toBe('auto');
+  for (const value of ['8765', '8766', '8767', '8768', '8769', 'auto']) {
+    select.value = value; select.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await settle();
+    expect(mounted.calls.at(-1).ui.browserBridgePort).toBe(value === 'auto' ? 'auto' : Number(value));
+  }
+  mounted.push({ ...mounted.state, bridge: { ...mounted.state.bridge, port: 12345, portOverridden: true } });
+  expect(select.disabled).toBe(true); expect(select.value).toBe('auto');
+  expect(w.document.getElementById('browserBridgePortHint')!.textContent).toContain('CLF_BRIDGE_PORTS');
+});
+
+it('shows startup bind errors in the existing Setup status and clears them after recovery', async () => {
+  const mounted = await mountChat({ bridge: { running: false, error: 'port 8767: EADDRINUSE' } });
+  const status = mounted.window.document.getElementById('bridgeState')!;
+  expect(status.textContent).toContain('Browser bridge could not start: port 8767: EADDRINUSE');
+  mounted.push({ ...mounted.state, bridge: { running: true, port: 8768, paired: false, present: false, error: null } });
+  expect(status.textContent).toContain('8768'); expect(status.textContent).not.toContain('EADDRINUSE');
+});
+
+it('restores a rejected focused port and prevents an unrelated queued save from retrying it', async () => {
+  let release!: (result: any) => void; const calls: any[] = [];
+  const mounted = await mountChat({}, [], { saveSettings: (patch: any, base: any) => {
+    calls.push({ patch: structuredClone(patch), base: structuredClone(base) });
+    if (calls.length === 1) return new Promise(resolve => { release = resolve; });
+    // Match main's three-way port merge: an inherited failed value is not an explicit edit.
+    const browserBridgePort = patch.ui.browserBridgePort === base.ui.browserBridgePort ? 'auto' : patch.ui.browserBridgePort;
+    return Promise.resolve({ ok: true, data: { ...mounted.state,
+      config: { ...mounted.state.config, ...patch, ui: { ...patch.ui, browserBridgePort } } } });
+  } });
+  const w = mounted.window; const select = w.document.getElementById('browserBridgePort') as HTMLSelectElement;
+  select.focus(); select.value = '8767'; select.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  const background = w.document.getElementById('backgroundChats') as HTMLInputElement;
+  background.checked = true; background.dispatchEvent(new w.Event('change', { bubbles: true }));
+  release({ ok: false, error: 'Port 8767: EADDRINUSE' });
+  await vi.waitFor(() => expect(calls).toHaveLength(2)); await settle();
+  expect(calls[1].patch.ui.browserBridgePort).toBe(calls[1].base.ui.browserBridgePort);
+  expect(select.value).toBe('auto'); expect(background.checked).toBe(true);
+});
+
 it('saves the ChatGPT browser choice from its settings control and restores it on state push', async () => {
   const mounted = await mountChat();
   const w = mounted.window;

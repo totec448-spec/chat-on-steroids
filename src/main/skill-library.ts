@@ -6,6 +6,7 @@ import { rawPromises as fs } from './rawfs.js';
 import { effectiveCapabilities, getConfig } from './config.js';
 import { isContained, resolvePath } from './sandbox.js';
 import { listSkills, readSkill, readSkillTextSnapshot, skillsDirectory, type SkillDocument } from './skills.js';
+import { approvedManagedSkillLink, sameSkillLink } from './skill-links.js';
 import { parseSkillConfiguration, parseSkillFrontmatter, parseSkillInterface, type SkillConfiguration } from './skill-metadata.js';
 import type { SkillLibrary, SkillMetadata, SkillScope, SkillSource } from '../shared/skills.js';
 
@@ -28,18 +29,54 @@ async function readApproved(file: string): Promise<{ real: string; virtual: stri
       !(['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'] as const).every(key => snapshot.identity[key] === stat[key])) throw new Error('Skill path changed during reading');
   return { ...target, text: snapshot.text };
 }
-async function interfaceFor(directory: string, managed: boolean, errors: string[]): Promise<SkillMetadata> {
-  const file = path.join(directory, 'agents', 'openai.yaml');
+async function interfaceFor(directory: string, managed: boolean, errors: string[], managedId?: string): Promise<SkillMetadata> {
+  let packageDirectory = directory;
+  let linked: Awaited<ReturnType<typeof approvedManagedSkillLink>> = null;
+  const revalidateLinked = async (): Promise<void> => {
+    if (!linked) return;
+    const root = skillsDirectory();
+    const config = getConfig();
+    const current = root && managedId && effectiveCapabilities(config).read
+      ? await approvedManagedSkillLink(root, managedId, config.roots)
+      : null;
+    if (!current || !sameSkillLink(linked, current)) {
+      throw new Error('Linked Skill changed while interface metadata was being read');
+    }
+  };
   try {
+    if (managed) {
+      const stat = await fs.lstat(directory);
+      if (stat.isSymbolicLink()) {
+        const root = skillsDirectory();
+        if (!root || !managedId) throw new Error('Linked Skill package lost its managed identity');
+        const config = getConfig();
+        if (!effectiveCapabilities(config).read) throw new Error('Read files permission is required for linked Skills');
+        linked = await approvedManagedSkillLink(root, managedId, config.roots);
+        if (!linked) throw new Error('Linked Skill target is outside the currently approved folders');
+        packageDirectory = linked.real;
+      }
+    }
+    const file = path.join(packageDirectory, 'agents', 'openai.yaml');
     const stat = await fs.lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Skill interface metadata must be a regular file');
     const metadataReal = await fs.realpath(file);
-    const directoryReal = await fs.realpath(directory);
+    const directoryReal = await fs.realpath(packageDirectory);
     if (!isContained(directoryReal, metadataReal)) throw new Error('Skill interface metadata leaves its package');
-    const text = managed ? (await readSkillTextSnapshot(file)).text : (await readApproved(file)).text;
+    const text = managed ? (await readSkillTextSnapshot(metadataReal)).text : (await readApproved(file)).text;
+    if (managed && !samePath(await fs.realpath(file), metadataReal)) {
+      throw new Error('Skill interface metadata changed location while being read');
+    }
+    await revalidateLinked();
     return parseSkillInterface(text);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { allowImplicitInvocation: true };
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      try { await revalidateLinked(); }
+      catch (revalidationError) {
+        if (errors.length < 64) errors.push(`openai.yaml: ${errorText(revalidationError)}`);
+        return { allowImplicitInvocation: false };
+      }
+      return { allowImplicitInvocation: true };
+    }
     if (errors.length < 64) errors.push(`openai.yaml: ${errorText(error)}`);
     // Explicit invocation remains possible. Invalid policy never implicitly enables a skill.
     return { allowImplicitInvocation: false };
@@ -123,12 +160,23 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}): Promise<S
   for (const summary of managed) {
     const directory = path.join(root, summary.id), file = path.join(directory, 'SKILL.md');
     const document = await readSkill(summary.id);
+    let seenFile = file;
+    try {
+      const directoryStat = await fs.lstat(directory);
+      if (directoryStat.isSymbolicLink()) {
+        const currentConfig = getConfig();
+        const linked = effectiveCapabilities(currentConfig).read
+          ? await approvedManagedSkillLink(root, summary.id, currentConfig.roots)
+          : null;
+        if (linked) seenFile = path.join(linked.real, 'SKILL.md');
+      }
+    } catch { /* readSkill already owns validity; dedupe must not widen filesystem authority. */ }
     let metadata = { name: summary.name, description: summary.description };
     try { metadata = { ...metadata, ...parseSkillFrontmatter(document.text) }; } catch { /* Existing plain Markdown remains supported. */ }
     if (!enabled(metadata.name, file)) continue;
-    const extra = await interfaceFor(directory, true, library.errors);
+    const extra = await interfaceFor(directory, true, library.errors, summary.id);
     library.skills.push({ ...summary, ...metadata, ...extra, scope: 'managed', source: 'managed', managed: true });
-    seen.add(identity(file));
+    seen.add(identity(seenFile));
   }
   let entries = 0, directories = 0;
   const seenDirectories = new Set<string>();

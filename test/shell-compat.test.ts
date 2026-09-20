@@ -120,7 +120,7 @@ function editing(f: ReturnType<typeof fixture>) {
   return { box, serialize: () => serialize(box) };
 }
 
-async function recorder(f: ReturnType<typeof fixture>, replies: Record<string, (m: any) => any> = {}) {
+async function recorder(f: ReturnType<typeof fixture>, replies: Record<string, (m: any) => any> = {}, initialize = true) {
   const win = f.win as any, sent: any[] = [];
   let hook: any, listener: any;
   win.CLF_TEST_HOOK = (value: any) => { hook = value; };
@@ -136,7 +136,7 @@ async function recorder(f: ReturnType<typeof fixture>, replies: Record<string, (
     } }, storage: { onChanged: { addListener() {}, removeListener() {} } } };
   win.eval(contentSource);
   await vi.waitFor(() => expect(hook).toBeTruthy());
-  await hook.refreshFiber(); await hook.pullActivity(); hook.observe(); await hook.flush();
+  if (initialize) { await hook.refreshFiber(); await hook.pullActivity(); hook.observe(); await hook.flush(); }
   return { sent, hook, runtime: (message: any) => new Promise<any>(resolve => listener(message, {}, resolve)),
     events: () => sent.filter(m => m.type === 'events').flatMap(m => m.entries.map((entry: any) => entry.event)) };
 }
@@ -271,6 +271,60 @@ it.each([false, true])('captures live shell request metadata and public activity
     conversationId: THREAD, calls: expect.arrayContaining([expect.objectContaining({ requestId: OTHER })]) })));
   expect(r.events()).toContainEqual(expect.objectContaining({ kind: 'page_tool', messageId: thought, text: 'Inspecting the project' }));
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+});
+
+// React keeps the host's original Fiber pointer across commits. The current root
+// and child lists are the published tree; memo bailouts can keep old return links.
+function bufferedShell(f: ReturnType<typeof fixture>, sharedChild = false) {
+  const { owner, snapshot } = liveShellMapping(f, true);
+  const native = f.doc.querySelector('[data-turn-key]')!;
+  const oldHost: any = { tag: 5, stateNode: native, memoizedProps: {}, return: f.row };
+  const nextEntry = sharedChild ? f.entry : structuredClone(f.entry);
+  const nextSnapshot = { renderedConversation: structuredClone(snapshot.renderedConversation),
+    renderedTurns: [{ id: TURN, turn: nextEntry.turn }] };
+  nextSnapshot.renderedConversation.mapping[CALL].message.metadata.request_id = 'wfr_committed_update';
+  const state: any = { current: null };
+  const oldRoot: any = { tag: 3, stateNode: state, return: null, child: owner };
+  const nextRoot: any = { tag: 3, stateNode: state, return: null };
+  const nextOwner: any = { tag: 0, memoizedProps: { conversationId: THREAD }, return: nextRoot,
+    updateQueue: { memoCache: { data: [[nextSnapshot]] } } };
+  const nextRow: any = sharedChild ? f.row : { tag: 0, memoizedProps: { entry: nextEntry }, return: nextOwner };
+  const nextHost: any = sharedChild ? oldHost : { tag: 5, stateNode: native, memoizedProps: {}, return: nextRow };
+  owner.tag = 0; owner.return = oldRoot; owner.child = f.row;
+  Object.assign(f.row, { tag: 0, child: oldHost });
+  nextRoot.child = nextOwner; nextOwner.child = nextRow; nextRow.child = nextHost;
+  for (const [a, b] of [[oldRoot, nextRoot], [owner, nextOwner], ...(!sharedChild ? [[f.row, nextRow], [oldHost, nextHost]] : [])]) {
+    a.alternate = b; b.alternate = a;
+  }
+  state.current = oldRoot;
+  (native as any).__reactFiber$fixture = oldHost;
+  return { state, oldRoot, nextRoot, oldHost, nextHost, owner, nextOwner, nextEntry, nextSnapshot, native };
+}
+
+it.each([false, true])('reads committed shell metadata across real React double-buffer shapes (shared child=%s)', async sharedChild => {
+  const f = fixture(), tree = bufferedShell(f, sharedChild);
+  expect((await f.ask()).turns[0].calls[0].requestId).toBe(OTHER);
+  // Work in progress is already reachable but has not been committed.
+  expect((await f.ask()).turns[0].requests.some((row: any) => row.requestId === 'wfr_committed_update')).toBe(false);
+  tree.state.current = tree.nextRoot;
+  expect((await f.ask()).turns[0].calls[0].requestId).toBe('wfr_committed_update');
+  // Preserve React's own pointers. The reader must not reparent a shared subtree.
+  expect((tree.native as any).__reactFiber$fixture).toBe(tree.oldHost);
+  expect(f.row.return).toBe(tree.owner);
+  tree.state.current = tree.oldRoot;
+  expect((await f.ask()).turns[0].calls[0].requestId).toBe(OTHER);
+});
+
+it.each(['foreign-current', 'unmounted', 'inconsistent-root', 'sibling-cycle'])('does not substitute stale React evidence for %s', async state => {
+  const f = fixture(), tree = bufferedShell(f);
+  await f.ask();
+  tree.state.current = tree.nextRoot;
+  if (state === 'foreign-current') tree.nextEntry.id = 'different-mounted-turn';
+  if (state === 'unmounted') tree.nextRoot.child = null;
+  if (state === 'inconsistent-root') tree.state.current = { tag: 3 };
+  if (state === 'sibling-cycle') { const sibling: any = {}; sibling.sibling = sibling; tree.nextOwner.child = sibling; }
+  expect((await f.ask()).turns).toEqual([]);
+  expect(f.api.messages()).toEqual([]);
 });
 
 it.each([false, true])('correlates a witnessed shell send before its client conversation resolves (compiler=%s)', async compiler => {
@@ -631,6 +685,51 @@ it.each([false, true])('bootstraps a shell worker with literal instructions and 
   expect(r.sent.filter(m => m.type === 'ack' && m.status === 'failed')).toEqual([]);
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 }, 10000);
+
+it.each(['immediate', 'hydrating', 'foreign', 'retired'])('binds the fresh background worker from native receipt events with throttled timers (%s)', async state => {
+  const f = fixture(), edit = editing(f), { owner } = liveShellMapping(f, true);
+  const commandId = 'event-owned-worker', text = 'Read this diagnostic and report through agents.';
+  const native = f.doc.querySelector('[data-turn-key]')!;
+  native.remove(); page.reconfigure({ url: `https://chatgpt.com/?clf=${commandId}` });
+  f.entry.conversationId = `local-chatgpt:${OTHER}`; owner.memoizedProps.conversationId = f.entry.conversationId;
+  f.entry.turn.items[0].message = text;
+  native.querySelector('.whitespace-pre-wrap')!.textContent = text;
+  Object.defineProperty(f.doc, 'visibilityState', { configurable: true, value: 'hidden' });
+  const nativeTimeout = f.win.setTimeout.bind(f.win);
+  f.win.setTimeout = ((fn: TimerHandler, delay?: number) => Number(delay) >= 500 ? 98765 : nativeTimeout(fn, delay)) as typeof f.win.setTimeout;
+  let clicked = 0;
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); clicked++; edit.box.replaceChildren();
+    if (state === 'immediate') {
+      f.win.history.pushState({}, '', `/c/${THREAD}`); f.doc.querySelector('[data-thread-find-target]')!.append(native);
+    }
+  });
+  const r = await recorder(f, { redeem: () => ({ ok: true, command: { id: commandId, type: 'worker', text, agent: 'worker-1' } }) }, false);
+  try {
+    await vi.waitFor(() => expect(clicked).toBe(1));
+    if (state !== 'immediate') {
+      expect(r.sent.filter(message => message.type === 'ack')).toEqual([]);
+      if (state === 'retired') (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+      if (state === 'foreign') {
+        f.entry.conversationId = THREAD; owner.memoizedProps.conversationId = THREAD;
+        f.win.history.pushState({}, '', `/c/${OTHER}`);
+      } else f.win.history.pushState({}, '', `/c/${THREAD}`);
+      f.doc.querySelector('[data-thread-find-target]')!.append(native);
+    }
+    if (state === 'foreign' || state === 'retired') {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      expect(r.sent.filter(message => message.type === 'ack' && message.status === 'sent')).toEqual([]);
+    } else {
+      await vi.waitFor(() => expect(r.sent.filter(message => message.type === 'ack')).toEqual([
+        expect.objectContaining({ id: commandId, status: 'sent', conversationId: THREAD, agent: 'worker-1' })
+      ]), { timeout: 2000 });
+      await vi.waitFor(() => expect(r.sent.some(message => message.type === 'correlate' &&
+        message.conversationId === THREAD && message.calls.some((call: any) => call.requestId === OTHER))).toBe(true));
+      expect(clicked).toBe(1); expect(f.doc.visibilityState).toBe('hidden');
+    }
+  } finally { (f.win as any).__CLF_CONTENT_RECORDER__.stop(); }
+});
+
 it('opens a local project from a cold shell page and binds its exact first send before recording', async () => {
   const f = fixture(), edit = editing(f), inputId = '88888888-1111-4111-8111-000000000001';
   const options = f.props.modelListConfig; f.props.modelListConfig = null;

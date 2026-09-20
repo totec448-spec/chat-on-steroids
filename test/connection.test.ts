@@ -37,7 +37,9 @@ const mocks = vi.hoisted(() => {
     endpointStartReached: vi.fn(),
     tunnelStartGate: null as Promise<void> | null,
     tunnelStartReached: vi.fn(),
-    tunnelStop: vi.fn(async () => undefined),
+    optionalStartGate: null as Promise<void> | null,
+    optionalStartReached: vi.fn(),
+    tunnelStop: vi.fn(async (): Promise<void> => undefined),
     secretGate: null as Promise<void> | null,
     secretReached: vi.fn()
   };
@@ -81,11 +83,15 @@ vi.mock('../src/main/secrets.js', () => ({
   })
 }));
 vi.mock('../src/main/tunnel/index.js', () => ({
-  startTunnel: vi.fn(async (options: { report: (report: Record<string, unknown>) => void }) => {
+  startTunnel: vi.fn(async (options: { label?: string; report: (report: Record<string, unknown>) => void }) => {
     mocks.starts += 1;
     mocks.report = options.report;
     mocks.tunnelStartReached();
     if (mocks.tunnelStartGate) await mocks.tunnelStartGate;
+    if (options.label === 'plugins') {
+      mocks.optionalStartReached();
+      if (mocks.optionalStartGate) await mocks.optionalStartGate;
+    }
     options.report({
       state: 'connected',
       detail: 'Connected.',
@@ -106,6 +112,8 @@ describe('connection surface state', () => {
     mocks.endpointStartGate = null;
     mocks.tunnelStartReached.mockClear();
     mocks.tunnelStartGate = null;
+    mocks.optionalStartGate = null;
+    mocks.optionalStartReached.mockClear();
     mocks.tunnelStop.mockClear();
     mocks.secretReached.mockClear();
     mocks.secretGate = null;
@@ -287,6 +295,8 @@ describe('connection surface state', () => {
     const connecting = connection.connect();
     await vi.waitFor(() => expect(mocks.endpointStartReached).toHaveBeenCalledTimes(1));
     const shuttingDown = connection.shutdownConnection();
+    await shuttingDown;
+    expect(connection.getStatus().state).toBe('disconnected');
     releaseEndpoint();
     await Promise.all([connecting, shuttingDown]);
 
@@ -306,12 +316,124 @@ describe('connection surface state', () => {
     const connecting = connection.connect();
     await vi.waitFor(() => expect(mocks.tunnelStartReached).toHaveBeenCalledTimes(1));
     const shuttingDown = connection.shutdownConnection();
+    await shuttingDown;
+    expect(mocks.tunnelStop).not.toHaveBeenCalled();
     releaseTunnel();
     await Promise.all([connecting, shuttingDown]);
 
     expect(mocks.tunnelStop).toHaveBeenCalledTimes(1);
     expect(mocks.endpointStop).toHaveBeenCalledWith({ forceAfterMs: 30_000 });
     expect(connection.getStatus()).toMatchObject({ state: 'disconnected', publicUrl: null, localUrl: null });
+  });
+
+  it('finishes final shutdown without waiting for a parked credential lookup', async () => {
+    let releaseSecret!: () => void;
+    mocks.secretGate = new Promise<void>(resolve => { releaseSecret = resolve; });
+    const connection = await import('../src/main/connection.js');
+    const connecting = connection.connect();
+    await vi.waitFor(() => expect(mocks.secretReached).toHaveBeenCalledTimes(1));
+    const shutdown = connection.shutdownConnection();
+    let finished = false;
+    void shutdown.then(() => { finished = true; });
+    try {
+      expect(mocks.endpointStop).toHaveBeenCalledWith({ forceAfterMs: 30_000 });
+      await vi.waitFor(() => expect(finished).toBe(true));
+      expect(connection.getStatus().state).toBe('disconnected');
+      expect(mocks.starts).toBe(0);
+    } finally {
+      releaseSecret();
+      await Promise.all([connecting, shutdown]);
+    }
+    expect(mocks.starts).toBe(0);
+    expect(connection.getStatus().state).toBe('disconnected');
+  });
+
+  it('joins the entire existing teardown, including tunnel retirement after the response drain', async () => {
+    const connection = await import('../src/main/connection.js');
+    await connection.connect();
+    let releaseDrain!: () => void;
+    const drain = new Promise<void>(resolve => { releaseDrain = resolve; });
+    let releaseTunnel!: () => void;
+    const tunnelStop = new Promise<void>(resolve => { releaseTunnel = resolve; });
+    mocks.endpointStop.mockImplementationOnce(() => drain).mockImplementationOnce(() => drain);
+    mocks.tunnelStop.mockImplementationOnce(() => tunnelStop);
+    const disconnect = connection.disconnect();
+    await vi.waitFor(() => expect(mocks.endpointStop).toHaveBeenCalledTimes(1));
+    let finished = false;
+    const shutdown = connection.shutdownConnection().then(() => { finished = true; });
+    vi.useFakeTimers();
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(finished).toBe(false);
+      expect(mocks.tunnelStop).not.toHaveBeenCalled();
+      releaseDrain();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.tunnelStop).toHaveBeenCalledTimes(1);
+      expect(finished).toBe(false);
+      releaseTunnel();
+      await Promise.all([disconnect, shutdown]);
+      expect(connection.getStatus().state).toBe('disconnected');
+    } finally {
+      releaseDrain();
+      releaseTunnel();
+      await Promise.all([disconnect, shutdown]);
+      vi.useRealTimers();
+    }
+  });
+
+  it('retires a late optional tunnel after shutdown without publishing or leaking it', async () => {
+    mocks.config.tunnel.kind = 'openai';
+    mocks.config.tunnel.tunnelId = 'core-test';
+    mocks.config.tunnel.pluginsTunnelId = 'plugins-test';
+    let releaseOptional!: () => void;
+    mocks.optionalStartGate = new Promise<void>(resolve => { releaseOptional = resolve; });
+    const connection = await import('../src/main/connection.js');
+    const connecting = connection.connect();
+    await vi.waitFor(() => expect(mocks.optionalStartReached).toHaveBeenCalledTimes(1));
+    let finished = false;
+    const shutdown = connection.shutdownConnection().then(() => { finished = true; });
+    try {
+      await vi.waitFor(() => expect(finished).toBe(true));
+      expect(mocks.tunnelStop).toHaveBeenCalledTimes(1);
+      expect(connection.getStatus().state).toBe('disconnected');
+    } finally {
+      releaseOptional();
+      await Promise.all([connecting, shutdown]);
+    }
+    expect(mocks.tunnelStop).toHaveBeenCalledTimes(2);
+    expect(connection.getStatus().surfaces.every(surface => surface.state === 'off' && surface.publicUrl === null)).toBe(true);
+  });
+
+  it.each(['core', 'plugins'] as const)('keeps a late %s transport alive until accepted responses drain', async surface => {
+    mocks.config.tunnel.kind = 'openai';
+    mocks.config.tunnel.pluginsTunnelId = surface === 'plugins' ? 'plugins-test' : '';
+    let releaseStart!: () => void;
+    const startup = new Promise<void>(resolve => { releaseStart = resolve; });
+    if (surface === 'core') mocks.tunnelStartGate = startup;
+    else mocks.optionalStartGate = startup;
+    const connection = await import('../src/main/connection.js');
+    const connecting = connection.connect();
+    await vi.waitFor(() => expect(surface === 'core' ? mocks.tunnelStartReached : mocks.optionalStartReached).toHaveBeenCalled());
+    let releaseDrain!: () => void;
+    const drain = new Promise<void>(resolve => { releaseDrain = resolve; });
+    mocks.endpointStop.mockImplementationOnce(() => drain);
+    const shutdown = connection.shutdownConnection();
+    vi.useFakeTimers();
+    try {
+      releaseStart();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.tunnelStop).not.toHaveBeenCalled();
+      expect(connection.getStatus().state).toBe('disconnecting');
+      releaseDrain();
+      await Promise.all([connecting, shutdown]);
+      expect(mocks.tunnelStop).toHaveBeenCalledTimes(surface === 'core' ? 1 : 2);
+      expect(connection.getStatus().state).toBe('disconnected');
+    } finally {
+      releaseStart();
+      releaseDrain();
+      await Promise.all([connecting, shutdown]);
+      vi.useRealTimers();
+    }
   });
 
   it('tears down the local endpoint when Keychain lookup resumes after final shutdown', async () => {

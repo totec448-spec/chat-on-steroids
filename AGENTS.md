@@ -198,6 +198,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Desktop | Windows on; macOS retains its off default and separate native OS consent; Linux supports extension browser control. | Existing screen/control grants also govern browser tools; unsupported native clipboard remains masked. No new per-tab permission dialog. |
 | Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
 | Plugin auto-refresh | Off. | Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
+| Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
 
 Keep evidence levels separate in all reports: **source → tests → build → package → installed
@@ -395,7 +396,11 @@ bounded UTF-8 import/read and metadata catalog. `skill-access.ts` exposes only t
 directory as `/skills` to Core, including nested code-mode calls. Current capability/Read-only
 guards still apply. This root is not saved in config, does not satisfy connection folder setup,
 and never becomes the default or learned project cwd, including native paths through an
-overlapping approved root. Desktop and external plugins receive no managed root.
+overlapping approved root. A package directory under the managed root may be a symlink/junction
+only while its final target remains inside an ordinary currently approved root. `/skills/<id>`
+then acts as a package-bounded alias for that target; resource paths are revalidated at use and
+cannot traverse above the linked package. The managed root itself and linked `SKILL.md` files
+remain non-linkable. Desktop and external plugins receive no managed root.
 
 Skills open through leading `/` completion in the composer; the attachment popup's Skills button
 inserts that leading slash and focuses the input while preserving existing draft text. Commands and Skills are
@@ -1286,15 +1291,17 @@ app-authored reopen after an earlier completed end. Restore the current generati
 same replay: a new start replaces the active turn, and its exact end clears it. An older
 turn with a missing end remains history and cannot become active again after a later turn
 finishes, including when the user repeatedly closes and revisits the chat.
-A same-request call that **starts after** a
-reported completed end can prove the page ended it falsely; recorder reopens that turn and
-retires the corresponding Goal attempt. A call started before the end, a new request or a
-manual Stop cannot be used as that proof. A canonical native final with a provider message UUID
+A same-request call that **starts after** a page-reported end can prove the page ended it
+falsely, including a stopped or interrupted view; recorder reopens that turn and retires the
+corresponding Goal attempt. A call started before the end, a new request or a Stop click alone
+cannot be used as that proof. Finish-only calls do not reopen activity. A canonical native final with a provider message UUID
 settles its already-proven request even when another connector call starts afterwards. The shared
 `readCompletedFinal` check requires request proof preceding that final and still rejects new work
 or newer boundaries. Activity and composer settlement consume this verdict without a competing
-timestamp rule; running local tools retain their independent delivery fence. False-end reopen
-evidence remains process-local.
+timestamp rule; running local tools retain their independent delivery fence. After recorder
+restart, the latest ended boundary can recover its exact request ownership only from the
+durable request-turn index recorded before that boundary. A newer question or canonical final
+vetoes reopening; restored identity never grants permission to reopen a deliberately closed tab.
 Completion reads validate the committed history sequence and current binding across their
 disk read. Concurrent activity/boundary reads must not turn a known final into an apparent
 unfinished response by replacing a queue promise. A real question, work or rebind still revokes
@@ -1411,7 +1418,7 @@ The loading message explains a potentially slow post-update rebuild and that the
 These charts are not a provider invoice, exact
 token consumption or proof of current prices/entitlements.
 
-The separate **Verified messages** section counts native user-message IDs with recorded
+The bottom **Messages and limits** section counts native user-message IDs with recorded
 model selection proof for GPT-5.6 and GPT-6. It uses provider `authoredAt`, otherwise the
 original delivery time; tool-injected `input:` rows, unconfirmed offers, unknown model IDs,
 missing model proof and future timestamps cannot contribute. Replayed/copied native IDs
@@ -1420,10 +1427,14 @@ legacy default, a current picker, or a later tool's model to increase these coun
 Cache version 9 retains these minimal ID/model/time facts alongside token totals, so a
 new week or a weekday click needs no extra transcript read. The renderer receives only
 seven local calendar days of counts and their snapshot end time. Its single weekday
-button cycles the start day, default Monday, persisted in `cos.usage.weekStart`; the range
+button above the rows cycles the start day, default Monday, persisted in `cos.usage.weekStart`; the range
 begins at the most recent occurrence of that weekday at local midnight, including today.
-Calendar arithmetic preserves daylight-saving transitions. Exact integers and the local
-date/time range are shown; they are recorded sends, not a provider quota or reset claim.
+Calendar arithmetic preserves daylight-saving transitions. Compact family rows show exact
+integers labeled sent alongside reported model/shared/feature limits. Missing catalog quotas
+do not create placeholder rows. The local date/time range stays in the weekday button's tooltip
+and accessible description; these counts are recorded sends, not a provider quota or reset claim.
+Usage starts with its summary and charts. Successful loading clears the transient status without
+leaving a gap; token-attribution/cache implementation notes are not persistent page copy.
 `session-usage`, `usage-week` and `renderer-usage` tests cover evidence, boundaries and
 preference restoration. `scripts/verify-usage-week.cjs` exercises Chromium keyboard input
 and narrow/zoomed layouts with isolated data.
@@ -1675,7 +1686,7 @@ version options normalize into the same bounded picker snapshot. Mixed-version p
 their execution ids rather than merging unrelated models into a synthetic Latest family.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
-The matched recorder/MAIN helper version is 20. Shell exchanges are read only under the native
+The matched recorder/MAIN helper version is 21. Shell exchanges are read only under the native
 main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
@@ -1692,6 +1703,10 @@ Before history hydration, a bounded read of published React hook/compiler values
 native `renderedConversation`/`renderedTurns` snapshot. Its conversation owner, actual user and
 same turn object must match. Only the newest exact turn may add early request metadata from its
 explicit current-node parent path back to that user; no guessed child or unselected prose is read.
+The DOM's Fiber pointer can name the prior render. Read the committed root's child path and
+its current ancestors, including memoized children with old return pointers. Never choose the
+newer-looking alternate or mutate React. Path views are bounded and cached only within one
+synchronous helper request; unmounted, contradictory and uncommitted branches supply no proof.
 Public thought summaries/preambles require unique public typed counterparts and real selected
 source message ids. Hidden/raw analysis stays excluded. Preambles retain the existing stable
 message identity rules. Missing or contradictory metadata remains unavailable.
@@ -1704,6 +1719,11 @@ resolves. Those descriptors carry `requestOwnerRequired`: only a witnessed local
 accepted Resume owner can confirm the request against the concrete route before tool evidence
 is published. A native click can request that first scan without an app-managed Send promise;
 its exact receipt is consumed after the scan rather than waiting for another page mutation.
+Fresh worker/resume binding uses the existing receipt observer immediately, with a 40s ceiling
+instead of the former first 500ms poll. Both require the exact submitted user row and route;
+composer clear alone cannot acknowledge an unnamed worker. A stamped native row whose frame
+is pending or rejected cannot bypass that rejection through its visible text. Cancellation and
+document/route changes revoke the wait; no acknowledgement or duplicate Send is invented.
 For classic turns, `fiber.js` retains text messages explicitly marked
 `is_thinking_preamble_message:true` on assistant/all commentary even when ChatGPT sets
 `is_visually_hidden_from_conversation:true` during streaming. This flag describes presentation;
@@ -1779,8 +1799,9 @@ External navigation may hide its destination URL under ChatGPT-only host permiss
 A completed tab absent from a successful ChatGPT URL query can release the departed
 conversation only while its original document, epoch and terminal lease still agree.
 Loading alone and failed queries are not departure proof; replacement registration wins.
-Confirmed removal or navigation sends an explicit departure to the bridge. It suspends local
-activity and automatic browser recovery, including silence, Goal/queue and compaction pickups.
+Confirmed removal or navigation sends an explicit departure to the bridge. It suspends
+automatic browser recovery, including silence, Goal/queue and compaction pickups. Exact local
+tool execution remains visible under its existing activity deadline independently of tab presence.
 An unexpected lost/discarded page retains its existing recovery contract. A newer observation
 of the exact departed page clears the dismissal; unresolved work reuses its last exact MCP
 timestamp and normal deadline. A tab close never fabricates provider completion.
@@ -1913,7 +1934,11 @@ the committed transition once; a cancelled card is not a delivery receipt.
 The existing repair's stable `progressId` is the Continue episode identity stored on its outbox
 row. Rehydration, cancellation and canonical revisions cannot mint a replacement for that same
 episode. Genuine resumed work must earn a fresh full silence window. Browser preparation alone
-does not consume the source as a delivered message; authorized or confirmed delivery does.
+does not consume the source. Authored queued input spends completion at authorization; Continue
+keeps the source exclusive until its native receipt, because a late final can still veto its
+click. The exact document's known pre-Send withdrawal retires that Continue without spending
+the final's Goal/Loop obligation. The failed attempt retains its spent authorization and cannot
+be resent or receive an ACK. A generic timeout or missing receipt cannot grant this exception.
 Stop and Send permission are checked again after their durable claim writes. A stale result
 does not issue permission and cannot replay the spent claim. Native page checks fence the
 same question, turn, work revision and document immediately before the actual input.
@@ -1923,19 +1948,43 @@ before and after asynchronous Send authorization. Its exact final message vetoes
 even when the browser journal has not reached the app or a stale Stop control remains.
 A final from before the latest native question cannot veto recovery of that newer question.
 
-A native Stop click publishes the user's stop intent through the existing journal immediately,
-even while the control remains mounted. Trusted user input also wins during automation's own
-Stop wait; automation's synthetic click is distinct. A later native Stop can strengthen the
-same source's interrupted/failed boundary, including after restart, but cannot close a newer
-question or turn. That recorded stopped source vetoes continuation and missing-tab reopening.
-The stop intent is not a claim that the provider has already ceased all server-side execution.
+A trusted native Stop click immediately blocks automatic page input, without emitting a terminal
+observation while native generation continues. Authorized app Stop records the same local intent
+before its programmatic click; unrelated synthetic clicks are not human actions. Native idleness
+can then record a stopped page view, while a canonical final retains its stronger outcome.
+Exact app-correlated work started after Stop can withdraw the local veto only for the same active
+turn, with no pending app Stop or canonical final. Old results, foreign turns and finish-only
+calls cannot do so. Browser recovery still requires the main process's exact current authority.
+Neither a click receipt nor a page-local stopped outcome claims provider-side cancellation.
+An already-earned MCP activity window remains visible through a stopped page observation:
+ten minutes for Pro, three otherwise. That retained display grants no input or reload while
+the source remains stopped. A fresh same-request call can reopen it; an old result cannot
+extend its deadline. A real canonical final or successful finish report consumes the grant.
 
 **Intent:** deliver one authorized operation to one exact document, survive transport loss,
 and revive only work that remains owed. The bridge never grants arbitrary local tools.
 
 `bridge.ts` owns the paired loopback HTTP boundary on 8765–8769; tests use isolated ports.
+`shared/browser-bridge.ts` defines the supported Settings range; `bridge-ports.ts` resolves the
+saved `ui.browserBridgePort` at startup or reconfiguration. Auto tries the established order;
+a fixed choice binds exactly that port. Effective `CLF_BRIDGE_PORTS` retains precedence, including
+test port 0; the same resolver supplies the UI override indicator and main rejects explicit edits.
+The serialized config transaction validates before entering the existing bridge lifecycle queue.
+It binds a gated replacement while the old listener serves, persists config, then activates the
+replacement. Bind/write failure releases the reservation and preserves the old config and runtime.
+Auto counts the current listener as available at its normal position. A successful switch preserves
+commands/receipts and pairing, resets browser-control/presence, replaces the wake socket, and
+drains the old listener without holding the config queue. Shutdown fences preparation/publication.
+An unavailable saved port keeps the app running, retains the choice, and reports the startup error
+in Setup; there is no fixed-port fallback, retry button or new retry timer. Settings restores a
+rejected focused selection; unchanged queued snapshots retain their base for three-way merging.
 Silent `/pair` provisioning replaces the retired six-digit flow. Validate allowed extension
 origin, bearer, payload bounds and operation identity. The wake socket only prompts maintenance.
+Automatic provisioning requests `reuse: true` to join the current credential generation across
+browser profiles. Legacy pairing and explicit reconnect still rotate credentials. Pair writes
+serialize with Disconnect, whose epoch rejects an older in-flight provisioning result.
+The extension popup's Advanced section has no Disconnect action. Its existing Connect action
+still recovers a deliberately disconnected installation; stored revocation remains authoritative.
 Status, event upload, activity, claims, receipts and bounded attachment chunks have distinct
 contracts; a successful status read is not proof that a browser action happened.
 
@@ -1987,10 +2036,10 @@ silence/no-tab recovery for workers, primes and ordinary chats. Reload repair fo
 Unattributed incidents and compaction has its own evidence. “Recover agents” is not blanket
 permission to reopen the session list. A plain historical chat with no current work is unprotected.
 An explicit `/closed` departure with `manual: true` persists `browserRecoveryDismissedAt` in the
-existing session metadata, retires its activity grant and withdraws every unexecuted browser
-repair. It revokes synthetic silence inputs while retaining authored input, continuation tickets,
-exact request ownership and confirmed repair receipts. Late owned MCP results remain history;
-neither their arrival nor an in-flight call can light the closed chat or renew recovery.
+existing session metadata and withdraws every unexecuted browser repair. It revokes synthetic
+silence inputs while retaining authored input, continuation tickets, exact request ownership
+and confirmed repair receipts. Exact running or newly started MCP work remains visible until
+its normal activity deadline, but cannot wake workers, clear departure or grant browser recovery.
 All automatic error/no-tab/stalled/attribution, silence, Goal/queue and compaction pickups remain
 suspended until a real page return. This is local departure, not a fabricated provider turn end.
 MCP results, broker reports, generic session reattachment and old page reads cannot clear the
@@ -2126,7 +2175,10 @@ Trying → failed → later confirmed updates the same progress identity in the 
 
 Stop turns automation off for that chat, cancels compaction/recovery intent, releases finish
 holds and queues a bounded exact-turn native Stop command. Native confirmation is required;
-the app does not manufacture a final answer. End turn only releases an Astra finish hold.
+the app does not manufacture a final answer or infer cancellation from a click/turn_end.
+The desktop logs admission with its exact session, conversation, turn and command. An empty
+or repeated form submit cannot request Stop: the submitting control must be the button while
+it displays Stop/Cancel. End turn only releases an Astra finish hold.
 Stop elects an existing exact tab, including a loading document, or opens the missing chat
 once under the same durable command. Its absolute two-minute deadline covers browser loading
 without renewing on retries. Browser election is saved before opening; lost receipts, navigation
@@ -2216,8 +2268,11 @@ repair, but cannot create a second browser action while another repair is alread
 Every compaction reload rechecks its original continuation token and phase at handout and the
 browser action claim. Cancellation, replacement, source dispatch and completed capture revoke
 obsolete pickup authority. Recovery text distinguishes an unsent request from an outstanding
-answer; neither implies a completed brief exists. The source waits for a visible, editable
-composer before insertion. Failed manual preparation retires only its exact pre-Send token and
+answer; neither implies a completed brief exists. A reloaded source waits for its visible,
+editable composer and recorded original question before freezing the source identity or stopping
+the turn. Already observed identities and a real user Send remain cancellation boundaries during
+hydration; an empty loading DOM must not be treated as a different conversation. The source
+rechecks the composer before insertion. Failed manual preparation retires only its exact pre-Send token and
 stores a bounded concrete failure reason. Existing user drafts remain intact. Ambiguous dispatched
 requests retain their existing custody and cannot be sent again merely because a receipt is absent.
 
@@ -2722,6 +2777,8 @@ same persisted preference. `translate="no"` protects text and attributes, includ
 language names. Japanese has its own system-font fallbacks and CJK wrapping. Changing language
 repaints owned labels while retaining drafts/selections; never translate authored messages,
 provider text or file paths. Catalog checks cover all source keys and numbered placeholders;
+`dom.run()` translates catalogued IPC errors before displaying a toast; unknown error strings
+and successful payloads stay literal.
 `scripts/verify-setup-guide.cjs` exercises narrow/zoomed layouts and native keyboard selection.
 Bindings live only in a WeakMap keyed by their DOM node. Language changes walk the current
 document, including hidden panels and bound text nodes. Never retain or periodically dereference
@@ -2872,8 +2929,12 @@ Disconnect immediately publishes `disconnecting` and coalesces repeated clicks i
 transition. MCP drain protects only complete requests admitted to the adapter: idle TCP,
 partial headers and incomplete bodies are closed without waiting for HTTP timeouts. Accepted
 responses flush before tunnel retirement; no ordinary force timer truncates committed work.
-Final shutdown can bound an already-running drain directly, rather than queueing its deadline
-behind that drain. Activity logs record Disconnect admission and the accepted-response count.
+Final shutdown bypasses unfinished startup/keychain work and directly joins one shared teardown,
+including tunnel retirement. It can shorten an already-running HTTP drain to its final budget;
+it must not declare the phase complete while that drain or its transport cleanup is pending.
+Late startup results retire their own handles without publishing them; late tunnel handles wait
+for the accepted-response drain first. Activity logs record Disconnect admission and the
+accepted-response count.
 
 The sidebar footer owns global connection controls in a compact popover outside the translucent
 sidebar stacking context. Its sidebar-themed surface is 160 CSS pixels wide, with
@@ -2929,6 +2990,11 @@ helper generation. Recheck those after asynchronous image work and before every 
 in a batch. A replaced helper/window/display invalidates old coordinates and refs. Bound
 decoded images, report actual visible crops, and never label a visible screen crop as a hidden
 window capture. Coordinate clamping and physical input respect the current display/button map.
+
+macOS AX window matching uses geometry only when the AX window number is absent. A contradictory
+explicit ID cannot borrow another window's bounds. `verify-macos-window-matching.mjs` executes
+the production Swift matching functions with synthetic AX responses when Swift is available;
+this checks matching policy, not live focus/Space transitions or packaged Mac input acceptance.
 
 Windows uses source-owned Windows.Graphics.Capture for exact HWND compositor pixels, including
 covered GPU windows, without activation or a visible-screen fallback. Minimized/unavailable
@@ -3052,8 +3118,10 @@ npm run dist:dir:mac:x64            # example unpacked target on a matching host
 
 Use `npm ci` for an intentionally needed reproducible dependency install, not as routine
 cleanup of this shared tree. `verify:ci` fetches rg, checks privacy/notices/native-source metadata,
-typechecks, verifies Electron resolves, runs Vitest excluding `mcp-shutdown`, then runs that
-socket-drain suite alone. `vitest.config.ts` forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
+typechecks, verifies Electron resolves, runs Vitest excluding `computer` and `mcp-shutdown`,
+then runs those suites with one worker. The real desktop foreground assertion must not compete
+with other suites' native windows or input; its assertions remain unchanged. `vitest.config.ts`
+forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
 and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
 

@@ -2199,6 +2199,85 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
     } finally { clock.mockRestore(); }
   });
 
+  it.each(['queued', 'claimed', 'authorized'] as const)('hands a late final from %s Continue back to the active driver', async phase => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const { row, conversationId, session, turnId } = await silent('gpt-5.6-sol', ms => { now += ms; });
+      if (mode !== 'off') await goal.setGoalObjectiveNow(conversationId, 'Finish the remaining implementation');
+      const claim = { id: row.id, owner: 'late-final-document', conversationId };
+      if (phase !== 'queued') expect((await post('/input/claim', { ...claim, requiresAuthorization: true })).body.input).toBeDefined();
+      if (phase === 'authorized') expect((await post('/input/claim', { ...claim, authorize: true })).body.ok).toBe(true);
+      // The native pre-click check discovers and journals the actual final after
+      // the app has granted permission, but before any native Send was attempted.
+      const final = { kind: 'assistant_message', messageId: randomUUID(), providerMessageId: randomUUID(), turnId,
+        text: 'The first part is ready. The remaining implementation still needs work.',
+        state: 'final', final: true, activeNow: true, goalEligible: true, time: ++now };
+      expect((await post('/events', { conversationId, events: [final] })).status).toBe(200);
+      if (phase === 'authorized') {
+        const failure = { ...claim, error: 'After-turn pickup was withdrawn before Send.' };
+        expect((await post('/input/fail', { ...failure, owner: 'different-document' })).body.ok).toBe(false);
+        expect(await input.inputBeforeGoal(session.id, turnId)).toBe('queued');
+        expect((await post('/input/fail', failure)).body.ok).toBe(true);
+        expect((await post('/input/fail', failure)).body.ok).toBe(false);
+        expect(await input.acknowledgeBrowserInput(row.id, claim.owner, conversationId, 'impossible-receipt')).toBe(false);
+        expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed', sendAuthorizedAt: expect.any(Number) });
+      }
+      input.resetInputForTests();
+      expect(await input.inputBeforeGoal(session.id, turnId)).toBeNull();
+      expect((await input.pendingBrowserInputs()).some(entry => entry.id === row.id)).toBe(false);
+      expect(await input.authorizeBrowserInput(row.id, claim.owner, conversationId)).toBe(false);
+      if (mode === 'off') expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+      else {
+        expect(goal.goalPendingReplyFor(conversationId)?.replyId).toBe(final.messageId);
+        now += 60_000;
+        const result = await post('/goal/draft', { conversationId, turnId, clientId: claim.owner, terminalRequired: true });
+        expect(result.status).toBe(200);
+        let helper: Awaited<ReturnType<typeof input.listInputs>>[number] | undefined;
+        await vi.waitFor(async () => {
+          helper = (await input.listInputs()).find(entry => entry.purpose === 'decision' && entry.decisionSourceSessionId === session.id);
+          expect(helper).toBeDefined();
+        });
+        const helperClaim = { id: helper!.id, owner: 'decision-document', conversationId: null };
+        const prepared = (await post('/input/claim', { ...helperClaim, requiresAuthorization: true })).body.input;
+        expect(prepared.text).toContain(final.text);
+        expect((await post('/input/claim', { ...helperClaim, authorize: true })).body.ok).toBe(true);
+        expect((await post('/input/ack', { ...helperClaim, messageId: 'decision-question' })).body.ok).toBe(true);
+        expect((await post('/input/answer', { ...helperClaim,
+          response: JSON.stringify({ action: 'continue', reply: 'Finish the remaining implementation and verify it.' }) })).body.ok).toBe(true);
+        await vi.waitFor(() => expect(goal.goalViewFor(conversationId)?.stage).toBe('ready'));
+        expect(goal.goalViewFor(conversationId)?.reply).toBeTruthy();
+        expect(goal.goalViewFor(conversationId)?.reply).not.toBe(row.text);
+      }
+    } finally { clock.mockRestore(); }
+  });
+
+  it('keeps an ambiguous Continue exclusive until its exact native receipt arrives', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const { row, conversationId, session, turnId } = await silent('gpt-5.6-sol', ms => { now += ms; });
+      if (mode !== 'off') await goal.setGoalObjectiveNow(conversationId, 'Finish the remaining implementation');
+      expect(await input.claimBrowserInput(row.id, 'uncertain-document', conversationId, true)).not.toBeNull();
+      expect(await input.authorizeBrowserInput(row.id, 'uncertain-document', conversationId)).toBe(true);
+      await post('/events', { conversationId, events: [{ kind: 'assistant_message',
+        messageId: randomUUID(), providerMessageId: randomUUID(), turnId, text: 'The first part is ready.',
+        state: 'final', final: true, activeNow: true, goalEligible: true, time: ++now }] });
+      input.resetInputForTests();
+      expect(await input.inputBeforeGoal(session.id, turnId)).toBe('queued');
+      expect(await input.failBrowserInput(row.id, 'uncertain-document', 'The response timed out')).toBe(false);
+      expect(await input.inputBeforeGoal(session.id, turnId)).toBe('queued');
+      expect(await input.claimBrowserInput(row.id, 'replacement-document', conversationId, true)).toBeNull();
+      expect(await input.authorizeBrowserInput(row.id, 'uncertain-document', conversationId)).toBe(false);
+      if (mode !== 'off') {
+        expect(goal.goalPendingReplyFor(conversationId)).not.toBeNull();
+        const result = await post('/goal/draft', { conversationId, turnId, clientId: 'replacement-document', terminalRequired: true });
+        expect(result.body.error).toBe('user_input_pending');
+      }
+      expect(await input.acknowledgeBrowserInput(row.id, 'uncertain-document', conversationId, 'actual-continue-message')).toBe(true);
+      expect(await input.inputBeforeGoal(session.id, turnId)).toBe('consumed');
+      expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+    } finally { clock.mockRestore(); }
+  });
+
   it('gives Pro five full minutes after a delayed reload acknowledgement', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {

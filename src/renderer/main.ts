@@ -9,6 +9,7 @@ import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
 import { initPet } from './pet.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
+import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
  *
@@ -465,6 +466,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
   }
   const readOnly = over.readOnly ?? previous.readOnly;
   const chatPatch = chatSettingsPatch(previous);
+  const selectedBridgePort = $<HTMLSelectElement>('browserBridgePort').value;
   const patch: SettingsPatch = {
     capabilities,
     readOnly,
@@ -484,6 +486,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
       backgroundChats: $<HTMLInputElement>('backgroundChats').checked,
+      browserBridgePort: (selectedBridgePort === 'auto' ? 'auto' : Number(selectedBridgePort)) as BrowserBridgePort,
       autoContinue: $<HTMLInputElement>('autoContinue').checked,
       browserOnly: $<HTMLInputElement>('browserOnly').checked,
       autoRefreshPlugins: $<HTMLInputElement>('autoRefreshPlugins').checked,
@@ -541,7 +544,15 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     } else if (toolSurfaceChanged) {
       toast(t("Tools changed. Start a new ChatGPT conversation to guarantee the new tool list is loaded."));
     }
-  } else await refresh();
+  } else {
+    await refresh();
+    // A rejected select remains focused. Restore it even though ordinary pushes protect dirty
+    // controls, unless a later save explicitly requested a different port. Unchanged queued
+    // snapshots keep their original base so main's three-way merge cannot retry this rejection.
+    if (state && (!requestedSettings || requestedSettings.ui.browserBridgePort === patch.ui.browserBridgePort)) {
+      $<HTMLSelectElement>('browserBridgePort').value = String(state.config.ui.browserBridgePort ?? 'auto');
+    }
+  }
 }
 
 // ---------------------------------------------------------------- helpers
@@ -1063,6 +1074,12 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
+  const bridgePortControl = $<HTMLSelectElement>('browserBridgePort');
+  applyValue(bridgePortControl, String(config.ui.browserBridgePort ?? 'auto'), String(previousState?.config.ui.browserBridgePort ?? 'auto'));
+  bridgePortControl.disabled = next.bridge.portOverridden === true;
+  ui($('browserBridgePortHint'), 'textContent', () => next.bridge.portOverridden
+    ? t('Controlled by CLF_BRIDGE_PORTS. Change the environment override to choose a port here.')
+    : t('Auto uses the first available port. A fixed port must be available.'));
   applyChecked($<HTMLInputElement>('autoContinue'), config.ui.autoContinue !== false, previousState?.config.ui.autoContinue);
   applyChecked($<HTMLInputElement>('browserOnly'), config.ui.browserOnly === true, previousState?.config.ui.browserOnly);
   applyChecked($<HTMLInputElement>('autoRefreshPlugins'), config.ui.autoRefreshPlugins === true, previousState?.config.ui.autoRefreshPlugins);

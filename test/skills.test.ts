@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +11,8 @@ import {
   skillsDirectory
 } from '../src/main/skills.js';
 import { MAX_SKILL_BYTES, MAX_SKILLS } from '../src/shared/skills.js';
+import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
+import { rawPromises as rawFs } from '../src/main/rawfs.js';
 
 let userData = '';
 let sources = '';
@@ -19,6 +21,8 @@ beforeEach(async () => {
   userData = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'cos-skills-')));
   sources = path.join(userData, 'sources');
   await fs.mkdir(sources);
+  initConfigPath(userData);
+  await saveConfig(defaultConfig());
   await initSkillsPath(userData);
 });
 
@@ -157,6 +161,86 @@ describe('managed Skills store', () => {
       path: '/skills/external/SKILL.md'
     }]);
     await expect(readSkill('nested')).rejects.toThrow(/not found/i);
+  });
+
+  it('discovers a linked package only while its target belongs to an approved root', async () => {
+    const approved = path.join(userData, 'approved');
+    const packageDirectory = path.join(approved, 'shared-review');
+    await fs.mkdir(path.join(packageDirectory, 'references'), { recursive: true });
+    await fs.writeFile(path.join(packageDirectory, 'SKILL.md'), '# Shared review\n\nRead the linked package.');
+    await fs.writeFile(path.join(packageDirectory, 'references', 'notes.md'), 'Package resource.');
+    await fs.symlink(packageDirectory, path.join(userData, 'skills', 'shared-review'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    expect(await listSkills()).toEqual([]);
+    const previous = getConfig();
+    await saveConfig({ ...previous, roots: [{ name: 'approved', path: approved }] });
+    try {
+      expect(await listSkills()).toEqual([{
+        id: 'shared-review',
+        name: 'Shared review',
+        description: 'Read the linked package.',
+        path: '/skills/shared-review/SKILL.md'
+      }]);
+      expect((await readSkill('shared-review')).text).toContain('Read the linked package.');
+      const readDisabled = { ...getConfig(), capabilities: { ...getConfig().capabilities, read: false } };
+      await saveConfig(readDisabled);
+      expect(await listSkills()).toEqual([]);
+      await expect(readSkill('shared-review')).rejects.toThrow(/not found/i);
+      await saveConfig({ ...readDisabled, capabilities: { ...readDisabled.capabilities, read: true } });
+      expect(await listSkills()).toHaveLength(1);
+    } finally {
+      await saveConfig(previous);
+    }
+    expect(await listSkills()).toEqual([]);
+    await expect(readSkill('shared-review')).rejects.toThrow(/not found/i);
+  });
+
+  it('never opens an unapproved target when a linked package is retargeted mid-scan', async () => {
+    const approved = path.join(userData, 'approved-race');
+    const approvedPackage = path.join(approved, 'race-review');
+    const unapprovedPackage = path.join(userData, 'unapproved-race', 'race-review');
+    await fs.mkdir(approvedPackage, { recursive: true });
+    await fs.mkdir(unapprovedPackage, { recursive: true });
+    await fs.writeFile(path.join(approvedPackage, 'SKILL.md'), '# Approved race\n\nSAFE_TEXT');
+    await fs.writeFile(path.join(unapprovedPackage, 'SKILL.md'), '# Unapproved race\n\nSECRET_TEXT');
+    const link = path.join(userData, 'skills', 'race-review');
+    await fs.symlink(approvedPackage, link, process.platform === 'win32' ? 'junction' : 'dir');
+    const previous = getConfig();
+    await saveConfig({ ...previous, roots: [{ name: 'approved-race', path: approved }] });
+
+    const originalLstat = rawFs.lstat.bind(rawFs);
+    const originalOpen = rawFs.open.bind(rawFs);
+    const aliasFile = path.resolve(path.join(link, 'SKILL.md'));
+    const maliciousFile = path.resolve(path.join(unapprovedPackage, 'SKILL.md'));
+    const opened: string[] = [];
+    let retargeted = false;
+    const lstatSpy = vi.spyOn(rawFs, 'lstat').mockImplementation((async (target: Parameters<typeof rawFs.lstat>[0], ...args: unknown[]) => {
+      const candidate = path.resolve(String(target));
+      const same = process.platform === 'win32'
+        ? candidate.toLowerCase() === aliasFile.toLowerCase()
+        : candidate === aliasFile;
+      if (!retargeted && same) {
+        retargeted = true;
+        await fs.unlink(link);
+        await fs.symlink(unapprovedPackage, link, process.platform === 'win32' ? 'junction' : 'dir');
+      }
+      return (originalLstat as (...values: unknown[]) => ReturnType<typeof rawFs.lstat>)(target, ...args);
+    }) as typeof rawFs.lstat);
+    const openSpy = vi.spyOn(rawFs, 'open').mockImplementation((async (target: Parameters<typeof rawFs.open>[0], ...args: unknown[]) => {
+      opened.push(path.resolve(String(target)));
+      return (originalOpen as (...values: unknown[]) => ReturnType<typeof rawFs.open>)(target, ...args);
+    }) as typeof rawFs.open);
+    try {
+      await expect(listSkills()).rejects.toThrow(/managed Skills folder changed/i);
+      expect(retargeted).toBe(true);
+      expect(opened.some(file => process.platform === 'win32'
+        ? file.toLowerCase() === maliciousFile.toLowerCase()
+        : file === maliciousFile)).toBe(false);
+    } finally {
+      lstatSpy.mockRestore();
+      openSpy.mockRestore();
+      await saveConfig(previous);
+    }
   });
 
   it('fails closed instead of silently omitting a valid 65th skill', async () => {
