@@ -1,9 +1,11 @@
-import { ui, t } from './i18n.js';
+import { currentLanguage, ui, t } from './i18n.js';
 import { $, el, run } from './dom.js';
-import { DEFAULT_USAGE_FORMULA, usageEstimate, usageModelGroups, usageRate, type UsageFormula, type UsageOverview } from '../shared/usage.js';
+import { DEFAULT_USAGE_FORMULA, usageDateKey as dateKey, usageEstimate, usageMessageTotals, usageModelGroups, usageRate, usageWeekStart, type UsageFormula, type UsageOverview } from '../shared/usage.js';
 let snapshot: UsageOverview | null = null;
 let loadGeneration = 0;
 const FORMULA_KEY = 'usage-formula-v1';
+const WEEK_START_KEY = 'cos.usage.weekStart';
+let weekStart = 1;
 let formula: UsageFormula = { ...DEFAULT_USAGE_FORMULA, rates: { ...DEFAULT_USAGE_FORMULA.rates } };
 function saveFormula(): void {
   try { localStorage.setItem(FORMULA_KEY, JSON.stringify(formula)); } catch { /* Read-only storage still permits an in-memory comparison. */ }
@@ -28,7 +30,19 @@ function usageHint(node: HTMLElement, text: string | (() => string)): void {
   node.addEventListener('focus', show); node.addEventListener('blur', hide);
   node.addEventListener('keydown', event => { if (event.key === 'Escape') hide(); });
 }
-function dateKey(date: Date): string { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
+function paintMessages(): void {
+  const through = snapshot?.messages.through ?? Date.now();
+  const from = usageWeekStart(weekStart, through);
+  ui($('usageWeekStartLabel'), 'textContent', () => t('Since {0}', [new Date(from).toLocaleDateString(currentLanguage(), { weekday: 'long' })]));
+  if (!snapshot) return;
+  const totals = usageMessageTotals(snapshot.messages, weekStart);
+  ui($('usageMessages56'), 'textContent', () => totals.gpt56.toLocaleString(currentLanguage()));
+  ui($('usageMessages6'), 'textContent', () => totals.gpt6.toLocaleString(currentLanguage()));
+  ui($('usageMessagePeriod'), 'textContent', () => {
+    const format = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' });
+    return t('Local time · {0} → {1}', [format.format(from), format.format(through)]);
+  });
+}
 export async function refreshUsage(): Promise<void> {
   document.getElementById('usageTooltip')?.remove();
   const generation = ++loadGeneration;
@@ -41,6 +55,7 @@ export async function refreshUsage(): Promise<void> {
     if (generation !== loadGeneration) return;
     if (!value) { ui(status, 'textContent', () => t("Usage could not be loaded. Try Refresh.")); return; }
     snapshot = value;
+    paintMessages();
     const summary = $('usageSummary'); summary.replaceChildren();
     for (const [label, number] of [['Processed tokens · est.', value.tokens], ['Peak daily tokens', Math.max(0, ...value.days.map((day) => day.tokens))], ['Conversations', value.sessions], ['Active days', value.days.filter((day) => day.tokens > 0).length]] as const) {
       const item = el('div'); item.dataset.usageMetric = label; usageHint(item, () => `${Math.round(number).toLocaleString()} ${t(label).toLowerCase()}`); item.append(el('strong', '', count.format(number)), el('span', '', () => t(label))); summary.append(item);
@@ -129,6 +144,17 @@ function paintCost(): void {
   $('usageDays').replaceChildren(modelTable, table);
 }
 export function initUsage(): void {
+  try {
+    const saved = localStorage.getItem(WEEK_START_KEY);
+    if (saved !== null && /^[0-6]$/.test(saved)) weekStart = Number(saved);
+  } catch { /* The weekday can still be changed in this window. */ }
+  paintMessages();
+  usageHint($('usageMessagesTitle'), () => t('Counts recorded native messages with verified model selection. Tool injections and messages without model evidence are excluded.'));
+  $('usageWeekStart').addEventListener('click', () => {
+    weekStart = (weekStart + 1) % 7;
+    try { localStorage.setItem(WEEK_START_KEY, String(weekStart)); } catch { /* Keep the current in-memory choice. */ }
+    paintMessages();
+  });
   try {
     const saved = JSON.parse(localStorage.getItem(FORMULA_KEY) ?? 'null');
     if (saved && Number.isFinite(saved.divisor) && saved.divisor > 0 && Number.isFinite(saved.multiplier) && saved.multiplier >= 0 && saved.rates && typeof saved.rates === 'object' && !Array.isArray(saved.rates)) {

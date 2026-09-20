@@ -157,7 +157,7 @@ describe('session finish turn identity', () => {
     expect(hooks.followup).toHaveBeenCalledTimes(2);
     expect(hooks.enqueue).toHaveBeenCalledTimes(1);
     expect(hooks.enqueue).toHaveBeenCalledWith(expect.objectContaining({ sessionId, mode: 'auto', text: 'Check the remaining requirement' }),
-      { turnId: 'turn-one', periodic: false });
+      { turnId: 'turn-one', periodic: false, mode: 'goal' });
     await announceSessionFinish(sessionId, 'Again');
     expect(hooks.followup).toHaveBeenCalledTimes(2);
   });
@@ -179,15 +179,48 @@ describe('session finish turn identity', () => {
     expect(hooks.enqueue).not.toHaveBeenCalled();
     expect(hooks.inputListeners.size).toBe(0);
   });
-  it('uses the armed Astra switch as Loop at finish and suppresses Notify', async () => {
+  it.each(['goal', 'loop'] as const)('uses the selected Astra %s mode at finish and suppresses Notify', async mode => {
     await observeSessionModel(sessionId, hooks.caller.conversationId, 'gpt-6-pro', Date.now());
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'notify' } });
     const { setGoalSwitchNow } = await import('../src/main/goal.js');
-    await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
+    await setGoalSwitchNow(hooks.caller.conversationId, mode, true);
     await announceSessionFinish(sessionId, 'Wrapping up');
-    expect(hooks.followup.mock.calls.map(call => call[4])).toEqual(['loop']);
+    expect(hooks.followup.mock.calls.map(call => call[4])).toEqual([mode]);
     expect(notify).not.toHaveBeenCalled();
-    expect(hooks.enqueue).toHaveBeenCalledWith(expect.objectContaining({ mode: 'auto' }), { turnId: 'turn-one', periodic: false });
+    expect(hooks.enqueue).toHaveBeenCalledWith(expect.objectContaining({ mode: 'auto' }), { turnId: 'turn-one', periodic: false, mode });
+  });
+  it('releases the exact finish hold when Goal completes without fabricating a final or a queued instruction', async () => {
+    hooks.hasInput = false;
+    hooks.followup.mockResolvedValueOnce(null);
+    await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
+    expect(await announceSessionFinish(sessionId, 'Requested work is complete')).toContain('RELEASED:');
+    expect(hooks.followup).toHaveBeenCalledOnce();
+    expect(hooks.enqueue).not.toHaveBeenCalled();
+    expect((await getSession(sessionId))?.finishTurn?.released).toBe(true);
+    expect((await getSession(sessionId))?.activeTurnId).toBe('turn-one');
+    expect(await readRecentEvents(sessionId, 10, { kinds: ['turn_end'] })).toEqual([]);
+    await announceSessionFinish(sessionId, 'Repeated finish');
+    expect(hooks.followup).toHaveBeenCalledOnce();
+  });
+  it.each(['goal', 'loop'] as const)('revokes an in-flight %s decision across a mode switch and switch back', async mode => {
+    await setGoalSwitchNow(hooks.caller.conversationId, mode, true);
+    let complete!: (text: string) => void;
+    let signal!: AbortSignal;
+    hooks.followup.mockImplementationOnce((_id, currentSignal) => {
+      signal = currentSignal;
+      return new Promise<string>(resolve => { complete = resolve; });
+    });
+    await announceTransport(sessionId, 'Wrapping up');
+    await vi.waitFor(() => expect(complete).toBeTypeOf('function'));
+    try {
+      await setGoalSwitchNow(hooks.caller.conversationId, mode === 'goal' ? 'loop' : 'goal', true);
+      const revoked = signal.aborted;
+      await setGoalSwitchNow(hooks.caller.conversationId, mode, true);
+      complete('Obsolete mode decision');
+      await settleSessionFinishForTests();
+      expect(revoked).toBe(true);
+      expect(hooks.enqueue).not.toHaveBeenCalled();
+    } finally { complete('Release the fixture'); await settleSessionFinishForTests(); }
   });
   it.each(['auto', 'finish', 'after-turn'])('suppresses notices and decisions while %s input remains queued, including future schedules', async mode => {
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'notify' } });
@@ -213,7 +246,7 @@ describe('session finish turn identity', () => {
     await expect(requestSessionFinishGoal(sessionId, 'turn-one')).rejects.toThrow('already queued');
     hooks.delivered = [];
     await requestSessionFinishGoal(sessionId, 'turn-one');
-    expect(hooks.enqueue).toHaveBeenCalledWith(expect.objectContaining({ sessionId }), { turnId: 'turn-one', periodic: false, userRequested: true });
+    expect(hooks.enqueue).toHaveBeenCalledWith(expect.objectContaining({ sessionId }), { turnId: 'turn-one', periodic: false, mode: 'goal', userRequested: true });
     await releaseSessionFinish(sessionId, 'turn-one');
     await waiting;
     expect(await sessionFinishWaiting(sessionId, 'turn-one', hooks.caller.conversationId)).toBe(false);

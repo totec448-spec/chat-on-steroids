@@ -11,6 +11,9 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## Unreleased
 
+- Keep fresh background workers rendering while their editor hydrates, including pending initial navigation and exact document retirement.
+- Read live alternate-shell request metadata and public activity before history hydration; place recorded tools beside native prose without a reload.
+- Restore versioned response observers without duplicate active readers and recognize complete identity in native resume streams.
 - Capture completed alternate-shell handoff briefs using their exact native final-message identity; retain cancellation and conversation guards.
 - Keep background chat preparation rendering through its owned same-document navigation, without changing the selected browser tab.
 - Add Japanese interface translations and compact, keyboard-accessible language flags in Setup.

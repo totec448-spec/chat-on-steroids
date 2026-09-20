@@ -257,8 +257,8 @@ describe('durable user input ownership', () => {
   it('supersedes only the receiving session Goal and preserves another session queued Goal across restart', async () => {
     binding.goalEnabled = true;
     binding.activeTurnId = 'turn-one';
-    const otherGoal = await enqueueInput(input({ text: 'Goal A' }), { turnId: 'turn-one', periodic: false });
-    const ownGoal = await enqueueInput(input({ sessionId: 'session-two', text: 'Goal B' }), { turnId: 'turn-one', periodic: false });
+    const otherGoal = await enqueueInput(input({ text: 'Goal A' }), { turnId: 'turn-one', periodic: false, mode: 'goal' });
+    const ownGoal = await enqueueInput(input({ sessionId: 'session-two', text: 'Goal B' }), { turnId: 'turn-one', periodic: false, mode: 'goal' });
     const ownInput = await enqueueInput(input({ sessionId: 'session-two', text: 'Correction for B' }));
     resetInputForTests();
     const rows = await listInputs();
@@ -299,7 +299,7 @@ describe('durable user input ownership', () => {
   it('keeps an automatic Goal for a call started after its enqueue', async () => {
     binding.goalEnabled = true;
     binding.activeTurnId = 'turn-one';
-    await enqueueInput(input(), { turnId: 'turn-one', periodic: false });
+    await enqueueInput(input(), { turnId: 'turn-one', periodic: false, mode: 'goal' });
     expect(await offerToolInput(sessionId, binding.conversationId, 'running-call', now, true)).toEqual([]);
     now += 1;
     expect(await offerToolInput(sessionId, binding.conversationId, 'next-call', now, true)).toHaveLength(1);
@@ -308,7 +308,7 @@ describe('durable user input ownership', () => {
   it.each([false, true])('prioritizes new user input while preserving generated post-wire receipts: offered=%s', async offered => {
     binding.goalEnabled = true;
     binding.activeTurnId = 'turn-one'; binding.impulseMinutes = 3;
-    const generated = await enqueueInput(input({ text: 'Generated instruction' }), { turnId: 'turn-one', periodic: false });
+    const generated = await enqueueInput(input({ text: 'Generated instruction' }), { turnId: 'turn-one', periodic: false, mode: 'goal' });
     if (offered) now += 1;
     if (offered) await offerToolInput(sessionId, binding.conversationId, 'first-request', now);
     const user = await enqueueInput(input({ text: 'My newer instruction' }));
@@ -338,7 +338,7 @@ describe('durable user input ownership', () => {
   it.each(['end', 'next-turn', 'hold-off'] as const)('does not deliver a queued finish instruction after %s, including restart', async change => {
     binding.goalEnabled = true;
     binding.activeTurnId = 'turn-one';
-    const row = await enqueueInput(input({ text: 'Check the remaining issue' }), { turnId: 'turn-one', periodic: false });
+    const row = await enqueueInput(input({ text: 'Check the remaining issue' }), { turnId: 'turn-one', periodic: false, mode: 'goal' });
     if (change === 'end') binding.finishReleased = true;
     if (change === 'next-turn') binding.activeTurnId = 'turn-two';
     if (change === 'hold-off') binding.finishEnabled = false;
@@ -349,7 +349,7 @@ describe('durable user input ownership', () => {
   });  it('delivers a generated finish instruction through the existing exact tool receipt once', async () => {
     binding.goalEnabled = true;
     binding.activeTurnId = 'turn-one';
-    const row = await enqueueInput(input({ text: 'Finish the validation' }), { turnId: 'turn-one', periodic: false });
+    const row = await enqueueInput(input({ text: 'Finish the validation' }), { turnId: 'turn-one', periodic: false, mode: 'goal' });
     expect(await offerToolInput(sessionId, binding.conversationId, 'first-request', now + 1, true)).toHaveLength(1);
     now += 100;
     expect(await offerToolInput(sessionId, binding.conversationId, 'next-request', now, true)).toEqual([]);
@@ -1071,6 +1071,26 @@ it('a queued finish task does not prevent a normal browser message from being cl
   await enqueueInput(input({ mode: 'finish' }));
   const ordinary = await enqueueInput(input());
   expect(await claimBrowserInput(ordinary.id, 'browser', binding.conversationId)).toMatchObject({ id: ordinary.id });
+});
+
+it.each(['other-turn', 'other-conversation', 'cancelled', 'legacy', 'new-turn'] as const)('does not borrow delayed completion for a queued input after %s', async change => {
+  binding.model = 'gpt-5.6-sol';
+  binding.activeTurnId = 'queued-source';
+  binding.end = { kind: 'turn_start', outcome: '', turnId: 'queued-source', time: now - 10 };
+  const row = await enqueueInput(input({ mode: 'after-turn' }));
+  binding.activeTurnId = null;
+  binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'queued-source', time: now - 1 };
+  if (change === 'other-turn') binding.end.turnId = 'older-turn';
+  if (change === 'other-conversation') binding.conversationId = 'conversation-b';
+  if (change === 'cancelled') await cancelInput(row.id);
+  if (change === 'new-turn') binding.activeTurnId = 'newer-turn';
+  if (change === 'legacy') {
+    const legacy = { ...row }; delete legacy.queuedTurn;
+    await writeDurableNow('session-input', [legacy]);
+  }
+  resetInputForTests();
+  expect(await pendingBrowserInputs()).toEqual([]);
+  expect(await claimBrowserInput(row.id, 'page', binding.conversationId, true)).toBeNull();
 });
 
 it.each(['finish', 'after-turn'] as const)('sends only one queued %s after each exact completed turn, including across restart', async mode => {
