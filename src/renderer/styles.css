@@ -258,14 +258,15 @@ body {
 
 /* CJK uses natural character wrapping and full-height glyphs. Keep native controls
    flexible at narrow window widths and when the renderer is zoomed. */
-html:lang(zh) body { letter-spacing: 0; line-break: strict; }
+html:lang(zh) body, html:lang(ja) body { letter-spacing: 0; line-break: strict; }
 html:lang(zh-TW) body { font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft JhengHei UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans CJK TC", sans-serif); }
+html:lang(ja) body { font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, "Segoe UI", "Yu Gothic UI", "Yu Gothic", "Hiragino Sans", "Meiryo", "Noto Sans CJK JP", sans-serif); }
 .language-select { min-width: 8em; max-width: 100%; }
 .setup-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px 24px; margin-bottom: 20px; }
 .setup-heading .settings-heading { margin-bottom: 0; padding: 0; }
 .setup-heading .settings-heading p { margin-bottom: 0; }
-.language-tabs { display: inline-flex; flex: none; padding: 3px; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
-.language-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; white-space: nowrap; }
+.language-tabs { display: inline-flex; flex: none; flex-wrap: wrap; justify-self: start; max-width: 100%; padding: 3px; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.language-tabs button { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 36px; padding: 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .language-tabs button:hover { background: var(--hover); color: var(--ink); }
 .language-tabs button[aria-pressed='true'] { background: var(--hover); border-color: var(--line); color: var(--ink); }
 .language-tabs button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
@@ -2872,6 +2873,13 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .usage-summary span, .muted { color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); }
 .usage-section { margin: 0 0 38px; }
 .usage-section h2 { display: flex; align-items: center; justify-content: space-between; font-size: calc(15px * var(--text-scale, 1)); margin-bottom: 15px; text-transform: none; letter-spacing: 0; }
+.usage-messages { padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.usage-messages h2 { gap: 12px; flex-wrap: wrap; }
+.usage-week-start { display: inline-flex; align-items: center; gap: 12px; }
+.usage-message-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin: 24px 0 16px; }
+.usage-message-counts dt { color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); }
+.usage-message-counts dd { margin: 6px 0 0; font-size: calc(36px * var(--text-scale, 1)); font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+#usageMessagePeriod { margin: 0; line-height: 1.5; }
 .usage-limit { display: flex; justify-content: space-between; padding: 18px 0; border-bottom: 1px solid var(--line); gap: 20px; }
 .usage-limit > div { display: grid; gap: 6px; }
 .usage-limit > div:last-child { text-align: right; }

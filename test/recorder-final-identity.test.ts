@@ -112,7 +112,7 @@ it.each(['missing', 'replaced', 'matching', 'restart'])('closes the canonical re
   expect(await readEvents(sessionId, { kinds: ['turn_end'] })).toHaveLength(1);
 });
 
-it.each(['missing', 'current-page-id'])('never closes newer work from an old canonical answer with %s identity', async mode => {
+it.each(['missing', 'current-page-id', 'original-page-id'])('never closes newer work from an old canonical answer with %s identity', async mode => {
   const conversationId = `historical-final-${mode}`;
   const opened = await recordChatObservations(conversationId, [
     { kind: 'turn_start', time: 10, turnId: 'old-turn' },
@@ -121,11 +121,12 @@ it.each(['missing', 'current-page-id'])('never closes newer work from an old can
     { kind: 'turn_start', time: 20, turnId: 'new-turn' }
   ]);
   const result = await recordChatObservations(conversationId, [{
-    kind: 'assistant_message', time: 30, messageId: 'old-answer', text: 'Old result', state: 'final', final: true,
-    ...(mode === 'current-page-id' ? { turnId: 'new-turn' } : {})
+    kind: 'assistant_message', time: 30, messageId: 'old-answer', text: 'Old result, revised', state: 'final', final: true,
+    activeNow: true, renderedHtml: '<p>Old result, revised</p>',
+    ...(mode === 'current-page-id' ? { turnId: 'new-turn' } : mode === 'original-page-id' ? { turnId: 'old-turn' } : {})
   }]);
   expect((await getSession(opened.sessionId!))?.activeTurnId).toBe('new-turn');
-  expect(result.activity.terminal).toBe(false);
+  expect(result.activity).toMatchObject({ meaningful: false, working: false, terminal: false });
   expect(await readEvents(opened.sessionId!, { kinds: ['turn_end'] })).toHaveLength(1);
 });
 
@@ -171,10 +172,11 @@ it('does not close the old turn after a newer user message arrives in the recove
     { kind: 'turn_start', time: 10, turnId: 'turn' },
     { kind: 'assistant_message', time: 11, turnId: 'turn', messageId: 'answer', text: 'Partial', state: 'streaming' }
   ]);
-  await recordChatObservations(conversationId, [
-    { kind: 'assistant_message', time: 20, messageId: 'answer', text: 'Final answer', state: 'final', final: true },
+  const revised = await recordChatObservations(conversationId, [
+    { kind: 'assistant_message', time: 20, messageId: 'answer', text: 'Final answer', state: 'final', final: true, activeNow: true },
     { kind: 'user_message', time: 21, messageId: 'next-user', text: 'New work', authoredNow: true }
   ]);
+  expect(revised.activity).toMatchObject({ working: true, terminal: false });
   expect((await getSession(opened.sessionId!))?.activeTurnId).toBe('turn');
   expect(await readEvents(opened.sessionId!, { kinds: ['turn_end'] })).toHaveLength(0);
 });
@@ -284,10 +286,11 @@ it('does not close an old turn when its revised final follows a newer user messa
     { kind: 'turn_start', time: 10, turnId: 'turn' },
     { kind: 'assistant_message', time: 11, turnId: 'turn', messageId: 'answer', text: 'Partial', state: 'streaming' }
   ]);
-  await recordChatObservations(conversationId, [
+  const revised = await recordChatObservations(conversationId, [
     { kind: 'user_message', time: 21, messageId: 'next-user', text: 'New work', authoredNow: true },
-    { kind: 'assistant_message', time: 20, messageId: 'answer', text: 'Final answer', state: 'final', final: true }
+    { kind: 'assistant_message', time: 20, messageId: 'answer', text: 'Final answer', state: 'final', final: true, activeNow: true }
   ]);
+  expect(revised.activity).toMatchObject({ working: true, terminal: false });
   expect((await getSession(opened.sessionId!))?.activeTurnId).toBe('turn');
   expect(await readEvents(opened.sessionId!, { kinds: ['turn_end'] })).toHaveLength(0);
 });

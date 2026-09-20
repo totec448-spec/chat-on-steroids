@@ -9,11 +9,31 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## Unreleased
+
+- Keep fresh background workers rendering while their editor hydrates, including pending initial navigation and exact document retirement.
+- Read live alternate-shell request metadata and public activity before history hydration; place recorded tools beside native prose without a reload.
+- Restore versioned response observers without duplicate active readers and recognize complete identity in native resume streams.
+- Capture completed alternate-shell handoff briefs using their exact native final-message identity; retain cancellation and conversation guards.
+- Keep background chat preparation rendering through its owned same-document navigation, without changing the selected browser tab.
+- Add Japanese interface translations and compact, keyboard-accessible language flags in Setup.
+- Resume new project chats and worker startup when the alternate shell's account picker finishes loading after its first inspection.
+- Capture early request identity from complete v1 stream messages with omitted format headers, preserving exact conversation ownership for worker status and messages.
+- Preserve prepared text, follow-up sends and worker bootstraps in the alternate ChatGPT Markdown editor; hide verified setup frames in its user bubbles.
+- Read exact selected-message request metadata and connector recipient names in the alternate shell, and prevent an older unfinished exchange from keeping its composer busy.
+- Preserve current activity and recovery deadlines when reload republishes an older final answer.
+- Bind a pending new chat to its project before route binding releases its queued observations.
+- Recover the exact missing tab when a sleeping worker is woken, and stop old prime history from blocking current chat recovery.
+- Restart the page-helper warning grace after a long reporting gap or a backward clock adjustment.
+- Record bounded, accurate Compact & Resume marker outcomes without repeating the same notice on every reload.
+- Give observation-journal deliveries and split retries a 60-second durable-write allowance while preserving unacknowledged observations after timeout.
+
 ## [2.1.14] — Death to Anthropic and OpenAI. Join the resistance @dummerspast39 x
 
 - Add the optional animated Tur Tur Sahur desktop companion.
 - Show normal and unattributed reload warnings only in the last 30 seconds; retain the five-minute Pro warning.
 - Improve automatic Continue, queued-message recovery, native Stop handling and recorded turn ownership.
+- Keep automatic Continue queued while temporary tool activity clears, and repair mismatched browser recorder/helper versions together.
 - Wait for native tool-result receipt before automatic compaction interrupts a response, preserving just-completed work for the handoff.
 - Improve browser snapshots, select controls and safe tab release.
 - Refine the project workspace, Skills picker, appearance, connection controls and worker overview.

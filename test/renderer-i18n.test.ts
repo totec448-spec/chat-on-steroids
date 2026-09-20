@@ -179,6 +179,7 @@ describe('Chinese app interface', () => {
       if (/[a-zA-Z]{2}/.test(text) && !catalog[text]) missing.push(text);
     }
     for (const node of document.querySelectorAll('[title], [placeholder], [aria-label]')) {
+      if (node.closest('[translate="no"]')) continue;
       for (const attr of ['title', 'placeholder', 'aria-label']) {
         const text = node.getAttribute(attr);
         if (text && /[a-zA-Z]{2}/.test(text) && !catalog[text]) missing.push(text);

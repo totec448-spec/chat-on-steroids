@@ -52,11 +52,41 @@ app.whenReady().then(async () => {
     const ready = await win.webContents.executeJavaScript('window.fixtureReady');
     assert.equal(ready, true);
     const results = [];
-    for (const [width, height, zoom, language, theme] of [[1100, 900, 1, 'en', 'dark'], [800, 650, 1, 'en', 'dark'], [1100, 900, 1.5, 'zh-CN', 'light'], [640, 720, 1, 'zh-CN', 'dark']]) {
+    for (const [width, height, zoom, language, theme] of [
+      [1100, 900, 1, 'en', 'dark'], [800, 650, 1, 'en', 'dark'],
+      [1100, 900, 1.5, 'zh-CN', 'light'], [640, 720, 1, 'zh-CN', 'dark'],
+      [800, 650, 1, 'es', 'dark'], [800, 650, 1, 'zh-TW', 'light'],
+      [1100, 900, 1, 'ja', 'dark'], [1100, 900, 1.5, 'ja', 'light'], [640, 720, 1, 'ja', 'dark']
+    ]) {
       win.setSize(width, height);
       win.webContents.setZoomFactor(zoom);
       await win.webContents.executeJavaScript(`window.setLanguage('${language}')`);
       await win.webContents.executeJavaScript(`document.documentElement.dataset.theme = '${theme}'`);
+      const header = await win.webContents.executeJavaScript(`(async () => {
+        const panel = document.querySelector('[data-panel="setup"]'); panel.scrollTop = 0;
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const tabs = panel.querySelector('.language-tabs'), title = panel.querySelector('.settings-heading');
+        const bounds = tabs.getBoundingClientRect(), heading = title.getBoundingClientRect();
+        const buttons = [...tabs.querySelectorAll('button')];
+        return {
+          overflow: panel.scrollWidth > panel.clientWidth,
+          separated: heading.right <= bounds.left || heading.bottom <= bounds.top,
+          compact: bounds.width <= 240,
+          flagsOnly: buttons.length === 5 && buttons.every(button => !button.textContent.trim() && button.querySelector('svg')),
+          labeled: buttons.every(button => button.title && button.title === button.getAttribute('aria-label')),
+          selected: buttons.filter(button => button.getAttribute('aria-pressed') === 'true').map(button => button.dataset.language),
+          reachable: buttons.every(button => {
+            const r = button.getBoundingClientRect();
+            return r.width >= 36 && r.height >= 32 && r.left >= 0 && r.right <= innerWidth
+              && r.top >= 0 && r.bottom <= innerHeight && button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+          })
+        };
+      })()`);
+      assert.deepEqual(header, { overflow:false, separated:true, compact:true, flagsOnly:true, labeled:true, selected:[language], reachable:true }, JSON.stringify({width, zoom, language, header}));
+      results.push({ kind:'header', width, zoom, language, theme, ...header });
+      // Let the offscreen compositor publish the scrolled header before capturing it.
+      await new Promise(resolve => setTimeout(resolve, 100));
+      fs.writeFileSync(path.join(output, `${language}-${width}-${zoom}-header.png`), (await win.webContents.capturePage()).toPNG());
       const emptyFields = await win.webContents.executeJavaScript(`(() => {
         return [...document.querySelectorAll('.setup-required')].every(input => {
           const empty = getComputedStyle(input).backgroundColor;
@@ -105,6 +135,26 @@ app.whenReady().then(async () => {
         }
       }
     }
+    // Use Chromium's native button activation, then reload the page to test persisted Japanese.
+    await win.webContents.executeJavaScript(`document.querySelector('[data-language="en"]').focus()`);
+    const key = async keyCode => {
+      win.webContents.sendInputEvent({type:'keyDown', keyCode});
+      if (keyCode === 'Enter') win.webContents.sendInputEvent({type:'char', keyCode:'\r'});
+      win.webContents.sendInputEvent({type:'keyUp', keyCode});
+      await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    };
+    await key('Tab');
+    assert.equal(await win.webContents.executeJavaScript('document.activeElement.dataset.language'), 'es');
+    await key('Enter');
+    assert.equal(await win.webContents.executeJavaScript('document.documentElement.lang'), 'es');
+    await key('Tab'); await key('Tab');
+    assert.equal(await win.webContents.executeJavaScript('document.activeElement.dataset.language'), 'ja');
+    await key('Space');
+    assert.equal(await win.webContents.executeJavaScript('document.documentElement.lang'), 'ja');
+    await win.loadURL(server.resolvedUrls.local[0] + 'setup-preview.html');
+    assert.deepEqual(await win.webContents.executeJavaScript(`({language:document.documentElement.lang,
+      selected:document.querySelector('[data-language="ja"]').getAttribute('aria-pressed'),
+      preference:document.getElementById('uiLanguage').value})`), {language:'ja', selected:'true', preference:'ja'});
     // Native modal, Escape dismissal and focus restoration must work without opening a browser.
     await win.webContents.executeJavaScript(`(() => {
       const button=document.querySelectorAll('[data-setup-guide="plugin"] .setup-enlarge')[1];
@@ -116,14 +166,14 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'ESCAPE' });
     await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
     assert.equal(await win.webContents.executeJavaScript('document.querySelector(".setup-image-dialog").open'), false);
-    assert.equal(await win.webContents.executeJavaScript('document.activeElement.textContent'), '放大图片');
+    assert.equal(await win.webContents.executeJavaScript('document.activeElement.textContent'), await win.webContents.executeJavaScript('window.t("Enlarge image")'));
     const details = await win.webContents.executeJavaScript(`(() => {
       const d=document.getElementById('desktopTunnelField'); const initial=d.open;
       d.querySelector('summary').click(); return { initial, opened:d.open };
     })()`);
     assert.deepEqual(details, { initial: false, opened: true });
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));
-    console.log(`PASS: ${results.length} screenshot layouts; native modal/Escape/focus and optional disclosure.`);
+    console.log(`PASS: ${results.length} setup/header layouts; native language keyboard controls and persistence; modal/Escape/focus and optional disclosure.`);
   } finally {
     win?.destroy();
     await server.close();

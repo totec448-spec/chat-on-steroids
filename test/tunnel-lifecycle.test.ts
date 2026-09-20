@@ -104,6 +104,67 @@ beforeEach(() => {
 });
 
 describe('OpenAI tunnel process ownership', () => {
+  it.each([
+    { level: 'WARN', msg: 'poll failed; backing off', error: 'dial tcp: i/o timeout', retry_in_ms: 401 },
+    { level: 'WARN', msg: 'poll failed; backing off', error: 'unexpected EOF', retry_in_ms: 403 },
+    { level: 'INFO', msg: 'poller recovered; polling operational', commands_processed: 401 },
+    { level: 'WARN', msg: 'harpoon host auto-registration failed', inclusion_reason: 'loopback', error: '401 Unauthorized' },
+    { level: 'WARN', msg: 'MCP probe failed', status_code: 401, error: '401 Unauthorized' },
+    { level: 'WARN', msg: 'poll failed; backing off', status_code: 400, error: 'invalid_request_error: unsupported parameter' },
+    { level: 'WARN', msg: 'poll failed; backing off', status_code: 503, error: 'upstream could not check whether access is forbidden' }
+  ])('keeps the tunnel alive for a non-authentication event: %j', async event => {
+    vi.useFakeTimers();
+    const reports: any[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/readyz') return new Response('ok');
+      if (url.pathname === '/metrics') return new Response('commands_poll_last_successful_timestamp_seconds 0\ncommands_poll_errors_total 0\n');
+      if (url.pathname === '/api/status') return Response.json({ uptime_seconds: 5, channels: [] });
+      return new Response('missing', { status: 404 });
+    }));
+    const handle = await startTunnel({ localUrl: 'http://127.0.0.1:1234/secret', settings, apiKey: 'test', report: r => reports.push(r) });
+    try {
+      await vi.advanceTimersByTimeAsync(10);
+      fixture.health.url = 'http://127.0.0.1:34567';
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(reports.at(-1).state).toBe('connected');
+      fixture.children[0].stderr.emit('data', Buffer.from(JSON.stringify(event) + '\n'));
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(reports.some(r => r.state === 'auth-failed')).toBe(false);
+      expect(fixture.terminate).not.toHaveBeenCalled();
+      expect(fixture.children).toHaveLength(1);
+      expect(handle.healthBase?.()).toBe('http://127.0.0.1:34567');
+    } finally {
+      await handle.stop();
+    }
+  });
+
+  it.each([
+    JSON.stringify({ level: 'WARN', msg: 'poll failed; backing off', status_code: 401, error: 'tunnel_use_forbidden' }),
+    JSON.stringify({ level: 'WARN', msg: 'tunnel metadata fetch failed', status_code: 403, error: 'access denied' }),
+    JSON.stringify({ level: 'WARN', msg: 'poll failed; backing off', error: '401 Unauthorized' }),
+    JSON.stringify({ level: 'ERROR', msg: 'failed to post response', error: 'controlplane responder: unexpected status 403: access denied' }),
+    'WARN poll failed; backing off: controlplane client: unexpected status 401: invalid_api_key'
+  ])('stops once for a genuine control-plane authorization rejection: %s', async line => {
+    vi.useFakeTimers();
+    const reports: any[] = [];
+    const handle = await startTunnel({ localUrl: 'http://127.0.0.1:1234/secret', settings, apiKey: 'test', report: r => reports.push(r) });
+    try {
+      await vi.advanceTimersByTimeAsync(10);
+      const child = fixture.children[0];
+      child.stderr.emit('data', Buffer.from(line + '\n'));
+      child.stdout.emit('data', Buffer.from(line + '\n'));
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(reports.filter(r => r.state === 'auth-failed')).toHaveLength(1);
+      expect(reports.at(-1).state).toBe('auth-failed');
+      expect(fixture.terminate).toHaveBeenCalledTimes(1);
+      expect(fixture.children).toHaveLength(1);
+      expect(handle.healthBase?.()).toBeNull();
+    } finally {
+      await handle.stop();
+    }
+  });
+
   it('classifies structured control-plane context together with its network error', async () => {
     vi.useFakeTimers();
     const reports: any[] = [];

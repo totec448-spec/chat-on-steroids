@@ -55,21 +55,21 @@ import { logInfo, logWarn } from './logger.js';
 import { getSecret } from './secrets.js';
 import { findSessionByConversation, getSession, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
 import { foldProgress } from '../shared/session.js';
-import { isAstraModel, isProModel } from '../shared/chat-models.js';
+import { supportsFinishAutomation } from '../shared/finish.js';
 
-/** Pro Loop defaults to finish-only; an exact chat switch may allow browser continuation. */
+/** A finish-only preference has authority only while the finish tool is available. */
 export async function astraFinishOnly(sessionId: string, conversationId: string): Promise<boolean> {
   const session = await getSession(sessionId);
   const selection = session?.selectedModel;
-  return session?.conversationId === conversationId && selection?.conversationId === conversationId &&
-    (isAstraModel(selection.model, selection.reasoningEffort) ||
-      (goalSwitchFor(conversationId).mode === 'loop' && isProModel(selection.model, selection.reasoningEffort))) &&
+  return getConfig().ui.finishTool === true && session?.conversationId === conversationId && selection?.conversationId === conversationId &&
+    supportsFinishAutomation(goalSwitchFor(conversationId).mode, selection.model, selection.reasoningEffort) &&
     !loopAfterTurnFor(conversationId);
 }
-/** Opt-in continuation uses the same durable switch as the existing Loop driver. */
+/** The saved loopAfterTurn preference now serves both Goal and Loop. Disabling
+ * finish makes after-turn effective without overwriting the user's preference. */
 export function loopAfterTurnFor(conversationId: string): boolean {
   const control = goalSwitchFor(conversationId);
-  return control.enabled && control.mode === 'loop' && control.afterTurn;
+  return control.enabled && (control.afterTurn || getConfig().ui.finishTool !== true);
 }
 import { resumeBootstrapMatches, resumeBootstrapText } from './session/handoff.js';
 import {
@@ -1782,7 +1782,7 @@ async function run(draft: GoalDraft): Promise<void> {
  * the standing switch, which is how a run started from "add specific loop" could open — and
  * then continue — as a Goal.
  */
-/** Finish asks the existing Loop driver for the next instruction; its caller owns delivery. */
+/** Finish uses the selected Goal/Loop driver; its caller owns delivery and hold release. */
 export async function draftFastFollowup(sessionId: string, signal: AbortSignal = AbortSignal.timeout(180000), preparedMessages?: ChatMessage[], publish?: GoalRequest['publish'], mode: GoalMode = 'loop'): Promise<string | null> {
   const backend = goalBackendFor(mode);
   const settings = getConfig().goal;

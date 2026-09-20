@@ -5,6 +5,7 @@ import { createSession, flushSessions, initSessionStore, readSessionPlan, rebind
 import { agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES } from '../src/shared/agent-plan.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { prepareHandoff, resumeBootstrapMatches, resumeBootstrapText } from '../src/main/session/handoff.js';
+import { MAX_CHATGPT_MESSAGE_CHARS } from '../src/shared/user-prompt.js';
 import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { attachRequestPlan, reconcileRequestPlans, resetRequestPlansForTests, updateRequestPlan } from '../src/main/session/request-plans.js';
 
@@ -17,18 +18,49 @@ afterAll(async () => {
   resetSessionStoreForTests(); resetDurableForTests(); await removeTempDir(dir);
 });
 
-it('adds a retrievable plan notice to the durable handoff only when a nonempty plan exists', async () => {
+it('carries the saved plan in the durable handoff without requesting a removed tool', async () => {
   const session = await createSession({ conversationId: 'plan-handoff' });
   const text = 'Continue the existing work and preserve the verified results. '.repeat(6);
   expect((await prepareHandoff({ sessionId: session.id, text })).text).toBe(text.trim());
   await updateSessionPlan(session.id, 'plan-handoff', update, 100);
   const handoff = await prepareHandoff({ sessionId: session.id, text });
-  expect(handoff.text).toContain(`session_id="${session.id}"`);
-  expect(handoff.text).toContain('latest update_plan');
-  expect(handoff.text).not.toContain(update.plan[0]!.details);
+  expect(handoff.text).toContain(update.plan[0]!.step);
+  expect(handoff.text).toContain(update.plan[0]!.status);
+  expect(handoff.text).toContain(update.plan[0]!.details);
+  expect(handoff.text).not.toContain('session(action=');
   expect(resumeBootstrapMatches(resumeBootstrapText(handoff.text), handoff.text)).toBe(true);
+  await expect(prepareHandoff({ sessionId: session.id, text: 'DONE' })).rejects.toThrow('only 4 characters');
   await updateSessionPlan(session.id, 'plan-handoff', { plan: [] }, 200);
   expect((await prepareHandoff({ sessionId: session.id, text })).text).toBe(text.trim());
+});
+
+it('keeps the full plan and both brief ends within the replacement message budget', async () => {
+  const session = await createSession({ conversationId: 'plan-budget' });
+  const saved = agentPlanUpdateSchema.parse({
+    explanation: 'Keep all verification obligations. '.repeat(25),
+    plan: Array.from({ length: 12 }, (_, index) => ({
+      step: `Step ${index + 1}: ${'specific requirement '.repeat(4)}`,
+      status: index === 0 ? 'in_progress' : 'pending',
+      details: `Required check ${index + 1}: ${'操作説明'.repeat(220)}`
+    }))
+  });
+  await updateSessionPlan(session.id, 'plan-budget', saved, 100);
+  const start = 'TASK: preserve the original objective.\n';
+  const end = '\nNEXT: finish the pending checks.\nDO NOT: repeat successful commands.';
+  const handoff = await prepareHandoff({ sessionId: session.id,
+    text: start + 'operational details '.repeat(8_000) + end });
+  const bootstrap = resumeBootstrapText(handoff.text);
+  expect(bootstrap.length).toBeLessThanOrEqual(MAX_CHATGPT_MESSAGE_CHARS);
+  expect(bootstrap).toContain(start);
+  expect(bootstrap).toContain(end);
+  expect(bootstrap).toContain('left out');
+  expect(bootstrap).toContain(saved.explanation);
+  for (const step of saved.plan) {
+    expect(bootstrap).toContain(step.step);
+    expect(bootstrap).toContain(step.details);
+  }
+  await updateSessionPlan(session.id, 'plan-budget', { plan: [] }, 200);
+  expect(resumeBootstrapText(handoff.text)).toBe(bootstrap);
 });
 
 it('persists a plan across restart and replacement, fencing old chats and older calls', async () => {

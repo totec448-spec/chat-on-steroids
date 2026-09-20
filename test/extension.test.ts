@@ -170,7 +170,8 @@ class FakeNode {
   }
 
   querySelectorAll(selector: string): FakeNode[] {
-    return this.all.get(selector) ?? [];
+    // @ehkogh/#318: flat classic fixtures must understand the adapter's union selectors.
+    return this.all.get(selector) ?? [...new Set(selector.split(/,\s*/).flatMap(part => this.all.get(part) ?? []))];
   }
 
   querySelector(selector: string): FakeNode | null {
@@ -188,7 +189,7 @@ class FakeNode {
   }
 
   closest(selector: string): FakeNode | null {
-    return this.closestMatches.has(selector) ? this : null;
+    return selector.split(/,\s*/).some(part => this.closestMatches.has(part)) ? this : null;
   }
 
   /** Flat fakes: a node only ever contains itself, which is all toolBlocks() asks. */
@@ -217,7 +218,7 @@ interface DomApi {
 
 function loadDom(sections: FakeNode[], pathname = '/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'): DomApi {
   const document = {
-    querySelectorAll: (selector: string) => (selector === TURN_SELECTOR ? sections : []),
+    querySelectorAll: (selector: string) => (selector.split(/,\s*/).includes(TURN_SELECTOR) ? sections : []),
     querySelector: () => null
   };
   const context = vm.createContext({ document, location: { pathname } });
@@ -2055,10 +2056,10 @@ describe('extension command delivery', () => {
     });
     expect(worker.scriptingExecuteScript.mock.calls).toEqual([
       [{ target: { tabId: 41 }, files: ['chatgpt-dom.js'] }],
-      [{ target: { tabId: 41 }, world: 'MAIN', files: ['fiber.js'] }],
+      [{ target: { tabId: 41 }, world: 'MAIN', files: ['usage.js', 'fiber.js'] }],
       [{ target: { tabId: 41 }, files: ['content.js'] }],
       [{ target: { tabId: 42 }, files: ['chatgpt-dom.js'] }],
-      [{ target: { tabId: 42 }, world: 'MAIN', files: ['fiber.js'] }],
+      [{ target: { tabId: 42 }, world: 'MAIN', files: ['usage.js', 'fiber.js'] }],
       [{ target: { tabId: 42 }, files: ['content.js'] }]
     ]);
     expect(worker.scriptingInsertCSS.mock.calls).toEqual([
@@ -2083,7 +2084,7 @@ describe('extension command delivery', () => {
       const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
         tabsQuery: async () => [tab],
         tabsGet: async () => scenario === 'navigated' ? { id: 41, url: 'https://example.com/' } : tab });
-      if (scenario === 'healthy') worker.tabsSendMessage.mockResolvedValue({ ok: true, recorderVersion: 13 });
+      if (scenario === 'healthy') worker.tabsSendMessage.mockResolvedValue({ ok: true, recorderVersion: 19 });
       // Startup restoration is a separate path; exercise the later maintenance pass.
       await worker.installed('update');
       worker.scriptingExecuteScript.mockClear();
@@ -2091,7 +2092,7 @@ describe('extension command delivery', () => {
       await worker.fireAlarm();
       if (scenario === 'healthy' || scenario === 'missing') {
         await vi.waitFor(() => expect(worker.scriptingExecuteScript).toHaveBeenCalledWith({
-          target: { tabId: 41 }, world: 'MAIN', files: ['fiber.js']
+          target: { tabId: 41 }, world: 'MAIN', files: ['usage.js', 'fiber.js']
         }));
         if (scenario === 'missing') await vi.waitFor(() => expect(worker.scriptingInsertCSS).toHaveBeenCalled());
       } else expect(worker.scriptingExecuteScript).not.toHaveBeenCalled();
@@ -2136,18 +2137,18 @@ describe('extension command delivery', () => {
     const session = new FakeStorageArea();
     const worker = loadWorker({ local, session });
     worker.tabsQuery.mockResolvedValueOnce([{ id: 41 }]);
-    worker.tabsSendMessage.mockResolvedValueOnce({ ok: true, recorderVersion: 13 });
+    worker.tabsSendMessage.mockResolvedValueOnce({ ok: true, recorderVersion: 19 });
 
     await worker.installed('update');
 
     expect(worker.tabsSendMessage).toHaveBeenCalledWith(41, { type: 'clf-recorder-ping' }, undefined);
     expect(worker.scriptingExecuteScript.mock.calls).toEqual([
-      [{ target: { tabId: 41 }, world: 'MAIN', files: ['fiber.js'] }]
+      [{ target: { tabId: 41 }, world: 'MAIN', files: ['usage.js', 'fiber.js'] }]
     ]);
     expect(worker.scriptingInsertCSS).not.toHaveBeenCalled();
   });
 
-  it('repairs a missing MAIN-world Fiber helper on demand for the sending tab only', async () => {
+  it('repairs the matching recorder and helper together for the requesting document only', async () => {
     const local = new FakeStorageArea(paired);
     const session = new FakeStorageArea();
     const worker = loadWorker({ local, session });
@@ -2155,14 +2156,33 @@ describe('extension command delivery', () => {
     const repaired = await worker.send({ type: 'repair_fiber' }, 73);
 
     expect(repaired).toMatchObject({ ok: true });
-    expect(worker.scriptingExecuteScript).toHaveBeenCalledWith({
-      target: { tabId: 73, documentIds: ['document-73-0'] },
-      world: 'MAIN',
-      files: ['fiber.js']
-    });
+    const target = { tabId: 73, documentIds: ['document-73-0'] };
+    expect(worker.scriptingExecuteScript.mock.calls).toEqual([
+      [{ target, files: ['chatgpt-dom.js'] }],
+      [{ target, world: 'MAIN', files: ['usage.js', 'fiber.js'] }],
+      [{ target, files: ['content.js'] }]
+    ]);
+    expect(worker.scriptingInsertCSS).toHaveBeenCalledWith({ target, files: ['overlay.css'] });
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
 
     await worker.navigateTab(73, 'https://example.com/left');
     expect(await worker.send({ type: 'repair_fiber' }, 73)).toMatchObject({ ok: false, error: 'tab_closed' });
+  });
+
+  it.each([1, 2, 3])('stops paired helper repair when Chrome loses the target during injection %s', async stage => {
+    const session = new FakeStorageArea();
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session });
+    let injections = 0;
+    worker.scriptingExecuteScript.mockImplementation(async () => {
+      if (++injections === stage) throw new Error('The target document no longer exists');
+      return [];
+    });
+    expect(await worker.send({ type: 'repair_fiber' }, 73)).toMatchObject({ ok: false });
+    expect(worker.scriptingExecuteScript).toHaveBeenCalledTimes(stage);
+    expect(worker.scriptingInsertCSS).not.toHaveBeenCalled();
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
   });
 
   it('has no way to ask the app for work at all', async () => {
@@ -2267,7 +2287,7 @@ describe('extension revival delivery', () => {
 
   const liveRecorder = async (_tabId: number, message: Record<string, unknown>) =>
     message.type === 'clf-recorder-ping'
-      ? { ok: true, recorderVersion: 13 }
+      ? { ok: true, recorderVersion: 19 }
       : { ok: true, claimed: true };
 
   it('scans before opening and routes to the oldest exact worker tab', async () => {
@@ -2525,6 +2545,97 @@ describe('extension revival delivery', () => {
 });
 
 describe('extension observation journal', () => {
+  it.each([false, true])('retains a slow durable event batch beyond ten seconds, including a split retry: %s', async split => {
+    vi.useFakeTimers();
+    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    const signals: AbortSignal[] = [];
+    const posted: Array<{ events: Array<{ text: string }> }> = [];
+    let release = () => {};
+    let delayed = false;
+    const worker = loadWorker({ local, session, fetch: async (input, init = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname !== '/events') return response(404, {});
+      const batch = JSON.parse(String(init.body));
+      posted.push(batch);
+      if (split && posted.length === 1) return response(413, { error: 'body_too_large' });
+      if (delayed) return response(200, { stored: batch.events.length });
+      delayed = true;
+      const signal = init.signal as AbortSignal;
+      signals.push(signal);
+      return new Promise<ReturnType<typeof response>>((resolve, reject) => {
+        const abort = () => reject(signal.reason);
+        signal.addEventListener('abort', abort, { once: true });
+        release = () => {
+          signal.removeEventListener('abort', abort);
+          resolve(response(200, { stored: batch.events.length }));
+        };
+      });
+    } });
+    let pending: Promise<unknown> | undefined;
+    try {
+      await worker.registerTab(61);
+      pending = worker.send({ type: 'events', conversationId: chat, entries: ['first', 'second'].map(text => ({
+        conversationId: chat, event: { kind: 'progress', time: Date.now(), text }
+      })) }, 61);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(signals).toHaveLength(1);
+      expect(signals[0]!.aborted).toBe(false);
+      expect(journalOf(session).map(entry => entry.event.text)).toEqual(['first', 'second']);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      await pending;
+      expect(journalOf(session)).toEqual([]);
+      expect(posted.map(batch => batch.events.map(event => event.text))).toEqual(
+        split ? [['first', 'second'], ['first'], ['second']] : [['first', 'second']]
+      );
+    } finally {
+      release();
+      await pending;
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps an event batch durable when its extended deadline expires and drains it on a later successful attempt', async () => {
+    vi.useFakeTimers();
+    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    const signals: AbortSignal[] = [];
+    let healthy = false;
+    const worker = loadWorker({ local, session, fetch: async (input, init = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname !== '/events') return response(404, {});
+      if (healthy) return response(200, { stored: 1 });
+      const signal = init.signal as AbortSignal;
+      signals.push(signal);
+      return new Promise<ReturnType<typeof response>>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    } });
+    try {
+      await worker.registerTab(61);
+      const pending = worker.send({ type: 'events', conversationId: chat, entries: [{
+        conversationId: chat, event: { kind: 'progress', time: Date.now(), text: 'preserve this observation' }
+      }] }, 61);
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(signals).toHaveLength(1);
+      expect(signals[0]!.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(signals[0]!.aborted).toBe(true);
+      expect(journalOf(session).map(entry => entry.event.text)).toEqual(['preserve this observation']);
+      healthy = true;
+      const retry = worker.send({ type: 'status' }, 61);
+      await vi.advanceTimersByTimeAsync(0);
+      await retry;
+      expect(journalOf(session)).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('delivers another chat and its Goal while a slow chat holds one slot, without overlapping same-chat batches', async () => {
     const a = '11111111-2222-3333-4444-555555555555';
     const b = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';

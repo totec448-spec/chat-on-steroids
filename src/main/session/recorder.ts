@@ -2082,6 +2082,7 @@ async function recordChatObservationsNow(
   // observations so a newer turn or an explicit verdict cannot be overwritten.
   const recoverableTurns = new Set(live?.openTurns);
   let recoveredFinal: { turnId: string; time: number; seq: number; origin: number; native: boolean } | undefined;
+  let terminalFinalAt: number | undefined;
 
   for (const item of observations) {
     const base = {
@@ -2223,8 +2224,8 @@ async function recordChatObservationsNow(
             await reopenThinkingFailure(sessionId, live, item.time, canonicalTurn)) {
           activity.terminal = false;
         }
-        if (terminalActivity || workingActivity) { activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time); }
-        if (terminalActivity) activity.terminal = true;
+        if (terminalActivity) terminalFinalAt = Math.max(terminalFinalAt ?? 0, item.time);
+        if (workingActivity) { activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time); }
         if (workingActivity) activity.working = true;
         break;
       }
@@ -2373,7 +2374,16 @@ async function recordChatObservationsNow(
   if (pageTitle) await promoteConversationTitle(sessionId, pageTitle.text, conversationId);
   // Completion and delivery readiness are separate: retain the exact native final
   // while a tool drains. The input owner keeps its in-flight fence until sending is safe.
-  const completion = recoveredFinal ? await readCompletedFinal(sessionId, conversationId, recoveredFinal.turnId) : null;
+  // Reload republishes historical request-owned finals as activeNow, including HTML-only
+  // revisions. They cannot retire current activity or its recovery deadline. Use the same
+  // canonical completion verdict after the whole batch, including any newer question/work.
+  const completion = recoveredFinal || terminalFinalAt !== undefined
+    ? await readCompletedFinal(sessionId, conversationId, live?.turnId ?? recoveredFinal?.turnId) : null;
+  if (terminalFinalAt !== undefined && completion) {
+    activity.meaningful = true;
+    activity.at = Math.max(activity.at ?? 0, terminalFinalAt);
+    activity.terminal = true;
+  }
   if (recoveredFinal && completion && live?.turnId === recoveredFinal.turnId && live.openTurns.has(recoveredFinal.turnId)) {
     const { turnId, time } = recoveredFinal;
     await appendEvent(sessionId, {
