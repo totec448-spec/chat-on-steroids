@@ -782,6 +782,53 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe(change === 'untouched' || change === 'delayed-raw' ? '' : change === 'edited' ? 'My independent draft' : text);
   });
 
+  it.each(['contenteditable', 'aria-disabled'].flatMap(attribute => ['loading', 'model-change'].map(phase => ({ attribute, phase }))))(
+    'waits for the visible helper editor to become writable ($attribute, $phase)', async ({ attribute, phase }) => {
+    live = await harness(`https://chatgpt.com/?temporary-chat=true&cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail
+        ? { ok: true } : { input: claimed({ purpose: 'decision', lifetime: 'temporary-planner' }) } })
+    });
+    const toggle = live.document.createElement('button'); toggle.setAttribute('aria-label', 'Temporary chat');
+    toggle.innerHTML = '<svg><use href="/sprite.svg#chat-temp-checked"></use></svg>';
+    Object.defineProperty(toggle, 'getClientRects', { value: () => [{}] }); live.document.body.append(toggle);
+    const box = live.document.querySelector('#prompt-textarea')!;
+    const disable = () => box.setAttribute(attribute, attribute === 'contenteditable' ? 'false' : 'true');
+    if (phase === 'loading') disable();
+    else (live.window as any).CLF_DOM.selectModelSettings = async () => { disable(); return true; };
+    const instantTimer = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => ms === 15000 ? 0 : instantTimer(fn, ms)) as typeof live.window.setTimeout;
+    const edit = vi.spyOn(live.document, 'execCommand');
+    const send = vi.fn(() => {
+      userTurn(live!.document, 'ready-helper-user', text);
+      box.textContent = '';
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', send);
+    const accepting = live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null });
+    await settle(80);
+    expect(live.sent.filter(message => message.fail)).toEqual([]);
+    expect(live.sent.filter(message => message.type === 'desktop_input')).toHaveLength(phase === 'loading' ? 0 : 1);
+    expect(edit).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    box.setAttribute(attribute, attribute === 'contenteditable' ? 'true' : 'false');
+    expect(await accepting).toEqual({ ok: true });
+    expect(edit.mock.calls.filter(([command]) => command === 'insertHTML')).toHaveLength(1);
+    expect(send).toHaveBeenCalledOnce();
+    expect(live.sent.filter(message => message.fail)).toEqual([]);
+    expect(live.sent.filter(message => message.ack)).toHaveLength(1);
+  });
+
+  it('retains the insertion predicate when the helper editor rejects native editing', async () => {
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.fail ? { ok: true } : { input: claimed({ purpose: 'decision' }) } })
+    });
+    live.document.execCommand = vi.fn(() => false);
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.fail)).toEqual([expect.objectContaining({
+      id: inputId, owner: 'input-owner', error: 'ChatGPT did not accept the text (native_edit_rejected)'
+    })]);
+    expect(live.sent.some(message => message.authorize || message.ack)).toBe(false);
+  });
+
   it('retains the temporary decision when composer acceptance precedes the mounted user receipt', async () => {
     const canonical = '{"action":"continue","reply":"late mounted plan"}';
     live = await harness(`https://chatgpt.com/?temporary-chat=true&cos-input=${inputId}`, {
@@ -1930,7 +1977,7 @@ async function replyFiber(
     );
     window.dispatchEvent(
       new window.MessageEvent('message', {
-        data: { source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken, v: 19, scanOk: true, rows, turns: indexedTurns },
+        data: { source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken, v: 20, scanOk: true, rows, turns: indexedTurns },
         source: window
       })
     );
@@ -3606,7 +3653,7 @@ describe('the app-owned chronological stream', () => {
         section.querySelector(`[data-message-id="${id}"] .markdown`)?.setAttribute('data-clf-fiber-message', `${scanToken}:0:${id}`);
       }
       live!.window.dispatchEvent(new live!.window.MessageEvent('message', {
-        data: { source: 'clf-fiber-reply', nonce: scanToken, scanToken, v: 19, scanOk: true, rows: [], turns: [{
+        data: { source: 'clf-fiber-reply', nonce: scanToken, scanToken, v: 20, scanOk: true, rows: [], turns: [{
           index: 0, turnId: 'idle-history-page', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
           calls: [{ messageId: 'idle-history-tool', requestId, tool: 'exec_command', order: 0, answered: true }],
           messages: [
@@ -3663,7 +3710,7 @@ describe('the app-owned chronological stream', () => {
       const scanToken = event.data.nonce;
       section.setAttribute('data-clf-fiber-turn', `${scanToken}:0`);
       live!.window.dispatchEvent(new live!.window.MessageEvent('message', { source: live!.window as unknown as Window, data: {
-        source: 'clf-fiber-reply', nonce: scanToken, scanToken, v: 19, scanOk: true, rows: [], turns: [{
+        source: 'clf-fiber-reply', nonce: scanToken, scanToken, v: 20, scanOk: true, rows: [], turns: [{
           index: 0, turnId: 'idle-resume-answer', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
           calls: [], activities: [], endMessageId: 'idle-resume-final-raw', messages: [
             { role: 'user', messageId: 'idle-resume-user', rawMessageId: 'idle-resume-user-raw', stable: true,
@@ -3870,7 +3917,7 @@ describe('the app-owned chronological stream', () => {
       ({ messageId, rawMessageId: messageId, stable: true, rawText, renderedHtml: '' }));
     section.setAttribute('data-clf-fiber-turn', '0');
     await replyFiber([{
-      v: 19, index: 0, messageId: 'interim-native-X', tool: 'read', app: 'Chat On Steroids Core', answered: true,
+      v: 20, index: 0, messageId: 'interim-native-X', tool: 'read', app: 'Chat On Steroids Core', answered: true,
       conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     }], [{ turnId: 'interrupted-fold-page', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', messages,
       calls: [{ messageId: 'interim-native-X', requestId, tool: 'read', order: 0, answered: true }], activities: [],
@@ -4029,7 +4076,8 @@ describe('the app-owned chronological stream', () => {
     expect(section.querySelectorAll('[data-clf-native-hidden]')).toHaveLength(0);
   });
 
-  it.each(['owned', 'no-local-call', 'foreign-owner'])('hides plain native status captions for the current native response without requiring local calls (%s)', async mode => {
+  it.each(['owned', 'no-local-call', 'foreign-owner'].flatMap(mode =>
+    ['legacy', 'v5', 'v5-empty', 'v5-long'].map(shape => ({ mode, shape }))))('hides plain native status captions for the current native response without requiring local calls ($mode, $shape)', async ({ mode, shape }) => {
     const requestId = 'wfr-plain-native-caption';
     live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], stream: [
       { seq: 1, time: 100, kind: 'turn_start', turnId: 'plain-caption-owner' },
@@ -4040,9 +4088,10 @@ describe('the app-owned chronological stream', () => {
     renderingOn();
     const section = assistantTurn(live.document, 'plain-caption-page', []);
     const layout = live.document.createElement('div');
-    const caption = live.document.createElement('span');
-    caption.className = 'group/tool-message';
-    caption.textContent = 'Inspected repository guidance and investigated failures';
+    const caption = live.document.createElement(shape === 'legacy' ? 'span' : 'div');
+    if (shape === 'legacy') caption.className = 'group/tool-message';
+    else caption.innerHTML = '<span data-testid="cot-v5-tool-icon-pile"><span data-testid="cot-v5-native-tool-icon"><svg></svg></span></span>';
+    caption.append(shape === 'v5-empty' ? '' : 'Inspected repository guidance and investigated failures'.repeat(shape === 'v5-long' ? 5 : 1));
     const action = live.document.createElement('button');
     action.setAttribute('aria-label', 'Open native result');
     action.innerHTML = '<svg aria-hidden="true"></svg>';
@@ -4152,7 +4201,7 @@ describe('the app-owned chronological stream', () => {
         section.setAttribute('data-clf-fiber-turn', `${scanToken}:0`);
         row.setAttribute('data-clf-fiber-thought', `${scanToken}:0:${thoughtId}`);
         answer = () => window.dispatchEvent(new window.MessageEvent('message', { source: window, data: {
-          source: 'clf-fiber-reply', nonce: scanToken, scanToken, v: 19, scanOk: true, rows: [],
+          source: 'clf-fiber-reply', nonce: scanToken, scanToken, v: 20, scanOk: true, rows: [],
           turns: [{ index: 0, turnId: 'pending-stamp-answer', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
             calls: [], messages: [], thoughtNotifications: [{ messageId: thoughtId, kind: 'thought_notification' }] }]
         } }));
@@ -5218,9 +5267,9 @@ describe('the app-owned chronological stream', () => {
     blocks[0]!.setAttribute('data-clf-fiber', '0');
     blocks[1]!.setAttribute('data-clf-fiber', '1');
     const rows = (secondAnswered: boolean) => [
-      { v: 19, index: 0, messageId: 'fiber-one', tool: 'read_file', path: '/Chat On Steroids Core/read_file',
+      { v: 20, index: 0, messageId: 'fiber-one', tool: 'read_file', path: '/Chat On Steroids Core/read_file',
         app: 'Chat On Steroids Core', answered: true, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' },
-      { v: 19, index: 1, messageId: 'fiber-two', tool: 'exec_command', path: '/Chat On Steroids Core/exec_command',
+      { v: 20, index: 1, messageId: 'fiber-two', tool: 'exec_command', path: '/Chat On Steroids Core/exec_command',
         app: 'Chat On Steroids Core', answered: secondAnswered, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }
     ];
     const turn = (secondAnswered: boolean) => ({
@@ -5260,7 +5309,7 @@ describe('the app-owned chronological stream', () => {
     userTurn(live.document, 'exact-block-owner', 'Read the exact file', { sent: false });
     const section = assistantTurn(live.document, 'exact-block-page', ['Native connector row']);
     const block = blocksOf(section)[0]!; section.setAttribute('data-clf-fiber-turn', '0'); block.setAttribute('data-clf-fiber', '0');
-    await replyFiber([{ v: 19, index: 0, messageId: 'fiber-exact-block', tool: 'read_file',
+    await replyFiber([{ v: 20, index: 0, messageId: 'fiber-exact-block', tool: 'read_file',
       path: `/${app}/read_file`, app, answered: true, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }], [{
       turnId: 'exact-block-page', calls: [{ messageId: 'fiber-exact-block', tool: 'read_file', order: 0,
         answered: true, requestId: 'wfr-exact-block' }]
@@ -5286,7 +5335,7 @@ describe('the app-owned chronological stream', () => {
     const blocks = blocksOf(section); section.setAttribute('data-clf-fiber-turn', '0');
     blocks.forEach((block, index) => block.setAttribute('data-clf-fiber', String(index)));
     const calls = ['read', secondTool].map((tool, index) => ({ messageId: `result-provider-${index}`, tool, order: index, requestId, answered: true }));
-    await replyFiber(calls.map((call, index) => ({ v: 19, index, ...call, path: null,
+    await replyFiber(calls.map((call, index) => ({ v: 20, index, ...call, path: null,
       app: 'Chat On Steroids Core', resource: `/asdk_app_fixture/link_fixture/${call.tool}`,
       conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' })), [{ turnId: 'result-only-page', calls }]);
     await live.hook.pullActivity(); live.hook.renderStreams();
@@ -6232,7 +6281,7 @@ describe('the app-owned chronological stream', () => {
     section.setAttribute('data-clf-fiber-turn', '0');
     block.setAttribute('data-clf-fiber', '0');
     const bind = async (answered: boolean) => replyFiber([{
-      v: 19, index: 0, messageId: 'fiber-moved-call', tool: 'read_file',
+      v: 20, index: 0, messageId: 'fiber-moved-call', tool: 'read_file',
       path: '/Chat On Steroids Core/read_file', app: 'Chat On Steroids Core', answered,
       conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     }], [{ turnId, calls: [{ messageId: 'fiber-moved-call', tool: 'read_file', order: 0,
@@ -7377,7 +7426,7 @@ describe('a stop button that goes missing while the turn is still running', () =
           source: 'clf-fiber-reply',
           nonce: event.data.nonce,
           scanToken: event.data.nonce,
-          v: 19,
+          v: 20,
           scanOk: true,
           rows: [],
           turns: [{
@@ -9653,7 +9702,7 @@ describe('a page leaving the screen', () => {
  */
 describe('evidence from the page context', () => {
   const GOOD = {
-    v: 19,
+    v: 20,
     index: 0,
     tool: 'agent_status',
     path: '/TobisComputer/mcp/agent_status',
@@ -10776,7 +10825,7 @@ describe('evidence from the page context', () => {
             source: 'clf-fiber-reply',
             nonce: event.data.nonce,
             scanToken: event.data.nonce,
-            v: 19,
+            v: 20,
             scanOk: true,
             rows: [],
             turns: [
@@ -10883,7 +10932,7 @@ describe('evidence from the page context', () => {
             source: 'clf-fiber-reply',
             nonce: event.data.nonce,
             scanToken: event.data.nonce,
-            v: 19,
+            v: 20,
             scanOk: true,
             rows: [{ ...GOOD, tool: 'read' }],
             turns: []
@@ -14406,7 +14455,7 @@ describe('the context meter and automatic compaction', () => {
             calls: binding.calls, codeModeCalls: codeModeCalls(), requests: index === 0 ? requests() : [], messages: [], activities: [] };
         });
         window.dispatchEvent(new window.MessageEvent('message', { source: window, data: {
-          source: 'clf-fiber-reply', nonce: scanToken, scanToken, v: 19,
+          source: 'clf-fiber-reply', nonce: scanToken, scanToken, v: 20,
           scanOk: currentCalls !== null, rows: [], turns
         } }));
       });
@@ -15170,7 +15219,7 @@ describe('one live isolated-world recorder per document', () => {
 
     await expect(live.runtimeMessage({ type: 'clf-recorder-ping' })).resolves.toEqual({
       ok: true,
-      recorderVersion: 19
+      recorderVersion: 20
     });
   });
 
@@ -15520,7 +15569,7 @@ describe('the goal loop', () => {
       const nonce = event.data.nonce;
       live!.document.querySelector('[data-turn-id="finished-answer"]')!.setAttribute('data-clf-fiber-turn', `${nonce}:0`);
       win.dispatchEvent(new win.MessageEvent('message', { source: win, data: {
-        source: 'clf-fiber-reply', nonce, scanToken: nonce, v: 19, scanOk: true, rows: [], turns: [{
+        source: 'clf-fiber-reply', nonce, scanToken: nonce, v: 20, scanOk: true, rows: [], turns: [{
           index: 0, conversationId: CHAT, turnId: 'finished-answer', endMessageId: 'finished-final', calls: [], activities: [],
           messages: [{ messageId: 'finished-final', rawMessageId: 'finished-final', stable: true, rawText: 'Completed answer.' }]
         }]
@@ -17607,7 +17656,7 @@ describe('the goal loop', () => {
             source: 'clf-fiber-reply',
             nonce: event.data.nonce,
             scanToken,
-            v: 19,
+            v: 20,
             scanOk: true,
             rows: [],
             turns: [{
@@ -17690,7 +17739,7 @@ describe('the goal loop', () => {
             source: 'clf-fiber-reply',
             nonce: event.data.nonce,
             scanToken,
-            v: 19,
+            v: 20,
             scanOk: true,
             rows: [],
             turns: [{
@@ -18840,7 +18889,7 @@ describe('app Stop command uses current native turn proof', () => {
       if (event.data?.source !== 'clf-fiber-ask') return;
       section.setAttribute('data-clf-fiber-turn', `${event.data.nonce}:0`);
       window.dispatchEvent(new window.MessageEvent('message', { source: window, data: {
-        source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 19, scanOk: true, rows: [],
+        source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 20, scanOk: true, rows: [],
         turns: [{ ...terminal, index: 0, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', messages: [{
           messageId: 'late-final-message', stable: true, rawText: 'First words and the complete final answer.', renderedHtml: '<p>First words and the complete final answer.</p>'
         }] }]
@@ -18879,7 +18928,7 @@ describe('app Stop command uses current native turn proof', () => {
       }
       section.setAttribute('data-clf-fiber-turn', `${event.data.nonce}:0`);
       window.dispatchEvent(new window.MessageEvent('message', { source: window, data: {
-        source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 19, scanOk: true, rows: [],
+        source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 20, scanOk: true, rows: [],
         turns: [{ ...terminal, index: 0, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', endMessageId: next === 'retry' ? null : terminal.endMessageId }]
       } }));
     };
@@ -19038,8 +19087,8 @@ describe('ordinary Continue native recovery', () => {
     // Chrome's static content cache can precede the helper read from disk by repair.
     win.__CLF_CONTENT_RECORDER__.stop();
     win.CLF_TEST_HOOK = (api: Hook) => { live!.hook = api; };
-    win.eval(contentSource.replace('const RECORDER_VERSION = 19;', 'const RECORDER_VERSION = 13;')
-      .replace('const FIBER_VERSION = 19;', 'const FIBER_VERSION = 12;'));
+    win.eval(contentSource.replace('const RECORDER_VERSION = 20;', 'const RECORDER_VERSION = 13;')
+      .replace('const FIBER_VERSION = 20;', 'const FIBER_VERSION = 12;'));
     await settle();
     userTurn(live.document, 'source', 'Complete the task');
     const section = assistantTurn(live.document, 'native-answer', []);
@@ -19054,7 +19103,7 @@ describe('ordinary Continue native recovery', () => {
       queueMicrotask(() => {
         section.setAttribute('data-clf-fiber-turn', `${data.nonce}:0`);
         win.dispatchEvent(new win.MessageEvent('message', { source: win, data: {
-          source: 'clf-fiber-reply', nonce: data.nonce, scanToken: data.nonce, v: 19, scanOk: true, rows: [], turns: [{
+          source: 'clf-fiber-reply', nonce: data.nonce, scanToken: data.nonce, v: 20, scanOk: true, rows: [], turns: [{
             index: 0, conversationId: chat, turnId: 'native-answer', endMessageId: null,
             calls: [], messages: [{ role: 'assistant', messageId: 'native-progress', rawMessageId: 'native-progress',
               stable: true, rawText: 'Inspecting the task.' }]
@@ -19113,7 +19162,7 @@ describe('ordinary Continue native recovery', () => {
       const nonce = event.data.nonce;
       section.setAttribute('data-clf-fiber-turn', `${nonce}:0`);
       win.dispatchEvent(new win.MessageEvent('message', { source: win, data: {
-        source: 'clf-fiber-reply', nonce, scanToken: nonce, v: 19, scanOk: true, rows: [], turns: [{
+        source: 'clf-fiber-reply', nonce, scanToken: nonce, v: 20, scanOk: true, rows: [], turns: [{
           index: 0, conversationId: chat, turnId: 'native-answer', endMessageId: terminal ? 'native-terminal' : null,
           calls: [], activities: [], messages: terminal ? [{ role: 'assistant', messageId: 'native-terminal',
             rawMessageId: 'native-terminal', stable: true, rawText: scenario === 'image-only' ? '' : 'Finished the task.' }] : [progress]
@@ -19139,6 +19188,8 @@ describe('ordinary Continue native recovery', () => {
     expect(emitted(live.sent, 'assistant_message')).toContainEqual(expect.objectContaining({ event: expect.objectContaining({
       providerMessageId: 'native-terminal', final: true
     }) }));
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.fail)).toEqual(scenario === 'authorization'
+      ? [expect.objectContaining({ id, owner: 'input-owner', error: 'After-turn pickup was withdrawn before Send.' })] : []);
   });
   it('journals native Stop immediately even while the native Stop control remains mounted', async () => {
     live = await harness(`https://chatgpt.com/c/${chat}`);

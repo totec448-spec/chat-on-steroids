@@ -90,6 +90,48 @@ it('keeps request ownership across restart, late proof and a subsequent request'
   expect(() => broker.sendMessage({ requestId: 'wfr_stranger' }, 'worker-1', 'Wrong owner')).toThrow();
 });
 
+it.each(['active', 'sleeping'] as const)('links an already recorded %s worker to its late-identified prime without needing another worker event', async state => {
+  const { getSession, readEvents } = await import('../src/main/session/store.js');
+  const parent = await createSession({ conversationId: `late-origin-prime-${state}` });
+  const conversationId = `late-origin-worker-${state}`;
+  const child = await createSession({ conversationId, title: 'User-named worker',
+    origin: { kind: 'worker', agentId: 'worker-1', fromSessionId: null, task: 'Original task' } });
+  const fleet = broker.spawn({ caller: request, workers: [{ task: 'Original task' }] });
+  broker.bindConversation('worker-1', conversationId, fleet.runId);
+  if (state === 'sleeping') {
+    broker.finishAgent({ conversationId }, 'The worker produced its report');
+    broker.releaseQuiescentRun({ allowPendingReports: true }, fleet.runId);
+  }
+  expect((await getSession(child.id))?.origin?.fromSessionId).toBeNull();
+  observeRequestCorrelation({ ...request, conversationId: parent.conversationId!, sessionId: parent.id,
+    messageId: 'exact-spawn-request', tool: 'agents', observedAt: Date.now() });
+  await broker.reconcileAgentRequestOwners();
+  const linked = await getSession(child.id);
+  expect(linked?.origin).toEqual({ ...child.origin, fromSessionId: parent.id });
+  expect(linked?.title).toBe(child.title);
+  expect((await readEvents(parent.id)).filter(event => event.kind === 'agent_message')).toEqual([]);
+  if (state === 'sleeping') expect(broker.offerMessagesForCaller({ conversationId: parent.conversationId! })?.messages)
+    .toEqual([expect.objectContaining({ text: expect.stringContaining('The worker produced its report') })]);
+  broker.restoreSwarm(broker.snapshotSwarm());
+  await broker.reconcileAgentRequestOwners();
+  expect((await getSession(child.id))?.origin).toEqual(linked?.origin);
+});
+
+it('does not rewrite a recorded worker parent, title or task when a provisional fleet becomes identifiable', async () => {
+  const { getSession } = await import('../src/main/session/store.js');
+  const parent = await createSession({ conversationId: 'late-origin-new-prime' });
+  const previous = await createSession({ conversationId: 'late-origin-original-prime' });
+  const child = await createSession({ conversationId: 'late-origin-preserved-worker', title: 'Keep my title',
+    origin: { kind: 'worker', agentId: 'worker-1', fromSessionId: previous.id, task: 'Keep original task' } });
+  const fleet = broker.spawn({ caller: request, workers: [{ task: 'Different current task' }] });
+  broker.bindConversation('worker-1', child.conversationId!, fleet.runId);
+  observeRequestCorrelation({ ...request, conversationId: parent.conversationId!, sessionId: parent.id,
+    messageId: 'exact-spawn-parent-proof', tool: 'agents', observedAt: Date.now() });
+  await broker.reconcileAgentRequestOwners();
+  expect((await getSession(child.id))?.origin).toEqual(child.origin);
+  expect((await getSession(child.id))?.title).toBe(child.title);
+});
+
 it('does not duplicate an unpublished fleet when its request is identified during the acceptance barrier', async () => {
   const session = await createSession({ conversationId: 'staged-proof-owner' });
   const stage = broker.stageSpawn({ caller: request, workers: [{ task: 'Still being accepted' }] });
@@ -300,4 +342,76 @@ it('keeps late proof inside the handoff when the durable session moved before br
   expect(broker.primeConversation(existing.runId)).toBe('fleet-commit-gap-b');
   expect(broker.primeConversation(late.runId)).toBe('fleet-commit-gap-b');
   expect(broker.agentFamiliesForCaller({ conversationId: 'fleet-commit-gap-b' })).toHaveLength(2);
+});
+
+it('joins dump-shaped paired tool sources through the real recorder into worker membership and the prime inbox', async () => {
+  const { JSDOM } = await import('jsdom');
+  const { readFileSync } = await import('node:fs');
+  const { recordRequestEvidence, noteChatOrigin, resetRecorderForTests } = await import('../src/main/session/recorder.js');
+  const { findSessionByConversation, getSession } = await import('../src/main/session/store.js');
+  const { dispatch, ok } = await import('../src/main/mcp/kernel.js');
+  const { currentCaller } = await import('../src/main/mcp/call-context.js');
+  const script = readFileSync(new URL('../extension/fiber.js', import.meta.url), 'utf8');
+  const prime = 'a1111111-1111-4111-8111-111111111111';
+  const worker = 'b2222222-2222-4222-8222-222222222222';
+  const primeRequest = 'wfr_native_shell_prime', workerRequest = 'wfr_native_shell_worker';
+  resetRecorderForTests();
+  async function publish(conversationId: string, requestId: string) {
+    const user = 'native-user', call = 'native-call', result = 'native-result', final = 'native-final', turn = 'native-turn';
+    const page = new JSDOM(`<main data-app-shell-main-surface><div data-thread-find-target="conversation">
+      <div data-turn-key="${user}"><div data-content-search-turn-key="${turn}">
+      <div data-content-search-unit-key="${turn}:0:user"><div data-user-message-bubble>Test</div></div>
+      <span data-chatgpt-agent-turn-start></span>
+      <div data-content-search-unit-key="${turn}:2:assistant"><div data-markdown-text-style="assistant-message">Done</div></div>
+      </div></div></div></main>`, { url: `https://chatgpt.com/c/${conversationId}`, runScripts: 'outside-only' });
+    try {
+      const path = '/Chat On Steroids Core/link_fixture/agents';
+      const entry = { id: turn, conversationId, turn: { status: 'complete', messageIds: [user, result, final], items: [
+        { type: 'user-message', messageId: user, message: 'Test' },
+        { type: 'chatgpt-reasoning-group', items: [{ type: 'mcp-tool-call', callId: call, completed: true,
+          invocation: { server: 'Chat On Steroids Core', tool: 'agents', arguments: { secret: 'PRIVATE_ARGUMENT' } },
+          widgetStateSource: { messageId: result } }] },
+        { type: 'assistant-message', messageId: final, content: 'Done', phase: 'final_answer', completed: true }
+      ] } };
+      const mapping = {
+        [call]: { id: call, message: { id: call, author: { role: 'assistant' }, recipient: 'api_tool.call_tool',
+          content: { content_type: 'code', text: JSON.stringify({ path, args: { secret: 'PRIVATE_ARGUMENT' } }) }, metadata: { request_id: requestId } } },
+        [result]: { id: result, message: { id: result, author: { role: 'tool' }, metadata: {
+          invoked_resource: { app_name: 'Chat On Steroids Core', resource_uri: path } } } }
+      };
+      const top = { memoizedProps: { client: { getQueryCache: () => ({ getAll: () => [
+        { queryKey: ['chatgpt-conversation', conversationId], state: { data: { mapping } } }
+      ] }) } }, return: null };
+      (page.window.document.querySelector('[data-turn-key]') as any).__reactFiber$fixture = { memoizedProps: { entry }, return: top };
+      let evidence: any;
+      page.window.postMessage = (data: any) => { if (data.source === 'clf-fiber-reply') evidence = data; };
+      page.window.eval(script);
+      page.window.dispatchEvent(new page.window.MessageEvent('message', { source: page.window as any,
+        data: { source: 'clf-fiber-ask', nonce: 'native-source-join' } }));
+      expect(evidence.turns[0].calls[0]).toMatchObject({ messageId: call, requestId, tool: 'agents', answered: true });
+      expect(JSON.stringify(evidence)).not.toContain('PRIVATE_ARGUMENT');
+      await recordRequestEvidence(conversationId, [{ kind: 'tool_evidence', time: Date.now(), calls: evidence.turns[0].calls }]);
+      await broker.reconcileAgentRequestOwners();
+    } finally { page.window.close(); }
+  }
+  try {
+    const fleet = broker.spawn({ caller: { requestId: primeRequest }, workers: [{ task: 'Read-only diagnostic' }] });
+    broker.bindConversation('worker-1', worker, fleet.runId);
+    await noteChatOrigin(worker, { kind: 'worker', agentId: 'worker-1', fromSessionId: null, task: 'Read-only diagnostic' });
+    expect(broker.statusForCaller({ requestId: workerRequest }).self).toBeNull();
+    await publish(worker, workerRequest);
+    expect(broker.statusForCaller({ requestId: workerRequest }).self).toMatchObject({ id: 'worker-1', conversationId: worker });
+    broker.finishAgent({ requestId: workerRequest }, 'EXACT_WORKER_RETURN');
+    const child = await findSessionByConversation(worker, { requireUnique: true });
+    expect(child?.origin?.fromSessionId).toBeNull();
+    await publish(prime, primeRequest);
+    const parent = await findSessionByConversation(prime, { requireUnique: true });
+    expect((await getSession(child!.id))?.origin?.fromSessionId).toBe(parent!.id);
+    const delivered = await dispatch('agents', { action: 'status' }, null, primeRequest, 'core', async () => {
+      expect(broker.statusForCaller(currentCaller()).self?.id).toBe('prime');
+      return ok('Exact prime status');
+    });
+    expect(JSON.stringify(delivered)).toContain('EXACT_WORKER_RETURN');
+    expect(broker.offerMessagesForCaller({ requestId: 'wfr_foreign_unknown' })).toBeNull();
+  } finally { resetRecorderForTests(); }
 });
