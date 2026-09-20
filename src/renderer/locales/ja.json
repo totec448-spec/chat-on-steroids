@@ -1,4 +1,9 @@
 {
+  "Auto": "自動",
+  "Browser bridge port": "ブラウザーブリッジのポート",
+  "Auto uses the first available port. A fixed port must be available.": "自動では最初に利用可能なポートを使用します。固定ポートは空いている必要があります。",
+  "Controlled by CLF_BRIDGE_PORTS. Change the environment override to choose a port here.": "CLF_BRIDGE_PORTS により制御されています。ここでポートを選択するには環境変数の上書きを変更してください。",
+  "Browser bridge could not start: {0}": "ブラウザーブリッジを開始できませんでした: {0}",
   "Verified messages": "確認済みメッセージ",
   "Since {0}": "{0}から",
   "Change start day": "開始曜日を変更",
