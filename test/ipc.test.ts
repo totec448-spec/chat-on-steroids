@@ -85,6 +85,47 @@ const removeRoot = (payload: unknown): Promise<any> => handlers.get('roots:remov
 const sessionEvents = (payload: unknown): Promise<any> => handlers.get('sessions:events')!(null, payload) as Promise<any>;
 const sessionList = (): Promise<any> => handlers.get('sessions:list')!(null, undefined) as Promise<any>;
 
+it('saves port choices, merges stale snapshots and serializes concurrent port edits', async () => {
+  const ports = await import('../src/main/bridge-ports.js');
+  const bridge = await import('../src/main/bridge.js');
+  const selection = vi.spyOn(ports, 'bridgePortSelection').mockReturnValue({ candidates: [0], overridden: false });
+  try {
+    const base = getConfig();
+    const results = await Promise.all([8767, 8768].map(browserBridgePort => save({ ...base, ui: { ...base.ui, browserBridgePort } }, base)));
+    expect(results.every(result => result.ok)).toBe(true);
+    const active = bridge.bridgePort();
+    expect(await save({ ...base, ui: { ...base.ui, theme: 'light' } }, base)).toMatchObject({ ok: true });
+    expect(getConfig().ui).toMatchObject({ browserBridgePort: 8768, theme: 'light' });
+    expect(bridge.bridgePort()).toBe(active);
+  } finally { selection.mockRestore(); }
+});
+
+it('rejects occupied port edits through Settings IPC and preserves the old bridge and disk', async () => {
+  const http = await import('node:http');
+  const ports = await import('../src/main/bridge-ports.js');
+  const bridge = await import('../src/main/bridge.js');
+  await startBridge(); const old = bridge.bridgePort();
+  const blocker = http.createServer();
+  await new Promise<void>(resolve => blocker.listen(0, '127.0.0.1', resolve));
+  const selection = vi.spyOn(ports, 'bridgePortSelection').mockReturnValue({ candidates: [(blocker.address() as { port: number }).port], overridden: false });
+  try {
+    const base = getConfig(); const disk = await fs.readFile(path.join(dir, 'config.json'), 'utf8');
+    expect(await save({ ...base, ui: { ...base.ui, browserBridgePort: 8767 } }, base)).toMatchObject({ ok: false });
+    expect(getConfig()).toBe(base); expect(bridge.bridgePort()).toBe(old);
+    expect(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).toBe(disk);
+  } finally { selection.mockRestore(); await new Promise<void>(resolve => blocker.close(() => resolve())); }
+});
+
+it('enforces the environment override for explicit edits while accepting unrelated saves', async () => {
+  const base = getConfig();
+  // vitest.config.ts supplies the real CLF_BRIDGE_PORTS=0 override.
+  const result = await save({ ...base, ui: { ...base.ui, browserBridgePort: 8767 } }, base);
+  expect(result).toMatchObject({ ok: false, error: expect.stringContaining('CLF_BRIDGE_PORTS') });
+  expect(getConfig().ui.browserBridgePort).toBe('auto');
+  const unrelated = await save({ ...base, ui: { ...base.ui, theme: 'light' } }, base);
+  expect(unrelated).toMatchObject({ ok: true, data: { bridge: { portOverridden: true } } });
+});
+
 it('persists arbitrary colors through Settings IPC and preserves concurrent per-field edits', async () => {
   const { defaultAppearance } = await import('../src/shared/appearance.js');
   const base = getConfig();

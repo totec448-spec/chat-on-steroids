@@ -198,6 +198,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Desktop | Windows on; macOS retains its off default and separate native OS consent; Linux supports extension browser control. | Existing screen/control grants also govern browser tools; unsupported native clipboard remains masked. No new per-tab permission dialog. |
 | Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
 | Plugin auto-refresh | Off. | Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
+| Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
 
 Keep evidence levels separate in all reports: **source → tests → build → package → installed
@@ -1938,6 +1939,19 @@ The stop intent is not a claim that the provider has already ceased all server-s
 and revive only work that remains owed. The bridge never grants arbitrary local tools.
 
 `bridge.ts` owns the paired loopback HTTP boundary on 8765–8769; tests use isolated ports.
+`shared/browser-bridge.ts` defines the supported Settings range; `bridge-ports.ts` resolves the
+saved `ui.browserBridgePort` at startup or reconfiguration. Auto tries the established order;
+a fixed choice binds exactly that port. Effective `CLF_BRIDGE_PORTS` retains precedence, including
+test port 0; the same resolver supplies the UI override indicator and main rejects explicit edits.
+The serialized config transaction validates before entering the existing bridge lifecycle queue.
+It binds a gated replacement while the old listener serves, persists config, then activates the
+replacement. Bind/write failure releases the reservation and preserves the old config and runtime.
+Auto counts the current listener as available at its normal position. A successful switch preserves
+commands/receipts and pairing, resets browser-control/presence, replaces the wake socket, and
+drains the old listener without holding the config queue. Shutdown fences preparation/publication.
+An unavailable saved port keeps the app running, retains the choice, and reports the startup error
+in Setup; there is no fixed-port fallback, retry button or new retry timer. Settings restores a
+rejected focused selection; unchanged queued snapshots retain their base for three-way merging.
 Silent `/pair` provisioning replaces the retired six-digit flow. Validate allowed extension
 origin, bearer, payload bounds and operation identity. The wake socket only prompts maintenance.
 Status, event upload, activity, claims, receipts and bounded attachment chunks have distinct
