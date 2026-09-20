@@ -8386,8 +8386,9 @@
     // request the model will try to answer — and then two turns each claim to be the brief.
     // Bring the page lifecycle up to the native turn before retaining its Stop authority.
     observe();
-    const stoppedTurnId = turnId;
-    const stoppedQuestionId = CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id ?? null;
+    let stoppedTurnId = turnId;
+    let stoppedQuestionId = CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id ?? null;
+    const initialSendReceipt = userSendReceipt;
     const sameTurn = () => turnId === stoppedTurnId &&
       (CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id ?? null) === stoppedQuestionId;
     localError = '';
@@ -8457,6 +8458,43 @@
       renderControl();
       injectStage();
       return;
+    }
+
+    // A pickup can arrive while React is still hydrating a reloaded source. A null
+    // question at that point is absence of evidence, not the identity of an empty
+    // conversation. Wait before freezing the source and before Stop, while retaining
+    // any identity already observed and rejecting a real user Send during the wait.
+    const editableSource = () => {
+      const box = CLF_DOM.composer();
+      return box?.isConnected && CLF_DOM.composerVisible() && box.getAttribute('contenteditable') !== 'false' &&
+        box.getAttribute('aria-disabled') !== 'true' ? box : null;
+    };
+    const expectedQuestionId = stoppedQuestionId || policyData.recordedQuestionId || null;
+    const sourceReady = () => editableSource() && (!expectedQuestionId ||
+      CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id === expectedQuestionId);
+    if (!sourceReady()) {
+      const hydrationCurrent = () => current() && userSendReceipt === initialSendReceipt &&
+        (!stoppedQuestionId || (CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id ?? null) === stoppedQuestionId) &&
+        (!stoppedTurnId || turnId === stoppedTurnId);
+      const ready = await waitPageView(sourceReady, hydrationCurrent, INTERRUPT_WAIT_MS);
+      if (!current()) return;
+      if (!ready || !hydrationCurrent()) {
+        pressedAt = 0;
+        nativeBusy = false;
+        nativePhase = '';
+        localError = hydrationCurrent()
+          ? expectedQuestionId && editableSource()
+            ? 'The original question has not loaded yet. Nothing was compacted; waiting for the source conversation.'
+            : `The ChatGPT message box is not ready (${CLF_DOM.composer() ? 'composer_unavailable' : 'composer_missing'}). Wait for the page to load and retry.`
+          : 'The chat changed while preparing the handoff. Nothing was sent.';
+        if (!automatic || !hydrationCurrent()) await retireUnsentCompaction(forId, String(filed.data.token || ''), localError, current);
+        if (!current()) return;
+        renderControl();
+        return;
+      }
+      observe();
+      stoppedTurnId = turnId;
+      stoppedQuestionId = CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id ?? null;
     }
 
     // The barrier, before the request rather than after it.

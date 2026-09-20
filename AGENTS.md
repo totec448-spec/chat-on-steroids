@@ -1795,6 +1795,9 @@ and revive only work that remains owed. The bridge never grants arbitrary local 
 `bridge.ts` owns the paired loopback HTTP boundary on 8765–8769; tests use isolated ports.
 Silent `/pair` provisioning replaces the retired six-digit flow. Validate allowed extension
 origin, bearer, payload bounds and operation identity. The wake socket only prompts maintenance.
+Automatic provisioning requests `reuse: true` to join the current credential generation across
+browser profiles. Legacy pairing and explicit reconnect still rotate credentials. Pair writes
+serialize with Disconnect, whose epoch rejects an older in-flight provisioning result.
 Status, event upload, activity, claims, receipts and bounded attachment chunks have distinct
 contracts; a successful status read is not proof that a browser action happened.
 
@@ -2066,8 +2069,11 @@ repair, but cannot create a second browser action while another repair is alread
 Every compaction reload rechecks its original continuation token and phase at handout and the
 browser action claim. Cancellation, replacement, source dispatch and completed capture revoke
 obsolete pickup authority. Recovery text distinguishes an unsent request from an outstanding
-answer; neither implies a completed brief exists. The source waits for a visible, editable
-composer before insertion. Failed manual preparation retires only its exact pre-Send token and
+answer; neither implies a completed brief exists. A reloaded source waits for its visible,
+editable composer and recorded original question before freezing the source identity or stopping
+the turn. Already observed identities and a real user Send remain cancellation boundaries during
+hydration; an empty loading DOM must not be treated as a different conversation. The source
+rechecks the composer before insertion. Failed manual preparation retires only its exact pre-Send token and
 stores a bounded concrete failure reason. Existing user drafts remain intact. Ambiguous dispatched
 requests retain their existing custody and cannot be sent again merely because a receipt is absent.
 
