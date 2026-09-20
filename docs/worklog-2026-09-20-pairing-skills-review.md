@@ -11,6 +11,10 @@
 | #340 | `37c5f41b9ac742f4303df3c8e867f559cd08daec` | Integrate pairing serialization/reuse, source hydration, login-shell PATH and explicit tunnel-selection fixes. |
 | #341 | `2e85435d6542edf217a9db4fa22cc1129bf5319b` | Leave open: includes a machine-specific node_modules symlink and bypasses durable compaction refusal using a work-stopped boolean rather than renewed exact turn authority. |
 
+The later #341 head `17acaa13c1bd4a9bc9d8f07d82b686dc69e43bef` was also reviewed. It expands
+the silence-sweep trigger but retains both the local dependency link and refusal bypass;
+the integration decision is unchanged.
+
 #342 was already on the public main line before this review. Its shell request attribution,
 resumed-turn recording and public interim-message capture remain included. Private local
 history and operational evidence are excluded from the public integration.
@@ -62,3 +66,27 @@ head had successful Windows x64, macOS arm64 and Linux x64 CI before integration
 The public candidate is validated and packaged separately from the shared private checkout.
 Build, package, installation and active-browser evidence are distinct from these source/test
 results; operational receipts stay in ignored output folders.
+
+## Resumed integration
+
+The combined candidate also includes the later shared-tree Stop/recorder corrections. A Stop
+request no longer manufactures provider cancellation. Fresh exact request-owned work can reopen
+a page-local false end, including after recorder restart, while a real canonical final and
+newer question remain terminal fences. Activity presentation stays independent of authority to
+reopen a deliberately closed browser tab. The corresponding contracts are updated in AGENTS.md.
+
+The initial full run passed 5,776 tests and failed one real-desktop focus check while the
+foreground window changed. The unchanged desktop suite and isolated MCP shutdown suite then
+passed all 26 tests. A new Stop regression's clock was corrected to use the simulated page clock
+consistently; no production behavior was weakened to satisfy that test.
+
+The foreground assertion failed again in the parallel full-suite run while passing in the
+isolated desktop run. `verify:ci` now runs `computer.test.ts` with the existing isolated shutdown
+stage using one worker, after all other test processes have finished. All assertions and test
+coverage are retained; foreground-sensitive checks no longer overlap the other native fixtures.
+
+Production build passed. The real Electron/Chromium port fixture bound every available supported
+port, rejected the occupied port without disturbing its owner, preserved config on rejection,
+and reconnected the actual MV3 wake socket after a port switch with unchanged pairing credentials
+in 29,953 ms. The shell browser fixture passed 14 checks, including exact native send receipts,
+finals, provisional request ownership, public preambles and Code Mode request metadata.

@@ -3721,7 +3721,7 @@ async function stopCurrentTurn(): Promise<void> {
   finally { if (selectedId === id && selectionGeneration === generation) { controlledStopPending = false; void refreshSessionControls(); } }
 }
 let composerDiscoveryGeneration = 0;
-async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?: string): Promise<boolean | void> {
+async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?: string, controlAction = false): Promise<boolean | void> {
   const input = $<HTMLTextAreaElement>('chatInput');
   const key = draftKey();
   const projectId = selectedId ? sessions.find(row => row.id === selectedId)?.projectId ?? null : selectedProjectId;
@@ -3729,6 +3729,9 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
   const text = plan?.[0] ?? (authoredComposerText().trim() || (images.length ? 'Please look at the attached files.' : ''));
   if ($<HTMLButtonElement>('chatSend').disabled) return;
   if (!text) {
+    // An empty/repeated form submission is not a Stop gesture. Only activation
+    // of the button while it actually displays Stop/Cancel owns this branch.
+    if (!controlAction) return;
     const target = selectedId, selection = selectionGeneration;
     const sameSelection = () => selectedId === target && selectionGeneration === selection;
     await refreshSessionControls();
@@ -4211,7 +4214,14 @@ export function initChat(next: Deps): void {
   $('composerSettings').addEventListener('toggle', paintTaskActions);
   initContextMeter();
   $('createPlan').addEventListener('click', () => { if (taskPlans.has(draftKey())) cancelTaskPlan(); else void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); });
-  $('composer').addEventListener('submit', (event) => { event.preventDefault(); if (currentPreparedPlan()) void sendPreparedPlan(); else if (taskPlans.has(draftKey())) { if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); } else void sendComposer(); });
+  $('composer').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const controlAction = event.submitter === $('chatSend') && $('chatSend').dataset.action === 'stop';
+    if (currentPreparedPlan()) void sendPreparedPlan();
+    else if (taskPlans.has(draftKey())) {
+      if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt');
+    } else void sendComposer(undefined, undefined, undefined, controlAction);
+  });
 
   $('sessionList').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-id]');

@@ -1291,15 +1291,17 @@ app-authored reopen after an earlier completed end. Restore the current generati
 same replay: a new start replaces the active turn, and its exact end clears it. An older
 turn with a missing end remains history and cannot become active again after a later turn
 finishes, including when the user repeatedly closes and revisits the chat.
-A same-request call that **starts after** a
-reported completed end can prove the page ended it falsely; recorder reopens that turn and
-retires the corresponding Goal attempt. A call started before the end, a new request or a
-manual Stop cannot be used as that proof. A canonical native final with a provider message UUID
+A same-request call that **starts after** a page-reported end can prove the page ended it
+falsely, including a stopped or interrupted view; recorder reopens that turn and retires the
+corresponding Goal attempt. A call started before the end, a new request or a Stop click alone
+cannot be used as that proof. Finish-only calls do not reopen activity. A canonical native final with a provider message UUID
 settles its already-proven request even when another connector call starts afterwards. The shared
 `readCompletedFinal` check requires request proof preceding that final and still rejects new work
 or newer boundaries. Activity and composer settlement consume this verdict without a competing
-timestamp rule; running local tools retain their independent delivery fence. False-end reopen
-evidence remains process-local.
+timestamp rule; running local tools retain their independent delivery fence. After recorder
+restart, the latest ended boundary can recover its exact request ownership only from the
+durable request-turn index recorded before that boundary. A newer question or canonical final
+vetoes reopening; restored identity never grants permission to reopen a deliberately closed tab.
 Completion reads validate the committed history sequence and current binding across their
 disk read. Concurrent activity/boundary reads must not turn a known final into an apparent
 unfinished response by replacing a queue promise. A real question, work or rebind still revokes
@@ -1788,8 +1790,9 @@ External navigation may hide its destination URL under ChatGPT-only host permiss
 A completed tab absent from a successful ChatGPT URL query can release the departed
 conversation only while its original document, epoch and terminal lease still agree.
 Loading alone and failed queries are not departure proof; replacement registration wins.
-Confirmed removal or navigation sends an explicit departure to the bridge. It suspends local
-activity and automatic browser recovery, including silence, Goal/queue and compaction pickups.
+Confirmed removal or navigation sends an explicit departure to the bridge. It suspends
+automatic browser recovery, including silence, Goal/queue and compaction pickups. Exact local
+tool execution remains visible under its existing activity deadline independently of tab presence.
 An unexpected lost/discarded page retains its existing recovery contract. A newer observation
 of the exact departed page clears the dismissal; unresolved work reuses its last exact MCP
 timestamp and normal deadline. A tab close never fabricates provider completion.
@@ -1936,12 +1939,14 @@ before and after asynchronous Send authorization. Its exact final message vetoes
 even when the browser journal has not reached the app or a stale Stop control remains.
 A final from before the latest native question cannot veto recovery of that newer question.
 
-A native Stop click publishes the user's stop intent through the existing journal immediately,
-even while the control remains mounted. Trusted user input also wins during automation's own
-Stop wait; automation's synthetic click is distinct. A later native Stop can strengthen the
-same source's interrupted/failed boundary, including after restart, but cannot close a newer
-question or turn. That recorded stopped source vetoes continuation and missing-tab reopening.
-The stop intent is not a claim that the provider has already ceased all server-side execution.
+A trusted native Stop click immediately blocks automatic page input, without emitting a terminal
+observation while native generation continues. Authorized app Stop records the same local intent
+before its programmatic click; unrelated synthetic clicks are not human actions. Native idleness
+can then record a stopped page view, while a canonical final retains its stronger outcome.
+Exact app-correlated work started after Stop can withdraw the local veto only for the same active
+turn, with no pending app Stop or canonical final. Old results, foreign turns and finish-only
+calls cannot do so. Browser recovery still requires the main process's exact current authority.
+Neither a click receipt nor a page-local stopped outcome claims provider-side cancellation.
 
 **Intent:** deliver one authorized operation to one exact document, survive transport loss,
 and revive only work that remains owed. The bridge never grants arbitrary local tools.
@@ -2018,10 +2023,10 @@ silence/no-tab recovery for workers, primes and ordinary chats. Reload repair fo
 Unattributed incidents and compaction has its own evidence. “Recover agents” is not blanket
 permission to reopen the session list. A plain historical chat with no current work is unprotected.
 An explicit `/closed` departure with `manual: true` persists `browserRecoveryDismissedAt` in the
-existing session metadata, retires its activity grant and withdraws every unexecuted browser
-repair. It revokes synthetic silence inputs while retaining authored input, continuation tickets,
-exact request ownership and confirmed repair receipts. Late owned MCP results remain history;
-neither their arrival nor an in-flight call can light the closed chat or renew recovery.
+existing session metadata and withdraws every unexecuted browser repair. It revokes synthetic
+silence inputs while retaining authored input, continuation tickets, exact request ownership
+and confirmed repair receipts. Exact running or newly started MCP work remains visible until
+its normal activity deadline, but cannot wake workers, clear departure or grant browser recovery.
 All automatic error/no-tab/stalled/attribution, silence, Goal/queue and compaction pickups remain
 suspended until a real page return. This is local departure, not a fabricated provider turn end.
 MCP results, broker reports, generic session reattachment and old page reads cannot clear the
@@ -2157,7 +2162,10 @@ Trying → failed → later confirmed updates the same progress identity in the 
 
 Stop turns automation off for that chat, cancels compaction/recovery intent, releases finish
 holds and queues a bounded exact-turn native Stop command. Native confirmation is required;
-the app does not manufacture a final answer. End turn only releases an Astra finish hold.
+the app does not manufacture a final answer or infer cancellation from a click/turn_end.
+The desktop logs admission with its exact session, conversation, turn and command. An empty
+or repeated form submit cannot request Stop: the submitting control must be the button while
+it displays Stop/Cancel. End turn only releases an Astra finish hold.
 Stop elects an existing exact tab, including a loading document, or opens the missing chat
 once under the same durable command. Its absolute two-minute deadline covers browser loading
 without renewing on retries. Browser election is saved before opening; lost receipts, navigation
@@ -3097,8 +3105,10 @@ npm run dist:dir:mac:x64            # example unpacked target on a matching host
 
 Use `npm ci` for an intentionally needed reproducible dependency install, not as routine
 cleanup of this shared tree. `verify:ci` fetches rg, checks privacy/notices/native-source metadata,
-typechecks, verifies Electron resolves, runs Vitest excluding `mcp-shutdown`, then runs that
-socket-drain suite alone. `vitest.config.ts` forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
+typechecks, verifies Electron resolves, runs Vitest excluding `computer` and `mcp-shutdown`,
+then runs those suites with one worker. The real desktop foreground assertion must not compete
+with other suites' native windows or input; its assertions remain unchanged. `vitest.config.ts`
+forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
 and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
 

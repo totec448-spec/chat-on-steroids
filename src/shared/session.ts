@@ -1018,17 +1018,9 @@ export function foldProgress(events: readonly SessionEvent[]): SessionEvent[] {
     }
     out[index] = null;
   }
-  // A Stop click receipt is not provider completion. Reconcile the existing status
-  // only from this exact turn's observed stopped event, including old stored rows.
-  const stopped = new Set(events.filter(event => event.source === 'extension' && event.kind === 'turn_end' &&
-    event.outcome === 'stopped' && event.turnId).map(event => event.turnId));
-  return out.filter((event): event is SessionEvent => event !== null).map(event => {
-    if (event.source !== 'app' || event.kind !== 'progress' || !event.turnId ||
-        event.progressId !== `finish-release:${event.turnId}` || !stopped.has(event.turnId) ||
-        !event.message.text.startsWith('Stop requested.')) return event;
-    const text = 'Stopped. ChatGPT confirmed that generation stopped.';
-    return { ...event, message: { text, chars: text.length, truncated: false } };
-  });
+  // A page-local stopped verdict is not provider cancellation confirmation.
+  // Preserve the recorded request instead of manufacturing a stronger receipt.
+  return out.filter((event): event is SessionEvent => event !== null);
 }
 
 export interface TokenPressure {

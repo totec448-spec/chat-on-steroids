@@ -2476,8 +2476,9 @@ describe('canonical recorder 1.8', () => {
    * request id that starts after the reported end is proof the end was the page's, not
    * ChatGPT's. The recorder reopens the turn durably and lets the real end close it later.
    */
-  it('reopens a turn the page ended while its server turn kept calling tools', async () => {
-    const conversationId = 'conv-false-turn-end';
+  it.each(['completed', 'stopped', 'interrupted'] as const)('reopens a turn the page marked %s while its server turn kept calling tools', async outcome => {
+    const conversationId = `conv-false-turn-end-${outcome}`;
+    const sameRequest = `wfr_same_turn_${outcome}`, nextRequest = `wfr_next_turn_${outcome}`;
     const sessionId = await sessionForConversation(conversationId);
     const now = Date.now();
     const active = () => liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ?? null;
@@ -2486,28 +2487,28 @@ describe('canonical recorder 1.8', () => {
       {
         kind: 'tool_evidence', time: now, fiberConversationId: conversationId,
         calls: [
-          { messageId: 'same-0', tool: 'read', order: 0, answered: false, requestId: 'wfr_same_turn' },
-          { messageId: 'next-0', tool: 'read', order: 1, answered: false, requestId: 'wfr_next_turn' }
+          { messageId: 'same-0', tool: 'read', order: 0, answered: false, requestId: sameRequest },
+          { messageId: 'next-0', tool: 'read', order: 1, answered: false, requestId: nextRequest }
         ]
       }
     ]);
-    await tool('wfr_same_turn', now + 10);
+    await tool(sameRequest, now + 10);
     expect(active()).toBe('g-false-end');
 
     await recordChatObservations(conversationId, [
-      { kind: 'turn_end', time: now + 20, turnId: 'g-false-end', outcome: 'completed' }
+      { kind: 'turn_end', time: now + 20, turnId: 'g-false-end', outcome }
     ]);
     expect(active()).toBeNull();
 
     // An in-flight call that merely finished late proves nothing about the end.
-    await tool('wfr_same_turn', now + 15);
+    await tool(sameRequest, now + 15);
     expect(active()).toBeNull();
     // Nor does a different server turn: that is a different turn.
-    await tool('wfr_next_turn', now + 30);
+    await tool(nextRequest, now + 30);
     expect(active()).toBeNull();
 
     // The same server turn calling on after the end is the turn not having ended.
-    await tool('wfr_same_turn', now + 40);
+    await tool(sameRequest, now + 40);
     expect(active()).toBe('g-false-end');
     const starts = await readEvents(sessionId!, { kinds: ['turn_start'] });
     expect(starts.map((event) => [event.turnId, event.source])).toEqual([
@@ -2517,7 +2518,7 @@ describe('canonical recorder 1.8', () => {
     expect(starts[1]?.kind === 'turn_start' && starts[1].detail).toMatch(/kept calling tools/);
 
     // Reopened once; the same turn going on is not news, and the real end is accepted.
-    await tool('wfr_same_turn', now + 50);
+    await tool(sameRequest, now + 50);
     expect(await readEvents(sessionId!, { kinds: ['turn_start'] })).toHaveLength(2);
     await recordChatObservations(conversationId, [
       { kind: 'turn_end', time: now + 60, turnId: 'g-false-end', outcome: 'completed' }
@@ -2525,6 +2526,42 @@ describe('canonical recorder 1.8', () => {
     expect(active()).toBeNull();
     const ends = await readEvents(sessionId!, { kinds: ['turn_end'] });
     expect(ends.map((event) => event.time)).toEqual([now + 20, now + 60]);
+  });
+
+  it.each(['continued-work', 'native-final'] as const)(
+    'reconciles a stopped response after recorder restart from %s', async evidenceKind => {
+    const conversationId = `conv-stop-restart-${evidenceKind}`;
+    const requestId = `wfr_stop_restart_${evidenceKind}`, turnId = 'stopped-before-restart';
+    const now = Date.now();
+    const { sessionId } = await recordChatObservations(conversationId, [
+      { kind: 'user_message', time: now, messageId: 'restart-question', text: 'Complete the task.' },
+      { kind: 'turn_start', time: now + 1, turnId },
+      { kind: 'tool_evidence', time: now + 2, turnId, fiberConversationId: conversationId,
+        calls: [{ messageId: 'restart-call', tool: 'read', order: 0, answered: false, requestId }] }
+    ]);
+    await tool(requestId, now + 3);
+    await recordChatObservations(conversationId, [{ kind: 'turn_end', time: now + 10, turnId, outcome: 'stopped' }]);
+    await flushSessions();
+    resetRecorderForTests();
+    resetSessionStoreForTests();
+    await sessionForConversation(conversationId);
+    // Restored exact request proof is supplied by a re-observed native call.
+    await recordChatObservations(conversationId, [{ kind: 'tool_evidence', time: now + 20, turnId,
+      fiberConversationId: conversationId,
+      calls: [{ messageId: 'restart-call', tool: 'read', order: 0, answered: true, requestId }] }]);
+    if (evidenceKind === 'continued-work') {
+      await tool(requestId, now + 21);
+      expect((await getSession(sessionId!))?.activeTurnId).toBe(turnId);
+    }
+    await recordChatObservations(conversationId, [{ kind: 'assistant_message', time: now + 30,
+      turnId, messageId: 'native-final-after-reload', providerMessageId: '11111111-2222-4333-8444-555555555555',
+      text: 'The full answer is available after reload.', state: 'final', final: true, activeNow: false }]);
+    const { readCompletedFinal } = await import('../src/main/session/store.js');
+    expect(await readCompletedFinal(sessionId!, conversationId, turnId))
+      .toMatchObject({ messageId: 'native-final-after-reload', turnId });
+    await tool(requestId, now + 31);
+    expect((await getSession(sessionId!))?.activeTurnId).toBeNull();
+    expect(await readCompletedFinal(sessionId!, conversationId, turnId)).not.toBeNull();
   });
 
   it('never cross-attributes concurrent same-tool calls from two chats', async () => {
@@ -3519,13 +3556,13 @@ describe('folding redrawn commentary', () => {
       message: { text, truncated: false, chars: text.length }
     }) as SessionEvent;
 
-  it('reconciles a stored Stop status from its exact stopped turn without moving or duplicating the row', () => {
+  it('keeps a Stop request truthful when the page reports stopped without a final answer', () => {
     const pending: SessionEvent = { ...progress(2, 'finish-release:stop-one', 'Stop requested. ChatGPT has not yet confirmed that generation stopped.'), source: 'app', turnId: 'stop-one' };
     const stopped: SessionEvent = { seq: 4, time: 4, source: 'extension', kind: 'turn_end', turnId: 'stop-one', outcome: 'stopped' };
     const rows = [pending, stopped];
     const folded = foldProgress(rows);
     expect(folded).toHaveLength(2);
-    expect(folded[0]).toMatchObject({ seq: 2, time: 2, progressId: 'finish-release:stop-one', turnId: 'stop-one', message: { text: 'Stopped. ChatGPT confirmed that generation stopped.', truncated: false } });
+    expect(folded[0]).toEqual(pending);
     expect(foldProgress(folded)).toEqual(folded);
     expect(pending.kind === 'progress' && pending.message.text).toContain('not yet confirmed');
   });

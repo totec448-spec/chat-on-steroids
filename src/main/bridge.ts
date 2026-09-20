@@ -1488,6 +1488,7 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string)
   await revokeSilenceInputs(sessionId);
   endActivity(id);
   repairsInFlight.delete(id);
+  if (!alreadyQueued) logInfo(`bridge: desktop Stop requested for session ${sessionId}, conversation ${id}, turn ${expectedTurnId}, command ${command.id}; native cancellation is unconfirmed`);
   wakeBrowserWork();
   changed();
   if (!alreadyQueued) {
@@ -2300,9 +2301,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (manual) {
         const session = await findSessionByConversation(id);
         if (session) await revokeSilenceInputs(session.id);
-        endActivity(id);
         if (repairsInFlight.get(id)?.state !== 'done') repairsInFlight.delete(id);
-        logInfo(`bridge: ${id} was closed deliberately; activity and automatic recovery are paused until its page returns`);
+        logInfo(`bridge: ${id} was closed deliberately; automatic browser recovery is paused until its page returns`);
       } else await queueMissingTab(id, working);
     }
     return json(res, 200, { ok: true }, origin);
@@ -5688,7 +5688,7 @@ function grantActivity(conversationId: string, sessionId: string, at = Date.now(
   if (!sessionId) return;
   const previous = activeUntil.get(conversationId);
   const ownership = turn ?? (previous?.sessionId === sessionId ? previous : { turnId: null, model: 'unknown' as const });
-  if (ownership.model === 'pro' && (isChatBlocked(conversationId) || stopRequestedFor(conversationId))) return;
+  if (isChatBlocked(conversationId) || (ownership.model === 'pro' && stopRequestedFor(conversationId) && !ownership.mcpBacked)) return;
   const evidenceAt = previous?.sessionId === sessionId && previous.turnId === ownership.turnId ? Math.max(previous.evidenceAt, at) : at;
   const mcpBacked = ownership.mcpBacked || (previous?.sessionId === sessionId && previous.turnId === ownership.turnId && previous.mcpBacked);
   activeUntil.set(conversationId, { sessionId, evidenceAt, until: evidenceAt + (ownership.model === 'pro' ? PRO_SILENCE_MS : window), turnId: ownership.turnId, model: ownership.model,
@@ -5734,6 +5734,11 @@ function silenceWindowMs(grant: Pick<ActivityGrant, 'model' | 'thinkingFailed'>)
   return grant.model === 'pro' ? grant.thinkingFailed ? 5 * 60_000 : PRO_SILENCE_MS : CHAT_SILENCE_MS;
 }
 
+/** Display can outlive the silence deadline without granting a browser action. */
+function activityDeadline(grant: Pick<ActivityGrant, 'model' | 'evidenceAt'>): number {
+  return grant.evidenceAt + (grant.model === 'pro' ? PRO_ACTIVITY_MS : CHAT_ACTIVE_MS);
+}
+
 /** Runtime presentation of the same exact Pro work grant that owns silence recovery. */
 export function sessionInputActivity(summary: SessionSummary): InputActivity {
   const id = summary.conversationId;
@@ -5741,6 +5746,7 @@ export function sessionInputActivity(summary: SessionSummary): InputActivity {
   const grant = activeUntil.get(id);
   const expiry = sessionActivityExpiresAt(summary);
   const mcpWindow = grant?.sessionId === summary.id && grant.mcpBacked && !grant.thinkingFailed &&
+    (summary.activeTurnId || summary.lastTurnOutcome !== 'stopped') &&
     (!summary.activeTurnId || summary.activeTurnId === grant.turnId) && grant.until > Date.now();
   const exact = !!mcpWindow || runningToolProgress(id) !== null ||
     liveConversations().some(row => row.sessionId === summary.id && row.conversationId === id && !!row.activeTurnId);
@@ -5750,13 +5756,13 @@ export function sessionInputActivity(summary: SessionSummary): InputActivity {
     (expiry !== undefined && expiry !== null && expiry > Date.now()) };
 }
 export function sessionActivityExpiresAt(summary: SessionSummary): number | null | undefined {
-  if (summary.browserRecoveryDismissedAt !== undefined) return null;
   const id = summary.conversationId;
+  if (id && isChatBlocked(id)) return null;
   const grant = id ? activeUntil.get(id) : undefined;
   // Admission is already live work, even before a long call has a recorded result.
   // Use exact running ownership, never the conservative anonymous safety counter.
   // This projection does not mint a recovery grant or reopen a browser binding.
-  if (id && summary.activeTurnId && !summary.finishTurn?.released && runningToolProgress(id)) {
+  if (id && (summary.activeTurnId || (grant?.sessionId === summary.id && grant.mcpBacked)) && runningToolProgress(id)) {
     const pro = grant?.sessionId === summary.id ? grant.model === 'pro' :
       summary.selectedModel?.conversationId === id && isProModel(summary.selectedModel.model, summary.selectedModel.reasoningEffort);
     return Date.now() + (pro ? PRO_ACTIVITY_MS : CHAT_ACTIVE_MS);
@@ -5764,7 +5770,7 @@ export function sessionActivityExpiresAt(summary: SessionSummary): number | null
   // An abandoned open recorder turn is not fresh work, even if a later picker selection
   // differs from the model that owned the retired grant.
   if (!grant || grant.sessionId !== summary.id || grant.thinkingFailed) return null;
-  return grant.evidenceAt + (grant.model === 'pro' ? PRO_ACTIVITY_MS : CHAT_ACTIVE_MS);
+  return activityDeadline(grant);
 }
 
 async function extendedSilenceWindowFor(conversationId: string, sessionId?: string): Promise<boolean> {
@@ -5918,12 +5924,12 @@ async function considerAutomaticCompaction(conversationId: string, sessionId: st
   compactionFilings.add(conversationId);
   try {
     const summary = await getSession(sessionId).catch(() => null);
-    if (!summary || summary.conversationId !== conversationId || summary.browserRecoveryDismissedAt !== undefined || !autoCompactionReady(summary)) return;
+    if (!summary || summary.conversationId !== conversationId || summary.endedAt !== null || summary.browserRecoveryDismissedAt !== undefined || !autoCompactionReady(summary)) return;
     if (await conversationWasSuperseded(conversationId)) return;
     if (failedTurn && !await failedCompactionTurnCurrent(conversationId, sessionId, failedTurn)) return;
     // Re-read after the awaits: the turn may have ended, or a page may have filed by hand.
     const current = await getSession(sessionId);
-    if (!current || current.conversationId !== conversationId || current.browserRecoveryDismissedAt !== undefined || !autoCompactionReady(current)) return;
+    if (!current || current.conversationId !== conversationId || current.endedAt !== null || current.browserRecoveryDismissedAt !== undefined || !autoCompactionReady(current)) return;
     if (failedTurn && !await failedCompactionTurnCurrent(conversationId, sessionId, failedTurn)) return;
     if ((!failedTurn && !hasCurrentWork()) || continuationForSession(sessionId) || goalFencedChat(conversationId) ||
         stopRequestedFor(conversationId) || !getConfig().compaction.auto || !automaticCompactionAllowed(current)) return;
@@ -6039,7 +6045,7 @@ function armResumedChat(sessionId: string, conversationId: string): void {
 async function restoreReturnedPageActivity(conversationId: string, sessionId: string): Promise<void> {
   const session = await getSession(sessionId);
   if (session?.conversationId !== conversationId || session.browserRecoveryDismissedAt !== undefined ||
-      !session.activeTurnId || session.finishTurn?.released || session.lastToolCallAt === null || activeUntil.has(conversationId)) return;
+      !session.activeTurnId || session.lastToolCallAt === null || activeUntil.has(conversationId)) return;
   const selected = session.selectedModel;
   const grant: ActivityGrant = { sessionId, turnId: session.activeTurnId,
     evidenceAt: session.lastToolCallAt, until: session.lastToolCallAt,
@@ -6077,7 +6083,11 @@ function forgetActivity(conversationId: string): void {
  */
 function armSilenceSweep(now = Date.now()): void {
   let earliest = Number.POSITIVE_INFINITY;
-  for (const grant of activeUntil.values()) if (grant.until > now) earliest = Math.min(earliest, grant.until);
+  for (const grant of activeUntil.values()) {
+    if (grant.until > now) earliest = Math.min(earliest, grant.until);
+    const visibleUntil = activityDeadline(grant);
+    if (!grant.thinkingFailed && visibleUntil > now) earliest = Math.min(earliest, visibleUntil);
+  }
   if (!Number.isFinite(earliest)) {
     if (silenceTimer) clearTimeout(silenceTimer);
     silenceTimer = null;
@@ -6377,8 +6387,8 @@ async function silenceSourceCurrent(conversationId: string, grant: ActivityGrant
       await readCompletedFinal(grant.sessionId, conversationId, grant.turnId)) return false;
   const boundary = await readRecoveryBoundary(grant.sessionId, grant.turnId);
   const session = await getSession(grant.sessionId);
-  return session?.conversationId === conversationId && session.browserRecoveryDismissedAt === undefined &&
-    !session.finishTurn?.released && !isChatBlocked(conversationId) && !stopRequestedFor(conversationId) &&
+  return session?.conversationId === conversationId && session.endedAt === null && session.browserRecoveryDismissedAt === undefined &&
+    !isChatBlocked(conversationId) && !stopRequestedFor(conversationId) &&
     (!session.activeTurnId || session.activeTurnId === grant.turnId) &&
     !!boundary && boundary.kind !== 'user_message' && boundary.turnId === grant.turnId &&
     !(boundary.kind === 'turn_end' && boundary.outcome === 'stopped');
@@ -6586,7 +6596,8 @@ async function noteRecoveryObservations(
   // renewing the work clock or changing an already known turn's model.
   const recorded = sessionId ? await getSession(sessionId) : null;
   if (recorded?.browserRecoveryDismissedAt !== undefined) {
-    endActivity(conversationId);
+    // Departure already consumed the old activity. A late page batch cannot
+    // erase newer server-side work which arrived while its tab was closed.
     if (repairsInFlight.get(conversationId)?.state !== 'done') repairsInFlight.delete(conversationId);
     return;
   }
@@ -6689,7 +6700,7 @@ async function noteRecoveryObservations(
       (['stalled', 'failed', 'unknown', 'interrupted', 'error'].includes(lastEnd) &&
         (recoveryInputAllowed(sessionId, conversationId) || loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(sessionId))));
   const mcpTerminal = !thinkingFailed && !terminalGrant?.thinkingFailed && terminalGrant?.turnId && activity.endedTurnId === terminalGrant.turnId && sessionId && activity.terminal &&
-    lastEnd !== 'stopped' && await turnHasMcpCall(sessionId, conversationId, terminalGrant.turnId);
+    await turnHasMcpCall(sessionId, conversationId, terminalGrant.turnId);
   const finalTurn = activity.endedTurnId ?? terminalGrant?.turnId;
   // A replacement page can first reveal the exact final after a completed end
   // control. That history backfill is not fresh activity, but its canonical
@@ -7021,7 +7032,7 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     const pro = await extendedSilenceWindowFor(conversationId, grant.sessionId);
     const afterTurn = recoveryInputAllowed(grant.sessionId, conversationId) || loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(grant.sessionId);
     if (activeUntil.get(conversationId) !== grant) continue;
-    if (afterTurn && runningToolCalls(conversationId) > 0) {
+    if (runningToolProgress(conversationId) || (afterTurn && runningToolCalls(conversationId) > 0)) {
       grant.until = now + GOAL_QUIET_MS;
       deferred = true;
       continue;
@@ -7046,8 +7057,7 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     // Not a chat the user wants brought back: its silence is spent the same way, without the
     // reload that would otherwise be its one chance.
     if (!grant.thinkingFailed && !tabRecoveryWanted(conversationId) && !afterTurn) {
-      if (pro && now < grant.evidenceAt + PRO_ACTIVITY_MS) {
-        grant.until = grant.evidenceAt + PRO_ACTIVITY_MS;
+      if (now < activityDeadline(grant)) {
         deferred = true;
         continue;
       }
@@ -7085,7 +7095,13 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     // Use the same source verdict as countdown/claim. Otherwise a newer question
     // makes the handout disappear while this scheduler keeps recreating it.
     if (!await silenceSourceCurrent(conversationId, grant)) {
-      if (activeUntil.get(conversationId) === grant) spent.push(conversationId);
+      if (activeUntil.get(conversationId) === grant) {
+        // The same work can still be displayed after a close or pending Stop.
+        // Preserve its original silence deadline so a real page return does
+        // not pretend to be fresh work or start another waiting window.
+        if (!grant.thinkingFailed && now < activityDeadline(grant)) deferred = true;
+        else spent.push(conversationId);
+      }
       continue;
     }
     if (activeUntil.get(conversationId) !== grant) continue;
@@ -7613,13 +7629,6 @@ function noteCallAttribution(
       repairsInFlight.delete(conversationId);
       return;
     }
-    // Exact results retain their historical owner after an explicit user close,
-    // but cannot renew activity, wake the worker, or authorize automatic recovery.
-    if (filedSession?.browserRecoveryDismissedAt !== undefined) return;
-    // A late attributed result remains history after Stop; it cannot reopen the
-    // stopped browser turn's activity/recovery clock. A new recorded turn owns
-    // its own activeTurnId and can receive fresh activity normally.
-    if (!filedSession?.activeTurnId && filedSession?.lastTurnOutcome === 'stopped') return;
     const callOwner = recordedRequestTurn(filedSession?.requestTurns, requestId, conversationId);
     if (callOwner && filedSession?.activeTurnId && responseTurnId(filedSession.timelineTurns, callOwner.turnId) !==
         responseTurnId(filedSession.timelineTurns, filedSession.activeTurnId)) return;
@@ -7628,7 +7637,8 @@ function noteCallAttribution(
     // settle an exact request that still delivers trailing connector work.
     const previous = activeUntil.get(conversationId);
     const continuingMcp = previous?.sessionId === sessionId && previous.mcpBacked && !previous.thinkingFailed &&
-      (!!filedSession?.activeTurnId ? filedSession.activeTurnId === previous.turnId : previous.until > Date.now());
+      (!!filedSession?.activeTurnId ? filedSession.activeTurnId === previous.turnId :
+        filedSession?.lastTurnOutcome !== 'stopped' && previous.until > Date.now());
     if (completedFinalAt !== null) {
       if (previous?.sessionId === sessionId && !filedSession?.activeTurnId) endActivity(conversationId);
       const repair = repairsInFlight.get(conversationId);
@@ -7637,12 +7647,17 @@ function noteCallAttribution(
     }
     const selection = filedSession?.selectedModel;
     const pro = previous?.model === 'pro' || ((!previous || previous.model === 'unknown') && selection?.conversationId === conversationId && isProModel(selection.model, selection.reasoningEffort));
-    if (pro && (isChatBlocked(conversationId) || stopRequestedFor(conversationId) || filedSession?.finishTurn?.released ||
-        (!continuingMcp && !filedSession?.activeTurnId && filedSession?.lastTurnEndAt != null && startedAt <= filedSession.lastTurnEndAt))) return;
+    if (isChatBlocked(conversationId) ||
+        (!continuingMcp && !filedSession?.activeTurnId && filedSession?.lastTurnEndAt != null && startedAt <= filedSession.lastTurnEndAt)) return;
     // The exact call is stronger than browser lifecycle state: the model is still working even
     // when Chrome, the tab or a reload destroyed the page's local turn projection.
     const sourceTurnId = filedSession?.activeTurnId ?? previous?.turnId ??
       goalPendingReplyFor(conversationId)?.silenceSourceTurnId ?? filedSession?.finishTurn?.turnId ?? null;
+    grantActivity(conversationId, sessionId, continuingMcp ? Date.now() : pro ? Math.min(Date.now(), startedAt) : Date.now(), CHAT_SILENCE_MS,
+      { turnId: sourceTurnId, model: pro ? 'pro' : previous?.model ?? 'unknown', mcpBacked: true });
+    // Exact calls are visible work even without a page. They cannot turn that
+    // display into a worker wake, browser repair or continuation after departure.
+    if (filedSession?.browserRecoveryDismissedAt !== undefined || filedSession?.endedAt !== null) return;
     // A completed tool is real work too. Long-running calls must leave a full quiet
     // window for the model to process their result, without reviving historical finals.
     if (!isChatBlocked(conversationId)) {
@@ -7652,8 +7667,6 @@ function noteCallAttribution(
     }
     void revokeSilenceInputs(sessionId).catch(error => logWarn(`input: could not withdraw silence pickup: ${String(error)}`));
     void revokeSilenceLoop(conversationId).catch(error => logWarn(`goal: could not withdraw silence pickup: ${String(error)}`));
-    grantActivity(conversationId, sessionId, continuingMcp ? Date.now() : pro ? Math.min(Date.now(), startedAt) : Date.now(), CHAT_SILENCE_MS,
-      { turnId: sourceTurnId, model: pro ? 'pro' : previous?.model ?? 'unknown', mcpBacked: true });
     noteRecoveryActivity(conversationId);
     notePickupActivity(conversationId);
     // Scoped to the repair this fact is evidence about. An attributed call proves the request-id
