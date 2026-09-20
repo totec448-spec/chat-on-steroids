@@ -1119,9 +1119,9 @@ async function call(path, init = {}, retried = false) {
  * by accident, and it is why the marker in a chat URL is harmless on its own.
  */
 function provision(reconnect = false) {
-  // Singleflight. Everything that wants a token waits on the same request: `/pair` mints
-  // a fresh credential and invalidates the one before it, so two concurrent callers do
-  // not get two tokens, they get one working token and one that has already been revoked.
+  // Singleflight. Everything that wants a token waits on the same request. Current
+  // apps honor automatic reuse across browser profiles; older apps rotate on every
+  // /pair, so concurrent requests there would immediately revoke one another.
   // A pairing from an *older* connection intent is deliberately not shared: Disconnect may
   // have happened while it was in flight, and a later explicit Connect must be able to mint
   // under the new intent without waiting for/accepting that stale result.
@@ -1158,7 +1158,7 @@ async function pairOnce(intent = connectionEpoch, reconnect = false) {
       method: 'POST',
       cache: 'no-store',
       headers: { 'content-type': 'application/json', ...versionHeaders() },
-      body: JSON.stringify(reconnect ? { reconnect: true } : {})
+      body: JSON.stringify(reconnect ? { reconnect: true } : { reuse: true })
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || typeof data.token !== 'string') {
