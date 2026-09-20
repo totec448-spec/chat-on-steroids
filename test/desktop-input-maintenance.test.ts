@@ -224,7 +224,7 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   const local = { get: async () => ({ ...localSaved }), set: vi.fn(async (value: object) => { Object.assign(localSaved, value); }), remove: async () => {} };
   const saved: Record<string, unknown> = { ...priorSession };
   const session = { get: async () => ({ ...saved }), set: async (value: object) => { Object.assign(saved, value); }, remove: async (key: string) => { delete saved[key]; } };
-  const create = vi.fn(async ({ url, windowId }: { url: string; windowId?: number }) => {
+  const create = vi.fn(async ({ url, windowId }: { url: string; windowId?: number }): Promise<Tab> => {
     const tab = { id: tabs.length + 1, pendingUrl: url, windowId }; tabs.push(tab); return tab;
   });
   const windows = {
@@ -723,6 +723,64 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(String(h.create.mock.calls[0]?.[0]?.url)).toContain('model=gpt-5.6-sol&reasoning_effort=medium');
     await h.maintain();
     expect(h.create).toHaveBeenCalledTimes(1);
+  });
+  it.each(['ready', 'loading'])('renders an owned fresh worker before its composer hydrates (%s)', async readiness => {
+    const rendered = new Set<number>(), h = await worker([], undefined, {}, {}, rendered);
+    let offered = true, live = true;
+    h.fetch.mockImplementation(async input => ({ ok: true, status: 200, json: async () => {
+      if (new URL(input).pathname === '/hello') return { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true };
+      const placement = offered ? { id: firstId, background: true } : null; offered = false;
+      return { ok: true, placement, commandIds: live ? [firstId] : [], inputs: [], background: true };
+    } }));
+    h.create.mockImplementation(async ({ url, windowId }) => {
+      const tab = { id: 1, windowId, ...(readiness !== 'loading' ? { url } : { pendingUrl: url }) };
+      h.tabs.push(tab); return tab;
+    });
+    await h.maintain();
+    if (readiness === 'loading') {
+      expect([...rendered]).toEqual([]);
+      const tab = h.tabs[0]!; tab.url = tab.pendingUrl; delete tab.pendingUrl;
+      await h.authorizeDocument({ tab, documentId: 'worker-document', frameId: 0, url: tab.url }, { navigationEpoch: 1 });
+      h.updated(1, { status: 'complete' });
+    }
+    await vi.waitFor(() => expect([...rendered]).toEqual([1]));
+    expect(h.windows.update).toHaveBeenCalledWith(80, { state: 'minimized', focused: false });
+    expect(h.update.mock.calls.some(([, patch]) => patch.active)).toBe(false);
+    live = false; await h.maintain();
+    expect([...rendered]).toEqual([]);
+    expect(h.create).toHaveBeenCalledTimes(1);
+  });
+  it.each(['foreign-tab', 'retired-command', 'changed-marker', 'contradictory-marker', 'foreign-route', 'expired'])('does not lend worker rendering custody to %s', async scenario => {
+    const rendered = new Set<number>();
+    const original = `https://chatgpt.com/?clf=${firstId}#clf=${firstId}`;
+    const h = await worker([], undefined, {}, { discardProtectedTabs: scenario === 'foreign-tab' ? {} : {
+      7: { commandId: firstId, at: Date.now() - (scenario === 'expired' ? 31 * 60_000 : 0), conversationId: null }
+    } }, rendered);
+    h.tabs.push({ id: 7, url: scenario === 'changed-marker' ? `https://chatgpt.com/?clf=${secondId}` :
+      scenario === 'contradictory-marker' ? `https://chatgpt.com/?clf=${firstId}#clf=${secondId}` :
+      scenario === 'foreign-route' ? `https://chatgpt.com/c/${secondId}` : original });
+    if (scenario === 'foreign-route') h.saved.tabConversations = { 7: secondId };
+    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, app: 'chat-on-steroids',
+      bridge: BRIDGE_PROTOCOL, compatible: true, paired: true, commandIds: scenario === 'retired-command' ? [] : [firstId], inputs: [] }) });
+    await h.maintain();
+    expect([...rendered]).toEqual([]);
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it('releases command rendering after document replacement and hands a bound worker to ordinary live activity', async () => {
+    const rendered = new Set<number>(), marker = `https://chatgpt.com/?clf=${firstId}`;
+    const h = await worker([], undefined, {}, { discardProtectedTabs: { 7: { commandId: firstId, at: Date.now(), url: marker, conversationId: null } } }, rendered);
+    const tab = { id: 7, url: marker }; h.tabs.push(tab);
+    let liveChat = false;
+    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, app: 'chat-on-steroids',
+      bridge: BRIDGE_PROTOCOL, compatible: true, paired: true, commandIds: [firstId], inputs: [],
+      nonDiscardableConversations: liveChat ? [secondId] : [] }) });
+    await h.authorizeDocument({ tab, documentId: 'first', frameId: 0, url: marker }, { navigationEpoch: 1 });
+    await h.maintain(); expect([...rendered]).toEqual([7]);
+    await h.authorizeDocument({ tab, documentId: 'replacement', frameId: 0, url: marker }, { navigationEpoch: 1 });
+    await h.maintain(); expect([...rendered]).toEqual([]);
+    tab.url = `https://chatgpt.com/c/${secondId}`;
+    liveChat = true; await h.maintain(); expect([...rendered]).toEqual([7]);
+    liveChat = false; await h.maintain(); expect([...rendered]).toEqual([]);
   });
   it('retains the completed exact dedicated catalog for first-message reuse', async () => {
     const h = await worker([]);

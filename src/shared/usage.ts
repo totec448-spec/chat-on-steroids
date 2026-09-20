@@ -17,11 +17,44 @@ export interface UsageModelTokens {
 export interface UsageOverview {
   /** Account-wide comparison ceiling selected from the observed model catalog. */
   contextTokenCap: number;
+  /** Verified native sends, independently of token estimates or provider quotas. */
+  messages: { through: number; days: UsageMessageDay[] };
   limits: ModelUsage[];
   days: Array<{ date: string; tokens: number; models: UsageModelTokens[] }>;
   models: UsageModelTokens[];
   tokens: number;
   sessions: number;
+}
+
+export interface UsageMessageDay { date: string; gpt56: number; gpt6: number }
+export type UsageMessageFamily = 'gpt-5.6' | 'gpt-6';
+
+/** Explicit recorded version identities only; unknown suffixes remain unclassified. */
+export function usageMessageFamily(model: string | undefined): UsageMessageFamily | null {
+  const id = (model ?? '').trim().toLowerCase().replace(/\s+/g, '-');
+  if (/^(?:gpt-?)?5[.-]6(?:-(?:thinking|pro|sol|terra|luna))?$/.test(id) || id === 'sol') return 'gpt-5.6';
+  if (/^(?:gpt-?)?6(?:\.0)?(?:-(?:pro|astra))?$/.test(id) || id === 'astra') return 'gpt-6';
+  return null;
+}
+
+export function usageDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/** Most recent selected weekday at local midnight, including today. Calendar days preserve DST. */
+export function usageWeekStart(weekday: number, through: number): number {
+  const date = new Date(through);
+  date.setDate(date.getDate() - (date.getDay() - weekday + 7) % 7);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+export function usageMessageTotals(messages: UsageOverview['messages'], weekday: number): UsageMessageDay {
+  const from = usageDateKey(new Date(usageWeekStart(weekday, messages.through)));
+  const through = usageDateKey(new Date(messages.through));
+  return messages.days.reduce((total, day) => day.date >= from && day.date <= through
+    ? { ...total, gpt56: total.gpt56 + day.gpt56, gpt6: total.gpt6 + day.gpt6 } : total,
+  { date: from, gpt56: 0, gpt6: 0 });
 }
 export interface UsageFormula {
   divisor: number;

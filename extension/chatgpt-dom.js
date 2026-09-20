@@ -515,9 +515,9 @@ var CLF_DOM = (() => {
     }, []);
   }
 
-  // This compatibility change records the alternate page, it does not replace its
-  // activity/answer UI. Classic Overwrite behavior keeps its own exact anchors.
-  const presentationTurns = () => turns().filter(turn => !turn.node.closest?.(SHELL_TURN));
+  // Shell exchanges contain both sides. The normal presentation owner still
+  // requires the exact user/message stamps before mounting recorded activity.
+  const presentationTurns = () => turns();
 
   const turnNodes = (turn) =>
     turn && Array.isArray(turn.nodes) && turn.nodes.length > 0 ? turn.nodes : turn && turn.node ? [turn.node] : [];
@@ -1835,6 +1835,14 @@ var CLF_DOM = (() => {
           if (root.parentElement !== anchor.parentElement || root.nextSibling !== before) anchor.parentElement.insertBefore(root, before);
         } else {
           const first = sections[0];
+          if (first.matches?.(SHELL_TURN)) {
+            const users = [...first.querySelectorAll('[data-content-search-unit-key$=":user"]')]
+              .filter(node => node.closest('[data-turn-key]') === first && messageIdOf(node));
+            if (users.length !== 1 || !users[0].parentElement) return false;
+            const user = users[0];
+            if (root.parentElement !== user.parentElement || user.nextSibling !== root) user.parentElement.insertBefore(root, user.nextSibling);
+            return true;
+          }
           if (!first.parentElement) return false;
           // A tool-only response has no authored separator. Keep the existing
           // response sibling stable through React's temporary host moves.

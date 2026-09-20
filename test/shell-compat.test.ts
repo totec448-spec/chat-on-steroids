@@ -180,7 +180,7 @@ it('reads the real shell composer, messages and tools through existing contracts
   expect(JSON.stringify(turns)).not.toContain('Commentary without a provider');
   expect(f.api.turns().map((t: any) => t.role)).toEqual(['user', 'assistant']);
   expect(f.api.messages().map((m: any) => [m.id, m.role, m.text])).toEqual([[USER, 'user', 'hello'], [ANSWER, 'assistant', 'Answer']]);
-  expect(f.api.presentationTurns()).toEqual([]); // No alternate Overwrite/UI implementation.
+  expect(f.api.presentationTurns().map((t: any) => t.role)).toEqual(['user', 'assistant']);
 });
 
 it.each(['in_progress', 'cancelled', 'complete', 'unknown', undefined])('does not invent a tool receipt from turn status %s', async status => {
@@ -225,6 +225,156 @@ it('reads request metadata only for the mounted shell message ids in the exact n
   expect((await f.ask()).turns[0].requests).toEqual([]);
   f.queries[0].queryKey[1] = THREAD; f.queries[0].state.data.mapping[CALL].message.id = OTHER;
   expect((await f.ask()).turns[0].requests).toEqual([]);
+});
+
+// The exported native page subscribes to its live message mapping separately from
+// the history query. React publishes that value in hook state / compiler memo data.
+function liveShellMapping(f: ReturnType<typeof fixture>, compiler = false) {
+  const thought = '66666666-1111-4111-8111-111111111111';
+  const preamble = '77777777-1111-4111-8111-111111111111';
+  const plain = (id: string, role: string, text: string, channel?: string) => ({ id, message: {
+    id, author: { role }, channel, content: { content_type: 'text', parts: [text] }, metadata: {}, create_time: 1700000000
+  } });
+  const mapping: any = {
+    [USER]: plain(USER, 'user', 'hello'), [ANSWER]: plain(ANSWER, 'assistant', 'Answer', 'final'),
+    [CALL]: { id: CALL, message: { id: CALL, author: { role: 'assistant' }, recipient: 'api_tool.call_tool',
+      metadata: { request_id: OTHER }, content: { content_type: 'code', text: '{"path":"/Chat On Steroids Core/link_x/read","args":{"private":"DO_NOT_COPY"}}' } } },
+    [thought]: { id: thought, message: { id: thought, author: { role: 'assistant' },
+      content: { content_type: 'thoughts', thoughts: [{ summary: 'Inspecting the project', content: 'PRIVATE_REASONING_CONTENT' }] }, metadata: {} } },
+    [preamble]: plain(preamble, 'assistant', 'I will inspect the project.', 'commentary')
+  };
+  f.entry.turn.messageIds = [USER, thought, preamble, CALL, ANSWER];
+  f.entry.turn.items[1].items.unshift({ type: 'reasoning', presentation: 'thought', content: 'Inspecting the project', completed: false });
+  f.entry.turn.items[1].items[1].content = 'I will inspect the project.';
+  const owner: any = f.chain({ conversationId: THREAD }, f.top);
+  for (let at = 0; at < f.entry.turn.messageIds.length; at++) {
+    const id = f.entry.turn.messageIds[at]!; mapping[id].parent = f.entry.turn.messageIds[at - 1] ?? null;
+  }
+  const snapshot = { renderedConversation: { mapping, current_node: ANSWER }, renderedTurns: [{ id: TURN, turn: f.entry.turn }] };
+  if (compiler) owner.updateQueue = { memoCache: { data: [[null, THREAD, mapping, snapshot]] } };
+  else owner.memoizedState = { memoizedState: snapshot, next: null };
+  f.row.return = owner;
+  return { mapping, owner, thought, preamble, snapshot };
+}
+
+it.each([false, true])('captures live shell request metadata and public activity before a history query exists (compiler=%s)', async compiler => {
+  const f = fixture(), { thought, preamble } = liveShellMapping(f, compiler);
+  const turn = (await f.ask()).turns[0];
+  expect(f.queries).toEqual([]);
+  expect(turn.calls[0]).toMatchObject({ requestId: OTHER, messageId: CALL, answered: false });
+  expect(turn.activities).toEqual([{ messageId: thought, label: 'Inspecting the project', order: 1 }]);
+  expect(turn.messages.map((m: any) => [m.rawMessageId, m.order])).toEqual([[USER, 0], [preamble, 2], [ANSWER, 4]]);
+  expect(turn.messages.find((m: any) => m.rawMessageId === preamble)?.rawText).toBe('I will inspect the project.');
+  expect(JSON.stringify(turn)).not.toMatch(/PRIVATE_REASONING_CONTENT|DO_NOT_COPY/);
+  const r = await recorder(f);
+  await vi.waitFor(() => expect(r.sent).toContainEqual(expect.objectContaining({ type: 'correlate',
+    conversationId: THREAD, calls: expect.arrayContaining([expect.objectContaining({ requestId: OTHER })]) })));
+  expect(r.events()).toContainEqual(expect.objectContaining({ kind: 'page_tool', messageId: thought, text: 'Inspecting the project' }));
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+});
+
+it.each(['foreign-owner', 'missing-user', 'wrong-user', 'two-mappings', 'getter', 'duplicate-selected-id'])('does not borrow live shell metadata from %s', async kind => {
+  const f = fixture(), { mapping, owner, snapshot } = liveShellMapping(f);
+  if (kind === 'foreign-owner') owner.memoizedProps.conversationId = OTHER;
+  if (kind === 'missing-user') delete mapping[USER];
+  if (kind === 'wrong-user') mapping[USER].message.id = OTHER;
+  if (kind === 'two-mappings') owner.memoizedState.next = { memoizedState: { ...snapshot, renderedConversation: { ...snapshot.renderedConversation, mapping: { ...mapping, [CALL]: {
+    id: CALL, message: { ...mapping[CALL].message, metadata: { request_id: 'wfr_conflict' } }
+  } } } }, next: null };
+  if (kind === 'getter') Object.defineProperty(mapping, USER, { get() { throw Error('not a published value'); } });
+  if (kind === 'duplicate-selected-id') f.entry.turn.messageIds.push(CALL);
+  const turn = (await f.ask()).turns[0];
+  expect(turn).toBeDefined(); expect(turn.requests).toEqual([]); expect(turn.activities).toEqual([]);
+});
+
+it.each(['final', 'preamble', 'tools-only'])('places recorded shell tools after their user and beside the exact native response (%s)', async state => {
+  const f = fixture(), { preamble } = liveShellMapping(f, true), owner = 'local-shell-tools';
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  const section = f.doc.querySelector('[data-turn-key]')!;
+  const user = section.querySelector('[data-content-search-unit-key$=":user"]')!;
+  const answer = section.querySelector('[data-content-search-unit-key$=":assistant"]')!;
+  const publicNode = section.querySelector('[data-markdown-text-style]')!;
+  publicNode.textContent = 'I will inspect the project.';
+  (publicNode as any).__reactFiber$fixture = f.chain({ item: f.entry.turn.items[1].items[1], localConversationId: THREAD }, f.row);
+  const stream: any[] = [{ seq: 2, time: 102, kind: 'turn_start', turnId: owner }];
+  if (state === 'preamble') stream.push({ seq: 3, time: 103, kind: 'assistant_message', turnId: owner,
+    messageId: preamble, text: publicNode.textContent, state: 'streaming', final: false });
+  stream.push({ seq: 4, time: 104, kind: 'tool_call', turnId: owner, callId: 'local-call', requestId: OTHER,
+    tool: 'read', outcome: 'ok', durationMs: 4, summary: { kind: 'read', title: 'Read project source' } });
+  if (state === 'final') stream.push({ seq: 5, time: 105, kind: 'assistant_message', turnId: owner,
+    messageId: ANSWER, providerMessageId: ANSWER, text: 'Answer', state: 'final', final: true });
+  if (state !== 'final') { answer.remove(); f.entry.turn.items.pop(); }
+  if (state !== 'preamble') { publicNode.remove(); f.entry.turn.items[1].items.splice(0, 2); }
+  const r = await recorder(f, { activity: () => ({ ok: true, data: { entries: [], stream,
+    userAnchors: [{ seq: 1, time: 100, messageId: USER }], pendingTools: 0, job: null } }) });
+  r.hook.setRenderStream(true); await r.hook.pullActivity(); r.hook.renderStreams();
+  const root = section.querySelector('.clf-stream');
+  expect(root?.textContent).toContain('Read project source');
+  expect(user.compareDocumentPosition(root!) & f.win.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  if (state === 'final') expect(root!.compareDocumentPosition(answer) & f.win.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  if (state === 'preamble') expect(publicNode.compareDocumentPosition(root!) & f.win.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(f.queries).toEqual([]);
+  r.hook.setRenderStream(false); r.hook.renderStreams();
+  expect(section.querySelector('.clf-stream')).toBeNull();
+  expect(user.isConnected).toBe(true);
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+});
+
+it.each(['current', 'older-turn', 'wrong-parent', 'cycle', 'unselected-branch'])('reads early metadata only on the native selected path of this exact turn (%s)', async state => {
+  const f = fixture(), { mapping, snapshot } = liveShellMapping(f, true), early = '88888888-1111-4111-8111-111111111111';
+  mapping[early] = { id: early, parent: ANSWER, message: { id: early, author: { role: 'assistant' }, channel: 'analysis',
+    metadata: { request_id: 'wfr_early_native' }, content: { content_type: 'text', parts: ['PRIVATE_EARLY_ANALYSIS'] } } };
+  if (state !== 'unselected-branch') snapshot.renderedConversation.current_node = early;
+  if (state === 'older-turn') snapshot.renderedTurns.push({ id: OTHER, turn: { ...f.entry.turn } });
+  if (state === 'wrong-parent') mapping[early].parent = OTHER;
+  if (state === 'cycle') mapping[early].parent = early;
+  const result = (await f.ask()).turns[0];
+  expect(result.requests.some((r: any) => r.requestId === 'wfr_early_native')).toBe(state === 'current');
+  expect(JSON.stringify(result)).not.toContain('PRIVATE_EARLY_ANALYSIS');
+});
+
+it.each(['hidden', 'raw-cot', 'unknown-presentation', 'hidden-group', 'different-public-label'])('does not export private or unrepresented reasoning (%s)', async kind => {
+  const f = fixture(), { mapping, thought } = liveShellMapping(f);
+  const group = f.entry.turn.items[1], message = mapping[thought].message;
+  if (kind === 'hidden') message.metadata.is_visually_hidden_from_conversation = true;
+  if (kind === 'raw-cot') message.metadata.summary_type = 'raw_cot';
+  if (kind === 'unknown-presentation') group.items[0].presentation = 'private';
+  if (kind === 'hidden-group') group.reasoningRecap = { type: 'hide_all' };
+  if (kind === 'different-public-label') group.items[0].content = 'A different summary';
+  expect((await f.ask()).turns[0].activities).toEqual([]);
+});
+it('keeps a public preamble under the existing stable source identity when its raw streaming id rotates', async () => {
+  const f = fixture(), { mapping, preamble } = liveShellMapping(f, true);
+  mapping[preamble].message.metadata = { working_turn_id: TURN, turn_exchange_id: OTHER };
+  const first = (await f.ask()).turns[0].messages.find((m: any) => m.rawMessageId === preamble);
+  expect(first.stable).toBe(true);
+  const replacement = '99999999-2222-4222-8222-111111111111';
+  mapping[replacement] = { ...mapping[preamble], id: replacement, message: { ...mapping[preamble].message, id: replacement } };
+  delete mapping[preamble]; mapping[CALL].parent = replacement;
+  f.entry.turn.messageIds = f.entry.turn.messageIds.map((id: string) => id === preamble ? replacement : id);
+  const second = (await f.ask()).turns[0].messages.find((m: any) => m.rawMessageId === replacement);
+  expect(second.messageId).toBe(first.messageId); expect(second.stable).toBe(true);
+});
+it('removes a public preamble placement stamp when the native typed owner is replaced', async () => {
+  const f = fixture(), { preamble } = liveShellMapping(f, true);
+  const node = f.doc.querySelector('[data-markdown-text-style]')!;
+  (node as any).__reactFiber$fixture = f.chain({ item: f.entry.turn.items[1].items[1] }, f.row);
+  await f.ask(); expect(node.getAttribute('data-clf-fiber-message')).toContain(preamble);
+  f.entry.turn.items[1].items[1] = { ...f.entry.turn.items[1].items[1] };
+  await f.ask(); expect(node.hasAttribute('data-clf-fiber-message')).toBe(false);
+  expect(node.isConnected).toBe(true);
+});
+it('uses the same exact call before and after history hydration and refuses a conflicting history request', async () => {
+  const f = fixture(), { mapping } = liveShellMapping(f, true);
+  const before = (await f.ask()).turns[0];
+  const cached = { id: CALL, message: { id: CALL, metadata: { request_id: OTHER } } };
+  f.queries.push({ queryKey: ['chatgpt-conversation', THREAD], state: { data: { conversation_id: THREAD, mapping: { [CALL]: cached } } } });
+  const after = (await f.ask()).turns[0];
+  expect(after.calls).toEqual(before.calls); expect(after.activities).toEqual(before.activities);
+  cached.message.metadata.request_id = 'wfr_conflicting_history';
+  const disputed = (await f.ask()).turns[0];
+  expect(disputed.requests).toEqual([]); expect(disputed.calls[0].requestId).toBeNull();
+  expect(mapping[CALL].message.metadata.request_id).toBe(OTHER);
 });
 it.each(['duplicate-cache', 'conflicting-conversation', 'duplicate-id', 'unavailable-cache'])('keeps the transcript without ambiguous optional request metadata (%s)', async kind => {
   const f = fixture();

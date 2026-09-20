@@ -1,4 +1,9 @@
 {
+  "Verified messages": "確認済みメッセージ",
+  "Since {0}": "{0}から",
+  "Change start day": "開始曜日を変更",
+  "Local time · {0} → {1}": "現地時刻 · {0} → {1}",
+  "Counts recorded native messages with verified model selection. Tool injections and messages without model evidence are excluded.": "記録されたネイティブメッセージのうち、モデル選択を確認できたものを数えます。ツールへの追加指示や、モデルを確認できないメッセージは含みません。",
   "Chat automatically refreshed": "チャットを自動更新しました",
   "This turn already received its automatic error reload.": "このターンでは、エラーによる自動再読み込みをすでに行いました。",
   "We reload on an error only once per chat and turn. Further errors wait for tool calls to stop and the silence window before another reload.": "エラーによる再読み込みは、各チャットの各ターンにつき1回だけ行います。さらにエラーが発生した場合は、ツール呼び出しの終了と、活動がない状態での待機時間の経過を待ってから再読み込みします。",
@@ -320,7 +325,7 @@
   "Inject now": "今すぐ挿入",
   "Send directly": "直接送信",
   "After this turn": "このターンの後",
-  "Pro Loop delivery": "Pro ループの送信タイミング",
+  "Continuation timing": "続行のタイミング",
   "Only finish": "終了通知時のみ",
   "After this turn + finish": "このターンの後＋終了通知時",
   "Send": "送信",

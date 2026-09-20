@@ -36,7 +36,7 @@
   // before touching the shared DOM. Otherwise old and new composer observers can continually
   // remove and reinsert each other's controls, starving transport/timers and freezing the tab.
   // A healthy incumbent in this context still wins the static/recovery injection race.
-  const RECORDER_VERSION = 18;
+  const RECORDER_VERSION = 19;
   const recorderHandle = {
     version: RECORDER_VERSION,
     healthy: () => false,
@@ -3016,7 +3016,7 @@
   // 11: adds exact typed thought-notification ids and ephemeral DOM stamps for selective
   //     presentation suppression. Caption text and per-call adjacency remain non-authority.
   // 12: adds exact provider-message/sediment generated-image descriptors and DOM pixel stamps.
-  const FIBER_VERSION = 18;
+  const FIBER_VERSION = 19;
   const FIBER_TIMEOUT_MS = 1500;
   const FIBER_MAX_ROWS = 400;
   /** Assistant turns whose per-call evidence is accepted from one scan. */
@@ -7439,7 +7439,8 @@
     // view does not carry because they are this tab's rather than the app's. The draft is
     // deliberately absent — the textarea already holds it, and Save is kept in step by the
     // input listener, so typing a goal repaints nothing.
-    const painted = JSON.stringify([view, menuBusy, objectiveBusy, objectiveError]);
+    const painted = JSON.stringify([view, menuBusy, objectiveBusy, objectiveError,
+      goalConfig?.proLoopDelivery, goalConfig?.afterTurn]);
     // Unchanged, so the sheet on screen is already the right sheet. Only its position is
     // still worth re-deciding: the composer it hangs off moves as ChatGPT grows it.
     if (painted === menuPainted && root.firstChild) return void placeMenu(root, control.button);
@@ -7495,10 +7496,10 @@
     }
     // Under the switch, and above the task it points at.
     if (view.mode) root.append(buildMode(view.mode));
-    if (goalConfig?.mode === 'loop' && goalConfig.proLoopDelivery && composerChat().state === 'chat') {
+    if (goalConfig?.proLoopDelivery && composerChat().state === 'chat') {
       const delivery = document.createElement('button');
       delivery.type = 'button'; delivery.className = 'clf-menu-action';
-      delivery.textContent = goalConfig.afterTurn ? 'Pro Loop: After this turn + finish' : 'Pro Loop: Only finish';
+      delivery.textContent = `${goalConfig.mode === 'loop' ? 'Loop' : 'Goal'}: ${goalConfig.afterTurn ? 'After this turn + finish' : 'Only finish'}`;
       delivery.disabled = menuBusy || !!goalConfig.blocked;
       delivery.addEventListener('click', event => {
         event.preventDefault(); event.stopPropagation();
