@@ -629,7 +629,7 @@ describe('provisioning', () => {
     expect((await request('GET', '/status', { auth: credentials[0] })).status).toBe(401);
   });
 
-  it('does not let a delayed credential write undo a newer Disconnect', async () => {
+  it('does not report successful pairing when Disconnect supersedes a delayed credential write', async () => {
     let entered!: () => void;
     let release!: () => void;
     const writing = new Promise<void>(resolve => { entered = resolve; });
