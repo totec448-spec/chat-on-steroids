@@ -41,7 +41,7 @@
   'use strict';
 
   /** Bumped when the descriptor shape changes, so a stale pair cannot half-understand. */
-  const VERSION = 19;
+  const VERSION = 20;
   // The MAIN world survives an extension reload because the ChatGPT document survives it.
   // Recovery may therefore execute this file again in a page that still has an older helper
   // listener. Retire it across versions too: picker/plugin replies use their own v1
@@ -76,7 +76,7 @@
   const TURN_SECTION = `section[data-testid^="conversation-turn"], ${SHELL_TURN}`;
   /** ChatGPT-rendered authored prose. Tool rows and this extension's own surfaces are excluded. */
   const MARKDOWN = '.markdown, [data-content-search-unit-key$=":assistant"] [data-markdown-text-style="assistant-message"]';
-  const TOOL = 'span[class*="tool-message"], div.pointer-events-none.contents';
+  const TOOL = 'span[class*="tool-message"], div.pointer-events-none.contents, div:has(> [data-testid="cot-v5-tool-icon-pile"])';
   const GENERATED_IMAGE = '[class~="group/imagegen-image"] img';
   const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot';
   const MAX_RENDERED_HTML = 120_000;
@@ -479,7 +479,12 @@
       if (!message || typeof message !== 'object') continue;
       const author = message.author;
       if (!author || author.role !== 'assistant') continue;
-      if (requestOf(message) || resultOf(message) || hiddenMessage(message)) continue;
+      // ChatGPT visually hides public preambles even while their text still grows.
+      // That presentation flag must not freeze or discard these typed public updates.
+      const publicPreamble = message.recipient === 'all' && channelOf(message) === 'commentary' &&
+        message.content?.content_type === 'text' && message.metadata?.is_thinking_preamble_message === true &&
+        message.metadata.is_visually_hidden !== true;
+      if (requestOf(message) || resultOf(message) || (hiddenMessage(message) && !publicPreamble)) continue;
       // Private reasoning, by ChatGPT's own routing. Never a transcript row.
       if (analysisMessage(message)) continue;
       const id = str(message.id);
@@ -1130,6 +1135,41 @@
     return { app: str(resource.app_name), resource: str(resource.resource_uri) };
   }
 
+  function conflictingRequestScope(left, right) {
+    return ['request_id', 'working_turn_id', 'turn_exchange_id'].some(key =>
+      str(left.metadata?.[key]) && str(right.metadata?.[key]) && left.metadata[key] !== right.metadata[key]);
+  }
+
+  /** Native results can point through a completed assistant/all intermediate message.
+   * Follow its exact parent links inside this turn, stopping at any other tool boundary.
+   * Repeated ids, cycles and contradictory request/working-turn ids provide no receipt. */
+  function resultParentsOf(messages) {
+    const byId = new Map(), parents = new Map();
+    for (const message of messages || []) {
+      const id = str(message?.id);
+      if (id) byId.set(id, byId.has(id) ? null : message);
+    }
+    for (const message of messages || []) {
+      const result = resultOf(message);
+      if (!result || !ourApp(result.app)) continue;
+      const visited = new Set();
+      let id = str(message.metadata?.parent_id), parentId = null;
+      while (id && visited.size < MAX_CALLS && !visited.has(id)) {
+        visited.add(id);
+        const parent = byId.get(id);
+        if (!parent) { if (!byId.has(id)) parentId = id; break; }
+        if (conflictingRequestScope(parent, message)) break;
+        const request = requestOf(parent);
+        if (request) { if (identify(request, result)) parentId = id; break; }
+        if (parent.author?.role !== 'assistant' || parent.recipient !== 'all' ||
+            parent.status !== 'finished_successfully' || parent.end_turn === true) break;
+        id = str(parent.metadata?.parent_id);
+      }
+      parents.set(message, parentId);
+    }
+    return parents;
+  }
+
   /** Rehydrated direct calls can expose only their public result object. Its UUID,
    * request id and invoked resource are exact evidence; no parent or payload is guessed. */
   function completedCallOf(message) {
@@ -1142,7 +1182,7 @@
     return { ...result, messageId, requestId, tool, createTime: num(message.create_time) };
   }
   /** Exact number of this app's own invocations represented by the whole turn, or null. */
-  function localCountOf(messages) {
+  function localCountOf(messages, resultParents = resultParentsOf(messages)) {
     if (!Array.isArray(messages)) return null;
     const ids = [];
     let anonymous = 0;
@@ -1164,8 +1204,7 @@
 
       const result = resultOf(message);
       if (result && ourApp(result.app)) {
-        const meta = message && typeof message === 'object' ? message.metadata : null;
-        remember((meta && typeof meta === 'object' ? str(meta.parent_id) : null) || completedCallOf(message)?.messageId);
+        remember(resultParents.get(message) || completedCallOf(message)?.messageId);
       }
     }
     return Math.min(999, ids.length + anonymous);
@@ -1194,30 +1233,43 @@
     if (!group) return null;
 
     const turnMessages = turnMessagesOf(fiber);
-    const localCount = localCountOf(turnMessages);
     const messages = group.messages;
+    const resultParents = resultParentsOf(turnMessages || messages);
+    const localCount = localCountOf(turnMessages, resultParents);
     const request = requestOf(messages[0]);
-    if (!request) {
-      const completed = completedCallOf(messages[0]);
-      return completed ? { v: VERSION, index, tool: completed.tool, path: null, app: completed.app,
-        resource: completed.resource, messageId: completed.messageId, turnId: str(group.turnId),
-        conversationId: str(group.clientThreadId) || str(group.conversationId), createTime: completed.createTime,
-        hidden: int(own.call(group, 'collapsedSameToolCallCount') ? group.collapsedSameToolCallCount : null),
-        localCount, answered: true } : null;
-    }
-
+    // A rejected result join is not positive evidence for the request's label.
+    // Keep an explicit contradictory parent/result visible as an unknown row.
+    const conflictingResult = request?.messageId && messages.some(message =>
+      str(message?.metadata?.parent_id) === request.messageId && resultOf(message) &&
+      identify(request, resultOf(message)) === null);
     let result = null;
-    if (request.messageId) {
+    if (request?.messageId) {
       // An index loop and no array method: this walks page-owned data, and the page can
       // replace Array.prototype.find but it cannot replace the language.
       for (let at = 1; at < messages.length && result === null; at++) {
         const message = messages[at];
-        const meta = message && typeof message === 'object' ? message.metadata : null;
-        if (meta && typeof meta === 'object' && str(meta.parent_id) === request.messageId) {
+        if (resultParents.get(message) === request.messageId) {
           result = resultOf(message);
         }
       }
     }
+
+    let completed = request ? null : completedCallOf(messages[0]);
+    // A settled native disclosure can retain a stale request before a parentless result.
+    // Represent the result's own UUID, leaving the unrelated request unanswered in callsOf.
+    // Never borrow a neighbor's result to complete that request or a still-running group.
+    if (request && !result && group.isCompletionRequestInProgress === false && messages.length === 2 &&
+        messages[0].status === 'finished_successfully' && messages[1].status === 'finished_successfully' &&
+        !conflictingRequestScope(messages[0], messages[1]) && ourPath(request.path)) {
+      const displayed = completedCallOf(messages[1]);
+      if (displayed && displayed.requestId === request.requestId && identify(request, displayed) === displayed.tool) completed = displayed;
+    }
+    if (completed) return { v: VERSION, index, tool: completed.tool, path: null, app: completed.app,
+      resource: completed.resource, messageId: completed.messageId, turnId: str(group.turnId),
+      conversationId: str(group.clientThreadId) || str(group.conversationId), createTime: completed.createTime,
+      hidden: int(own.call(group, 'collapsedSameToolCallCount') ? group.collapsedSameToolCallCount : null),
+      localCount, answered: true };
+    if (!request) return null;
 
     /**
      * How many calls the row shows in place of, as the page counts them.
@@ -1232,7 +1284,7 @@
     return {
       v: VERSION,
       index,
-      tool: identify(request, result),
+      tool: conflictingResult ? null : identify(request, result),
       path: request.path,
       app: result ? result.app : null,
       resource: result ? result.resource : null,
@@ -1335,6 +1387,7 @@
     const out = [];
     const seen = new Set();
     const answered = new Set();
+    const resultParents = resultParentsOf(messages);
     // Results first, so a request can say whether its own answer has arrived. `parent_id`
     // is what pairs them; position does not, and pairing by position is how a row came to
     // sit over another tool's output.
@@ -1342,8 +1395,7 @@
       const message = messages[at];
       const result = resultOf(message);
       if (!result || !ourApp(result.app)) continue;
-      const meta = message && typeof message === 'object' ? message.metadata : null;
-      const parent = meta && typeof meta === 'object' ? str(meta.parent_id) : null;
+      const parent = resultParents.get(message);
       if (parent) answered.add(parent);
     }
 
@@ -1481,15 +1533,22 @@
   }
   /** #318 identified the history cache. Both sources project only explicitly named
    * messages. Typed public items own presentation; cache text cannot supply a final. */
-  function shellRequestMetadata(fiber, queries, entry, conversation) {
-    if (conversation.conflict || !conversation.conversationId) return [];
+  function shellRequestMetadata(fiber, queries, shell, conversation) {
+    if (conversation.conflict) return [];
+    const entry = shell.entry;
     const ids = entry.turn.messageIds;
     if (!Array.isArray(ids) || ids.length > MAX_ROWS || new Set(ids).size !== ids.length) return [];
     let live;
     try { live = shellLiveMapping(fiber, entry); } catch { return []; }
     if (live === false) return [];
-    const matches = queries.filter(query => Array.isArray(query?.queryKey) && query.queryKey.length === 2 &&
-      query.queryKey[0] === 'chatgpt-conversation' && query.queryKey[1] === conversation.conversationId);
+    // A freshly submitted shell exchange can still carry only its provisional
+    // local-chatgpt id while the page route already names the real conversation.
+    // The mounted live mapping is independently fenced by this exact entry, turn
+    // object and user message id, so retain its request metadata during that gap.
+    // Cache metadata still requires the concrete server conversation join below.
+    if (!conversation.conversationId && !live) return [];
+    const matches = conversation.conversationId ? queries.filter(query => Array.isArray(query?.queryKey) && query.queryKey.length === 2 &&
+      query.queryKey[0] === 'chatgpt-conversation' && query.queryKey[1] === conversation.conversationId) : [];
     if (matches.length > 1) return [];
     const data = matches[0]?.state?.data;
     if (data?.conversation_id && data.conversation_id !== conversation.conversationId) return [];
@@ -1498,7 +1557,46 @@
     const out = [];
     const publicBudget = { remaining: MAX_TURN_TEXT };
     const selected = new Set(ids);
-    for (const id of new Set([...ids, ...shellCurrentPath(live, entry)])) {
+    const invocationIds = new Set();
+    const sourceCounts = new Map();
+    for (const reference of shell.callSources.values()) if (reference.id)
+      sourceCounts.set(reference.id, (sourceCounts.get(reference.id) || 0) + 1);
+    const messageAt = id => {
+      const node = id && Object.getOwnPropertyDescriptor(mapping, id)?.value;
+      return node?.id === id && node.message?.id === id ? node.message : null;
+    };
+    // Native dynamic-tool-call.callId explicitly names the functions.exec
+    // invocation (811613 / L). Its source can disappear from messageIds when
+    // paired results replace sourceMessage. Read metadata, never its code.
+    for (const id of shell.executionIds) {
+      const message = messageAt(id);
+      if (message?.author?.role === 'assistant' && message.recipient === 'functions.exec') invocationIds.add(id);
+    }
+    const serverName = name => OUR_APPS.find(app => name === app || name === app.replaceAll(' ', '_'));
+    for (const call of shell.calls) {
+      const reference = shell.callSources.get(call.messageId);
+      if (!reference?.id || !selected.has(reference.id) || sourceCounts.get(reference.id) !== 1) continue;
+      const result = messageAt(reference.id);
+      if (result?.author?.role !== 'tool') continue;
+      const resource = resultOf(result);
+      if (resource && (serverName(resource.app) !== serverName(reference.server) || toolName(resource.resource) !== call.tool)) continue;
+      const invocation = messageAt(call.messageId);
+      if (invocation) {
+        const asked = requestOf(invocation), path = asked?.path;
+        // Native N() keeps callId while replacing sourceMessage with the result.
+        // This mounted relation, not cache position or a sibling's request id,
+        // permits reading the original invocation's metadata after a reload.
+        if (invocation.recipient !== 'api_tool.call_tool' || !path || serverName(path.slice(1, path.indexOf('/', 1))) !== serverName(reference.server) ||
+            toolName(path) !== call.tool) continue;
+        for (const key of ['request_id', 'working_turn_id', 'turn_exchange_id']) {
+          const a = str(invocation.metadata?.[key]), b = str(result.metadata?.[key]);
+          if (a && b && a !== b) return [];
+        }
+        invocationIds.add(call.messageId);
+      }
+      reference.metadataId = reference.id;
+    }
+    for (const id of new Set([...ids, ...invocationIds, ...shellCurrentPath(live, entry)])) {
       if (typeof id !== 'string' || !id || id.length > MAX_TEXT || !own.call(mapping, id)) continue;
       const node = Object.getOwnPropertyDescriptor(mapping, id)?.value, message = node?.message;
       if (node?.id !== id || message?.id !== id) continue;
@@ -1570,7 +1668,7 @@
       if (Array.isArray(at.memoizedProps?.entry?.turn?.items)) { entry = at.memoizedProps.entry; break; }
     }
     if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_ROWS) return null;
-    const messages = [], calls = [], slots = [], seen = new Set();
+    const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [];
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
     let work = 0;
     for (const [index, item] of entry.turn.items.entries()) {
@@ -1589,19 +1687,28 @@
         const nodes = [...section.querySelectorAll('[data-content-search-unit-key]')].filter(node =>
           node.closest('[data-turn-key]') === section && node.getAttribute('data-content-search-unit-key') === key);
         if (nodes.length === 1) slots.push({ node: nodes[0], id });
-      } else if (item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items)) {
-        for (const step of item.items) {
+      } else {
+        const steps = item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items) ? item.items : [item];
+        for (const step of steps) {
           if (++work > MAX_ROWS) return null;
+          if (step?.type === 'dynamic-tool-call' && step.tool === 'exec') {
+            const id = str(step.callId);
+            if (!id) continue;
+            if (!remember(id) || executionIds.length >= MAX_CALLS) return null;
+            executionIds.push(id);
+            continue;
+          }
           if (step?.type !== 'mcp-tool-call' || !OUR_APPS.some(app =>
             step.invocation?.server === app || step.invocation?.server === app.replaceAll(' ', '_'))) continue;
           const id = str(step.callId), tool = toolName(step.invocation?.tool);
           if (!id || !tool) continue;
           if (!remember(id) || calls.length >= MAX_CALLS) return null;
           calls.push({ messageId: id, tool, order: calls.length, answered: step.completed === true, requestId: null, createTime: null });
+          callSources.set(id, { id: str(step.widgetStateSource?.messageId), server: step.invocation.server });
         }
       }
     }
-    return { entry, messages, calls, slots };
+    return { entry, messages, calls, slots, callSources, executionIds };
   }
   function turnsOf(scanToken) {
     const out = [];
@@ -1668,10 +1775,12 @@
         const calls = shell ? shell.calls : callsOf(messages, codeReceipts);
         const queries = shell ? shellQueries(fiber) : [];
         const conversation = shell ? shellConversation(queries, shell.entry.conversationId, conversationEvidenceOf(fiber)) : conversationEvidenceOf(fiber);
-        const metadata = shell ? shellRequestMetadata(fiber, queries, shell.entry, conversation) : messages;
+        const metadata = shell ? shellRequestMetadata(fiber, queries, shell, conversation) : messages;
         const requests = requestIdsOf(metadata);
         if (shell) for (const call of calls) {
-          const source = metadata.find(message => message.id === call.messageId);
+          const invocation = metadata.find(message => message.id === call.messageId);
+          const source = invocation?.metadata.request_id ? invocation :
+            metadata.find(message => message.id === shell.callSources.get(call.messageId)?.metadataId) || invocation;
           call.requestId = source?.metadata.request_id || null;
           call.createTime = source?.create_time ?? null;
         }
@@ -1705,6 +1814,7 @@
           turnId: group.turnId,
           conversationId: conversation.conversationId,
           conversationConflict: conversation.conflict,
+          ...(shell && !conversation.conversationId ? { requestOwnerRequired: true } : {}),
           endMessageId,
           calls,
           codeModeCalls,

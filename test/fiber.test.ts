@@ -280,7 +280,7 @@ interface TurnFixture {
   messages: Message[];
   /** A visible `.markdown` block: its text, or markup when the test is about the markup. */
   rendered?: Array<string | { html: string; nativeId?: string; fiberProps?: Record<string, unknown>; fiber?: Fiber; staleMessageStamp?: string }>;
-  activities?: Array<{ label: string; fiber: Fiber; staleThoughtStamp?: string }>;
+  activities?: Array<{ label: string; fiber: Fiber; staleThoughtStamp?: string; v5?: boolean }>;
   images?: Array<{ assetId: string; clones?: number }>;
   staleStamp?: string;
   conversationProps?: Record<string, unknown>;
@@ -338,9 +338,10 @@ async function scan(
       section.append(block);
     }
     for (const entry of turn.activities ?? []) {
-      const row = document.createElement('span');
-      row.className = 'group/tool-message';
-      row.textContent = entry.label;
+      const row = document.createElement(entry.v5 ? 'div' : 'span');
+      if (entry.v5) row.innerHTML = '<span data-testid="cot-v5-tool-icon-pile"><span data-testid="cot-v5-native-tool-icon"><svg></svg></span></span>';
+      else row.className = 'group/tool-message';
+      row.append(entry.label);
       if (entry.staleThoughtStamp) row.setAttribute('data-clf-fiber-thought', entry.staleThoughtStamp);
       (row as unknown as Record<string, unknown>)['__reactFiber$qlrmvxwbkkq'] = entry.fiber;
       section.append(row);
@@ -399,7 +400,7 @@ async function scan(
   }
   const stamps = elements.map((row) => row.getAttribute('data-clf-fiber'));
   const messageStamps = [...document.querySelectorAll('.markdown')].map(node => node.getAttribute('data-clf-fiber-message'));
-  const thoughtStamps = [...document.querySelectorAll('[data-clf-fiber-thought], .group\\/tool-message')]
+  const thoughtStamps = [...document.querySelectorAll('[data-clf-fiber-thought], .group\\/tool-message, div:has(> [data-testid="cot-v5-tool-icon-pile"])')]
     .filter(node => node.closest('[data-testid^="conversation-turn-"]'))
     .map(node => node.getAttribute('data-clf-fiber-thought'));
   const imageStamps = [...document.querySelectorAll('.group\\/imagegen-image img')]
@@ -430,6 +431,42 @@ const rowInTurn = (messages: Message[], turnMessages: Message[], collapsed = 0) 
 // --------------------------------------------------------------------- tests
 
 describe('reading a row out of the page', () => {
+  it.each(['exact', 'missing', 'duplicate', 'cycle', 'different-request', 'tool-boundary', 'foreign-tool'])(
+    'follows an exact result parent through the native intermediate message (%s)', async mode => {
+      const asked = request('linked-request', 'read');
+      const intermediate = authored('linked-intermediate', '', { parent: asked.id, status: 'finished_successfully' });
+      const result = answer('linked-result', intermediate.id, mode === 'foreign-tool' ? 'exec_command' : 'read');
+      result.author.name = 'api_tool.call_tool';
+      Object.defineProperty(result.content!, 'text', { get() { throw new Error('Result bytes must remain unread'); } });
+      if (mode === 'cycle') intermediate.metadata!.parent_id = intermediate.id;
+      if (mode === 'different-request') intermediate.metadata!.request_id = 'another-response';
+      if (mode === 'tool-boundary') intermediate.recipient = 'functions.exec';
+      const messages = [asked, ...(mode === 'missing' ? [] : [intermediate]), result,
+        ...(mode === 'duplicate' ? [intermediate] : [])];
+      const { rows, turns } = await scan([rowInTurn([asked, result], messages)], [{ id: 'linked-turn', messages }]);
+      expect(rows[0]).toMatchObject({ messageId: asked.id, tool: 'read', answered: mode === 'exact' });
+      expect(turns[0]!.calls).toEqual([expect.objectContaining({ messageId: asked.id, tool: 'read', answered: mode === 'exact' })]);
+      if (mode === 'exact') expect(rows[0]!.localCount).toBe(1);
+    });
+
+  it.each(['settled', 'running', 'unknown-state', 'unfinished-result', 'different-request', 'different-exchange', 'different-tool', 'foreign-app', 'multiple-results'])(
+    'uses the displayed parentless result identity without completing its stale request (%s)', async mode => {
+      const asked = request('detached-request', 'read'); asked.status = 'finished_successfully';
+      const result = answer('detached-result', 'unused', mode === 'different-tool' ? 'exec_command' : 'read', mode === 'foreign-app' ? 'Gmail' : APP);
+      result.author.name = 'api_tool.call_tool'; delete result.metadata!.parent_id;
+      result.status = mode === 'unfinished-result' ? 'in_progress' : 'finished_successfully';
+      if (mode === 'different-request') result.metadata!.request_id = 'another-response';
+      if (mode === 'different-exchange') result.metadata!.turn_exchange_id = 'another-exchange';
+      Object.defineProperty(result.content!, 'text', { get() { throw new Error('Result bytes must remain unread'); } });
+      const messages = [asked, result, ...(mode === 'multiple-results' ? [{ ...result, id: 'second-result' }] : [])];
+      const props = { ...group(messages), ...(mode === 'unknown-state' ? {} : { isCompletionRequestInProgress: mode === 'running' }) };
+      const { rows, turns } = await scan([chain(props, LIVE_DEPTH, turnNode(messages))], [{ id: 'detached-turn', messages }]);
+      const accepted = mode === 'settled';
+      expect(rows[0]).toMatchObject({ messageId: accepted ? result.id : asked.id, tool: 'read', answered: accepted });
+      expect(turns[0]!.calls.find(call => call.messageId === asked.id)?.answered).toBe(false);
+      if (accepted) expect(turns[0]!.calls.find(call => call.messageId === result.id)?.answered).toBe(true);
+    });
+
   it('recognises a native result-only call without inventing its missing request parent', async () => {
     // Observed provider shape: tool/api_tool.call_tool with invoked_resource,
     // but no request message or metadata.parent_id in the rehydrated turn.
@@ -485,8 +522,8 @@ describe('reading a row out of the page', () => {
 
   it('keeps the version it was built for on the reply', async () => {
     const { version, rows } = await scan([row([request('req-1', 'read_file')])]);
-    expect(version).toBe(19);
-    expect(rows[0]!.v).toBe(19);
+    expect(version).toBe(20);
+    expect(rows[0]!.v).toBe(20);
   });
   it('counts only TobisComputer requests in the complete turn, not api_tool metadata calls', async () => {
     const mine1 = request('req-1', 'read_file');
@@ -781,6 +818,47 @@ describe('the calls a turn says it made', () => {
     ]);
   });
 
+  it('keeps public preambles complete when ChatGPT visually hides them during streaming and reload', async () => {
+    const branch = { workingTurnId: 'preamble-working', turnExchangeId: 'preamble-exchange', channel: 'commentary' };
+    const first = authored('preamble-first', 'The verification is', { ...branch, createTime: 1_787_165_000 });
+    first.metadata!.is_thinking_preamble_message = true;
+    const before = await scan([], [{ id: 'preamble-response', messages: [first] }]);
+
+    // Live page shape: this flag flips before the public paragraph is complete,
+    // and later public preambles carry it from their first observation.
+    first.metadata!.is_visually_hidden_from_conversation = true;
+    first.content!.parts = ['The verification is still running.'];
+    const later = authored('preamble-later', 'Verification passed.', { ...branch, createTime: 1_787_165_010 });
+    later.metadata = { ...later.metadata, is_thinking_preamble_message: true, is_visually_hidden_from_conversation: true };
+    const final = authored('preamble-final', 'Ready.', { status: 'finished_successfully', endTurn: true, channel: 'final' });
+    const messages = [first, request('preamble-tool', 'read'), later, final];
+    const after = await scan([], [{ id: 'preamble-response', messages }]);
+    const reloaded = await scan([], [{ id: 'preamble-response', messages }]);
+
+    expect(after.turns[0]!.messages.map(message => message.rawText)).toEqual([
+      'The verification is still running.', 'Verification passed.', 'Ready.'
+    ]);
+    expect(after.turns[0]!.messages.map(message => message.order)).toEqual([0, 2, 3]);
+    expect(after.turns[0]!.messages[0]!.messageId).toBe(before.turns[0]!.messages[0]!.messageId);
+    expect(after.turns[0]!.endMessageId).toBe(final.id);
+    expect(reloaded.turns[0]!.messages).toEqual(after.turns[0]!.messages);
+  });
+
+  it.each(['missing-marker', 'false-marker', 'analysis', 'final', 'tool-role', 'tool-recipient', 'thoughts', 'other-hidden'])
+    ('does not expose other hidden messages as public preambles (%s)', async mode => {
+      const message = authored('excluded-preamble', 'Must stay excluded.', { channel: 'commentary' });
+      message.metadata = { ...message.metadata, is_thinking_preamble_message: true, is_visually_hidden_from_conversation: true };
+      if (mode === 'missing-marker') delete message.metadata.is_thinking_preamble_message;
+      if (mode === 'false-marker') message.metadata.is_thinking_preamble_message = false;
+      if (mode === 'analysis' || mode === 'final') message.channel = mode;
+      if (mode === 'tool-role') message.author.role = 'tool';
+      if (mode === 'tool-recipient') message.recipient = 'functions.exec';
+      if (mode === 'thoughts') message.content!.content_type = 'thoughts';
+      if (mode === 'other-hidden') message.metadata.is_visually_hidden = true;
+      const { turns } = await scan([], [{ id: 'excluded-response', messages: [message] }]);
+      expect(turns.flatMap(turn => turn.messages)).toEqual([]);
+    });
+
   it.each(['native', 'scoped', 'foreign', 'unknown', 'text-only', 'duplicate'])('stamps only exact current native message anchors (%s)', async mode => {
     const message = authored('anchor-message', 'Public prose');
     const block = { html: 'Public prose', staleMessageStamp: 'old-scan:0:old-message',
@@ -825,14 +903,15 @@ describe('the calls a turn says it made', () => {
       : mode === 'duplicate' ? [null, null, stamp(b.id), stamp(final.id)] : [null, null, stamp(final.id)]);
   });
 
-  it.each(['exact', 'empty-label', 'duplicate', 'conflicting-label', 'wrong-type', 'unknown-owner'])('stamps only exact typed thought notifications and retains duplicate DOM copies (%s)', async mode => {
+  it.each(['exact', 'empty-label', 'duplicate', 'conflicting-label', 'wrong-type', 'unknown-owner'].flatMap(mode =>
+    [false, true].map(v5 => ({ mode, v5 }))))('stamps only exact typed thought notifications and retains duplicate DOM copies ($mode, v5=$v5)', async ({ mode, v5 }) => {
     const owner = '11111111-2222-4333-8444-555555555555';
     const key = `thought-${mode === 'unknown-owner' ? 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' : owner}-7`;
     const fiber = chain({ item: { type: mode === 'wrong-type' ? 'preamble' : 'thought', key } });
     const activities = [
-      { label: mode === 'empty-label' ? '' : '任意の実行通知', fiber, staleThoughtStamp: 'old-scan:0:stale' },
+      { label: mode === 'empty-label' ? '' : '任意の実行通知', fiber, v5, staleThoughtStamp: 'old-scan:0:stale' },
       ...(['duplicate', 'conflicting-label'].includes(mode)
-        ? [{ label: mode === 'conflicting-label' ? '別の表示' : '任意の実行通知', fiber }]
+        ? [{ label: mode === 'conflicting-label' ? '別の表示' : '任意の実行通知', fiber, v5 }]
         : [])
     ];
     const result = await scan([], [{ id: 'typed-thought-turn', messages: [thought(owner)], activities }], true);
