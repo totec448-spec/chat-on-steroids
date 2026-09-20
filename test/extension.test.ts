@@ -4242,7 +4242,7 @@ describe('extension connection', () => {
     expect(status.paired).toBe(true);
     expect(status.disconnected).toBe(false);
     expect(local.data.disconnected).toBe(false);
-    expect(pairBodies).toEqual([{}, { reconnect: true }]);
+    expect(pairBodies).toEqual([{ reuse: true }, { reconnect: true }]);
   });
 
   it('forces an immediate overwrite in known and newly discovered ChatGPT tabs', async () => {

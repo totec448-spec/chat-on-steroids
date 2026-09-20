@@ -255,6 +255,14 @@ export function defaultUserShell(): DetectedShell {
   return shell;
 }
 
+/** Restore an app-owned POSIX search directory after login-profile evaluation. */
+export function withPosixPathPrefix(command: string, shellType: ShellType, directory: string | null): string {
+  if (!directory || !['zsh', 'bash', 'sh'].includes(shellType)) return command;
+  // Login profiles run after the inherited environment has been prepared. Reapply
+  // the app-owned search directory afterwards while retaining the profile's PATH.
+  return `export PATH=${shlexJoin([directory])}:"\${PATH:-}"\n${command}`;
+}
+
 /** `Shell::derive_exec_args`: the argv Codex hands the operating system. */
 export function deriveExecArgs(shell: DetectedShell, command: string, useLoginShell: boolean): string[] {
   switch (shell.shellType) {

@@ -71,7 +71,7 @@ import {
   DEFAULT_TTY,
   DEFAULT_WRITE_STDIN_YIELD_TIME_MS
 } from '../codex/unified-exec-constants.js';
-import { defaultUserShell, deriveExecArgs, getShellByModelProvidedPath, shlexJoin } from '../codex/shell.js';
+import { defaultUserShell, deriveExecArgs, getShellByModelProvidedPath, shlexJoin, withPosixPathPrefix } from '../codex/shell.js';
 import {
   APPLY_PATCH_ARGUMENT_DESCRIPTION,
   APPLY_PATCH_DESCRIPTION,
@@ -809,6 +809,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // id cannot briefly authorize its previous chat before this call publishes the new owner.
             forgetExecOwner(processId);
 
+            const ripgrep = locateRipgrep();
+            const executionCommand = deriveExecArgs(shell,
+              withPosixPathPrefix(boundCommand, shell.shellType, ripgrep ? nodePath.dirname(ripgrep) : null), useLoginShell);
             const output = await unifiedExecManager.execCommand({
               classifyExit: (exitCode, rawOutput) => {
                 if (!batch) return nonZeroExitIsBenign(boundCommand, exitCode, rawOutput);
@@ -818,7 +821,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
                   nonzero.every(section => nonZeroExitIsBenign(boundCommands[section.index - 1] ?? '', section.exitCode, section.text));
               },
               batchMarker: batch?.marker,
-              command,
+              command: executionCommand,
               shellType: shell.shellType,
               hookCommand: commandDetail,
               processId,

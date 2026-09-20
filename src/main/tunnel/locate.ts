@@ -118,6 +118,10 @@ export function locateBinary(name: BinaryName, hint?: string): string | null {
       locateCache.set(key, sibling);
       return sibling;
     }
+    // An explicit selection is an executable identity, not a suggestion. Falling
+    // back here hides a missing/non-executable selection behind an unrelated copy.
+    locateCache.set(key, null);
+    return null;
   }
 
   const bundled = bundledDir();

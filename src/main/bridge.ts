@@ -289,6 +289,13 @@ const COMMANDS_STATE = 'bridge-commands';
  * that could disagree with the token after a crash.
  */
 const BROWSER_DISCONNECTED = '!browser-disconnected';
+let browserCredentialEpoch = 0;
+let browserCredentialQueue: Promise<void> = Promise.resolve();
+function withBrowserCredentials<T>(operation: () => Promise<T>): Promise<T> {
+  const work = browserCredentialQueue.then(operation, operation);
+  browserCredentialQueue = work.then(() => undefined, () => undefined);
+  return work;
+}
 
 /**
  * How recently a ChatGPT tab must have talked to this app to count as open.
@@ -752,12 +759,15 @@ export async function unpair(): Promise<void> {
   // secrets store looks like, and those are intentionally allowed to provision silently.
   // This impossible-as-a-token sentinel preserves the user's explicit intent across both
   // the extension's next poll and an app restart.
-  await setSecret('bridgeToken', BROWSER_DISCONNECTED);
-  clearCompanionDiagnostics();
-  browserWake?.revoke();
-  browserControl.reset();
-  logInfo('bridge: browser disconnected');
-  changed();
+  ++browserCredentialEpoch;
+  await withBrowserCredentials(async () => {
+    await setSecret('bridgeToken', BROWSER_DISCONNECTED);
+    clearCompanionDiagnostics();
+    browserWake?.revoke();
+    browserControl.reset();
+    logInfo('bridge: browser disconnected');
+    changed();
+  });
 }
 
 // ------------------------------------------------------------------ helpers
@@ -1711,6 +1721,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   }
 
   if (route === '/pair' && req.method === 'POST') {
+    const credentialEpoch = browserCredentialEpoch;
     if (!protocolCompatible(req)) {
       return json(
         res,
@@ -1757,12 +1768,27 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // "open a fresh chat" command. It can still not read a file, run anything, or change
     // a permission — the bridge has no route that does. A web page cannot: originOf
     // refuses anything that is not a chrome-extension:// origin, above.
-    const token = randomBytes(32).toString('base64url');
-    await setSecret('bridgeToken', token);
-    noteBrowserSeen();
-    logInfo('bridge: browser extension connected and provisioned');
-    changed();
-    return json(res, 200, { token }, origin);
+    // Automatic provisioning joins the current connection generation. Multiple
+    // browser profiles must not continually revoke each other. Legacy pairing and
+    // explicit reconnect still rotate the token; Disconnect revokes every profile.
+    const reuse = !reconnect && Boolean(body && typeof body === 'object' && !Array.isArray(body) &&
+      (body as Record<string, unknown>)['reuse'] === true);
+    const provisioned = await withBrowserCredentials(async () => {
+      const stored = await getSecret('bridgeToken');
+      if (credentialEpoch !== browserCredentialEpoch || (stored === BROWSER_DISCONNECTED && !reconnect)) return null;
+      const reused = reuse && !!stored && stored !== BROWSER_DISCONNECTED;
+      const token = reused ? stored : randomBytes(32).toString('base64url');
+      if (!reused) await setSecret('bridgeToken', token);
+      if (credentialEpoch !== browserCredentialEpoch) return null;
+      return { token, reused };
+    });
+    if (!provisioned) return json(res, 409, { error: 'browser_disconnected' }, origin);
+    const appeared = noteBrowserSeen();
+    if (!provisioned.reused) {
+      logInfo('bridge: browser extension connected and provisioned');
+    }
+    if (!provisioned.reused || appeared) changed();
+    return json(res, 200, { token: provisioned.token }, origin);
   }
 
   // A deliberate revocation is different from a stale credential. The extension repairs a

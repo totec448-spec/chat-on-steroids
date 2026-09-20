@@ -611,6 +611,46 @@ describe('provisioning', () => {
     expect((await request('GET', '/status', { auth: second })).status).toBe(200);
   });
 
+  it('lets concurrent automatic browser profiles share one valid credential without revoking one another', async () => {
+    const replies = await Promise.all(Array.from({ length: 6 }, () => request('POST', '/pair', { auth: null, body: { reuse: true } })));
+    expect(replies.every(reply => reply.status === 200)).toBe(true);
+    const credentials = replies.map(reply => reply.body.token as string);
+    expect(new Set(credentials).size).toBe(1);
+    for (const auth of credentials) expect((await request('GET', '/status', { auth })).status).toBe(200);
+    resetSecretsCacheForTests();
+    const restored = await request('POST', '/pair', { auth: null, body: { reuse: true } });
+    expect(restored.body.token).toBe(credentials[0]);
+    await unpair();
+    expect((await request('GET', '/status', { auth: credentials[0] })).status).toBe(401);
+    expect((await request('POST', '/pair', { auth: null, body: { reuse: true } })).status).toBe(409);
+    const reconnect = await request('POST', '/pair', { auth: null, body: { reconnect: true } });
+    expect(reconnect.status).toBe(200);
+    expect(reconnect.body.token).not.toBe(credentials[0]);
+    expect((await request('GET', '/status', { auth: credentials[0] })).status).toBe(401);
+  });
+
+  it('does not report successful pairing when Disconnect supersedes a delayed credential write', async () => {
+    let entered!: () => void;
+    let release!: () => void;
+    const writing = new Promise<void>(resolve => { entered = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    vi.mocked(safeStorage.encryptStringAsync).mockImplementationOnce(async value => {
+      entered();
+      await held;
+      return Buffer.from(value, 'utf8');
+    });
+    const pairing = request('POST', '/pair', { auth: null, body: { reuse: true } });
+    await writing;
+    const disconnecting = unpair();
+    release();
+    const paired = await pairing;
+    await disconnecting;
+    expect(paired.status).toBe(409);
+    expect(paired.body.token).toBeUndefined();
+    expect((await request('GET', '/hello', { auth: null })).body.disconnected).toBe(true);
+    expect((await request('POST', '/pair', { auth: null, body: { reuse: true } })).status).toBe(409);
+  });
+
   it('drops the token when the user disconnects the browser', async () => {
     await pair();
     expect((await request('GET', '/status')).status).toBe(200);
