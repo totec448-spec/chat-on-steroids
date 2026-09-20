@@ -1686,7 +1686,7 @@ version options normalize into the same bounded picker snapshot. Mixed-version p
 their execution ids rather than merging unrelated models into a synthetic Latest family.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
-The matched recorder/MAIN helper version is 20. Shell exchanges are read only under the native
+The matched recorder/MAIN helper version is 21. Shell exchanges are read only under the native
 main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
@@ -1703,6 +1703,10 @@ Before history hydration, a bounded read of published React hook/compiler values
 native `renderedConversation`/`renderedTurns` snapshot. Its conversation owner, actual user and
 same turn object must match. Only the newest exact turn may add early request metadata from its
 explicit current-node parent path back to that user; no guessed child or unselected prose is read.
+The DOM's Fiber pointer can name the prior render. Read the committed root's child path and
+its current ancestors, including memoized children with old return pointers. Never choose the
+newer-looking alternate or mutate React. Path views are bounded and cached only within one
+synchronous helper request; unmounted, contradictory and uncommitted branches supply no proof.
 Public thought summaries/preambles require unique public typed counterparts and real selected
 source message ids. Hidden/raw analysis stays excluded. Preambles retain the existing stable
 message identity rules. Missing or contradictory metadata remains unavailable.
@@ -1715,6 +1719,11 @@ resolves. Those descriptors carry `requestOwnerRequired`: only a witnessed local
 accepted Resume owner can confirm the request against the concrete route before tool evidence
 is published. A native click can request that first scan without an app-managed Send promise;
 its exact receipt is consumed after the scan rather than waiting for another page mutation.
+Fresh worker/resume binding uses the existing receipt observer immediately, with a 40s ceiling
+instead of the former first 500ms poll. Both require the exact submitted user row and route;
+composer clear alone cannot acknowledge an unnamed worker. A stamped native row whose frame
+is pending or rejected cannot bypass that rejection through its visible text. Cancellation and
+document/route changes revoke the wait; no acknowledgement or duplicate Send is invented.
 For classic turns, `fiber.js` retains text messages explicitly marked
 `is_thinking_preamble_message:true` on assistant/all commentary even when ChatGPT sets
 `is_visually_hidden_from_conversation:true` during streaming. This flag describes presentation;
@@ -1947,6 +1956,10 @@ Exact app-correlated work started after Stop can withdraw the local veto only fo
 turn, with no pending app Stop or canonical final. Old results, foreign turns and finish-only
 calls cannot do so. Browser recovery still requires the main process's exact current authority.
 Neither a click receipt nor a page-local stopped outcome claims provider-side cancellation.
+An already-earned MCP activity window remains visible through a stopped page observation:
+ten minutes for Pro, three otherwise. That retained display grants no input or reload while
+the source remains stopped. A fresh same-request call can reopen it; an old result cannot
+extend its deadline. A real canonical final or successful finish report consumes the grant.
 
 **Intent:** deliver one authorized operation to one exact document, survive transport loss,
 and revive only work that remains owed. The bridge never grants arbitrary local tools.

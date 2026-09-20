@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 // Synthetic AX responses around the real matching and geometry functions.
 // No AppKit, permission prompt, focus change or physical input is involved.

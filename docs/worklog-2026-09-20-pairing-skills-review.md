@@ -90,3 +90,11 @@ port, rejected the occupied port without disturbing its owner, preserved config 
 and reconnected the actual MV3 wake socket after a port switch with unchanged pairing credentials
 in 29,953 ms. The shell browser fixture passed 14 checks, including exact native send receipts,
 finals, provisional request ownership, public preambles and Code Mode request metadata.
+
+The combined local verify chain then passed 5,809 tests, with 47 conditional cases skipped.
+PR CI exposed two fixture portability problems: the stopped-source test did not establish a
+strictly later timestamp and waited a fixed 25 ms for asynchronous publication, while the Swift
+fixture omitted the CoreGraphics import needed for CGRect's Swift interface on macOS. The test
+now controls that clock boundary and awaits its actual positive outcome. The fixture imports
+CoreGraphics when available, retaining the Foundation implementation on other Swift platforms.
+Neither correction weakens the production ownership or native matching checks.

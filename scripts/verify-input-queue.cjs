@@ -68,7 +68,7 @@ app.whenReady().then(async () => {
         if (await js(condition)) return;
         await new Promise(resolve => setTimeout(resolve, 25));
       }
-      throw new Error('Renderer condition timed out: ' + condition + ' ' + JSON.stringify(await js('({ready:!!window.fixtureReady,error:window.fixtureError})')));
+      throw new Error('Renderer condition timed out: ' + condition + ' ' + JSON.stringify(await js('({ready:!!window.fixtureReady,error:window.fixtureError,keys:window.fixtureKeys,focused:document.activeElement?.id,stops:window.queueFixture?.stops})')));
     };
     const click = selector => js(`document.querySelector(${JSON.stringify(selector)}).click()`);
     const checks = [];
@@ -91,8 +91,10 @@ app.whenReady().then(async () => {
     await wait('queueFixture.stops.length === 1');
     assert.deepEqual(await js('queueFixture.stops[0]'), {id:'queue-fixture-session',turnId:'fixture-turn'});
     await wait('document.getElementById("chatSend").getAttribute("aria-label") === "Stop turn"');
-    await js('document.getElementById("chatSend").focus()');
+    await js(`window.fixtureKeys=[];document.addEventListener('keydown',e=>fixtureKeys.push({key:e.key,target:e.target.id}),true);
+      document.getElementById('chatSend').focus()`);
     win.webContents.sendInputEvent({type:'keyDown',keyCode:'Return'});
+    win.webContents.sendInputEvent({type:'char',keyCode:'\r'});
     win.webContents.sendInputEvent({type:'keyUp',keyCode:'Return'});
     await wait('queueFixture.stops.length === 2');
     checks.push('button and keyboard activation stop only the captured turn');
