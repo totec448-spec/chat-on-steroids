@@ -21,14 +21,28 @@ const liveStart = tests.indexOf('function liveShellMapping(');
 const liveEnd = tests.indexOf('\nit.each', liveStart);
 assert(liveStart > 0 && liveEnd > liveStart);
 const liveMapping = tests.slice(liveStart, liveEnd);
+const pairedStart = tests.indexOf('function pairedShellCall(');
+const pairedEnd = tests.indexOf('\nit.each', pairedStart);
+assert(pairedStart > 0 && pairedEnd > pairedStart);
+const pairedMapping = tests.slice(pairedStart, pairedEnd);
+const recorderStart = tests.indexOf('async function recorder(');
+const recorderEnd = tests.indexOf('\nfunction addExchange(', recorderStart);
+assert(recorderStart > 0 && recorderEnd > recorderStart);
+const nativeRecorder = tests.slice(recorderStart, recorderEnd).replace(
+  'await vi.waitFor(() => expect(hook).toBeTruthy());', 'if (!hook) throw Error("Recorder did not initialize");');
 const constants = tests.slice(tests.indexOf('const THREAD ='), tests.indexOf('let page:'));
 const setup = transformSync(`${constants}
 const vi = { fn: (fn = () => {}) => fn };
 const domSource = ${JSON.stringify(fs.readFileSync(path.join(root, 'extension/chatgpt-dom.js'), 'utf8'))};
 const fiberSource = ${JSON.stringify(fs.readFileSync(path.join(root, 'extension/fiber.js'), 'utf8'))};
 const usageSource = ${JSON.stringify(fs.readFileSync(path.join(root, 'extension/usage.js'), 'utf8'))};
+const contentSource = ${JSON.stringify(fs.readFileSync(path.join(root, 'extension/content.js'), 'utf8'))};
 ${fixture}
 ${liveMapping}
+${pairedMapping}
+${nativeRecorder}
+globalThis.recorder = recorder;
+globalThis.pairedShellCall = pairedShellCall;
 globalThis.liveShellMapping = liveShellMapping;
 globalThis.fixture = fixture; globalThis.usageSource = usageSource;`, { loader: 'ts', target: 'es2022' }).code;
 
@@ -166,6 +180,56 @@ async function evaluate(expression) {
       }
       checks.push('three native sends clicked once each, matched exact user receipts and settled exact finals');
       checks.push('completed native final ids retain handoff capture proof without classic parent metadata');
+      for (const source of ['request', 'result', 'embedded']) {
+        const paired = fixture(), { mapping, step, resultId } = pairedShellCall(paired);
+        if (source !== 'request') {
+          delete mapping[CALL]; mapping[resultId].message.metadata.request_id = OTHER;
+          if (source === 'embedded') step.callId = 'native-mcp-call-not-a-provider-message';
+        }
+        const descriptor = (await paired.ask()).turns[0];
+        if (descriptor.calls[0]?.messageId !== step.callId || descriptor.calls[0]?.requestId !== OTHER ||
+            descriptor.calls[0]?.answered !== true || /PRIVATE_TOOL_RESULT|DO_NOT_COPY/.test(JSON.stringify(descriptor)))
+          throw Error('Native paired invocation/source projection failed: ' + source);
+        checks.push('reloaded paired tool retains exact request ownership from ' + source + ' metadata');
+      }
+      const manual = fixture(), manualMapping = liveShellMapping(manual, true);
+      manual.entry.conversationId = 'local-chatgpt:' + OTHER;
+      manualMapping.owner.memoizedProps.conversationId = manual.entry.conversationId;
+      const freshSection = manual.doc.querySelector('[data-turn-key]');
+      freshSection.remove();
+      const manualRecorder = await recorder(manual);
+      manual.api.sendButton().addEventListener('click', event => {
+        event.preventDefault(); manual.api.composer().replaceChildren();
+        manual.doc.querySelector('[data-thread-find-target]').append(freshSection);
+      }, { once: true });
+      if (!manual.api.insertPrompt('hello', true)) throw Error('Native manual draft insertion failed');
+      manual.api.sendButton().click();
+      // The earlier stream test deliberately leaves another exact origin in the
+      // document replay cache. Its readiness replay is not this Send's receipt.
+      const manualOwners = () => manualRecorder.sent.filter(message => message.type === 'correlate' &&
+        message.conversationId === THREAD && message.calls.some(call => call.requestId === OTHER));
+      const deadline = Date.now() + 5000;
+      while (manualOwners().length === 0 && Date.now() < deadline)
+        await new Promise(resolve => setTimeout(resolve, 20));
+      await manualRecorder.hook.flush();
+      if (manualRecorder.events().filter(event => event.kind === 'turn_start').length !== 1 ||
+          manualOwners().length !== 1)
+        throw Error('Native manual send did not establish exactly one generation and request owner: ' + JSON.stringify({
+          events: manualRecorder.events().map(event => event.kind),
+          requests: manualRecorder.sent.filter(message => message.type === 'correlate').flatMap(message => message.calls.map(call => call.requestId))
+        }));
+      if (!manualRecorder.events().some(event => event.kind === 'tool_evidence' && event.turnId &&
+          event.calls.some(call => call.messageId === CALL && call.requestId === OTHER)))
+        throw Error('Native manual Send did not retain turn-owned tool evidence');
+      window.__CLF_CONTENT_RECORDER__.stop();
+      checks.push('native click and transcript mutations establish shell request identity without a forced scan or page reload');
+      const code = fixture(), liveCode = liveShellMapping(code, true), execution = '88888888-3333-4333-8333-333333333333';
+      liveCode.mapping[execution] = { id: execution, message: { id: execution, author: { role: 'assistant' },
+        recipient: 'functions.exec', metadata: { request_id: 'wfr_native_code_mode' } } };
+      code.entry.turn.items[1].items.push({ type: 'dynamic-tool-call', callId: execution, tool: 'exec', completed: false });
+      const codeTurn = (await code.ask()).turns[0];
+      if (!codeTurn.requests.some(request => request.requestId === 'wfr_native_code_mode')) throw Error('Native Code Mode identity missing');
+      checks.push('mounted Code Mode invocation supplies its exact request metadata before a result or history query');
       return { ok: true, checks, userAgent: navigator.userAgent };
     })()`);
     fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify(report, null, 2));

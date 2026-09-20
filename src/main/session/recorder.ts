@@ -475,6 +475,7 @@ async function applyOrigin(sessionId: string, conversationId: string): Promise<v
     if (summary.origin.kind === 'worker' && origin.kind === 'worker' &&
         summary.origin.agentId === origin.agentId && !summary.origin.fromSessionId && origin.fromSessionId) {
       await setSessionOrigin(sessionId, { ...summary.origin, fromSessionId: origin.fromSessionId }, summary.title);
+      notifyChanged();
     }
     return;
   }

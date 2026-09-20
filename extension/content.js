@@ -36,7 +36,7 @@
   // before touching the shared DOM. Otherwise old and new composer observers can continually
   // remove and reinsert each other's controls, starving transport/timers and freezing the tab.
   // A healthy incumbent in this context still wins the static/recovery injection race.
-  const RECORDER_VERSION = 19;
+  const RECORDER_VERSION = 20;
   const recorderHandle = {
     version: RECORDER_VERSION,
     healthy: () => false,
@@ -727,7 +727,13 @@
     const turn = stampedFiberTurn({ node: message.node }, [...fiberTurns.values()], fiberScanToken);
     const temporary = desktopDecision?.temporary && desktopDecision.onTarget() &&
       (!desktopDecision.messageId || desktopDecision.messageId === message.id);
-    if (turn && (turn.conversationConflict || (!temporary && turn.conversationId !== CLF_DOM.conversationId()))) return null;
+    // A fresh shell exchange can expose exact native user ids before its provisional
+    // client conversation resolves. Absence is not a conflicting owner: this same
+    // mounted bubble was already readable before Fiber supplied its descriptor.
+    // Send still requires the complete prepared text and its unchanged route/lifetime;
+    // request ownership remains a separate exact handshake. Known foreign owners fail.
+    if (turn && (turn.conversationConflict || (!temporary && turn.conversationId &&
+        turn.conversationId !== CLF_DOM.conversationId()))) return null;
     const authored = (turn?.messages || []).filter(candidate => candidate.role === 'user' && candidate.stable === true &&
       (candidate.rawMessageId === message.id || candidate.messageId === message.id));
     if (authored.length > 1) return null;
@@ -2522,10 +2528,18 @@
     // needs canonical MAIN-world text; requiring a recognized generation here would make
     // recognizing that generation depend on a scan we never admit. This only reads evidence
     // while an exact send receipt is pending; the usual route/message checks still decide it.
-    const pendingSendEvidence = pageViewChecks.size > 0 && (desktopInputBusy ||
-      userSendReceipt && Date.now() - userSendReceipt.at < USER_SEND_RECEIPT_MS);
+    const pendingSendEvidence = (pageViewChecks.size > 0 && desktopInputBusy) ||
+      userSendReceipt && Date.now() - userSendReceipt.at < USER_SEND_RECEIPT_MS;
     if (continuationJournalPending || generating || pendingSendEvidence) {
-      void refreshFiber();
+      const receipt = userSendReceipt, observedEpoch = epoch, observedConversation = conversationId;
+      void refreshFiber().then(refreshed => {
+        // Native clicks also need the first shell scan: its slots have no message
+        // ids until MAIN stamps them. Consume only this send's newly readable
+        // receipt, without waiting for another mutation or a background timer.
+        if (refreshed && receipt && userSendReceipt === receipt && epoch === observedEpoch &&
+            conversationId === observedConversation && CLF_DOM.conversationId() === observedConversation &&
+            !resumeIdentityPending && matchesUserSendReceipt(CLF_DOM.messages().filter(userMessagePresent).at(-1), receipt)) observe();
+      });
     } else if (fiberTerminalMessageId && nowGenerating) {
       const terminalTurn = currentAssistantTurn(observedTurns);
       void refreshFiber({
@@ -3016,7 +3030,7 @@
   // 11: adds exact typed thought-notification ids and ephemeral DOM stamps for selective
   //     presentation suppression. Caption text and per-call adjacency remain non-authority.
   // 12: adds exact provider-message/sediment generated-image descriptors and DOM pixel stamps.
-  const FIBER_VERSION = 19;
+  const FIBER_VERSION = 20;
   const FIBER_TIMEOUT_MS = 1500;
   const FIBER_MAX_ROWS = 400;
   /** Assistant turns whose per-call evidence is accepted from one scan. */
@@ -3329,6 +3343,7 @@
       turnId,
       conversationId: cap(raw.conversationId, 200),
       conversationConflict: raw.conversationConflict === true,
+      requestOwnerRequired: raw.requestOwnerRequired === true,
       endMessageId,
       calls: kept,
       codeModeCalls,
@@ -3969,7 +3984,8 @@
       // verdict: it would re-assert the URL conversation, bypass a rejected handshake and turn
       // an already-proven request owner into a sticky conflict.
       const ownedPageConversation = ownedPageTurn ? concreteConversation(ownedPageTurn.conversationId) : null;
-      if (ownedPageTurn && ownedPageConversation && ownedPageConversation !== askedConversation) {
+      if (ownedPageTurn && (ownedPageTurn.requestOwnerRequired ||
+          ownedPageConversation && ownedPageConversation !== askedConversation)) {
         await ownerConfirmation;
         // The ownership read-back added a new async boundary to this scan. Re-prove the same
         // document/route before any observation from the pre-await Fiber frame can be emitted.
@@ -3990,7 +4006,7 @@
     for (let index = 0; index < answer.turns.length; index++) {
       const turn = answer.turns[index];
       const pageConversation = concreteConversation(turn.conversationId);
-      const provisionalOwnedTurn = Boolean(
+      const provisionalOwnedTurn = turn.requestOwnerRequired || Boolean(
         turn === ownedPageTurn &&
         askedConversation &&
         pageConversation &&
@@ -8876,7 +8892,10 @@
    */
   function answerTurnFor(turns, index) {
     const turn = turns[index];
-    if (turn.endMessageId) return turn;
+    // The shell keeps the marked user and its running response in one exchange.
+    // Waiting for endMessageId loses that exact relation throughout tool execution.
+    if (turn.endMessageId || (turn.messages || []).some(message => message.role === 'assistant') ||
+        (turn.calls || []).length > 0) return turn;
     for (let at = index + 1; at < turns.length; at++) {
       const next = turns[at];
       const messages = next.messages || [];
@@ -10885,6 +10904,7 @@
     let sent = false;
     let draft = null;
     let claimedSilence = null;
+    const writableComposer = () => CLF_DOM.composerVisible() && CLF_DOM.composerWritable() && CLF_DOM.composer();
     try {
       // Registration may precede React mounting the composer. Observe that same document
       // instead of rejecting the offer and waiting for Chrome's next 30-second alarm.
@@ -10893,7 +10913,8 @@
       // Settings/plan dialogs retain the editor behind aria-hidden/inert. Claiming
       // that editor turns ordinary page unavailability into a false model failure.
       // Keep the input queued until this same document exposes its composer again.
-      const composer = await waitPageView(() => (message.directTurn || !CLF_DOM.generating()) && CLF_DOM.composerVisible() && CLF_DOM.composer(),
+      const composer = await waitPageView(() => (message.directTurn || !CLF_DOM.generating()) &&
+        (message.directTurn ? CLF_DOM.composerVisible() && CLF_DOM.composer() : writableComposer()),
         () => onTarget() && (message.directTurn || silencePickup || !generating) && pendingTools === 0, 15000);
       if (!composer && onTarget() && CLF_DOM.generating() && await confirmedProviderTerminal() && onTarget() && CLF_DOM.generating()) {
         // Only after readiness expires, re-prove the exact terminal: a Retry or
@@ -10939,8 +10960,13 @@
       const limitation = providerLimitation();
       if (limitation) return fail(limitation);
       if (!(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, onTarget))) return fail(providerLimitation() || 'Requested model or reasoning could not be confirmed');
+      // Native picker closure can precede re-enabling the same editor. Wait before
+      // its one insertion; a disabled editing host is not a rejected helper prompt.
+      if (!await waitPageView(writableComposer, () => onTarget() && !CLF_DOM.generating(), 15000)) return fail('The ChatGPT editor did not become writable before sending.');
       if (!onTarget() || CLF_DOM.generating() || (!ownsFreshPage() && (CLF_DOM.composer()?.textContent || '').trim()) || CLF_DOM.hasComposerAttachments()) return fail('The ChatGPT composer changed before sending');
-      if (!CLF_DOM.insertPrompt(input.text, ownsFreshPage())) return fail('ChatGPT did not accept the text');
+      let insertionFailure = '';
+      if (!CLF_DOM.insertPrompt(input.text, ownsFreshPage(), reason => { insertionFailure = reason; }))
+        return fail(`ChatGPT did not accept the text${insertionFailure ? ` (${insertionFailure})` : ''}`);
       const sendingTarget = submittedSendLifetime(target, forEpoch);
       draft = CLF_DOM.captureComposerDraft(input.text, () => sendAttempted ? sendingTarget() : onTarget());
       const files = [];
