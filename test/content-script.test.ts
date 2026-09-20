@@ -177,6 +177,8 @@ interface Harness {
   runtimeMessage(message: Record<string, any>): Promise<unknown>;
   /** Browser-extension listeners still owned by live recorder instances in this document. */
   listenerCounts(): { runtime: number; storage: number };
+  /** Invoke document capture listeners with native trust; jsdom only dispatches synthetic clicks. */
+  trustedClick(target: Element): void;
   /** Moves the clock the script reads. Nothing else advances it between ticks. */
   advance(ms: number): void;
   close(): void;
@@ -221,6 +223,17 @@ async function harness(
   });
 
   const sent: Array<Record<string, any>> = [];
+  const clickListeners = new Set<EventListener>();
+  const addDocumentListener = window.document.addEventListener.bind(window.document);
+  const removeDocumentListener = window.document.removeEventListener.bind(window.document);
+  window.document.addEventListener = ((type: string, listener: EventListener, options: any) => {
+    if (type === 'click' && options === true) clickListeners.add(listener);
+    addDocumentListener(type, listener, options);
+  }) as typeof window.document.addEventListener;
+  window.document.removeEventListener = ((type: string, listener: EventListener, options: any) => {
+    if (type === 'click' && options === true) clickListeners.delete(listener);
+    removeDocumentListener(type, listener, options);
+  }) as typeof window.document.removeEventListener;
   const reply = new Map<string, (message: Record<string, any>) => unknown>();
   type RuntimeListener = (
     message: Record<string, any>,
@@ -379,6 +392,12 @@ async function harness(
         if (async !== true && !answered) resolve(undefined);
       }),
     listenerCounts: () => ({ runtime: runtimeListeners.size, storage: storageListeners.size }),
+    trustedClick: target => {
+      const click = new window.MouseEvent('click', { bubbles: true });
+      const event = new Proxy(click, { get: (value, key) => key === 'isTrusted' ? true : key === 'target' ? target :
+        typeof Reflect.get(value, key, value) === 'function' ? Reflect.get(value, key, value).bind(value) : Reflect.get(value, key, value) });
+      for (const listener of clickListeners) listener.call(window.document, event);
+    },
     advance,
     close: () => dom.window.close()
   };
@@ -7706,7 +7725,7 @@ describe('a stop button that goes missing while the turn is still running', () =
    * the tab. That strands exactly the frozen turn the reload exists to heal, which is the same
    * mistake as calling a repair done because it was handed out.
    */
-  /** A turn the user stopped is finished, however long the page then sits there. */
+  /** Native Stop intent vetoes automatic browser input even before the page obeys it. */
   it('never reloads a stalled turn the user stopped', async () => {
     live = await harness(undefined, { reload_owned_chat: () => ({ ok: true }) });
     userTurn(live.document, 'turn-stopped-user', 'do the long thing');
@@ -7716,7 +7735,7 @@ describe('a stop button that goes missing while the turn is still running', () =
     await settle();
 
     const stop = live.document.querySelector('[data-testid="stop-button"]')!;
-    stop.dispatchEvent(new live.window.MouseEvent('click', { bubbles: true }));
+    live.trustedClick(stop);
 
     live.advance(live.hook.STALL_MS + 1);
     live.hook.observe();
@@ -8098,10 +8117,10 @@ describe('a stop button that goes missing while the turn is still running', () =
   });
 
   /**
-   * The user pressing stop is not a signal that needs corroborating, and a composer that
-   * stays disabled for four more seconds because the app is being careful is its own bug.
+   * A trusted Stop request is distinct from a synthetic click. Once the native
+   * page also becomes idle, its stopped observation can close the local view.
    */
-  it('closes at once when the user stopped the turn', async () => {
+  it('records a stopped view after a trusted Stop request and native generation ends', async () => {
     live = await harness();
     startGenerating(live.document);
     assistantTurn(live.document, 'turn-stopped', ['partial answer before stop']);
@@ -8109,7 +8128,9 @@ describe('a stop button that goes missing while the turn is still running', () =
     await settle();
 
     const stop = live.document.querySelector('[data-testid="stop-button"]')!;
-    stop.dispatchEvent(new live.window.MouseEvent('click', { bubbles: true }));
+    live.trustedClick(stop);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
     stopGenerating(live.document);
     live.hook.observe();
     await settle();
@@ -8358,7 +8379,7 @@ describe('a content script reloaded into a turn already in flight', () => {
       if (variant === 'stopped') startGenerating(document, { send: false });
     });
     if (variant === 'stopped') {
-      live.document.querySelector<HTMLButtonElement>('[data-testid="stop-button"]')!.click();
+      live.trustedClick(live.document.querySelector('[data-testid="stop-button"]')!);
       stopGenerating(live.document);
     }
     live.reply.set('activity', () => activity({ activeTurnId: 'g-unproven-old-turn',
@@ -14283,7 +14304,8 @@ describe('the fresh chat the app opened', () => {
     expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe('');
   });
 
-  it('overwrites a New Chat autosaved draft and sends the worker bootstrap once', async () => {
+  it.each([false, true])('overwrites a New Chat autosaved draft once and requires its worker receipt (received=%s)', async received => {
+    let sends = 0;
     live = await harness(
       'https://chatgpt.com/?clf=cmd-9',
       {
@@ -14293,10 +14315,15 @@ describe('the fresh chat the app opened', () => {
         }),
         ack: () => ({ ok: true })
       },
-      (document) => {
+      (document, dom) => {
         document.querySelector('#prompt-textarea')!.textContent = 'a draft the user was writing';
         document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          sends++;
           document.querySelector('#prompt-textarea')!.textContent = '';
+          if (received) {
+            dom.reconfigure({ url: 'https://chatgpt.com/c/11111111-2222-3333-4444-555555555555' });
+            userTurn(document, 'accepted-worker', 'You are worker agent "worker-1".', { sent: false });
+          }
         });
       }
     );
@@ -14311,7 +14338,8 @@ describe('the fresh chat the app opened', () => {
     // is stale page state rather than user work in an existing conversation. A second startup
     // tick remains a no-op: replacing the draft is permission for one bootstrap, never two.
     const acks = live.sent.filter((message) => message.type === 'ack');
-    expect(acks.map((ack) => ack.status)).toEqual(['sent']);
+    expect(sends).toBe(1);
+    expect(acks.map((ack) => ack.status)).toEqual(received ? ['sent'] : []);
     expect(live.sent.filter((message) => message.type === 'redeem')).toHaveLength(1);
   });
 });
@@ -17954,9 +17982,7 @@ describe('the goal loop', () => {
     await settle();
     prose(live.document, section, 'a-stopped', 'half an answer, and then');
 
-    live.document
-      .querySelector('[data-testid="stop-button"]')!
-      .dispatchEvent(new live.window.MouseEvent('click', { bubbles: true }));
+    live.trustedClick(live.document.querySelector('[data-testid="stop-button"]')!);
     stopGenerating(live.document);
     live.hook.observe();
     await settle(800);
@@ -18926,6 +18952,39 @@ describe('app Stop command uses current native turn proof', () => {
     expect(h.clicks()).toBe(1);
   });
 
+  it('does not confirm a Stop command while the native page continues generating', async () => {
+    const h = await setup();
+    expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
+    await live!.hook.flush();
+    expect(h.clicks()).toBe(1);
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+    live!.advance(60_000);
+    live!.hook.observe(); await settle(); await live!.hook.flush();
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+  });
+
+  it.each(['fresh', 'before-stop', 'foreign-turn', 'unattributed', 'finish', 'final'] as const)(
+    'rechecks the stopped page against exact subsequent MCP work (%s)', async evidence => {
+    const h = await setup();
+    const stoppedAt = live!.window.Date.now();
+    expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
+    expect(await live!.runtimeMessage({ type: 'clf-repair-check', conversationId: h.request.conversationId }))
+      .toMatchObject({ safe: false });
+    live!.advance(1000);
+    live!.reply.set('activity', () => ({ ok: true, data: { entries: [], nextSince: 101,
+      activeTurnId: evidence === 'final' ? null : h.request.turnId,
+      pendingTools: 0, stream: [{ seq: 100, callId: 'continued-after-stop', kind: 'tool_call',
+        turnId: evidence === 'foreign-turn' ? 'another-turn' : h.request.turnId,
+        time: evidence === 'before-stop' ? stoppedAt - 1 : live!.window.Date.now(),
+        requestId: 'wfr_same_stopped_request', attribution: evidence === 'unattributed' ? 'unattributed' : 'request_id',
+        tool: evidence === 'finish' ? 'session_finish' : 'read', outcome: 'ok' }] } }));
+    await live!.hook.pullActivity();
+    expect(await live!.runtimeMessage({ type: 'clf-repair-check', conversationId: h.request.conversationId }))
+      .toMatchObject({ safe: evidence === 'fresh' });
+    expect(h.clicks()).toBe(1);
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+  });
+
   it('captures a completed final hydrated later in a hidden tab after the settle window', async () => {
     live = await harness();
     startGenerating(live.document);
@@ -19248,18 +19307,18 @@ describe('ordinary Continue native recovery', () => {
     expect(live.sent.filter(message => message.type === 'desktop_input' && message.fail)).toEqual(scenario === 'authorization'
       ? [expect.objectContaining({ id, owner: 'input-owner', error: 'After-turn pickup was withdrawn before Send.' })] : []);
   });
-  it('journals native Stop immediately even while the native Stop control remains mounted', async () => {
+  it('blocks automatic repair on trusted Stop intent without inventing a terminal observation', async () => {
     live = await harness(`https://chatgpt.com/c/${chat}`);
     userTurn(live.document, 'source', 'Complete the task'); startGenerating(live.document, { send: false });
     live.hook.observe(); await settle();
     const button = live.document.querySelector('[data-testid="stop-button"]') as HTMLElement;
     Object.defineProperty(button, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
-    button.click(); await live.hook.flush();
+    live.trustedClick(button); await live.hook.flush();
     expect(live.document.contains(button)).toBe(true);
-    expect(emitted(live.sent, 'turn_end').filter(row => row.event.outcome === 'stopped')).toHaveLength(1);
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
     expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).toMatchObject({ safe: false });
-    button.click(); await live.hook.flush();
-    expect(emitted(live.sent, 'turn_end').filter(row => row.event.outcome === 'stopped')).toHaveLength(1);
+    live.trustedClick(button); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
   });
 
   it.each(['stop', 'send'] as const)('does not execute a stale %s permission after new native work', async during => {
