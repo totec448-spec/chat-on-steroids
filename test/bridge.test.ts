@@ -12471,3 +12471,29 @@ it('retires an already armed ordinary Goal repair when its conversation is now f
     expect(((await request('GET', '/status')).body.repairs ?? []).filter((r: any) => r.conversationId === chat)).toEqual([]);
   } finally { resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); vi.useRealTimers(); }
 });
+
+it('preserves pending commands and durable ACK receipts across a port switch', async () => {
+  await pair();
+  const failed = await compactedSession('ea000001-1111-4222-8333-444444444444', 'Receipt retained');
+  const failedCommand = queueResume(failed.sessionId, failed.token)!;
+  await redeem(failedCommand.id, 'port-switch-client');
+  const ackBody = { id: failedCommand.id, client: 'port-switch-client', status: 'failed', error: 'fixture tab closed' };
+  const ack = await request('POST', '/commands/ack', { body: ackBody });
+  expect(ack.status).toBe(200);
+  const queued = await compactedSession('ea000002-1111-4222-8333-444444444444', 'Pending command retained');
+  queueResume(queued.sessionId, queued.token);
+  await flushDurable();
+  const before = await readDurable('bridge-commands'); const pending = pendingCommands();
+  expect((before as any).receipts.length).toBeGreaterThan(0);
+  const ports = await import('../src/main/bridge-ports.js');
+  const selection = vi.spyOn(ports, 'bridgePortSelection').mockReturnValue({ candidates: [0], overridden: false });
+  try {
+    const { updateConfig } = await import('../src/main/config.js');
+    const { publishBridgePortChange } = await import('../src/main/bridge.js');
+    await updateConfig(config => ({ ...config, ui: { ...config.ui, browserBridgePort: 8767 } }), undefined, publishBridgePortChange);
+    base = `http://127.0.0.1:${bridgePort()}`;
+    expect(pendingCommands()).toEqual(pending);
+    expect(await readDurable('bridge-commands')).toEqual(before);
+    expect((await request('POST', '/commands/ack', { body: ackBody })).body).toEqual(ack.body);
+  } finally { selection.mockRestore(); }
+});

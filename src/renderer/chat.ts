@@ -3266,7 +3266,7 @@ function applyAutoCompactHint(config: Config): void {
  * expire by age.
  */
 const CHAT_INPUTS = [
-  'chatBrowser',
+  'chatBrowser', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
   'finishTool', 'finishLeadMinutes', 'workerModel', 'workerReasoning', 'backgroundChats', 'browserOnly', 'autoRefreshPlugins',
@@ -3331,6 +3331,8 @@ export function chatApply(state: AppState, previous?: Config): void {
     ? t("Browser-backed features are off. The extension is not needed right now.")
     : !secureStorageAvailable
       ? (state.secureStorage?.detail ?? t("Secure credential storage is unavailable, so the extension cannot pair safely."))
+    : !bridge.running && bridge.error
+      ? t("Browser bridge could not start: {0}", [bridge.error])
     : !bridge.running
       ? t("The local bridge is off even though recording or multi-agent mode needs it.")
       : bridge.present

@@ -35,6 +35,22 @@ Core, Desktop and Plugins are separate connectors. Configure each surface you en
 
 **Your own HTTPS tunnel:** forward to the loopback URL shown by CoS and preserve its secret path. Treat the resulting URL like a password.
 
+## Browser bridge port
+
+In **Settings → Browser & history → Browser bridge port**, choose **Auto** (default) or
+**8765**, **8766**, **8767**, **8768**, **8769**. Auto uses the first available port in that
+order. A fixed choice uses exactly that port. The companion discovers the same supported range.
+
+If the selected port is occupied, the save is rejected and the previous choice and working
+bridge remain active. If a saved port is occupied when CoS starts, the app stays open with the
+bridge stopped and an error in **Setup**. Choose a free port or Auto in Settings to recover.
+The saved fixed choice never silently falls back to another port. Pairing survives a successful switch.
+
+An effective `CLF_BRIDGE_PORTS` environment override takes precedence over the saved choice.
+The dropdown is disabled and explains the override; unrelated Settings changes remain available.
+Remove the override from the launch environment and restart CoS to use this selector. The existing
+comma-separated override and port `0` remain available for isolated development/tests.
+
 ## Permissions and connectors
 
 | Connector | What it adds |
