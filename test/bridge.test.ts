@@ -8929,6 +8929,8 @@ describe('unattributed activity recovery', () => {
     const chat = model === 'pro' ? 'a2222222-1111-4111-8111-000000000091' : 'a2222222-1111-4111-8111-000000000092';
     const goal = await import('../src/main/goal.js');
     const { setSessionAutomation } = await import('../src/main/bridge.js');
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, finishTool: true } });
     await setSecret('openRouterApiKey', 'sk-or-off-silence');
     vi.useFakeTimers();
     try {
@@ -8971,7 +8973,7 @@ describe('unattributed activity recovery', () => {
       await events(chat, [openTurn('new-work-after-silence')]);
       await setSessionAutomation(sessionId, 'loop', true);
       expect(goalPendingReplyFor(chat)).toBeNull();
-    } finally { await setSecret('openRouterApiKey', ''); vi.useRealTimers(); }
+    } finally { await setSecret('openRouterApiKey', ''); await saveConfig(previous); vi.useRealTimers(); }
   });
 
   it.each([
@@ -9838,18 +9840,26 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  it.each(['completed', 'thinking_failed'])('lets opted-in Pro Loop draft at its confirmed %s boundary', async kind => {
-    const OTHER = kind === 'completed' ? 'c9292929-1111-2222-3333-444444444444' : 'c9393939-1111-2222-3333-444444444444';
+  it.each([
+    ['goal', true, 'completed'], ['goal', false, 'completed'],
+    ['loop', true, 'completed'], ['loop', false, 'completed'],
+    ['goal', true, 'thinking_failed'], ['goal', false, 'thinking_failed'],
+    ['loop', true, 'thinking_failed'], ['loop', false, 'thinking_failed']
+  ] as const)('routes Astra %s with finish=%s at its confirmed %s boundary', async (mode, finishTool, kind) => {
+    const OTHER = randomUUID();
     const previous = getConfig();
     const goal = await import('../src/main/goal.js');
-    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
+    await saveConfig({ ...previous, ui: { ...previous.ui, finishTool }, goal: { ...previous.goal, enabled: true, mode } });
     await setSecret('openRouterApiKey', 'sk-or-pro-loop-boundary'); resetGoalStateForTests();
     vi.useFakeTimers();
     try {
-      await pair(); await goal.setGoalSwitchNow(OTHER, 'loop', true, true);
-      const turn = `pro-loop-${kind}`;
+      await pair(); await goal.setGoalSwitchNow(OTHER, mode, true, finishTool);
+      const turn = `astra-${mode}-${kind}`;
       await events(OTHER, [{ kind: 'model_selection', model: 'gpt-6-pro', reasoningEffort: 'pro', time: Date.now() }, openTurn(turn)]);
       await attributed(OTHER, false, Date.now());
+      const activity = (await request('GET', `/activity?conversationId=${OTHER}`)).body;
+      expect(activity.goal).toMatchObject({ mode, afterTurn: true, proLoopDelivery: finishTool });
+      expect((await sessionControlsFor(activity.sessionId)).proLoopDelivery).toBe(finishTool);
       await vi.advanceTimersByTimeAsync(kind === 'completed' ? PRO_SILENCE_MS : 330000);
       if (kind === 'completed') {
         await events(OTHER, [{ kind: 'assistant_message', messageId: `answer-${turn}`, turnId: turn, time: Date.now(),
@@ -9870,11 +9880,6 @@ describe('unattributed activity recovery', () => {
       expect(pending).not.toBeNull();
       const reply = await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: pending!.turnId, terminalRequired: true } });
       expect(`${reply.status} ${JSON.stringify(reply.body)}`).toMatch(/^200 /);
-      if (kind === 'thinking_failed') {
-        await goal.setGoalSwitchNow(OTHER, 'loop', false);
-        await request('GET', `/activity?conversationId=${OTHER}`);
-        expect((await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: pending!.turnId } })).status).toBe(409);
-      }
     } finally { resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); vi.useRealTimers(); }
   });
 
@@ -12438,11 +12443,11 @@ describe('app requests to stop one exact active turn', () => {
   });
 });
 
-it('retires an already armed ordinary Goal repair when its conversation is now Astra', async () => {
+it('retires an already armed ordinary Goal repair when its conversation is now finish-only Astra', async () => {
   const previous = getConfig();
   vi.useFakeTimers();
   try {
-    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'goal' } });
+    await saveConfig({ ...previous, ui: { ...previous.ui, finishTool: true }, goal: { ...previous.goal, enabled: true, mode: 'goal' } });
     await setSecret('openRouterApiKey', 'test-goal-key');
     await pair();
     const chat = 'a5555555-1111-4111-8111-000000000005';

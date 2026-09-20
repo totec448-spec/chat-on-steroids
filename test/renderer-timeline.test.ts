@@ -154,7 +154,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; sessions?: SessionSummary[]; pro?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -208,7 +208,8 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   const api: any = new Proxy(
     {
       getState: () => ok(state),
-      getChatModels: () => ok({ state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: options.pro ? ['high', 'pro'] : ['none', 'high'] }] }),
+      getChatModels: () => ok({ state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: options.pro ? ['high', 'pro'] : ['none', 'high'] },
+        ...(options.astra ? [{ id: 'gpt-6-pro', label: 'GPT-6 Pro', efforts: ['pro'] }] : [])] }),
       getSessionControls: (id: string) => ok({ sessionId: id, conversationId: 'chat-a', automation: live.automation, activeTurnId: 'held-turn', finishHeld: live.finishHeld, blocked: '', job: live.compacting ? { busy: true } : null }),
       releaseSessionFinish: (id: string, turn: string) => { live.controlCalls.push({ id, action: `release:${turn}` }); live.finishHeld = false; return ok({}); },
       setSessionAutomation: (id: string, action: string) => { live.controlCalls.push({ id, action }); live.automation = action; return ok({}); },
@@ -2758,6 +2759,7 @@ it('follows the accepted New Chat receipt while preserving a typed follow-up', a
 
 it('shows Pro Loop delivery before sending and freezes changes made while the opening is being accepted', async () => {
   const { w, live } = await boot([], false, [], [], { pro: true });
+  (await (w as any).api.getState()).data.config.ui.finishTool = true;
   const row = w.document.getElementById('loopDeliveryRow')!;
   const effort = w.document.getElementById('composerReasoning') as HTMLSelectElement;
   const delivery = w.document.getElementById('loopDelivery') as HTMLSelectElement;
@@ -2786,6 +2788,45 @@ it('shows Pro Loop delivery before sending and freezes changes made while the op
   expect(row.hidden).toBe(true);
   w.document.getElementById('newChat')!.click();
   expect(delivery.value).toBe('finish');
+});
+
+it.each(['goal', 'loop'] as const)('keeps Astra %s selected when changing delivery and hides finish choices when finish is disabled', async mode => {
+  const { w, append } = await boot([], true, [], [], { astra: true });
+  const api = (w as any).api;
+  const state = (await api.getState()).data;
+  state.config.ui.finishTool = true;
+  const getSession = api.getSession;
+  api.getSession = async (...args: unknown[]) => {
+    const result = await getSession(...args);
+    result.data.summary.selectedModel = { conversationId: 'chat-b', model: 'gpt-6-pro', reasoningEffort: 'pro', observedAt: Date.now() };
+    return result;
+  };
+  const model = w.document.getElementById('composerModel') as HTMLSelectElement;
+  model.value = 'gpt-6-pro'; model.dispatchEvent(new w.Event('change'));
+  const controls = { sessionId: summary([]).id, conversationId: 'chat-b', automation: mode, loopAfterTurn: false, blocked: '' };
+  api.getSessionControls = async () => ({ ok: true, data: controls });
+  api.setSessionAutomation = vi.fn(async (_id: string, next: string, afterTurn: boolean) => {
+    controls.automation = next as typeof mode; controls.loopAfterTurn = afterTurn;
+    return { ok: true, data: controls };
+  });
+  await append([]);
+  // Re-select after the session's recorded model projection has settled.
+  model.value = 'gpt-6-pro'; model.dispatchEvent(new w.Event('change'));
+  const row = w.document.getElementById('loopDeliveryRow')!;
+  const delivery = w.document.getElementById('loopDelivery') as HTMLSelectElement;
+  expect(row.hidden).toBe(false);
+  delivery.value = 'after-turn'; delivery.dispatchEvent(new w.Event('change'));
+  await settle();
+  expect(api.setSessionAutomation).toHaveBeenLastCalledWith(summary([]).id, mode, true);
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe(mode);
+  state.config.ui.finishTool = false;
+  await append([]);
+  expect(row.hidden).toBe(true);
+  expect(delivery.value).toBe('after-turn');
+  state.config.ui.finishTool = true;
+  model.value = 'gpt-6-pro'; model.dispatchEvent(new w.Event('change'));
+  expect(row.hidden).toBe(false);
+  expect(delivery.value).toBe('after-turn');
 });
 
 it('applies Off to the exact accepted New Chat opening while preserving an unrelated composer draft', async () => {

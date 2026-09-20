@@ -9,9 +9,16 @@
  */
 (() => {
   'use strict';
-  if (window.__cosUsageObserver) return;
-  window.__cosUsageObserver = true;
-  const post = window.postMessage.bind(window);
+  const OBSERVER_VERSION = 2;
+  const prior = window.__cosUsageObserver;
+  if (prior?.version === OBSERVER_VERSION && typeof prior.refresh === 'function' && prior.refresh() === true) return;
+  // A legacy boolean has no listener/reader disposal handle. A fresh document is
+  // required to replace it; stacking another active observer is not a repair.
+  if (prior && typeof prior.dispose !== 'function') { window.__cosUsageObserverNeedsReload = true; return; }
+  prior?.dispose();
+  let active = true;
+  const nativePost = window.postMessage.bind(window);
+  const post = (...args) => { if (active) nativePost(...args); };
   let latest = null;
   let requestOrder = 0, latestOrder = 0;
   const CONVERSATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -23,8 +30,10 @@
   // repeated provider observations across responses as well as inside one stream.
   const origins = new Map();
   const originReaders = new Set();
+  const readers = new Set();
   const ORIGIN_LISTEN_MS = 15 * 60_000;
   function publishOrigin(conversationId, requestIds, observedAt) {
+    if (!active) return;
     const fresh = requestIds.filter(id => !origins.has(`${conversationId}:${id}`));
     if (!fresh.length) return;
     for (const requestId of fresh) {
@@ -68,12 +77,14 @@
     latest = { type: 'cos-usage', rows, observedAt }; post(latest, location.origin);
   };
   async function inspect(response, observedAt, order) {
+    if (!active) return;
     let url;
     try { url = new URL(response.url); } catch { return; }
     if (url.origin !== location.origin || !/^\/backend-api\/(?:wham\/usage|conversation\/init|conversation\/prepare|models)(?:\?|$)/.test(url.pathname)) return;
     if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) return;
     const copy = response.clone(), reader = copy.body?.getReader();
     if (!reader) return;
+    readers.add(reader);
     const timer = setTimeout(() => void reader.cancel().catch(() => {}), 10000);
     let bytes = 0, text = ''; const decoder = new TextDecoder();
     try {
@@ -84,7 +95,7 @@
       }
       project(JSON.parse(text + decoder.decode()), observedAt, order);
     } catch { /* Unsupported metadata is unavailable, never guessed. */ }
-    finally { clearTimeout(timer); void reader.cancel().catch(() => {}); }
+    finally { clearTimeout(timer); readers.delete(reader); void reader.cancel().catch(() => {}); }
   }
   /**
    * Reads bounded complete SSE events from a clone without changing the page's response.
@@ -145,14 +156,16 @@
       return requestIds.size ? { conversationId, requestIds: [...requestIds] } : null;
   }
   async function inspectRequestOrigins(response, observedAt) {
+    if (!active) return;
     let url;
     try { url = new URL(response.url); } catch { return; }
-    if (url.origin !== location.origin || !/^\/backend-api\/(?:f\/)?conversation$/.test(url.pathname)) return;
+    if (url.origin !== location.origin || !/^\/backend-api\/(?:conversation|f\/conversation(?:\/resume)?)$/.test(url.pathname)) return;
     if (!response.ok || !response.headers.get('content-type')?.includes('text/event-stream')) return;
     if (originReaders.size >= 2) return;
     const copy = response.clone(), reader = copy.body?.getReader();
     if (!reader) return;
     originReaders.add(reader);
+    readers.add(reader);
     const timer = setTimeout(() => void reader.cancel().catch(() => {}), ORIGIN_LISTEN_MS);
     const decoder = new TextDecoder(), emitted = new Set(), stream = {};
     let bytes = 0, buffer = '';
@@ -186,12 +199,13 @@
       buffer += decoder.decode();
       scan(buffer);
     } catch { /* A missing stream observation leaves the existing Fiber path in charge. */ }
-    finally { clearTimeout(timer); originReaders.delete(reader); void reader.cancel().catch(() => {}); }
+    finally { clearTimeout(timer); originReaders.delete(reader); readers.delete(reader); void reader.cancel().catch(() => {}); }
   }
   let observedFetch = null;
   let observedWebSocket = null;
   const observedSockets = new WeakSet();
   function inspectSocketMessage(event, streams) {
+    if (!active) { streams.clear(); return; }
     // Pro hands its HTTP stream to the native conversation-turn-stream socket.
     // Header-only events matter too. No subscriptions or message reconstruction.
     if (typeof event.data !== 'string' || event.data.length > 2 * 1024 * 1024) { streams.clear(); return; }
@@ -234,14 +248,14 @@
     }
   }
   function installSocketObserver() {
-    if (typeof window.WebSocket !== 'function' || window.WebSocket === observedWebSocket) return;
+    if (!active || typeof window.WebSocket !== 'function' || window.WebSocket === observedWebSocket) return;
     observedWebSocket = new Proxy(window.WebSocket, {
       construct(target, args, newTarget) {
         const socket = Reflect.construct(target, args, newTarget);
         try {
           const url = new URL(socket.url);
           if (url.protocol === 'wss:' && (url.hostname === 'chatgpt.com' || url.hostname.endsWith('.chatgpt.com')) &&
-              !observedSockets.has(socket)) {
+              active && !observedSockets.has(socket)) {
             observedSockets.add(socket);
             const streams = new Map();
             socket.addEventListener('message', event => inspectSocketMessage(event, streams));
@@ -255,7 +269,7 @@
   }
   const inspectedResponses = new WeakSet();
   const installFetchObserver = () => {
-    if (window.fetch === observedFetch || typeof window.fetch !== 'function') return;
+    if (!active || window.fetch === observedFetch || typeof window.fetch !== 'function') return;
     // A page wrapper may still call our earlier wrapper. Capture its downstream
     // function per installation; changing a shared pointer would create a cycle.
     const downstreamFetch = window.fetch;
@@ -263,7 +277,9 @@
       // Request order fences late responses, not accounts. No account identity is inferred.
       const observedAt = Date.now(), order = ++requestOrder;
       const result = downstreamFetch.apply(this, args);
+      if (!active) return result;
       void result.then((response) => {
+        if (!active) return;
         if (inspectedResponses.has(response)) return;
         inspectedResponses.add(response);
         void inspect(response, observedAt, order).catch(() => {});
@@ -288,16 +304,31 @@
     window.addEventListener('DOMContentLoaded', installFetchObserver, { once: true });
     window.addEventListener('DOMContentLoaded', installSocketObserver, { once: true });
   }
-  window.addEventListener('message', (event) => {
-    if (event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-usage-request') return;
+  const request = (event) => {
+    if (!active || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-usage-request') return;
     if (latest) post(latest, location.origin);
     // Newest first: old evidence must not fill content's 16-ID pending capacity
     // before the current workflow can enter it during document startup.
     for (const { conversationId, requestId, observedAt } of [...origins.values()].slice(-16).reverse())
       post({ type: 'cos-request-origin', conversationId, requestIds: [requestId], observedAt }, location.origin);
-  });
-  window.addEventListener('pagehide', () => {
+  };
+  const hide = () => {
     for (const reader of originReaders) void reader.cancel().catch(() => {});
     origins.clear();
-  });
+  };
+  window.addEventListener('message', request);
+  window.addEventListener('pagehide', hide);
+  window.__cosUsageObserver = {
+    version: OBSERVER_VERSION,
+    refresh() { installFetchObserver(); installSocketObserver(); return active; },
+    current: () => active && window.fetch === observedFetch && window.WebSocket === observedWebSocket,
+    dispose() {
+      active = false;
+      for (const reader of readers) void reader.cancel().catch(() => {});
+      readers.clear(); origins.clear(); latest = null;
+      window.removeEventListener('message', request); window.removeEventListener('pagehide', hide);
+      window.removeEventListener('DOMContentLoaded', installFetchObserver);
+      window.removeEventListener('DOMContentLoaded', installSocketObserver);
+    }
+  };
 })();

@@ -20,7 +20,7 @@ function harness() {
     addEventListener(type: string, listener: (event: { data: string }) => void) { if (type === 'message') this.handlers.push(listener); }
     receive(data: unknown) { for (const listener of this.handlers) listener({ data: JSON.stringify(data) }); }
   }
-  const window = {
+  const window: any = {
     WebSocket: Socket,
     fetch: (..._args: unknown[]) => Promise.resolve(response),
     postMessage: (data: unknown) => posts.push(JSON.parse(JSON.stringify(data))),
@@ -28,16 +28,18 @@ function harness() {
       const rows = listeners.get(type) ?? [];
       rows.push({ handler, once: options?.once === true });
       listeners.set(type, rows);
-    }
+    },
+    removeEventListener: (type: string, handler: (event: unknown) => void) => listeners.set(type, (listeners.get(type) || []).filter(row => row.handler !== handler))
   };
   const dispatch = (type: string, event: unknown) => {
     const rows = listeners.get(type) ?? [];
     listeners.set(type, rows.filter(row => !row.once));
     for (const row of rows) row.handler(event);
   };
-  runInNewContext(script, { window, document, location: { origin: 'https://chatgpt.com' }, URL, Date: Clock, TextDecoder,
+  const evaluate = (source = script) => runInNewContext(source, { window, document, location: { origin: 'https://chatgpt.com' }, URL, Date: Clock, TextDecoder,
     setTimeout: (run: () => void, ms: number) => { timers.set(++timerId, { at: now + ms, run }); return timerId; },
     clearTimeout: (id: number) => timers.delete(id) });
+  evaluate();
   async function feed(data: unknown, url = 'https://chatgpt.com/backend-api/wham/usage', init: Record<string, unknown> = {}) {
     let done: () => void = () => {};
     const inspected = new Promise<void>(resolve => { done = resolve; });
@@ -76,6 +78,10 @@ function harness() {
   }
   return {
     posts,
+    evaluate,
+    observer: () => window.__cosUsageObserver,
+    markLegacy: () => { window.__cosUsageObserver.dispose(); window.__cosUsageObserver = true; },
+    needsReload: () => window.__cosUsageObserverNeedsReload === true,
     nativeSocket: Socket,
     socket: (url = 'wss://ws.chatgpt.com/ws') => new window.WebSocket(url),
     feed,
@@ -110,6 +116,38 @@ function harness() {
 }
 
 describe('MAIN-world usage projection', () => {
+  it('keeps one current observer and refreshes a provider-replaced wrapper without extra active readers', async () => {
+    const h = harness(), current = h.observer(), fetch = h.currentFetch();
+    h.evaluate(); expect(h.observer()).toBe(current); expect(h.currentFetch()).toBe(fetch);
+    h.replaceFetch(true); expect(current.current()).toBe(false);
+    h.evaluate(); expect(current.current()).toBe(true);
+    const stream = await h.openSse(); expect(stream.clones).toBe(1);
+    h.observer().dispose(); expect(stream.cancelled).toBe(true);
+    h.evaluate(); expect(h.observer()).not.toBe(current); expect(h.observer().current()).toBe(true);
+  });
+  it('retires a versioned observer across replacement while preserving provider wrappers and native sockets', async () => {
+    const h = harness(), old = h.observer(), socket = h.socket();
+    h.replaceFetch(true);
+    h.evaluate(script.replace('const OBSERVER_VERSION = 2;', 'const OBSERVER_VERSION = 3;'));
+    expect(old.current()).toBe(false); expect(h.observer().version).toBe(3);
+    const stream = await h.openSse(); expect(stream.clones).toBe(1); h.hide();
+    expect(socket).toBeInstanceOf(h.nativeSocket);
+    const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    await h.feedSse([`data: {"conversation_id":"${id}","metadata":{"request_id":"wfr_replaced"}}\n\n`]);
+    expect(h.posts.filter(row => row.requestIds?.includes('wfr_replaced'))).toHaveLength(1);
+  });
+  it('requires a fresh document for a legacy observer without a disposal handle', () => {
+    const h = harness(); h.markLegacy(); const before = h.currentFetch();
+    h.evaluate(); expect(h.needsReload()).toBe(true); expect(h.currentFetch()).toBe(before);
+  });
+  it('reads complete identity in the native f/conversation/resume stream without admitting arbitrary endpoints', async () => {
+    const h = harness(), id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const frame = [`data: {"conversation_id":"${id}","metadata":{"request_id":"wfr_resume"}}\n\n`];
+    await h.feedSse(frame, { method: 'POST' }, 'https://chatgpt.com/backend-api/f/conversation/resume');
+    expect(h.posts.map(row => row.requestIds)).toEqual([['wfr_resume']]);
+    await h.feedSse(frame, { method: 'POST' }, 'https://chatgpt.com/backend-api/other/conversation/resume');
+    expect(h.posts).toHaveLength(1);
+  });
   it('retains self-contained explicit root delta identity when a socket handoff has no encoding prologue', async () => {
     const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     const frame = (request_id: string) => `event: delta\ndata: ${JSON.stringify({ p: '', o: 'add', c: 0,

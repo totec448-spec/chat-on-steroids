@@ -7,6 +7,7 @@ import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt
 import { prepareSessionPrompt } from './session/prompt.js';
 import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
 import { isProModel } from '../shared/chat-models.js';
+import { supportsFinishAutomation } from '../shared/finish.js';
 import { injectedUserMessage, recordedRequestTurn, responseTurnId } from '../shared/chronology.js';
 import type { SessionSummary } from '../shared/session.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, type InputActivity } from './session/input.js';
@@ -119,7 +120,7 @@ import {
 } from './session/store.js';
 import { inFlightMcpRequests, runningToolCalls, runningToolProgress, settlingToolCalls } from './mcp/call-context.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
-import { briefShortfall, handoffPlanNotice, resumeBootstrapText } from './session/handoff.js';
+import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
 import {
   PRIME_ID,
   agentConversation,
@@ -320,42 +321,6 @@ const BROWSER_DISCONNECTED = '!browser-disconnected';
  * very differently before ending somebody's run.
  */
 const BROWSER_PRESENT_MS = 60_000;
-
-/**
- * The longest native compaction brief the browser bridge will carry across.
- *
- * This used to be 24k characters, which silently forced even a model instructed to write a
- * large token-budget handoff down to roughly six thousand tokens. The model-side prompt owns
- * the semantic ceiling (30k tokens); this is deliberately *not* another token approximation.
- * It is only a generous runaway-input guard, far above a normal 30k-token operational brief.
- */
-const MAX_BRIEF_CHARS = 256_000;
-
-/**
- * Cuts an over-long brief down to what will be typed, from the middle.
- *
- * Truncating the end was worse than not truncating at all: a brief is written TASK first
- * and NEXT / DO NOT last, so cutting the tail hands the fresh chat pages of history with
- * the instructions for what to do about it deleted — and nothing in the text says so. The
- * two ends are the parts that must survive, so the middle goes instead, with a marker in
- * its place. Both halves therefore end and begin at a line boundary where one is near.
- */
-function boundBrief(text: string, maxChars = MAX_BRIEF_CHARS): string {
-  if (text.length <= maxChars) return text;
-  const marker = '\n\n[… the middle of this brief was longer than the app carries across and was left out …]\n\n';
-  const room = maxChars - marker.length;
-  // The tail is the actionable half, so it gets the larger share.
-  const headRoom = Math.floor(room * 0.4);
-  const head = text.slice(0, headRoom);
-  const tail = text.slice(text.length - (room - headRoom));
-  const headBreak = head.lastIndexOf('\n');
-  const tailBreak = tail.indexOf('\n');
-  return (
-    (headBreak > headRoom - 400 ? head.slice(0, headBreak) : head) +
-    marker +
-    (tailBreak >= 0 && tailBreak < 400 ? tail.slice(tailBreak + 1) : tail)
-  );
-}
 
 /**
  * What the extension is asked to do: open a ChatGPT chat and type one message into it.
@@ -1475,7 +1440,8 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     stopPending: commands.some(c => c.spec.type === 'stop' && c.spec.sessionId === sessionId && c.spec.turnId === activeTurnId),
     objective: goalObjectiveFor(id),
     loopAfterTurn: control.afterTurn,
-    proLoopDelivery: session.selectedModel?.conversationId === id && isProModel(session.selectedModel.model, session.selectedModel.reasoningEffort),
+    proLoopDelivery: control.enabled && getConfig().ui.finishTool === true && session.selectedModel?.conversationId === id &&
+      supportsFinishAutomation(control.mode, session.selectedModel.model, session.selectedModel.reasoningEffort),
     automation: goalArmedFor(id) && !blocked ? control.enabled ? control.mode : 'goal' : 'off',
     blocked, job: resumeJobFor(sessionId) };
 }
@@ -2412,9 +2378,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return ({
       enabled: !superseded && !finishOnly && goalEnabledFor(id),
       configuredEnabled: !superseded && goalEnabledFor(id),
-      afterTurn: goalSwitchFor(id).afterTurn,
-      proLoopDelivery: astraSession?.selectedModel?.conversationId === id &&
-        isProModel(astraSession.selectedModel.model, astraSession.selectedModel.reasoningEffort),
+      afterTurn: loopAfterTurnFor(id),
+      proLoopDelivery: goalEnabledFor(id) && getConfig().ui.finishTool === true && astraSession?.selectedModel?.conversationId === id &&
+        supportsFinishAutomation(goalModeFor(id), astraSession.selectedModel.model, astraSession.selectedModel.reasoningEffort),
       // Has this chat answered for itself? The page reads the switch and the saved goal as
       // one state — see goalArmedFor() — and cannot tell an Off somebody chose here from an
       // Off merely inherited from the app-wide setting without being told which it is.
@@ -3074,19 +3040,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const token = typeof body['token'] === 'string' ? body['token'] : '';
       const entry = continuationByToken(token);
       if (!entry || entry.sessionId !== sessionId) return json(res, 409, { error: 'no_such_continuation' }, origin);
-      // Resume carries its brief without adding executor/project instructions.
-      // Only the brief uses its existing explicit middle-omission policy.
-      // Reserve the possible notice even if a plan update is settling during capture.
-      const overhead = resumeBootstrapText('', token).length + handoffPlanNotice(sessionId).length;
-      const brief = boundBrief(String(body['summary']), Math.min(MAX_BRIEF_CHARS, MAX_CHATGPT_MESSAGE_CHARS - overhead));
+      // The handoff owner freezes and budgets the brief with its saved plan and
+      // exact replacement framing. No executor/project setup is added on resume.
+      const brief = body['summary'].trim();
       // Refused here rather than deeper, because this is where the reason can still be said
       // in words the page will put on screen. A brief that cannot be a brief is a failed
       // compaction, and a failed compaction leaves the session exactly where it is — which
       // is strictly better than moving it into a chat that was handed half a document and
       // has no way to know it. See briefShortfall.
-      // Only the brief that would actually be stored is judged. Once a continuation holds
-      // one, a retry's text is discarded in favour of it, so refusing that text would refuse
-      // a capture that already succeeded.
+      // The handoff owner checks its bounded brief again before storage. Once a
+      // continuation holds one, a retry's text is discarded in favour of it, so
+      // refusing that text would refuse a capture that already succeeded.
       const source = known ?? (await getSession(sessionId));
       const shortfall = entry.handoffId ? null : briefShortfall(brief, source?.estimatedTokens ?? 0);
       if (shortfall) {

@@ -305,6 +305,11 @@
         </section>
         <section class="panel usage-panel" data-panel="usage">
           <div class="settings-heading"><span class="eyebrow">YOUR ACTIVITY</span><h1>Usage</h1><p>Model availability and the work recorded in this workspace.</p></div>
+          <section class="usage-section usage-messages" aria-labelledby="usageMessagesTitle">
+            <h2><span id="usageMessagesTitle">Verified messages</span><button class="btn usage-week-start" id="usageWeekStart" type="button" title="Change start day"><span id="usageWeekStartLabel"></span><span aria-hidden="true">›</span></button></h2>
+            <dl class="usage-message-counts" id="usageMessageCounts" aria-live="polite" translate="no"><div><dt>GPT-5.6</dt><dd id="usageMessages56">—</dd></div><div><dt>GPT-6</dt><dd id="usageMessages6">—</dd></div></dl>
+            <p class="muted" id="usageMessagePeriod"></p>
+          </section>
           <p class="muted usage-status" id="usageStatus" role="status">Updating usage in the background. After an update, this can take a few minutes. You can keep using the app.</p><div class="usage-summary" id="usageSummary"></div>
           <section class="usage-section"><h2>Token activity per day</h2><div id="usageHeatmap" class="usage-heatmap"></div><p class="muted">Estimated context processed per tool call · last 52 weeks</p></section>
           <section class="usage-section"><h2>Cost estimate per day</h2>
@@ -977,7 +982,7 @@
                         <button type="button" role="radio" aria-checked="false" data-mode="goal" data-keep-menu="true">Goal</button>
                         <button type="button" role="radio" aria-checked="false" data-mode="loop" data-keep-menu="true">Loop</button>
                         </div><select hidden id="chatAutomation" aria-label="Chat automation"><option value="off">Off</option><option value="goal">Goal</option><option value="loop">Loop</option></select>
-                      <label id="loopDeliveryRow" hidden>Pro Loop delivery<select id="loopDelivery"><option value="finish">Only finish</option><option value="after-turn">After this turn + finish</option></select></label>
+                      <label id="loopDeliveryRow" hidden>Continuation timing<select id="loopDelivery"><option value="finish">Only finish</option><option value="after-turn">After this turn + finish</option></select></label>
               <div id="sessionControls" hidden>
                 <div class="session-controls-menu">
                   <label for="sessionObjective">This chat's goal</label>

@@ -249,7 +249,7 @@ it('round-trips Goal controls and cannot revive old periodic input when Off canc
     await store.observeSessionModel(session.id, 'periodic-settings-chat', 'gpt-6-astra', Date.now());
     const row = await outbox.enqueueInput({ id: 'f0f00014-1111-4111-8111-111111111111', sessionId: session.id,
       text: 'Pending automatic instruction', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null },
-      { turnId: 'periodic-turn', periodic: false, userRequested: true });
+      { turnId: 'periodic-turn', periodic: false, mode: 'goal', userRequested: true });
     // Seed an old-version row; current code deliberately refuses new periodic input.
     await writeDurableNow('session-input', [{ ...row, finishOwner: { turnId: 'periodic-turn', periodic: true } }]);
     outbox.resetInputForTests();

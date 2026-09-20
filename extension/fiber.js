@@ -41,7 +41,7 @@
   'use strict';
 
   /** Bumped when the descriptor shape changes, so a stale pair cannot half-understand. */
-  const VERSION = 18;
+  const VERSION = 19;
   // The MAIN world survives an extension reload because the ChatGPT document survives it.
   // Recovery may therefore execute this file again in a page that still has an older helper
   // listener. Retire it across versions too: picker/plugin replies use their own v1
@@ -1417,27 +1417,150 @@
     }
     return { conversationId: found, conflict: false };
   }
-  /** #318 identified this native cache. Read only metadata for ids explicitly named
-   * by the mounted exchange. No child traversal, cached prose or cached final status. */
-  function shellRequestMetadata(queries, entry, conversation) {
+  /** The native shell subscribes to its live mapping independently of the history
+   * query (144961 / QH.C). Read published React values, never invoke store actions
+   * or enumerate cached branches. The mounted owner and exact user id fence this
+   * optional source before any message metadata can leave the helper. */
+  function shellLiveMapping(fiber, entry) {
+    const user = entry.turn.items.find(item => item?.type === 'user-message');
+    const userId = str(user?.messageId) || str(user?.serverMessageId);
+    if (!userId) return null;
+    const snapshots = new Map();
+    const inspected = new WeakSet();
+    const value = (object, key) => object && typeof object === 'object'
+      ? Object.getOwnPropertyDescriptor(object, key)?.value : undefined;
+    let conflict = false;
+    const inspect = candidate => {
+      if (!candidate || typeof candidate !== 'object' || inspected.has(candidate)) return;
+      inspected.add(candidate);
+      const conversation = value(candidate, 'renderedConversation'), turns = value(candidate, 'renderedTurns');
+      const mapping = value(conversation, 'mapping');
+      if (!mapping || !Array.isArray(turns) || turns.length > 4096 ||
+          turns.filter(turn => turn?.id === entry.id && turn.turn === entry.turn).length !== 1) return;
+      const node = value(mapping, userId), message = value(node, 'message');
+      if (value(node, 'id') !== userId || value(message, 'id') !== userId || message.author?.role !== 'user') return;
+      const prior = snapshots.get(mapping);
+      if (prior && prior.renderedConversation.current_node !== conversation.current_node) conflict = true;
+      snapshots.set(mapping, candidate);
+    };
+    let remaining = 2048;
+    for (let at = fiber, up = 0; at && up < MAX_CLIMB && remaining > 0; up++, at = at.return) {
+      if (at.memoizedProps?.conversationId !== entry.conversationId) continue;
+      for (let hook = at.memoizedState; hook && remaining-- > 0; hook = hook.next) {
+        const state = value(hook, 'memoizedState');
+        inspect(state); if (Array.isArray(state)) inspect(state[0]);
+      }
+      const data = at.updateQueue?.memoCache?.data;
+      if (!Array.isArray(data) || data.length > 32) continue;
+      for (const row of data) {
+        if (!Array.isArray(row) || row.length > 1024) continue;
+        for (const item of row) { if (--remaining < 0) break; inspect(item); }
+      }
+    }
+    return conflict || snapshots.size > 1 || remaining <= 0 ? false : snapshots.values().next().value || null;
+  }
+  /** The renderer publishes its chosen current_node together with the very same
+   * turn object. Follow parent links back to that turn's actual user, never pick
+   * a child or import another branch. Untyped early messages contribute ids only. */
+  function shellCurrentPath(snapshot, entry) {
+    if (snapshot?.renderedTurns.at(-1)?.turn !== entry.turn) return [];
+    const mapping = snapshot.renderedConversation.mapping, ids = [], seen = new Set();
+    let id = snapshot.renderedConversation.current_node;
+    for (let at = 0; at < MAX_ROWS && typeof id === 'string' && id.length <= MAX_TEXT && !seen.has(id); at++) {
+      const node = Object.getOwnPropertyDescriptor(mapping, id)?.value, message = node?.message;
+      if (node?.id !== id || message?.id !== id) return [];
+      seen.add(id); ids.push(id);
+      if (message.author?.role === 'user') {
+        const user = entry.turn.items.find(item => item?.type === 'user-message');
+        return id === (user?.messageId || user?.serverMessageId) && entry.turn.messageIds.every(value => seen.has(value))
+          ? ids.reverse() : [];
+      }
+      id = node.parent;
+    }
+    return [];
+  }
+  /** #318 identified the history cache. Both sources project only explicitly named
+   * messages. Typed public items own presentation; cache text cannot supply a final. */
+  function shellRequestMetadata(fiber, queries, entry, conversation) {
     if (conversation.conflict || !conversation.conversationId) return [];
     const ids = entry.turn.messageIds;
     if (!Array.isArray(ids) || ids.length > MAX_ROWS || new Set(ids).size !== ids.length) return [];
+    let live;
+    try { live = shellLiveMapping(fiber, entry); } catch { return []; }
+    if (live === false) return [];
     const matches = queries.filter(query => Array.isArray(query?.queryKey) && query.queryKey.length === 2 &&
       query.queryKey[0] === 'chatgpt-conversation' && query.queryKey[1] === conversation.conversationId);
-    if (matches.length !== 1) return [];
-    const data = matches[0].state?.data;
+    if (matches.length > 1) return [];
+    const data = matches[0]?.state?.data;
     if (data?.conversation_id && data.conversation_id !== conversation.conversationId) return [];
-    const mapping = data?.mapping;
+    const mapping = live?.renderedConversation?.mapping || data?.mapping;
     if (!mapping || typeof mapping !== 'object') return [];
     const out = [];
-    for (const id of ids) {
+    const publicBudget = { remaining: MAX_TURN_TEXT };
+    const selected = new Set(ids);
+    for (const id of new Set([...ids, ...shellCurrentPath(live, entry)])) {
       if (typeof id !== 'string' || !id || id.length > MAX_TEXT || !own.call(mapping, id)) continue;
-      const node = mapping[id], message = node?.message;
+      const node = Object.getOwnPropertyDescriptor(mapping, id)?.value, message = node?.message;
       if (node?.id !== id || message?.id !== id) continue;
-      out.push({ id, create_time: num(message.create_time), metadata: { request_id: str(message.metadata?.request_id) } });
+      const request = str(message.metadata?.request_id), cached = data?.mapping?.[id]?.message;
+      if (live && cached?.id === id && request && cached.metadata?.request_id && cached.metadata.request_id !== request) return [];
+      const publicMessage = selected.has(id) && message.author?.role === 'assistant' && !hiddenMessage(message) &&
+        message.metadata?.is_visually_hidden_reasoning_group !== true && message.metadata?.summary_type !== 'raw_cot';
+      const thought = publicMessage && thoughtMessage(message) && Array.isArray(message.content.thoughts)
+        ? message.content.thoughts.at(-1)?.summary : null;
+      const preamble = publicMessage && channelOf(message) === 'commentary' &&
+        (!message.recipient || message.recipient === 'all') ? authoredText(message) : null;
+      out.push({ id, create_time: num(message.create_time), metadata: { request_id: request },
+        ...(typeof thought === 'string' ? { thought: budgetedText(thought, publicBudget, MAX_RENDERED_TEXT) } : {}),
+        ...(preamble ? { preamble: budgetedText(preamble, publicBudget, MAX_RENDERED_TEXT),
+          publicIdentity: { parent_id: str(message.metadata?.parent_id), working_turn_id: str(message.metadata?.working_turn_id),
+            turn_exchange_id: str(message.metadata?.turn_exchange_id) } } : {}) });
     }
     return out;
+  }
+  /** Public shell titles/preambles have no ids of their own. Their selected source
+   * messages do. Match only unique public representations; never mint ids from a
+   * group index, use raw analysis, or suppress DOM based on this text comparison. */
+  function shellPublicActivity(shell, metadata, rendered, budget, section, exactAnchors) {
+    const publicItems = shell.entry.turn.items.flatMap(item => item?.type === 'chatgpt-reasoning-group' &&
+      Array.isArray(item.items) && item.reasoningRecap?.type !== 'hide_all' ? item.items : []).filter(item => item?.type === 'reasoning' &&
+        item.isTransient !== true && ['thought', 'preamble'].includes(item.presentation) && typeof item.content === 'string');
+    const ids = shell.entry.turn.messageIds;
+    const order = new Map(Array.isArray(ids) && ids.length <= MAX_ROWS ? ids.map((id, index) => [id, index]) : []);
+    for (const message of rendered) if (order.has(message.rawMessageId)) message.order = order.get(message.rawMessageId);
+    const events = [];
+    const blocks = [...section.querySelectorAll('[data-markdown-text-style="assistant-message"]')]
+      .filter(node => node.closest('[data-turn-key]') === section && !node.closest(OWN_SURFACES)).slice(0, MAX_ROWS);
+    for (const source of metadata) for (const kind of ['thought', 'preamble']) {
+      const text = source[kind];
+      const matches = publicItems.filter(item => item.presentation === kind && item.content === text);
+      if (!text || matches.length !== 1 ||
+          metadata.filter(other => other[kind] === text).length !== 1) continue;
+      const authored = kind === 'preamble' ? authoredAssistantMessages([{ id: source.id, author: { role: 'assistant' },
+        channel: 'commentary', metadata: source.publicIdentity, create_time: source.create_time,
+        content: { content_type: 'text', parts: [text] } }], budget)[0] : null;
+      const publicText = kind === 'thought' ? budgetedText(visibleText(text), budget, 300) : authored?.rawText;
+      if (!publicText) continue;
+      if (kind === 'thought') events.push({ messageId: source.id, label: publicText, order: order.get(source.id) });
+      else if (!rendered.some(message => message.rawMessageId === source.id)) rendered.push({ messageId: authored.messageId,
+        rawMessageId: source.id, role: 'assistant', stable: authored.stable, rawText: publicText, renderedHtml: '',
+        order: order.get(source.id), createTime: authoredTime(source) });
+      if (kind === 'preamble') {
+        // Native ChatGptMarkdown is owned by the exact typed reasoning item.
+        // Text equality above selects public content; only this object relation
+        // may place a local tool chunk beside the provider's own prose node.
+        const nodes = blocks.filter(node => {
+          for (let at = fiberOf(node), up = 0; at && up < MAX_CLIMB; up++, at = at.return) {
+            if (at.memoizedProps?.item === matches[0]) return true;
+            if (at.memoizedProps?.entry) break;
+          }
+          return false;
+        });
+        if (nodes.length === 1) exactAnchors.set(nodes[0], source.id);
+      }
+    }
+    rendered.sort((a, b) => a.order - b.order);
+    return { events, notifications: [] };
   }
   /** Translate only publicly identified items in the mounted exchange. Missing item ids
    * stay missing; a stopped turn does not manufacture replies to its tool calls. */
@@ -1545,7 +1668,7 @@
         const calls = shell ? shell.calls : callsOf(messages, codeReceipts);
         const queries = shell ? shellQueries(fiber) : [];
         const conversation = shell ? shellConversation(queries, shell.entry.conversationId, conversationEvidenceOf(fiber)) : conversationEvidenceOf(fiber);
-        const metadata = shell ? shellRequestMetadata(queries, shell.entry, conversation) : messages;
+        const metadata = shell ? shellRequestMetadata(fiber, queries, shell.entry, conversation) : messages;
         const requests = requestIdsOf(metadata);
         if (shell) for (const call of calls) {
           const source = metadata.find(message => message.id === call.messageId);
@@ -1558,8 +1681,8 @@
         const turnBudget = { remaining: Math.min(MAX_TURN_TEXT, responseBudget.remaining) };
         const before = turnBudget.remaining;
         const renderedMessages = renderedMessagesOf(group.sections, messages, turnBudget, exactAnchors, conversation.conversationId);
+        const nativeActivities = shell ? shellPublicActivity(shell, metadata, renderedMessages, turnBudget, section, exactAnchors) : nativeActivitiesOf(group.sections, messages, exactThoughtRows);
         responseBudget.remaining -= before - turnBudget.remaining;
-        const nativeActivities = shell ? { events: [], notifications: [] } : nativeActivitiesOf(group.sections, messages, exactThoughtRows);
         const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes);
         const activities = nativeActivities.events;
         const endMessageId = turnEndMessageId(messages);
@@ -1602,6 +1725,9 @@
           for (const slot of shell.slots) {
             desiredTurnStamps.set(slot.node, `${scanToken}:${index}`);
             if (!conversation.conflict) desiredMessageStamps.set(slot.node, `${scanToken}:${index}:${encodeURIComponent(slot.id)}`);
+            // A slot and its inner Markdown are one native message. Publishing
+            // both as placement anchors would make every shell final ambiguous.
+            for (const [node, id] of exactAnchors) if (id === slot.id) exactAnchors.delete(node);
           }
           // Busy hint only, never a completion receipt or a Stop action target.
           const running = shell.entry.turn.status === 'in_progress' ? location.pathname : null;
@@ -1633,7 +1759,7 @@
       const section = sections[at];
       try {
         if (!section || !section.getAttribute) continue;
-        for (const node of section.querySelectorAll(`[data-clf-fiber-message], [data-content-search-unit-key], ${MARKDOWN}`)) {
+        for (const node of section.querySelectorAll(`[data-clf-fiber-message], [data-content-search-unit-key], [data-markdown-text-style="assistant-message"], ${MARKDOWN}`)) {
           const wantedMessage = desiredMessageStamps.get(node);
           const currentMessage = node.getAttribute('data-clf-fiber-message');
           if (wantedMessage === undefined) {
