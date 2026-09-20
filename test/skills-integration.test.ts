@@ -13,6 +13,7 @@ import { resolveCwd, resolveIn, type ToolContext } from '../src/main/mcp/kernel.
 import { currentWorkspace, resetWorkspaces, setWorkspaceFor, workspaceForChat } from '../src/main/workspace.js';
 import { emptyEvidence, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import { withManagedSkills } from '../src/main/skill-access.js';
+import { listSkillLibrary, readLibrarySkill } from '../src/main/skill-library.js';
 import { prepareSessionPrompt, prepareSkillFollowup, fitSessionPrompt } from '../src/main/session/prompt.js';
 import { userPromptText } from '../src/shared/user-prompt.js';
 import { addProject } from '../src/main/projects.js';
@@ -52,6 +53,81 @@ it('reads and installs through existing direct and nested Core tools without exp
   const desktop = await rpc('exec', { code: 'text(await tools.read({paths:["/skills/review/SKILL.md"]}));' }, 'desktop');
   expect(desktop.isError).toBe(true);
   expect(getConfig().roots).toEqual([]);
+});
+it('uses an approved linked managed package as a package-bounded /skills alias', async () => {
+  const project = path.join(directory, 'project');
+  const linkedPackage = path.join(project, 'shared-review');
+  await fs.mkdir(path.join(linkedPackage, 'references'), { recursive: true });
+  await fs.mkdir(path.join(linkedPackage, 'agents'), { recursive: true });
+  await fs.writeFile(path.join(linkedPackage, 'SKILL.md'), '# Linked review\n\nLINKED_SKILL_TEXT');
+  await fs.writeFile(path.join(linkedPackage, 'references', 'notes.md'), 'LINKED_RESOURCE_TEXT');
+  await fs.writeFile(path.join(linkedPackage, 'agents', 'openai.yaml'), 'interface: { display_name: "Linked review display" }');
+  await fs.symlink(linkedPackage, path.join(directory, 'skills', 'linked-review'), process.platform === 'win32' ? 'junction' : 'dir');
+  const sibling = path.join(project, 'outside-package');
+  await fs.mkdir(sibling);
+  await fs.writeFile(path.join(sibling, 'secret.md'), 'SIBLING_MUST_STAY_OUTSIDE_ALIAS');
+  await fs.symlink(sibling, path.join(linkedPackage, 'references', 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
+
+  const previous = getConfig();
+  await saveConfig({ ...previous, roots: [{ name: 'project', path: project }] });
+  try {
+    const library = await listSkillLibrary();
+    expect(library.skills.find(skill => skill.id === 'linked-review')).toMatchObject({
+      id: 'linked-review', managed: true, path: '/skills/linked-review/SKILL.md', displayName: 'Linked review display'
+    });
+    expect((await readLibrarySkill('linked-review', {}, library)).text).toContain('LINKED_SKILL_TEXT');
+
+    const resource = await rpc('read', { paths: ['/skills/linked-review/references/notes.md'] });
+    expect(resource.isError).not.toBe(true);
+    expect(JSON.stringify(resource)).toContain('LINKED_RESOURCE_TEXT');
+
+    const escapedResource = await rpc('read', { paths: ['/skills/linked-review/references/escape/secret.md'] });
+    expect(JSON.stringify(escapedResource)).not.toContain('SIBLING_MUST_STAY_OUTSIDE_ALIAS');
+    expect(JSON.stringify(escapedResource)).toMatch(/escape|approved|folder|link/i);
+    const nativeEscape = await rpc('read', {
+      paths: [path.join(directory, 'skills', 'linked-review', 'references', 'escape', 'secret.md')]
+    });
+    expect(JSON.stringify(nativeEscape)).not.toContain('SIBLING_MUST_STAY_OUTSIDE_ALIAS');
+    expect(JSON.stringify(nativeEscape)).toMatch(/escape|approved|folder|link/i);
+
+    const call = { startedAt: Date.now(), transportKey: null, agent: null, caller: { transportKey: null, requestId: null, conversationId: 'linked-skill-cwd' }, outcome: null, evidence: emptyEvidence() } as CallContext;
+    await runInCallContext(call, async () => {
+      const resolved = await resolveIn(withManagedSkills(ctx).roots, '/skills/linked-review/references/notes.md');
+      expect(resolved.virtual).toBe('/skills/linked-review/references/notes.md');
+      expect((await resolveIn(withManagedSkills(ctx).roots, '/SKILLS/linked-review/references/notes.md')).virtual)
+        .toBe('/skills/linked-review/references/notes.md');
+      if (process.platform === 'win32') {
+        expect((await resolveIn(withManagedSkills(ctx).roots, '/skills/LINKED-REVIEW/references/notes.md')).virtual)
+          .toBe('/skills/linked-review/references/notes.md');
+      }
+      expect((await resolveIn(withManagedSkills(ctx).roots, 'references/notes.md', { base: '/skills/linked-review' })).virtual)
+        .toBe('/skills/linked-review/references/notes.md');
+      expect((await resolveIn(withManagedSkills(ctx).roots, path.join(directory, 'skills', 'linked-review', 'references', 'notes.md'))).virtual)
+        .toBe('/skills/linked-review/references/notes.md');
+      expect(currentWorkspace()).toBeNull();
+    });
+    setWorkspaceFor('chat:linked-skill-restore', { virtual: '/skills/linked-review', real: linkedPackage });
+    expect(workspaceForChat('linked-skill-restore')).toBeNull();
+    if (process.platform === 'win32') {
+      const outsideWithSkillBase = await resolveIn(
+        withManagedSkills(ctx).roots,
+        path.join(project, 'outside-package', 'secret.md'),
+        { base: '/skills/linked-review' }
+      );
+      expect(outsideWithSkillBase.virtual).toBe('/project/outside-package/secret.md');
+    }
+  } finally {
+    await saveConfig(previous);
+  }
+});
+it('refuses a managed package link whose target is outside the live approved roots', async () => {
+  const outside = path.join(directory, 'unapproved-linked-skill');
+  await fs.mkdir(outside);
+  await fs.writeFile(path.join(outside, 'SKILL.md'), '# Private link\n\nUNAPPROVED_LINK_TEXT');
+  await fs.symlink(outside, path.join(directory, 'skills', 'private-link'), process.platform === 'win32' ? 'junction' : 'dir');
+  const response = await rpc('read', { paths: ['/skills/private-link/SKILL.md'] });
+  expect(JSON.stringify(response)).not.toContain('UNAPPROVED_LINK_TEXT');
+  expect(JSON.stringify(response)).toMatch(/outside|approved|folder/i);
 });
 it('preserves live read and write capability enforcement for the managed folder', async () => {
   const caps = ctx.caps;
