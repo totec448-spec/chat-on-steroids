@@ -2084,22 +2084,31 @@ describe('automatic compaction', () => {
           messageId: 'guarded-native-final', providerMessageId: '11111111-2222-4333-8444-555555555555',
           text: 'The requested work is complete.', state: 'final', final: true, activeNow: true
         }] } });
+        const endedAt = Date.now();
         await request('POST', '/events', { body: { conversationId, events: [{
-          kind: 'turn_end', time: Date.now(), turnId: 'guarded-page-turn',
+          kind: 'turn_end', time: endedAt, turnId: 'guarded-page-turn',
           outcome: scenario === 'stopped' ? 'stopped' : scenario === 'finished' ? 'completed' : 'failed'
         }] } });
         if (scenario === 'auto-off') await request('POST', '/settings', { body: { conversationId, autoCompact: false } });
         if (scenario === 'blocked') setChatBlocked(conversationId, true);
         if (scenario === 'closed') await request('POST', '/closed', { body: { conversationId, manual: true } });
+        // This case requires a call STARTED after the end. Fast hosts can execute
+        // both within one millisecond; disk speed is not ownership evidence.
+        const later = Math.max(Date.now(), endedAt + 1);
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(later);
         try {
           await call('x'.repeat(44_000));
           await settled();
           expect((await getSession(sessionId))?.contextTokens).toBeGreaterThan(10_000);
           if (scenario === 'finished') expect(await sessionStoreModule.readCompletedFinal(sessionId, conversationId))
             .toMatchObject({ messageId: 'guarded-native-final' });
-          if (scenario === 'stopped') expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, from: conversationId });
+          if (scenario === 'stopped') await vi.waitFor(() =>
+            expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, from: conversationId }));
           else expect(continuationForSession(sessionId)).toBeNull();
-        } finally { if (scenario === 'blocked') setChatBlocked(conversationId, false); }
+        } finally {
+          clock.mockRestore();
+          if (scenario === 'blocked') setChatBlocked(conversationId, false);
+        }
       });
     });
 
