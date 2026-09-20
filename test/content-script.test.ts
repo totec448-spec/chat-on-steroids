@@ -12067,6 +12067,63 @@ describe('the Compact & resume control', () => {
     expect(live.document.querySelector('.clf-pill-text')!.textContent).toContain('message box is not ready (composer_missing)');
   });
 
+  it.each([false, true])('establishes the compaction source after hydration (editor already mounted=%s)', async editorMounted => {
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, job: null,
+        recordedQuestionId: 'm-restored-question' } }),
+      compact: () => ({ ok: true, data: { started: true, token: 'hydrated-source', prompt: 'Write the exact handoff brief.',
+        job: { sessionId: 'hydrated-session', stage: 'handoff-pending', automatic: true, busy: true, handoffId: null, error: null } } })
+    });
+    live.hook.injectControl();
+    const box = live.document.querySelector('#prompt-textarea')!;
+    const parent = box.parentNode!;
+    if (!editorMounted) box.remove();
+    const timer = live.window.setTimeout;
+    let waiting = false;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => {
+      if (ms === 15000) { waiting = true; return 0; }
+      return timer(fn, ms);
+    }) as typeof timer;
+    const sends = watchSend(live.document);
+    const running = live.hook.startCompact(true);
+    await settle(100);
+    expect(waiting).toBe(true);
+    expect(sends()).toBe(0);
+    userTurn(live.document, 'restored-question', 'Existing work to continue', { sent: false });
+    if (!editorMounted) parent.appendChild(box);
+    await running;
+    expect(sends()).toBe(1);
+    expect(live.sent.filter(message => message.sourceDispatch)).toHaveLength(1);
+    expect(live.sent.some(message => message.sourceLost)).toBe(false);
+  });
+
+  it.each(['question', 'send', 'navigation'] as const)('does not compact after a real %s change during source hydration', async change => {
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, job: null } }),
+      compact: message => message.sourceLost ? { ok: true, data: { aborted: true, job: null } }
+        : { ok: true, data: { started: true, token: 'changed-source', prompt: 'Write the exact handoff brief.',
+          job: { sessionId: 'changed-session', stage: 'handoff-pending', automatic: true, busy: true, handoffId: null, error: null } } }
+    });
+    live.hook.injectControl();
+    if (change === 'question') userTurn(live.document, 'original', 'Original work', { sent: false });
+    const box = live.document.querySelector('#prompt-textarea')!;
+    const parent = box.parentNode!;
+    box.remove();
+    const timer = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => ms === 15000 ? 0 : timer(fn, ms)) as typeof timer;
+    const sends = watchSend(live.document);
+    const running = live.hook.startCompact(true);
+    await settle(100);
+    parent.appendChild(box);
+    if (change === 'question') userTurn(live.document, 'replacement', 'New work', { sent: false });
+    if (change === 'send') userTurn(live.document, 'new-send', 'New work');
+    if (change === 'navigation') live.window.history.pushState({}, '', '/c/bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee');
+    await running;
+    expect(sends()).toBe(0);
+    expect(live.sent.some(message => message.sourceAttempt || message.sourceDispatch || message.resume)).toBe(false);
+    expect(composerText(live.document)).toBe('');
+  });
+
   it.each(['missing', 'disabled', 'hidden'] as const)('waits for a %s editor to become available before inserting one handoff', async state => {
     live = await harness(undefined, {
       activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, job: null } }),

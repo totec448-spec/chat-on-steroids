@@ -1,10 +1,10 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { bindBundledRipgrep, execRecoveryHints, nonZeroExitIsBenign, repairPowerShellQuoting } from '../src/main/exec-hints.js';
-import { deriveExecArgs, getShellByModelProvidedPath } from '../src/main/codex/shell.js';
+import { deriveExecArgs, getShellByModelProvidedPath, withPosixPathPrefix } from '../src/main/codex/shell.js';
 import { composeCommandBatch, parseCommandBatchSections } from '../src/main/codex/command-batch.js';
 import { locateRipgrep } from '../src/main/ripgrep.js';
 
@@ -42,6 +42,25 @@ describe('native shell argument and batch parity', () => {
 });
 
 const zsh = getShellByModelProvidedPath('zsh');
+it.skipIf(!zsh)('restores bundled command discovery after a login profile rewrites PATH', () => {
+  const dir = fixture();
+  const bundled = join(dir, "app's bundled tools");
+  mkdirSync(bundled);
+  writeFileSync(join(bundled, 'rg'), '#!/bin/sh\nprintf bundled-rg\n', { mode: 0o755 });
+  writeFileSync(join(dir, '.zprofile'), 'export PATH=/usr/bin:/bin\n');
+  const command = withPosixPathPrefix('command -v rg; rg; printf "\\n%s" "$PATH"', 'zsh', bundled);
+  const args = deriveExecArgs(zsh!, command, true);
+  const result = spawnSync(args[0]!, args.slice(1), { encoding: 'utf8', env: { ...process.env, ZDOTDIR: dir } });
+  expect(result.status).toBe(0);
+  expect(result.stdout.trim().split('\n')).toEqual([join(bundled, 'rg'), 'bundled-rg', `${bundled}:/usr/bin:/bin`]);
+});
+
+it('leaves other shell languages and missing bundled paths unchanged', () => {
+  expect(withPosixPathPrefix('Get-Command rg', 'powershell', '/bundle')).toBe('Get-Command rg');
+  expect(withPosixPathPrefix('where rg', 'cmd', '/bundle')).toBe('where rg');
+  expect(withPosixPathPrefix('command -v rg', 'sh', null)).toBe('command -v rg');
+});
+
 it.skipIf(!zsh)('preserves native zsh unmatched-glob failure instead of reporting no search matches', () => {
   const command = bindBundledRipgrep('rg needle missing/*.ts', 'zsh', locateRipgrep());
   const args = deriveExecArgs(zsh!, command, false);
