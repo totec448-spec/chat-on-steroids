@@ -2,6 +2,7 @@ import { ui, t } from './i18n.js';
 import type { SessionSummary, SessionEvent } from '../shared/session.js';
 import { el } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
+import { slideTransition } from './slide-transition.js';
 
 /** A read-only second pane. Its selection never changes the main chat's composer. */
 export function createAgentPanel(options: {
@@ -13,7 +14,7 @@ export function createAgentPanel(options: {
   openMain: (id: string) => void;
   working: (summary: SessionSummary) => boolean;
 }) {
-  const pane = el('aside', 'agent-panel'); pane.hidden = true;
+  const pane = el('aside', 'agent-panel'); pane.hidden = true; pane.inert = true;
   ui(pane, 'aria-label', () => t("Sub-agents"));
   attachWorkPanelResize(options.host, pane);
   const head = el('div', 'agent-panel-header'); head.hidden = true;
@@ -23,14 +24,29 @@ export function createAgentPanel(options: {
   const body = el('div', 'agent-panel-body');
   head.append(back, title); pane.append(head, body); options.host.append(pane);
   let parent: string | null = null, workers: SessionSummary[] = [], selected: string | null = null;
-  let generation = 0;
-  function hide(): void {
-    generation++; pane.hidden = true; selected = null;
-    options.host.classList.remove('has-agent-panel'); options.toggle.setAttribute('aria-expanded', 'false');
+  let generation = 0, openState = false, transition: Animation | null = null;
+  function hide(immediate = false): void {
+    generation++; selected = null;
+    const wasOpen = openState; openState = false; pane.inert = true;
+    options.toggle.setAttribute('aria-expanded', 'false');
+    transition?.cancel(); transition = null;
+    const finish = () => {
+      if (openState) return;
+      pane.hidden = true;
+      options.host.classList.remove('has-agent-panel');
+      transition = null;
+    };
+    if (immediate || pane.hidden || !wasOpen) { finish(); return; }
+    transition = slideTransition(pane, 'right', false, finish);
   }
   function show(): void {
-    options.onShow?.();
-    pane.hidden = false; options.host.classList.add('has-agent-panel'); options.toggle.setAttribute('aria-expanded', 'true');
+    const entering = !openState;
+    if (entering) options.onShow?.();
+    openState = true; pane.hidden = false; pane.inert = false;
+    options.host.classList.add('has-agent-panel'); options.toggle.setAttribute('aria-expanded', 'true');
+    if (!entering) return;
+    transition?.cancel(); transition = null;
+    transition = slideTransition(pane, 'right', true, () => { if (openState) transition = null; });
   }
   function list(): void {
     generation++; selected = null; head.hidden = true; body.replaceChildren();
@@ -49,16 +65,16 @@ export function createAgentPanel(options: {
   async function open(id: string, refresh = false): Promise<void> {
     const worker = workers.find(row => row.id === id);
     if (!worker) return;
-    const preserve = refresh && selected === id && !pane.hidden;
+    const preserve = refresh && selected === id && openState;
     show(); selected = id; const request = ++generation;
     head.hidden = false; title.textContent = worker.title;
     if (!preserve) body.replaceChildren(el('p', 'meta', () => t("Loading conversation…")));
-    const current = () => request === generation && selected === id && !pane.hidden;
+    const current = () => request === generation && selected === id && openState;
     const detail = await options.load(id);
     if (!current()) return;
     if (!detail) { body.replaceChildren(el('p', 'meta', () => t("Conversation unavailable"))); return; }
     const openMain = el('button', 'btn', () => t("Open full chat")); openMain.setAttribute('type', 'button');
-    openMain.onclick = () => { hide(); options.openMain(id); };
+    openMain.onclick = () => { hide(true); options.openMain(id); };
     const position = body.scrollTop;
     const follow = !preserve || position + body.clientHeight >= body.scrollHeight - 40;
     body.replaceChildren(openMain, ...options.render(detail.events, id, current));
@@ -69,16 +85,16 @@ export function createAgentPanel(options: {
     if (event.key !== 'Escape') return;
     event.preventDefault(); hide(); options.toggle.focus();
   });
-  options.toggle.onclick = () => { if (pane.hidden) { show(); list(); } else hide(); };
+  options.toggle.onclick = () => { if (!openState) { show(); list(); } else hide(); };
   return {
     hide,
     open,
     update(id: string | null, next: SessionSummary[]): void {
-      if (parent !== id) { hide(); parent = id; }
+      if (parent !== id) { hide(true); parent = id; }
       const previous = workers.find(worker => worker.id === selected);
       workers = next; options.toggle.hidden = id === null;
       ui(options.toggle, 'title', () => t("Sub-agents · {0} recorded", [workers.length]));
-      if (pane.hidden) return;
+      if (!openState) return;
       const latest = workers.find(worker => worker.id === selected);
       if (!selected || !latest) list();
       else if (latest.updatedAt !== previous?.updatedAt) void open(latest.id, true);

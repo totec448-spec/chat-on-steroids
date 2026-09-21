@@ -24,18 +24,21 @@ import { CHAT_ACTIVE_MS, type SessionSummary } from '../src/shared/session.js';
 let document: Document;
 let css = '';
 let chatSource = '';
+let terminalSource = '';
 let browserPreferencesSource = '';
 
 beforeAll(async () => {
   browserPreferencesSource = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'browser-preferences.ts'), 'utf8');
-  const [html, styles, chat] = await Promise.all([
+  const [html, styles, chat, terminal] = await Promise.all([
     fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8'),
     fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'styles.css'), 'utf8'),
-    fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'chat.ts'), 'utf8')
+    fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'chat.ts'), 'utf8'),
+    fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'workspace-terminal.ts'), 'utf8')
   ]);
   document = new JSDOM(html).window.document;
   css = styles;
   chatSource = chat;
+  terminalSource = terminal;
 });
 
 it('searches whole settings sections without empty headings, orphaned controls or lost conditional visibility', () => {
@@ -67,11 +70,19 @@ it('limits the existing tool-detail preference to handoff briefs', () => {
   expect(chatSource).toContain("applyChatChecked($<HTMLInputElement>('goalIncludeToolCalls')");
 });
 
-it('keeps the context circle in the gear group rather than an auto-placed composer grid cell', () => {
-  const group = document.getElementById('composerSettings')!.parentElement!;
+it('keeps command plumbing hidden while the context circle occupies the former gear group', () => {
+  const group = document.getElementById('contextMeter')!.parentElement!;
   expect(group.classList.contains('composer-options')).toBe(true);
   expect(document.getElementById('contextMeter')!.parentElement).toBe(group);
   expect(document.getElementById('contextMeterInfo')!.parentElement?.id).toBe('contextMeter');
+  expect(document.getElementById('composerSettings')).toBeNull();
+  expect(document.querySelector('#composer summary[aria-label="Chat options"]')).toBeNull();
+  expect(document.querySelector('#composer use[href="#i-gear"]')).toBeNull();
+  const state = document.getElementById('composerCommandState') as HTMLElement;
+  expect(state.hidden).toBe(true);
+  for (const id of ['automationSwitch', 'chatAutomation', 'sessionControls', 'sessionObjective', 'createPlan', 'compactSession']) {
+    expect(document.getElementById(id)!.closest('#composerCommandState')).toBe(state);
+  }
 });
 
 it('does not expose a periodic Astra continuation outside session_finish', () => {
@@ -115,7 +126,7 @@ describe('the session card header', () => {
     expect(rule('.sidebar-connection')).toContain('width: 36px; height: 36px');
     expect(document.getElementById('connectionAdvanced')).not.toBeNull();
     expect(document.getElementById('connectionAdvancedGrid')).not.toBeNull();
-    expect(document.getElementById('sessionControls')!.closest('#composerSettings')).not.toBeNull();
+    expect(document.getElementById('sessionControls')!.closest('#composerCommandState')).not.toBeNull();
     expect(header.querySelector('.session-controls')).toBeNull();
   });
 
@@ -424,7 +435,7 @@ describe('the settings sheet', () => {
     const pane = document.querySelector('.view[data-view="settings"]')!;
     const order = [...pane.querySelectorAll('[id^="goal"]')].map((node) => node.id);
     expect(document.getElementById('goalEnabled')).toBeNull();
-    expect(document.getElementById('chatAutomation')!.closest('#composerSettings')).not.toBeNull();
+    expect(document.getElementById('chatAutomation')!.closest('#composerCommandState')).not.toBeNull();
     expect(order.indexOf('goalKey')).toBeLessThan(order.indexOf('goalPick'));
     expect(order.indexOf('goalPick')).toBeLessThan(order.indexOf('goalReasoning'));
     expect(order.indexOf('goalReasoning')).toBeLessThan(order.indexOf('goalPromptEdit'));
@@ -498,6 +509,34 @@ describe('the session timeline', () => {
 });
 
 describe('the window as a whole', () => {
+  it('keeps workspace panel controls together at the right edge of the titlebar', () => {
+    const topbar = document.querySelector('.app-topbar')!;
+    const actions = document.getElementById('workspaceTopbarActions')!;
+    expect(actions.parentElement).toBe(topbar);
+    expect(rule('.app-topbar-workspace-actions')).toContain('margin-left: auto');
+    expect(rule('.app-topbar-workspace-actions')).toContain('gap: 4px');
+    expect(rule('.app-topbar-workspace-actions')).toContain('-webkit-app-region: no-drag');
+    expect(rule('.app-topbar-workspace-actions > .btn')).toContain('width: 28px');
+    expect(rule('.app-topbar-workspace-actions > .btn')).toContain('height: 24px');
+    expect(chatSource).toContain("$('workspaceTopbarActions').append(fileToggle, agentToggle)");
+    expect(chatSource).toContain("el('button', 'btn btn-icon file-panel-toggle')");
+    expect(chatSource).toContain("agentToggle.append(icon('i-panel-right'))");
+    expect(terminalSource).toContain("document.getElementById('workspaceTopbarActions')!.prepend(toggle)");
+    expect(chatSource).not.toContain("$('headerConnect').after(fileToggle, agentToggle)");
+    expect(terminalSource).not.toContain("document.getElementById('headerConnect')!.after(toggle)");
+  });
+
+  it('uses motion-safe slide transitions for the surrounding workspace chrome', () => {
+    expect(rule('.app.is-sidebar-collapsed .sidebar')).toContain('transform: translateX(-100%)');
+    expect(css).toContain('@media (prefers-reduced-motion: no-preference)');
+    expect(css).toContain('transition: grid-template-columns 180ms');
+    expect(css).toContain('transition: transform 180ms');
+    expect(chatSource).toContain('filePanel?.hide(true)');
+    expect(chatSource).toContain('agentPanel?.hide(true)');
+    expect(terminalSource).toContain("slideTransition(panel, 'down', true");
+    expect(terminalSource).toContain("slideTransition(panel, 'down', false");
+  });
+
   it('keeps workspace settings in a scrollable column', () => {
     expect(rule("[data-panel='home']")).toContain('overflow-y: auto');
   });

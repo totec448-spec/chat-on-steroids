@@ -329,6 +329,10 @@ code {
 .app-topbar > .btn, .view-menu { -webkit-app-region: no-drag; height: 100%; }
 .app-topbar > .btn { padding: 0 5px; }
 .app-topbar > .btn .ico { width: 14px; height: 14px; }
+.app-topbar-workspace-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; height: 100%; padding: 0 2px; -webkit-app-region: no-drag; }
+.app-topbar-workspace-actions > .btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 24px; padding: 0; border-radius: 6px; }
+.app-topbar-workspace-actions > .btn .ico { flex: 0 0 14px; width: 14px; height: 14px; }
+.app:is([data-screen='settings'], [data-screen='library']) .app-topbar-workspace-actions { display: none; }
 .view-menu { position: relative; font-size: calc(12px * var(--text-scale, 1)); }
 .view-menu > summary { display: flex; align-items: center; height: 100%; list-style: none; cursor: pointer; padding: 0 9px; border-radius: 6px; }
 .view-menu > summary:hover, .view-menu[open] > summary { background: var(--hover); }
@@ -337,8 +341,13 @@ code {
 .view-menu-items kbd { margin-left: auto; color: var(--soft); font: inherit; }
 .view-menu-items hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
 .app.is-sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
-.app.is-sidebar-collapsed .sidebar { display: none; }
-.sidebar { position: relative; grid-column: 1; grid-row: 2 / -1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--sunk); border-right: 1px solid transparent; padding: 20px 12px 10px; }
+.app.is-sidebar-collapsed .sidebar { transform: translateX(-100%); opacity: 0; pointer-events: none; }
+.sidebar { position: relative; grid-column: 1; grid-row: 2 / -1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--sunk); border-right: 1px solid transparent; padding: 20px 12px 10px; transform: translateX(0); opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .app:not(.is-resizing-sidebar) { transition: grid-template-columns 180ms cubic-bezier(.2,.8,.2,1); }
+  .sidebar { transition: transform 180ms cubic-bezier(.2,.8,.2,1), opacity 120ms ease-out; }
+  .app.is-resizing-sidebar .sidebar { transition: none; }
+}
 /* Round the workspace edge without clipping header menus or changing the grid. */
 .sidebar::before, .sidebar::after { content: ''; position: absolute; left: calc(100% + 1px); top: 0; pointer-events: none; z-index: 4; }
 .sidebar::before {
@@ -3020,10 +3029,6 @@ select option:disabled { color: var(--soft); opacity: .55; }
 select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink); }
 
 .session-controls-menu { padding: 8px 0 0; margin-top: 8px; border-top: 1px solid var(--line); }
-#composerSettings > summary { width: 36px; height: 36px; padding: 8px; justify-content: center; }
-#composerSettings > summary .ico { width: 20px; height: 20px; }
-#composerSettings .composer-popover { width: 280px; left: 50%; right: auto; translate: -50% 0; transform-origin: bottom center; max-height: min(520px, 70vh); overflow-y: auto; }
-#composerSettings #loopDeliveryRow { flex-direction: column; align-items: stretch; gap: 7px; padding: 12px 9px 6px; }
 #loopDeliveryRow select { width: 100%; max-width: 100%; padding: 9px 11px; border-radius: 9px; line-height: 1.4; }
 .automation-switch { display: flex; padding: 3px; gap: 3px; border-radius: 10px; background: var(--sunk); }
 .automation-switch button { justify-content: center; padding: 8px 12px; transition: background .15s ease; color: var(--soft); }
@@ -3293,7 +3298,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-confirm-dialog-detail { margin: -4px 0 4px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); line-height: 1.5; }
 .file-dialog-danger { border-color: var(--red-line); background: var(--red-wash); color: var(--red); }
 .file-dialog-danger:hover:not(:disabled) { border-color: var(--red); background: var(--red-wash); color: var(--red); }
-.app[data-screen='settings'] :is(#agentPanelToggle, #filePanelToggle) { display: none; }
 @media (max-width: 850px) {
   [data-panel='chat'].has-agent-panel, [data-panel='chat'].has-file-panel { grid-template-columns: minmax(0, 1fr); }
   .has-agent-panel > .is-session, .has-file-panel > .is-session { display: none; }

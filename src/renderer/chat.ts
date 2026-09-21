@@ -957,13 +957,7 @@ function paintActiveGoal(): void {
   const label = el('span', 'queue-label', () => `${mode === 'loop' ? t("Loop") : t("Pursuing goal")}${objective ? ' · ' + objective : ''}`);
   label.title = objective;
   row.replaceChildren(icon('i-pulse'), label,
-    dockAction(() => t("Pause automation"), 'i-power', () => { const select = $<HTMLSelectElement>('chatAutomation'); select.value = 'off'; select.dispatchEvent(new Event('change')); }),
-    dockAction(() => t("Edit task"), 'i-pencil', event => {
-      // This opener is outside the menu; its click must not immediately dismiss it.
-      event.stopPropagation();
-      $<HTMLDetailsElement>('composerSettings').open = true;
-      $<HTMLTextAreaElement>('sessionObjective').focus();
-    }));
+    dockAction(() => t("Pause automation"), 'i-power', () => { const select = $<HTMLSelectElement>('chatAutomation'); select.value = 'off'; select.dispatchEvent(new Event('change')); }));
 }
 type TaskPlanDraft = { text: string; requestId: string | null; stages: string[] | null; sending: boolean; progress: TaskProgress | null; error: string | null };
 // Planning belongs to its draft key. Completed stages own their captured objective
@@ -3918,18 +3912,19 @@ export function initChat(next: Deps): void {
     .filter(entry => (entry.conversationId || entry.origin?.kind === 'desktop') && entry.origin?.kind !== 'worker')
     .map(entry => ({ id: entry.id, scope: projectGroup(entry.projectId) ?? '' })), paintSessions);
   deps = next;
-  const fileToggle = el('button', 'btn file-panel-toggle') as HTMLButtonElement;
+  const fileToggle = el('button', 'btn btn-icon file-panel-toggle') as HTMLButtonElement;
   fileToggle.id = 'filePanelToggle'; fileToggle.type = 'button'; fileToggle.hidden = true;
   fileToggle.append(icon('i-folder'));
   ui(fileToggle, 'aria-label', () => t('Toggle Files side panel')); fileToggle.setAttribute('aria-expanded', 'false');
-  const agentToggle = el('button', 'btn btn-icon', '◫') as HTMLButtonElement;
+  const agentToggle = el('button', 'btn btn-icon') as HTMLButtonElement;
   agentToggle.id = 'agentPanelToggle'; agentToggle.type = 'button'; agentToggle.hidden = true;
+  agentToggle.append(icon('i-panel-right'));
   ui(agentToggle, 'aria-label', () => t("Toggle sub-agent side panel")); agentToggle.setAttribute('aria-expanded', 'false');
-  $('headerConnect').after(fileToggle, agentToggle);
+  $('workspaceTopbarActions').append(fileToggle, agentToggle);
   const agentToolGroups = new Map<string, HTMLDetailsElement>();
   agentPanel = createAgentPanel({
     host: document.querySelector<HTMLElement>('[data-panel="chat"]')!, toggle: agentToggle,
-    onShow: () => filePanel?.hide(),
+    onShow: () => filePanel?.hide(true),
     load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
     render: (source, id, current) => {
       let boundary = '';
@@ -4104,7 +4099,7 @@ export function initChat(next: Deps): void {
   };
   filePanel = createFilePanel({
     host: document.querySelector<HTMLElement>('[data-panel="chat"]')!, toggle: fileToggle,
-    onShow: () => agentPanel?.hide(),
+    onShow: () => agentPanel?.hide(true),
     captureAttachment: () => {
       const owner = composerDraftOwner();
       return attachment => appendImages(owner, [attachment]);
@@ -4211,7 +4206,6 @@ export function initChat(next: Deps): void {
     if (skillPicker?.keydown(event)) return;
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (currentPreparedPlan() || authoredComposerText().trim() || imageDrafts.get(draftKey())?.length) $<HTMLFormElement>('composer').requestSubmit(); }
   });
-  $('composerSettings').addEventListener('toggle', paintTaskActions);
   initContextMeter();
   $('createPlan').addEventListener('click', () => { if (taskPlans.has(draftKey())) cancelTaskPlan(); else void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); });
   $('composer').addEventListener('submit', (event) => {

@@ -6,6 +6,7 @@ import { marked } from 'marked';
 import { t, ui } from './i18n.js';
 import { el, icon, run, toast } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
+import { slideTransition } from './slide-transition.js';
 import type { ProjectCodeEditor } from './file-code-editor.js';
 import type { ProjectPdfViewer } from './file-pdf-viewer.js';
 
@@ -226,7 +227,7 @@ function requestFileConfirmation(options: { title: string; message: string; deta
  * LocalProject id plus a project-relative path and main re-resolves the filesystem authority.
  */
 export function createFilePanel(options: FilePanelOptions) {
-  const pane = el('aside', 'file-panel'); pane.hidden = true;
+  const pane = el('aside', 'file-panel'); pane.hidden = true; pane.inert = true;
   ui(pane, 'aria-label', () => t('Files'));
   attachWorkPanelResize(options.host, pane);
 
@@ -255,6 +256,7 @@ export function createFilePanel(options: FilePanelOptions) {
 
   let project: LocalProject | null = null;
   let generation = 0;
+  let openState = false, transition: Animation | null = null;
   let selection: Selection = { path: '', kind: 'root' };
   let previewPath: string | null = null;
   let previewValue: ProjectFilePreview | null = null;
@@ -443,21 +445,34 @@ export function createFilePanel(options: FilePanelOptions) {
   window.addEventListener('resize', clampPreviewHeight);
   resetPreviewHeight();
 
-  function hide(): void {
+  function hide(immediate = false): void {
     generation++;
     destroyPdfViewer();
-    pane.hidden = true;
-    options.host.classList.remove('has-file-panel');
+    const wasOpen = openState; openState = false; pane.inert = true;
     options.toggle.setAttribute('aria-expanded', 'false');
+    transition?.cancel(); transition = null;
     syncWatches();
+    const finish = () => {
+      if (openState) return;
+      pane.hidden = true;
+      options.host.classList.remove('has-file-panel');
+      transition = null;
+    };
+    if (immediate || pane.hidden || !wasOpen) { finish(); return; }
+    transition = slideTransition(pane, 'right', false, finish);
   }
 
   async function show(): Promise<void> {
     if (!project) return;
-    options.onShow?.();
-    pane.hidden = false;
+    const entering = !openState;
+    if (entering) options.onShow?.();
+    openState = true; pane.hidden = false; pane.inert = false;
     options.host.classList.add('has-file-panel');
     options.toggle.setAttribute('aria-expanded', 'true');
+    if (entering) {
+      transition?.cancel(); transition = null;
+      transition = slideTransition(pane, 'right', true, () => { if (openState) transition = null; });
+    }
     if (!listings.has('')) await loadDirectory('');
     else render();
     const draft = project && retainedDrafts.get(project.id);
@@ -881,7 +896,7 @@ export function createFilePanel(options: FilePanelOptions) {
 
   function render(): void {
     renderTree();
-    if (!pane.hidden) renderPreview();
+    if (openState) renderPreview();
     updateActions();
     syncWatches();
   }
@@ -903,7 +918,7 @@ export function createFilePanel(options: FilePanelOptions) {
   }
 
   function syncWatches(): void {
-    const current = pane.hidden ? null : project;
+    const current = openState ? project : null;
     const directories = current ? watchedDirectories() : [];
     const signature = current ? `${current.id}\0${directories.join('\0')}` : '<none>';
     if (signature === watchSignature) return;
@@ -1073,13 +1088,13 @@ export function createFilePanel(options: FilePanelOptions) {
     if (event.key !== 'Escape') return;
     event.preventDefault(); hide(); options.toggle.focus();
   });
-  options.toggle.onclick = () => { if (pane.hidden) void show(); else hide(); };
+  options.toggle.onclick = () => { if (!openState) void show(); else hide(); };
   window.api.onProjectFilesChanged?.(change => { void handleWatchedChange(change); });
 
   updateActions();
   return {
     hide,
-    visible: () => !pane.hidden,
+    visible: () => openState,
     update(next: LocalProject | null): void {
       const changed = project?.id !== next?.id;
       const labelChanged = project?.name !== next?.name || project?.path !== next?.path;
@@ -1101,9 +1116,9 @@ export function createFilePanel(options: FilePanelOptions) {
       generation++;
       listings.clear(); expanded = new Set(['']); selection = { path: '', kind: 'root' };
       previewPath = null; previewValue = null;
-      if (!next) { hide(); render(); return; }
+      if (!next) { hide(true); render(); return; }
       render();
-      if (!pane.hidden) void show();
+      if (openState) void show();
     }
   };
 }

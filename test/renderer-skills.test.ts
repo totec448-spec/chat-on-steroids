@@ -14,7 +14,7 @@ beforeEach(() => {
 afterEach(() => dom.window.close());
 const skill: LibrarySkill = { id: 'review', name: 'Review', description: 'Check changes', path: '/skills/review/SKILL.md', managed: true, scope: 'managed', source: 'managed', allowImplicitInvocation: true };
 const library = (skills = [skill]): SkillLibrary => ({ skills, errors: [], roots: [], includeInstructions: true });
-async function fixture() {
+async function fixture(withCommands = false) {
   const { initSkills } = await import('../src/renderer/skills.js');
   const input = document.getElementById('input') as HTMLTextAreaElement;
   const button = document.getElementById('skills')!;
@@ -26,7 +26,8 @@ async function fixture() {
   const command = vi.fn();
   const picker = initSkills({ input, host, selectedHost: document.getElementById('selected')!, owner: () => owner,
     openButton: button, addButton: document.getElementById('add')!,
-    scope: () => ({ sessionId: key() }), draft: () => drafts.get(key()), saveDraft: text => drafts.set(key(), text), list });
+    scope: () => ({ sessionId: key() }), draft: () => drafts.get(key()), saveDraft: text => drafts.set(key(), text), list,
+    ...(withCommands ? { command } : {}) });
   const type = (value: string) => { input.value = value; input.setSelectionRange(value.length, value.length); input.dispatchEvent(new Event('input')); };
   const press = (value: string) => picker.keydown(new dom.window.KeyboardEvent('keydown', { key: value, cancelable: true }));
   const replace = (value: string) => { drafts.set(key(), value); input.value = value; picker.restore(); };
@@ -92,6 +93,18 @@ it('adds only the requested prompt from the popup and removes the slash-menu foo
   add.click();
   expect(f.input.value).toBe('Please add the following skills to my COS skills:\n');
   expect(f.host.hidden).toBe(true);
+});
+it('keeps Plan, Goal, Loop and Compact available through slash commands', async () => {
+  const f = await fixture(true); f.type('/'); await settle();
+  const commands = [...f.host.querySelectorAll<HTMLElement>('.slash-menu-option')]
+    .filter(row => row.title.startsWith('/'))
+    .slice(0, 4);
+  expect(commands.map(row => row.title)).toEqual(['/plan', '/goal', '/loop', '/compact']);
+  expect(commands.map(row => row.querySelector('strong')?.textContent)).toEqual(['Plan', 'Goal', 'Loop', 'Compact']);
+  f.type('/g'); await settle();
+  (f.host.querySelector('.slash-menu-option[title="/goal"]') as HTMLButtonElement).click();
+  expect(f.command).toHaveBeenCalledWith('goal');
+  expect(f.input.value).toBe('');
 });
 it('opens completion from the popup without losing draft text or selected skills', async () => {
   const f = await fixture();

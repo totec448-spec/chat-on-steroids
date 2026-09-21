@@ -2077,21 +2077,14 @@ it('shows Stop immediately for a queued first send, switches to Send for a new d
   expect(send.dataset.action).toBe('send');
 });
 
-it('opens the saved task editor from the Goal dock and still closes it on outside clicks', async () => {
+it('does not expose the removed legacy task editor from the Goal dock', async () => {
   const { w } = await boot([]);
   (w.document.querySelector('#automationSwitch [data-mode="goal"]') as HTMLButtonElement).click();
   await settle();
-  const menu = w.document.getElementById('composerSettings') as HTMLDetailsElement;
-  const objective = w.document.getElementById('sessionObjective') as HTMLTextAreaElement;
-  const edit = w.document.querySelector('#activeGoalRow button[aria-label="Edit task"]') as HTMLButtonElement;
-  expect(edit).not.toBeNull();
-  menu.open = false;
-  edit.click();
-  expect(menu.open).toBe(true);
-  expect(w.document.activeElement).toBe(objective);
-  w.document.body.click();
-  expect(menu.open).toBe(false);
-  await settle();
+  const row = w.document.getElementById('activeGoalRow')!;
+  expect(w.document.getElementById('composerSettings')).toBeNull();
+  expect(row.querySelector('button[aria-label="Edit task"]')).toBeNull();
+  expect(row.querySelector('button[aria-label="Pause automation"]')).not.toBeNull();
 });
 
 it.each(['off', 'goal', 'loop'])('retains the first-message draft and task across chat navigation (%s)', async mode => {

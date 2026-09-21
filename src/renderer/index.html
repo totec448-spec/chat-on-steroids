@@ -42,6 +42,7 @@
         <g id="i-terminal">
           <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M13 15h4" />
         </g>
+        <g id="i-panel-right"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M15 4v16" /></g>
         <g id="i-power"><path d="M12 4v8" /><path d="M7.5 7a7 7 0 1 0 9 0" /></g>
         <g id="i-lock">
           <rect x="4.5" y="10.5" width="15" height="9.5" rx="2" /><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" />
@@ -84,6 +85,7 @@
           <button class="btn" id="zoomOut" type="button">Zoom Out <kbd>Ctrl+−</kbd></button>
           <button class="btn" id="zoomActualSize" type="button">Actual Size <span id="zoomReset">100%</span><kbd>Ctrl+0</kbd></button>
         </div></details>
+        <div class="app-topbar-workspace-actions" id="workspaceTopbarActions"></div>
       </div>
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
@@ -981,37 +983,35 @@
                     </div>
                   </div>
                 </details>
-                <div class="composer-options">
-                  <details class="composer-menu" id="composerSettings">
-                    <summary aria-label="Chat options" title="Chat options"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg></summary>
-                    <div class="composer-popover">
-                      <div class="automation-switch" id="automationSwitch" role="radiogroup" aria-label="Chat mode">
-                        <button type="button" role="radio" aria-checked="true" data-mode="off" data-keep-menu="true">Off</button>
-                        <button type="button" role="radio" aria-checked="false" data-mode="goal" data-keep-menu="true">Goal</button>
-                        <button type="button" role="radio" aria-checked="false" data-mode="loop" data-keep-menu="true">Loop</button>
-                        </div><select hidden id="chatAutomation" aria-label="Chat automation"><option value="off">Off</option><option value="goal">Goal</option><option value="loop">Loop</option></select>
-                      <label id="loopDeliveryRow" hidden>Continuation timing<select id="loopDelivery"><option value="finish">Only finish</option><option value="after-turn">After this turn + finish</option></select></label>
-              <div id="sessionControls" hidden>
-                <div class="session-controls-menu">
-                  <label for="sessionObjective">This chat's goal</label>
-                  <textarea dir="auto" id="sessionObjective" rows="3" maxlength="16000" placeholder="What should this chat achieve?"></textarea>
-                  <button id="saveSessionObjective" data-keep-menu="true" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check" /></svg><span>Save task</span></button>
-                  <select hidden id="sessionObjectiveMode" aria-label="Goal behavior"><option value="goal">Goal · stop when complete</option><option value="loop">Loop · keep going</option></select>
-                  <button id="createPlan" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg><span>Create plan</span></button>
-                  <button id="queueAtFinish" type="button" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-clock" /></svg><span>Queue at Session finish</span></button>
-                  <button id="compactSession" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-copy" /></svg><span>Compact &amp; resume</span></button>
-                  <button id="cancelCompaction" type="button" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg><span>Cancel compaction</span></button>
-                  <p id="sessionControlStatus" role="status"></p>
-                </div>
-              </div>
+                <div id="composerCommandState" hidden>
+                  <div class="automation-switch" id="automationSwitch" role="radiogroup" aria-label="Chat mode">
+                    <button type="button" role="radio" aria-checked="true" data-mode="off">Off</button>
+                    <button type="button" role="radio" aria-checked="false" data-mode="goal">Goal</button>
+                    <button type="button" role="radio" aria-checked="false" data-mode="loop">Loop</button>
+                  </div>
+                  <select hidden id="chatAutomation" aria-label="Chat automation"><option value="off">Off</option><option value="goal">Goal</option><option value="loop">Loop</option></select>
+                  <label id="loopDeliveryRow" hidden>Continuation timing<select id="loopDelivery"><option value="finish">Only finish</option><option value="after-turn">After this turn + finish</option></select></label>
+                  <div id="sessionControls" hidden>
+                    <div class="session-controls-menu">
+                      <label for="sessionObjective">This chat's goal</label>
+                      <textarea dir="auto" id="sessionObjective" rows="3" maxlength="16000" placeholder="What should this chat achieve?"></textarea>
+                      <button id="saveSessionObjective" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check" /></svg><span>Save task</span></button>
+                      <select hidden id="sessionObjectiveMode" aria-label="Goal behavior"><option value="goal">Goal · stop when complete</option><option value="loop">Loop · keep going</option></select>
+                      <button id="createPlan" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg><span>Create plan</span></button>
+                      <button id="queueAtFinish" type="button" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-clock" /></svg><span>Queue at Session finish</span></button>
+                      <button id="compactSession" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-copy" /></svg><span>Compact &amp; resume</span></button>
+                      <button id="cancelCompaction" type="button" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg><span>Cancel compaction</span></button>
+                      <p id="sessionControlStatus" role="status"></p>
                     </div>
-                  </details>
-                <div class="context-meter" id="contextMeter">
-                  <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-controls="contextMeterInfo">
-                    <svg viewBox="0 0 16 16" aria-hidden="true"><circle class="context-track" cx="8" cy="8" r="6"/><circle id="contextMeterArc" cx="8" cy="8" r="6" stroke-dasharray="0 37.7"/></svg>
-                  </button>
-                  <div id="contextMeterInfo" role="tooltip">Session context · estimated</div>
+                  </div>
                 </div>
+                <div class="composer-options">
+                  <div class="context-meter" id="contextMeter">
+                    <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-controls="contextMeterInfo">
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><circle class="context-track" cx="8" cy="8" r="6"/><circle id="contextMeterArc" cx="8" cy="8" r="6" stroke-dasharray="0 37.7"/></svg>
+                    </button>
+                    <div id="contextMeterInfo" role="tooltip">Session context · estimated</div>
+                  </div>
                 </div>
                 <details class="composer-menu model-menu" id="modelMenu">
                   <summary><span id="composerModelLabel">Model</span><svg class="ico picker-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg></summary>

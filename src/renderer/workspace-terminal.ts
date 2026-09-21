@@ -5,6 +5,7 @@ import { el, icon, toast } from './dom.js';
 import { t, ui } from './i18n.js';
 import { onAppearanceChanged } from './appearance.js';
 import type { LocalProject } from '../shared/projects.js';
+import { slideTransition } from './slide-transition.js';
 
 type Tab = { id: string; projectId: string; title: string; node: HTMLElement; term: Terminal; fit: FitAddon; ready: boolean; exited: boolean; queued: number; writes: Promise<void> };
 
@@ -14,8 +15,8 @@ export function createWorkspaceTerminal() {
   const toggle = el('button', 'btn btn-icon') as HTMLButtonElement;
   toggle.id = 'terminalToggle'; toggle.type = 'button'; toggle.append(icon('i-terminal'));
   ui(toggle, 'title', () => t('Toggle terminal (Ctrl+`)')); ui(toggle, 'aria-label', () => t('Toggle terminal'));
-  document.getElementById('headerConnect')!.after(toggle);
-  const panel = el('section', 'workspace-terminal'); panel.id = 'workspaceTerminal'; panel.hidden = true;
+  document.getElementById('workspaceTopbarActions')!.prepend(toggle);
+  const panel = el('section', 'workspace-terminal'); panel.id = 'workspaceTerminal'; panel.hidden = true; panel.inert = true;
   ui(panel, 'aria-label', () => t('Terminal'));
   const resize = el('div', 'terminal-resize'); resize.tabIndex = 0; resize.setAttribute('role', 'separator');
   resize.setAttribute('aria-orientation', 'horizontal'); ui(resize, 'aria-label', () => t('Terminal height'));
@@ -38,7 +39,7 @@ export function createWorkspaceTerminal() {
     const theme = terminalTheme();
     for (const tab of tabs.values()) tab.term.options.theme = theme;
   });
-  let project: LocalProject | null = null, selected: string | null = null, open = false;
+  let project: LocalProject | null = null, selected: string | null = null, open = false, transition: Animation | null = null;
   const setHeight = (height: number): void => {
     const next = Math.round(Math.max(130, Math.min(window.innerHeight * .65, height)));
     app.style.setProperty('--terminal-height', `${next}px`); resize.setAttribute('aria-valuenow', String(next));
@@ -51,9 +52,23 @@ export function createWorkspaceTerminal() {
     if (tab.ready && !tab.exited) void window.api.terminalResize(tab.id, Math.min(500, tab.term.cols), Math.min(200, tab.term.rows));
   };
   const setOpen = (value: boolean): void => {
-    open = value; panel.hidden = !value; app.classList.toggle('has-terminal', value);
+    if (open === value && (value || panel.hidden)) return;
+    transition?.cancel(); transition = null;
+    open = value;
     toggle.setAttribute('aria-expanded', String(value));
-    if (value) requestAnimationFrame(() => { fit(); if (selected) tabs.get(selected)?.term.focus(); });
+    if (value) {
+      panel.hidden = false; panel.inert = false; app.classList.add('has-terminal');
+      transition = slideTransition(panel, 'down', true, () => { if (open) transition = null; });
+      requestAnimationFrame(() => { fit(); if (selected) tabs.get(selected)?.term.focus(); });
+      return;
+    }
+    panel.inert = true;
+    const finish = () => {
+      if (open) return;
+      panel.hidden = true; app.classList.remove('has-terminal'); transition = null;
+    };
+    if (panel.hidden) { finish(); return; }
+    transition = slideTransition(panel, 'down', false, finish);
   };
   const paint = (): void => {
     tabsHost.replaceChildren();
