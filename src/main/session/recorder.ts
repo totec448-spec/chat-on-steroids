@@ -62,6 +62,7 @@ import {
   reopenSession,
   rewriteUnattributedToolCalls,
   setSessionOrigin,
+  annotateUserMessageModel,
   upsertMessageEvent,
   upsertNativeImageEvent,
   writeAsset,
@@ -1703,7 +1704,7 @@ export interface ChatObservation {
   authoredTime?: boolean;
   /** Provider time retained for display without changing local recovery clocks. */
   authoredAt?: number;
-  /** True only for the newest DOM user row that this document proved was just sent. */
+  /** True only for the newest DOM user row, or its bound selection, proved just sent. */
   authoredNow?: boolean;
   /** True only when the current page generation owns this assistant revision now. */
   activeNow?: boolean;
@@ -2012,6 +2013,7 @@ async function recordSupersededMessages(
           message: await storeText(sessionId, item.text ?? '', MAX_USER_MESSAGE_CHARS),
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
           ...(item.reaction !== undefined ? { reaction: item.reaction } : {}),
+          ...(item.model ? { model: item.model, ...(item.reasoningEffort ? { reasoningEffort: item.reasoningEffort } : {}) } : {}),
           messageId: item.messageId
         },
         { preferTime: item.authoredTime === true, work: false }
@@ -2108,7 +2110,12 @@ async function recordChatObservationsNow(
     };
     switch (item.kind) {
       case 'model_selection':
-        if (item.model) await observeSessionModel(sessionId, conversationId, item.model, item.time, item.reasoningEffort);
+        if (item.model) {
+          await observeSessionModel(sessionId, conversationId, item.model, item.time, item.reasoningEffort);
+          if (item.authoredNow === true && item.messageId) await annotateUserMessageModel(
+            sessionId, item.messageId, item.model, item.reasoningEffort, item.time
+          );
+        }
         break;
       case 'conversation_title':
         // Apply after canonical messages so legacy preview proof exists in either batch order.
@@ -2123,6 +2130,7 @@ async function recordChatObservationsNow(
           message: await storeText(sessionId, item.text ?? '', MAX_USER_MESSAGE_CHARS),
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
           ...(item.reaction !== undefined ? { reaction: item.reaction } : {}),
+          ...(item.model ? { model: item.model, ...(item.reasoningEffort ? { reasoningEffort: item.reasoningEffort } : {}) } : {}),
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (!written.changed) continue;

@@ -2598,6 +2598,7 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     }));
     await live.hook.pullActivity();
 
+    (live.window as any).CLF_DOM.visibleModelSelection = () => ({ model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh' });
     userTurn(live.document, 'opening-send', 'start the repository audit');
     live.hook.observe();
     await settle();
@@ -2608,6 +2609,10 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     expect(emitted(live.sent, 'user_message').map((entry) => entry.event)).toEqual([
       expect.objectContaining({ messageId: 'm-opening-send', authoredTime: true })
     ]);
+    expect(emitted(live.sent, 'model_selection').map((entry) => entry.event)).toContainEqual(
+      expect.objectContaining({ messageId: 'm-opening-send', authoredNow: true,
+        model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh' })
+    );
     expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
   });
 
@@ -15304,7 +15309,7 @@ describe('one live isolated-world recorder per document', () => {
 
     await expect(live.runtimeMessage({ type: 'clf-recorder-ping' })).resolves.toEqual({
       ok: true,
-      recorderVersion: 21
+      recorderVersion: 22
     });
   });
 
@@ -19203,7 +19208,7 @@ describe('ordinary Continue native recovery', () => {
     // Chrome's static content cache can precede the helper read from disk by repair.
     win.__CLF_CONTENT_RECORDER__.stop();
     win.CLF_TEST_HOOK = (api: Hook) => { live!.hook = api; };
-    win.eval(contentSource.replace('const RECORDER_VERSION = 21;', 'const RECORDER_VERSION = 13;')
+    win.eval(contentSource.replace('const RECORDER_VERSION = 22;', 'const RECORDER_VERSION = 13;')
       .replace('const FIBER_VERSION = 21;', 'const FIBER_VERSION = 12;'));
     await settle();
     userTurn(live.document, 'source', 'Complete the task');

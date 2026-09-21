@@ -1394,7 +1394,7 @@ totals. Recorded results, overflow assets and actual MCP responses retain their 
 Code-mode children are recorded with dispatcher-proven `nested: true`: they remain audit/tool
 activity but contribute neither context tokens nor Usage billing calls. Only the outer exchange
 counts. Legacy rows lack this proof and keep their old estimate; request ids and timing are not
-safe nesting identities. Usage cache version 9 retains the distinction on recorded new calls.
+safe nesting identities. Usage cache version 10 retains the current attribution baseline on recorded calls.
 
 `extension/usage.js` observes bounded allowed account-usage responses in MAIN world, including
 already available state; it does not retain raw account payloads. App `session/usage.ts` accepts
@@ -1409,8 +1409,9 @@ This billing policy neither changes recorded context/compaction nor claims a pro
 limit. Cap each frontend before aggregation, never the daily/model totals. The selected cap
 belongs to the Usage snapshot and cache revision; availability changes invalidate old totals.
 Model changes affect attribution; compaction starts another frontend segment. Duplicate call
-ids do not count twice. Historical rows without model proof carry an explicitly assumed legacy
-model. Canonical revision/timezone-keyed `usage-cache` avoids rereading unchanged transcripts;
+ids do not count twice. A just-authored native question records the picker model/effort observed
+in that same page tick; historical rows never borrow the mutable picker. Rows without model proof
+carry an explicitly assumed legacy model with unknown effort. Canonical revision/timezone-keyed `usage-cache` avoids rereading unchanged transcripts;
 formula changes only project cached totals. Startup warms this same cache once without awaiting
 it; a Usage visit joins the in-flight calculation. Only changed sessions are read, sequentially
 with an event-loop yield between reads, and quitting cancels the warmup before cache publication.
@@ -1424,7 +1425,7 @@ original delivery time; tool-injected `input:` rows, unconfirmed offers, unknown
 missing model proof and future timestamps cannot contribute. Replayed/copied native IDs
 count once; conflicting model/time evidence abstains. Never borrow token attribution's
 legacy default, a current picker, or a later tool's model to increase these counts.
-Cache version 9 retains these minimal ID/model/time facts alongside token totals, so a
+Cache version 10 retains these minimal ID/model/time facts alongside token totals, so a
 new week or a weekday click needs no extra transcript read. The renderer receives only
 seven local calendar days of counts and their snapshot end time. Its single weekday
 button above the rows cycles the start day, default Monday, persisted in `cos.usage.weekStart`; the range
@@ -1434,7 +1435,9 @@ integers labeled sent alongside reported model/shared/feature limits. Missing ca
 do not create placeholder rows. The local date/time range stays in the weekday button's tooltip
 and accessible description; these counts are recorded sends, not a provider quota or reset claim.
 Usage starts with its summary and charts. Successful loading clears the transient status without
-leaving a gap; token-attribution/cache implementation notes are not persistent page copy.
+leaving a gap. Refresh remains actionable while a request is pending so a new request can supersede
+an orphaned renderer IPC call; the generation guard prevents late stale replies from repainting.
+Token-attribution/cache implementation notes are not persistent page copy.
 `session-usage`, `usage-week` and `renderer-usage` tests cover evidence, boundaries and
 preference restoration. `scripts/verify-usage-week.cjs` exercises Chromium keyboard input
 and narrow/zoomed layouts with isolated data.

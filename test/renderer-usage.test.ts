@@ -92,18 +92,46 @@ it('explains a pending background rebuild and replaces transport failure with a 
   const status = dom.window.document.getElementById('usageStatus')!;
   const refresh = dom.window.document.getElementById('refreshUsage') as HTMLButtonElement;
   expect(status.textContent).toContain('You can keep using the app.');
-  expect(refresh.disabled).toBe(true);
+  expect(refresh.disabled).toBe(false);
   reject(new Error('IPC disconnected'));
   await pending;
   expect(status.textContent).toBe('Usage could not be loaded. Try Refresh.');
   expect(refresh.disabled).toBe(false);
 });
 
+it('lets Refresh supersede an orphaned usage request and ignores its late reply', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  let resolveFirst!: (value: { ok: true; data: UsageOverview }) => void;
+  const first = new Promise<{ ok: true; data: UsageOverview }>(resolve => { resolveFirst = resolve; });
+  const recoveredModel = { model: '5.6', reasoningEffort: 'xhigh', assumed: false, tokens: 10 };
+  const staleModel = { ...recoveredModel, tokens: 999 };
+  const recovered: UsageOverview = { contextTokenCap: 400_000, tokens: 10, models: [recoveredModel],
+    days: [{ date: '2026-09-20', tokens: 10, models: [recoveredModel] }], sessions: 1, limits: [], messages: { through: Date.now(), days: [] } };
+  const stale: UsageOverview = { ...recovered, tokens: 999, models: [staleModel],
+    days: [{ date: '2026-09-20', tokens: 999, models: [staleModel] }] };
+  const getUsage = vi.fn()
+    .mockImplementationOnce(() => first)
+    .mockResolvedValueOnce({ ok: true, data: recovered });
+  Object.assign(dom.window, { api: { getUsage, getChatModels: async () => ({ ok: true, data: { models: [] } }) } });
+  const usage = await import('../src/renderer/usage.js'); usage.initUsage();
+  const pending = usage.refreshUsage();
+  const refresh = dom.window.document.getElementById('refreshUsage') as HTMLButtonElement;
+  expect(refresh.disabled).toBe(false);
+  refresh.click();
+  await vi.waitFor(() => expect(dom.window.document.getElementById('usageStatus')!.textContent).toBe(''));
+  expect(dom.window.document.getElementById('usageSummary')!.textContent).toContain('10');
+  resolveFirst({ ok: true, data: stale });
+  await pending;
+  expect(dom.window.document.getElementById('usageSummary')!.textContent).toContain('10');
+  expect(dom.window.document.getElementById('usageSummary')!.textContent).not.toContain('999');
+});
+
 it.each([256_000, 400_000])('shows the calculated %i context cap and edits formula preferences without reloading recordings', async (contextTokenCap) => {
   dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
   const models = [
-    { model: 'gpt-5.6', reasoningEffort: 'high', assumed: true, tokens: 1e6 },
+    { model: 'gpt-5.6', reasoningEffort: null, assumed: true, tokens: 1e6 },
     { model: 'another-model', reasoningEffort: 'low', assumed: false, tokens: 1e6 }
   ];
   const data: UsageOverview = { contextTokenCap, messages: { through: Date.now(), days: [] }, tokens: 2e6, models, days: [{ date: '2026-09-05', tokens: 2e6, models }], sessions: 1, limits: ['deep_research', 'file_upload', 'paste_text_to_file', 'image_gen'].map(model => ({ model, scope: 'feature', remaining: 3, remainingPercent: 50, resetAt: null, windowSeconds: null, observedAt: Date.now() })) };
@@ -115,6 +143,7 @@ it.each([256_000, 400_000])('shows the calculated %i context cap and edits formu
   const cost = () => dom.window.document.getElementById('usageTotalCost')!.textContent;
   const divisor = field('usageDivisor');
   initUsage(); await refreshUsage();
+  expect(dom.window.document.getElementById('usageDays')!.textContent).toContain('gpt-5.6-sol · effort unknown (assumed)');
   expect(dom.window.document.getElementById('usageFormula')!.textContent).toContain(`capped at ${contextTokenCap.toLocaleString()} tokens`);
   const formulaDetails = dom.window.document.getElementById('usageFormulaDetails') as HTMLDetailsElement;
   expect(formulaDetails.open).toBe(false);

@@ -983,6 +983,23 @@ describe('observations', () => {
     expect(await readEvents(first.body.sessionId, { kinds: ['user_message'] })).toHaveLength(1);
   });
 
+  it('persists picker evidence only when it belongs to the just-authored native question', async () => {
+    await pair();
+    const conversationId = 'f0f00003-1111-4111-8111-111111111118';
+    const time = Date.now();
+    const reply = await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'user_message', time, text: 'Historical question', messageId: 'historical-model', model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh' },
+      { kind: 'model_selection', time: time + 1, model: 'gpt-5-6-thinking', reasoningEffort: 'high', messageId: 'historical-model' },
+      { kind: 'user_message', time: time + 1, text: 'Fresh question', messageId: 'fresh-model' },
+      { kind: 'model_selection', time: time + 2, model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh', messageId: 'fresh-model', authoredNow: true }
+    ] } });
+    const rows = await readEvents(reply.body.sessionId, { kinds: ['user_message'] });
+    expect(rows.find(row => row.kind === 'user_message' && row.messageId === 'historical-model')).not.toMatchObject({ model: expect.anything() });
+    expect(rows.find(row => row.kind === 'user_message' && row.messageId === 'fresh-model')).toMatchObject({
+      model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh'
+    });
+  });
+
   it('anchors and independently enriches multiple exact native generated images without activity effects', async () => {
     await pair();
     const conversationId = '21111111-2222-4333-8444-555555555555';

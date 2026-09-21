@@ -22,7 +22,7 @@ export function observeUsage(raw: unknown, capturedAt: unknown = Date.now()): vo
 }
 // One derived cache owns token totals and verified sends. Display preferences project
 // this baseline; only changed canonical session revisions reread transcripts.
-const CACHE_VERSION = 9;
+const CACHE_VERSION = 10;
 const modelTokens = z.object({ model: z.string().min(1).max(100), reasoningEffort: z.string().max(100).nullable(), assumed: z.boolean(), tokens: z.number().finite().nonnegative() });
 const verifiedMessage = z.object({ id: z.string().min(1).max(512), time: z.number().finite().positive().max(8.64e15), model: z.enum(['gpt-5.6', 'gpt-6']) });
 type VerifiedMessage = z.infer<typeof verifiedMessage>;
@@ -42,7 +42,7 @@ function mergeModels(target: Map<string, UsageModelTokens>, rows: readonly Usage
   }
 }
 type Attribution = Pick<UsageModelTokens, 'model' | 'reasoningEffort' | 'assumed'>;
-const LEGACY: Attribution = { model: 'gpt-5.6', reasoningEffort: 'high', assumed: true };
+const LEGACY: Attribution = { model: 'gpt-5.6', reasoningEffort: null, assumed: true };
 function attribution(raw: { model?: string; reasoningEffort?: string }, previous: Attribution): Attribution {
   const model = raw.model?.trim();
   const effort = raw.reasoningEffort?.trim();

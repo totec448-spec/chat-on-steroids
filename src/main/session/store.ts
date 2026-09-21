@@ -1336,6 +1336,54 @@ export function upsertMessageEvent(
 }
 
 /**
+ * Add exact native-send model evidence to an already-canonical user row.
+ *
+ * Fiber can publish the stable provider message before the rendered bubble proves that this
+ * document just sent it. That later boundary owns picker attribution, but it must enrich the
+ * existing row rather than creating a second user-message observation. Missing/non-user ids
+ * fail closed so a current picker can never be projected onto arbitrary transcript history.
+ */
+export function annotateUserMessageModel(
+  sessionId: string,
+  messageId: string,
+  model: string,
+  reasoningEffort: ReasoningEffort | undefined,
+  observedAt: number
+): Promise<boolean> {
+  if (!messageId || messageId.length > 190 || !/^[a-zA-Z0-9 ._-]{1,80}$/.test(model) || !Number.isFinite(observedAt)) {
+    return Promise.resolve(false);
+  }
+  const key = `user_message\u0000${messageId}`;
+  return ensureOpen(sessionId).then((entry) => {
+    const write = entry.queue.then(async () => {
+      const previous = entry.messages.get(key);
+      if (!previous || previous.kind !== 'user_message') return false;
+      if (previous.model === model && previous.reasoningEffort === reasoningEffort) return false;
+      const full: MessageEvent = {
+        ...previous,
+        model,
+        ...(reasoningEffort ? { reasoningEffort } : { reasoningEffort: undefined }),
+        // Attribution is metadata for the same authored question. Preserve chronology/work
+        // anchors and advance only the revision cursor so Usage notices the enrichment.
+        seq: entry.nextSeq
+      };
+      await writeCanonicalMessage(sessionId, key, full);
+      entry.nextSeq += 1;
+      entry.messages.set(key, full);
+      entry.historySeq = full.seq;
+      entry.summary.updatedAt = Math.max(entry.summary.updatedAt, observedAt);
+      scheduleMeta(entry);
+      return true;
+    });
+    entry.queue = write.then(
+      () => undefined,
+      (err: Error) => logError(`session user model annotation failed: ${err.message}`)
+    );
+    return write;
+  });
+}
+
+/**
  * Creates or enriches one ChatGPT-native generated image by exact provider tuple.
  *
  * Metadata is canonical before preview capture starts. A later asset revision advances the

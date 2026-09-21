@@ -1035,7 +1035,7 @@ function parseObservations(input: unknown): ChatObservation[] {
         Number.isFinite(item['authoredAt']) && item['authoredAt'] >= earliestChatGpt && item['authoredAt'] <= now + 60_000) {
       observation.authoredAt = item['authoredAt'];
     }
-    if (item['authoredNow'] === true && kind === 'user_message') observation.authoredNow = true;
+    if (item['authoredNow'] === true && (kind === 'user_message' || kind === 'model_selection')) observation.authoredNow = true;
     if (typeof item['activeNow'] === 'boolean' && (kind === 'assistant_message' || kind === 'page_tool')) observation.activeNow = item['activeNow'];
     if (kind === 'model_selection') {
       if (typeof item['model'] !== 'string' || !/^[a-zA-Z0-9 ._-]{1,80}$/.test(item['model'])) continue;
@@ -1043,6 +1043,13 @@ function parseObservations(input: unknown): ChatObservation[] {
       if (isReasoningEffort(item['reasoningEffort'])) {
         observation.reasoningEffort = item['reasoningEffort'];
       }
+    }
+    // A just-authored native question can carry the exact picker snapshot observed in the
+    // same page tick. Historical transcript rows must never inherit the current picker.
+    if (kind === 'user_message' && observation.authoredNow === true &&
+        typeof item['model'] === 'string' && /^[a-zA-Z0-9 ._-]{1,80}$/.test(item['model'])) {
+      observation.model = item['model'];
+      if (isReasoningEffort(item['reasoningEffort'])) observation.reasoningEffort = item['reasoningEffort'];
     }
     // Long final handoff-style answers are valid transcript content too. Keep this aligned
     // with the page-side assistant bound so the bridge does not silently become the next

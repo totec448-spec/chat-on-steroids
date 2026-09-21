@@ -48,7 +48,6 @@ function paintMessages(): void {
 export async function refreshUsage(): Promise<void> {
   document.getElementById('usageTooltip')?.remove();
   const generation = ++loadGeneration;
-  $('refreshUsage').setAttribute('disabled', '');
   const status = $('usageStatus');
   ui(status, 'textContent', () => t("Updating usage in the background. After an update, this can take a few minutes. You can keep using the app."));
   status.setAttribute('role', 'status');
@@ -84,7 +83,7 @@ export async function refreshUsage(): Promise<void> {
     ui(status, 'textContent', () => '');
   } catch {
     if (generation === loadGeneration) ui(status, 'textContent', () => t("Usage could not be loaded. Try Refresh."));
-  } finally { if (generation === loadGeneration) $('refreshUsage').removeAttribute('disabled'); }
+  }
 }
 function paintRates(): void {
   if (!snapshot) return;

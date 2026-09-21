@@ -36,7 +36,7 @@
   // before touching the shared DOM. Otherwise old and new composer observers can continually
   // remove and reinsert each other's controls, starving transport/timers and freezing the tab.
   // A healthy incumbent in this context still wins the static/recovery injection race.
-  const RECORDER_VERSION = 21;
+  const RECORDER_VERSION = 22;
   const recorderHandle = {
     version: RECORDER_VERSION,
     healthy: () => false,
@@ -2030,7 +2030,7 @@
    * user bubble that caused it. Both used to read as "the user has moved on", which closed a
    * turn that had not ended. See `authoredNow`.
    */
-  function reportMessages(nowGenerating) {
+  function reportMessages(nowGenerating, modelSelection) {
     // See resumeIdentityPending: until the app has said what it already holds for this chat,
     // this transcript is unreadable rather than merely unopenable.
     if (resumeIdentityPending) return null;
@@ -2109,7 +2109,14 @@
         // row contributes only the boundary here.
         const justAuthored = authoredNow(message);
         if (seenMessages.has(key) && (reaction === undefined || (seenMessages.get(key) ?? null) === reaction)) {
-          if (justAuthored) newUserMessage = justAuthored;
+          if (justAuthored) {
+            newUserMessage = justAuthored;
+            // Fiber may have already published this exact canonical row before the rendered
+            // bubble proves it crossed Send. Bind same-tick picker evidence to that native id
+            // as metadata instead of publishing a duplicate user message.
+            if (modelSelection?.model) emit({ kind: 'model_selection', ...modelSelection,
+              messageId: message.id, authoredNow: true });
+          }
           continue;
         }
         // Presentation is not enough to commit a continuation, but it is enough to stop this
@@ -2136,7 +2143,9 @@
           ...(source.attachments?.length ? { attachments: source.attachments } : {}),
           messageId: message.id,
           turnId: message.turnId || undefined,
-          ...(justAuthored ? { authoredNow: true } : {})
+          ...(justAuthored ? { authoredNow: true,
+            ...(modelSelection?.model ? { model: modelSelection.model,
+              ...(modelSelection.reasoningEffort ? { reasoningEffort: modelSelection.reasoningEffort } : {}) } : {}) } : {})
         });
       } else if (message.role === 'assistant') {
         // Assistant identity/content comes exclusively from the MAIN-world Fiber scan now.
@@ -2396,7 +2405,7 @@
     // the live turn at sequence 2, the user message that asked for it at 3, and the
     // conversation's earlier history at 4 and 5. A log whose first assistant turn precedes
     // the question that caused it cannot be read back as a session, however complete it is.
-    const submission = reportMessages(nowGenerating);
+    const submission = reportMessages(nowGenerating, modelSelection);
     const newUserMessage = submission?.messageId || claimUnrecordedGeneration(nowGenerating, observedTurns);
     if (newUserMessage) {
       fiberTerminalMessageId = null;

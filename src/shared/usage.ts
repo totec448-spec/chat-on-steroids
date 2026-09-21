@@ -10,7 +10,7 @@ export interface ModelUsage {
 export interface UsageModelTokens {
   model: string;
   reasoningEffort: string | null;
-  /** Legacy rows with no recorded model use GPT-5.6 High, visibly marked as assumed. */
+  /** Legacy rows with no recorded model use an assumed GPT-5.6 identity and unknown effort. */
   assumed: boolean;
   tokens: number;
 }
