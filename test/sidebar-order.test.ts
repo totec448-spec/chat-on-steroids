@@ -1,6 +1,6 @@
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createSidebarOrder } from '../src/renderer/sidebar-order.js';
+import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from '../src/renderer/sidebar-order.js';
 
 let dom: JSDOM;
 afterEach(() => dom?.window.close());
@@ -91,4 +91,47 @@ it('supports keyboard movement, preserves focus and tolerates corrupt preference
   f.row('b').dispatchEvent(new f.w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true, cancelable: true }));
   expect(f.ids('project')).toEqual(['b', 'a', 'c']);
   expect(f.w.document.activeElement).toBe(f.row('b'));
+});
+
+it('reorders composite project groups as one row while leaving their chat scopes intact', () => {
+  dom = new JSDOM('<div class="scroll"><div id="list"></div></div>', { url: 'https://local.test', pretendToBeVisual: true });
+  const w = dom.window;
+  Object.assign(globalThis, { window: w, document: w.document });
+  const list = w.document.getElementById('list')!;
+  list.setPointerCapture = vi.fn(); list.hasPointerCapture = () => false;
+  const entries = [
+    { id: 'alpha', scope: SIDEBAR_PROJECT_SCOPE }, { id: 'beta', scope: SIDEBAR_PROJECT_SCOPE },
+    { id: 'chat-a', scope: 'alpha' }, { id: 'chat-b', scope: 'beta' }
+  ];
+  const paint = vi.fn(() => {
+    const groups = order.ordered(SIDEBAR_PROJECT_SCOPE, entries.filter(row => row.scope === SIDEBAR_PROJECT_SCOPE)).map((project, index) => {
+      const group = w.document.createElement('details'); group.dataset.sortId = project.id; group.dataset.sortScope = SIDEBAR_PROJECT_SCOPE;
+      const heading = w.document.createElement('summary'); heading.dataset.sortHandle = ''; heading.textContent = project.id; group.append(heading);
+      for (const chat of order.ordered(project.id, entries.filter(row => row.scope === project.id))) {
+        const row = w.document.createElement('div'); row.dataset.id = chat.id; row.dataset.sortScope = project.id; row.tabIndex = 0; group.append(row);
+      }
+      group.getClientRects = () => [{ top: index * 100, height: 80 }] as unknown as DOMRectList;
+      group.getBoundingClientRect = () => ({ top: index * 100, height: 80 }) as DOMRect;
+      return group;
+    });
+    list.replaceChildren(...groups);
+  });
+  const order = createSidebarOrder(list, () => entries, paint); paint();
+  const groups = () => [...list.querySelectorAll<HTMLElement>(`[data-sort-scope="${SIDEBAR_PROJECT_SCOPE}"]`)];
+  const projectIds = () => groups().map(row => row.dataset.sortId);
+  const pointer = (target: Element | Window, type: string, y: number) => target.dispatchEvent(new w.MouseEvent(type, {
+    bubbles: true, cancelable: true, button: 0, clientX: 20, clientY: y
+  }));
+
+  const alpha = groups()[0]!;
+  pointer(alpha.querySelector('summary')!, 'pointerdown', 10); pointer(list, 'pointermove', 500); pointer(w as unknown as Window, 'pointerup', 500);
+  expect(projectIds()).toEqual(['beta', 'alpha']);
+  expect(groups()[0]!.querySelector('[data-id="chat-b"]')).not.toBeNull();
+  expect(groups()[1]!.querySelector('[data-id="chat-a"]')).not.toBeNull();
+
+  const alphaHeading = groups()[1]!.querySelector<HTMLElement>('summary')!;
+  alphaHeading.focus();
+  alphaHeading.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true, cancelable: true }));
+  expect(projectIds()).toEqual(['alpha', 'beta']);
+  expect(w.document.activeElement).toBe(groups()[0]!.querySelector('summary'));
 });

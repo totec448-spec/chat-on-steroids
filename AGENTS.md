@@ -2704,9 +2704,12 @@ Selecting a project chat or project-scoped New Chat deliberately expands that gr
 group initially shows five parent chats; Show more adds eight, preserving expanded worker children
 and the selected task. `renderer/sidebar-order.ts` owns a bounded localStorage presentation order:
 dragging or Alt+Up/Down moves a parent and its worker children within its current project or
-unfiled group. A drag beyond the group clamps to its first/last visible slot; it cannot change
-project ownership. Pointer custody defers row replacement during live refresh and revalidates
-membership before saving. Off-page order survives partial list refreshes.
+unfiled group. The same owner gives whole project `<details>` groups a reserved project scope;
+dragging a project summary or Alt+Up/Down moves the complete group, including its chats, without
+changing any session's project ownership. Composite sort rows use `data-sort-id`; `data-id` remains
+session identity for chat selection. A drag beyond the group clamps to its first/last visible slot.
+Pointer custody defers row replacement during live refresh and revalidates membership before
+saving. Off-page order survives partial list refreshes.
 The chat keeps the current input queue/plan visible alongside a
 paged transcript. Main owns durable mutation acknowledgements; renderer optimism is not a
 receipt. Native edit context menus respect the focused editable control and selection.

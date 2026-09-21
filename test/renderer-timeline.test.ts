@@ -1454,6 +1454,55 @@ it('groups project chats and restores each project composer with its selected id
   expect(w.document.querySelector<HTMLDetailsElement>(`[data-project-id="${projects[1]!.id}"]`)!.open).toBe(false);
 });
 
+it('reorders whole project groups without selecting them as chats and preserves the order through refresh', async () => {
+  const projects: LocalProject[] = [
+    { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Alpha', path: '/alpha', createdAt: 1 },
+    { id: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff', name: 'Beta', path: '/beta', createdAt: 2 }
+  ];
+  const alpha = { ...summary([]), id: 'alpha-chat', title: 'Alpha chat', conversationId: 'alpha-conversation', chatIds: ['alpha-conversation'], projectId: projects[0]!.id };
+  const beta = { ...summary([]), id: 'beta-chat', title: 'Beta chat', conversationId: 'beta-conversation', chatIds: ['beta-conversation'], projectId: projects[1]!.id };
+  const app = await boot([], false, [], projects, { sessions: [alpha, beta] });
+  const { w } = app;
+  const list = w.document.getElementById('sessionList') as HTMLElement;
+  list.setPointerCapture = vi.fn(); list.hasPointerCapture = () => false; list.releasePointerCapture = vi.fn();
+  const groups = () => [...w.document.querySelectorAll<HTMLDetailsElement>('.project-group')];
+  const ids = () => groups().map(group => group.dataset.projectId);
+  const setGeometry = () => groups().forEach((group, index) => {
+    group.getClientRects = () => [{ top: index * 100, height: 80 }] as unknown as DOMRectList;
+    group.getBoundingClientRect = () => ({ top: index * 100, height: 80 }) as DOMRect;
+  });
+  const pointer = (target: Element | Window, type: string, y: number) => target.dispatchEvent(new w.MouseEvent(type, {
+    bubbles: true, cancelable: true, button: 0, clientX: 20, clientY: y
+  }));
+
+  expect(ids()).toEqual(projects.map(project => project.id));
+  expect(groups()[0]!.hasAttribute('data-id')).toBe(false);
+  groups()[0]!.querySelector('summary')!.click();
+  expect(groups()[0]!.open).toBe(true);
+  expect(w.document.querySelector('.sess.is-sel')).toBeNull();
+
+  setGeometry();
+  pointer(groups()[1]!.querySelector('summary')!, 'pointerdown', 110);
+  pointer(list, 'pointermove', -20);
+  pointer(w as unknown as Window, 'pointerup', -20);
+  expect(ids()).toEqual([projects[1]!.id, projects[0]!.id]);
+  expect(groups()[0]!.querySelector('[data-id="beta-chat"]')).not.toBeNull();
+  expect(groups()[1]!.querySelector('[data-id="alpha-chat"]')).not.toBeNull();
+  expect(groups()[1]!.open).toBe(true);
+  expect(w.document.querySelector('.sess.is-sel')).toBeNull();
+
+  await app.append([]);
+  expect(ids()).toEqual([projects[1]!.id, projects[0]!.id]);
+  expect(groups()[1]!.open).toBe(true);
+
+  setGeometry();
+  const betaHeading = groups()[0]!.querySelector<HTMLElement>('summary')!;
+  betaHeading.focus();
+  betaHeading.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true, cancelable: true }));
+  expect(ids()).toEqual([projects[0]!.id, projects[1]!.id]);
+  expect(w.document.activeElement).toBe(groups()[1]!.querySelector('summary'));
+});
+
 it('folds a whole Compact & Resume into one row that says the new chat opened', async () => {
   const { w } = await boot([
     { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },

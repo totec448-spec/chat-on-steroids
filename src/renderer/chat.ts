@@ -14,7 +14,7 @@ import { goalErrorMessage } from '../shared/goal-errors.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
 import { renderGoalReasoning } from './goal-reasoning.js';
 import { preserveTimelineViewport } from './timeline-scroll.js';
-import { createSidebarOrder } from './sidebar-order.js';
+import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { toolResultText } from './tool-result.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
@@ -670,13 +670,18 @@ function paintSessions(): void {
     history.addEventListener('toggle', () => { if (history.isConnected) history.open ? expandedWorkers.add('other-workers') : expandedWorkers.delete('other-workers'); });
     rows.push(history);
   }
-  const projectIds = [...new Set([...projects.filter(project => !project.ungrouped).map(project => project.id), ...projectRows.keys()])];
+  const nativeProjectIds = [...new Set([...projects.filter(project => !project.ungrouped).map(project => project.id), ...projectRows.keys()])];
+  const projectIds = sidebarOrder
+    ? sidebarOrder.ordered(SIDEBAR_PROJECT_SCOPE, nativeProjectIds.map(id => ({ id }))).map(row => row.id)
+    : nativeProjectIds;
   const projectSections: HTMLElement[] = [];
   for (const id of projectIds) {
     const project = projects.find(row => row.id === id);
     const section = document.createElement('details'); section.className = 'project-group'; section.dataset.projectId = id;
+    section.dataset.sortId = id; section.dataset.sortScope = SIDEBAR_PROJECT_SCOPE;
     section.open = expandedProjects.has(id);
     const heading = el('summary', 'project-heading');
+    heading.dataset.sortHandle = '';
     const label = el('span', 'project-name', () => project?.name ?? t("Unavailable project"));
     ui(heading, 'title', () => project?.path ?? t("Unavailable project"));
     heading.append(icon('i-folder'), label); section.append(heading);
@@ -3914,9 +3919,15 @@ function selectNewChat(projectId: string | null = null): void {
 }
 
 export function initChat(next: Deps): void {
-  sidebarOrder = createSidebarOrder($('sessionList'), () => sessions
-    .filter(entry => (entry.conversationId || entry.origin?.kind === 'desktop') && entry.origin?.kind !== 'worker')
-    .map(entry => ({ id: entry.id, scope: projectGroup(entry.projectId) ?? '' })), paintSessions);
+  sidebarOrder = createSidebarOrder($('sessionList'), () => [
+    ...[...new Set([
+      ...projects.filter(project => !project.ungrouped).map(project => project.id),
+      ...sessions.filter(entry => entry.origin?.kind !== 'worker').map(entry => projectGroup(entry.projectId)).filter((id): id is string => !!id)
+    ])].map(id => ({ id, scope: SIDEBAR_PROJECT_SCOPE })),
+    ...sessions
+      .filter(entry => (entry.conversationId || entry.origin?.kind === 'desktop') && entry.origin?.kind !== 'worker')
+      .map(entry => ({ id: entry.id, scope: projectGroup(entry.projectId) ?? '' }))
+  ], paintSessions);
   deps = next;
   const fileToggle = el('button', 'btn file-panel-toggle') as HTMLButtonElement;
   fileToggle.id = 'filePanelToggle'; fileToggle.type = 'button'; fileToggle.hidden = true;

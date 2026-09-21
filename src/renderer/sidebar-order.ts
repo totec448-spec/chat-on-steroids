@@ -1,6 +1,7 @@
 /** Sidebar order is a local presentation preference; session/project ownership never changes. */
 const STORAGE_KEY = 'chat-on-steroids.sidebar-order';
 const MAX_IDS = 5000;
+export const SIDEBAR_PROJECT_SCOPE = ':projects';
 type Entry = { id: string; scope: string };
 
 export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], repaint: () => void) {
@@ -51,8 +52,10 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
 
   let drag: { pointer: number; id: string; scope: string; x: number; y: number; row: HTMLElement; active: boolean; target?: string; after?: boolean } | null = null;
   let suppressClick = false;
+  const rowId = (row: HTMLElement): string | undefined => row.dataset.sortId ?? row.dataset.id;
   const rows = (scope: string) => [...list.querySelectorAll<HTMLElement>('[data-sort-scope]')]
     .filter(row => row.dataset.sortScope === scope && row.getClientRects().length > 0);
+  const focusTarget = (row: HTMLElement): HTMLElement => row.querySelector<HTMLElement>('[data-sort-handle]') ?? row;
   function clearMarkers(): void {
     for (const row of list.querySelectorAll('.sort-before, .sort-after')) row.classList.remove('sort-before', 'sort-after');
   }
@@ -75,8 +78,11 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
     suppressClick = false;
     if (event.button !== 0 || event.isPrimary === false || drag || (event.target as Element).closest('button, input, a')) return;
     const row = (event.target as Element).closest<HTMLElement>('[data-sort-scope]');
-    if (!row?.dataset.id || !list.contains(row)) return;
-    drag = { pointer: event.pointerId, id: row.dataset.id, scope: row.dataset.sortScope!, x: event.clientX, y: event.clientY, row, active: false };
+    const id = row && rowId(row);
+    if (!row || !id || !list.contains(row)) return;
+    const handle = row.querySelector<HTMLElement>('[data-sort-handle]');
+    if (handle && !(event.target as Element).closest('[data-sort-handle]')) return;
+    drag = { pointer: event.pointerId, id, scope: row.dataset.sortScope!, x: event.clientX, y: event.clientY, row, active: false };
   });
   list.addEventListener('pointermove', event => {
     if (!drag || drag.pointer !== event.pointerId) return;
@@ -94,11 +100,11 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
       if (event.clientY < bounds.top + 28) scroll.scrollTop -= 18;
       else if (event.clientY > bounds.bottom - 28) scroll.scrollTop += 18;
     }
-    const candidates = rows(drag.scope).filter(row => row.dataset.id !== drag!.id);
+    const candidates = rows(drag.scope).filter(row => rowId(row) !== drag!.id);
     clearMarkers();
     const before = candidates.find(row => { const rect = row.getBoundingClientRect(); return event.clientY < rect.top + rect.height / 2; });
     const target = before ?? candidates.at(-1);
-    drag.target = target?.dataset.id; drag.after = !before;
+    drag.target = target && rowId(target); drag.after = !before;
     target?.classList.add(before ? 'sort-before' : 'sort-after');
   });
   window.addEventListener('pointerup', event => { if (event.pointerId === drag?.pointer) finish(true); });
@@ -113,15 +119,20 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
   }, true);
   list.addEventListener('keydown', event => {
     if (!event.altKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
-    const row = event.target as HTMLElement;
-    if (!row.matches('[data-sort-scope]') || !row.dataset.id) return;
+    const target = event.target as HTMLElement;
+    const row = target.matches('[data-sort-scope]') ? target : target.closest<HTMLElement>('[data-sort-scope]');
+    const id = row && rowId(row);
+    if (!row || !id || !list.contains(row) || ![row, focusTarget(row)].includes(target)) return;
     const siblings = rows(row.dataset.sortScope!);
-    const target = siblings[siblings.indexOf(row) + (event.key === 'ArrowUp' ? -1 : 1)];
+    const sibling = siblings[siblings.indexOf(row) + (event.key === 'ArrowUp' ? -1 : 1)];
     event.preventDefault();
-    if (!target?.dataset.id) return;
-    move(row.dataset.id, target.dataset.id, event.key === 'ArrowDown', row.dataset.sortScope!);
+    const siblingId = sibling && rowId(sibling);
+    if (!sibling || !siblingId) return;
+    move(id, siblingId, event.key === 'ArrowDown', row.dataset.sortScope!);
     repaint();
-    [...list.querySelectorAll<HTMLElement>('[data-sort-scope]')].find(next => next.dataset.id === row.dataset.id)?.focus();
+    const replacement = [...list.querySelectorAll<HTMLElement>('[data-sort-scope]')]
+      .find(next => rowId(next) === id && next.dataset.sortScope === row.dataset.sortScope);
+    if (replacement) focusTarget(replacement).focus();
   });
   return { ordered, get interacting() { return drag !== null; } };
 }
