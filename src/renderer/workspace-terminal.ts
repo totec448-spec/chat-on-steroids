@@ -60,7 +60,7 @@ export function createWorkspaceTerminal() {
     for (const tab of tabs.values()) {
       tab.node.hidden = tab.id !== selected;
       const wrapper = el('div', `terminal-tab${tab.id === selected ? ' is-selected' : ''}`);
-      const pick = el('button', 'btn', `${tab.title}${tab.exited ? ' · exited' : ''}`) as HTMLButtonElement;
+      const pick = el('button', 'btn', () => `${tab.title}${tab.exited ? ` · ${t('exited')}` : ''}`) as HTMLButtonElement;
       pick.type = 'button'; pick.title = tab.title;
       pick.setAttribute('aria-pressed', String(tab.id === selected));
       pick.addEventListener('click', () => { selected = tab.id; paint(); fit(); tab.term.focus(); });
@@ -114,7 +114,7 @@ export function createWorkspaceTerminal() {
   const stopEvents = window.api.onTerminalEvent(event => {
     const tab = tabs.get(event.id); if (!tab) return;
     if ('data' in event) tab.term.write(event.data, () => { void window.api.terminalAck(event.id, event.data.length); });
-    else { tab.exited = true; tab.term.write(`\r\n[Process exited: ${event.exitCode}]\r\n`); paint(); }
+    else { tab.exited = true; tab.term.write(`\r\n[${t('Process exited: {0}', [event.exitCode])}]\r\n`); paint(); }
   });
   toggle.addEventListener('click', () => { setOpen(!open); if (open && !tabs.size && project) void create(); });
   add.addEventListener('click', () => void create()); empty.addEventListener('click', () => void create()); hide.addEventListener('click', () => setOpen(false));

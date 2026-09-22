@@ -14,7 +14,7 @@ function button(label: string | (() => string), action: () => void | Promise<voi
   node.type = 'button';
   node.addEventListener('click', async () => {
     node.disabled = true;
-    try { await action(); } catch (error) { toast(error instanceof Error ? error.message : 'Plugin operation failed'); }
+    try { await action(); } catch (error) { toast(error instanceof Error ? error.message : t('Plugin operation failed')); }
     finally { node.disabled = false; }
   });
   return node;
@@ -62,11 +62,11 @@ export function applyPluginsState(next: AppState): void {
     ? contacted ? t("Connected to ChatGPT") : t("Connector online · waiting for ChatGPT")
     : configured ? t("Plugins connector offline") : t("Setup required · connect your plugins"));
   status.dataset.live = String(surface?.state === 'live');
-  status.title = surface?.detail ?? '';
+  ui(status, 'title', () => t(surface?.detail ?? ''));
   const setupStatus = document.getElementById('pluginSetupStatus');
   if (setupStatus) ui(setupStatus, 'textContent', () => surface?.state === 'live'
     ? t("{0} tools available · {1}", [surface.tools.length, surface.lastRequestAt ? t("Connected to ChatGPT") : t("Ready to add in ChatGPT")])
-    : surface?.state === 'error' ? surface.detail : t("Save your connection below to make enabled plugins available in ChatGPT."));
+    : surface?.state === 'error' ? t(surface.detail) : t("Save your connection below to make enabled plugins available in ChatGPT."));
 }
 function showConnection(): void {
   if (!appState) { toast(t("Connection settings are still loading.")); return; }

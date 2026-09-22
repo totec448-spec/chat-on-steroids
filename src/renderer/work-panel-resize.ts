@@ -1,3 +1,5 @@
+import { t, ui } from './i18n.js';
+
 const STORAGE_KEY = 'chat-on-steroids.work-panel-width';
 const MIN_WIDTH = 280;
 const MIN_MAIN_WIDTH = 360;
@@ -53,7 +55,7 @@ export function attachWorkPanelResize(host: HTMLElement, pane: HTMLElement): HTM
   handle.tabIndex = 0;
   handle.setAttribute('role', 'separator');
   handle.setAttribute('aria-orientation', 'vertical');
-  handle.setAttribute('aria-label', 'Resize work panel');
+  ui(handle, 'aria-label', () => t('Resize work panel'));
   pane.prepend(handle);
 
   let drag: { id: number; x: number; width: number } | null = null;

@@ -249,7 +249,7 @@ export function createFilePanel(options: FilePanelOptions) {
   previewResize.tabIndex = 0;
   previewResize.setAttribute('role', 'separator');
   previewResize.setAttribute('aria-orientation', 'horizontal');
-  previewResize.setAttribute('aria-label', 'Resize file preview');
+  ui(previewResize, 'aria-label', () => t('Resize file preview'));
   body.append(tree, preview);
   pane.append(toolbar, body); options.host.append(pane);
 
@@ -372,9 +372,9 @@ export function createFilePanel(options: FilePanelOptions) {
     if (editorDirtyBadge) {
       editorDirtyBadge.hidden = !editorDirty;
       editorDirtyBadge.classList.toggle('is-conflict', editorExternalChange);
-      editorDirtyBadge.title = editorDirty
+      ui(editorDirtyBadge, 'title', () => editorDirty
         ? editorExternalChange ? t('Unsaved changes · file changed on disk') : t('Unsaved changes')
-        : '';
+        : '');
     }
   }
 

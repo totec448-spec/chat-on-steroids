@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { goalErrorMessage } from '../src/shared/goal-errors.js';
+import es from '../src/renderer/locales/es.json';
+import zhCN from '../src/renderer/locales/zh-CN.json';
+import zhTW from '../src/renderer/locales/zh-TW.json';
+import ja from '../src/renderer/locales/ja.json';
+import tr from '../src/renderer/locales/tr.json';
+import fr from '../src/renderer/locales/fr.json';
 
 describe('Goal failure explanations', () => {
   it('distinguishes missing tool evidence from a confirmed lost connection or disabled Loop', () => {
@@ -43,5 +49,31 @@ describe('Goal failure explanations', () => {
     expect(goalErrorMessage('goal_browser_send_failed')).toContain('could not be delivered');
     expect(goalErrorMessage('Enter a task of at most 16000 characters')).toBe('Enter a task of at most 16000 characters');
     expect(goalErrorMessage('future_goal_error')).toContain('Check the app diagnostics');
+  });
+
+  it('keeps every fixed Goal explanation localizable in every renderer catalog', () => {
+    const catalogs = { es, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, tr, fr } as const;
+    const codes = [
+      'loop_mcp_call_missing', 'goal_reply_not_pending', 'goal_context_too_large', 'reply_too_long',
+      'stream_record_too_long', 'response_body_too_large', 'no_api_key', 'auth_rejected', 'out_of_credit',
+      'unknown_model', 'invalid_provider', 'rate_limited', 'timeout_or_cancelled', 'request_failed',
+      'goal_browser_busy', 'goal_browser_cancelled', 'goal_browser_send_failed', 'goal_browser_send_unconfirmed',
+      'goal_owned_elsewhere', 'goal_final_not_confirmed', 'astra_finish_only', 'goal_disabled', 'goal_worker_chat',
+      'conversation_superseded', 'chat_blocked', 'session_not_recorded', 'no_conversation', 'no_objective',
+      'nothing_to_open_with', 'loop_stop_refused', 'goal_marker_missing', 'goal_reply_not_durable',
+      'goal_ack_not_durable', 'goal_switch_not_durable', 'goal_objective_not_durable',
+      'invalid_goal_decision_json', 'provider_completion_error'
+    ];
+    const fixed = new Set(codes.map(code => goalErrorMessage(code)));
+    const parameterized = [
+      'The helper prompt could not be delivered. {0}',
+      'The continuation provider rejected the request (HTTP {0}). Check its status and the configured model or endpoint.',
+      'The continuation could not proceed. Check the app diagnostics for details ({0}).'
+    ];
+    for (const [locale, catalog] of Object.entries(catalogs)) {
+      for (const source of [...fixed, ...parameterized]) {
+        expect(Object.hasOwn(catalog, source), `${locale}: ${source}`).toBe(true);
+      }
+    }
   });
 });

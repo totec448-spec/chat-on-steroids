@@ -705,7 +705,7 @@ function paintSessions(): void {
     });
     if (project) {
       const create = el('button', 'btn project-new'); create.append(icon('i-pencil')); create.setAttribute('type', 'button'); create.dataset.newProject = id;
-      ui(create, 'title', () => t("New chat in this project")); create.setAttribute('aria-label', create.title);
+      ui(create, 'title', () => t("New chat in this project")); ui(create, 'aria-label', () => t("New chat in this project"));
       create.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); selectNewChat(id); }); heading.append(create);
       const remove = el('button', 'btn project-remove') as HTMLButtonElement;
       remove.type = 'button'; remove.append(icon('i-trash'));
@@ -734,11 +734,11 @@ function paintSessions(): void {
               if (images) imageDrafts.set(draftKey(), images);
               else imageDrafts.delete(draftKey());
               imageDrafts.delete(oldKey);
-              $<HTMLTextAreaElement>('chatInput').placeholder = 'Ask anything…';
+              ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => t('Ask anything…'));
             } else selectedProjectId = null;
           }
           paintSessions(); void refreshInputQueue();
-          toast('Project removed; conversations kept');
+          toast(t('Project removed; conversations kept'));
         } finally { remove.disabled = false; }
       });
       heading.append(remove);
@@ -856,6 +856,16 @@ type GoalDraftPresentation = { stage: string; model: string; text: string; error
 let goalDraftView: GoalDraftPresentation | null = null;
 let goalWaitView: import('../shared/goal.js').GoalWait | null = null;
 let finishGoalDraftView: GoalDraftPresentation | null = null;
+function localizedGoalError(error: string): string {
+  const message = goalErrorMessage(error);
+  const delivery = /^The helper prompt could not be delivered\. (.+)$/.exec(message);
+  if (delivery) return t('The helper prompt could not be delivered. {0}', [delivery[1]!]);
+  const http = /^The continuation provider rejected the request \(HTTP (\d{3})\)\. Check its status and the configured model or endpoint\.$/.exec(message);
+  if (http) return t('The continuation provider rejected the request (HTTP {0}). Check its status and the configured model or endpoint.', [http[1]!]);
+  const code = /^The continuation could not proceed\. Check the app diagnostics for details \(([^)]+)\)\.$/.exec(message);
+  if (code) return t('The continuation could not proceed. Check the app diagnostics for details ({0}).', [code[1]!]);
+  return t(message);
+}
 function paintGoalProgress(): void {
   let row = document.getElementById('goalLifecycle');
   if (!row) { row = el('div', 'queued-input'); row.id = 'goalLifecycle'; row.setAttribute('role', 'status'); $('activeGoalRow').before(row); }
@@ -874,10 +884,10 @@ function paintGoalProgress(): void {
   const labels: Record<string, string> = { saving: t("Saving task…"), saved: t("Task saved · waiting for the next completed answer"),
     preparing: t("Preparing the opening message…"), generating: t("Generating the opening message…"), ready: t("Message ready · awaiting ChatGPT delivery"),
     sending: t("Preparing a continuation…"), answering: t("Generating a continuation…"), queued: t("Opening message queued"),
-    browser: t("Sending opening message to ChatGPT…"), sent: t("Opening message sent"), tool: 'Opening message delivered to the active turn',
+    browser: t("Sending opening message to ChatGPT…"), sent: t("Opening message sent"), tool: t('Opening message delivered to the active turn'),
     failed: t("Task could not continue"), cancelled: t("Opening message cancelled"), paused: t("Automation paused · task text preserved"), 'no-reply': t("Goal reached") };
   if (phase === 'retrying') { text = ''; error = undefined; }
-  labels.retrying = t("Provider busy · retry {0}{1}", [progress?.attempt ?? '', progress?.retryAt ? ' at ' + new Date(progress.retryAt).toLocaleTimeString() : '']);
+  labels.retrying = t("Provider busy · retry {0}{1}", [progress?.attempt ?? '', progress?.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString()]) : '']);
   const mode = $<HTMLSelectElement>('chatAutomation').value === 'loop' ? t('Loop') : t('Goal');
   labels.settling = `${mode} · ${wait?.reason === 'native-busy' ? t('ChatGPT resumed work · waiting before retry') : wait?.reason === 'silence' ? t('Waiting before recovery reload') : wait?.reason === 'quiet' ? t('Waiting for tool inactivity') :
     wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : t('Answer settling')}`;
@@ -892,7 +902,7 @@ function paintGoalProgress(): void {
   const busy = ['settling', 'saving', 'preparing', 'generating', 'retrying', 'sending', 'answering', 'browser', 'queued', 'ready'].includes(phase) && !error;
   row.setAttribute('aria-busy', String(busy));
   const marker = el('span', busy ? 'session-status is-working' : 'session-status');
-  const body = el('div', 'queue-label'); body.append(el('span', '', error ? `${labels.failed}: ${goalErrorMessage(error)}` : labels[phase] ?? phase));
+  const body = el('div', 'queue-label'); body.append(el('span', '', error ? `${labels.failed}: ${localizedGoalError(error)}` : labels[phase] ?? phase));
   if (text && ['generating', 'answering', 'preparing'].includes(phase)) { const preview = el('pre', 'goal-live-preview', text.slice(-8000)); body.append(preview); }
   row.replaceChildren(marker, body);
   if (phase === 'settling' && wait?.until) {
@@ -1001,14 +1011,14 @@ function paintTaskPlan(): void {
   if (plan?.stages) paintPreparedPlan();
   else if (plan?.error) {
     const failure = plan.error;
-    const error = el('div', 'muted', () => failure === 'invalid_goal_decision_json' ? t("The planner response could not be read.") : goalErrorMessage(failure));
+    const error = el('div', 'muted', () => failure === 'invalid_goal_decision_json' ? t("The planner response could not be read.") : localizedGoalError(failure));
     error.title = plan.error;
     preview.append(error, el('div', 'muted', () => t("Send again to retry, or cancel the plan.")));
   } else if (plan?.requestId) {
     const progress = plan.progress;
     const label = () => !progress ? t("Creating plan…") : progress.phase === 'retrying' ? t("Provider busy · retry {0}{1}", [progress.attempt ?? '', progress.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString()]) : '']) : progress.phase === 'cancelled' ? t("Plan cancelled") : progress.phase === 'preparing' ? t("Preparing plan…") : progress.phase === 'ready' ? t("Plan ready") : progress.phase === 'failed' ? t("Plan failed") : t("Writing plan…");
     preview.append(el('span', 'muted', label));
-    if (progress?.text || progress?.error) preview.append(el('pre', 'task-progress-text', progress.error ? goalErrorMessage(progress.error) : progress.text));
+    if (progress?.text || progress?.error) preview.append(el('pre', 'task-progress-text', progress.error ? () => localizedGoalError(progress.error!) : progress.text));
   }
   paintTaskActions(); paintDeliveryControls();
 }
@@ -1472,7 +1482,12 @@ export function renderedMarkdown(source: string, capture?: StoredText): HTMLElem
         if (safeExternalLink(url[2] ?? '')) link.setAttribute('href', url[2]!);
         return link.outerHTML;
       }
-      return citations.get(token.raw) ?? (token.raw.startsWith('\uE200filecite\uE202') ? '' : '<span title="The recording does not include this source URL">[source link unavailable]</span>');
+      if (citations.has(token.raw)) return citations.get(token.raw)!;
+      if (token.raw.startsWith('\uE200filecite\uE202')) return '';
+      const missing = document.createElement('span');
+      missing.title = t('The recording does not include this source URL');
+      missing.textContent = t('[source link unavailable]');
+      return missing.outerHTML;
     }
   }] });
   const html = parser.parse(text, { async: false });
@@ -3154,44 +3169,44 @@ function wireGoal(save: () => Promise<void>): void {
   $('goalPromptEdit').addEventListener('click', () => {
     const panel = $('goalPromptPanel');
     panel.hidden = !panel.hidden;
-    $('goalPromptEdit').textContent = panel.hidden ? 'Edit prompt' : 'Close prompt';
+    ui($('goalPromptEdit'), 'textContent', () => panel.hidden ? t('Edit prompt') : t('Close prompt'));
     if (!panel.hidden) $<HTMLTextAreaElement>('goalPrompt').focus();
   });
   $('goalPromptReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('goalPrompt').value = DEFAULT_GOAL_SYSTEM_PROMPT;
     await save();
-    toast('Goal prompt (no task) restored to default');
+    toast(t('Goal prompt (no task) restored to default'));
   });
   $<HTMLTextAreaElement>('goalObjectivePrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalObjectivePromptEdit').addEventListener('click', () => {
     const panel = $('goalObjectivePromptPanel');
     panel.hidden = !panel.hidden;
-    $('goalObjectivePromptEdit').textContent = panel.hidden ? 'Edit prompt' : 'Close prompt';
+    ui($('goalObjectivePromptEdit'), 'textContent', () => panel.hidden ? t('Edit prompt') : t('Close prompt'));
     if (!panel.hidden) $<HTMLTextAreaElement>('goalObjectivePrompt').focus();
   });
   $('goalObjectivePromptReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('goalObjectivePrompt').value = DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT;
     await save();
-    toast('Goal prompt (with a task) restored to default');
+    toast(t('Goal prompt (with a task) restored to default'));
   });
   $<HTMLTextAreaElement>('goalLoopPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalLoopPromptEdit').addEventListener('click', () => {
     const panel = $('goalLoopPromptPanel');
     panel.hidden = !panel.hidden;
-    $('goalLoopPromptEdit').textContent = panel.hidden ? 'Edit prompt' : 'Close prompt';
+    ui($('goalLoopPromptEdit'), 'textContent', () => panel.hidden ? t('Edit prompt') : t('Close prompt'));
     if (!panel.hidden) $<HTMLTextAreaElement>('goalLoopPrompt').focus();
   });
   $('goalLoopPromptReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('goalLoopPrompt').value = DEFAULT_GOAL_LOOP_SYSTEM_PROMPT;
     await save();
-    toast('Loop prompt restored to default');
+    toast(t('Loop prompt restored to default'));
   });
   // The catalogue is fetched on the first press and kept afterwards: the picker closing is
   // not a reason to spend another round trip on a list that changes weekly.
   $('goalPick').addEventListener('click', () => {
     const panel = $('goalModels');
     panel.hidden = !panel.hidden;
-    $('goalPick').textContent = panel.hidden ? 'Select model' : 'Close';
+    ui($('goalPick'), 'textContent', () => panel.hidden ? t('Select model') : t('Close'));
     if (!panel.hidden && goalModels.length === 0) void loadGoalModels(true);
   });
   $('goalMore').addEventListener('click', () => void loadGoalModels(false));
@@ -3208,7 +3223,7 @@ function wireGoal(save: () => Promise<void>): void {
     paintGoalReasoning(undefined, true);
     paintGoalModels();
     void save();
-    toast(`Goal model set to ${goalModel}`);
+    toast(t('Goal model set to {0}', [goalModel]));
   });
   // On blur, like every other key in this app: not saved keystroke by keystroke, and the
   // field is emptied the moment it has been handed over.
@@ -3226,7 +3241,7 @@ function wireGoal(save: () => Promise<void>): void {
       // Clear only the exact value that successfully crossed the secret-store boundary.
       if (input.value === submitted) input.value = '';
       applyGoal(next);
-      toast('OpenRouter key stored');
+      toast(t('OpenRouter key stored'));
     }
   });
   $('goalKeyRemove').addEventListener('click', async () => {
@@ -3234,7 +3249,7 @@ function wireGoal(save: () => Promise<void>): void {
     if (next) {
       invalidateGoalModels();
       applyGoal(next);
-      toast('OpenRouter key removed');
+      toast(t('OpenRouter key removed'));
     }
   });
   // Same blur-to-save discipline as the OpenRouter key above. Empty submits nothing:
@@ -3248,14 +3263,14 @@ function wireGoal(save: () => Promise<void>): void {
     if (next) {
       if (input.value === submitted) input.value = '';
       applyGoal(next);
-      toast('Custom provider key stored');
+      toast(t('Custom provider key stored'));
     }
   });
   $('goalCustomKeyRemove').addEventListener('click', async () => {
     const next = await run(api.setCustomProviderKey(''));
     if (next) {
       applyGoal(next);
-      toast('Custom provider key removed');
+      toast(t('Custom provider key removed'));
     }
   });
 }
@@ -3408,7 +3423,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
   visibleInputIds.add(entry.id);
   if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
-  const status = () => entry.error || (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString()]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
+  const status = () => entry.error ? t(entry.error) : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString()]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
   const files = el('div', 'message-attachments');
   if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
   for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
@@ -4047,7 +4062,7 @@ export function initChat(next: Deps): void {
         const draft = objective.value, mode = $<HTMLSelectElement>('sessionObjectiveMode').value as 'goal' | 'loop';
         if (!draft.trim()) return;
         const settings = confirmedComposerModel();
-        if (!settings) { toast('Reload model choices and select an available model and thinking effort before sending.'); return; }
+        if (!settings) { toast(t('Reload model choices and select an available model and thinking effort before sending.')); return; }
         const selection = selectionGeneration, intent = goalIntentGeneration, requestId = crypto.randomUUID();
         const projectId = selectedProjectId;
         const { model, reasoningEffort } = settings;
@@ -4172,7 +4187,7 @@ export function initChat(next: Deps): void {
     if (!files.length) return;
     event.preventDefault();
     const owner = composerDraftOwner();
-    if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast('Attach up to 20 files per message'); return; }
+    if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast(t('Attach up to 20 files per message')); return; }
     appendImages(owner, await run(api.dropFiles(files)));
   });
   window.addEventListener('dragover', event => {
@@ -4184,7 +4199,7 @@ export function initChat(next: Deps): void {
     event.preventDefault();
     const files = Array.from(event.dataTransfer.files), owner = composerDraftOwner();
     if (!files.length) return;
-    if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast('Attach up to 20 files per message'); return; }
+    if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast(t('Attach up to 20 files per message')); return; }
     appendImages(owner, await run(api.dropFiles(files)));
   });
   api.onWriteSession?.(id => { selectSession(id); $<HTMLTextAreaElement>('chatInput').focus(); });
@@ -4298,14 +4313,14 @@ export function initChat(next: Deps): void {
   $('copyHandoff').addEventListener('click', async () => {
     if (!handoff) return;
     const copied = await run(api.writeClipboard(handoff.text));
-    if (copied) toast('Handoff copied');
+    if (copied) toast(t('Handoff copied'));
   });
 
   $('swarmReset').addEventListener('click', async () => {
     const state = await run(api.resetSwarm());
     if (state) {
       paintSwarm(state);
-      toast('Swarm cleared');
+      toast(t('Swarm cleared'));
     }
   });
 
@@ -4321,10 +4336,10 @@ export function initChat(next: Deps): void {
     paintSwarm(outcome.swarm);
     toast(
       outcome.cleared === 'run'
-        ? 'Run cleared — every worker ended'
+        ? t('Run cleared — every worker ended')
         : outcome.cleared === 'worker'
-          ? `${id} cleared — its slot is free`
-          : outcome.reason
+          ? t('{0} cleared — its slot is free', [id])
+          : t(outcome.reason)
     );
   });
 
@@ -4336,11 +4351,11 @@ export function initChat(next: Deps): void {
 
   $('bridgeUnpair').addEventListener('click', async () => {
     const state = await run(api.unpairExtension());
-    if (state) toast('Browser disconnected');
+    if (state) toast(t('Browser disconnected'));
   });
   $('bridgeFolder').addEventListener('click', async () => {
     const dir = await run(api.openExtensionFolder());
-    if (dir) toast('Extension folder opened');
+    if (dir) toast(t('Extension folder opened'));
   });
 
   api.onSessionChanged(scheduleReload);

@@ -138,7 +138,7 @@ export function initPet(): () => void {
   window.addEventListener('resize',()=>interact(()=>{release();machine.resize(innerWidth,innerHeight);clearProps();closeMenu();persist();}),{signal});
   reduced.addEventListener('change',()=>interact(()=>{release();machine.setReducedMotion(reduced.matches);clearProps();}),{signal});
   window.addEventListener('pagehide',()=>{persist();stop();},{signal});
-  const atlas=new Image();atlas.onload=()=>{if(signal.aborted)return;ready=true;paint();wake();};atlas.onerror=()=>{launcher.disabled=true;launcher.title=t('Pet artwork could not be loaded');};atlas.src=new URL('./pet-assets/atlas.png',import.meta.url).href;
+  const atlas=new Image();atlas.onload=()=>{if(signal.aborted)return;ready=true;paint();wake();};atlas.onerror=()=>{launcher.disabled=true;ui(launcher,'title',()=>t('Pet artwork could not be loaded'));};atlas.src=new URL('./pet-assets/atlas.png',import.meta.url).href;
   paint();
   return ()=>{persist();stop();lifetime.abort();machine.hide();clearProps();layer.remove();launcher.remove();};
 }
