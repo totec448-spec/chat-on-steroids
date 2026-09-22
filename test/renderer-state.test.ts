@@ -43,6 +43,7 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
       create: false, edit: false, move: false, deleteFile: false, command: false,
       screen: false, control: false, clipboardRead: false, clipboardWrite: false
     },
+    commandAllowlist: { enabled: false, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
@@ -199,6 +200,7 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
       create: true, edit: true, move: true, deleteFile: true, command: true,
       screen: true, control: true, clipboardRead: true, clipboardWrite: true
     },
+    commandAllowlist: { enabled: false, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as 'light' | 'dark' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
@@ -823,6 +825,30 @@ it('saves the ChatGPT browser choice from its settings control and restores it o
   expect(browser.value).toBe('edge');
   mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, chatBrowser: 'chrome' } } });
   expect(browser.value).toBe('chrome');
+});
+
+it('validates and saves command allowlist rules from the Run programs settings group', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const rules = w.document.getElementById('commandAllowlistRules') as HTMLTextAreaElement;
+  const enabled = w.document.getElementById('commandAllowlistEnabled') as HTMLInputElement;
+  const error = w.document.getElementById('commandAllowlistError')!;
+
+  rules.value = 'git status; whoami';
+  rules.dispatchEvent(new w.Event('input', { bubbles: true }));
+  rules.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(error.hidden).toBe(false);
+  expect(error.textContent).toContain('Line 1');
+  expect(mounted.calls).toHaveLength(0);
+
+  rules.value = 'git status\ngit diff *';
+  rules.dispatchEvent(new w.Event('input', { bubbles: true }));
+  enabled.checked = true;
+  enabled.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].commandAllowlist).toEqual({ enabled: true, rules: ['git status', 'git diff *'] });
+  expect(error.hidden).toBe(true);
 });
 
 it('shows the current host Desktop tools without rebuilding permission controls on state pushes', async () => {

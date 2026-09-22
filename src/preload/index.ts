@@ -41,6 +41,7 @@ const call = <T>(channel: string, payload?: unknown): Promise<Reply<T>> =>
 export interface SettingsPatch {
   capabilities: Capabilities;
   readOnly: boolean;
+  commandAllowlist: Config['commandAllowlist'];
   tunnel: Config['tunnel'];
   ui: Config['ui'];
   sessions: Config['sessions'];
