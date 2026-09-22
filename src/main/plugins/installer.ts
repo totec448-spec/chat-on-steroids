@@ -145,7 +145,8 @@ export async function runInstaller(command: string, args: string[], cwd: string)
       clearTimeout(timer);
       reject(new Error(`Required runtime ${path.basename(command)} is unavailable; install it and restart CoS`));
     });
-    child.once('exit', (code) => {
+    // Callers can retire the staged runtime only after the process handles close.
+    child.once('close', (code) => {
       clearTimeout(timer);
       if (child.pid) installing.delete(child.pid);
       code === 0

@@ -1373,14 +1373,17 @@ describe('Astra delivery boundaries and stacked direct input', () => {
     active = false;
     expect(await authorizeBrowserInput(row.id, 'page', binding.conversationId)).toBe(true);
   });
-  it.each([null, { kind: 'turn_end', outcome: 'unknown', turnId: 'unknown', time: 1000 }])('requires confirmed terminal evidence for an existing Astra chat (%j)', async end => {
+  it.each([null, { kind: 'turn_end', outcome: 'unknown', turnId: 'unknown', time: 1000 }])('delivers explicit input in an idle adopted Astra chat without manufacturing completion (%j)', async end => {
     binding.end = end;
+    const checkpoint = await enqueueInput(input({ mode: 'after-turn', text: 'Automatic checkpoint' }));
     const row = await enqueueInput(input());
-    expect(await claimBrowserInput(row.id, 'page', binding.conversationId)).toBeNull();
-    expect(await pendingBrowserInputs()).toEqual([]);
-    await cancelInput(row.id);
-    const initial = await enqueueInput(input({ sessionId: null, model: 'gpt-6-astra' }));
-    expect(await claimBrowserInput(initial.id, 'fresh', null)).not.toBeNull();
+    expect(await sessionInputPolicy(sessionId)).toMatchObject({ browserAllowed: true, settled: false });
+    expect((await pendingBrowserInputs()).map(entry => entry.id)).toEqual([row.id]);
+    resetInputForTests();
+    expect(await claimBrowserInput(row.id, 'page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(row.id, 'page', binding.conversationId)).toBe(true);
+    expect(await claimBrowserInput(checkpoint.id, 'page', binding.conversationId)).toBeNull();
+    expect((await listInputs()).find(entry => entry.id === checkpoint.id)?.state).toBe('queued');
   });
   it('retains non-Astra browser behavior with unknown terminal evidence', async () => {
     binding.model = 'gpt-5.6-sol'; binding.end = null;

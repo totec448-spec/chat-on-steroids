@@ -16,7 +16,7 @@ app.setPath('userData', path.join(output, 'runtime'));
 app.whenReady().then(async () => {
   const { createServer } = await import('vite');
   const fixture = `
-    localStorage.removeItem('chat-on-steroids.sidebar-order');
+    if (new URL(location.href).searchParams.has('reset')) localStorage.removeItem('chat-on-steroids.sidebar-order');
     localStorage.removeItem('cos.ui.language');
     const config = {
       roots: [{name:'demo',path:'C:/demo'}], readOnly:true,
@@ -32,13 +32,14 @@ app.whenReady().then(async () => {
       bridge:{running:false,port:0,paired:false,present:false,lastSeenAt:null,extensionVersion:null},
       update:{current:'2.0.9',latest:null,stage:'idle',error:null,checkedAt:null}};
     const project = {id:'demo-project',name:'VideoClipper',path:'C:/demo',createdAt:1};
+    const projects = [project, {id:'second-project',name:'Documentation',path:'C:/docs',createdAt:2}];
     const rows = Array.from({length:22},(_,i)=>({id:'task-'+i,title:'Project chat '+(i+1),projectId:project.id,
       conversationId:'chat-'+i,chatIds:['chat-'+i],startedAt:1,updatedAt:100-i,endedAt:2,events:0,userMessages:0,
       toolCalls:0,lastToolCallAt:null,processExitNonzero:0,toolRejected:0,toolInternalErrors:0,errors:0,
       estimatedTokens:0,contextTokens:0,lastHandoffId:null,lastHandoffAt:null,lastTurnOutcome:null,activeTurnId:null,agents:[],origin:null}));
     const ok=data=>Promise.resolve({ok:true,data});
     window.api = new Proxy({ getState:()=>ok(state),getLog:()=>ok([]),
-      listProjects:()=>ok([project]),listSessions:()=>ok({sessions:rows,total:22,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
+      listProjects:()=>ok(projects),listSessions:()=>ok({sessions:rows,total:22,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
       getSwarm:()=>ok({running:false,runId:null,agents:[],maxWorkers:2,pendingReports:0}),
       getChatModels:()=>ok({state:'unknown',models:[]}),
       saveSettings:patch=>{state.config={...state.config,...patch};return ok(state)},
@@ -66,7 +67,7 @@ app.whenReady().then(async () => {
   try {
     await server.listen(); fs.mkdirSync(output,{recursive:true});
     win = new BrowserWindow({show:false,width:1100,height:900,webPreferences:{sandbox:true,backgroundThrottling:false}});
-    await win.loadURL(server.resolvedUrls.local[0]+'fixture.html');
+    await win.loadURL(server.resolvedUrls.local[0]+'fixture.html?reset=1');
     win.webContents.setZoomFactor(1);
     const js = code=>win.webContents.executeJavaScript(code);
     const screenshot = async name => {
@@ -207,6 +208,29 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('[data-remove-profile-id="default"]').click()`);
     for(let i=0;i<100 && await js(`document.querySelectorAll('[data-remove-profile-id]').length!==1`);i++) await new Promise(r=>setTimeout(r,25));
     assert.equal(await js(`document.querySelector('[data-remove-profile-id]').disabled`),true);
-    console.log(JSON.stringify({projectDisclosure:{initiallyCollapsed:true,pointer:true,space:true,enter:true},geometry,drag:moved,showMore:13,collapse:true,profileLayout:compactProfiles,longProfile,output}));
+    await js(`document.getElementById('newChat').click(); document.querySelector('[data-project-id="demo-project"] summary').click()`);
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    const projectPoints = await js(`[...document.querySelectorAll('.project-heading')].map(heading=>{const r=heading.getBoundingClientRect();return {x:Math.round(r.left+35),y:Math.round(r.top+r.height/2)}})`);
+    win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...projectPoints[1]});
+    win.webContents.sendInputEvent({type:'mouseMove',...projectPoints[0],y:projectPoints[0].y-8});
+    win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...projectPoints[0],y:projectPoints[0].y-8});
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    const projectOrder = `[...document.querySelectorAll('.project-group')].map(group=>group.dataset.projectId)`;
+    assert.deepEqual(await js(projectOrder),['second-project','demo-project']);
+    assert.equal(await js(`document.querySelectorAll('[data-project-id="demo-project"] > .sess').length`),13);
+    assert.equal(await js(`document.querySelector('.sess.is-sel') === null`),true);
+    await js(`document.querySelector('[data-project-id="second-project"] summary').focus()`);
+    for(const type of ['keyDown','keyUp']) win.webContents.sendInputEvent({type,keyCode:'Down',modifiers:['alt']});
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    assert.deepEqual(await js(projectOrder),['demo-project','second-project']);
+    assert.equal(await js(`document.activeElement.closest('.project-group').dataset.projectId`),'second-project');
+    for(const type of ['keyDown','keyUp']) win.webContents.sendInputEvent({type,keyCode:'Up',modifiers:['alt']});
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    assert.deepEqual(await js(projectOrder),['second-project','demo-project']);
+    await win.loadURL(server.resolvedUrls.local[0]+'fixture.html');
+    for(let i=0;i<100 && !(await js('!!window.fixtureReady && document.querySelectorAll(".project-group").length === 2'));i++) await new Promise(r=>setTimeout(r,25));
+    assert.deepEqual(await js(projectOrder),['second-project','demo-project']);
+    await screenshot('project-order-restored.png');
+    console.log(JSON.stringify({projectDisclosure:{initiallyCollapsed:true,pointer:true,space:true,enter:true},geometry,drag:moved,projectOrder:{pointer:true,keyboard:true,restored:true},showMore:13,collapse:true,profileLayout:compactProfiles,longProfile,output}));
   } finally { win?.destroy(); await server.close(); app.quit(); }
 }).catch(error=>{console.error(error);app.exit(1)});

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { pluginManager } from './plugins/manager.js';
 import { refreshPluginPublication } from './connection.js';
+import { rearmPluginRefresh } from './plugin-refresh.js';
 
 const values = z.record(z.string().min(1).max(128), z.string().max(16_384)).refine(value => Object.keys(value).length <= 64, 'At most 64 configuration fields');
 const source = z.object({
@@ -30,7 +31,9 @@ export function registerPluginIpc(handle: Register, getWindow: () => BrowserWind
     await pluginManager.configure(input.id, input.patch); return pluginManager.snapshot();
   });
   for (const action of ['restart', 'update', 'uninstall', 'authenticate', 'cancelAuthentication'] as const) handle(`plugins:${action}`, async payload => {
-    await pluginManager[action](identity.strict().parse(payload).id); return pluginManager.snapshot();
+    await pluginManager[action](identity.strict().parse(payload).id);
+    if (action === 'restart') await rearmPluginRefresh('plugins');
+    return pluginManager.snapshot();
   });
   handle('plugins:enabled', async payload => {
     const input = identity.extend({ enabled: z.boolean() }).strict().parse(payload);
