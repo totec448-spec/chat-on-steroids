@@ -1454,6 +1454,48 @@ it('groups project chats and restores each project composer with its selected id
   expect(w.document.querySelector<HTMLDetailsElement>(`[data-project-id="${projects[1]!.id}"]`)!.open).toBe(false);
 });
 
+it('reorders whole project groups without changing chat selection, ownership or disclosure across refresh', async () => {
+  const projects: LocalProject[] = [
+    { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Alpha', path: '/alpha', createdAt: 1 },
+    { id: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff', name: 'Beta', path: '/beta', createdAt: 2 }
+  ];
+  const chats = projects.map((project, index) => ({ ...summary([]), id: `chat-${index}`, conversationId: `conversation-${index}`, projectId: project.id }));
+  const { w, append, live } = await boot([], false, [], projects, { sessions: chats });
+  const list = w.document.getElementById('sessionList')!;
+  list.setPointerCapture = vi.fn(); list.hasPointerCapture = () => false;
+  const groups = () => [...w.document.querySelectorAll<HTMLDetailsElement>('.project-group')];
+  const ids = () => groups().map(group => group.dataset.projectId);
+  const geometry = () => groups().forEach((group, index) => {
+    group.getClientRects = () => [{ top: index * 100, height: 80 }] as unknown as DOMRectList;
+    group.getBoundingClientRect = () => ({ top: index * 100, height: 80 }) as DOMRect;
+  });
+  const pointer = (target: Element | Window, type: string, y: number) => target.dispatchEvent(new w.MouseEvent(type, {
+    bubbles: true, cancelable: true, button: 0, clientX: 20, clientY: y
+  }));
+  groups()[0]!.querySelector('summary')!.click();
+  expect(groups()[0]!.open).toBe(true);
+  expect(groups().every(group => !group.hasAttribute('data-id'))).toBe(true);
+  geometry();
+  pointer(groups()[1]!.querySelector('summary')!, 'pointerdown', 110);
+  pointer(list, 'pointermove', -20); pointer(w as unknown as Window, 'pointerup', -20);
+  expect(ids()).toEqual([projects[1]!.id, projects[0]!.id]);
+  expect(groups()[1]!.open).toBe(true);
+  for (const chat of chats) expect(w.document.querySelector(`[data-project-id="${chat.projectId}"] [data-id="${chat.id}"]`)).not.toBeNull();
+  expect(w.document.querySelector('.sess.is-sel')).toBeNull();
+  await append([]);
+  expect(ids()).toEqual([projects[1]!.id, projects[0]!.id]);
+  geometry();
+  const beta = groups()[0]!.querySelector<HTMLElement>('summary')!;
+  beta.focus(); beta.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true, cancelable: true }));
+  expect(ids()).toEqual(projects.map(project => project.id));
+  expect(w.document.activeElement).toBe(groups()[1]!.querySelector('summary'));
+  const saved = w.localStorage.getItem('chat-on-steroids.sidebar-order');
+  pointer(groups()[0]!.querySelector('.project-new')!, 'pointerdown', 10);
+  pointer(list, 'pointermove', 500); pointer(w as unknown as Window, 'pointerup', 500);
+  expect(w.localStorage.getItem('chat-on-steroids.sidebar-order')).toBe(saved);
+  expect(live.sent).toEqual([]);
+});
+
 it('folds a whole Compact & Resume into one row that says the new chat opened', async () => {
   const { w } = await boot([
     { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },
@@ -3169,6 +3211,14 @@ it('opens every selected chat at the bottom and preserves manual reading during 
     expect(pane.scrollTop).toBe(pane.scrollHeight); // Chromium clamps to the actual bottom.
   };
   await select(first.id);
+  // A global notification from another chat still refreshes this idle selection.
+  // A deliberate small scroll away from its bottom must remain a reading position.
+  pane.scrollTop = pane.scrollHeight - pane.clientHeight - 20;
+  const nearTail = pane.scrollTop;
+  for (let index = 0; index < 3; index++) {
+    await append([]);
+    expect(pane.scrollTop).toBe(nearTail);
+  }
   for (let i = 0; i < 3; i++) {
     pane.scrollTop = 700;
     await append([]);

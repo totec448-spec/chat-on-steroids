@@ -154,7 +154,9 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
     (!astra && !!completed && !activity.possible && !activity.exact);
   const executing = inFlightToolCalls(session.conversationId) > 0;
   return { canInject, injectionTurnId, directTurn, queueAtFinish: astra && canInject && getConfig().ui.finishTool === true,
-    browserAllowed: !session.activeTurnId && !activity.possible && !activity.exact && !executing && (!astra || terminal),
+    // An adopted idle chat may have no recorded turn boundary. Explicit input can
+    // use its native composer; queued checkpoints still require `settled` below.
+    browserAllowed: !session.activeTurnId && !activity.possible && !activity.exact && !executing,
     // Completion already reconciles trailing same-request calls. A separate time
     // comparison would leave the composer unsettled after the activity clock stopped.
     settled: settled && !executing && (!!completed || (session.lastToolCallAt ?? 0) <= (end?.time ?? 0)) };

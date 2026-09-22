@@ -75,11 +75,16 @@ it('keeps first-use setup and the connector-refresh instruction visible, includi
   initPlugins(); await tick();
   expect(document.querySelector('.plugin-connection')!.textContent).toContain('before your first use');
   expect(document.querySelector('.plugin-refresh-guide')!.textContent).toContain('After installing, updating or changing enabled plugins');
-  applyPluginsState({ config: { tunnel: { kind: 'manual' } }, status: { surfaces: [{ id: 'plugins', state: 'live', lastRequestAt: 1 }] } } as unknown as AppState);
+  applyPluginsState({ config: { tunnel: { kind: 'manual' } }, status: { surfaces: [{ id: 'plugins', state: 'live', lastRequestAt: 1, tools: [] }] } } as unknown as AppState);
   expect(document.getElementById('pluginsSetupTitle')!.textContent).toBe('Your Plugins connector');
   expect(document.querySelector('.plugin-refresh-guide')!.textContent).toContain('refresh Chat On Steroids Plugins in ChatGPT');
   document.getElementById('pluginsOpenChatGPT')!.click(); await tick();
-  expect(api.openLink).toHaveBeenCalledWith('https://chatgpt.com/#settings/Plugins');
+  expect(api.openLink).toHaveBeenCalledExactlyOnceWith('https://chatgpt.com/plugins');
+  document.getElementById('pluginsSetupLink')!.click();
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')]
+    .find(node => node.textContent === 'Open ChatGPT plugins')!.click();
+  await tick();
+  expect(api.openLink!.mock.calls).toEqual([['https://chatgpt.com/plugins'], ['https://chatgpt.com/plugins']]);
 });
 
 it('keeps plugin connection setup local, preserves a draft and saves through the existing settings authority', async () => {
