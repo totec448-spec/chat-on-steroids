@@ -4,15 +4,16 @@ import zhTW from './locales/zh-TW.json';
 import ja from './locales/ja.json';
 import tr from './locales/tr.json';
 import fr from './locales/fr.json';
+import de from './locales/de.json';
 
-export type Language = 'en' | 'es' | 'zh-CN' | 'zh-TW' | 'ja' | 'tr' | 'fr';
+export type Language = 'en' | 'es' | 'zh-CN' | 'zh-TW' | 'ja' | 'tr' | 'fr' | 'de';
 const STORAGE_KEY = 'cos.ui.language';
 type Catalog = Readonly<Record<string, string>>;
-const catalogs: Readonly<Record<Exclude<Language, 'en'>, Catalog>> = { es, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, tr, fr };
+const catalogs: Readonly<Record<Exclude<Language, 'en'>, Catalog>> = { es, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, tr, fr, de };
 const sourceKeys = new Set(Object.values(catalogs).flatMap(catalog => Object.keys(catalog)));
 
 function parseLanguage(value: string | null | undefined): Language {
-  return value === 'es' || value === 'zh-CN' || value === 'zh-TW' || value === 'ja' || value === 'tr' || value === 'fr' ? value : 'en';
+  return value === 'es' || value === 'zh-CN' || value === 'zh-TW' || value === 'ja' || value === 'tr' || value === 'fr' || value === 'de' ? value : 'en';
 }
 
 let language: Language = 'en';

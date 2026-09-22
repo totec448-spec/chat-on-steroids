@@ -6,7 +6,7 @@ import zhCN from '../src/renderer/locales/zh-CN.json';
 import zhTW from '../src/renderer/locales/zh-TW.json';
 import ja from '../src/renderer/locales/ja.json';
 
-const names = { en: 'English', es: 'Español', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', ja: '日本語', tr: 'Türkçe', fr: 'Français' } as const;
+const names = { en: 'English', es: 'Español', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', ja: '日本語', tr: 'Türkçe', fr: 'Français', de: 'Deutsch' } as const;
 let dom: JSDOM;
 beforeEach(() => {
   vi.resetModules();
@@ -88,7 +88,7 @@ describe('Japanese app interface and compact setup languages', () => {
     const action = ui(document.createElement('button'), 'textContent', () => t('Remove {0}', [argument]));
     document.body.append(authored, hidden, action);
     const icons = [...document.querySelectorAll('svg')];
-    for (const locale of ['ja', 'es', 'zh-CN', 'zh-TW', 'en', 'ja'] as const) {
+    for (const locale of ['ja', 'es', 'zh-CN', 'zh-TW', 'tr', 'fr', 'de', 'en', 'ja'] as const) {
       setLanguage(locale);
       expect(document.getElementById('chatInput')).toBe(input);
       expect(input.value).toBe(draft);
