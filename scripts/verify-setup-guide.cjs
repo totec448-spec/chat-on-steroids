@@ -57,7 +57,8 @@ app.whenReady().then(async () => {
       [1100, 900, 1.5, 'zh-CN', 'light'], [640, 720, 1, 'zh-CN', 'dark'],
       [800, 650, 1, 'es', 'dark'], [800, 650, 1, 'zh-TW', 'light'],
       [1100, 900, 1, 'ja', 'dark'], [1100, 900, 1.5, 'ja', 'light'], [640, 720, 1, 'ja', 'dark'],
-      [1100, 900, 1, 'tr', 'dark'], [1100, 900, 1.5, 'tr', 'light'], [640, 720, 1, 'tr', 'dark']
+      [1100, 900, 1, 'tr', 'dark'], [1100, 900, 1.5, 'tr', 'light'], [640, 720, 1, 'tr', 'dark'],
+      [1100, 900, 1, 'fr', 'dark'], [1100, 900, 1.5, 'fr', 'light'], [640, 720, 1, 'fr', 'dark']
     ]) {
       win.setSize(width, height);
       win.webContents.setZoomFactor(zoom);
@@ -72,8 +73,8 @@ app.whenReady().then(async () => {
         return {
           overflow: panel.scrollWidth > panel.clientWidth,
           separated: heading.right <= bounds.left || heading.bottom <= bounds.top,
-          compact: bounds.width <= 285,
-          flagsOnly: buttons.length === 6 && buttons.every(button => !button.textContent.trim() && button.querySelector('svg')),
+          compact: bounds.width <= 330,
+          flagsOnly: buttons.length === 7 && buttons.every(button => !button.textContent.trim() && button.querySelector('svg')),
           labeled: buttons.every(button => button.title && button.title === button.getAttribute('aria-label')),
           selected: buttons.filter(button => button.getAttribute('aria-pressed') === 'true').map(button => button.dataset.language),
           reachable: buttons.every(button => {
@@ -154,10 +155,12 @@ app.whenReady().then(async () => {
     assert.equal(await win.webContents.executeJavaScript('document.documentElement.lang'), 'ja');
     await key('Tab'); await key('Space');
     assert.equal(await win.webContents.executeJavaScript('document.documentElement.lang'), 'tr');
+    await key('Tab'); await key('Space');
+    assert.equal(await win.webContents.executeJavaScript('document.documentElement.lang'), 'fr');
     await win.loadURL(server.resolvedUrls.local[0] + 'setup-preview.html');
     assert.deepEqual(await win.webContents.executeJavaScript(`({language:document.documentElement.lang,
-      selected:document.querySelector('[data-language="tr"]').getAttribute('aria-pressed'),
-      preference:document.getElementById('uiLanguage').value})`), {language:'tr', selected:'true', preference:'tr'});
+      selected:document.querySelector('[data-language="fr"]').getAttribute('aria-pressed'),
+      preference:document.getElementById('uiLanguage').value})`), {language:'fr', selected:'true', preference:'fr'});
     // Native modal, Escape dismissal and focus restoration must work without opening a browser.
     await win.webContents.executeJavaScript(`(() => {
       const button=document.querySelectorAll('[data-setup-guide="plugin"] .setup-enlarge')[1];
