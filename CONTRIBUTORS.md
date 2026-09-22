@@ -113,6 +113,13 @@ The larger off-Space/focus change remains unincorporated. Exact source revisions
 and public GitHub co-author trailers are recorded in
 [`docs/worklog-2026-09-20-selective-pr-review.md`](docs/worklog-2026-09-20-selective-pr-review.md).
 
+The September 22 follow-up incorporates [@PourrezJ](https://github.com/PourrezJ)'s French
+translation from [#369](https://github.com/totec448-spec/chat-on-steroids/pull/369). Its
+1,431 translated entries are retained with one wording correction; 21 newer strings are
+added independently. Integration preserves Turkish and the existing language controls,
+drafts and preference storage. Validation is recorded in
+[the follow-up worklog](docs/worklog-2026-09-22-french-locale.md).
+
 ## Reports, review and proposed work
 
 The September 22 selective review adapts [@lavalava45](https://github.com/lavalava45)'s
