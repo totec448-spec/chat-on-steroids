@@ -8126,10 +8126,54 @@ async function deliverOne(): Promise<void> {
   // polling. Only that browser can put the new tab in the window the old one is in, and only
   // a tab it creates itself is guaranteed to be in a browser this extension is loaded in.
   try {
-    if (!offerPlacement(command)) await openFreshChatInBrowser(command);
+    if (offerPlacement(command)) armPlacementFallback(command);
+    else await openFreshChatInBrowser(command);
   } finally {
     scheduleDeliver();
   }
+}
+
+/**
+ * How long the browser keeps the right to open a chat it was offered before this app does it.
+ *
+ * Placement is an optimisation: the page that asked for the handoff can put the successor in the
+ * same window, which the operating system's opener cannot. When it works it is instant — three
+ * handoffs measured on 2026-09-21 committed 4, 5 and 100 seconds after the brief was captured.
+ * When it does not work it is silent, and silence used to cost a quarter of an hour: the offer's
+ * only bound was the command's own lease, and for an automatic resume that lease is fifteen
+ * minutes. Measured on 2026-09-22, the brief was captured at 04:32:53 and nothing happened at all
+ * until the lease let go at 04:47:53 — this app then opened the chat itself and the handoff was
+ * committed eight seconds later. One handoff in four that day.
+ *
+ * Long enough that a page which is merely slow still wins the race; short enough that a page
+ * which is gone costs a minute rather than a quarter hour. Deliberately under COMMAND_DEADLINE_MS
+ * as well, so a manual resume — which leases for exactly that — gets its fallback rather than
+ * racing its own expiry.
+ */
+const PLACEMENT_FALLBACK_MS = 60_000;
+
+/**
+ * Opens the chat here when the browser was offered it and did nothing with it.
+ *
+ * Deliberately not a failure: the command keeps its lease, its ticket and its identity, and the
+ * destination checkpoint still fences the bootstrap, so this is the same opening by a different
+ * hand. A command that has since been redeemed, dropped or retired is left alone — `owner` is the
+ * proof a page took it, and the lookup by id is what makes a stale timer harmless.
+ */
+function armPlacementFallback(command: Command): void {
+  const timer = setTimeout(() => {
+    const current = commands.find((entry) => entry.id === command.id);
+    if (!current || current.owner !== null) return;
+    // Withdraw an offer nobody ever collected, so a late poll cannot open a second chat for a
+    // command this app is about to open itself.
+    delete current.placement;
+    logInfo(
+      `bridge: the browser did not open ${specKey(current.spec)} within ` +
+        `${Math.round(PLACEMENT_FALLBACK_MS / 1000)}s — opening it from here instead`
+    );
+    void openFreshChatInBrowser(current);
+  }, PLACEMENT_FALLBACK_MS);
+  timer.unref?.();
 }
 
 /**
