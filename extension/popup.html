@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Chat On Steroids</title>
+    <title data-i18n="extension_action_title">Chat On Steroids</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
@@ -24,51 +24,51 @@
 
       <header>
         <img class="glyph" src="icons/icon48.png" alt="" width="34" height="34" />
-        <h1>Chat On Steroids</h1>
+        <h1 data-i18n="extension_action_title">Chat On Steroids</h1>
       </header>
 
-      <p class="pill off" id="pill"><span class="dot"></span><span id="state">Looking for the app</span></p>
+      <p class="pill off" id="pill"><span class="dot"></span><span id="state" data-i18n="popup_state_looking_for_app">Looking for the app</span></p>
 
 
       <p class="alert" id="alert" hidden></p>
-      <p class="caption">Session capture</p>
+      <p class="caption" data-i18n="popup_section_session_capture">Session capture</p>
       <section class="card">
         <div class="row" id="r-tab">
           <svg class="ico"><use href="#i-tab" /></svg>
-          <span class="name">ChatGPT tab</span>
+          <span class="name" data-i18n="popup_chatgpt_tab">ChatGPT tab</span>
           <span class="meta" id="d-tab"></span>
           <span class="badge"></span>
       </div>
       <div class="row" id="r-rec">
         <svg class="ico"><use href="#i-rec" /></svg>
-        <span class="name">Recording this chat</span>
+        <span class="name" data-i18n="popup_recording_this_chat">Recording this chat</span>
         <span class="meta" id="d-rec"></span>
         <span class="badge"></span>
       </div>
       <div class="row" id="r-chat">
         <svg class="ico"><use href="#i-hash" /></svg>
-        <span class="name">Chat ID</span>
-        <button class="meta copy" id="d-chat" type="button"></button>
+        <span class="name" data-i18n="popup_chat_id">Chat ID</span>
+        <button class="meta copy" id="d-chat" type="button" aria-label="Copy chat ID" data-i18n-aria-label="popup_copy_chat_id"></button>
         <span class="badge"></span>
       </div>
       <div class="row" id="r-req">
         <svg class="ico"><use href="#i-req" /></svg>
-        <span class="name">Current request</span>
-        <button class="meta copy" id="d-req" type="button"></button>
+        <span class="name" data-i18n="popup_current_request">Current request</span>
+        <button class="meta copy" id="d-req" type="button" aria-label="Copy current request ID" data-i18n-aria-label="popup_copy_current_request_id"></button>
         <span class="badge"></span>
       </div>
       <details id="stream">
         <summary class="row" id="r-app">
           <svg class="ico"><use href="#i-send" /></svg>
-          <span class="name">Reaching the app</span>
+          <span class="name" data-i18n="popup_reaching_app">Reaching the app</span>
           <span class="meta" id="d-app"></span>
           <span class="badge"></span>
           <span class="chevron" aria-hidden="true"></span>
         </summary>
         <div class="stages">
-          <div class="stage" id="s-read"><span class="tick"></span><span class="name">Request ID found</span><span class="meta" id="n-read"></span></div>
-          <div class="stage" id="s-sent"><span class="tick"></span><span class="name">Sent to app</span><span class="meta" id="n-sent"></span></div>
-          <div class="stage" id="s-proc"><span class="tick"></span><span class="name">Owner confirmed</span><span class="meta" id="n-proc"></span></div>
+          <div class="stage" id="s-read"><span class="tick"></span><span class="name" data-i18n="popup_request_id_found">Request ID found</span><span class="meta" id="n-read"></span></div>
+          <div class="stage" id="s-sent"><span class="tick"></span><span class="name" data-i18n="popup_sent_to_app">Sent to app</span><span class="meta" id="n-sent"></span></div>
+          <div class="stage" id="s-proc"><span class="tick"></span><span class="name" data-i18n="popup_owner_confirmed">Owner confirmed</span><span class="meta" id="n-proc"></span></div>
           <p class="why" id="why"></p>
           <div class="calls" id="calls"></div>
         </div>
@@ -76,17 +76,17 @@
     </section>
 
 
-    <p class="caption">Augment ChatGPT</p>
+    <p class="caption" data-i18n="popup_section_augment_chatgpt">Augment ChatGPT</p>
     <section class="card">
       <label class="row" for="overwriteToggle">
         <svg class="ico"><use href="#i-pen" /></svg>
-        <span class="name">Overwrite ChatGPT</span>
+        <span class="name" data-i18n="popup_overwrite_chatgpt">Overwrite ChatGPT</span>
         <input id="overwriteToggle" type="checkbox" checked />
         <span class="track" aria-hidden="true"><span class="thumb"></span></span>
       </label>
       <label class="row" for="timeToggle">
         <svg class="ico"><use href="#i-clock" /></svg>
-        <span class="name">Timestamps</span>
+        <span class="name" data-i18n="popup_timestamps">Timestamps</span>
         <input id="timeToggle" type="checkbox" />
         <span class="track" aria-hidden="true"><span class="thumb"></span></span>
       </label>
@@ -95,17 +95,18 @@
     <details id="more">
       <summary class="card row">
         <svg class="ico"><use href="#i-more" /></svg>
-        <span class="name">Advanced</span>
+        <span class="name" data-i18n="popup_advanced">Advanced</span>
         <span class="chevron" aria-hidden="true"></span>
       </summary>
       <dl class="grid" id="grid"></dl>
       <div class="actions">
-        <button id="copyBtn" type="button">Copy</button>
-        <button id="retryBtn" type="button" hidden>Try again</button>
+        <button id="copyBtn" type="button" data-i18n="popup_copy">Copy</button>
+        <button id="retryBtn" type="button" hidden data-i18n="popup_try_again">Try again</button>
       </div>
     </details>
 
     </div>
+    <script src="i18n.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
