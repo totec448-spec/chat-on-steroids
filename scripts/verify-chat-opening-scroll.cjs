@@ -83,12 +83,21 @@ app.whenReady().then(async () => {
       pane.scrollTop=0;
       await select('a');
     }
+    pane.scrollTop=pane.scrollHeight-pane.clientHeight-20;
+    await frame();
+    const nearTail=pane.scrollTop, nearTailRefreshes=[];
+    for(let index=0;index<3;index++) {
+      fixture.sessions.find(row=>row.id==='b').updatedAt++;
+      const reads=fixture.reads.length;fixture.signal();
+      await waitFor(()=>fixture.reads.length>reads);await frame();
+      nearTailRefreshes.push(pane.scrollTop);
+    }
     pane.scrollTop=700;
     await frame();
     const readBefore=fixture.reads.length;fixture.addLive();fixture.signal();
     await waitFor(()=>fixture.reads.length>readBefore&&[...document.querySelectorAll('.ev-assistant_message')].some(row=>row.textContent.includes('New live row')));
     await frame();
-    return {observations, readerAfterRefresh:pane.scrollTop,readBefore,readAfter:fixture.reads.length,
+    return {observations,nearTail,nearTailRefreshes, readerAfterRefresh:pane.scrollTop,readBefore,readAfter:fixture.reads.length,
       inserted:[...document.querySelectorAll('.ev-assistant_message')].some(row=>row.textContent.includes('New live row'))};
   })()`);
   console.log(JSON.stringify(results, null, 2));
@@ -100,6 +109,7 @@ app.whenReady().then(async () => {
   assert.ok(results.readAfter > results.readBefore, 'Live refresh must perform a session read');
   assert.equal(results.inserted, true, 'Live refresh must render the inserted assistant row');
   assert.equal(results.readerAfterRefresh, 700, 'Live refresh preserves deliberate reading');
-  console.log('Chat opening passed: initial open, three A/B/A cycles, long first message and live reader position.');
+  assert.deepEqual(results.nearTailRefreshes,[results.nearTail,results.nearTail,results.nearTail], 'Other sessions cannot reclaim a near-tail reading position');
+  console.log('Chat opening passed: initial open, A/B/A cycles, long first message, near-tail background refresh and live reader position.');
   win.destroy(); app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });

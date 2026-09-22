@@ -115,6 +115,17 @@ and public GitHub co-author trailers are recorded in
 
 ## Reports, review and proposed work
 
+The September 22 selective review adapts [@lavalava45](https://github.com/lavalava45)'s
+Plugins route correction (#351) and explicit refresh retry (#363),
+[@27mfp](https://github.com/27mfp)'s project-order proposal (#355),
+[@ayhanmalkoc](https://github.com/ayhanmalkoc)'s Turkish translation (#366), and
+[@Haz4rdovisk](https://github.com/Haz4rdovisk)'s installer-close correction from #345.
+The adaptations reuse the existing outbox, refresh ledger, sidebar order and locale owners.
+Independent fixes also address the cancellation, adopted-Astra input and scrolling reports
+in #357, #361 and #359. Validation and the disposition of every reviewed issue/PR are recorded
+in [the worklog](docs/worklog-2026-09-22-github-triage.md) and
+[review ledger](docs/github-triage-2026-09-22.md).
+
 The September 20 connection and Skills integration incorporates
 [@K4viar](https://github.com/K4viar) / Lucas Pazini Pinha's approved, package-bounded Skills
 links from [#334](https://github.com/totec448-spec/chat-on-steroids/pull/334),

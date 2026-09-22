@@ -97,6 +97,20 @@ export function publishPluginSurface(surface: PluginSurface, connectorName: stri
 }
 export function unpublishPluginSurface(surface: PluginSurface): void { publications.delete(surface); }
 export function pluginRefreshPublications(): PluginPublication[] { return structuredClone([...publications.values()]); }
+/** One fresh browser attempt after an explicit Restart, only before any Refresh claim. */
+export function rearmPluginRefresh(surface: PluginSurface): Promise<boolean> {
+  return serial(async () => {
+    const current = await rows();
+    const publication = publications.get(surface);
+    const row = current.find(candidate => candidate.surface === surface);
+    if (!publication || !row || row.schemaId !== publication.schemaId || row.attempted || row.manual || row.completedSchemaId === row.schemaId) return false;
+    row.id = randomUUID();
+    delete row.error;
+    await writeDurableNow('plugin-refresh', current);
+    wakeBrowserWork();
+    return true;
+  });
+}
 /** App IDs are stable connector identities. The browser must prove current installation. */
 export function pendingPluginRefreshes(): Promise<PluginRefreshRequest[]> {
   return serial(async () => {

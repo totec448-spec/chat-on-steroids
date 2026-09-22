@@ -1,4 +1,4 @@
-import { t, ui } from './i18n.js';
+import { currentLanguage, t, ui } from './i18n.js';
 /**
  * The handful of DOM helpers both panels need.
  *
@@ -31,12 +31,13 @@ export const $ = <T extends HTMLElement>(id: string): T => document.getElementBy
 
 /** Filter complete settings sections so headings, controls and their context stay together. */
 export function filterSettingsSections(view: HTMLElement, search: string): void {
-  const query = search.trim().toLowerCase();
+  const fold = (text: string) => text.toLocaleLowerCase(currentLanguage());
+  const query = fold(search.trim());
   let matches = 0;
   for (const heading of view.querySelectorAll<HTMLElement>('.settings-section-title')) {
     const pane = heading.nextElementSibling as HTMLElement | null;
     if (!pane?.classList.contains('pane')) continue;
-    const visible = !query || `${heading.textContent} ${pane.textContent}`.toLowerCase().includes(query);
+    const visible = !query || fold(`${heading.textContent} ${pane.textContent}`).includes(query);
     heading.hidden = pane.hidden = !visible;
     if (visible) matches++;
   }

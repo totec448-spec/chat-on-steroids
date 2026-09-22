@@ -2,7 +2,9 @@
  * state: selection changes and user scrolling naturally get a fresh anchor. */
 export function preserveTimelineViewport(pane: HTMLElement, timeline: HTMLElement, followBottom = true): () => void {
   const previous = pane.scrollTop;
-  const following = followBottom && previous + pane.clientHeight >= pane.scrollHeight - 40;
+  // Only rounding tolerance belongs here. A small deliberate scroll away from the
+  // tail must survive unrelated session/status repaints and later answer growth.
+  const following = followBottom && previous + pane.clientHeight >= pane.scrollHeight - 1;
   const previousReserve = Number.parseFloat(timeline.style.getPropertyValue('--timeline-scroll-reserve')) || 0;
   const previousContentHeight = timeline.getBoundingClientRect().height - previousReserve;
   const edge = pane.getBoundingClientRect().top;
