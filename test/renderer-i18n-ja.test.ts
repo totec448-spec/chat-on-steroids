@@ -6,7 +6,7 @@ import zhCN from '../src/renderer/locales/zh-CN.json';
 import zhTW from '../src/renderer/locales/zh-TW.json';
 import ja from '../src/renderer/locales/ja.json';
 
-const names = { en: 'English', es: 'Español', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', ja: '日本語', tr: 'Türkçe' } as const;
+const names = { en: 'English', es: 'Español', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', ja: '日本語', tr: 'Türkçe', fr: 'Français' } as const;
 let dom: JSDOM;
 beforeEach(() => {
   vi.resetModules();
