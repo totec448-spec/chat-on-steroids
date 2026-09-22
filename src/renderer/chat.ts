@@ -15,6 +15,7 @@ import type { GoalModel } from '../shared/goal-reasoning.js';
 import { renderGoalReasoning } from './goal-reasoning.js';
 import { preserveTimelineViewport } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
+import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
@@ -155,6 +156,7 @@ function selectedLocalProject(): LocalProject | null {
 const PROJECT_TASK_PAGE_SIZE = 5;
 const PROJECT_TASK_PAGE_INCREMENT = 8;
 let sidebarOrder: ReturnType<typeof createSidebarOrder> | undefined;
+let sidebarCompletion: ReturnType<typeof createSidebarCompletionState> | undefined;
 function draftKey(): string { return selectedId ?? (selectedProjectId ? `project:${selectedProjectId}` : 'new'); }
 let selectionGeneration = 0;
 // Async file import belongs to one visible composer draft, not just to a session key.
@@ -291,7 +293,7 @@ function pressureOf(id: string): TokenPressure | null {
 /** A short word about a session, drawn as a chip on its row. */
 interface Badge {
   text: string;
-  tone: '' | 'is-active' | 'is-finished' | 'is-failed';
+  tone: '' | 'is-active' | 'is-finished' | 'is-failed' | 'is-unseen';
 }
 
 /** Live word per worker state, in the user's vocabulary rather than the protocol's. */
@@ -323,6 +325,16 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
 /** Keep callback arguments separate from the shared predicate's explicit clock. */
 function sessionWorking(summary: SessionSummary): boolean {
   return sessionWorkingAt(summary, Date.now());
+}
+
+/**
+ * Sidebar rows are intentionally rebuilt when fresh activity arrives. Anchor the spinner to a
+ * wall-clock phase so a new tool repaint does not visually restart an already-running turn.
+ * Keep this period aligned with `.session-status.is-active` in styles.css.
+ */
+const SESSION_SPIN_MS = 900;
+function syncSessionSpinner(indicator: HTMLElement): void {
+  indicator.style.animationDelay = `-${Date.now() % SESSION_SPIN_MS}ms`;
 }
 
 /**
@@ -381,6 +393,7 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   else if (!agent && workerReportedFinish(summary)) badges.push(AGENT_BADGE.sleeping);
   else if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
   else if (agent && agent.role !== 'prime') badges.push(AGENT_BADGE[agent.state]);
+  if (!sessionWorking(summary) && sidebarCompletion?.isUnseen(summary)) badges.push({ text: 'New response', tone: 'is-unseen' });
   return badges;
 }
 
@@ -407,9 +420,12 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   row.addEventListener('pointerenter', showTip);
   row.addEventListener('pointerleave', () => document.getElementById('sessionTooltip')?.remove());
   row.addEventListener('click', () => document.getElementById('sessionTooltip')?.remove());
+  // Unseen is presentation only and is appended last, so every existing lifecycle tone keeps
+  // its previous priority (blocked/active/worker finished/failed).
   const status = badges.find((badge) => badge.tone);
   if (status) {
     const indicator = el('span', `session-status ${status.tone}`);
+    if (status.tone === 'is-active') syncSessionSpinner(indicator);
     ui(indicator, 'title', () => t(status.text));
     ui(indicator, 'aria-label', () => t(status.text));
     top.append(indicator);
@@ -1242,6 +1258,9 @@ async function refreshSessionControls(): Promise<void> {
 async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: number): Promise<boolean> {
   const prepend = olderBefore !== undefined;
   const wanted = selectedId;
+  const selection = selectionGeneration;
+  const observed = wanted === null ? undefined : sessions.find(row => row.id === wanted);
+  const observedCompletion = observed ? { ...observed } : undefined;
   if (wanted !== null && (historyBefore !== null || historyLoading) && detailFor === wanted && !navigate) {
     if (historyLoading) historyRefreshPending = true;
     void refreshSessionControls(); paintDetail(); return false;
@@ -1266,7 +1285,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   const detail = await run(
     api.getSession(wanted, newerFrom !== undefined ? { after: newerFrom, limit: TIMELINE_BATCH_SIZE } : incremental ? { from: detailCursor!, limit: TIMELINE_BATCH_SIZE } : { ...(olderBefore !== undefined ? { before: olderBefore } : historyBefore !== null ? { before: historyBefore } : {}), limit: TIMELINE_BATCH_SIZE })
   );
-  if (generation !== detailLoadGeneration || selectedId !== wanted) return false;
+  if (generation !== detailLoadGeneration || selection !== selectionGeneration || selectedId !== wanted) return false;
   if (!detail) {
     // A failed destination read must not leave another chat displayed indefinitely.
     // run() already presents the read error; keep the destination empty and retryable.
@@ -1308,6 +1327,13 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   totalEvents = detail.total;
   if (opening) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
   paintDetail(!prepend && newerFrom === undefined);
+  // A sidebar completion becomes read only after this exact selection/load has successfully
+  // painted its conversation at the live tail. Keep the completion snapshot from request time:
+  // a newer completion observed while this load is in flight must remain unseen.
+  if (visible && historyBefore === null && generation === detailLoadGeneration && selection === selectionGeneration && selectedId === wanted) {
+    sidebarCompletion?.markSeen(observedCompletion);
+    paintSessions();
+  }
   // A selection opens at the latest message; the previous chat's viewport is not
   // a reading position in this one. Apply only after the current load has rendered.
   if (opening) $('chatBody').scrollTop = $('chatBody').scrollHeight;
@@ -3928,6 +3954,7 @@ function selectNewChat(projectId: string | null = null): void {
 }
 
 export function initChat(next: Deps): void {
+  sidebarCompletion = createSidebarCompletionState();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
     ...projectSortEntries(),
     ...sessions.filter(entry => (entry.conversationId || entry.origin?.kind === 'desktop') && entry.origin?.kind !== 'worker')

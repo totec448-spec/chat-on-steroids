@@ -1496,6 +1496,152 @@ it('reorders whole project groups without changing chat selection, ownership or 
   expect(live.sent).toEqual([]);
 });
 
+it('keeps working state per chat and marks only completed background chats as unseen until opened', async () => {
+  const startedAt = Date.now();
+  const chats: SessionSummary[] = [
+    { ...summary([]), id: 'chat-a', title: 'Alpha', conversationId: 'conversation-a', chatIds: ['conversation-a'], updatedAt: startedAt,
+      lastToolCallAt: startedAt, activityExpiresAt: startedAt + 60_000 },
+    { ...summary([]), id: 'chat-b', title: 'Beta', conversationId: 'conversation-b', chatIds: ['conversation-b'], updatedAt: startedAt - 1,
+      lastToolCallAt: startedAt, activityExpiresAt: startedAt + 60_000 }
+  ];
+  const { w } = await boot([], false, [], [], { sessions: chats });
+  const row = (id: string) => w.document.querySelector<HTMLElement>(`.sess[data-id="${id}"]`)!;
+  const refresh = async () => { (w.document.getElementById('chatRefresh') as HTMLButtonElement).click(); await settle(); };
+  let observedAt = Date.now();
+  const nextAt = () => ++observedAt;
+
+  row('chat-a').click();
+  expect(row('chat-a').querySelector('.session-status.is-active')).not.toBeNull();
+  expect(row('chat-b').querySelector('.session-status.is-active')).not.toBeNull();
+
+  const backgroundCompletedAt = nextAt();
+  Object.assign(chats[1]!, {
+    activityExpiresAt: null,
+    lastAssistantFinalAt: backgroundCompletedAt,
+    lastTurnEndAt: backgroundCompletedAt,
+    lastTurnOutcome: 'completed',
+    updatedAt: backgroundCompletedAt
+  });
+  await refresh();
+  expect(row('chat-a').querySelector('.session-status.is-active')).not.toBeNull();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')?.getAttribute('aria-label')).toBe('New response');
+
+  row('chat-b').click();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
+  await settle();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).toBeNull();
+  expect(w.localStorage.getItem('chat-on-steroids.sidebar-completion-seen')).toContain('chat-b');
+
+  const selectedWorkingAt = nextAt();
+  Object.assign(chats[1]!, { lastToolCallAt: selectedWorkingAt, activityExpiresAt: selectedWorkingAt + 60_000, updatedAt: selectedWorkingAt });
+  await refresh();
+  expect(row('chat-b').querySelector('.session-status.is-active')).not.toBeNull();
+  const selectedCompletedAt = nextAt();
+  Object.assign(chats[1]!, {
+    activityExpiresAt: null,
+    lastAssistantFinalAt: selectedCompletedAt,
+    lastTurnEndAt: selectedCompletedAt,
+    lastTurnOutcome: 'completed',
+    updatedAt: selectedCompletedAt
+  });
+  await refresh();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).toBeNull();
+
+  const alphaCompletedAt = nextAt();
+  Object.assign(chats[0]!, {
+    activityExpiresAt: null,
+    lastAssistantFinalAt: alphaCompletedAt,
+    lastTurnEndAt: alphaCompletedAt,
+    lastTurnOutcome: 'completed',
+    updatedAt: alphaCompletedAt
+  });
+  await refresh();
+  expect(row('chat-a').querySelector('.session-status.is-unseen')).not.toBeNull();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).toBeNull();
+});
+
+it('keeps the sidebar working spinner on one continuous phase across activity repaints', async () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+  try {
+    const chats: SessionSummary[] = [{
+      ...summary([]), id: 'chat-a', title: 'Alpha', conversationId: 'conversation-a', chatIds: ['conversation-a'],
+      updatedAt: 10_000, lastToolCallAt: 10_000, activityExpiresAt: 70_000
+    }];
+    const { w } = await boot([], false, [], [], { sessions: chats });
+    const spinner = () => w.document.querySelector<HTMLElement>('.sess[data-id="chat-a"] .session-status.is-active')!;
+    expect(spinner().style.animationDelay).toBe('-100ms');
+
+    clock.mockReturnValue(10_450);
+    chats[0]!.lastToolCallAt = 10_450;
+    chats[0]!.updatedAt = 10_450;
+    (w.document.getElementById('chatRefresh') as HTMLButtonElement).click();
+    await settle();
+    // The row node was rebuilt, but the spinner resumes the wall-clock phase instead of 0deg.
+    expect(spinner().style.animationDelay).toBe('-550ms');
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+it('keeps unseen completions unread through failed and stale A-to-B-to-A detail loads', async () => {
+  const chats: SessionSummary[] = [
+    { ...summary([]), id: 'chat-a', title: 'Alpha', conversationId: 'conversation-a', chatIds: ['conversation-a'] },
+    { ...summary([]), id: 'chat-b', title: 'Beta', conversationId: 'conversation-b', chatIds: ['conversation-b'] }
+  ];
+  const { w } = await boot([], false, [], [], { sessions: chats });
+  const row = (id: string) => w.document.querySelector<HTMLElement>(`.sess[data-id="${id}"]`)!;
+  let observedAt = Date.now();
+  for (const chat of chats) {
+    const completedAt = ++observedAt;
+    Object.assign(chat, {
+      activeTurnId: null,
+      activityExpiresAt: null,
+      lastAssistantFinalAt: completedAt,
+      lastTurnEndAt: completedAt,
+      lastTurnOutcome: 'completed',
+      updatedAt: completedAt
+    });
+  }
+  (w.document.getElementById('chatRefresh') as HTMLButtonElement).click();
+  await settle();
+  expect(row('chat-a').querySelector('.session-status.is-unseen')).not.toBeNull();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
+
+  type Reply = (value: unknown) => void;
+  const pending: Array<{ id: string; reply: Reply }> = [];
+  const api = (w as any).api;
+  api.getSession = vi.fn((id: string) => new Promise(resolve => pending.push({ id, reply: resolve })));
+  const detail = (sum: SessionSummary) => ({ ok: true, data: { summary: sum, events: [], total: 0, nextFrom: 0 } });
+
+  // A failed current read is not a review receipt.
+  row('chat-b').click();
+  await vi.waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b']));
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
+  pending[0]!.reply({ ok: false, error: 'B detail unavailable' });
+  await settle();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
+
+  // Returning to A creates a new selection/load generation. Neither the old A response nor
+  // the intervening B response may acknowledge work just because the selected id later matches.
+  row('chat-a').click();
+  await vi.waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b', 'chat-a']));
+  row('chat-b').click();
+  await vi.waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b', 'chat-a', 'chat-b']));
+  row('chat-a').click();
+  await vi.waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b', 'chat-a', 'chat-b', 'chat-a']));
+
+  pending[1]!.reply(detail(chats[0]!));
+  pending[2]!.reply(detail(chats[1]!));
+  await settle();
+  expect(row('chat-a').querySelector('.session-status.is-unseen')).not.toBeNull();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
+
+  pending[3]!.reply(detail(chats[0]!));
+  await settle();
+  expect(row('chat-a').querySelector('.session-status.is-unseen')).toBeNull();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
+});
+
 it('folds a whole Compact & Resume into one row that says the new chat opened', async () => {
   const { w } = await boot([
     { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },
