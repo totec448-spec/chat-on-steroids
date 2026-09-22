@@ -143,6 +143,23 @@ describe('cross-platform packaging targets', () => {
     expect(installer).not.toMatch(/(?:no-sandbox|disable-gpu-sandbox)/i);
   });
 
+  it('keeps routine CI on Linux and requires confirmation for hosted native runners', () => {
+    const workflow = yamlFile('.github/workflows/ci.yml');
+    const native = workflow.jobs['verify-native'];
+
+    expect(workflow.on.workflow_dispatch.inputs.confirm_native).toMatchObject({
+      required: true,
+      default: false,
+      type: 'boolean'
+    });
+    expect(workflow.jobs['verify-linux']['runs-on']).toBe('ubuntu-24.04');
+    expect(native.if).toBe("github.event_name == 'workflow_dispatch' && inputs.confirm_native == true");
+    expect(native.strategy.matrix.include.map((entry: { runner: string }) => entry.runner)).toEqual([
+      'windows-2025',
+      'macos-15'
+    ]);
+  });
+
   it('assembles every platform artifact in the reusable release workflow', () => {
     const workflow = readFileSync(path.join(root, '.github', 'workflows', 'release.yml'), 'utf8');
     const parsed = yamlFile('.github/workflows/release.yml');
