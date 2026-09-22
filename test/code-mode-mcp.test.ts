@@ -155,6 +155,27 @@ it('preserves a nonzero terminal exit and leaves nested correction delivery with
   await call(who.requestId, 'text("receipt")');
 });
 
+it('enforces command allowlist rejection identically for direct and code-mode calls', async () => {
+  const original = getConfig();
+  await saveConfig({ ...original, commandAllowlist: { enabled: true, rules: ['git status'] } });
+  const who = await identity();
+  const launch = vi.spyOn(unifiedExecManager, 'execCommand');
+  try {
+    const direct = await rpc('tools/call', {
+      name: 'exec_command', arguments: { cmd: 'git diff', workdir: '/workspace' }
+    }, who.requestId);
+    expect(direct.result.isError).toBe(true);
+    expect(text(direct)).toContain('COMMAND_NOT_ALLOWED');
+
+    const nested = await call(who.requestId, 'text(await tools.exec_command({cmd:"git diff",workdir:"/workspace"}));');
+    expect(text(nested)).toContain('COMMAND_NOT_ALLOWED');
+    expect(launch).not.toHaveBeenCalled();
+  } finally {
+    launch.mockRestore();
+    await saveConfig(original);
+  }
+});
+
 it('projects corrections for other Core structured results without changing the empty worker family', async () => {
   const config = getConfig();
   await saveConfig({ ...config, multiAgent: { ...config.multiAgent, enabled: true } });

@@ -71,6 +71,20 @@ first non-zero one. Batching exists to spend one connector round trip instead of
 related checks. The `apply_patch` interception and the benign-non-zero-exit classification
 apply to single-command calls only.
 
+Settings can optionally enforce one application-wide command allowlist. It is disabled by
+default; while disabled, command behavior is unchanged and saved rules remain available. While
+enabled, every `cmd` item must match an exact argv rule such as `git status`, or a rule ending in
+a standalone `*`, such as `git diff *`, which also permits `git diff` with no extra arguments.
+An enabled empty list rejects every launch. Compound commands, substitutions, redirections,
+globs and other ambiguous shell syntax are rejected with `COMMAND_NOT_ALLOWED` before patch
+interception or process launch. Rules are case-sensitive and do not collapse executable paths
+to basenames.
+
+This is a launch policy, not an OS sandbox. An allowed program remains trusted after it starts,
+including its child processes, project/build code, shell environment and interactive input.
+`write_stdin` behavior and process ownership checks are unchanged. The human-operated workspace
+terminal is outside this policy.
+
 ### `write_stdin`
 
 Writes to or polls a live command session by `session_id`, with optional yield time and output

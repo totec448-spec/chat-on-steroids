@@ -21,7 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { effectiveCapabilities, defaultConfig } from '../src/main/config.js';
+import { effectiveCapabilities, defaultConfig, getConfig } from '../src/main/config.js';
 import { lastRequestAt, selfTestHeaders, startMcpServer, tunnelProbeHeaders, type McpEndpoint } from '../src/main/mcp/server.js';
 import { lastToolCallAt, type ToolContext } from '../src/main/mcp/tools.js';
 import { friendlyError } from '../src/main/mcp/kernel.js';
@@ -2504,6 +2504,51 @@ describe('exec_command and write_stdin', () => {
   beforeEach(() => {
     ctx.readOnly = false;
     ctx.caps = withCaps({ command: true });
+    getConfig().commandAllowlist = { enabled: false, rules: [] };
+  });
+
+  it('enforces the same optional policy at the shared handler before process launch', async () => {
+    const command = IS_WINDOWS ? 'Write-Output allowlist-ok' : "printf '%s\\n' allowlist-ok";
+    getConfig().commandAllowlist = { enabled: true, rules: [command] };
+    const allowed = await core('tools/call', {
+      name: 'exec_command', arguments: { cmd: command, workdir: '/workspace', yield_time_ms: 5_000 }
+    });
+    expect(failed(allowed), textOf(allowed)).toBe(false);
+    expect(textOf(allowed)).toContain('allowlist-ok');
+
+    const launch = vi.spyOn(unifiedExecManager, 'execCommand');
+    const denied = await core('tools/call', {
+      name: 'exec_command', arguments: { cmd: IS_WINDOWS ? 'Write-Output denied' : 'printf denied', workdir: '/workspace' }
+    });
+    expect(failed(denied)).toBe(true);
+    expect(textOf(denied)).toContain('COMMAND_NOT_ALLOWED');
+    expect(textOf(denied)).toContain('No command was run');
+    expect(launch).not.toHaveBeenCalled();
+    launch.mockRestore();
+  });
+
+  it('preflights a complete batch before launching its allowed first command', async () => {
+    getConfig().commandAllowlist = { enabled: true, rules: ['git status'] };
+    const launch = vi.spyOn(unifiedExecManager, 'execCommand');
+    const denied = await core('tools/call', {
+      name: 'exec_command', arguments: { cmds: ['git status', 'git diff'], workdir: '/workspace' }
+    });
+    expect(failed(denied)).toBe(true);
+    expect(textOf(denied)).toContain('in command 2');
+    expect(launch).not.toHaveBeenCalled();
+    launch.mockRestore();
+  });
+
+  it('checks policy before intercepted apply_patch can mutate a file', async () => {
+    getConfig().commandAllowlist = { enabled: true, rules: ['git status'] };
+    const target = path.join(approved, 'allowlist-intercept.txt');
+    const patch = ['*** Begin Patch', '*** Add File: allowlist-intercept.txt', '+must-not-land', '*** End Patch'].join('\n');
+    const denied = await core('tools/call', {
+      name: 'exec_command', arguments: { cmd: `apply_patch <<'PATCH'\n${patch}\nPATCH`, workdir: '/workspace' }
+    });
+    expect(failed(denied)).toBe(true);
+    expect(textOf(denied)).toContain('COMMAND_NOT_ALLOWED');
+    await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('refuses an approved virtual path in opaque shell text instead of running against the drive root', async () => {

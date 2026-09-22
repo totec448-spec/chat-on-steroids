@@ -842,6 +842,28 @@ describe('settings writes from more than one UI', () => {
     expect(getConfig().goal.enabled).toBe(false);
   });
 
+  it('persists command allowlist fields independently across stale renderer saves', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    const enabled = await save({
+      ...base, commandAllowlist: { enabled: true, rules: ['git status', 'git diff *'] }
+    }, base);
+    expect(enabled.ok, enabled.error).toBe(true);
+
+    const stale = await save({ ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } }, base);
+    expect(stale.ok, stale.error).toBe(true);
+    expect(getConfig().commandAllowlist).toEqual({ enabled: true, rules: ['git status', 'git diff *'] });
+
+    const current = getConfig();
+    expect((await save({
+      ...current, commandAllowlist: { enabled: false, rules: current.commandAllowlist.rules }
+    }, current)).ok).toBe(true);
+    expect(getConfig().commandAllowlist).toEqual({ enabled: false, rules: ['git status', 'git diff *'] });
+    expect((await save({
+      ...getConfig(), commandAllowlist: { enabled: true, rules: ['git status; whoami'] }
+    }, getConfig())).ok).toBe(false);
+  });
+
   it('preserves a newer unattributed-call choice across an unrelated stale renderer save', async () => {
     const base = defaultConfig();
     await saveConfig(base);

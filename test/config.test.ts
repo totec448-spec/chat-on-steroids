@@ -43,6 +43,38 @@ describe('browser bridge port config', () => {
 });
 
 describe('settings migration', () => {
+  it('defaults command allowlist enforcement off for fresh and legacy configs and round-trips rules', async () => {
+    expect(defaultConfig().commandAllowlist).toEqual({ enabled: false, rules: [] });
+    const legacy = defaultConfig() as Partial<ReturnType<typeof defaultConfig>>;
+    delete legacy.commandAllowlist;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).commandAllowlist).toEqual({ enabled: false, rules: [] });
+
+    const saved = await saveConfig({
+      ...defaultConfig(),
+      commandAllowlist: { enabled: true, rules: ['git status', 'git diff *'] }
+    });
+    expect(saved.commandAllowlist).toEqual({ enabled: true, rules: ['git status', 'git diff *'] });
+    await saveConfig({ ...saved, commandAllowlist: { ...saved.commandAllowlist, enabled: false } });
+    expect((await loadConfig()).commandAllowlist).toEqual({ enabled: false, rules: ['git status', 'git diff *'] });
+  });
+
+  it('rejects invalid command allowlist updates without replacing the saved config', async () => {
+    const valid = await saveConfig({ ...defaultConfig(), commandAllowlist: { enabled: true, rules: ['git status'] } });
+    const before = await fs.readFile(path.join(dir, 'config.json'), 'utf8');
+    await expect(saveConfig({ ...valid, commandAllowlist: { enabled: true, rules: ['git status; whoami'] } })).rejects.toThrow(/shell syntax/i);
+    expect(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).toBe(before);
+  });
+
+  it('recovers conservatively from a malformed active command policy', async () => {
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({
+      ...defaultConfig(), commandAllowlist: { enabled: true, rules: ['git status; whoami'] }
+    }), 'utf8');
+    const loaded = await loadConfig();
+    expect(loaded).toMatchObject({ readOnly: true, commandAllowlist: { enabled: false, rules: [] } });
+    expect(loaded.capabilities.command).toBe(false);
+  });
+
   it('round-trips custom appearance and isolates malformed appearance from permissions', async () => {
     const { defaultAppearance } = await import('../src/shared/appearance.js');
     const config = defaultConfig(); config.readOnly = true; config.capabilities.command = false;
