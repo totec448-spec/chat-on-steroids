@@ -10,7 +10,7 @@ afterEach(() => { dom?.window.close(); vi.resetModules(); });
 it('covers every current source key with matching placeholders and no duplicate keys', () => {
   const missing = Object.keys(zhCN).filter(key => !Object.hasOwn(zhTW, key));
   expect(missing).toEqual([]);
-  for (const locale of ['es', 'zh-CN', 'zh-TW', 'ja']) {
+  for (const locale of ['es', 'zh-CN', 'zh-TW', 'ja', 'fr']) {
     const source = readFileSync(`src/renderer/locales/${locale}.json`, 'utf8');
     const keys = [...source.matchAll(/^\s{2}("(?:[^"\\]|\\.)*")\s*:/gm)].map(match => JSON.parse(match[1]!));
     expect(keys.length).toBe(new Set(keys).size);
