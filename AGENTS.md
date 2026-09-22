@@ -2772,8 +2772,8 @@ names render as plain chips; unresolved file citations do not gain invented loca
 Tool result rendering preserves structured text/image/resource distinctions within bounds.
 App-owned external/local links cross their validated main-process route.
 
-English, Spanish, Simplified Chinese, Traditional Chinese, Japanese and Turkish use the existing UI
-catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja,tr}.json`), with the selected locale in
+English, Spanish, Simplified Chinese, Traditional Chinese, Japanese, Turkish and French use the existing UI
+catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja,tr,fr}.json`), with the selected locale in
 `cos.ui.language`. Setup uses SVG flags only, with native language names in tooltips and
 accessible labels; Appearance retains the named language dropdown. Both controls share the
 same persisted preference. `translate="no"` protects text and attributes, including native
