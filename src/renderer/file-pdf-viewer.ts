@@ -57,6 +57,7 @@ export async function createProjectPdfViewer(options: ProjectPdfViewerOptions): 
   spacer.className = 'file-pdf-toolbar-spacer';
   const zoomOut = button('Zoom out', '−');
   const fit = button('Fit to width', 'Fit');
+  ui(fit, 'textContent', () => t('Fit'));
   const zoomIn = button('Zoom in', '+');
   toolbar.append(previous, page, next, spacer, zoomOut, fit, zoomIn);
 
@@ -106,7 +107,7 @@ export async function createProjectPdfViewer(options: ProjectPdfViewerOptions): 
     // resize/page change flash white even when nothing has gone wrong.
     if (!hasRenderedPage) {
       status.hidden = false;
-      status.textContent = `Rendering page ${pageNumber}…`;
+      ui(status, 'textContent', () => t('Rendering page {0}…', [pageNumber]));
       canvas.hidden = true;
     }
     try {
@@ -165,7 +166,7 @@ export async function createProjectPdfViewer(options: ProjectPdfViewerOptions): 
       if (name === 'RenderingCancelledException') return;
       if (!hasRenderedPage) canvas.hidden = true;
       status.hidden = false;
-      status.textContent = error instanceof Error ? t('PDF preview failed: {0}', [error.message]) : t('PDF preview failed.');
+      ui(status, 'textContent', () => error instanceof Error ? t('PDF preview failed: {0}', [t(error.message)]) : t('PDF preview failed.'));
     }
   };
 
@@ -255,7 +256,7 @@ export async function createProjectPdfViewer(options: ProjectPdfViewerOptions): 
   } catch (error) {
     if (!destroyed) {
       status.hidden = false;
-      status.textContent = error instanceof Error ? t('PDF preview failed: {0}', [error.message]) : t('PDF preview failed.');
+      ui(status, 'textContent', () => error instanceof Error ? t('PDF preview failed: {0}', [t(error.message)]) : t('PDF preview failed.'));
     }
   }
 
