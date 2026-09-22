@@ -97,7 +97,7 @@ function showConnection(): void {
     ? t("In ChatGPT, add this connector with Tunnel and select your Plugins tunnel. Refresh its tools after adding or changing plugins.")
     : t("In ChatGPT, add this connector using its MCP server URL. Refresh its tools after adding or changing plugins.")));
   const actions = el('div', 'plugin-setup-actions');
-  actions.append(button(() => t("Open ChatGPT plugins"), async () => { await run(window.api.openLink('https://chatgpt.com/#settings/Plugins')); }), button(() => t("Save & connect"), async () => {
+  actions.append(button(() => t("Open ChatGPT plugins"), async () => { await run(window.api.openLink('https://chatgpt.com/plugins')); }), button(() => t("Save & connect"), async () => {
     if (!appState) return;
     if (tunnel && !tunnel.value.trim()) { tunnel.focus(); throw new Error(t("Enter your Plugins tunnel ID.")); }
     if (key?.value) { const next = await run(window.api.setApiKey(key.value)); if (!next) return; key.value = ''; applyAppState(next); applyPluginsState(next); }
@@ -287,7 +287,7 @@ export function initPlugins(onState: (next: AppState) => void = () => {}): void 
   $('pluginsAdd').addEventListener('click', showCatalog); $('pluginsRefresh').addEventListener('click', () => void refreshPlugins());
   $('pluginsSearch').addEventListener('input', renderInstalled);
   $('pluginsSetupLink').addEventListener('click', showConnection);
-  $('pluginsOpenChatGPT').addEventListener('click', async () => { await run(window.api.openLink('https://chatgpt.com/#settings/Plugins')); });
+  $('pluginsOpenChatGPT').addEventListener('click', async () => { await run(window.api.openLink('https://chatgpt.com/plugins')); });
   $('pluginsLegalOpen').addEventListener('click', async () => { await run(window.api.openLegalNotices()); });
   window.api.onPluginsChanged(() => { void refreshPlugins(); }); void refreshPlugins();
 }

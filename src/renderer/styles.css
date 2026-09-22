@@ -3126,7 +3126,9 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .queue-label[draggable='true']:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: 3px; }
 
 .project-group { margin: 8px 0; }
+.project-group[data-sort-scope] { position: relative; }
 .project-heading { display: flex; align-items: center; gap: 9px; cursor: pointer; padding: 6px 8px; list-style: none; }
+.project-heading[data-sort-handle] { cursor: grab; user-select: none; }
 .project-heading::-webkit-details-marker { display: none; }
 .project-name { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .project-new { display: grid; place-items: center; width: 26px; height: 26px; padding: 4px; opacity: 0; }
@@ -3139,10 +3141,10 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .sess[data-sort-scope] .sess-top { cursor: grab; user-select: none; }
 .sess[data-sort-scope]:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 #sessionList.is-sorting, #sessionList.is-sorting * { cursor: grabbing; user-select: none; }
-.sess.is-sorting { opacity: .45; }
-.sess.sort-before::before, .sess.sort-after::after { content: ''; position: absolute; inset-inline: 0; height: 2px; border-radius: 2px; background: var(--blue); pointer-events: none; }
-.sess.sort-before::before { top: -2px; }
-.sess.sort-after::after { bottom: -2px; }
+:is(.sess, .project-group).is-sorting { opacity: .45; }
+:is(.sess, .project-group).sort-before::before, :is(.sess, .project-group).sort-after::after { content: ''; position: absolute; inset-inline: 0; height: 2px; border-radius: 2px; background: var(--blue); pointer-events: none; }
+:is(.sess, .project-group).sort-before::before { top: -2px; }
+:is(.sess, .project-group).sort-after::after { bottom: -2px; }
 
 /* Right-side work panes. Files and Sub-agents are mutually exclusive projections of the
    current task; the ChatGPT browser remains the independent left dock. */

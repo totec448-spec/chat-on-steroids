@@ -43,6 +43,32 @@ it('anchors the logical reader row across late growth and replacement, while ret
   } finally { dom.window.close(); }
 });
 
+it.each([2, 20, 39])('does not reclaim bottom-following after the reader scrolls %s pixels away', distance => {
+  const dom = new JSDOM('<div id="pane"><div id="timeline"><div data-timeline-key="reader"></div></div></div>');
+  try {
+    const pane = dom.window.document.getElementById('pane')!;
+    const timeline = dom.window.document.getElementById('timeline')!;
+    const reader = timeline.firstElementChild as HTMLElement;
+    let height = 1500;
+    Object.defineProperties(pane, { clientHeight: { value: 400 }, scrollHeight: { get: () => height } });
+    pane.getBoundingClientRect = () => ({ top: 0 } as DOMRect);
+    timeline.getBoundingClientRect = () => ({ height } as DOMRect);
+    reader.getBoundingClientRect = () => ({ top: 1000 - pane.scrollTop, bottom: 1500 - pane.scrollTop, height: 500 } as DOMRect);
+    pane.scrollTop = 1100 - distance;
+    for (let index = 0; index < 4; index++) preserveTimelineViewport(pane, timeline)();
+    expect(pane.scrollTop).toBe(1100 - distance);
+    const restore = preserveTimelineViewport(pane, timeline);
+    height += 200;
+    restore();
+    expect(pane.scrollTop).toBe(1100 - distance);
+    pane.scrollTop = height - pane.clientHeight - 0.5;
+    const follow = preserveTimelineViewport(pane, timeline);
+    height += 100;
+    follow();
+    expect(pane.scrollTop).toBe(height);
+  } finally { dom.window.close(); }
+});
+
 it('uses another visible row when a paged activity group loses its old key', () => {
   const dom = new JSDOM('<div id="pane"><div id="timeline"><div data-timeline-key="old-group"></div><div data-timeline-key="message"></div></div></div>');
   try {

@@ -2707,6 +2707,9 @@ dragging or Alt+Up/Down moves a parent and its worker children within its curren
 unfiled group. A drag beyond the group clamps to its first/last visible slot; it cannot change
 project ownership. Pointer custody defers row replacement during live refresh and revalidates
 membership before saving. Off-page order survives partial list refreshes.
+Whole project groups use the same bounded order owner in a separate scope. Dragging a
+project summary or pressing Alt+Up/Down moves the group without changing any chat's project;
+the summary handle keeps focus and disclosure state. Group order survives reload.
 The chat keeps the current input queue/plan visible alongside a
 paged transcript. Main owns durable mutation acknowledgements; renderer optimism is not a
 receipt. Native edit context menus respect the focused editable control and selection.
@@ -2769,8 +2772,8 @@ names render as plain chips; unresolved file citations do not gain invented loca
 Tool result rendering preserves structured text/image/resource distinctions within bounds.
 App-owned external/local links cross their validated main-process route.
 
-English, Spanish, Simplified Chinese, Traditional Chinese and Japanese use the existing UI
-catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja}.json`), with the selected locale in
+English, Spanish, Simplified Chinese, Traditional Chinese, Japanese and Turkish use the existing UI
+catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja,tr}.json`), with the selected locale in
 `cos.ui.language`. Setup uses SVG flags only, with native language names in tooltips and
 accessible labels; Appearance retains the named language dropdown. Both controls share the
 same persisted preference. `translate="no"` protects text and attributes, including native
@@ -2779,6 +2782,7 @@ repaints owned labels while retaining drafts/selections; never translate authore
 provider text or file paths. Catalog checks cover all source keys and numbered placeholders;
 `dom.run()` translates catalogued IPC errors before displaying a toast; unknown error strings
 and successful payloads stay literal.
+Settings search folds both query and labels with the selected locale, including Turkish İ/ı.
 `scripts/verify-setup-guide.cjs` exercises narrow/zoomed layouts and native keyboard selection.
 Bindings live only in a WeakMap keyed by their DOM node. Language changes walk the current
 document, including hidden panels and bound text nodes. Never retain or periodically dereference
@@ -2916,6 +2920,10 @@ descriptions and input schemas, not app-version/instruction churn. Changes debou
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
+An explicit successful Plugin Restart may rearm matching unclaimed, non-manual, unfinished
+refresh debt with a fresh request ID. The existing serialized ledger publishes that ID before
+waking browser work; ordinary status polling and a closed helper do not grant another attempt.
+Installer ownership lasts through child `close`, retaining the existing deadline and teardown.
 
 ### Connections, tunnels and diagnostics
 
