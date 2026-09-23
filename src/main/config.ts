@@ -39,6 +39,7 @@ import {
   SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS,
   SUPERSEDED_GOAL_SYSTEM_PROMPTS
 } from '../shared/goal.js';
+import { DEFAULT_HANDOFF_PROMPT, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { logError } from './logger.js';
 import { RESERVED_ROOT_NAMES } from './sandbox.js';
 import { capabilitiesForPlatform } from './platform.js';
@@ -115,7 +116,8 @@ const DEFAULT_COMPACTION: CompactionSettings = {
   // the crossing turn still finishes and still writes its handoff, rather than the app
   // waiting for a chat that is already over the line and compacting it on sight.
   auto: true,
-  autoTokens: DEFAULT_SESSIONS.advisoryTokens
+  autoTokens: DEFAULT_SESSIONS.advisoryTokens,
+  handoffPrompt: DEFAULT_HANDOFF_PROMPT
 };
 /**
  * The goal loop's defaults.
@@ -336,7 +338,16 @@ const configSchema = z.object({
         .min(10_000)
         .max(4_000_000)
         .optional()
-        .default(DEFAULT_COMPACTION.autoTokens)
+        .default(DEFAULT_COMPACTION.autoTokens),
+      // Existing configs predate this editor. Blank/oversized hand edits recover to the
+      // shipped content policy; protocol framing remains outside this user-authored field.
+      handoffPrompt: z
+        .string()
+        .max(MAX_HANDOFF_PROMPT_CHARS)
+        .optional()
+        .default(DEFAULT_COMPACTION.handoffPrompt)
+        .transform((prompt) => prompt.trim() === '' ? DEFAULT_COMPACTION.handoffPrompt : prompt.trim())
+        .catch(DEFAULT_COMPACTION.handoffPrompt)
     })
     .optional()
     .default({ ...DEFAULT_COMPACTION }),

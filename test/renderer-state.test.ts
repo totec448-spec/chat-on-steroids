@@ -6,6 +6,7 @@ import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DEFAULT_GOAL_MODEL, DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/goal.js';
+import { DEFAULT_HANDOFF_PROMPT } from '../src/shared/handoff.js';
 import { BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from '../src/shared/browser-control.js';
 
 let dom: JSDOM | null = null;
@@ -46,7 +47,7 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
-    compaction: { auto: true, autoTokens: 300000 },
+    compaction: { auto: true, autoTokens: 300000, handoffPrompt: DEFAULT_HANDOFF_PROMPT },
     multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
     goal: {
       enabled: false,
@@ -202,7 +203,7 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as 'light' | 'dark' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
-    compaction: { auto: true, autoTokens: 300000 },
+    compaction: { auto: true, autoTokens: 300000, handoffPrompt: DEFAULT_HANDOFF_PROMPT },
     multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
     goal: {
       enabled: false,
@@ -352,7 +353,7 @@ async function mountChat(
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as const },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
-    compaction: { auto: true, autoTokens: 300000 },
+    compaction: { auto: true, autoTokens: 300000, handoffPrompt: DEFAULT_HANDOFF_PROMPT },
     multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
     goal: {
       enabled: false,
@@ -1408,6 +1409,31 @@ it('opens, saves and restores the editable goal prompt', async () => {
   await settle();
   expect(prompt.value).toBe(DEFAULT_GOAL_SYSTEM_PROMPT);
   expect(mounted.calls.at(-1)?.goal.prompt).toBe(DEFAULT_GOAL_SYSTEM_PROMPT);
+});
+
+it('opens, saves and restores the editable handoff prompt', async () => {
+  const mounted = await mountChat({ hasGoalKey: true });
+  const doc = mounted.window.document;
+  const panel = doc.getElementById('handoffPromptPanel')!;
+  const edit = doc.getElementById('handoffPromptEdit') as HTMLButtonElement;
+  const prompt = doc.getElementById('handoffPrompt') as HTMLTextAreaElement;
+
+  expect(panel.hidden).toBe(true);
+  edit.click();
+  expect(panel.hidden).toBe(false);
+  expect(prompt.value).toBe(DEFAULT_HANDOFF_PROMPT);
+
+  prompt.value = 'Keep only continuation-critical state and the exact next action.';
+  prompt.dispatchEvent(new mounted.window.Event('change'));
+  await settle();
+  await settle();
+  expect(mounted.calls.at(-1)?.compaction.handoffPrompt).toBe(prompt.value);
+
+  (doc.getElementById('handoffPromptReset') as HTMLButtonElement).click();
+  await settle();
+  await settle();
+  expect(prompt.value).toBe(DEFAULT_HANDOFF_PROMPT);
+  expect(mounted.calls.at(-1)?.compaction.handoffPrompt).toBe(DEFAULT_HANDOFF_PROMPT);
 });
 
 /**

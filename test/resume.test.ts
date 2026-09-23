@@ -19,6 +19,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../src/shared/user-prompt.js';
 import { nativeHandoffPrompt } from '../src/main/session/handoff-prompt.js';
+import { DEFAULT_HANDOFF_PROMPT } from '../src/shared/handoff.js';
 import { resumeBootstrapText } from '../src/main/session/handoff.js';
 
 vi.mock('electron', () => ({
@@ -353,6 +354,28 @@ describe('one press, one transaction', () => {
       body: { conversationId: CHAT_A, token: first.token, sourceAttempt: true }
     });
     expect(reclaimed.body.allowed).toBe(true);
+  });
+
+  it('uses the configured handoff content prompt without making framing editable', async () => {
+    const conversationId = 'f0f00099-1111-4111-8111-111111111111';
+    await connect();
+    await record(conversationId);
+    const previous = defaultConfig();
+    const custom = 'CUSTOM COMPACTION BRIEF: preserve only continuation-critical state.';
+    await saveConfig({
+      ...previous,
+      compaction: { ...previous.compaction, handoffPrompt: custom }
+    });
+    try {
+      const first = await press(conversationId);
+      expect(first.prompt).toContain(custom);
+      expect(first.prompt).not.toContain(DEFAULT_HANDOFF_PROMPT);
+      expect(first.prompt).toContain(`[[CLF-HANDOFF:${first.token}]]`);
+      expect(first.prompt).toContain('Your reply to this message must be the brief itself and nothing else');
+      expect((await request('POST', '/compact', { body: { conversationId, cancel: true } })).status).toBe(200);
+    } finally {
+      await saveConfig(previous);
+    }
   });
 
   it('never re-offers the prompt once a document armed the click', async () => {

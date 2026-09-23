@@ -49,6 +49,7 @@ import {
   type Config
 } from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
+import { MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema } from './config.js';
 import { bridgePortSelection } from './bridge-ports.js';
@@ -179,7 +180,8 @@ const settingsPatch = z.object({
     auto: z.boolean(),
     // Floored well above what a fresh chat holds, so a threshold cannot be set somewhere
     // every conversation is already past the moment it opens.
-    autoTokens: z.number().int().min(10_000).max(4_000_000)
+    autoTokens: z.number().int().min(10_000).max(4_000_000),
+    handoffPrompt: z.string().trim().min(1).max(MAX_HANDOFF_PROMPT_CHARS)
   }),
   multiAgent: z.object({
     enabled: z.boolean(),
@@ -313,7 +315,12 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     },
     compaction: {
       auto: pick(current.compaction.auto, base.compaction.auto, wanted.compaction.auto),
-      autoTokens: pick(current.compaction.autoTokens, base.compaction.autoTokens, wanted.compaction.autoTokens)
+      autoTokens: pick(current.compaction.autoTokens, base.compaction.autoTokens, wanted.compaction.autoTokens),
+      handoffPrompt: pick(
+        current.compaction.handoffPrompt,
+        base.compaction.handoffPrompt,
+        wanted.compaction.handoffPrompt
+      )
     },
     multiAgent: {
       defaultModel: pick(current.multiAgent.defaultModel, base.multiAgent.defaultModel, wanted.multiAgent.defaultModel),
