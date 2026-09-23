@@ -7,7 +7,7 @@ let dom: JSDOM;
 afterEach(() => dom?.window.close());
 const tool = { name: 'read', description: 'Read an exact file.', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } };
 function page() {
-  dom = new JSDOM('<section role="tabpanel" aria-labelledby="settings-trigger-Plugins"><h2>Chat On Steroids Core</h2><button id="schema">Schema kopieren</button><footer><button id="refresh">Aktualisieren</button></footer></section>', { runScripts: 'outside-only', url: 'https://chatgpt.com/#settings/Plugins/plugin_asdk_app_synthetic' });
+  dom = new JSDOM('<section role="tabpanel" aria-labelledby="einstellungen-erweiterungen"><h2>Chat On Steroids Core</h2><button id="schema">Schema kopieren</button><footer><button id="refresh">Aktualisieren</button></footer></section>', { runScripts: 'outside-only', url: 'https://chatgpt.com/#settings/Plugins/plugin_asdk_app_synthetic' });
   const win = dom.window;
   Object.defineProperty(win.HTMLElement.prototype, 'getClientRects', { value() { return this.hidden ? [] : [{}]; } });
   win.postMessage = (data: unknown) => queueMicrotask(() => win.dispatchEvent(new win.MessageEvent('message', { data, source: win as unknown as Window, origin: win.location.origin })));
@@ -71,6 +71,7 @@ it('refuses ambiguous native actions and never copies unrelated connector proper
 });
 it('discovers exact installed rows across languages and preserves ambiguity', () => {
   const { api } = page(); const panel = dom.window.document.querySelector('section')!;
+  panel.setAttribute('aria-labelledby', 'settings-trigger-Erweiterungen');
   panel.innerHTML = '<a href="/plugins">Plugins durchsuchen</a>';
   expect(api.pluginInstalledButtons('Chat On Steroids Core')).toBeNull();
   panel.insertAdjacentHTML('beforeend', '<button><span data-testid="plugin-icon-wrapper"></span><div>Chat On Steroids Core</div><span>Alle zulassen</span></button>');

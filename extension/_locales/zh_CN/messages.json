@@ -1,0 +1,1037 @@
+{
+  "content_app_did_not_answer": {
+    "message": "应用未响应。"
+  },
+  "content_app_did_not_answer_lower": {
+    "message": "应用未响应"
+  },
+  "content_app_not_running": {
+    "message": "Chat On Steroids 未在此电脑上运行。"
+  },
+  "content_auto_compaction": {
+    "message": "自动压缩"
+  },
+  "content_auto_compaction_blocked_off": {
+    "message": "此处已关闭：此聊天已在应用中被阻止"
+  },
+  "content_auto_compaction_manual": {
+    "message": "手动压缩此聊天"
+  },
+  "content_auto_compaction_off": {
+    "message": "自动压缩已关闭"
+  },
+  "content_auto_compaction_on": {
+    "message": "自动压缩已开启$1"
+  },
+  "content_auto_compaction_threshold_app": {
+    "message": "阈值在应用中设置"
+  },
+  "content_auto_compaction_worker_off": {
+    "message": "此处已关闭：子代理聊天不会自动压缩"
+  },
+  "content_bootstrap_composer_changed_authorizing": {
+    "message": "授权引导消息期间输入框发生变化；草稿已保留，未发送任何内容"
+  },
+  "content_bootstrap_composer_changed_before_send": {
+    "message": "发送引导消息前输入框发生变化；草稿已保留"
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "插入引导消息时，ChatGPT 替换了输入框"
+  },
+  "content_bootstrap_composer_unavailable": {
+    "message": "ChatGPT 始终未提供可用于引导消息的输入框"
+  },
+  "content_bootstrap_fresh_chat_changed": {
+    "message": "发送引导消息前，标记的新聊天发生了变化；未发送任何内容"
+  },
+  "content_bootstrap_handoff": {
+    "message": "这是应用带过来的交接摘要，不是你输入的内容"
+  },
+  "content_bootstrap_insert_refused": {
+    "message": "ChatGPT 拒绝了插入的文本$1"
+  },
+  "content_bootstrap_missing_target": {
+    "message": "它被提供给一个已有聊天，但没有指定目标聊天"
+  },
+  "content_bootstrap_model_unavailable": {
+    "message": "请求的模型或推理级别不可用，或无法在 ChatGPT 中确认"
+  },
+  "content_bootstrap_project_not_authorized": {
+    "message": "该命令未授权进入项目；未发送任何内容"
+  },
+  "content_bootstrap_project_open_failed": {
+    "message": "ChatGPT 无法通过原生链接打开源项目；未发送任何内容"
+  },
+  "content_bootstrap_project_source_changed": {
+    "message": "项目条目已不再与源对话匹配；未发送任何内容"
+  },
+  "content_bootstrap_resume_marker_invalid": {
+    "message": "恢复引导消息中没有有效的续接标记"
+  },
+  "content_bootstrap_send_not_accepted": {
+    "message": "ChatGPT 未接受引导消息的发送"
+  },
+  "content_bootstrap_target_changed": {
+    "message": "发送前，此消息对应的聊天发生了变化；未发送任何内容"
+  },
+  "content_bootstrap_worker": {
+    "message": "这是 $1，是应用给子代理的指令，不是你输入的内容"
+  },
+  "content_bootstrap_wrong_conversation": {
+    "message": "为它打开的页面显示的是另一个对话"
+  },
+  "content_browser_disconnected": {
+    "message": "Chat On Steroids 中的浏览器连接已断开。"
+  },
+  "content_cancel": {
+    "message": "取消"
+  },
+  "content_chat_blocked": {
+    "message": "聊天已阻止"
+  },
+  "content_chat_blocked_tip": {
+    "message": "此聊天已在 Chat On Steroids 应用中被阻止：其工具调用会被拒绝，目标、循环 和自动压缩均已关闭。要解除阻止，请打开应用的“聊天”标签页，在会话列表中将鼠标悬停在此聊天上，然后点击其阻止图标。"
+  },
+  "content_chat_still_opening": {
+    "message": "此聊天仍在打开中，请重试"
+  },
+  "content_chatgpt_message_box_not_ready": {
+    "message": "ChatGPT 输入框尚未就绪（$1）。请等待页面加载后重试。"
+  },
+  "content_chatgpt_tool": {
+    "message": "ChatGPT 工具"
+  },
+  "content_clear": {
+    "message": "清除"
+  },
+  "content_compact": {
+    "message": "压缩"
+  },
+  "content_compact_already_underway": {
+    "message": "此聊天正在进行压缩。请等待其完成，或取消压缩。"
+  },
+  "content_compact_app_opening_fresh": {
+    "message": "应用正在尝试打开新聊天。"
+  },
+  "content_compact_asking": {
+    "message": "正在请求…"
+  },
+  "content_compact_attempt_not_repeated": {
+    "message": "$1。此持久化尝试不会重复发送。"
+  },
+  "content_compact_attempt_owned": {
+    "message": "持久化交接尝试已被接管；正在核对 ChatGPT 中已标记的消息。"
+  },
+  "content_compact_blocked_unavailable_hint": {
+    "message": "被阻止的聊天不会被压缩或恢复：替代聊天将无法使用其工具。请先在应用中解除阻止。"
+  },
+  "content_compact_cancel": {
+    "message": "取消压缩"
+  },
+  "content_compact_cancel_aria": {
+    "message": "取消“压缩并恢复”"
+  },
+  "content_compact_cancel_failed": {
+    "message": "无法取消压缩。"
+  },
+  "content_compact_chat_changed_before_start": {
+    "message": "压缩开始前，此聊天已发生变化。"
+  },
+  "content_compact_chat_changed_preparing": {
+    "message": "准备交接时聊天发生了变化。未发送任何内容。"
+  },
+  "content_compact_chat_changed_stopping": {
+    "message": "压缩流程停止当前回合时，此聊天发生了变化。"
+  },
+  "content_compact_chat_changed_waiting_results": {
+    "message": "压缩流程等待工具结果时，此聊天发生了变化。"
+  },
+  "content_compact_chat_changed_waiting_tools": {
+    "message": "压缩流程等待本地工具时，此聊天发生了变化。"
+  },
+  "content_compact_chatgpt_writing": {
+    "message": "ChatGPT 正在编写交接内容"
+  },
+  "content_compact_existing_draft": {
+    "message": "ChatGPT 中已有草稿；请求交接前请先清空输入框。"
+  },
+  "content_compact_failed": {
+    "message": "压缩失败"
+  },
+  "content_compact_failed_request_unconfirmed": {
+    "message": "$1 应用尚未确认此失败请求已关闭。"
+  },
+  "content_compact_fresh_open": {
+    "message": "新聊天已打开"
+  },
+  "content_compact_handoff_already_submitted": {
+    "message": "交接指令已在此处提交。它会自行完成，也可以取消。"
+  },
+  "content_compact_handoff_incomplete_detail": {
+    "message": "交接回复未完成。取消压缩即可返回此聊天。"
+  },
+  "content_compact_handoff_problem": {
+    "message": "ChatGPT 在准备交接时报告了问题。"
+  },
+  "content_compact_handoff_request_failed": {
+    "message": "无法请求 ChatGPT 生成交接内容：$1"
+  },
+  "content_compact_handoff_stopped_detail": {
+    "message": "交接回复已停止。取消压缩即可返回此聊天。"
+  },
+  "content_compact_insert_failed": {
+    "message": "浏览器无法插入交接请求（$1）。请确认输入框可用后重试。"
+  },
+  "content_compact_message_box_changed": {
+    "message": "发送交接指令前输入框发生了变化。草稿已保留；未执行压缩。"
+  },
+  "content_compact_message_box_changed_preserved": {
+    "message": "发送交接内容前输入框发生了变化。草稿已保留。"
+  },
+  "content_compact_missing_handoff_instruction": {
+    "message": "应用未发送交接指令。"
+  },
+  "content_compact_missing_token": {
+    "message": "应用未发送压缩令牌，因此无法跟踪此次操作。"
+  },
+  "content_compact_nothing_yet": {
+    "message": "暂无可压缩内容——请发送消息，或设置目标让它先生成一条消息。"
+  },
+  "content_compact_opening_fresh": {
+    "message": "交接内容已保存，正在打开新聊天"
+  },
+  "content_compact_policy_unverified": {
+    "message": "无法确认此聊天是否允许压缩。"
+  },
+  "content_compact_results_unconfirmed": {
+    "message": "ChatGPT 尚未确认收到最新工具结果。未执行压缩。"
+  },
+  "content_compact_resume_cancelled": {
+    "message": "恢复已取消"
+  },
+  "content_compact_resume_now": {
+    "message": "立即压缩并恢复"
+  },
+  "content_compact_send_ambiguous": {
+    "message": "发送结果不明确。不会重复发送；如果 ChatGPT 从未接受该消息，请明确取消。"
+  },
+  "content_compact_send_not_ready": {
+    "message": "由于“发送”按钮或输入框尚未就绪，交接请求未提交。请在页面就绪后重试。"
+  },
+  "content_compact_send_permission_unconfirmed": {
+    "message": "此处未提交任何内容：尚未确认交接发送权限。现有请求不会重复发送。"
+  },
+  "content_compact_send_state_unverified": {
+    "message": "无法确认交接发送状态。未停止任何操作。"
+  },
+  "content_compact_settling": {
+    "message": "正在等待稳定…"
+  },
+  "content_compact_source_not_loaded": {
+    "message": "原始问题尚未加载。未执行压缩；正在等待源对话。"
+  },
+  "content_compact_starting": {
+    "message": "启动中…"
+  },
+  "content_compact_step_opening": {
+    "message": "正在打开新聊天"
+  },
+  "content_compact_step_preparing": {
+    "message": "正在准备"
+  },
+  "content_compact_step_saving": {
+    "message": "正在保存"
+  },
+  "content_compact_step_writing": {
+    "message": "正在编写交接内容"
+  },
+  "content_compact_stop_failed": {
+    "message": "ChatGPT 未能停止当前回合。未执行压缩。"
+  },
+  "content_compact_stopping": {
+    "message": "正在停止…"
+  },
+  "content_compact_ticket_store_failed": {
+    "message": "无法保存压缩任务凭据。"
+  },
+  "content_compact_tools_still_running": {
+    "message": "等待稳定超时后，本地工具仍在运行。未执行压缩。"
+  },
+  "content_compact_tools_stop_unverified": {
+    "message": "无法确认本地工具已停止。未执行压缩。"
+  },
+  "content_compact_unavailable": {
+    "message": "“压缩并恢复”不可用"
+  },
+  "content_compact_waiting_response": {
+    "message": "正在等待交接回复"
+  },
+  "content_compact_waiting_store": {
+    "message": "摘要已完成；正在等待应用保存。"
+  },
+  "content_compact_worker_unavailable_hint": {
+    "message": "子代理聊天会保留在现有对话中，且不会手动压缩或恢复。"
+  },
+  "content_connector_identity_ambiguous": {
+    "message": "已安装连接器的身份不可用或存在歧义"
+  },
+  "content_connector_refresh_claim_unconfirmed": {
+    "message": "未确认连接器刷新声明或页面归属"
+  },
+  "content_connector_refresh_schema_unchanged": {
+    "message": "已请求刷新，但未观察到匹配架构发生变化"
+  },
+  "content_connector_refresh_unverified": {
+    "message": "无法验证连接器刷新"
+  },
+  "content_connector_settings_unverified": {
+    "message": "无法验证准确的连接器设置"
+  },
+  "content_delivery_attachment_transfer_failed": {
+    "message": "附件传输失败。消息未发送。"
+  },
+  "content_delivery_attachment_transfer_incomplete": {
+    "message": "附件传输不完整。"
+  },
+  "content_delivery_attachment_upload_unconfirmed": {
+    "message": "未确认附件上传。重试前，请检查 ChatGPT 中未发送的草稿以及任何文件错误。"
+  },
+  "content_delivery_chat_changed": {
+    "message": "直接发送前聊天已发生变化。"
+  },
+  "content_delivery_chat_changed_or_busy": {
+    "message": "聊天已发生变化或未停止。消息未发送。"
+  },
+  "content_delivery_composer_changed": {
+    "message": "发送前 ChatGPT 输入框发生了变化"
+  },
+  "content_delivery_composer_stuck": {
+    "message": "ChatGPT 已完成回复，但输入框仍停留在“停止”状态。正在恢复此页面，然后再发送排队的消息。"
+  },
+  "content_delivery_draft_preserved": {
+    "message": "输入框发生了变化；你的草稿已保留"
+  },
+  "content_delivery_editor_not_writable": {
+    "message": "发送前 ChatGPT 编辑器未变为可输入状态。"
+  },
+  "content_delivery_existing_draft": {
+    "message": "ChatGPT 中已有未发送的草稿。重试前，请先在 Chrome 中发送或清除该草稿。"
+  },
+  "content_delivery_model_unconfirmed": {
+    "message": "无法确认请求的模型或推理强度"
+  },
+  "content_delivery_stop_failed": {
+    "message": "无法停止当前回复。"
+  },
+  "content_delivery_temporary_chat_unconfirmed": {
+    "message": "未确认“临时聊天”。请打开辅助标签页并完成“临时聊天”介绍流程。"
+  },
+  "content_delivery_text_not_accepted": {
+    "message": "ChatGPT 未接受该文本$1"
+  },
+  "content_delivery_turn_changed": {
+    "message": "直接发送前回合已发生变化。"
+  },
+  "content_dismiss": {
+    "message": "关闭"
+  },
+  "content_empty": {
+    "message": "（空）"
+  },
+  "content_error_compaction_running": {
+    "message": "另一个聊天当前正在压缩。"
+  },
+  "content_error_session_not_recorded": {
+    "message": "此聊天尚无已记录的本地会话。"
+  },
+  "content_error_turn_still_generating": {
+    "message": "请先等待此 ChatGPT 回合结束。"
+  },
+  "content_failed": {
+    "message": "失败"
+  },
+  "content_goal_add_specific": {
+    "message": "添加具体目标"
+  },
+  "content_goal_add_specific_hint": {
+    "message": "写下此聊天需要达到的目标。随后它会持续发起提示，直到达成目标后停止。"
+  },
+  "content_goal_add_to_start": {
+    "message": "添加目标或循环以开始此聊天"
+  },
+  "content_goal_answer_never_settled": {
+    "message": "回复始终在变化，因此未写入任何内容"
+  },
+  "content_goal_answering": {
+    "message": "$1 正在回复"
+  },
+  "content_goal_backend_chatgpt_helper": {
+    "message": "ChatGPT 辅助聊天"
+  },
+  "content_goal_backend_custom_endpoint": {
+    "message": "自定义端点"
+  },
+  "content_goal_backend_no_answer": {
+    "message": "$1 未响应"
+  },
+  "content_goal_backend_offline_templates": {
+    "message": "离线模板"
+  },
+  "content_goal_backend_offline_templates_title": {
+    "message": "离线模板"
+  },
+  "content_goal_checking_again": {
+    "message": "将在 $1 后再次检查"
+  },
+  "content_goal_checking_finished": {
+    "message": "正在确认回复已结束"
+  },
+  "content_goal_delivery": {
+    "message": "$1：$2"
+  },
+  "content_goal_delivery_after_turn_finish": {
+    "message": "本轮结束后或完成时"
+  },
+  "content_goal_delivery_only_finish": {
+    "message": "仅在完成时"
+  },
+  "content_goal_loop_off": {
+    "message": "目标和循环已关闭"
+  },
+  "content_goal_loop_stopped": {
+    "message": "目标循环已停止"
+  },
+  "content_goal_message_box_in_use": {
+    "message": "输入框正在使用，因此未发送任何内容"
+  },
+  "content_goal_mode_aria": {
+    "message": "目标模式"
+  },
+  "content_goal_new_chat_draft_refused": {
+    "message": "ChatGPT 未允许替换“新聊天”草稿"
+  },
+  "content_goal_no_api_key_unavailable": {
+    "message": "没有 API 密钥——目标和循环不可用"
+  },
+  "content_goal_nothing_sent": {
+    "message": "未发送任何内容"
+  },
+  "content_goal_off_blocked": {
+    "message": "目标已关闭——此聊天已在应用中被阻止"
+  },
+  "content_goal_off_prime_writes": {
+    "message": "目标已关闭——由主代理编写此聊天"
+  },
+  "content_goal_on": {
+    "message": "目标已开启"
+  },
+  "content_goal_on_chasing": {
+    "message": "目标已开启——正在推进此聊天的目标"
+  },
+  "content_goal_on_no_api_key": {
+    "message": "目标已开启——没有 API 密钥"
+  },
+  "content_goal_opening_empty": {
+    "message": "模型没有生成开场消息"
+  },
+  "content_goal_opening_on_goal": {
+    "message": "正在根据目标打开此聊天"
+  },
+  "content_goal_placeholder": {
+    "message": "此聊天需要达到什么目标？"
+  },
+  "content_goal_reached": {
+    "message": "目标已达成"
+  },
+  "content_goal_retrying": {
+    "message": "将在 $1 秒后重试目标"
+  },
+  "content_goal_save": {
+    "message": "保存为目标"
+  },
+  "content_goal_save_failed": {
+    "message": "无法将目标保存到此聊天"
+  },
+  "content_goal_send_failed": {
+    "message": "ChatGPT 未发送该消息"
+  },
+  "content_goal_sending_answer_to": {
+    "message": "正在将回复发送给 $1"
+  },
+  "content_goal_sending_to_chatgpt": {
+    "message": "正在发送到 ChatGPT"
+  },
+  "content_goal_status_dismiss": {
+    "message": "关闭目标状态"
+  },
+  "content_goal_step_reading": {
+    "message": "正在读取聊天"
+  },
+  "content_goal_step_sending": {
+    "message": "正在发送"
+  },
+  "content_goal_step_settling": {
+    "message": "确认回答已结束"
+  },
+  "content_goal_step_writing": {
+    "message": "正在编写回复"
+  },
+  "content_goal_wait_recovery_activity": {
+    "message": "恢复后等待活动"
+  },
+  "content_goal_wait_recovery_reload": {
+    "message": "等待恢复重新加载"
+  },
+  "content_goal_wait_resumed": {
+    "message": "ChatGPT 已恢复工作 · 等待后重试"
+  },
+  "content_goal_wait_running_tools": {
+    "message": "等待正在运行的工具"
+  },
+  "content_goal_wait_tool_inactivity": {
+    "message": "等待工具活动停止"
+  },
+  "content_goal_writing_first_message": {
+    "message": "$1 正在编写第一条消息"
+  },
+  "content_goal_wrote_next_message": {
+    "message": "$1 已编写下一条消息"
+  },
+  "content_loop_add_specific": {
+    "message": "添加具体循环"
+  },
+  "content_loop_add_specific_hint": {
+    "message": "写下此聊天需要达到的目标。之后它会持续发起提示，只有关闭“循环”开关才会停止。"
+  },
+  "content_loop_continuation_paused": {
+    "message": "循环续接已暂停"
+  },
+  "content_loop_on_never_stops": {
+    "message": "循环已开启——不会自行停止"
+  },
+  "content_loop_on_no_api_key": {
+    "message": "循环已开启——没有 API 密钥"
+  },
+  "content_loop_save": {
+    "message": "保存为循环"
+  },
+  "content_meter_status": {
+    "message": "$1/$2 · 自动压缩 $3"
+  },
+  "content_mode_goal": {
+    "message": "目标"
+  },
+  "content_mode_goal_hint": {
+    "message": "会以你的身份持续回复，直到达成此聊天的目标后停止。使用 $1 编写。"
+  },
+  "content_mode_loop": {
+    "message": "循环"
+  },
+  "content_mode_loop_hint": {
+    "message": "会一直以你的身份回复——只有此滑块能将其停止。使用 $1 编写。"
+  },
+  "content_mode_note_blocked": {
+    "message": "已在应用中被阻止"
+  },
+  "content_mode_note_goal": {
+    "message": "持续回复直到达成目标"
+  },
+  "content_mode_note_key_required": {
+    "message": "需要 OpenRouter 密钥"
+  },
+  "content_mode_note_loop": {
+    "message": "持续回复，不会自行停止"
+  },
+  "content_mode_note_off": {
+    "message": "此处不会自动编写回复"
+  },
+  "content_mode_note_prime_writes": {
+    "message": "由主代理在此编写"
+  },
+  "content_mode_off": {
+    "message": "关闭"
+  },
+  "content_mode_off_hint": {
+    "message": "此处不会自动写入任何内容。"
+  },
+  "content_model_generic": {
+    "message": "模型"
+  },
+  "content_off": {
+    "message": "关闭"
+  },
+  "content_on": {
+    "message": "开启"
+  },
+  "content_opened": {
+    "message": "已打开"
+  },
+  "content_opening": {
+    "message": "正在打开…"
+  },
+  "content_paused": {
+    "message": "已暂停"
+  },
+  "content_saving": {
+    "message": "保存中…"
+  },
+  "content_settings_aria": {
+    "message": "Chat On Steroids 设置"
+  },
+  "content_stage_handoff_attention": {
+    "message": "交接回复需要处理"
+  },
+  "content_stage_handoff_stopped": {
+    "message": "交接回复已停止"
+  },
+  "content_stage_opening_fresh_chat": {
+    "message": "正在打开新聊天"
+  },
+  "content_stage_saving_handoff": {
+    "message": "正在保存交接内容"
+  },
+  "content_stage_waiting_for_chrome": {
+    "message": "正在等待 Chrome"
+  },
+  "content_task_add": {
+    "message": "添加任务"
+  },
+  "content_task_api_key_unavailable": {
+    "message": "请先在应用中添加 OpenRouter API 密钥。"
+  },
+  "content_task_blocked_unavailable": {
+    "message": "此聊天已在应用中被阻止。请先在那里解除阻止，再继续驱动此聊天。"
+  },
+  "content_task_change_hint": {
+    "message": "更改或清除此聊天需要达到的目标。它将以 $1 运行。"
+  },
+  "content_task_edit": {
+    "message": "编辑任务"
+  },
+  "content_task_pick_mode_first": {
+    "message": "请先在上方选择“目标”或“循环”——“关闭”不会写入任何内容。"
+  },
+  "content_task_worker_unavailable": {
+    "message": "子代理聊天已由其主代理驱动。"
+  },
+  "content_task_write_hint": {
+    "message": "写下此聊天需要达到的目标。它将以 $1 运行。"
+  },
+  "content_tokens_from": {
+    "message": "来自 $1 个令牌"
+  },
+  "content_tool_calls_count": {
+    "message": "$1 次工具调用"
+  },
+  "content_tool_details_loading": {
+    "message": "正在加载已记录的详细信息…"
+  },
+  "content_tool_details_unavailable": {
+    "message": "此活动修订版的记录详情不可用。"
+  },
+  "content_tool_more_changed_files": {
+    "message": "另外 $1 个已更改文件"
+  },
+  "content_tool_outcome_completed": {
+    "message": "已完成"
+  },
+  "content_tool_outcome_failed": {
+    "message": "失败"
+  },
+  "content_tool_outcome_internal_error": {
+    "message": "内部错误"
+  },
+  "content_tool_outcome_refused": {
+    "message": "已拒绝"
+  },
+  "content_tool_outcome_unknown": {
+    "message": "未知"
+  },
+  "content_tool_preview_truncated": {
+    "message": "预览已从 $1 个字符处截断。"
+  },
+  "content_tool_ran": {
+    "message": "已运行 $1"
+  },
+  "content_tool_recorded_arguments": {
+    "message": "已记录的参数（已脱敏）"
+  },
+  "content_tool_recorded_result": {
+    "message": "已记录的结果（脱敏预览）"
+  },
+  "content_turn_auto_continue_stopped": {
+    "message": "自动继续已停止一个内容未变化的静默回合。"
+  },
+  "content_turn_chatgpt_interrupted": {
+    "message": "ChatGPT 将此回合标记为已中断"
+  },
+  "content_turn_outcome": {
+    "message": "回合 $1"
+  },
+  "content_turn_replaced_by_user_message": {
+    "message": "新的用户消息替换了未完成的回合"
+  },
+  "content_turn_stalled_detail": {
+    "message": "十分钟内没有可见输出，也没有进展"
+  },
+  "content_turn_stalled_error": {
+    "message": "十分钟内没有可见进展。应用无法确认本轮已结束。"
+  },
+  "content_turn_started": {
+    "message": "轮次开始"
+  },
+  "content_turn_stop_requested": {
+    "message": "已请求停止；原生页面已不再显示生成状态。"
+  },
+  "content_unknown_error": {
+    "message": "未知错误"
+  },
+  "content_waiting": {
+    "message": "正在等待…"
+  },
+  "content_waiting_current_operation": {
+    "message": "仍在等待当前操作完成"
+  },
+  "content_waiting_local_tool": {
+    "message": "正在等待本地工具完成"
+  },
+  "content_waiting_local_tools": {
+    "message": "正在等待 $1 个本地工具完成"
+  },
+  "content_worker_generic": {
+    "message": "一个子代理"
+  },
+  "content_worker_label": {
+    "message": "子代理"
+  },
+  "content_worker_retired": {
+    "message": "$1 已停用，原因：$2。此聊天无法再使用本地工具。"
+  },
+  "content_worker_still_running": {
+    "message": "子代理仍在运行：$1"
+  },
+  "content_workers_still_running": {
+    "message": "仍有 $1 个子代理在运行"
+  },
+  "content_workers_summary": {
+    "message": "$1 个已完成 · $2 个运行中"
+  },
+  "content_workers_summary_failed": {
+    "message": "$1 个已完成 · $2 个运行中 · $3 个失败"
+  },
+  "content_working": {
+    "message": "正在处理…"
+  },
+  "content_writing": {
+    "message": "正在编写…"
+  },
+  "extension_action_title": {
+    "message": "Chat On Steroids"
+  },
+  "extension_description": {
+    "message": "将 ChatGPT 连接到 Chat On Steroids，并通过 DOM、截图和开发者工具在后台控制浏览器标签页。"
+  },
+  "extension_name": {
+    "message": "Chat On Steroids 配套扩展"
+  },
+  "popup_advanced": {
+    "message": "高级"
+  },
+  "popup_attribution_agent_key": {
+    "message": "智能体键"
+  },
+  "popup_attribution_exact_request_id": {
+    "message": "精确请求 ID"
+  },
+  "popup_attribution_not_placed_in_chat": {
+    "message": "未归属到聊天"
+  },
+  "popup_attribution_only_chat_generating": {
+    "message": "唯一正在生成的聊天"
+  },
+  "popup_attribution_request_id_not_resolved": {
+    "message": "请求 ID 未解析"
+  },
+  "popup_attribution_tool_block_on_page": {
+    "message": "页面上的工具块"
+  },
+  "popup_call_details": {
+    "message": "$1 — 找到 $2 · 应用回执 $3 · 归属 $4 · 工具活动 $5"
+  },
+  "popup_chat_id": {
+    "message": "聊天 ID"
+  },
+  "popup_chatgpt_tab": {
+    "message": "ChatGPT 标签页"
+  },
+  "popup_confirmed": {
+    "message": "已确认"
+  },
+  "popup_connect": {
+    "message": "连接"
+  },
+  "popup_copied": {
+    "message": "已复制"
+  },
+  "popup_copy": {
+    "message": "复制"
+  },
+  "popup_copy_chat_id": {
+    "message": "复制聊天 ID"
+  },
+  "popup_copy_current_request_id": {
+    "message": "复制当前请求 ID"
+  },
+  "popup_copy_failed": {
+    "message": "复制失败"
+  },
+  "popup_count_held": {
+    "message": "保留 $1 个"
+  },
+  "popup_count_held_in_page": {
+    "message": "页面中保留 $1 个"
+  },
+  "popup_count_queued": {
+    "message": "$1 个排队中"
+  },
+  "popup_current_request": {
+    "message": "当前请求"
+  },
+  "popup_detail_app": {
+    "message": "应用"
+  },
+  "popup_detail_app_session": {
+    "message": "应用会话"
+  },
+  "popup_detail_app_value": {
+    "message": "v$1 · 端口 $2"
+  },
+  "popup_detail_browser_queue_value": {
+    "message": "保留 $1 个 · 共 $2 个"
+  },
+  "popup_detail_chat_id": {
+    "message": "聊天 ID"
+  },
+  "popup_detail_delivered": {
+    "message": "已发送"
+  },
+  "popup_detail_extension": {
+    "message": "扩展"
+  },
+  "popup_detail_extension_value": {
+    "message": "v$1 · 协议 $2"
+  },
+  "popup_detail_in_this_browser": {
+    "message": "在此浏览器中"
+  },
+  "popup_detail_last_delivery": {
+    "message": "上次发送"
+  },
+  "popup_detail_last_delivery_value": {
+    "message": "$1 · $2 · $3 前"
+  },
+  "popup_detail_observed": {
+    "message": "已观察"
+  },
+  "popup_detail_observed_value": {
+    "message": "$1 个事件 · $2 次调用"
+  },
+  "popup_detail_ownership": {
+    "message": "归属"
+  },
+  "popup_detail_page_sends": {
+    "message": "页面发送次数"
+  },
+  "popup_detail_page_sends_value": {
+    "message": "$1 · $2 次失败"
+  },
+  "popup_detail_recorder": {
+    "message": "记录器"
+  },
+  "popup_detail_recorder_value": {
+    "message": "fiber v$1 · 运行 ID $2"
+  },
+  "popup_detail_tab": {
+    "message": "标签页"
+  },
+  "popup_detail_tab_value": {
+    "message": "$1 · 世代 $2"
+  },
+  "popup_detail_turn": {
+    "message": "轮次"
+  },
+  "popup_detail_turn_live": {
+    "message": "$1 · 实时"
+  },
+  "popup_no": {
+    "message": "否"
+  },
+  "popup_no_record": {
+    "message": "无记录"
+  },
+  "popup_overwrite_chatgpt": {
+    "message": "覆盖 ChatGPT"
+  },
+  "popup_owner_confirmed": {
+    "message": "已确认所有者"
+  },
+  "popup_pending": {
+    "message": "待处理"
+  },
+  "popup_pipeline_call_fallback_many": {
+    "message": "应用无法通过请求 ID 归属 $1 次调用——已回退为 $2。"
+  },
+  "popup_pipeline_call_fallback_one": {
+    "message": "应用无法通过请求 ID 归属一次调用——已回退为 $1。"
+  },
+  "popup_pipeline_delivery_blocked": {
+    "message": "在应用连接并确认协议兼容之前，发送将被阻止。"
+  },
+  "popup_pipeline_delivery_rejected": {
+    "message": "应用拒绝了上次发送（$1）。"
+  },
+  "popup_pipeline_extension_blocked": {
+    "message": "扩展未接受此标签页的观察结果（$1）。请重新加载 ChatGPT 标签页。"
+  },
+  "popup_pipeline_id_found_waiting_receipt": {
+    "message": "已在最新轮次中找到 ID。正在等待应用确认接收。"
+  },
+  "popup_pipeline_no_recorder": {
+    "message": "此标签页没有记录器。请重新加载页面。"
+  },
+  "popup_pipeline_owner_confirmed_no_activity": {
+    "message": "请求归属已确认。尚无匹配的工具活动记录。"
+  },
+  "popup_pipeline_queued_retrying": {
+    "message": "已排队。正在重试发送到应用。"
+  },
+  "popup_pipeline_received_waiting_owner": {
+    "message": "应用已收到 ID。正在等待归属确认。"
+  },
+  "popup_pipeline_request_id_matched_many": {
+    "message": "$1 个请求 ID 与已记录的工具活动匹配。"
+  },
+  "popup_pipeline_request_id_matched_one": {
+    "message": "1 个请求 ID 与已记录的工具活动匹配。"
+  },
+  "popup_pipeline_waiting_first_message": {
+    "message": "正在等待首条消息。"
+  },
+  "popup_pipeline_waiting_latest_request_id": {
+    "message": "聊天已记录。正在等待最新轮次的请求 ID。"
+  },
+  "popup_pipeline_waiting_session_receipt": {
+    "message": "应用可访问。正在等待此聊天的会话回执。"
+  },
+  "popup_reaching_app": {
+    "message": "正在连接应用"
+  },
+  "popup_recording_this_chat": {
+    "message": "正在记录此聊天"
+  },
+  "popup_request_id": {
+    "message": "请求 ID"
+  },
+  "popup_request_id_found": {
+    "message": "已找到请求 ID"
+  },
+  "popup_section_augment_chatgpt": {
+    "message": "增强 ChatGPT"
+  },
+  "popup_section_session_capture": {
+    "message": "会话捕获"
+  },
+  "popup_secure_storage_unavailable": {
+    "message": "安全凭据存储不可用。请打开 Chat On Steroids 查看设置说明。"
+  },
+  "popup_sent_to_app": {
+    "message": "已发送到应用"
+  },
+  "popup_state_app_not_reachable": {
+    "message": "无法连接应用"
+  },
+  "popup_state_app_reachable_port": {
+    "message": "应用可连接 · 端口 $1"
+  },
+  "popup_state_disconnected": {
+    "message": "已断开连接"
+  },
+  "popup_state_looking_for_app": {
+    "message": "正在查找应用"
+  },
+  "popup_state_port_connecting": {
+    "message": "端口 $1 · 正在连接"
+  },
+  "popup_state_version_mismatch": {
+    "message": "版本不匹配"
+  },
+  "popup_status_answering": {
+    "message": "正在回复"
+  },
+  "popup_status_blocked": {
+    "message": "已阻止"
+  },
+  "popup_status_bound": {
+    "message": "已绑定"
+  },
+  "popup_status_failed": {
+    "message": "失败"
+  },
+  "popup_status_id_confirmed": {
+    "message": "ID 已确认"
+  },
+  "popup_status_idle": {
+    "message": "空闲"
+  },
+  "popup_status_new_chat": {
+    "message": "新聊天"
+  },
+  "popup_status_none_open": {
+    "message": "未打开"
+  },
+  "popup_status_none_yet": {
+    "message": "暂无"
+  },
+  "popup_status_not_attached": {
+    "message": "未附加"
+  },
+  "popup_status_ok": {
+    "message": "正常"
+  },
+  "popup_status_reload": {
+    "message": "重新加载"
+  },
+  "popup_status_retired": {
+    "message": "已停用"
+  },
+  "popup_status_tool_matched": {
+    "message": "工具已匹配"
+  },
+  "popup_status_unbound": {
+    "message": "未绑定"
+  },
+  "popup_status_waiting": {
+    "message": "正在等待"
+  },
+  "popup_time_hours_short": {
+    "message": "$1 小时"
+  },
+  "popup_time_minutes_short": {
+    "message": "$1 分钟"
+  },
+  "popup_time_seconds_short": {
+    "message": "$1 秒"
+  },
+  "popup_timestamps": {
+    "message": "时间戳"
+  },
+  "popup_try_again": {
+    "message": "重试"
+  },
+  "popup_version_mismatch_help": {
+    "message": "应用 v$1（协议 $2）；配套扩展 v$3（协议 $4）。打开浏览器的“扩展程序”页面，启用“开发者模式”，然后更新 / 重新加载此配套扩展。如果仍不匹配，请在 Chat On Steroids 中使用“打开扩展文件夹”，并加载该文件夹。待 ChatGPT 标签页中的活动工作完成后，再重新加载这些标签页。"
+  },
+  "popup_yes": {
+    "message": "是"
+  }
+}

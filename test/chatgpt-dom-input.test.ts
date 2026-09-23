@@ -19,6 +19,9 @@ interface DomApi {
   send(options?: { acceptanceTimeoutMs?: number; stillCurrent?: () => boolean; beforeSend?: () => Promise<boolean> }): Promise<boolean>;
   selectModelSettings(model: string | null, effort: string | null, current?: () => boolean): Promise<boolean>;
   uploadImages(images: Array<{ name: string; dataUrl: string }>, current?: () => boolean, draft?: ReturnType<DomApi['captureComposerDraft']>, files?: File[]): Promise<boolean>;
+  turns(): Array<{ id: string | null; role: string; node: HTMLElement; nodes: HTMLElement[] }>;
+  toolBlocks(turn: ReturnType<DomApi['turns']>[number]): HTMLElement[];
+  hideActivity(turn: ReturnType<DomApi['turns']>[number], covered: HTMLElement[]): void;
 }
 let dom: JSDOM;
 let document: Document;
@@ -724,5 +727,26 @@ describe('locale-independent provider composer evidence', () => {
     group.firstElementChild!.setAttribute('data-default-action', 'true');
     group.append(group.lastElementChild!.cloneNode(true));
     expect(api.hasComposerAttachments()).toBe(false);
+  });
+
+  it.each(['画像を編集', '分享此图片'])('keeps a localized generated-output action beside a hidden duplicate tool row (%s)', actionLabel => {
+    const section = document.createElement('section');
+    section.setAttribute('data-testid', 'conversation-turn-output-action');
+    section.setAttribute('data-turn', 'assistant');
+    section.setAttribute('data-turn-id', 'output-action');
+    const layout = document.createElement('div');
+    const branch = document.createElement('div');
+    const tool = document.createElement('span'); tool.className = 'tool-message'; tool.textContent = 'Called image tool';
+    const disclosure = document.createElement('button'); disclosure.setAttribute('aria-label', 'Called image tool');
+    const action = document.createElement('button'); action.setAttribute('aria-label', actionLabel);
+    branch.append(tool, disclosure, action); layout.append(branch); section.append(layout); document.body.append(section);
+
+    const turn = api.turns().find(item => item.id === 'output-action')!;
+    const blocks = api.toolBlocks(turn);
+    expect(blocks).toEqual([tool]);
+    api.hideActivity(turn, blocks);
+    expect(tool.getAttribute('data-clf-native-hidden')).toBe('1');
+    expect(disclosure.getAttribute('data-clf-native-hidden')).toBe('1');
+    expect(action.closest('[data-clf-native-hidden]')).toBeNull();
   });
 });

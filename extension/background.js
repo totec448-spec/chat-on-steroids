@@ -4241,6 +4241,11 @@ async function restoreChatgptTab(id, current = () => true, documentId = null) {
   }
   try {
     if (!current()) return false;
+    // Rebuild localization before the isolated-world DOM adapter and recorder that consume it.
+    // Static manifest injection has the same ordering. Keeping recovery identical matters after
+    // an extension reload, when the old isolated world (including its i18n helper) is invalidated.
+    await chrome.scripting.executeScript({ target, files: ['i18n.js'] });
+    if (!current()) return false;
     // Rebuild the isolated-world DOM adapter before the recorder that consumes it.
     await chrome.scripting.executeScript({ target, files: ['chatgpt-dom.js'] });
     if (!current()) return false;

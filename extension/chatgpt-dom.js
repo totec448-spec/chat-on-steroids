@@ -1667,9 +1667,23 @@ var CLF_DOM = (() => {
     }, []);
   }
 
-  /** Controls in the leaf's immediate native branch belong to that tool disclosure. */
+  /** Controls structurally owned by one tool disclosure.
+   *
+   * A generated-output action can sit beside a tool row in the same native branch. Treating
+   * every sibling button as part of the tool made localized Edit/Share actions disappear when
+   * the duplicate native tool row was hidden. Keep controls inside the row, plus the observed
+   * sibling disclosure whose semantic label exactly matches the row itself. Anything else is
+   * unrelated native UI and therefore stops the hide climb without reading translated labels.
+   */
   function activityControls(block) {
-    return new Set(block.parentElement?.querySelectorAll?.(ACTIVITY_CONTROL) || []);
+    const own = new Set(block.querySelectorAll?.(ACTIVITY_CONTROL) || []);
+    const label = text(block, 240);
+    for (const control of block.parentElement?.querySelectorAll?.(ACTIVITY_CONTROL) || []) {
+      const semantics = [control.getAttribute?.('aria-label'), control.getAttribute?.('title'), text(control, 240)]
+        .map(value => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+      if (label && semantics.includes(label)) own.add(control);
+    }
+    return own;
   }
 
   /**
@@ -1732,7 +1746,15 @@ var CLF_DOM = (() => {
         if (!covered.has(block)) continue;
         const section = sections.find(candidate => candidate.contains(block));
         const target = section && activityHideTarget(block, section, candidates, covered, allowedControls);
-        if (target) desired.get(section).add(target);
+        if (target) {
+          desired.get(section).add(target);
+          // When unrelated native UI keeps the shared parent visible, retire only this
+          // tool row's own sibling disclosure controls. This avoids leaving an orphaned
+          // chevron while preserving adjacent localized output actions.
+          if (!summaries.has(block)) for (const control of activityControls(block)) {
+            if (control !== target && !target.contains(control)) desired.get(section).add(control);
+          }
+        }
       }
     }
     syncHiddenActivity(turn, desired);
@@ -2109,7 +2131,7 @@ var CLF_DOM = (() => {
   function pluginInstalledButtons(connectorName) {
     return safe(() => {
       const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => panel.getClientRects().length > 0 &&
-        panel.getAttribute('aria-labelledby')?.endsWith('-trigger-Plugins'));
+        (panel.querySelector('[data-testid="plugin-icon-wrapper"]') || panel.querySelector('a[href="/plugins"]')));
       if (panels.length !== 1) return null;
       // Installed settings rows are buttons, not the links in the /plugins catalog.
       // Match the name's own leaf so adjacent permission text cannot alter identity.

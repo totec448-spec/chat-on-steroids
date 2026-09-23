@@ -1,0 +1,1037 @@
+{
+  "content_app_did_not_answer": {
+    "message": "Uygulama yanıt vermedi."
+  },
+  "content_app_did_not_answer_lower": {
+    "message": "uygulama yanıt vermedi"
+  },
+  "content_app_not_running": {
+    "message": "Chat On Steroids bu bilgisayarda çalışmıyor."
+  },
+  "content_auto_compaction": {
+    "message": "Otomatik sıkıştırma"
+  },
+  "content_auto_compaction_blocked_off": {
+    "message": "burada kapalı: bu sohbet uygulamada engellenmiş"
+  },
+  "content_auto_compaction_manual": {
+    "message": "bu sohbeti elle sıkıştır"
+  },
+  "content_auto_compaction_off": {
+    "message": "Otomatik sıkıştırma kapalı"
+  },
+  "content_auto_compaction_on": {
+    "message": "Otomatik sıkıştırma açık$1"
+  },
+  "content_auto_compaction_threshold_app": {
+    "message": "eşik uygulamada ayarlanır"
+  },
+  "content_auto_compaction_worker_off": {
+    "message": "burada kapalı: yardımcı ajan sohbetleri hiçbir zaman otomatik sıkıştırılmaz"
+  },
+  "content_bootstrap_composer_changed_authorizing": {
+    "message": "başlangıç yetkilendirmesi sırasında mesaj alanı değişti; taslak korundu ve hiçbir şey gönderilmedi"
+  },
+  "content_bootstrap_composer_changed_before_send": {
+    "message": "başlangıç mesajı gönderilmeden önce mesaj alanı değişti; taslak korundu"
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "ChatGPT, başlangıç metni eklenirken mesaj alanını değiştirdi"
+  },
+  "content_bootstrap_composer_unavailable": {
+    "message": "ChatGPT başlangıç için kullanılabilir bir mesaj alanı göstermedi"
+  },
+  "content_bootstrap_fresh_chat_changed": {
+    "message": "işaretlenen yeni sohbet başlangıç mesajı gönderilmeden önce değişti; hiçbir şey gönderilmedi"
+  },
+  "content_bootstrap_handoff": {
+    "message": "Bu uygulamanın devraldığı devir özeti — sizin yazdığınız bir şey değil"
+  },
+  "content_bootstrap_insert_refused": {
+    "message": "ChatGPT eklenen metni kabul etmedi$1"
+  },
+  "content_bootstrap_missing_target": {
+    "message": "mevcut bir sohbete sunuldu ve hedef sohbet belirtilmedi"
+  },
+  "content_bootstrap_model_unavailable": {
+    "message": "İstenen model veya akıl yürütme kullanılamıyor ya da ChatGPT içinde doğrulanamadı"
+  },
+  "content_bootstrap_project_not_authorized": {
+    "message": "komut Proje erişimine izin vermedi; hiçbir şey gönderilmedi"
+  },
+  "content_bootstrap_project_open_failed": {
+    "message": "ChatGPT kaynak Projeyi kendi bağlantısından açamadı; hiçbir şey gönderilmedi"
+  },
+  "content_bootstrap_project_source_changed": {
+    "message": "Proje girişi artık kaynak sohbetle eşleşmiyor; hiçbir şey gönderilmedi"
+  },
+  "content_bootstrap_resume_marker_invalid": {
+    "message": "sürdürme başlangıcında geçerli bir devam işareti yoktu"
+  },
+  "content_bootstrap_send_not_accepted": {
+    "message": "ChatGPT başlangıç mesajının gönderimini kabul etmedi"
+  },
+  "content_bootstrap_target_changed": {
+    "message": "bu mesajın gönderileceği sohbet, gönderilmeden önce değişti; hiçbir şey gönderilmedi"
+  },
+  "content_bootstrap_worker": {
+    "message": "Bu $1 — uygulamanın yardımcı ajana verdiği talimat; sizin yazdığınız bir şey değil"
+  },
+  "content_bootstrap_wrong_conversation": {
+    "message": "bunun için açılan sayfa farklı bir sohbet gösteriyordu"
+  },
+  "content_browser_disconnected": {
+    "message": "Tarayıcı bağlantısı Chat On Steroids'ta kesik."
+  },
+  "content_cancel": {
+    "message": "İptal"
+  },
+  "content_chat_blocked": {
+    "message": "Sohbet engellendi"
+  },
+  "content_chat_blocked_tip": {
+    "message": "Bu sohbet Chat On Steroids uygulamasında engellenmiş: araç çağrıları reddedilir; Hedef, Döngü ve otomatik sıkıştırma kapalıdır. Engeli kaldırmak için uygulamanın Sohbet sekmesini açın, oturum listesindeki bu sohbetin üzerine gelin ve engelleme simgesine basın."
+  },
+  "content_chat_still_opening": {
+    "message": "bu sohbet hâlâ açılıyor — yeniden deneyin"
+  },
+  "content_chatgpt_message_box_not_ready": {
+    "message": "ChatGPT mesaj alanı hazır değil ($1). Sayfanın yüklenmesini bekleyip yeniden deneyin."
+  },
+  "content_chatgpt_tool": {
+    "message": "ChatGPT aracı"
+  },
+  "content_clear": {
+    "message": "Temizle"
+  },
+  "content_compact": {
+    "message": "Sıkıştır"
+  },
+  "content_compact_already_underway": {
+    "message": "Bu sohbette zaten bir sıkıştırma işlemi sürüyor. Tamamlanmasını bekleyin veya iptal edin."
+  },
+  "content_compact_app_opening_fresh": {
+    "message": "Uygulama yeni sohbeti açmaya çalışıyor."
+  },
+  "content_compact_asking": {
+    "message": "Soruluyor…"
+  },
+  "content_compact_attempt_not_repeated": {
+    "message": "$1. Kalıcı deneme iki kez gönderilmeyecek."
+  },
+  "content_compact_attempt_owned": {
+    "message": "Kalıcı devir özeti denemesi zaten başka bir işlem tarafından yürütülüyor; ChatGPT’de işaretlenen mesaj eşitleniyor."
+  },
+  "content_compact_blocked_unavailable_hint": {
+    "message": "Engellenmiş bir sohbet asla sıkıştırılmaz veya sürdürülmez: yerine açılan sohbet araçları olmadan çalışır. Önce uygulamadan engeli kaldırın."
+  },
+  "content_compact_cancel": {
+    "message": "Sıkıştırmayı iptal et"
+  },
+  "content_compact_cancel_aria": {
+    "message": "Sıkıştır ve sürdür işlemini iptal et"
+  },
+  "content_compact_cancel_failed": {
+    "message": "Sıkıştırma iptal edilemedi."
+  },
+  "content_compact_chat_changed_before_start": {
+    "message": "Sıkıştırma başlamadan önce bu sohbet değişti."
+  },
+  "content_compact_chat_changed_preparing": {
+    "message": "Devir özeti hazırlanırken sohbet değişti. Hiçbir şey gönderilmedi."
+  },
+  "content_compact_chat_changed_stopping": {
+    "message": "Sıkıştırma turu durdururken bu sohbet değişti."
+  },
+  "content_compact_chat_changed_waiting_results": {
+    "message": "Sıkıştırma araç sonuçlarını beklerken bu sohbet değişti."
+  },
+  "content_compact_chat_changed_waiting_tools": {
+    "message": "Sıkıştırma yerel araçları beklerken bu sohbet değişti."
+  },
+  "content_compact_chatgpt_writing": {
+    "message": "ChatGPT devir özetini yazıyor"
+  },
+  "content_compact_existing_draft": {
+    "message": "ChatGPT’de zaten bir taslak var; devir özeti istemeden önce mesaj alanını temizleyin."
+  },
+  "content_compact_failed": {
+    "message": "Sıkıştırma başarısız"
+  },
+  "content_compact_failed_request_unconfirmed": {
+    "message": "$1 Uygulama bu başarısız isteğin kapatıldığını henüz doğrulamadı."
+  },
+  "content_compact_fresh_open": {
+    "message": "Yeni sohbet açık"
+  },
+  "content_compact_handoff_already_submitted": {
+    "message": "Devir özeti talimatı burada zaten gönderildi. Kendiliğinden tamamlanmasını bekleyin veya iptal edin."
+  },
+  "content_compact_handoff_incomplete_detail": {
+    "message": "Devir özeti yanıtı tamamlanmadı. Bu sohbete dönmek için sıkıştırmayı iptal edin."
+  },
+  "content_compact_handoff_problem": {
+    "message": "ChatGPT devir özetini hazırlarken bir sorun bildirdi."
+  },
+  "content_compact_handoff_request_failed": {
+    "message": "ChatGPT'den devir özeti istenemedi: $1"
+  },
+  "content_compact_handoff_stopped_detail": {
+    "message": "Devir özeti yanıtı durduruldu. Bu sohbete dönmek için sıkıştırmayı iptal edin."
+  },
+  "content_compact_insert_failed": {
+    "message": "Tarayıcı devir özeti isteğini ekleyemedi ($1). Mesaj alanının kullanılabilir olduğunu kontrol edip yeniden deneyin."
+  },
+  "content_compact_message_box_changed": {
+    "message": "Devir özeti talimatı gönderilmeden önce mesaj alanı değişti. Taslak korundu; hiçbir şey sıkıştırılmadı."
+  },
+  "content_compact_message_box_changed_preserved": {
+    "message": "Devir özeti gönderilmeden önce mesaj alanı değişti. Taslak korundu."
+  },
+  "content_compact_missing_handoff_instruction": {
+    "message": "Uygulama devir özeti talimatını göndermedi."
+  },
+  "content_compact_missing_token": {
+    "message": "Uygulama sıkıştırma belirteci göndermedi; bu nedenle işlem izlenemedi."
+  },
+  "content_compact_nothing_yet": {
+    "message": "Henüz sıkıştırılacak bir şey yok — bir mesaj gönderin veya bir Hedef belirleyin; devam mesajını otomatik yazsın."
+  },
+  "content_compact_opening_fresh": {
+    "message": "Devir özeti kaydedildi, yeni sohbet açılıyor"
+  },
+  "content_compact_policy_unverified": {
+    "message": "Bu sohbetin sıkıştırılmasına izin verilip verilmediği doğrulanamadı."
+  },
+  "content_compact_results_unconfirmed": {
+    "message": "ChatGPT en son araç sonuçlarını aldığını doğrulamadı. Hiçbir şey sıkıştırılmadı."
+  },
+  "content_compact_resume_cancelled": {
+    "message": "Sürdürme iptal edildi"
+  },
+  "content_compact_resume_now": {
+    "message": "Şimdi sıkıştır ve sürdür"
+  },
+  "content_compact_send_ambiguous": {
+    "message": "Gönderim sonucu belirsizdi. Hiçbir şey iki kez gönderilmeyecek; ChatGPT kabul etmediyse işlemi açıkça iptal edin."
+  },
+  "content_compact_send_not_ready": {
+    "message": "Gönder düğmesi veya mesaj alanı hazır olmadığı için devir özeti isteği gönderilmedi. Sayfa hazır olduğunda yeniden deneyin."
+  },
+  "content_compact_send_permission_unconfirmed": {
+    "message": "Burada hiçbir şey gönderilmedi: devir özeti gönderim izni doğrulanmadı. Mevcut istek iki kez gönderilmeyecek."
+  },
+  "content_compact_send_state_unverified": {
+    "message": "Devir özeti gönderim durumu doğrulanamadı. Hiçbir şey durdurulmadı."
+  },
+  "content_compact_settling": {
+    "message": "Durulması bekleniyor…"
+  },
+  "content_compact_source_not_loaded": {
+    "message": "Asıl soru henüz yüklenmedi. Hiçbir şey sıkıştırılmadı; kaynak sohbet bekleniyor."
+  },
+  "content_compact_starting": {
+    "message": "Başlatılıyor…"
+  },
+  "content_compact_step_opening": {
+    "message": "Yeni sohbet açılıyor"
+  },
+  "content_compact_step_preparing": {
+    "message": "Hazırlanıyor"
+  },
+  "content_compact_step_saving": {
+    "message": "Kaydediliyor"
+  },
+  "content_compact_step_writing": {
+    "message": "Devir özeti yazılıyor"
+  },
+  "content_compact_stop_failed": {
+    "message": "ChatGPT geçerli turu durdurmadı. Hiçbir şey sıkıştırılmadı."
+  },
+  "content_compact_stopping": {
+    "message": "Durduruluyor…"
+  },
+  "content_compact_ticket_store_failed": {
+    "message": "Sıkıştırma kaydı saklanamadı."
+  },
+  "content_compact_tools_still_running": {
+    "message": "Bekleme süresi dolduğunda yerel araçlar hâlâ çalışıyordu. Hiçbir şey sıkıştırılmadı."
+  },
+  "content_compact_tools_stop_unverified": {
+    "message": "Yerel araçların durduğu doğrulanamadı. Hiçbir şey sıkıştırılmadı."
+  },
+  "content_compact_unavailable": {
+    "message": "Sıkıştır ve sürdür kullanılamıyor"
+  },
+  "content_compact_waiting_response": {
+    "message": "Devir özeti yanıtı bekleniyor"
+  },
+  "content_compact_waiting_store": {
+    "message": "Özet tamamlandı; uygulamanın kaydetmesi bekleniyor."
+  },
+  "content_compact_worker_unavailable_hint": {
+    "message": "Yardımcı ajan sohbetleri mevcut konuşmalarında kalır; hiçbir zaman elle sıkıştırılmaz veya sürdürülmez."
+  },
+  "content_connector_identity_ambiguous": {
+    "message": "Yüklü bağlayıcının kimliği kullanılamıyor veya belirsiz"
+  },
+  "content_connector_refresh_claim_unconfirmed": {
+    "message": "Bağlayıcı yenileme beyanı veya sayfa sahipliği doğrulanmadı"
+  },
+  "content_connector_refresh_schema_unchanged": {
+    "message": "Yenileme istendi ancak eşleşen şemada bir değişiklik gözlenmedi"
+  },
+  "content_connector_refresh_unverified": {
+    "message": "Bağlayıcının yenilendiği doğrulanamadı"
+  },
+  "content_connector_settings_unverified": {
+    "message": "Bağlayıcının kesin ayarları doğrulanamadı"
+  },
+  "content_delivery_attachment_transfer_failed": {
+    "message": "Ek aktarımı başarısız oldu. Mesaj gönderilmedi."
+  },
+  "content_delivery_attachment_transfer_incomplete": {
+    "message": "Ek aktarımı tamamlanmadı."
+  },
+  "content_delivery_attachment_upload_unconfirmed": {
+    "message": "Ek yüklemesi doğrulanmadı. Yeniden denemeden önce ChatGPT’deki gönderilmemiş taslağı ve varsa dosya hatasını kontrol edin."
+  },
+  "content_delivery_chat_changed": {
+    "message": "Doğrudan iletimden önce sohbet değişti."
+  },
+  "content_delivery_chat_changed_or_busy": {
+    "message": "Sohbet değişti veya durmadı. Mesaj gönderilmedi."
+  },
+  "content_delivery_composer_changed": {
+    "message": "Göndermeden önce ChatGPT mesaj alanı değişti"
+  },
+  "content_delivery_composer_stuck": {
+    "message": "ChatGPT yanıtını tamamladı ancak mesaj alanı hâlâ Durdur durumunda. Sıradaki mesaj iletilmeden önce bu sayfa kurtarılıyor."
+  },
+  "content_delivery_draft_preserved": {
+    "message": "Mesaj alanı değişti; taslağınız korundu"
+  },
+  "content_delivery_editor_not_writable": {
+    "message": "Göndermeden önce ChatGPT düzenleyicisi yazılabilir duruma gelmedi."
+  },
+  "content_delivery_existing_draft": {
+    "message": "ChatGPT’de zaten gönderilmemiş bir taslak var. Yeniden denemeden önce bu taslağı Chrome’da gönderin veya temizleyin."
+  },
+  "content_delivery_model_unconfirmed": {
+    "message": "İstenen model veya akıl yürütme düzeyi doğrulanamadı"
+  },
+  "content_delivery_stop_failed": {
+    "message": "Geçerli yanıt durdurulamadı."
+  },
+  "content_delivery_temporary_chat_unconfirmed": {
+    "message": "Geçici Sohbet doğrulanmadı. Yardımcı sekmesini açın ve Geçici Sohbet tanıtımını tamamlayın."
+  },
+  "content_delivery_text_not_accepted": {
+    "message": "ChatGPT metni kabul etmedi$1"
+  },
+  "content_delivery_turn_changed": {
+    "message": "Doğrudan iletimden önce tur değişti."
+  },
+  "content_dismiss": {
+    "message": "Kapat"
+  },
+  "content_empty": {
+    "message": "(boş)"
+  },
+  "content_error_compaction_running": {
+    "message": "Şu anda başka bir sohbet sıkıştırılıyor."
+  },
+  "content_error_session_not_recorded": {
+    "message": "Bu sohbet için henüz kayıtlı bir yerel oturum yok."
+  },
+  "content_error_turn_still_generating": {
+    "message": "Önce bu ChatGPT turunun tamamlanmasını bekleyin."
+  },
+  "content_failed": {
+    "message": "Başarısız"
+  },
+  "content_goal_add_specific": {
+    "message": "özel hedef ekle"
+  },
+  "content_goal_add_specific_hint": {
+    "message": "Bu sohbetin ulaşması gereken şeyi yazın. Ulaşana kadar yeni istemler gönderir ve orada durur."
+  },
+  "content_goal_add_to_start": {
+    "message": "Bu sohbeti başlatmak için bir Hedef veya Döngü ekleyin"
+  },
+  "content_goal_answer_never_settled": {
+    "message": "yanıtın değişmesi hiç durmadı; bu nedenle hiçbir şey yazılmadı"
+  },
+  "content_goal_answering": {
+    "message": "$1 yanıtlıyor"
+  },
+  "content_goal_backend_chatgpt_helper": {
+    "message": "ChatGPT yardımcısı"
+  },
+  "content_goal_backend_custom_endpoint": {
+    "message": "özel uç nokta"
+  },
+  "content_goal_backend_no_answer": {
+    "message": "$1 yanıt vermedi"
+  },
+  "content_goal_backend_offline_templates": {
+    "message": "çevrimdışı şablonlar"
+  },
+  "content_goal_backend_offline_templates_title": {
+    "message": "Çevrimdışı şablonlar"
+  },
+  "content_goal_checking_again": {
+    "message": "$1 sonra yeniden kontrol ediliyor"
+  },
+  "content_goal_checking_finished": {
+    "message": "Yanıtın tamamlandığı kontrol ediliyor"
+  },
+  "content_goal_delivery": {
+    "message": "$1: $2"
+  },
+  "content_goal_delivery_after_turn_finish": {
+    "message": "Bu turdan sonra + bitişte"
+  },
+  "content_goal_delivery_only_finish": {
+    "message": "Yalnızca bitişte"
+  },
+  "content_goal_loop_off": {
+    "message": "Hedef ve Döngü kapalı"
+  },
+  "content_goal_loop_stopped": {
+    "message": "Hedef döngüsü durdu"
+  },
+  "content_goal_message_box_in_use": {
+    "message": "mesaj alanı kullanılıyordu; bu nedenle hiçbir şey gönderilmedi"
+  },
+  "content_goal_mode_aria": {
+    "message": "Hedef modu"
+  },
+  "content_goal_new_chat_draft_refused": {
+    "message": "ChatGPT Yeni Sohbet taslağını değiştirmeyi kabul etmedi"
+  },
+  "content_goal_no_api_key_unavailable": {
+    "message": "API anahtarı yok — Hedef ve Döngü kullanılamıyor"
+  },
+  "content_goal_nothing_sent": {
+    "message": "hiçbir şey gönderilmedi"
+  },
+  "content_goal_off_blocked": {
+    "message": "Hedef kapalı — bu sohbet uygulamada engellenmiş"
+  },
+  "content_goal_off_prime_writes": {
+    "message": "Hedef kapalı — bu sohbeti ana ajan yazıyor"
+  },
+  "content_goal_on": {
+    "message": "Hedef açık"
+  },
+  "content_goal_on_chasing": {
+    "message": "Hedef açık — bu sohbetin hedefi izleniyor"
+  },
+  "content_goal_on_no_api_key": {
+    "message": "Hedef açık — API anahtarı yok"
+  },
+  "content_goal_opening_empty": {
+    "message": "model açılış için hiçbir şey yazmadı"
+  },
+  "content_goal_opening_on_goal": {
+    "message": "Bu sohbet hedefiyle açılıyor"
+  },
+  "content_goal_placeholder": {
+    "message": "Bu sohbet neye ulaşmalı?"
+  },
+  "content_goal_reached": {
+    "message": "Hedefe ulaşıldı"
+  },
+  "content_goal_retrying": {
+    "message": "Hedef $1 saniye içinde yeniden denenecek"
+  },
+  "content_goal_save": {
+    "message": "Hedef olarak kaydet"
+  },
+  "content_goal_save_failed": {
+    "message": "hedef bu sohbete kaydedilemedi"
+  },
+  "content_goal_send_failed": {
+    "message": "ChatGPT mesajı göndermedi"
+  },
+  "content_goal_sending_answer_to": {
+    "message": "Yanıt $1 tarafına gönderiliyor"
+  },
+  "content_goal_sending_to_chatgpt": {
+    "message": "ChatGPT'ye gönderiliyor"
+  },
+  "content_goal_status_dismiss": {
+    "message": "Hedef durumunu kapat"
+  },
+  "content_goal_step_reading": {
+    "message": "Sohbet okunuyor"
+  },
+  "content_goal_step_sending": {
+    "message": "Gönderiliyor"
+  },
+  "content_goal_step_settling": {
+    "message": "Yanıtın bittiği doğrulanıyor"
+  },
+  "content_goal_step_writing": {
+    "message": "Yanıt yazılıyor"
+  },
+  "content_goal_wait_recovery_activity": {
+    "message": "Kurtarma sonrası etkinlik bekleniyor"
+  },
+  "content_goal_wait_recovery_reload": {
+    "message": "Kurtarma için yeniden yüklemeden önce bekleniyor"
+  },
+  "content_goal_wait_resumed": {
+    "message": "ChatGPT çalışmaya devam etti · tekrar denemeden önce bekleniyor"
+  },
+  "content_goal_wait_running_tools": {
+    "message": "Çalışan araçlar bekleniyor"
+  },
+  "content_goal_wait_tool_inactivity": {
+    "message": "Araç etkinliğinin durması bekleniyor"
+  },
+  "content_goal_writing_first_message": {
+    "message": "$1 ilk mesajı yazıyor"
+  },
+  "content_goal_wrote_next_message": {
+    "message": "$1 sonraki mesajı yazdı"
+  },
+  "content_loop_add_specific": {
+    "message": "özel döngü ekle"
+  },
+  "content_loop_add_specific_hint": {
+    "message": "Bu sohbetin ulaşması gereken şeyi yazın. Ardından sürekli istem gönderir — yalnızca Döngü kaydırıcısı durdurur."
+  },
+  "content_loop_continuation_paused": {
+    "message": "Döngü sürdürmesi duraklatıldı"
+  },
+  "content_loop_on_never_stops": {
+    "message": "Döngü açık — kendi kendine asla durmaz"
+  },
+  "content_loop_on_no_api_key": {
+    "message": "Döngü açık — API anahtarı yok"
+  },
+  "content_loop_save": {
+    "message": "Döngü olarak kaydet"
+  },
+  "content_meter_status": {
+    "message": "$1/$2 · otomatik sıkıştırma $3"
+  },
+  "content_mode_goal": {
+    "message": "Hedef"
+  },
+  "content_mode_goal_hint": {
+    "message": "Bu sohbetin hedefine ulaşana kadar sizin adınıza yanıt verir, sonra durur. $1 ile yazılır."
+  },
+  "content_mode_loop": {
+    "message": "Döngü"
+  },
+  "content_mode_loop_hint": {
+    "message": "Sizin adınıza sürekli yanıt verir — yalnızca bu kaydırıcı durdurur. $1 ile yazılır."
+  },
+  "content_mode_note_blocked": {
+    "message": "uygulamada engellendi"
+  },
+  "content_mode_note_goal": {
+    "message": "hedefe ulaşana kadar yanıt verir"
+  },
+  "content_mode_note_key_required": {
+    "message": "OpenRouter anahtarı gerekli"
+  },
+  "content_mode_note_loop": {
+    "message": "sürekli yanıt verir"
+  },
+  "content_mode_note_off": {
+    "message": "burada yanıt yazılmaz"
+  },
+  "content_mode_note_prime_writes": {
+    "message": "burayı ana ajan yazar"
+  },
+  "content_mode_off": {
+    "message": "Kapalı"
+  },
+  "content_mode_off_hint": {
+    "message": "Buraya kendiliğinden hiçbir şey yazılmaz."
+  },
+  "content_model_generic": {
+    "message": "model"
+  },
+  "content_off": {
+    "message": "kapalı"
+  },
+  "content_on": {
+    "message": "açık"
+  },
+  "content_opened": {
+    "message": "Açıldı"
+  },
+  "content_opening": {
+    "message": "Açılıyor…"
+  },
+  "content_paused": {
+    "message": "Duraklatıldı"
+  },
+  "content_saving": {
+    "message": "Kaydediliyor…"
+  },
+  "content_settings_aria": {
+    "message": "Chat On Steroids ayarları"
+  },
+  "content_stage_handoff_attention": {
+    "message": "Devir özeti yanıtı ilgilenmenizi gerektiriyor"
+  },
+  "content_stage_handoff_stopped": {
+    "message": "Devir özeti yanıtı durduruldu"
+  },
+  "content_stage_opening_fresh_chat": {
+    "message": "Yeni sohbet açılıyor"
+  },
+  "content_stage_saving_handoff": {
+    "message": "Devir özeti kaydediliyor"
+  },
+  "content_stage_waiting_for_chrome": {
+    "message": "Chrome bekleniyor"
+  },
+  "content_task_add": {
+    "message": "görev ekle"
+  },
+  "content_task_api_key_unavailable": {
+    "message": "Önce uygulamaya bir OpenRouter API anahtarı ekleyin."
+  },
+  "content_task_blocked_unavailable": {
+    "message": "Bu sohbet uygulamada engellenmiş. Yeniden yönlendirmek için oradan engeli kaldırın."
+  },
+  "content_task_change_hint": {
+    "message": "Bu sohbetin ulaşması gereken şeyi değiştirin veya temizleyin. $1 olarak çalışır."
+  },
+  "content_task_edit": {
+    "message": "görevi düzenle"
+  },
+  "content_task_pick_mode_first": {
+    "message": "Önce yukarıdan Hedef veya Döngü seçin — Kapalı seçeneği hiçbir şey yazmaz."
+  },
+  "content_task_worker_unavailable": {
+    "message": "Yardımcı ajan sohbeti zaten ana ajanı tarafından yönetiliyor."
+  },
+  "content_task_write_hint": {
+    "message": "Bu sohbetin ulaşması gereken şeyi yazın. $1 olarak çalışır."
+  },
+  "content_tokens_from": {
+    "message": "$1 tokendan itibaren"
+  },
+  "content_tool_calls_count": {
+    "message": "$1 araç çağrısı"
+  },
+  "content_tool_details_loading": {
+    "message": "Kayıtlı ayrıntılar yükleniyor…"
+  },
+  "content_tool_details_unavailable": {
+    "message": "Bu etkinlik sürümü için kayıtlı ayrıntılar kullanılamıyor."
+  },
+  "content_tool_more_changed_files": {
+    "message": "$1 değiştirilmiş dosya daha"
+  },
+  "content_tool_outcome_completed": {
+    "message": "tamamlandı"
+  },
+  "content_tool_outcome_failed": {
+    "message": "başarısız"
+  },
+  "content_tool_outcome_internal_error": {
+    "message": "dahili hata"
+  },
+  "content_tool_outcome_refused": {
+    "message": "reddedildi"
+  },
+  "content_tool_outcome_unknown": {
+    "message": "bilinmiyor"
+  },
+  "content_tool_preview_truncated": {
+    "message": "Önizleme $1 karakterden kısaltıldı."
+  },
+  "content_tool_ran": {
+    "message": "$1 çalıştırıldı"
+  },
+  "content_tool_recorded_arguments": {
+    "message": "Kayıtlı bağımsız değişkenler (hassas bilgiler çıkarıldı)"
+  },
+  "content_tool_recorded_result": {
+    "message": "Kayıtlı sonuç (hassas bilgiler çıkarılmış önizleme)"
+  },
+  "content_turn_auto_continue_stopped": {
+    "message": "Otomatik Devam, değişmeden sessiz kalan bir turu durdurdu."
+  },
+  "content_turn_chatgpt_interrupted": {
+    "message": "ChatGPT turu kesintiye uğramış olarak işaretledi"
+  },
+  "content_turn_outcome": {
+    "message": "Tur $1"
+  },
+  "content_turn_replaced_by_user_message": {
+    "message": "yeni bir kullanıcı mesajı tamamlanmamış turun yerini aldı"
+  },
+  "content_turn_stalled_detail": {
+    "message": "on dakikadır görünür çıktı veya ilerleme yok"
+  },
+  "content_turn_stalled_error": {
+    "message": "On dakikadır görünür ilerleme yok. Uygulama bu turun bittiğini doğrulayamadı."
+  },
+  "content_turn_started": {
+    "message": "Tur başladı"
+  },
+  "content_turn_stop_requested": {
+    "message": "Durdurma istendi; yerel sayfa artık üretim yapıldığını göstermiyor."
+  },
+  "content_unknown_error": {
+    "message": "bilinmeyen hata"
+  },
+  "content_waiting": {
+    "message": "Bekleniyor…"
+  },
+  "content_waiting_current_operation": {
+    "message": "Geçerli işlemin tamamlanması hâlâ bekleniyor"
+  },
+  "content_waiting_local_tool": {
+    "message": "Yerel bir aracın tamamlanması bekleniyor"
+  },
+  "content_waiting_local_tools": {
+    "message": "$1 yerel aracın tamamlanması bekleniyor"
+  },
+  "content_worker_generic": {
+    "message": "bir yardımcı ajan"
+  },
+  "content_worker_label": {
+    "message": "Yardımcı ajan"
+  },
+  "content_worker_retired": {
+    "message": "$1, $2 nedeniyle kullanımdan kaldırıldı. Bu sohbet artık yerel araçları kullanamaz."
+  },
+  "content_worker_still_running": {
+    "message": "Yardımcı ajan hâlâ çalışıyor: $1"
+  },
+  "content_workers_still_running": {
+    "message": "$1 yardımcı ajan hâlâ çalışıyor"
+  },
+  "content_workers_summary": {
+    "message": "$1 tamamlandı · $2 çalışıyor"
+  },
+  "content_workers_summary_failed": {
+    "message": "$1 tamamlandı · $2 çalışıyor · $3 başarısız"
+  },
+  "content_working": {
+    "message": "çalışıyor…"
+  },
+  "content_writing": {
+    "message": "Yazılıyor…"
+  },
+  "extension_action_title": {
+    "message": "Chat On Steroids"
+  },
+  "extension_description": {
+    "message": "ChatGPT'yi Chat On Steroids'a bağlar ve tarayıcı sekmelerini DOM, ekran görüntüleri ve geliştirici araçlarıyla arka planda denetler."
+  },
+  "extension_name": {
+    "message": "Chat On Steroids yardımcı eklentisi"
+  },
+  "popup_advanced": {
+    "message": "Gelişmiş"
+  },
+  "popup_attribution_agent_key": {
+    "message": "ajan anahtarı"
+  },
+  "popup_attribution_exact_request_id": {
+    "message": "kesin istek kimliği"
+  },
+  "popup_attribution_not_placed_in_chat": {
+    "message": "bir sohbete yerleştirilmedi"
+  },
+  "popup_attribution_only_chat_generating": {
+    "message": "yanıt üreten tek sohbet"
+  },
+  "popup_attribution_request_id_not_resolved": {
+    "message": "istek kimliği çözümlenemedi"
+  },
+  "popup_attribution_tool_block_on_page": {
+    "message": "sayfadaki araç bloğu"
+  },
+  "popup_call_details": {
+    "message": "$1 — bulundu $2 · uygulama alındısı $3 · sahip $4 · araç etkinliği $5"
+  },
+  "popup_chat_id": {
+    "message": "Sohbet kimliği"
+  },
+  "popup_chatgpt_tab": {
+    "message": "ChatGPT sekmesi"
+  },
+  "popup_confirmed": {
+    "message": "doğrulandı"
+  },
+  "popup_connect": {
+    "message": "Bağlan"
+  },
+  "popup_copied": {
+    "message": "kopyalandı"
+  },
+  "popup_copy": {
+    "message": "Kopyala"
+  },
+  "popup_copy_chat_id": {
+    "message": "Sohbet kimliğini kopyala"
+  },
+  "popup_copy_current_request_id": {
+    "message": "Geçerli istek kimliğini kopyala"
+  },
+  "popup_copy_failed": {
+    "message": "kopyalanamadı"
+  },
+  "popup_count_held": {
+    "message": "$1 bekletiliyor"
+  },
+  "popup_count_held_in_page": {
+    "message": "$1 sayfada bekletiliyor"
+  },
+  "popup_count_queued": {
+    "message": "$1 sırada"
+  },
+  "popup_current_request": {
+    "message": "Mevcut istek"
+  },
+  "popup_detail_app": {
+    "message": "uygulama"
+  },
+  "popup_detail_app_session": {
+    "message": "uygulama oturumu"
+  },
+  "popup_detail_app_value": {
+    "message": "v$1 · bağlantı noktası $2"
+  },
+  "popup_detail_browser_queue_value": {
+    "message": "$1 bekletiliyor · toplam $2"
+  },
+  "popup_detail_chat_id": {
+    "message": "sohbet kimliği"
+  },
+  "popup_detail_delivered": {
+    "message": "iletildi"
+  },
+  "popup_detail_extension": {
+    "message": "uzantı"
+  },
+  "popup_detail_extension_value": {
+    "message": "v$1 · protokol $2"
+  },
+  "popup_detail_in_this_browser": {
+    "message": "bu tarayıcıda"
+  },
+  "popup_detail_last_delivery": {
+    "message": "son iletim"
+  },
+  "popup_detail_last_delivery_value": {
+    "message": "$1 · $2 · $3 önce"
+  },
+  "popup_detail_observed": {
+    "message": "gözlemlendi"
+  },
+  "popup_detail_observed_value": {
+    "message": "$1 olay · $2 çağrı"
+  },
+  "popup_detail_ownership": {
+    "message": "sahiplik"
+  },
+  "popup_detail_page_sends": {
+    "message": "sayfa gönderimleri"
+  },
+  "popup_detail_page_sends_value": {
+    "message": "$1 · $2 başarısız"
+  },
+  "popup_detail_recorder": {
+    "message": "kaydedici"
+  },
+  "popup_detail_recorder_value": {
+    "message": "fiber v$1 · çalışma $2"
+  },
+  "popup_detail_tab": {
+    "message": "sekme"
+  },
+  "popup_detail_tab_value": {
+    "message": "$1 · dönem $2"
+  },
+  "popup_detail_turn": {
+    "message": "tur"
+  },
+  "popup_detail_turn_live": {
+    "message": "$1 · canlı"
+  },
+  "popup_no": {
+    "message": "hayır"
+  },
+  "popup_no_record": {
+    "message": "kayıt yok"
+  },
+  "popup_overwrite_chatgpt": {
+    "message": "ChatGPT görünümünü değiştir"
+  },
+  "popup_owner_confirmed": {
+    "message": "Sahibi doğrulandı"
+  },
+  "popup_pending": {
+    "message": "beklemede"
+  },
+  "popup_pipeline_call_fallback_many": {
+    "message": "Uygulama $1 çağrıyı istek kimliğiyle eşleştiremedi — bunun yerine $2 kullandı."
+  },
+  "popup_pipeline_call_fallback_one": {
+    "message": "Uygulama çağrıyı istek kimliğiyle eşleştiremedi — bunun yerine $1 kullandı."
+  },
+  "popup_pipeline_delivery_blocked": {
+    "message": "Uygulama bağlanıp protokol uyumluluğu doğrulanana kadar iletim engellenir."
+  },
+  "popup_pipeline_delivery_rejected": {
+    "message": "Uygulama son iletimi reddetti ($1)."
+  },
+  "popup_pipeline_extension_blocked": {
+    "message": "Uzantı bu sekmenin gözlemlerini kabul etmiyor ($1). ChatGPT sekmesini yeniden yükleyin."
+  },
+  "popup_pipeline_id_found_waiting_receipt": {
+    "message": "Son turda kimlik bulundu. Uygulamanın alındı onayı bekleniyor."
+  },
+  "popup_pipeline_no_recorder": {
+    "message": "Bu sekmede kaydedici yok. Sayfayı yeniden yükleyin."
+  },
+  "popup_pipeline_owner_confirmed_no_activity": {
+    "message": "İsteğin sahibi doğrulandı. Henüz eşleşen araç etkinliği kaydedilmedi."
+  },
+  "popup_pipeline_queued_retrying": {
+    "message": "Burada sıraya alındı. Uygulamaya iletim yeniden deneniyor."
+  },
+  "popup_pipeline_received_waiting_owner": {
+    "message": "Uygulama kimliği aldı. Sahip doğrulaması bekleniyor."
+  },
+  "popup_pipeline_request_id_matched_many": {
+    "message": "$1 istek kimliği kaydedilmiş araç etkinliğiyle eşleştirildi."
+  },
+  "popup_pipeline_request_id_matched_one": {
+    "message": "1 istek kimliği kayıtlı araç etkinliğiyle eşleşti."
+  },
+  "popup_pipeline_waiting_first_message": {
+    "message": "İlk mesaj bekleniyor."
+  },
+  "popup_pipeline_waiting_latest_request_id": {
+    "message": "Sohbet kaydedildi. Son turdan bir istek kimliği bekleniyor."
+  },
+  "popup_pipeline_waiting_session_receipt": {
+    "message": "Uygulamaya erişiliyor. Bu sohbetin oturum alındı onayı bekleniyor."
+  },
+  "popup_reaching_app": {
+    "message": "Uygulamaya erişiliyor"
+  },
+  "popup_recording_this_chat": {
+    "message": "Bu sohbet kaydediliyor"
+  },
+  "popup_request_id": {
+    "message": "istek kimliği"
+  },
+  "popup_request_id_found": {
+    "message": "İstek kimliği bulundu"
+  },
+  "popup_section_augment_chatgpt": {
+    "message": "ChatGPT görünümünü genişlet"
+  },
+  "popup_section_session_capture": {
+    "message": "Oturum kaydı"
+  },
+  "popup_secure_storage_unavailable": {
+    "message": "Güvenli kimlik bilgisi depolama kullanılamıyor. Kurulum talimatları için Chat On Steroids'u açın."
+  },
+  "popup_sent_to_app": {
+    "message": "Uygulamaya gönderildi"
+  },
+  "popup_state_app_not_reachable": {
+    "message": "Uygulamaya ulaşılamıyor"
+  },
+  "popup_state_app_reachable_port": {
+    "message": "Uygulamaya erişilebilir · Bağlantı noktası $1"
+  },
+  "popup_state_disconnected": {
+    "message": "Bağlantı kesildi"
+  },
+  "popup_state_looking_for_app": {
+    "message": "Uygulama aranıyor"
+  },
+  "popup_state_port_connecting": {
+    "message": "Bağlantı noktası $1 · bağlanıyor"
+  },
+  "popup_state_version_mismatch": {
+    "message": "Sürüm uyuşmazlığı"
+  },
+  "popup_status_answering": {
+    "message": "yanıtlıyor"
+  },
+  "popup_status_blocked": {
+    "message": "engellendi"
+  },
+  "popup_status_bound": {
+    "message": "bağlı"
+  },
+  "popup_status_failed": {
+    "message": "başarısız"
+  },
+  "popup_status_id_confirmed": {
+    "message": "kimlik doğrulandı"
+  },
+  "popup_status_idle": {
+    "message": "boşta"
+  },
+  "popup_status_new_chat": {
+    "message": "yeni sohbet"
+  },
+  "popup_status_none_open": {
+    "message": "açık olan yok"
+  },
+  "popup_status_none_yet": {
+    "message": "henüz yok"
+  },
+  "popup_status_not_attached": {
+    "message": "bağlı değil"
+  },
+  "popup_status_ok": {
+    "message": "tamam"
+  },
+  "popup_status_reload": {
+    "message": "yeniden yükle"
+  },
+  "popup_status_retired": {
+    "message": "sonlandırıldı"
+  },
+  "popup_status_tool_matched": {
+    "message": "araç eşleştirildi"
+  },
+  "popup_status_unbound": {
+    "message": "bağlı değil"
+  },
+  "popup_status_waiting": {
+    "message": "bekliyor"
+  },
+  "popup_time_hours_short": {
+    "message": "$1 sa"
+  },
+  "popup_time_minutes_short": {
+    "message": "$1 dk"
+  },
+  "popup_time_seconds_short": {
+    "message": "$1 sn"
+  },
+  "popup_timestamps": {
+    "message": "Zaman damgaları"
+  },
+  "popup_try_again": {
+    "message": "Yeniden dene"
+  },
+  "popup_version_mismatch_help": {
+    "message": "Uygulama v$1 (protokol $2); yardımcı eklenti v$3 (protokol $4). Tarayıcınızın Uzantılar sayfasını açın, Geliştirici modunu etkinleştirin ve bu yardımcı eklentiyi Güncelle / Yeniden yükle ile yenileyin. Uyumsuzluk sürerse Chat On Steroids'ta Uzantı klasörünü aç seçeneğini kullanın ve o klasörü yükleyin. Etkin çalışmaları bittiğinde ChatGPT sekmelerini yeniden yükleyin."
+  },
+  "popup_yes": {
+    "message": "evet"
+  }
+}

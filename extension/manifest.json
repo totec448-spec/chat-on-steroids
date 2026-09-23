@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Chat On Steroids companion",
+  "name": "__MSG_extension_name__",
   "version": "2.1.14",
-  "description": "Connects ChatGPT to Chat On Steroids and controls browser tabs in the background with DOM, screenshots and developer tools.",
+  "description": "__MSG_extension_description__",
+  "default_locale": "en",
   "minimum_chrome_version": "125",
   "permissions": [
     "storage",
@@ -33,6 +34,7 @@
         "https://chat.openai.com/*"
       ],
       "js": [
+        "i18n.js",
         "chatgpt-dom.js",
         "content.js"
       ],
@@ -72,7 +74,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Chat On Steroids",
+    "default_title": "__MSG_extension_action_title__",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",

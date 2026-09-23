@@ -11,6 +11,7 @@ function workflow(options: { unchanged?: boolean; deny?: boolean; navigateDuring
   let refreshed = false;
   const click = vi.fn(() => { refreshed = true; });
   const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1,
+    t: (_key: string, fallback: string) => fallback,
     location: { pathname: '/', href: `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic` },
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
       pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', refresh: options.refreshAvailable === false ? null : { click }, tools: options.unchanged || refreshed ? tools : [{ ...tools[0], description: 'Old description.' }] }) }

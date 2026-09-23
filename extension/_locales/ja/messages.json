@@ -1,0 +1,1037 @@
+{
+  "content_app_did_not_answer": {
+    "message": "アプリが応答しませんでした。"
+  },
+  "content_app_did_not_answer_lower": {
+    "message": "アプリが応答しませんでした"
+  },
+  "content_app_not_running": {
+    "message": "この PC で Chat On Steroids が実行されていません。"
+  },
+  "content_auto_compaction": {
+    "message": "自動圧縮"
+  },
+  "content_auto_compaction_blocked_off": {
+    "message": "ここでは無効：このチャットはアプリでブロックされています"
+  },
+  "content_auto_compaction_manual": {
+    "message": "このチャットを手動で圧縮"
+  },
+  "content_auto_compaction_off": {
+    "message": "自動圧縮は無効です"
+  },
+  "content_auto_compaction_on": {
+    "message": "自動圧縮オン$1"
+  },
+  "content_auto_compaction_threshold_app": {
+    "message": "しきい値はアプリで設定"
+  },
+  "content_auto_compaction_worker_off": {
+    "message": "ここでは無効：ワーカーチャットは自動圧縮されません"
+  },
+  "content_bootstrap_composer_changed_authorizing": {
+    "message": "初期メッセージの承認中に入力欄が変わりました。下書きは保持され、何も送信されていません"
+  },
+  "content_bootstrap_composer_changed_before_send": {
+    "message": "初期メッセージを送信する前に入力欄が変わりました。下書きは保持されました"
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "初期メッセージの挿入中に ChatGPT が入力欄を置き換えました"
+  },
+  "content_bootstrap_composer_unavailable": {
+    "message": "ChatGPT が初期メッセージ用の入力欄を利用可能にしませんでした"
+  },
+  "content_bootstrap_fresh_chat_changed": {
+    "message": "指定した新しいチャットが初期メッセージ送信前に変わりました。何も送信されていません"
+  },
+  "content_bootstrap_handoff": {
+    "message": "このアプリが引き継いだ要約です。あなたが入力したものではありません"
+  },
+  "content_bootstrap_insert_refused": {
+    "message": "ChatGPT が挿入したテキストを受け付けませんでした$1"
+  },
+  "content_bootstrap_missing_target": {
+    "message": "既存のチャットに渡されましたが、対象のチャットが指定されていません"
+  },
+  "content_bootstrap_model_unavailable": {
+    "message": "指定したモデルまたは推論設定を利用できないか、ChatGPT で確認できませんでした"
+  },
+  "content_bootstrap_project_not_authorized": {
+    "message": "コマンドでプロジェクトへの移動が許可されませんでした。何も送信されていません"
+  },
+  "content_bootstrap_project_open_failed": {
+    "message": "ChatGPT が元のプロジェクトを標準リンクから開けませんでした。何も送信されていません"
+  },
+  "content_bootstrap_project_source_changed": {
+    "message": "プロジェクトの項目が元の会話と一致しなくなりました。何も送信されていません"
+  },
+  "content_bootstrap_resume_marker_invalid": {
+    "message": "再開用の初期メッセージに有効な継続マーカーがありませんでした"
+  },
+  "content_bootstrap_send_not_accepted": {
+    "message": "ChatGPT が初期メッセージの送信を受け付けませんでした"
+  },
+  "content_bootstrap_target_changed": {
+    "message": "このメッセージの送信先チャットが送信前に変わりました。何も送信されていません"
+  },
+  "content_bootstrap_worker": {
+    "message": "これは $1 です。アプリがワーカーに与えた指示で、あなたが入力したものではありません"
+  },
+  "content_bootstrap_wrong_conversation": {
+    "message": "開いたページには別の会話が表示されていました"
+  },
+  "content_browser_disconnected": {
+    "message": "Chat On Steroids のブラウザー接続が切れています。"
+  },
+  "content_cancel": {
+    "message": "キャンセル"
+  },
+  "content_chat_blocked": {
+    "message": "チャットはブロックされています"
+  },
+  "content_chat_blocked_tip": {
+    "message": "このチャットは Chat On Steroids アプリでブロックされています。ツール呼び出しは拒否され、ゴール、ループ、自動圧縮も無効です。解除するにはアプリのチャットタブを開き、セッション一覧でこのチャットにカーソルを合わせてブロック解除アイコンを押してください。"
+  },
+  "content_chat_still_opening": {
+    "message": "このチャットはまだ開いています。もう一度お試しください"
+  },
+  "content_chatgpt_message_box_not_ready": {
+    "message": "ChatGPT の入力欄がまだ使えません（$1）。ページの読み込みを待ってから再試行してください。"
+  },
+  "content_chatgpt_tool": {
+    "message": "ChatGPT ツール"
+  },
+  "content_clear": {
+    "message": "クリア"
+  },
+  "content_compact": {
+    "message": "圧縮"
+  },
+  "content_compact_already_underway": {
+    "message": "このチャットではすでに圧縮処理が進行中です。完了を待つか、キャンセルしてください。"
+  },
+  "content_compact_app_opening_fresh": {
+    "message": "アプリが新しいチャットを開こうとしています。"
+  },
+  "content_compact_asking": {
+    "message": "問い合わせ中…"
+  },
+  "content_compact_attempt_not_repeated": {
+    "message": "$1。永続的な処理を二重送信することはありません。"
+  },
+  "content_compact_attempt_owned": {
+    "message": "永続的な引き継ぎ処理はすでに別の処理が担当しています。ChatGPT で印を付けたメッセージと整合を取っています。"
+  },
+  "content_compact_blocked_unavailable_hint": {
+    "message": "ブロックされたチャットは圧縮も再開もされません。置き換え先のチャットでツールが使えなくなるためです。先にアプリでブロックを解除してください。"
+  },
+  "content_compact_cancel": {
+    "message": "圧縮をキャンセル"
+  },
+  "content_compact_cancel_aria": {
+    "message": "「圧縮して再開」をキャンセル"
+  },
+  "content_compact_cancel_failed": {
+    "message": "圧縮をキャンセルできませんでした。"
+  },
+  "content_compact_chat_changed_before_start": {
+    "message": "圧縮を開始する前にこのチャットが変わりました。"
+  },
+  "content_compact_chat_changed_preparing": {
+    "message": "引き継ぎの準備中にチャットが変わりました。何も送信されていません。"
+  },
+  "content_compact_chat_changed_stopping": {
+    "message": "圧縮でターンを停止している間にこのチャットが変わりました。"
+  },
+  "content_compact_chat_changed_waiting_results": {
+    "message": "圧縮でツール結果を待っている間にこのチャットが変わりました。"
+  },
+  "content_compact_chat_changed_waiting_tools": {
+    "message": "圧縮でローカルツールを待っている間にこのチャットが変わりました。"
+  },
+  "content_compact_chatgpt_writing": {
+    "message": "ChatGPT が引き継ぎを書いています"
+  },
+  "content_compact_existing_draft": {
+    "message": "ChatGPT に未送信の下書きがあります。引き継ぎを要求する前に入力欄を空にしてください。"
+  },
+  "content_compact_failed": {
+    "message": "圧縮に失敗しました"
+  },
+  "content_compact_failed_request_unconfirmed": {
+    "message": "$1 アプリでは、この失敗したリクエストが終了したことをまだ確認できていません。"
+  },
+  "content_compact_fresh_open": {
+    "message": "新しいチャットが開きました"
+  },
+  "content_compact_handoff_already_submitted": {
+    "message": "引き継ぎ指示はすでに送信されています。そのまま完了を待つか、キャンセルしてください。"
+  },
+  "content_compact_handoff_incomplete_detail": {
+    "message": "引き継ぎの応答が完了しませんでした。このチャットに戻るには圧縮をキャンセルしてください。"
+  },
+  "content_compact_handoff_problem": {
+    "message": "引き継ぎの準備中に ChatGPT が問題を報告しました。"
+  },
+  "content_compact_handoff_request_failed": {
+    "message": "ChatGPT に引き継ぎを依頼できませんでした：$1"
+  },
+  "content_compact_handoff_stopped_detail": {
+    "message": "引き継ぎの応答が停止しました。このチャットに戻るには圧縮をキャンセルしてください。"
+  },
+  "content_compact_insert_failed": {
+    "message": "ブラウザーが引き継ぎリクエストを挿入できませんでした（$1）。入力欄が利用できることを確認して再試行してください。"
+  },
+  "content_compact_message_box_changed": {
+    "message": "引き継ぎ指示を送信する前に入力欄が変わりました。下書きは保持され、圧縮は行われませんでした。"
+  },
+  "content_compact_message_box_changed_preserved": {
+    "message": "引き継ぎを送信する前に入力欄が変わりました。下書きは保持されました。"
+  },
+  "content_compact_missing_handoff_instruction": {
+    "message": "アプリが引き継ぎ指示を送信しませんでした。"
+  },
+  "content_compact_missing_token": {
+    "message": "アプリから圧縮トークンが送られなかったため、処理を追跡できませんでした。"
+  },
+  "content_compact_nothing_yet": {
+    "message": "まだ圧縮する内容がありません。メッセージを送信するか、ゴールを設定して続きのメッセージを作成してください。"
+  },
+  "content_compact_opening_fresh": {
+    "message": "引き継ぎを保存しました。新しいチャットを開いています"
+  },
+  "content_compact_policy_unverified": {
+    "message": "このチャットを圧縮してよいか確認できませんでした。"
+  },
+  "content_compact_results_unconfirmed": {
+    "message": "ChatGPT が最新のツール結果を受け取ったことを確認できていません。圧縮は行われませんでした。"
+  },
+  "content_compact_resume_cancelled": {
+    "message": "再開をキャンセルしました"
+  },
+  "content_compact_resume_now": {
+    "message": "今すぐ圧縮して再開"
+  },
+  "content_compact_send_ambiguous": {
+    "message": "送信結果を判定できませんでした。同じ内容を二重送信することはありません。ChatGPT が受け付けていない場合は明示的にキャンセルしてください。"
+  },
+  "content_compact_send_not_ready": {
+    "message": "送信ボタンまたは入力欄の準備ができていなかったため、引き継ぎリクエストは送信されませんでした。ページの準備ができてから再試行してください。"
+  },
+  "content_compact_send_permission_unconfirmed": {
+    "message": "ここでは何も送信されていません。引き継ぎ送信の許可を確認できませんでした。既存のリクエストを二重送信することはありません。"
+  },
+  "content_compact_send_state_unverified": {
+    "message": "引き継ぎの送信状態を確認できませんでした。何も停止していません。"
+  },
+  "content_compact_settling": {
+    "message": "安定待ち…"
+  },
+  "content_compact_source_not_loaded": {
+    "message": "元の質問がまだ読み込まれていません。圧縮は行わず、元の会話を待っています。"
+  },
+  "content_compact_starting": {
+    "message": "起動中…"
+  },
+  "content_compact_step_opening": {
+    "message": "新しいチャットを開いています"
+  },
+  "content_compact_step_preparing": {
+    "message": "準備中"
+  },
+  "content_compact_step_saving": {
+    "message": "保存中"
+  },
+  "content_compact_step_writing": {
+    "message": "引き継ぎを作成中"
+  },
+  "content_compact_stop_failed": {
+    "message": "ChatGPT が現在のターンを停止しませんでした。圧縮は行われませんでした。"
+  },
+  "content_compact_stopping": {
+    "message": "停止中…"
+  },
+  "content_compact_ticket_store_failed": {
+    "message": "圧縮チケットを保存できませんでした。"
+  },
+  "content_compact_tools_still_running": {
+    "message": "待機時間を過ぎてもローカルツールが実行中でした。圧縮は行われませんでした。"
+  },
+  "content_compact_tools_stop_unverified": {
+    "message": "ローカルツールが停止したことを確認できませんでした。圧縮は行われませんでした。"
+  },
+  "content_compact_unavailable": {
+    "message": "「圧縮して再開」は利用できません"
+  },
+  "content_compact_waiting_response": {
+    "message": "引き継ぎの応答を待っています"
+  },
+  "content_compact_waiting_store": {
+    "message": "要約は完成しました。アプリへの保存を待っています。"
+  },
+  "content_compact_worker_unavailable_hint": {
+    "message": "ワーカーチャットは現在の会話のまま維持され、手動で圧縮したり再開したりすることはありません。"
+  },
+  "content_connector_identity_ambiguous": {
+    "message": "インストール済みコネクターの識別情報を取得できないか、特定できません"
+  },
+  "content_connector_refresh_claim_unconfirmed": {
+    "message": "コネクターの更新要求またはページの所有状態を確認できませんでした"
+  },
+  "content_connector_refresh_schema_unchanged": {
+    "message": "更新を要求しましたが、一致するスキーマの変更を確認できませんでした"
+  },
+  "content_connector_refresh_unverified": {
+    "message": "コネクターの更新を確認できませんでした"
+  },
+  "content_connector_settings_unverified": {
+    "message": "コネクターの正確な設定を確認できませんでした"
+  },
+  "content_delivery_attachment_transfer_failed": {
+    "message": "添付ファイルの転送に失敗しました。メッセージは送信されていません。"
+  },
+  "content_delivery_attachment_transfer_incomplete": {
+    "message": "添付ファイルの転送が完了しませんでした。"
+  },
+  "content_delivery_attachment_upload_unconfirmed": {
+    "message": "添付ファイルのアップロードを確認できませんでした。再試行する前に、ChatGPT の未送信の下書きとファイルエラーを確認してください。"
+  },
+  "content_delivery_chat_changed": {
+    "message": "直接送信する前にチャットが変わりました。"
+  },
+  "content_delivery_chat_changed_or_busy": {
+    "message": "チャットが変わったか、停止しませんでした。メッセージは送信されていません。"
+  },
+  "content_delivery_composer_changed": {
+    "message": "送信前に ChatGPT の入力欄が変わりました"
+  },
+  "content_delivery_composer_stuck": {
+    "message": "ChatGPT は回答を終えましたが、入力欄がまだ「停止」のままです。キュー内のメッセージを送る前に、このページを復旧しています。"
+  },
+  "content_delivery_draft_preserved": {
+    "message": "入力欄が変わりました。下書きは保持されています"
+  },
+  "content_delivery_editor_not_writable": {
+    "message": "送信前に ChatGPT のエディターが入力可能になりませんでした。"
+  },
+  "content_delivery_existing_draft": {
+    "message": "ChatGPT に未送信の下書きがあります。再試行する前に Chrome でその下書きを送信するか削除してください。"
+  },
+  "content_delivery_model_unconfirmed": {
+    "message": "指定したモデルまたは推論強度を確認できませんでした"
+  },
+  "content_delivery_stop_failed": {
+    "message": "現在の回答を停止できませんでした。"
+  },
+  "content_delivery_temporary_chat_unconfirmed": {
+    "message": "一時チャットを確認できませんでした。補助チャットのタブを開き、一時チャットの案内を完了してください。"
+  },
+  "content_delivery_text_not_accepted": {
+    "message": "ChatGPT がテキストを受け付けませんでした$1"
+  },
+  "content_delivery_turn_changed": {
+    "message": "直接送信する前にターンが変わりました。"
+  },
+  "content_dismiss": {
+    "message": "閉じる"
+  },
+  "content_empty": {
+    "message": "（空）"
+  },
+  "content_error_compaction_running": {
+    "message": "現在、別のチャットを圧縮しています。"
+  },
+  "content_error_session_not_recorded": {
+    "message": "このチャットにはまだローカルの記録済みセッションがありません。"
+  },
+  "content_error_turn_still_generating": {
+    "message": "先にこの ChatGPT のターンが完了するまで待ってください。"
+  },
+  "content_failed": {
+    "message": "失敗"
+  },
+  "content_goal_add_specific": {
+    "message": "具体的なゴールを追加"
+  },
+  "content_goal_add_specific_hint": {
+    "message": "このチャットで達成する内容を書いてください。達成するまで次の指示を送り、達成したら停止します。"
+  },
+  "content_goal_add_to_start": {
+    "message": "このチャットを開始するにはゴールまたはループを追加してください"
+  },
+  "content_goal_answer_never_settled": {
+    "message": "回答の変化が止まらなかったため、何も書き込まれませんでした"
+  },
+  "content_goal_answering": {
+    "message": "$1 が回答中です"
+  },
+  "content_goal_backend_chatgpt_helper": {
+    "message": "ChatGPT 補助チャット"
+  },
+  "content_goal_backend_custom_endpoint": {
+    "message": "カスタムエンドポイント"
+  },
+  "content_goal_backend_no_answer": {
+    "message": "$1 が応答しませんでした"
+  },
+  "content_goal_backend_offline_templates": {
+    "message": "オフラインテンプレート"
+  },
+  "content_goal_backend_offline_templates_title": {
+    "message": "オフラインテンプレート"
+  },
+  "content_goal_checking_again": {
+    "message": "$1 後に再確認"
+  },
+  "content_goal_checking_finished": {
+    "message": "回答が完了したか確認中"
+  },
+  "content_goal_delivery": {
+    "message": "$1：$2"
+  },
+  "content_goal_delivery_after_turn_finish": {
+    "message": "このターンの後＋終了通知時"
+  },
+  "content_goal_delivery_only_finish": {
+    "message": "終了通知時のみ"
+  },
+  "content_goal_loop_off": {
+    "message": "ゴールとループはオフ"
+  },
+  "content_goal_loop_stopped": {
+    "message": "ゴールのループが停止しました"
+  },
+  "content_goal_message_box_in_use": {
+    "message": "入力欄が使用中だったため、何も送信されませんでした"
+  },
+  "content_goal_mode_aria": {
+    "message": "ゴールモード"
+  },
+  "content_goal_new_chat_draft_refused": {
+    "message": "ChatGPT が新規チャットの下書きの置き換えを受け付けませんでした"
+  },
+  "content_goal_no_api_key_unavailable": {
+    "message": "API キーがありません — ゴールとループは利用できません"
+  },
+  "content_goal_nothing_sent": {
+    "message": "何も送信されませんでした"
+  },
+  "content_goal_off_blocked": {
+    "message": "ゴールはオフ — このチャットはアプリでブロックされています"
+  },
+  "content_goal_off_prime_writes": {
+    "message": "ゴールはオフ — このチャットはメインエージェントが書き込みます"
+  },
+  "content_goal_on": {
+    "message": "ゴールはオン"
+  },
+  "content_goal_on_chasing": {
+    "message": "ゴールはオン — このチャットのゴールを追跡中"
+  },
+  "content_goal_on_no_api_key": {
+    "message": "ゴールはオン — API キーがありません"
+  },
+  "content_goal_opening_empty": {
+    "message": "モデルが開始用のメッセージを何も書きませんでした"
+  },
+  "content_goal_opening_on_goal": {
+    "message": "ゴールに沿ってこのチャットを開始中"
+  },
+  "content_goal_placeholder": {
+    "message": "このチャットで何を達成しますか？"
+  },
+  "content_goal_reached": {
+    "message": "目標を達成しました"
+  },
+  "content_goal_retrying": {
+    "message": "$1 秒後にゴールを再試行"
+  },
+  "content_goal_save": {
+    "message": "ゴールとして保存"
+  },
+  "content_goal_save_failed": {
+    "message": "ゴールをこのチャットに保存できませんでした"
+  },
+  "content_goal_send_failed": {
+    "message": "ChatGPT がメッセージを送信しませんでした"
+  },
+  "content_goal_sending_answer_to": {
+    "message": "回答を $1 に送信中"
+  },
+  "content_goal_sending_to_chatgpt": {
+    "message": "ChatGPT に送信中"
+  },
+  "content_goal_status_dismiss": {
+    "message": "ゴールの状態を閉じる"
+  },
+  "content_goal_step_reading": {
+    "message": "チャットを読み取り中"
+  },
+  "content_goal_step_sending": {
+    "message": "送信中"
+  },
+  "content_goal_step_settling": {
+    "message": "回答の終了を確認中"
+  },
+  "content_goal_step_writing": {
+    "message": "返信を作成中"
+  },
+  "content_goal_wait_recovery_activity": {
+    "message": "復旧後のアクティビティ待ち"
+  },
+  "content_goal_wait_recovery_reload": {
+    "message": "復旧用の再読み込み前に待機中"
+  },
+  "content_goal_wait_resumed": {
+    "message": "ChatGPT が作業を再開しました · 再試行前に待機中"
+  },
+  "content_goal_wait_running_tools": {
+    "message": "実行中のツールを待っています"
+  },
+  "content_goal_wait_tool_inactivity": {
+    "message": "ツールの活動が止まるのを待っています"
+  },
+  "content_goal_writing_first_message": {
+    "message": "$1 が最初のメッセージを作成中"
+  },
+  "content_goal_wrote_next_message": {
+    "message": "$1 が次のメッセージを作成しました"
+  },
+  "content_loop_add_specific": {
+    "message": "具体的なループを追加"
+  },
+  "content_loop_add_specific_hint": {
+    "message": "このチャットで達成する内容を書いてください。その後は継続的に指示を送り、ループのスライダーをオフにするまで止まりません。"
+  },
+  "content_loop_continuation_paused": {
+    "message": "ループの継続を一時停止しました"
+  },
+  "content_loop_on_never_stops": {
+    "message": "ループはオン — 自動では停止しません"
+  },
+  "content_loop_on_no_api_key": {
+    "message": "ループはオン — API キーがありません"
+  },
+  "content_loop_save": {
+    "message": "ループとして保存"
+  },
+  "content_meter_status": {
+    "message": "$1/$2 · 自動圧縮 $3"
+  },
+  "content_mode_goal": {
+    "message": "ゴール"
+  },
+  "content_mode_goal_hint": {
+    "message": "このチャットのゴールを達成するまであなたに代わって返信し、達成すると停止します。$1 で作成します。"
+  },
+  "content_mode_loop": {
+    "message": "ループ"
+  },
+  "content_mode_loop_hint": {
+    "message": "あなたに代わって継続的に返信します。このスライダーをオフにするまで停止しません。$1 で作成します。"
+  },
+  "content_mode_note_blocked": {
+    "message": "アプリでブロックされています"
+  },
+  "content_mode_note_goal": {
+    "message": "ゴール達成まで返信"
+  },
+  "content_mode_note_key_required": {
+    "message": "OpenRouter キーが必要です"
+  },
+  "content_mode_note_loop": {
+    "message": "継続的に返信"
+  },
+  "content_mode_note_off": {
+    "message": "ここには返信を書き込みません"
+  },
+  "content_mode_note_prime_writes": {
+    "message": "ここはメインエージェントが書き込みます"
+  },
+  "content_mode_off": {
+    "message": "オフ"
+  },
+  "content_mode_off_hint": {
+    "message": "ここには自動で何も書き込まれません。"
+  },
+  "content_model_generic": {
+    "message": "モデル"
+  },
+  "content_off": {
+    "message": "オフ"
+  },
+  "content_on": {
+    "message": "オン"
+  },
+  "content_opened": {
+    "message": "開きました"
+  },
+  "content_opening": {
+    "message": "開いています…"
+  },
+  "content_paused": {
+    "message": "一時停止"
+  },
+  "content_saving": {
+    "message": "保存中…"
+  },
+  "content_settings_aria": {
+    "message": "Chat On Steroids の設定"
+  },
+  "content_stage_handoff_attention": {
+    "message": "引き継ぎの応答を確認する必要があります"
+  },
+  "content_stage_handoff_stopped": {
+    "message": "引き継ぎの応答が停止しました"
+  },
+  "content_stage_opening_fresh_chat": {
+    "message": "新しいチャットを開いています"
+  },
+  "content_stage_saving_handoff": {
+    "message": "引き継ぎを保存中"
+  },
+  "content_stage_waiting_for_chrome": {
+    "message": "Chrome を待っています"
+  },
+  "content_task_add": {
+    "message": "タスクを追加"
+  },
+  "content_task_api_key_unavailable": {
+    "message": "先にアプリで OpenRouter API キーを追加してください。"
+  },
+  "content_task_blocked_unavailable": {
+    "message": "このチャットはアプリでブロックされています。再び操作するにはアプリでブロックを解除してください。"
+  },
+  "content_task_change_hint": {
+    "message": "このチャットで達成する内容を変更または削除してください。$1 として動作します。"
+  },
+  "content_task_edit": {
+    "message": "タスクを編集"
+  },
+  "content_task_pick_mode_first": {
+    "message": "先に上でゴールまたはループを選択してください。「オフ」では何も書き込みません。"
+  },
+  "content_task_worker_unavailable": {
+    "message": "ワーカーチャットはすでにメインエージェントが管理しています。"
+  },
+  "content_task_write_hint": {
+    "message": "このチャットで達成する内容を書いてください。$1 として動作します。"
+  },
+  "content_tokens_from": {
+    "message": "$1 トークンから"
+  },
+  "content_tool_calls_count": {
+    "message": "ツール呼び出し $1 件"
+  },
+  "content_tool_details_loading": {
+    "message": "記録済みの詳細を読み込み中…"
+  },
+  "content_tool_details_unavailable": {
+    "message": "このアクティビティのリビジョンでは記録済みの詳細を利用できません。"
+  },
+  "content_tool_more_changed_files": {
+    "message": "変更されたファイルがあと $1 件"
+  },
+  "content_tool_outcome_completed": {
+    "message": "完了"
+  },
+  "content_tool_outcome_failed": {
+    "message": "失敗"
+  },
+  "content_tool_outcome_internal_error": {
+    "message": "内部エラー"
+  },
+  "content_tool_outcome_refused": {
+    "message": "拒否"
+  },
+  "content_tool_outcome_unknown": {
+    "message": "不明"
+  },
+  "content_tool_preview_truncated": {
+    "message": "プレビューは $1 文字から省略されています。"
+  },
+  "content_tool_ran": {
+    "message": "$1 を実行しました"
+  },
+  "content_tool_recorded_arguments": {
+    "message": "記録済みの引数（機密情報を除去）"
+  },
+  "content_tool_recorded_result": {
+    "message": "記録済みの結果（機密情報を除去したプレビュー）"
+  },
+  "content_turn_auto_continue_stopped": {
+    "message": "自動続行が、変化のない無応答のターンを停止しました。"
+  },
+  "content_turn_chatgpt_interrupted": {
+    "message": "ChatGPT がこのターンを中断済みとして扱いました"
+  },
+  "content_turn_outcome": {
+    "message": "ターン $1"
+  },
+  "content_turn_replaced_by_user_message": {
+    "message": "新しいユーザーメッセージによって未完了のターンが置き換えられました"
+  },
+  "content_turn_stalled_detail": {
+    "message": "10 分間、表示出力も進捗もありません"
+  },
+  "content_turn_stalled_error": {
+    "message": "10分間、確認できる進捗がありません。このターンが終了したか、アプリは確認できませんでした。"
+  },
+  "content_turn_started": {
+    "message": "ターン開始"
+  },
+  "content_turn_stop_requested": {
+    "message": "停止を要求しました。ネイティブページでは生成中の表示がなくなりました。"
+  },
+  "content_unknown_error": {
+    "message": "不明なエラー"
+  },
+  "content_waiting": {
+    "message": "待機中…"
+  },
+  "content_waiting_current_operation": {
+    "message": "現在の処理が完了するのを待っています"
+  },
+  "content_waiting_local_tool": {
+    "message": "ローカルツールの完了を待っています"
+  },
+  "content_waiting_local_tools": {
+    "message": "$1 個のローカルツールの完了を待っています"
+  },
+  "content_worker_generic": {
+    "message": "ワーカー"
+  },
+  "content_worker_label": {
+    "message": "ワーカー"
+  },
+  "content_worker_retired": {
+    "message": "$1 は $2 のため終了しました。このチャットではローカルツールを使用できません。"
+  },
+  "content_worker_still_running": {
+    "message": "ワーカーはまだ実行中です：$1"
+  },
+  "content_workers_still_running": {
+    "message": "$1 個のワーカーがまだ実行中です"
+  },
+  "content_workers_summary": {
+    "message": "$1 完了 · $2 実行中"
+  },
+  "content_workers_summary_failed": {
+    "message": "$1 完了 · $2 実行中 · $3 失敗"
+  },
+  "content_working": {
+    "message": "作業中…"
+  },
+  "content_writing": {
+    "message": "作成中…"
+  },
+  "extension_action_title": {
+    "message": "Chat On Steroids"
+  },
+  "extension_description": {
+    "message": "ChatGPT を Chat On Steroids に接続し、DOM、スクリーンショット、開発者ツールを使ってバックグラウンドでブラウザータブを操作します。"
+  },
+  "extension_name": {
+    "message": "Chat On Steroids 連携拡張機能"
+  },
+  "popup_advanced": {
+    "message": "詳細"
+  },
+  "popup_attribution_agent_key": {
+    "message": "エージェントキー"
+  },
+  "popup_attribution_exact_request_id": {
+    "message": "正確なリクエスト ID"
+  },
+  "popup_attribution_not_placed_in_chat": {
+    "message": "チャットに未帰属"
+  },
+  "popup_attribution_only_chat_generating": {
+    "message": "唯一生成中のチャット"
+  },
+  "popup_attribution_request_id_not_resolved": {
+    "message": "リクエスト ID 未解決"
+  },
+  "popup_attribution_tool_block_on_page": {
+    "message": "ページ上のツールブロック"
+  },
+  "popup_call_details": {
+    "message": "$1 — 検出 $2 · アプリ受領 $3 · 所有者 $4 · ツール活動 $5"
+  },
+  "popup_chat_id": {
+    "message": "チャット ID"
+  },
+  "popup_chatgpt_tab": {
+    "message": "ChatGPT タブ"
+  },
+  "popup_confirmed": {
+    "message": "確認済み"
+  },
+  "popup_connect": {
+    "message": "接続"
+  },
+  "popup_copied": {
+    "message": "コピーしました"
+  },
+  "popup_copy": {
+    "message": "コピー"
+  },
+  "popup_copy_chat_id": {
+    "message": "チャット ID をコピー"
+  },
+  "popup_copy_current_request_id": {
+    "message": "現在のリクエスト ID をコピー"
+  },
+  "popup_copy_failed": {
+    "message": "コピーに失敗しました"
+  },
+  "popup_count_held": {
+    "message": "$1 件を保持"
+  },
+  "popup_count_held_in_page": {
+    "message": "ページ内で $1 件を保持"
+  },
+  "popup_count_queued": {
+    "message": "$1 件をキューに追加済み"
+  },
+  "popup_current_request": {
+    "message": "現在のリクエスト"
+  },
+  "popup_detail_app": {
+    "message": "アプリ"
+  },
+  "popup_detail_app_session": {
+    "message": "アプリのセッション"
+  },
+  "popup_detail_app_value": {
+    "message": "v$1 · ポート $2"
+  },
+  "popup_detail_browser_queue_value": {
+    "message": "$1 件を保持 · 合計 $2 件"
+  },
+  "popup_detail_chat_id": {
+    "message": "チャット ID"
+  },
+  "popup_detail_delivered": {
+    "message": "受領済み"
+  },
+  "popup_detail_extension": {
+    "message": "拡張機能"
+  },
+  "popup_detail_extension_value": {
+    "message": "v$1 · プロトコル $2"
+  },
+  "popup_detail_in_this_browser": {
+    "message": "このブラウザー内"
+  },
+  "popup_detail_last_delivery": {
+    "message": "前回の送信"
+  },
+  "popup_detail_last_delivery_value": {
+    "message": "$1 · $2 · $3 前"
+  },
+  "popup_detail_observed": {
+    "message": "観測済み"
+  },
+  "popup_detail_observed_value": {
+    "message": "$1 件のイベント · $2 件の呼び出し"
+  },
+  "popup_detail_ownership": {
+    "message": "帰属"
+  },
+  "popup_detail_page_sends": {
+    "message": "ページからの送信回数"
+  },
+  "popup_detail_page_sends_value": {
+    "message": "$1 · $2 件失敗"
+  },
+  "popup_detail_recorder": {
+    "message": "記録機能"
+  },
+  "popup_detail_recorder_value": {
+    "message": "fiber v$1 · 実行 $2"
+  },
+  "popup_detail_tab": {
+    "message": "タブ"
+  },
+  "popup_detail_tab_value": {
+    "message": "$1 · エポック $2"
+  },
+  "popup_detail_turn": {
+    "message": "ターン"
+  },
+  "popup_detail_turn_live": {
+    "message": "$1 · 実行中"
+  },
+  "popup_no": {
+    "message": "いいえ"
+  },
+  "popup_no_record": {
+    "message": "記録なし"
+  },
+  "popup_overwrite_chatgpt": {
+    "message": "ChatGPT の表示を置き換え"
+  },
+  "popup_owner_confirmed": {
+    "message": "帰属を確認済み"
+  },
+  "popup_pending": {
+    "message": "待機中"
+  },
+  "popup_pipeline_call_fallback_many": {
+    "message": "アプリは $1 件の呼び出しをリクエスト ID で割り当てられなかったため、$2 を使用しました。"
+  },
+  "popup_pipeline_call_fallback_one": {
+    "message": "アプリは呼び出しをリクエスト ID で割り当てられなかったため、$1 を使用しました。"
+  },
+  "popup_pipeline_delivery_blocked": {
+    "message": "アプリが接続され、プロトコルの互換性が確認されるまで送信をブロックします。"
+  },
+  "popup_pipeline_delivery_rejected": {
+    "message": "アプリが前回の送信を拒否しました（$1）。"
+  },
+  "popup_pipeline_extension_blocked": {
+    "message": "拡張機能がこのタブの観測結果を受け付けていません（$1）。ChatGPT タブを再読み込みしてください。"
+  },
+  "popup_pipeline_id_found_waiting_receipt": {
+    "message": "最新ターンで ID を見つけました。アプリの受領確認を待っています。"
+  },
+  "popup_pipeline_no_recorder": {
+    "message": "このタブには記録機能がありません。ページを再読み込みしてください。"
+  },
+  "popup_pipeline_owner_confirmed_no_activity": {
+    "message": "リクエストの帰属を確認しました。一致するツールアクティビティはまだ記録されていません。"
+  },
+  "popup_pipeline_queued_retrying": {
+    "message": "ここでキューに追加済みです。アプリへの送信を再試行しています。"
+  },
+  "popup_pipeline_received_waiting_owner": {
+    "message": "アプリが ID を受け取りました。帰属の確認を待っています。"
+  },
+  "popup_pipeline_request_id_matched_many": {
+    "message": "$1件のリクエスト ID が記録済みのツールアクティビティと一致しました。"
+  },
+  "popup_pipeline_request_id_matched_one": {
+    "message": "1 件のリクエスト ID が記録済みのツール活動と一致しました。"
+  },
+  "popup_pipeline_waiting_first_message": {
+    "message": "最初のメッセージを待っています。"
+  },
+  "popup_pipeline_waiting_latest_request_id": {
+    "message": "チャットを記録しました。最新ターンのリクエスト ID を待っています。"
+  },
+  "popup_pipeline_waiting_session_receipt": {
+    "message": "アプリに接続できます。このチャットのセッション受領確認を待っています。"
+  },
+  "popup_reaching_app": {
+    "message": "アプリへの到達状況"
+  },
+  "popup_recording_this_chat": {
+    "message": "このチャットを記録中"
+  },
+  "popup_request_id": {
+    "message": "リクエスト ID"
+  },
+  "popup_request_id_found": {
+    "message": "リクエスト ID を検出"
+  },
+  "popup_section_augment_chatgpt": {
+    "message": "ChatGPT の表示を拡張"
+  },
+  "popup_section_session_capture": {
+    "message": "セッションの取得"
+  },
+  "popup_secure_storage_unavailable": {
+    "message": "安全な認証情報ストレージを利用できません。設定手順を確認するには Chat On Steroids を開いてください。"
+  },
+  "popup_sent_to_app": {
+    "message": "アプリに送信済み"
+  },
+  "popup_state_app_not_reachable": {
+    "message": "アプリに接続できません"
+  },
+  "popup_state_app_reachable_port": {
+    "message": "アプリに接続済み · ポート $1"
+  },
+  "popup_state_disconnected": {
+    "message": "切断済み"
+  },
+  "popup_state_looking_for_app": {
+    "message": "アプリを検索中"
+  },
+  "popup_state_port_connecting": {
+    "message": "ポート $1 · 接続中"
+  },
+  "popup_state_version_mismatch": {
+    "message": "バージョン不一致"
+  },
+  "popup_status_answering": {
+    "message": "回答中"
+  },
+  "popup_status_blocked": {
+    "message": "ブロック中"
+  },
+  "popup_status_bound": {
+    "message": "紐づけ済み"
+  },
+  "popup_status_failed": {
+    "message": "失敗"
+  },
+  "popup_status_id_confirmed": {
+    "message": "ID 確認済み"
+  },
+  "popup_status_idle": {
+    "message": "待機中"
+  },
+  "popup_status_new_chat": {
+    "message": "新しいチャット"
+  },
+  "popup_status_none_open": {
+    "message": "開いていません"
+  },
+  "popup_status_none_yet": {
+    "message": "まだありません"
+  },
+  "popup_status_not_attached": {
+    "message": "未接続"
+  },
+  "popup_status_ok": {
+    "message": "正常"
+  },
+  "popup_status_reload": {
+    "message": "再読み込み"
+  },
+  "popup_status_retired": {
+    "message": "終了済み"
+  },
+  "popup_status_tool_matched": {
+    "message": "ツールが一致"
+  },
+  "popup_status_unbound": {
+    "message": "未紐づけ"
+  },
+  "popup_status_waiting": {
+    "message": "待機中"
+  },
+  "popup_time_hours_short": {
+    "message": "$1時間"
+  },
+  "popup_time_minutes_short": {
+    "message": "$1分"
+  },
+  "popup_time_seconds_short": {
+    "message": "$1秒"
+  },
+  "popup_timestamps": {
+    "message": "タイムスタンプ"
+  },
+  "popup_try_again": {
+    "message": "再試行"
+  },
+  "popup_version_mismatch_help": {
+    "message": "アプリ v$1（プロトコル $2）、連携拡張機能 v$3（プロトコル $4）。ブラウザーの拡張機能ページを開いてデベロッパーモードを有効にし、この連携拡張機能を更新または再読み込みしてください。まだ一致しない場合は、Chat On Steroids の「拡張機能フォルダーを開く」でそのフォルダーを読み込んでください。ChatGPT タブの作業が終わったら再読み込みしてください。"
+  },
+  "popup_yes": {
+    "message": "はい"
+  }
+}

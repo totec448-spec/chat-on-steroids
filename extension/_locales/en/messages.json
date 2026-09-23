@@ -1,0 +1,1037 @@
+{
+  "content_app_did_not_answer": {
+    "message": "The app did not answer."
+  },
+  "content_app_did_not_answer_lower": {
+    "message": "the app did not answer"
+  },
+  "content_app_not_running": {
+    "message": "Chat On Steroids is not running on this PC."
+  },
+  "content_auto_compaction": {
+    "message": "Auto-compaction"
+  },
+  "content_auto_compaction_blocked_off": {
+    "message": "off here: this chat is blocked in the app"
+  },
+  "content_auto_compaction_manual": {
+    "message": "compact this chat by hand"
+  },
+  "content_auto_compaction_off": {
+    "message": "Auto-compaction off"
+  },
+  "content_auto_compaction_on": {
+    "message": "Auto-compaction on$1"
+  },
+  "content_auto_compaction_threshold_app": {
+    "message": "threshold set in the app"
+  },
+  "content_auto_compaction_worker_off": {
+    "message": "off here: worker chats never auto-compact"
+  },
+  "content_bootstrap_composer_changed_authorizing": {
+    "message": "the composer changed during bootstrap authorization; the draft was preserved and nothing was sent"
+  },
+  "content_bootstrap_composer_changed_before_send": {
+    "message": "the composer changed before bootstrap send; the draft was preserved"
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "ChatGPT replaced the composer while inserting the bootstrap"
+  },
+  "content_bootstrap_composer_unavailable": {
+    "message": "ChatGPT never exposed a usable composer for bootstrap"
+  },
+  "content_bootstrap_fresh_chat_changed": {
+    "message": "the marked fresh chat changed before bootstrap send; nothing was sent"
+  },
+  "content_bootstrap_handoff": {
+    "message": "The handoff brief this app carried over — not something you typed"
+  },
+  "content_bootstrap_insert_refused": {
+    "message": "ChatGPT refused the inserted text$1"
+  },
+  "content_bootstrap_missing_target": {
+    "message": "it was offered to a chat that already exists and it does not name one"
+  },
+  "content_bootstrap_model_unavailable": {
+    "message": "The requested model or reasoning is unavailable or could not be confirmed in ChatGPT"
+  },
+  "content_bootstrap_project_not_authorized": {
+    "message": "the command did not authorize Project entry; nothing was sent"
+  },
+  "content_bootstrap_project_open_failed": {
+    "message": "ChatGPT could not open the source Project through its native link; nothing was sent"
+  },
+  "content_bootstrap_project_source_changed": {
+    "message": "the Project entry no longer matches the source conversation; nothing was sent"
+  },
+  "content_bootstrap_resume_marker_invalid": {
+    "message": "the resume bootstrap had no valid continuation marker"
+  },
+  "content_bootstrap_send_not_accepted": {
+    "message": "ChatGPT did not accept the bootstrap send"
+  },
+  "content_bootstrap_target_changed": {
+    "message": "the chat this message was for changed before it was sent; nothing was sent"
+  },
+  "content_bootstrap_worker": {
+    "message": "This is $1 — the instruction this app gave the worker, not something you typed"
+  },
+  "content_bootstrap_wrong_conversation": {
+    "message": "the page that was opened for it was showing a different conversation"
+  },
+  "content_browser_disconnected": {
+    "message": "Browser connection is disconnected in Chat On Steroids."
+  },
+  "content_cancel": {
+    "message": "Cancel"
+  },
+  "content_chat_blocked": {
+    "message": "Chat blocked"
+  },
+  "content_chat_blocked_tip": {
+    "message": "This chat is blocked in the Chat On Steroids app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open the app’s Chat tab, hover this chat in the sessions list and press its block symbol."
+  },
+  "content_chat_still_opening": {
+    "message": "this chat is still opening — try again"
+  },
+  "content_chatgpt_message_box_not_ready": {
+    "message": "The ChatGPT message box is not ready ($1). Wait for the page to load and retry."
+  },
+  "content_chatgpt_tool": {
+    "message": "ChatGPT tool"
+  },
+  "content_clear": {
+    "message": "Clear"
+  },
+  "content_compact": {
+    "message": "Compact"
+  },
+  "content_compact_already_underway": {
+    "message": "A compaction is already under way in this chat. Wait for it, or cancel it."
+  },
+  "content_compact_app_opening_fresh": {
+    "message": "The app is trying to open the fresh chat."
+  },
+  "content_compact_asking": {
+    "message": "Asking…"
+  },
+  "content_compact_attempt_not_repeated": {
+    "message": "$1. The durable attempt will not be sent twice."
+  },
+  "content_compact_attempt_owned": {
+    "message": "The durable handoff attempt is already owned; reconciling ChatGPT’s marked message."
+  },
+  "content_compact_blocked_unavailable_hint": {
+    "message": "A blocked chat is never compacted or resumed: the replacement chat would run without its tools. Release it in the app first."
+  },
+  "content_compact_cancel": {
+    "message": "Cancel compaction"
+  },
+  "content_compact_cancel_aria": {
+    "message": "Cancel Compact & resume"
+  },
+  "content_compact_cancel_failed": {
+    "message": "Could not cancel compaction."
+  },
+  "content_compact_chat_changed_before_start": {
+    "message": "This chat changed before compaction could start."
+  },
+  "content_compact_chat_changed_preparing": {
+    "message": "The chat changed while preparing the handoff. Nothing was sent."
+  },
+  "content_compact_chat_changed_stopping": {
+    "message": "This chat changed while compaction was stopping the turn."
+  },
+  "content_compact_chat_changed_waiting_results": {
+    "message": "This chat changed while compaction was waiting for tool results."
+  },
+  "content_compact_chat_changed_waiting_tools": {
+    "message": "This chat changed while compaction was waiting for local tools."
+  },
+  "content_compact_chatgpt_writing": {
+    "message": "ChatGPT is writing the handoff"
+  },
+  "content_compact_existing_draft": {
+    "message": "A draft is already in ChatGPT; clear the message box before requesting the handoff."
+  },
+  "content_compact_failed": {
+    "message": "Compaction failed"
+  },
+  "content_compact_failed_request_unconfirmed": {
+    "message": "$1 The app has not yet confirmed that this failed request was closed."
+  },
+  "content_compact_fresh_open": {
+    "message": "The fresh chat is open"
+  },
+  "content_compact_handoff_already_submitted": {
+    "message": "The handoff instruction was already submitted here. It will finish on its own, or cancel it."
+  },
+  "content_compact_handoff_incomplete_detail": {
+    "message": "The handoff response did not complete. Cancel compaction to return to this chat."
+  },
+  "content_compact_handoff_problem": {
+    "message": "ChatGPT reported a problem while preparing the handoff."
+  },
+  "content_compact_handoff_request_failed": {
+    "message": "Could not ask ChatGPT for a handoff: $1"
+  },
+  "content_compact_handoff_stopped_detail": {
+    "message": "The handoff response was stopped. Cancel compaction to return to this chat."
+  },
+  "content_compact_insert_failed": {
+    "message": "The browser could not insert the handoff request ($1). Check that the message box is available and retry."
+  },
+  "content_compact_message_box_changed": {
+    "message": "The message box changed before the handoff instruction could be sent. Its draft was preserved; nothing was compacted."
+  },
+  "content_compact_message_box_changed_preserved": {
+    "message": "The message box changed before the handoff could be sent. Its draft was preserved."
+  },
+  "content_compact_missing_handoff_instruction": {
+    "message": "The app did not send the handoff instruction."
+  },
+  "content_compact_missing_token": {
+    "message": "The app did not send a compaction token, so nothing could be tracked."
+  },
+  "content_compact_nothing_yet": {
+    "message": "Nothing to compact yet — send a message, or set a goal and it writes one."
+  },
+  "content_compact_opening_fresh": {
+    "message": "Handoff saved, opening the fresh chat"
+  },
+  "content_compact_policy_unverified": {
+    "message": "Could not verify whether this chat may be compacted."
+  },
+  "content_compact_results_unconfirmed": {
+    "message": "ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted."
+  },
+  "content_compact_resume_cancelled": {
+    "message": "Resume cancelled"
+  },
+  "content_compact_resume_now": {
+    "message": "Compact & resume now"
+  },
+  "content_compact_send_ambiguous": {
+    "message": "The send result was ambiguous. Nothing will be sent twice; cancel explicitly if ChatGPT never accepted it."
+  },
+  "content_compact_send_not_ready": {
+    "message": "The handoff request was not submitted because the Send button or message box was not ready. Retry after the page is ready."
+  },
+  "content_compact_send_permission_unconfirmed": {
+    "message": "Nothing was submitted here: the handoff send permission was not confirmed. The existing request will not be sent twice."
+  },
+  "content_compact_send_state_unverified": {
+    "message": "Could not verify the handoff send state. Nothing was stopped."
+  },
+  "content_compact_settling": {
+    "message": "Settling…"
+  },
+  "content_compact_source_not_loaded": {
+    "message": "The original question has not loaded yet. Nothing was compacted; waiting for the source conversation."
+  },
+  "content_compact_starting": {
+    "message": "Starting…"
+  },
+  "content_compact_step_opening": {
+    "message": "Opening the new chat"
+  },
+  "content_compact_step_preparing": {
+    "message": "Preparing"
+  },
+  "content_compact_step_saving": {
+    "message": "Saving it"
+  },
+  "content_compact_step_writing": {
+    "message": "Writing the handoff"
+  },
+  "content_compact_stop_failed": {
+    "message": "ChatGPT would not stop the current turn. Nothing was compacted."
+  },
+  "content_compact_stopping": {
+    "message": "Stopping…"
+  },
+  "content_compact_ticket_store_failed": {
+    "message": "The compaction ticket could not be stored."
+  },
+  "content_compact_tools_still_running": {
+    "message": "Local tools were still running after the settle timeout. Nothing was compacted."
+  },
+  "content_compact_tools_stop_unverified": {
+    "message": "Could not verify that local tools had stopped. Nothing was compacted."
+  },
+  "content_compact_unavailable": {
+    "message": "Compact & resume unavailable"
+  },
+  "content_compact_waiting_response": {
+    "message": "Waiting for the handoff response"
+  },
+  "content_compact_waiting_store": {
+    "message": "The brief is finished; waiting for the app to store it."
+  },
+  "content_compact_worker_unavailable_hint": {
+    "message": "Worker chats stay in their existing conversation and are never manually compacted or resumed."
+  },
+  "content_connector_identity_ambiguous": {
+    "message": "Installed connector identity is unavailable or ambiguous"
+  },
+  "content_connector_refresh_claim_unconfirmed": {
+    "message": "Connector refresh claim or page ownership was not confirmed"
+  },
+  "content_connector_refresh_schema_unchanged": {
+    "message": "Refresh was requested, but a changed matching schema was not observed"
+  },
+  "content_connector_refresh_unverified": {
+    "message": "Connector refresh could not be verified"
+  },
+  "content_connector_settings_unverified": {
+    "message": "Exact connector settings could not be verified"
+  },
+  "content_delivery_attachment_transfer_failed": {
+    "message": "Attachment transfer failed. The message was not sent."
+  },
+  "content_delivery_attachment_transfer_incomplete": {
+    "message": "Attachment transfer was incomplete."
+  },
+  "content_delivery_attachment_upload_unconfirmed": {
+    "message": "Attachment upload was not confirmed. Check the unsent draft and any file error in ChatGPT before trying again."
+  },
+  "content_delivery_chat_changed": {
+    "message": "The chat changed before direct delivery."
+  },
+  "content_delivery_chat_changed_or_busy": {
+    "message": "The chat changed or did not stop. The message was not sent."
+  },
+  "content_delivery_composer_changed": {
+    "message": "The ChatGPT composer changed before sending"
+  },
+  "content_delivery_composer_stuck": {
+    "message": "ChatGPT finished its answer but its composer is still stuck on Stop. Recovering this page before delivering the queued message."
+  },
+  "content_delivery_draft_preserved": {
+    "message": "The composer changed; your draft was preserved"
+  },
+  "content_delivery_editor_not_writable": {
+    "message": "The ChatGPT editor did not become writable before sending."
+  },
+  "content_delivery_existing_draft": {
+    "message": "ChatGPT already contains an unsent draft. Send or clear that draft in Chrome before trying again."
+  },
+  "content_delivery_model_unconfirmed": {
+    "message": "Requested model or reasoning could not be confirmed"
+  },
+  "content_delivery_stop_failed": {
+    "message": "The current answer could not be stopped."
+  },
+  "content_delivery_temporary_chat_unconfirmed": {
+    "message": "Temporary Chat was not confirmed. Open the helper tab and complete its Temporary Chat introduction."
+  },
+  "content_delivery_text_not_accepted": {
+    "message": "ChatGPT did not accept the text$1"
+  },
+  "content_delivery_turn_changed": {
+    "message": "The turn changed before direct delivery."
+  },
+  "content_dismiss": {
+    "message": "Dismiss"
+  },
+  "content_empty": {
+    "message": "(empty)"
+  },
+  "content_error_compaction_running": {
+    "message": "Another chat is compacting right now."
+  },
+  "content_error_session_not_recorded": {
+    "message": "This chat has no recorded local session yet."
+  },
+  "content_error_turn_still_generating": {
+    "message": "Wait for this ChatGPT turn to finish first."
+  },
+  "content_failed": {
+    "message": "Failed"
+  },
+  "content_goal_add_specific": {
+    "message": "add specific goal"
+  },
+  "content_goal_add_specific_hint": {
+    "message": "Write what this chat has to reach. It then prompts until it is reached, and stops there."
+  },
+  "content_goal_add_to_start": {
+    "message": "Add a goal or a loop to start this chat"
+  },
+  "content_goal_answer_never_settled": {
+    "message": "the answer never stopped changing, so nothing was written"
+  },
+  "content_goal_answering": {
+    "message": "$1 is answering"
+  },
+  "content_goal_backend_chatgpt_helper": {
+    "message": "ChatGPT helper"
+  },
+  "content_goal_backend_custom_endpoint": {
+    "message": "custom endpoint"
+  },
+  "content_goal_backend_no_answer": {
+    "message": "$1 did not answer"
+  },
+  "content_goal_backend_offline_templates": {
+    "message": "offline templates"
+  },
+  "content_goal_backend_offline_templates_title": {
+    "message": "Offline templates"
+  },
+  "content_goal_checking_again": {
+    "message": "Checking again in $1"
+  },
+  "content_goal_checking_finished": {
+    "message": "Checking the answer is finished"
+  },
+  "content_goal_delivery": {
+    "message": "$1: $2"
+  },
+  "content_goal_delivery_after_turn_finish": {
+    "message": "After this turn + finish"
+  },
+  "content_goal_delivery_only_finish": {
+    "message": "Only finish"
+  },
+  "content_goal_loop_off": {
+    "message": "Goal and Loop off"
+  },
+  "content_goal_loop_stopped": {
+    "message": "The goal loop stopped"
+  },
+  "content_goal_message_box_in_use": {
+    "message": "the message box was in use, so nothing was sent"
+  },
+  "content_goal_mode_aria": {
+    "message": "Goal mode"
+  },
+  "content_goal_new_chat_draft_refused": {
+    "message": "ChatGPT would not replace the New Chat draft"
+  },
+  "content_goal_no_api_key_unavailable": {
+    "message": "No API key — Goal and Loop unavailable"
+  },
+  "content_goal_nothing_sent": {
+    "message": "nothing was sent"
+  },
+  "content_goal_off_blocked": {
+    "message": "Goal off — this chat is blocked in the app"
+  },
+  "content_goal_off_prime_writes": {
+    "message": "Goal off — the prime writes this chat"
+  },
+  "content_goal_on": {
+    "message": "Goal on"
+  },
+  "content_goal_on_chasing": {
+    "message": "Goal on — chasing this chat’s goal"
+  },
+  "content_goal_on_no_api_key": {
+    "message": "Goal on — no API key"
+  },
+  "content_goal_opening_empty": {
+    "message": "the model wrote nothing to open with"
+  },
+  "content_goal_opening_on_goal": {
+    "message": "Opening this chat on its goal"
+  },
+  "content_goal_placeholder": {
+    "message": "What does this chat have to reach?"
+  },
+  "content_goal_reached": {
+    "message": "Goal reached"
+  },
+  "content_goal_retrying": {
+    "message": "Retrying Goal in $1 seconds"
+  },
+  "content_goal_save": {
+    "message": "Save as goal"
+  },
+  "content_goal_save_failed": {
+    "message": "the goal could not be saved to this chat"
+  },
+  "content_goal_send_failed": {
+    "message": "ChatGPT would not send the message"
+  },
+  "content_goal_sending_answer_to": {
+    "message": "Sending the answer to $1"
+  },
+  "content_goal_sending_to_chatgpt": {
+    "message": "Sending it to ChatGPT"
+  },
+  "content_goal_status_dismiss": {
+    "message": "Dismiss Goal status"
+  },
+  "content_goal_step_reading": {
+    "message": "Reading the chat"
+  },
+  "content_goal_step_sending": {
+    "message": "Sending"
+  },
+  "content_goal_step_settling": {
+    "message": "Answer settling"
+  },
+  "content_goal_step_writing": {
+    "message": "Writing the reply"
+  },
+  "content_goal_wait_recovery_activity": {
+    "message": "Waiting for activity after recovery"
+  },
+  "content_goal_wait_recovery_reload": {
+    "message": "Waiting before recovery reload"
+  },
+  "content_goal_wait_resumed": {
+    "message": "ChatGPT resumed work · waiting before retry"
+  },
+  "content_goal_wait_running_tools": {
+    "message": "Waiting for running tools"
+  },
+  "content_goal_wait_tool_inactivity": {
+    "message": "Waiting for tool inactivity"
+  },
+  "content_goal_writing_first_message": {
+    "message": "$1 is writing the first message"
+  },
+  "content_goal_wrote_next_message": {
+    "message": "$1 wrote the next message"
+  },
+  "content_loop_add_specific": {
+    "message": "add specific loop"
+  },
+  "content_loop_add_specific_hint": {
+    "message": "Write what this chat has to reach. It then prompts for ever — nothing but the Loop slider ends it."
+  },
+  "content_loop_continuation_paused": {
+    "message": "Loop continuation paused"
+  },
+  "content_loop_on_never_stops": {
+    "message": "Loop on — never stops on its own"
+  },
+  "content_loop_on_no_api_key": {
+    "message": "Loop on — no API key"
+  },
+  "content_loop_save": {
+    "message": "Save as loop"
+  },
+  "content_meter_status": {
+    "message": "$1/$2 · autocompact $3"
+  },
+  "content_mode_goal": {
+    "message": "Goal"
+  },
+  "content_mode_goal_hint": {
+    "message": "Replies as you until this chat’s goal is reached, then stops. Written with $1."
+  },
+  "content_mode_loop": {
+    "message": "Loop"
+  },
+  "content_mode_loop_hint": {
+    "message": "Replies as you for ever — only this slider ends it. Written with $1."
+  },
+  "content_mode_note_blocked": {
+    "message": "blocked in the app"
+  },
+  "content_mode_note_goal": {
+    "message": "replies until goal reached"
+  },
+  "content_mode_note_key_required": {
+    "message": "OpenRouter key required"
+  },
+  "content_mode_note_loop": {
+    "message": "replies for ever"
+  },
+  "content_mode_note_off": {
+    "message": "no replies written here"
+  },
+  "content_mode_note_prime_writes": {
+    "message": "the prime writes here"
+  },
+  "content_mode_off": {
+    "message": "Off"
+  },
+  "content_mode_off_hint": {
+    "message": "Nothing is written here on its own."
+  },
+  "content_model_generic": {
+    "message": "the model"
+  },
+  "content_off": {
+    "message": "off"
+  },
+  "content_on": {
+    "message": "on"
+  },
+  "content_opened": {
+    "message": "Opened"
+  },
+  "content_opening": {
+    "message": "Opening…"
+  },
+  "content_paused": {
+    "message": "Paused"
+  },
+  "content_saving": {
+    "message": "Saving…"
+  },
+  "content_settings_aria": {
+    "message": "Chat On Steroids settings"
+  },
+  "content_stage_handoff_attention": {
+    "message": "The handoff response needs attention"
+  },
+  "content_stage_handoff_stopped": {
+    "message": "The handoff response was stopped"
+  },
+  "content_stage_opening_fresh_chat": {
+    "message": "Opening a fresh chat"
+  },
+  "content_stage_saving_handoff": {
+    "message": "Saving the handoff"
+  },
+  "content_stage_waiting_for_chrome": {
+    "message": "Waiting for Chrome"
+  },
+  "content_task_add": {
+    "message": "add task"
+  },
+  "content_task_api_key_unavailable": {
+    "message": "Add an OpenRouter API key in the app first."
+  },
+  "content_task_blocked_unavailable": {
+    "message": "This chat is blocked in the app. Release it there to drive it again."
+  },
+  "content_task_change_hint": {
+    "message": "Change or clear what this chat has to reach. It runs as $1."
+  },
+  "content_task_edit": {
+    "message": "edit task"
+  },
+  "content_task_pick_mode_first": {
+    "message": "Pick Goal or Loop above first — Off writes nothing."
+  },
+  "content_task_worker_unavailable": {
+    "message": "A worker chat is already driven by its prime."
+  },
+  "content_task_write_hint": {
+    "message": "Write what this chat has to reach. It runs as $1."
+  },
+  "content_tokens_from": {
+    "message": "from $1 tokens"
+  },
+  "content_tool_calls_count": {
+    "message": "$1 tool calls"
+  },
+  "content_tool_details_loading": {
+    "message": "Loading recorded details…"
+  },
+  "content_tool_details_unavailable": {
+    "message": "Recorded details are unavailable for this activity revision."
+  },
+  "content_tool_more_changed_files": {
+    "message": "$1 more changed files"
+  },
+  "content_tool_outcome_completed": {
+    "message": "completed"
+  },
+  "content_tool_outcome_failed": {
+    "message": "failed"
+  },
+  "content_tool_outcome_internal_error": {
+    "message": "internal error"
+  },
+  "content_tool_outcome_refused": {
+    "message": "refused"
+  },
+  "content_tool_outcome_unknown": {
+    "message": "unknown"
+  },
+  "content_tool_preview_truncated": {
+    "message": "Preview truncated from $1 characters."
+  },
+  "content_tool_ran": {
+    "message": "Ran $1"
+  },
+  "content_tool_recorded_arguments": {
+    "message": "Recorded arguments (redacted)"
+  },
+  "content_tool_recorded_result": {
+    "message": "Recorded result (redacted preview)"
+  },
+  "content_turn_auto_continue_stopped": {
+    "message": "Automatic Continue stopped an unchanged silent turn."
+  },
+  "content_turn_chatgpt_interrupted": {
+    "message": "ChatGPT marked the turn interrupted"
+  },
+  "content_turn_outcome": {
+    "message": "Turn $1"
+  },
+  "content_turn_replaced_by_user_message": {
+    "message": "a new user message replaced the unfinished turn"
+  },
+  "content_turn_stalled_detail": {
+    "message": "no visible output and no progress for ten minutes"
+  },
+  "content_turn_stalled_error": {
+    "message": "No visible progress for ten minutes. The app could not confirm that this turn finished."
+  },
+  "content_turn_started": {
+    "message": "Turn started"
+  },
+  "content_turn_stop_requested": {
+    "message": "Stop was requested; the native page no longer shows generation."
+  },
+  "content_unknown_error": {
+    "message": "unknown error"
+  },
+  "content_waiting": {
+    "message": "Waiting…"
+  },
+  "content_waiting_current_operation": {
+    "message": "Still waiting for the current operation to complete"
+  },
+  "content_waiting_local_tool": {
+    "message": "Waiting for a local tool to finish"
+  },
+  "content_waiting_local_tools": {
+    "message": "Waiting for $1 local tools to finish"
+  },
+  "content_worker_generic": {
+    "message": "a worker"
+  },
+  "content_worker_label": {
+    "message": "Worker"
+  },
+  "content_worker_retired": {
+    "message": "$1 was retired because $2. This chat can no longer use local tools."
+  },
+  "content_worker_still_running": {
+    "message": "Worker still running: $1"
+  },
+  "content_workers_still_running": {
+    "message": "$1 workers still running"
+  },
+  "content_workers_summary": {
+    "message": "$1 finished · $2 running"
+  },
+  "content_workers_summary_failed": {
+    "message": "$1 finished · $2 running · $3 failed"
+  },
+  "content_working": {
+    "message": "working…"
+  },
+  "content_writing": {
+    "message": "Writing…"
+  },
+  "extension_action_title": {
+    "message": "Chat On Steroids"
+  },
+  "extension_description": {
+    "message": "Connects ChatGPT to Chat On Steroids and controls browser tabs in the background with DOM, screenshots and developer tools."
+  },
+  "extension_name": {
+    "message": "Chat On Steroids companion"
+  },
+  "popup_advanced": {
+    "message": "Advanced"
+  },
+  "popup_attribution_agent_key": {
+    "message": "agent key"
+  },
+  "popup_attribution_exact_request_id": {
+    "message": "exact request id"
+  },
+  "popup_attribution_not_placed_in_chat": {
+    "message": "not placed in a chat"
+  },
+  "popup_attribution_only_chat_generating": {
+    "message": "the only chat generating"
+  },
+  "popup_attribution_request_id_not_resolved": {
+    "message": "request id not resolved"
+  },
+  "popup_attribution_tool_block_on_page": {
+    "message": "tool block on the page"
+  },
+  "popup_call_details": {
+    "message": "$1 — found $2 · app receipt $3 · owner $4 · tool activity $5"
+  },
+  "popup_chat_id": {
+    "message": "Chat ID"
+  },
+  "popup_chatgpt_tab": {
+    "message": "ChatGPT tab"
+  },
+  "popup_confirmed": {
+    "message": "confirmed"
+  },
+  "popup_connect": {
+    "message": "Connect"
+  },
+  "popup_copied": {
+    "message": "copied"
+  },
+  "popup_copy": {
+    "message": "Copy"
+  },
+  "popup_copy_chat_id": {
+    "message": "Copy chat ID"
+  },
+  "popup_copy_current_request_id": {
+    "message": "Copy current request ID"
+  },
+  "popup_copy_failed": {
+    "message": "copy failed"
+  },
+  "popup_count_held": {
+    "message": "$1 held"
+  },
+  "popup_count_held_in_page": {
+    "message": "$1 held in page"
+  },
+  "popup_count_queued": {
+    "message": "$1 queued"
+  },
+  "popup_current_request": {
+    "message": "Current request"
+  },
+  "popup_detail_app": {
+    "message": "app"
+  },
+  "popup_detail_app_session": {
+    "message": "app session"
+  },
+  "popup_detail_app_value": {
+    "message": "v$1 · port $2"
+  },
+  "popup_detail_browser_queue_value": {
+    "message": "$1 held · $2 total"
+  },
+  "popup_detail_chat_id": {
+    "message": "chat id"
+  },
+  "popup_detail_delivered": {
+    "message": "delivered"
+  },
+  "popup_detail_extension": {
+    "message": "extension"
+  },
+  "popup_detail_extension_value": {
+    "message": "v$1 · protocol $2"
+  },
+  "popup_detail_in_this_browser": {
+    "message": "in this browser"
+  },
+  "popup_detail_last_delivery": {
+    "message": "last delivery"
+  },
+  "popup_detail_last_delivery_value": {
+    "message": "$1 · $2 · $3 ago"
+  },
+  "popup_detail_observed": {
+    "message": "observed"
+  },
+  "popup_detail_observed_value": {
+    "message": "$1 events · $2 calls"
+  },
+  "popup_detail_ownership": {
+    "message": "ownership"
+  },
+  "popup_detail_page_sends": {
+    "message": "page sends"
+  },
+  "popup_detail_page_sends_value": {
+    "message": "$1 · $2 failed"
+  },
+  "popup_detail_recorder": {
+    "message": "recorder"
+  },
+  "popup_detail_recorder_value": {
+    "message": "fiber v$1 · run $2"
+  },
+  "popup_detail_tab": {
+    "message": "tab"
+  },
+  "popup_detail_tab_value": {
+    "message": "$1 · epoch $2"
+  },
+  "popup_detail_turn": {
+    "message": "turn"
+  },
+  "popup_detail_turn_live": {
+    "message": "$1 · live"
+  },
+  "popup_no": {
+    "message": "no"
+  },
+  "popup_no_record": {
+    "message": "no record"
+  },
+  "popup_overwrite_chatgpt": {
+    "message": "Overwrite ChatGPT"
+  },
+  "popup_owner_confirmed": {
+    "message": "Owner confirmed"
+  },
+  "popup_pending": {
+    "message": "pending"
+  },
+  "popup_pipeline_call_fallback_many": {
+    "message": "The app could not place $1 calls by request id — it fell back to $2."
+  },
+  "popup_pipeline_call_fallback_one": {
+    "message": "The app could not place a call by request id — it fell back to $1."
+  },
+  "popup_pipeline_delivery_blocked": {
+    "message": "Delivery is blocked until the app is connected and protocol compatibility is confirmed."
+  },
+  "popup_pipeline_delivery_rejected": {
+    "message": "The app rejected the last delivery ($1)."
+  },
+  "popup_pipeline_extension_blocked": {
+    "message": "The extension is not accepting this tab’s observations ($1). Reload the ChatGPT tab."
+  },
+  "popup_pipeline_id_found_waiting_receipt": {
+    "message": "ID found in the latest turn. Waiting for the app to confirm receipt."
+  },
+  "popup_pipeline_no_recorder": {
+    "message": "No recorder in this tab. Reload the page."
+  },
+  "popup_pipeline_owner_confirmed_no_activity": {
+    "message": "Request owner confirmed. No matching tool activity recorded yet."
+  },
+  "popup_pipeline_queued_retrying": {
+    "message": "Queued here. Retrying delivery to the app."
+  },
+  "popup_pipeline_received_waiting_owner": {
+    "message": "App received the ID. Waiting for owner confirmation."
+  },
+  "popup_pipeline_request_id_matched_many": {
+    "message": "$1 request IDs matched to recorded tool activity."
+  },
+  "popup_pipeline_request_id_matched_one": {
+    "message": "1 request ID matched to recorded tool activity."
+  },
+  "popup_pipeline_waiting_first_message": {
+    "message": "Waiting for the first message."
+  },
+  "popup_pipeline_waiting_latest_request_id": {
+    "message": "Chat recorded. Waiting for a request ID from the latest turn."
+  },
+  "popup_pipeline_waiting_session_receipt": {
+    "message": "App reachable. Waiting for this chat’s session receipt."
+  },
+  "popup_reaching_app": {
+    "message": "Reaching the app"
+  },
+  "popup_recording_this_chat": {
+    "message": "Recording this chat"
+  },
+  "popup_request_id": {
+    "message": "request ID"
+  },
+  "popup_request_id_found": {
+    "message": "Request ID found"
+  },
+  "popup_section_augment_chatgpt": {
+    "message": "Augment ChatGPT"
+  },
+  "popup_section_session_capture": {
+    "message": "Session capture"
+  },
+  "popup_secure_storage_unavailable": {
+    "message": "Secure credential storage is unavailable. Open Chat On Steroids for setup instructions."
+  },
+  "popup_sent_to_app": {
+    "message": "Sent to app"
+  },
+  "popup_state_app_not_reachable": {
+    "message": "App not reachable"
+  },
+  "popup_state_app_reachable_port": {
+    "message": "App reachable · Port $1"
+  },
+  "popup_state_disconnected": {
+    "message": "Disconnected"
+  },
+  "popup_state_looking_for_app": {
+    "message": "Looking for the app"
+  },
+  "popup_state_port_connecting": {
+    "message": "Port $1 · connecting"
+  },
+  "popup_state_version_mismatch": {
+    "message": "Version mismatch"
+  },
+  "popup_status_answering": {
+    "message": "answering"
+  },
+  "popup_status_blocked": {
+    "message": "blocked"
+  },
+  "popup_status_bound": {
+    "message": "bound"
+  },
+  "popup_status_failed": {
+    "message": "failed"
+  },
+  "popup_status_id_confirmed": {
+    "message": "ID confirmed"
+  },
+  "popup_status_idle": {
+    "message": "idle"
+  },
+  "popup_status_new_chat": {
+    "message": "new chat"
+  },
+  "popup_status_none_open": {
+    "message": "none open"
+  },
+  "popup_status_none_yet": {
+    "message": "none yet"
+  },
+  "popup_status_not_attached": {
+    "message": "not attached"
+  },
+  "popup_status_ok": {
+    "message": "ok"
+  },
+  "popup_status_reload": {
+    "message": "reload"
+  },
+  "popup_status_retired": {
+    "message": "retired"
+  },
+  "popup_status_tool_matched": {
+    "message": "tool matched"
+  },
+  "popup_status_unbound": {
+    "message": "unbound"
+  },
+  "popup_status_waiting": {
+    "message": "waiting"
+  },
+  "popup_time_hours_short": {
+    "message": "$1h"
+  },
+  "popup_time_minutes_short": {
+    "message": "$1m"
+  },
+  "popup_time_seconds_short": {
+    "message": "$1s"
+  },
+  "popup_timestamps": {
+    "message": "Timestamps"
+  },
+  "popup_try_again": {
+    "message": "Try again"
+  },
+  "popup_version_mismatch_help": {
+    "message": "App v$1 (protocol $2); companion v$3 (protocol $4). Open your browser's Extensions page, enable Developer mode, then Update / Reload this companion. If the mismatch remains, use Open extension folder in Chat On Steroids and load that folder. Reload ChatGPT tabs when their active work is finished."
+  },
+  "popup_yes": {
+    "message": "yes"
+  }
+}

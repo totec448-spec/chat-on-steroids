@@ -88,6 +88,14 @@ describe('extension release metadata', () => {
     expect(code).not.toMatch(/JSON\.stringify/);
   });
 
+  it('does not identify the provider Plugins panel by its localized tab label', async () => {
+    const source = await fs.readFile(path.join(process.cwd(), 'extension', 'fiber.js'), 'utf8');
+    expect(source).not.toContain('-trigger-Plugins');
+    expect(source).toContain("^#settings\\/Plugins\\/plugin_");
+    expect(source).toContain("document.querySelectorAll('[role=\"tabpanel\"]')");
+    expect(source).toContain("props.connector?.id !== route[1]");
+  });
+
   /**
    * The installed popup showed "Paired · port 8765" with a green dot and, underneath it,
    * a six-digit code field and a Pair button — a page contradicting itself about the one
@@ -2055,9 +2063,11 @@ describe('extension command delivery', () => {
       url: ['https://chatgpt.com/*', 'https://chat.openai.com/*']
     });
     expect(worker.scriptingExecuteScript.mock.calls).toEqual([
+      [{ target: { tabId: 41 }, files: ['i18n.js'] }],
       [{ target: { tabId: 41 }, files: ['chatgpt-dom.js'] }],
       [{ target: { tabId: 41 }, world: 'MAIN', files: ['usage.js', 'fiber.js'] }],
       [{ target: { tabId: 41 }, files: ['content.js'] }],
+      [{ target: { tabId: 42 }, files: ['i18n.js'] }],
       [{ target: { tabId: 42 }, files: ['chatgpt-dom.js'] }],
       [{ target: { tabId: 42 }, world: 'MAIN', files: ['usage.js', 'fiber.js'] }],
       [{ target: { tabId: 42 }, files: ['content.js'] }]
@@ -2158,6 +2168,7 @@ describe('extension command delivery', () => {
     expect(repaired).toMatchObject({ ok: true });
     const target = { tabId: 73, documentIds: ['document-73-0'] };
     expect(worker.scriptingExecuteScript.mock.calls).toEqual([
+      [{ target, files: ['i18n.js'] }],
       [{ target, files: ['chatgpt-dom.js'] }],
       [{ target, world: 'MAIN', files: ['usage.js', 'fiber.js'] }],
       [{ target, files: ['content.js'] }]
