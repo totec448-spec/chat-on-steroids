@@ -158,7 +158,10 @@ const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
   allowUnattributedCalls: false,
   // Off: Goal/Loop chats are always recovered, and reopening anything else — a worker, a prime,
   // a plain chat that once called a tool — is the user's choice to make.
-  recoverAgentTabs: false
+  recoverAgentTabs: false,
+  // Off: waiting for a run's own workers before its next automatic step is a deliberate choice.
+  // A chat that delegated nothing, and a chat with no run, never wait either way.
+  waitForSubAgents: false
 };
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
@@ -347,10 +350,11 @@ const configSchema = z.object({
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
       maxWorkers: z.number().int().min(1).max(8).optional().default(DEFAULT_MULTI_AGENT.maxWorkers),
       allowUnattributedCalls: z.boolean().optional().default(DEFAULT_MULTI_AGENT.allowUnattributedCalls),
-      recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs)
+      recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs),
+      waitForSubAgents: z.boolean().optional().default(DEFAULT_MULTI_AGENT.waitForSubAgents ?? false)
     })
     .optional()
-    .default({ ...DEFAULT_MULTI_AGENT }),
+    .default({ ...DEFAULT_MULTI_AGENT, waitForSubAgents: DEFAULT_MULTI_AGENT.waitForSubAgents ?? false }),
   // An empty model id is repaired rather than rejected: the id is free text from a
   // provider listing that changes weekly, and a config that lost it must still load with
   // every root and permission in it intact.

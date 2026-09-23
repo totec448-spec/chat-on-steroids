@@ -4,6 +4,9 @@ import { currentCall } from '../mcp/call-context.js';
 import { getSession } from './store.js';
 import { onSessionChange, recordProgress } from './recorder.js';
 import { isChatBlocked } from './blocked-chats.js';
+// The one worker-wait rule, owned where worker state lives: the page asks the same question
+// over HTTP for `/goal/draft`, and the two must not be able to disagree about it.
+import { waitingForSubAgents } from '../agents.js';
 import { draftFastFollowup, conversationMessages, automaticFinishEnabled, goalDrivingMode, goalObjectiveFor, goalProgressFor, onGoalChange } from '../goal.js';
 import { hasEligibleToolInput, finishNeedsBrowserInput, onInputChange, listInputs, enqueueInput } from './input.js';
 
@@ -91,6 +94,16 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
     }
     let result = `${notification} ${REMAINING}`;
     if (!userRequested && !automatic) return result;
+    // The chat's own workers report back into it. Drafting now would take the decision from a
+    // context that is about to change and then type the instruction into a chat that is still
+    // working, so the hold is released instead: the work continues, and the finished answer
+    // leaves the reply obligation owed, which the pickup tree collects once the last worker
+    // stops. Checked after every earlier return so a notice-only hold is never released here.
+    if (waitingForSubAgents(session.conversationId)) {
+      try { await releaseSessionFinish(sessionId, turnId, 'end'); }
+      catch { /* the turn moved on; that turn's own authority owns the release */ }
+      return 'Waiting for this chat’s sub-agents to finish before deciding the next step.';
+    }
     const generated = new Set(inputs.filter(entry => entry.finishOwner).map(entry => entry.id));
     // A request id, timestamp, hold result or app status is not new work. Hash actual
     // authored context; tool-only work cannot change the provider's next decision input.
