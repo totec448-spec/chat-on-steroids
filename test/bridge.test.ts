@@ -2357,6 +2357,53 @@ describe('automatic compaction', () => {
     expect((await request('POST', '/compact', { body: { conversationId, token, sourceDispatch: true } })).status).toBe(409);
   });
 
+  /**
+   * The chat that kept working after its ticket was refused, with no turn on its page.
+   *
+   * A refusal is a verdict about the turn that would not take the handoff, and it is read as
+   * standing while no turn is running. That is right for a chat that stopped and wrong for one
+   * whose page lost its turn while the connector went on answering tool calls for it:
+   * `activeTurnId` is null for that whole stretch, so the refusal never lapses and the level rule
+   * that protects an oversized chat can never fire again. Measured on 2026-09-21 with the
+   * threshold at 400,000: a ticket given up at 417,733 tokens, twenty-two minutes of work with no
+   * turn on the page, nothing filed, 632,211 by the time the run stopped on its own.
+   */
+  it('files again for an oversized chat still working after its ticket was refused', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0b';
+    await withThreshold(10_000, async () => {
+      await request('POST', '/events', { body: { conversationId, events: over() } });
+      await settled();
+      const activity = await request('GET', `/activity?conversationId=${conversationId}`);
+      const sessionId = activity.body.sessionId as string;
+
+      // The verdict a given-up ticket leaves behind. Its turn is null because the chat had none,
+      // which is exactly the state the read below used to treat as "no turn is running".
+      const { refuseAutomaticCompactionNow } = await import('../src/main/session/store.js');
+      await refuseAutomaticCompactionNow(sessionId, conversationId, null);
+      const open = continuationForSession(sessionId);
+      if (open) await request('POST', '/compact', { body: { conversationId, token: open.token, sourceLost: true } });
+      expect(continuationForSession(sessionId)).toBeNull();
+
+      // Working, and with no turn of its own: exactly attributed local calls, close enough
+      // together that the chat never stops working between them.
+      for (let index = 0; index < 3; index += 1) {
+        const requestId = `wfr_refused_still_working_${index}`;
+        await request('POST', '/events', { body: { conversationId, events: [{
+          kind: 'tool_evidence', time: Date.now(),
+          calls: [{ messageId: `m-refused-working-${index}`, tool: 'read', order: 0, answered: false, requestId }]
+        }] } });
+        await recordToolCall({ tool: 'read', args: { paths: ['/project/a.ts'] },
+          content: [{ type: 'text' as const, text: 'ok' }], outcome: 'ok' as const,
+          durationMs: 1, startedAt: Date.now(), requestId });
+        await settled();
+      }
+
+      await vi.waitFor(() => expect(continuationForSession(sessionId))
+        .toMatchObject({ automatic: true, state: 'awaiting-summary' }), { timeout: 3000 });
+    });
+  });
+
   it('does not immediately refile a rejected automatic compaction in the same working turn', async () => {
     await pair();
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac09';
