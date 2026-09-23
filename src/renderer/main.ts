@@ -1780,7 +1780,7 @@ for (const id of ['copyLog', 'copyLogText']) {
     const text = await run(api.getLogText());
     if (text === null) return;
     const copied = await run(api.writeClipboard(text));
-    if (copied) toast('Activity copied');
+    if (copied) toast(t('Activity copied'));
   });
 }
 
@@ -1788,7 +1788,7 @@ $('copyLogJson').addEventListener('click', async () => {
   const text = await run(api.getLogJson());
   if (text === null) return;
   const copied = await run(api.writeClipboard(text));
-  if (copied) toast('Activity JSON copied');
+  if (copied) toast(t('Activity JSON copied'));
 });
 
 // The API key is written on blur so it is not saved keystroke by keystroke.
@@ -1807,7 +1807,7 @@ $('apiKey').addEventListener('blur', () => {
         if (input.value === submitted) input.value = '';
         apply(next);
       }
-      toast('API key stored');
+      toast(t('API key stored'));
     }
     return next !== null;
   })();
@@ -1817,7 +1817,7 @@ $('removeApiKey').addEventListener('click', async () => {
   const next = await run(api.setApiKey('', state?.config.tunnel.profileId));
   if (next) {
     apply(next);
-    toast('API key removed');
+    toast(t('API key removed'));
   }
 });
 

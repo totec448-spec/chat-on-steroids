@@ -276,7 +276,7 @@
             <div class="appearance-reset"><button class="btn" id="appearanceReset" type="button">Reset appearance</button></div>
                             <h2 class="settings-section-title">Preferences</h2>
                 <div class="pane">
-                  <label class="setting" for="uiLanguage"><span class="setting-text"><b>Language</b><em>Changes the app interface immediately. Your messages stay as written.</em></span><select id="uiLanguage" class="language-select" translate="no"><option value="en" lang="en">English</option><option value="es" lang="es">Español</option><option value="zh-CN" lang="zh-CN">简体中文</option><option value="zh-TW" lang="zh-TW">繁體中文</option><option value="ja" lang="ja">日本語</option><option value="tr" lang="tr">Türkçe</option><option value="fr" lang="fr">Français</option></select></label>
+                  <label class="setting" for="uiLanguage"><span class="setting-text"><b>Language</b><em>Changes the app interface immediately. Your messages stay as written.</em></span><select id="uiLanguage" class="language-select" translate="no"><option value="en" lang="en">English</option><option value="es" lang="es">Español</option><option value="zh-CN" lang="zh-CN">简体中文</option><option value="zh-TW" lang="zh-TW">繁體中文</option><option value="ja" lang="ja">日本語</option><option value="tr" lang="tr">Türkçe</option><option value="fr" lang="fr">Français</option><option value="pt-BR" lang="pt-BR">Português (Brasil)</option></select></label>
                   <div class="setting setup-profile-setting">
                     <span class="setting-text"><b id="setupProfileLabel">Setup profile</b></span>
                     <div class="setup-profile-controls">
@@ -443,6 +443,47 @@
                 <button type="button" data-language="ja" lang="ja" translate="no" title="日本語" aria-label="日本語" aria-pressed="false"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#fff" d="M0 0h60v40H0z"/><circle cx="30" cy="20" r="12" fill="#bc002d"/></svg></button>
                 <button type="button" data-language="tr" lang="tr" translate="no" title="Türkçe" aria-label="Türkçe" aria-pressed="false"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#e30a17" d="M0 0h60v40H0z"/><circle cx="25" cy="20" r="10" fill="#fff"/><circle cx="28" cy="20" r="8" fill="#e30a17"/><path fill="#fff" d="m39 13 1.6 4.8h5l-4 3 1.5 4.7-4.1-2.9-4.1 2.9 1.5-4.7-4-3h5z"/></svg></button>
                 <button type="button" data-language="fr" lang="fr" translate="no" title="Français" aria-label="Français" aria-pressed="false"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#002395" d="M0 0h20v40H0z"/><path fill="#fff" d="M20 0h20v40H20z"/><path fill="#ed2939" d="M40 0h20v40H40z"/></svg></button>
+                <button type="button" data-language="pt-BR" lang="pt-BR" translate="no" title="Português (Brasil)" aria-label="Português (Brasil)" aria-pressed="false">
+                  <svg class="language-flag" viewBox="0 0 70 49" aria-hidden="true">
+                    <path fill="#009739" d="M0 0h70v49H0z" />
+                    <path fill="#ffdf00" d="M35 3.5 66.5 24.5 35 45.5 3.5 24.5Z" />
+                    <defs>
+                      <clipPath id="language-br-globe"><circle cx="35" cy="24.5" r="11.2" /></clipPath>
+                      <path id="language-br-star" d="M0-1.5 0.42-.48 1.5-.35.69.36.88 1.42 0 .88-.88 1.42-.69.36-1.5-.35-.42-.48Z" />
+                    </defs>
+                    <circle cx="35" cy="24.5" r="11.2" fill="#002776" />
+                    <g clip-path="url(#language-br-globe)" fill="#fff">
+                      <use href="#language-br-star" transform="translate(35 13.8) scale(.9)" />
+                      <use href="#language-br-star" transform="translate(30 15.5) scale(.75)" />
+                      <use href="#language-br-star" transform="translate(34 16) scale(.8)" />
+                      <use href="#language-br-star" transform="translate(39 16) scale(.75)" />
+                      <use href="#language-br-star" transform="translate(27 18) scale(.7)" />
+                      <use href="#language-br-star" transform="translate(31 18) scale(.8)" />
+                      <use href="#language-br-star" transform="translate(36 18) scale(.75)" />
+                      <use href="#language-br-star" transform="translate(41 18) scale(.7)" />
+                      <use href="#language-br-star" transform="translate(25 22) scale(.65)" />
+                      <use href="#language-br-star" transform="translate(29 22) scale(.8)" />
+                      <use href="#language-br-star" transform="translate(34 22) scale(.75)" />
+                      <use href="#language-br-star" transform="translate(39 23) scale(.8)" />
+                      <use href="#language-br-star" transform="translate(45 24) scale(.65)" />
+                      <use href="#language-br-star" transform="translate(27 27) scale(.7)" />
+                      <use href="#language-br-star" transform="translate(32 27) scale(.8)" />
+                      <use href="#language-br-star" transform="translate(37 27) scale(.75)" />
+                      <use href="#language-br-star" transform="translate(42 28) scale(.7)" />
+                      <use href="#language-br-star" transform="translate(44 30) scale(.6)" />
+                      <use href="#language-br-star" transform="translate(40 32) scale(.75)" />
+                      <use href="#language-br-star" transform="translate(35 31) scale(.8)" />
+                      <use href="#language-br-star" transform="translate(30 31) scale(.75)" />
+                      <use href="#language-br-star" transform="translate(26 30) scale(.6)" />
+                      <use href="#language-br-star" transform="translate(33 34) scale(.65)" />
+                      <use href="#language-br-star" transform="translate(39 34) scale(.6)" />
+                      <use href="#language-br-star" transform="translate(42 31) scale(.65)" />
+                      <use href="#language-br-star" transform="translate(28 24) scale(.65)" />
+                      <use href="#language-br-star" transform="translate(37 33) scale(.6)" />
+                    </g>
+                    <path clip-path="url(#language-br-globe)" fill="#fff" d="M22.7 17.1c6.8.8 16 2.5 24.8 5.1l-.7 3.2c-8.7-2.6-17.9-4.5-24.9-5.1z" />
+                  </svg>
+                </button>
               </div>
             </div>
             <div class="lede">
