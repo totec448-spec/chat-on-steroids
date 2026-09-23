@@ -24,13 +24,13 @@ timeout, cancellation, deny-list, priority or project policy.
 Focused matcher, config, MCP, code-mode, IPC and renderer regressions were added.
 
 - `npm run typecheck` — passed.
+- `npm run verify:notices` — passed for 153 production packages, seven catalog entries and
+  730 pinned native source archives/patches.
+- Focused command policy, config, IPC, Core/code-mode and renderer suites — 416 passed with six
+  platform/optional skips; the adjacent renderer timeline suite also passed all 187 tests.
+- `npm run build` — passed for main, preload and renderer production bundles.
 - Direct Node production-matcher smoke — passed exact, wildcard, compound rejection and enabled
-  empty-list rejection.
-- Focused Vitest — blocked before collection because Vite/esbuild child-process creation returns
-  `spawn EPERM`; the alternative runner loader reaches the same sandbox restriction.
-- `npm run verify` — staged the verified bundled ripgrep, then stopped in
-  `verify-public-history.mjs` because its `git remote` child process could not start.
-- `npm ci` — blocked by lifecycle-script `spawn EPERM`; `npm install --ignore-scripts` supplied
-  JavaScript-only typecheck/test tooling and did not change the lockfile.
-
-No Electron UI/runtime smoke was claimed from this restricted environment.
+  empty-list rejection. Follow-up review added and passed regressions for PowerShell quote
+  concatenation/comma syntax and POSIX tilde expansion.
+- Isolated built-app smoke — the Settings controls rendered, enabling an empty allowlist saved
+  `{ enabled: true, rules: [] }`, and the enabled toggle remained selected after restart.
