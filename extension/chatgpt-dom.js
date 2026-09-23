@@ -112,7 +112,116 @@ var CLF_DOM = (() => {
    * That is the exact loop that produced twenty copies of the same assistant update. Clone
    * and strip our nodes before extracting page text. Unknown/fake DOMs fall back safely.
    */
-  const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot, [data-clf-user-text]';
+  const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot, .clf-connector-warning, [data-clf-user-text]';
+  const CONNECTOR_ID = /^plugin_asdk_app_[a-zA-Z0-9_-]{1,160}$/;
+  const normalizeConnectorLabel = value => String(value || '').replace(/\s+/g, ' ').trim();
+
+  /** Structured app token for this exact installed connector, never plain authored @ text. */
+  function connectorMentionSelected(connectorName, connectorId) {
+    return safe(() => {
+      if (!connectorName || !CONNECTOR_ID.test(connectorId)) return false;
+      const box = composer(), host = composerBox();
+      if (!box || !host) return false;
+      const appId = connectorId.slice('plugin_'.length);
+      const wanted = normalizeConnectorLabel(connectorName);
+      const inline = [...box.querySelectorAll(
+        '[data-app-id],[data-plugin-id],[data-mention-id],[data-testid*="mention" i],[contenteditable="false"]'
+      )];
+      const external = [...host.querySelectorAll(
+        '[data-app-id],[data-plugin-id],[data-mention-id],[data-testid*="mention" i]'
+      )].filter(node => !box.contains(node));
+      return [...new Set([...inline, ...external])].some(node => {
+        if (node === box || node.closest(OWN_SURFACES)) return false;
+        const label = normalizeConnectorLabel(node.textContent).replace(/^@\s*/, '');
+        if (label !== wanted) return false;
+        const attrs = [...node.attributes].map(attribute => `${attribute.name}=${attribute.value}`).join(' ');
+        const exactId = attrs.includes(connectorId) || attrs.includes(appId);
+        const tokenShape = box.contains(node) && (node.getAttribute('contenteditable') === 'false' ||
+          node.hasAttribute('data-mention-id') || /mention/i.test(node.getAttribute('data-testid') || ''));
+        return exactId || tokenShape;
+      });
+    }, false);
+  }
+
+  /** Exact visible native @-mention suggestion for one installed connector. */
+  function connectorMentionOption(connectorName, connectorId) {
+    return safe(() => {
+      if (!connectorName || !CONNECTOR_ID.test(connectorId)) return null;
+      const appId = connectorId.slice('plugin_'.length);
+      const wanted = normalizeConnectorLabel(connectorName);
+      const candidates = [];
+      const roots = [...document.querySelectorAll(
+        '[role="listbox"],[role="menu"],[data-radix-popper-content-wrapper],[role="dialog"]'
+      )].filter(root => !root.closest(OWN_SURFACES) && root.getClientRects().length > 0);
+      for (const root of roots) {
+        for (const node of root.querySelectorAll('[role="option"],[role="menuitem"],button,[role="button"]')) {
+          if (!renderedComposerNode(node)) continue;
+          const label = normalizeConnectorLabel(node.textContent).replace(/^@\s*/, '');
+          if (label !== wanted && !label.startsWith(`${wanted} `)) continue;
+          const attrs = [...node.attributes].map(attribute => `${attribute.name}=${attribute.value}`).join(' ');
+          candidates.push({ node, label, exactId: attrs.includes(connectorId) || attrs.includes(appId) });
+        }
+      }
+      const exact = candidates.filter(candidate => candidate.exactId);
+      if (exact.length === 1) return exact[0].node;
+      const named = candidates.filter(candidate => candidate.label === wanted);
+      return named.length === 1 ? named[0].node : null;
+    }, null);
+  }
+
+  function waitForConnector(read, timeoutMs = 2500) {
+    return new Promise(resolve => {
+      let done = false;
+      const finish = value => { if (done) return; done = true; observer.disconnect(); clearTimeout(timer); resolve(value); };
+      const check = () => {
+        let value = null;
+        try { value = read(); } catch { value = null; }
+        if (value) finish(value);
+      };
+      const observer = new MutationObserver(check);
+      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      const timer = setTimeout(() => finish(null), Math.max(1, Math.min(5000, timeoutMs)));
+      check();
+    });
+  }
+
+  /** Select through ChatGPT's native @-mention UI and prove the resulting structured token. */
+  async function selectConnectorMention(connectorName, connectorId, stillCurrent = () => true) {
+    if (!connectorName || !CONNECTOR_ID.test(connectorId) || !stillCurrent()) return false;
+    if (connectorMentionSelected(connectorName, connectorId)) return true;
+    const box = composer();
+    if (!box?.isConnected || !composerWritable() || generating() || stopButton()) return false;
+    const before = typeof box.innerText === 'string' ? box.innerText : box.textContent || '';
+    const selection = document.getSelection();
+    if (!selection) return false;
+    const rollback = () => {
+      if (composer() !== box || !box.isConnected) return;
+      for (let count = 0; count < 2; count++) {
+        const now = typeof box.innerText === 'string' ? box.innerText : box.textContent || '';
+        if (normalizeConnectorLabel(now) === normalizeConnectorLabel(before)) break;
+        try { if (!document.execCommand('undo', false)) break; } catch { break; }
+      }
+    };
+    try {
+      box.focus();
+      selection.selectAllChildren(box);
+      selection.collapseToEnd();
+      if (!stillCurrent() || composer() !== box || document.activeElement !== box) return false;
+      const prefix = before && !/\s$/.test(before) ? ' ' : '';
+      if (!document.execCommand('insertText', false, `${prefix}@${connectorName}`)) return false;
+      if (!stillCurrent() || composer() !== box) { rollback(); return false; }
+      const option = await waitForConnector(() => connectorMentionOption(connectorName, connectorId));
+      if (!option || !stillCurrent() || composer() !== box) { rollback(); return false; }
+      option.click();
+      const selected = await waitForConnector(() => connectorMentionSelected(connectorName, connectorId) ? true : null);
+      if (selected && stillCurrent() && composer() === box) return true;
+      rollback();
+      return false;
+    } catch {
+      rollback();
+      return false;
+    }
+  }
 
   /**
    * Removes this extension's own rendered surfaces from a clone, in place.
@@ -2535,6 +2644,9 @@ var CLF_DOM = (() => {
     turnIdOf,
     messageIdOf,
     userPromptText,
+    connectorMentionSelected,
+    connectorMentionOption,
+    selectConnectorMention,
     userMessageReaction,
     presentUserPrompts,
     composerVisible,

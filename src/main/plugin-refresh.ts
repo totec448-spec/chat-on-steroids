@@ -11,8 +11,14 @@ const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
 const LEGACY_PLUGIN_MAX_TOOLS = 64;
 const rowSchema = z.object({ surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), versionId: z.string().max(200).optional() });
 type Row = z.infer<typeof rowSchema>;
+export interface PluginConnectorPresence {
+  connectorName: string;
+  connectorId: string;
+}
 const publications = new Map<PluginSurface, PluginPublication>();
 const settling = new Map<PluginSurface, { schemaId: string; readyAt: number; timer?: ReturnType<typeof setTimeout> }>();
+let corePresenceCache: PluginConnectorPresence | null | undefined;
+const processRearmed = new Set<PluginSurface>();
 export const PLUGIN_REFRESH_DEBOUNCE_MS = 20_000;
 let chain: Promise<unknown> = Promise.resolve();
 function serial<T>(work: () => Promise<T>): Promise<T> { const result = chain.then(work, work); chain = result.catch(() => undefined); return result; }
@@ -74,6 +80,7 @@ export function publishPluginSurface(surface: PluginSurface, connectorName: stri
   const changed = previous?.schemaId !== publication.schemaId;
   const restored = !publications.has(surface);
   publications.set(surface, publication);
+  if (surface === 'core') corePresenceCache = undefined;
   if (changed) {
     if (previous?.timer) clearTimeout(previous.timer);
     // Initial enrollment is immediate. Changes to an existing declaration wait for
@@ -95,8 +102,23 @@ export function publishPluginSurface(surface: PluginSurface, connectorName: stri
     wakeBrowserWork();
   }
 }
-export function unpublishPluginSurface(surface: PluginSurface): void { publications.delete(surface); }
+export function unpublishPluginSurface(surface: PluginSurface): void { publications.delete(surface); if (surface === 'core') corePresenceCache = undefined; }
 export function pluginRefreshPublications(): PluginPublication[] { return structuredClone([...publications.values()]); }
+
+/** Exact installed Core identity already proven by ChatGPT's plugin settings page. */
+export function coreConnectorPresence(): Promise<PluginConnectorPresence | null> {
+  if (corePresenceCache !== undefined) return Promise.resolve(structuredClone(corePresenceCache));
+  return serial(async () => {
+    if (corePresenceCache !== undefined) return structuredClone(corePresenceCache);
+    const current = await rows();
+    const row = current.find(entry => entry.surface === 'core');
+    const publication = publications.get('core');
+    corePresenceCache = row?.appId && publication
+      ? { connectorName: publication.connectorName, connectorId: `plugin_${row.appId}` }
+      : null;
+    return structuredClone(corePresenceCache);
+  });
+}
 /** One fresh browser attempt after an explicit Restart, only before any Refresh claim. */
 export function rearmPluginRefresh(surface: PluginSurface): Promise<boolean> {
   return serial(async () => {
@@ -118,20 +140,36 @@ export function pendingPluginRefreshes(): Promise<PluginRefreshRequest[]> {
     let changed = false;
     for (const publication of publications.values()) {
       const found = current.find(row => row.surface === publication.surface);
-      if (found?.schemaId === publication.schemaId) continue;
+      if (found?.schemaId === publication.schemaId) {
+        // A missing helper tab is intentionally not reopened on every maintenance poll.
+        // After the app itself restarts, however, a stale chrome.storage.session owner from
+        // the previous runtime must not strand first-time enrollment forever. Give each
+        // still-unenrolled surface one fresh request id per app process. If the user closes
+        // that new helper, the id stays stable for the rest of this process and the browser
+        // suppression continues to work as before.
+        if (!processRearmed.has(publication.surface) && found.appId === null && !found.attempted && !found.manual && found.completedSchemaId !== found.schemaId) {
+          found.id = randomUUID();
+          delete found.error;
+          changed = true;
+        }
+        processRearmed.add(publication.surface);
+        continue;
+      }
       const next: Row = { surface: publication.surface, schemaId: publication.schemaId, id: randomUUID(), appId: found?.appId ?? null, completedSchemaId: found?.completedSchemaId ?? null, attempted: false, manual: false };
       if (found) current[current.indexOf(found)] = next; else current.push(next);
+      processRearmed.add(publication.surface);
       changed = true;
     }
     if (changed) {
       await writeDurableNow('plugin-refresh', current);
       logInfo(`plugin refresh pending observed ${current.filter(row => !row.manual && row.completedSchemaId !== row.schemaId).map(row => `surface=${row.surface} schema=${row.schemaId.slice(0, 12)} dueInMs=${Math.max(0, (settling.get(row.surface)?.readyAt ?? 0) - Date.now())}`).join(' ')}`);
     }
+    const priority: Record<PluginSurface, number> = { core: 0, desktop: 1, plugins: 2 };
     return current.flatMap(row => {
       const publication = publications.get(row.surface);
       return publication && (settling.get(row.surface)?.readyAt ?? 0) <= Date.now() && publication.schemaId === row.schemaId && !row.attempted && !row.manual && row.completedSchemaId !== row.schemaId
         ? [{ ...structuredClone(publication), id: row.id, appId: row.appId }] : [];
-    });
+    }).sort((a, b) => priority[a.surface] - priority[b.surface]);
   });
 }
 type Identity = { id: string; appId: string };
@@ -152,6 +190,7 @@ export function claimPluginRefresh(input: Identity & { connectorName: string; to
     const isCurrent = matches(input.tools, publication.tools, row.surface);
     if (input.alreadyCurrent === true ? !isCurrent : isCurrent) return false;
     row.appId = input.appId; row.attempted = true;
+    if (row.surface === 'core') corePresenceCache = undefined;
     delete row.error;
     // Enrollment/migration may find the installed declaration already current. Record
     // that observation without clicking Refresh or manufacturing a new plugin version.
@@ -175,6 +214,7 @@ export function requireManualPluginRefresh(input: Identity & { connectorName: st
     if (row.appId ? row.appId !== input.appId : input.connectorName !== publication.connectorName || !enrollable(input.tools, publication)) return false;
     if (current.some(other => other !== row && other.appId === input.appId) || matches(input.tools, publication.tools, row.surface)) return false;
     row.appId = input.appId;
+    if (row.surface === 'core') corePresenceCache = undefined;
     row.manual = true;
     row.error = input.error.slice(0, 200);
     await writeDurableNow('plugin-refresh', current);
@@ -201,4 +241,4 @@ export function failPluginRefresh(input: { id: string; error: string }): Promise
     row.error = input.error.slice(0, 200); await writeDurableNow('plugin-refresh', current); return true;
   });
 }
-export function resetPluginRefreshForTests(): void { for (const row of settling.values()) if (row.timer) clearTimeout(row.timer); settling.clear(); publications.clear(); chain = Promise.resolve(); }
+export function resetPluginRefreshForTests(): void { for (const row of settling.values()) if (row.timer) clearTimeout(row.timer); settling.clear(); publications.clear(); processRearmed.clear(); corePresenceCache = undefined; chain = Promise.resolve(); }

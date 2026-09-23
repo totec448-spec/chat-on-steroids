@@ -3,6 +3,90 @@ import { JSDOM } from 'jsdom';
 import { expect, it } from 'vitest';
 import { prependUserPrompt, userPromptText } from '../src/shared/user-prompt.js';
 
+it('recognizes only structured connector tokens, never plain authored @ text', () => {
+  const page = new JSDOM('<form><div id="prompt-textarea" contenteditable="true"></div><div id="chips"></div></form>', { url: 'https://chatgpt.com/c/example', runScripts: 'outside-only', pretendToBeVisual: true });
+  try {
+    page.window.eval(readFileSync('extension/chatgpt-dom.js', 'utf8'));
+    const api = (page.window as any).CLF_DOM;
+    const box = page.window.document.getElementById('prompt-textarea')!;
+    const chips = page.window.document.getElementById('chips')!;
+    Object.defineProperty(box, 'getClientRects', { value: () => [{ width: 400, height: 60 }] });
+    box.textContent = '@Chat On Steroids Core please continue';
+    expect(api.connectorMentionSelected('Chat On Steroids Core', 'plugin_asdk_app_example')).toBe(false);
+
+    const chip = page.window.document.createElement('span');
+    chip.setAttribute('contenteditable', 'false');
+    chip.setAttribute('data-app-id', 'asdk_app_example');
+    chip.textContent = 'Chat On Steroids Core';
+    chips.append(chip);
+    expect(api.connectorMentionSelected('Chat On Steroids Core', 'plugin_asdk_app_example')).toBe(true);
+    expect(api.connectorMentionSelected('Chat On Steroids Plugins', 'plugin_asdk_app_example')).toBe(false);
+  } finally { page.window.close(); }
+});
+
+it('requires an unambiguous native connector suggestion and prefers exact app id evidence', () => {
+  const page = new JSDOM('<form><div id="prompt-textarea" contenteditable="true"></div></form><div role="listbox" id="menu"></div>', { url: 'https://chatgpt.com/c/example', runScripts: 'outside-only', pretendToBeVisual: true });
+  try {
+    page.window.eval(readFileSync('extension/chatgpt-dom.js', 'utf8'));
+    const api = (page.window as any).CLF_DOM;
+    const box = page.window.document.getElementById('prompt-textarea')!;
+    const menu = page.window.document.getElementById('menu')!;
+    Object.defineProperty(box, 'getClientRects', { value: () => [{ width: 400, height: 60 }] });
+    Object.defineProperty(menu, 'getClientRects', { value: () => [{ width: 300, height: 200 }] });
+
+    const named = page.window.document.createElement('button');
+    named.textContent = 'Chat On Steroids Core';
+    Object.defineProperty(named, 'getClientRects', { value: () => [{ width: 200, height: 30 }] });
+    menu.append(named);
+    expect(api.connectorMentionOption('Chat On Steroids Core', 'plugin_asdk_app_example')).toBe(named);
+
+    const duplicate = named.cloneNode(true) as HTMLElement;
+    Object.defineProperty(duplicate, 'getClientRects', { value: () => [{ width: 200, height: 30 }] });
+    menu.append(duplicate);
+    expect(api.connectorMentionOption('Chat On Steroids Core', 'plugin_asdk_app_example')).toBeNull();
+
+    duplicate.setAttribute('data-app-id', 'asdk_app_example');
+    expect(api.connectorMentionOption('Chat On Steroids Core', 'plugin_asdk_app_example')).toBe(duplicate);
+  } finally { page.window.close(); }
+});
+
+it('uses the native mention UI and succeeds only after a structured token appears', async () => {
+  const page = new JSDOM('<form><div id="prompt-textarea" contenteditable="true">continue task</div></form><div role="listbox" id="menu"></div>', { url: 'https://chatgpt.com/c/example', runScripts: 'outside-only', pretendToBeVisual: true });
+  try {
+    const { document } = page.window;
+    const box = document.getElementById('prompt-textarea')!;
+    const menu = document.getElementById('menu')!;
+    Object.defineProperty(box, 'getClientRects', { value: () => [{ width: 400, height: 60 }] });
+    Object.defineProperty(menu, 'getClientRects', { value: () => [{ width: 300, height: 200 }] });
+    (document as any).execCommand = (command: string, _ui?: boolean, value?: string) => {
+      if (command === 'insertText') {
+        box.textContent = (box.textContent || '') + (value || '');
+        const option = document.createElement('button');
+        option.textContent = 'Chat On Steroids Core';
+        option.setAttribute('data-app-id', 'asdk_app_example');
+        Object.defineProperty(option, 'getClientRects', { value: () => [{ width: 200, height: 30 }] });
+        option.addEventListener('click', () => {
+          const chip = document.createElement('span');
+          chip.textContent = 'Chat On Steroids Core';
+          chip.setAttribute('contenteditable', 'false');
+          chip.setAttribute('data-app-id', 'asdk_app_example');
+          box.append(chip);
+          menu.replaceChildren();
+        });
+        menu.replaceChildren(option);
+        return true;
+      }
+      if (command === 'undo') return true;
+      return false;
+    };
+    page.window.eval(readFileSync('extension/chatgpt-dom.js', 'utf8'));
+    const api = (page.window as any).CLF_DOM;
+    box.focus();
+    expect(await api.selectConnectorMention('Chat On Steroids Core', 'plugin_asdk_app_example', () => true)).toBe(true);
+    expect(api.connectorMentionSelected('Chat On Steroids Core', 'plugin_asdk_app_example')).toBe(true);
+  } finally { page.window.close(); }
+});
+
 it('preserves the entire Unicode prompt and literal boundary-like user text across both readers', () => {
   const page = new JSDOM('', { runScripts: 'outside-only' });
   try {
