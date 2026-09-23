@@ -734,11 +734,11 @@ function paintSessions(): void {
               if (images) imageDrafts.set(draftKey(), images);
               else imageDrafts.delete(draftKey());
               imageDrafts.delete(oldKey);
-              $<HTMLTextAreaElement>('chatInput').placeholder = 'Ask anything…';
+              $<HTMLTextAreaElement>('chatInput').placeholder = t('Ask anything…');
             } else selectedProjectId = null;
           }
           paintSessions(); void refreshInputQueue();
-          toast('Project removed; conversations kept');
+          toast(t('Project removed; conversations kept'));
         } finally { remove.disabled = false; }
       });
       heading.append(remove);
@@ -3154,44 +3154,44 @@ function wireGoal(save: () => Promise<void>): void {
   $('goalPromptEdit').addEventListener('click', () => {
     const panel = $('goalPromptPanel');
     panel.hidden = !panel.hidden;
-    $('goalPromptEdit').textContent = panel.hidden ? 'Edit prompt' : 'Close prompt';
+    $('goalPromptEdit').textContent = t(panel.hidden ? 'Edit prompt' : 'Close prompt');
     if (!panel.hidden) $<HTMLTextAreaElement>('goalPrompt').focus();
   });
   $('goalPromptReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('goalPrompt').value = DEFAULT_GOAL_SYSTEM_PROMPT;
     await save();
-    toast('Goal prompt (no task) restored to default');
+    toast(t('Goal prompt (no task) restored to default'));
   });
   $<HTMLTextAreaElement>('goalObjectivePrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalObjectivePromptEdit').addEventListener('click', () => {
     const panel = $('goalObjectivePromptPanel');
     panel.hidden = !panel.hidden;
-    $('goalObjectivePromptEdit').textContent = panel.hidden ? 'Edit prompt' : 'Close prompt';
+    $('goalObjectivePromptEdit').textContent = t(panel.hidden ? 'Edit prompt' : 'Close prompt');
     if (!panel.hidden) $<HTMLTextAreaElement>('goalObjectivePrompt').focus();
   });
   $('goalObjectivePromptReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('goalObjectivePrompt').value = DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT;
     await save();
-    toast('Goal prompt (with a task) restored to default');
+    toast(t('Goal prompt (with a task) restored to default'));
   });
   $<HTMLTextAreaElement>('goalLoopPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalLoopPromptEdit').addEventListener('click', () => {
     const panel = $('goalLoopPromptPanel');
     panel.hidden = !panel.hidden;
-    $('goalLoopPromptEdit').textContent = panel.hidden ? 'Edit prompt' : 'Close prompt';
+    $('goalLoopPromptEdit').textContent = t(panel.hidden ? 'Edit prompt' : 'Close prompt');
     if (!panel.hidden) $<HTMLTextAreaElement>('goalLoopPrompt').focus();
   });
   $('goalLoopPromptReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('goalLoopPrompt').value = DEFAULT_GOAL_LOOP_SYSTEM_PROMPT;
     await save();
-    toast('Loop prompt restored to default');
+    toast(t('Loop prompt restored to default'));
   });
   // The catalogue is fetched on the first press and kept afterwards: the picker closing is
   // not a reason to spend another round trip on a list that changes weekly.
   $('goalPick').addEventListener('click', () => {
     const panel = $('goalModels');
     panel.hidden = !panel.hidden;
-    $('goalPick').textContent = panel.hidden ? 'Select model' : 'Close';
+    $('goalPick').textContent = t(panel.hidden ? 'Select model' : 'Close');
     if (!panel.hidden && goalModels.length === 0) void loadGoalModels(true);
   });
   $('goalMore').addEventListener('click', () => void loadGoalModels(false));
@@ -3226,7 +3226,7 @@ function wireGoal(save: () => Promise<void>): void {
       // Clear only the exact value that successfully crossed the secret-store boundary.
       if (input.value === submitted) input.value = '';
       applyGoal(next);
-      toast('OpenRouter key stored');
+      toast(t('OpenRouter key stored'));
     }
   });
   $('goalKeyRemove').addEventListener('click', async () => {
@@ -3234,7 +3234,7 @@ function wireGoal(save: () => Promise<void>): void {
     if (next) {
       invalidateGoalModels();
       applyGoal(next);
-      toast('OpenRouter key removed');
+      toast(t('OpenRouter key removed'));
     }
   });
   // Same blur-to-save discipline as the OpenRouter key above. Empty submits nothing:
@@ -3248,14 +3248,14 @@ function wireGoal(save: () => Promise<void>): void {
     if (next) {
       if (input.value === submitted) input.value = '';
       applyGoal(next);
-      toast('Custom provider key stored');
+      toast(t('Custom provider key stored'));
     }
   });
   $('goalCustomKeyRemove').addEventListener('click', async () => {
     const next = await run(api.setCustomProviderKey(''));
     if (next) {
       applyGoal(next);
-      toast('Custom provider key removed');
+      toast(t('Custom provider key removed'));
     }
   });
 }
@@ -4047,7 +4047,7 @@ export function initChat(next: Deps): void {
         const draft = objective.value, mode = $<HTMLSelectElement>('sessionObjectiveMode').value as 'goal' | 'loop';
         if (!draft.trim()) return;
         const settings = confirmedComposerModel();
-        if (!settings) { toast('Reload model choices and select an available model and thinking effort before sending.'); return; }
+        if (!settings) { toast(t('Reload model choices and select an available model and thinking effort before sending.')); return; }
         const selection = selectionGeneration, intent = goalIntentGeneration, requestId = crypto.randomUUID();
         const projectId = selectedProjectId;
         const { model, reasoningEffort } = settings;
@@ -4172,7 +4172,7 @@ export function initChat(next: Deps): void {
     if (!files.length) return;
     event.preventDefault();
     const owner = composerDraftOwner();
-    if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast('Attach up to 20 files per message'); return; }
+    if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast(t('Attach up to 20 files per message')); return; }
     appendImages(owner, await run(api.dropFiles(files)));
   });
   window.addEventListener('dragover', event => {
@@ -4184,7 +4184,7 @@ export function initChat(next: Deps): void {
     event.preventDefault();
     const files = Array.from(event.dataTransfer.files), owner = composerDraftOwner();
     if (!files.length) return;
-    if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast('Attach up to 20 files per message'); return; }
+    if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast(t('Attach up to 20 files per message')); return; }
     appendImages(owner, await run(api.dropFiles(files)));
   });
   api.onWriteSession?.(id => { selectSession(id); $<HTMLTextAreaElement>('chatInput').focus(); });
@@ -4298,14 +4298,14 @@ export function initChat(next: Deps): void {
   $('copyHandoff').addEventListener('click', async () => {
     if (!handoff) return;
     const copied = await run(api.writeClipboard(handoff.text));
-    if (copied) toast('Handoff copied');
+    if (copied) toast(t('Handoff copied'));
   });
 
   $('swarmReset').addEventListener('click', async () => {
     const state = await run(api.resetSwarm());
     if (state) {
       paintSwarm(state);
-      toast('Swarm cleared');
+      toast(t('Swarm cleared'));
     }
   });
 
@@ -4321,9 +4321,9 @@ export function initChat(next: Deps): void {
     paintSwarm(outcome.swarm);
     toast(
       outcome.cleared === 'run'
-        ? 'Run cleared — every worker ended'
+        ? t('Run cleared — every worker ended')
         : outcome.cleared === 'worker'
-          ? `${id} cleared — its slot is free`
+          ? t('{0} cleared — its slot is free', [id])
           : outcome.reason
     );
   });
@@ -4336,11 +4336,11 @@ export function initChat(next: Deps): void {
 
   $('bridgeUnpair').addEventListener('click', async () => {
     const state = await run(api.unpairExtension());
-    if (state) toast('Browser disconnected');
+    if (state) toast(t('Browser disconnected'));
   });
   $('bridgeFolder').addEventListener('click', async () => {
     const dir = await run(api.openExtensionFolder());
-    if (dir) toast('Extension folder opened');
+    if (dir) toast(t('Extension folder opened'));
   });
 
   api.onSessionChanged(scheduleReload);
