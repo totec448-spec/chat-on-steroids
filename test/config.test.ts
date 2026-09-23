@@ -43,35 +43,42 @@ describe('browser bridge port config', () => {
 });
 
 describe('settings migration', () => {
-  it('defaults command allowlist enforcement off for fresh and legacy configs and round-trips rules', async () => {
-    expect(defaultConfig().commandAllowlist).toEqual({ enabled: false, rules: [] });
+  it('defaults command policy enforcement off in allow mode and round-trips both modes', async () => {
+    expect(defaultConfig().commandAllowlist).toEqual({ enabled: false, mode: 'allow', rules: [] });
     const legacy = defaultConfig() as Partial<ReturnType<typeof defaultConfig>>;
     delete legacy.commandAllowlist;
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
-    expect((await loadConfig()).commandAllowlist).toEqual({ enabled: false, rules: [] });
+    expect((await loadConfig()).commandAllowlist).toEqual({ enabled: false, mode: 'allow', rules: [] });
+
+    const legacyAllowlist = { ...defaultConfig(), commandAllowlist: { enabled: true, rules: ['git status'] } };
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacyAllowlist), 'utf8');
+    expect((await loadConfig()).commandAllowlist).toEqual({ enabled: true, mode: 'allow', rules: ['git status'] });
+
+    await saveConfig({ ...defaultConfig(), commandAllowlist: { enabled: true, mode: 'allow', rules: ['git diff *'] } });
+    expect((await loadConfig()).commandAllowlist).toEqual({ enabled: true, mode: 'allow', rules: ['git diff *'] });
 
     const saved = await saveConfig({
       ...defaultConfig(),
-      commandAllowlist: { enabled: true, rules: ['git status', 'git diff *'] }
+      commandAllowlist: { enabled: true, mode: 'deny', rules: ['git status', 'git diff *'] }
     });
-    expect(saved.commandAllowlist).toEqual({ enabled: true, rules: ['git status', 'git diff *'] });
+    expect(saved.commandAllowlist).toEqual({ enabled: true, mode: 'deny', rules: ['git status', 'git diff *'] });
     await saveConfig({ ...saved, commandAllowlist: { ...saved.commandAllowlist, enabled: false } });
-    expect((await loadConfig()).commandAllowlist).toEqual({ enabled: false, rules: ['git status', 'git diff *'] });
+    expect((await loadConfig()).commandAllowlist).toEqual({ enabled: false, mode: 'deny', rules: ['git status', 'git diff *'] });
   });
 
   it('rejects invalid command allowlist updates without replacing the saved config', async () => {
-    const valid = await saveConfig({ ...defaultConfig(), commandAllowlist: { enabled: true, rules: ['git status'] } });
+    const valid = await saveConfig({ ...defaultConfig(), commandAllowlist: { enabled: true, mode: 'allow', rules: ['git status'] } });
     const before = await fs.readFile(path.join(dir, 'config.json'), 'utf8');
-    await expect(saveConfig({ ...valid, commandAllowlist: { enabled: true, rules: ['git status; whoami'] } })).rejects.toThrow(/shell syntax/i);
+    await expect(saveConfig({ ...valid, commandAllowlist: { enabled: true, mode: 'deny', rules: ['git status; whoami'] } })).rejects.toThrow(/shell syntax/i);
     expect(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).toBe(before);
   });
 
   it('recovers conservatively from a malformed active command policy', async () => {
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({
-      ...defaultConfig(), commandAllowlist: { enabled: true, rules: ['git status; whoami'] }
+      ...defaultConfig(), commandAllowlist: { enabled: true, mode: 'deny', rules: ['git status; whoami'] }
     }), 'utf8');
     const loaded = await loadConfig();
-    expect(loaded).toMatchObject({ readOnly: true, commandAllowlist: { enabled: false, rules: [] } });
+    expect(loaded).toMatchObject({ readOnly: true, commandAllowlist: { enabled: false, mode: 'allow', rules: [] } });
     expect(loaded.capabilities.command).toBe(false);
   });
 

@@ -183,7 +183,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
       create: false, edit: false, move: false, deleteFile: false, command: false,
       screen: false, control: false, clipboardRead: false, clipboardWrite: false
     },
-    commandAllowlist: { enabled: false, rules: [] as string[] },
+    commandAllowlist: { enabled: false, mode: 'allow' as const, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },

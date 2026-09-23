@@ -1197,6 +1197,7 @@ main {
 
 .command-allowlist { display: grid; gap: 8px; padding: 12px 0 2px; border-top: 1px solid var(--line); }
 .command-allowlist-toggle { padding: 0; }
+.command-policy-mode { justify-self: start; }
 .command-allowlist-label { font-size: 12px; font-weight: 650; }
 .command-allowlist textarea { width: 100%; min-height: 104px; resize: vertical; font: 12px/1.45 var(--mono); }
 .command-allowlist .hint { margin: 0; }

@@ -139,6 +139,7 @@ const settingsPatch = z.object({
   readOnly: z.boolean(),
   commandAllowlist: z.object({
     enabled: z.boolean(),
+    mode: z.enum(['allow', 'deny']).optional().default('allow'),
     rules: z.array(z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHARS).superRefine((rule, ctx) => {
       const message = validateCommandAllowlistRule(rule);
       if (message) ctx.addIssue({ code: 'custom', message });
@@ -279,6 +280,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     readOnly: pick(current.readOnly, base.readOnly, wanted.readOnly),
     commandAllowlist: {
       enabled: pick(current.commandAllowlist.enabled, base.commandAllowlist.enabled, wanted.commandAllowlist.enabled),
+      mode: pick(current.commandAllowlist.mode, base.commandAllowlist.mode, wanted.commandAllowlist.mode),
       rules: pickRules(current.commandAllowlist.rules, base.commandAllowlist.rules, wanted.commandAllowlist.rules)
     },
     tunnel: {

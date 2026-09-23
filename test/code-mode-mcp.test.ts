@@ -157,7 +157,7 @@ it('preserves a nonzero terminal exit and leaves nested correction delivery with
 
 it('enforces command allowlist rejection identically for direct and code-mode calls', async () => {
   const original = getConfig();
-  await saveConfig({ ...original, commandAllowlist: { enabled: true, rules: ['git status'] } });
+  await saveConfig({ ...original, commandAllowlist: { enabled: true, mode: 'allow', rules: ['git status'] } });
   const who = await identity();
   const launch = vi.spyOn(unifiedExecManager, 'execCommand');
   try {
