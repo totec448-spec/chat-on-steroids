@@ -2,9 +2,11 @@ export const MAX_COMMAND_ALLOWLIST_RULES = 100;
 export const MAX_COMMAND_ALLOWLIST_RULE_CHARS = 1000;
 
 export type CommandAllowlistShell = 'zsh' | 'bash' | 'powershell' | 'sh' | 'cmd';
+export type CommandPolicyMode = 'allow' | 'deny';
 
 export interface CommandAllowlistSettings {
   enabled: boolean;
+  mode: CommandPolicyMode;
   rules: string[];
 }
 
@@ -20,7 +22,7 @@ interface ParsedInvocation {
 
 export type CommandAllowlistDecision =
   | { allowed: true; args: string[][] }
-  | { allowed: false; commandIndex: number; kind: 'unsupported' | 'unmatched' | 'invalid-policy'; detail: string };
+  | { allowed: false; commandIndex: number; kind: 'unsupported' | 'unmatched' | 'denied' | 'invalid-policy'; detail: string };
 
 type ParseMode = 'command' | 'rule';
 type ParseShell = CommandAllowlistShell | 'neutral';
@@ -167,6 +169,9 @@ export function evaluateCommandAllowlist(
   shell: CommandAllowlistShell
 ): CommandAllowlistDecision {
   if (!policy.enabled) return { allowed: true, args: [] };
+  if (policy.mode !== 'allow' && policy.mode !== 'deny') {
+    return { allowed: false, commandIndex: 0, kind: 'invalid-policy', detail: 'Saved command policy mode is invalid.' };
+  }
 
   const rules: ParsedInvocation[] = [];
   for (const [index, rule] of policy.rules.entries()) {
@@ -186,8 +191,12 @@ export function evaluateCommandAllowlist(
       return { allowed: false, commandIndex: index, kind: 'unsupported', detail: error instanceof Error ? error.message : 'Unsupported shell syntax.' };
     }
     parsed.push(invocation.args);
-    if (!rules.some((rule) => ruleMatches(rule, invocation.args))) {
+    const matchedRule = rules.findIndex((rule) => ruleMatches(rule, invocation.args));
+    if (policy.mode === 'allow' && matchedRule === -1) {
       return { allowed: false, commandIndex: index, kind: 'unmatched', detail: 'No allowlist rule matched the executable and complete argument list.' };
+    }
+    if (policy.mode === 'deny' && matchedRule !== -1) {
+      return { allowed: false, commandIndex: index, kind: 'denied', detail: `Denylist rule ${matchedRule + 1} matched the executable and complete argument list.` };
     }
   }
   return { allowed: true, args: parsed };

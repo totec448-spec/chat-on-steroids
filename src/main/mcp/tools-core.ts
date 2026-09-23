@@ -712,13 +712,15 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           if (!policy.allowed) {
             const location = isBatch ? ` in command ${policy.commandIndex + 1}` : '';
             const reason = policy.kind === 'unmatched'
-              ? 'the command did not match any saved rule'
+              ? 'the command did not match any allow rule'
+              : policy.kind === 'denied'
+                ? 'the command matched a deny rule'
               : policy.kind === 'invalid-policy'
                 ? 'the saved policy is invalid'
                 : 'the command uses unsupported or ambiguous shell syntax';
             return fail(
               `COMMAND_NOT_ALLOWED${location}: ${reason}. ${policy.detail} No command was run. ` +
-              'Change the command allowlist in Settings if this launch should be permitted.'
+              'Change the command policy in Settings if this launch should be permitted.'
             );
           }
           // Does only what the shell itself would have done — today, expanding a bare filename
@@ -768,7 +770,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             if (changed !== -1) {
               return fail(
                 `COMMAND_NOT_ALLOWED${isBatch ? ` in command ${changed + 1}` : ''}: command normalization changed the authorized argument list. ` +
-                'No command was run. Change the command allowlist in Settings if this launch should be permitted.'
+                'No command was run. Change the command policy in Settings if this launch should be permitted.'
               );
             }
           }

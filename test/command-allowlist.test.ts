@@ -5,8 +5,9 @@ import {
   parseCommandAllowlistText,
   validateCommandAllowlistRule
 } from '../src/shared/command-allowlist.js';
+import { normalizeShellCommand } from '../src/main/exec-hints.js';
 
-const enabled = (rules: string[]) => ({ enabled: true, rules });
+const enabled = (rules: string[], mode: 'allow' | 'deny' = 'allow') => ({ enabled: true, mode, rules });
 
 describe('command allowlist', () => {
   it('matches exact argument boundaries and rejects additions', () => {
@@ -29,6 +30,7 @@ describe('command allowlist', () => {
     expect(evaluateCommandAllowlist(enabled([rule]), ['& "C:\\Program Files\\Git\\bin\\git.exe" status'], 'powershell').allowed).toBe(true);
     expect(evaluateCommandAllowlist(enabled([rule]), ['git status'], 'powershell').allowed).toBe(false);
     expect(evaluateCommandAllowlist(enabled(['tool "argument with spaces"']), ['tool "argument with spaces"'], 'bash').allowed).toBe(true);
+    expect(evaluateCommandAllowlist(enabled(['git diff *']), ['git diff -- "some file.txt"'], 'powershell').allowed).toBe(true);
   });
 
   it.each([
@@ -63,7 +65,7 @@ describe('command allowlist', () => {
 
   it('fails closed for an enabled empty or malformed policy but bypasses a disabled policy', () => {
     expect(evaluateCommandAllowlist(enabled([]), ['git status'], 'powershell')).toMatchObject({ allowed: false, kind: 'unmatched' });
-    expect(evaluateCommandAllowlist({ enabled: false, rules: [] }, ['git status; whoami'], 'powershell').allowed).toBe(true);
+    expect(evaluateCommandAllowlist({ enabled: false, mode: 'allow', rules: [] }, ['git status; whoami'], 'powershell').allowed).toBe(true);
     expect(evaluateCommandAllowlist(enabled(['git status; whoami']), ['git status'], 'powershell')).toMatchObject({ allowed: false, kind: 'invalid-policy' });
   });
 
@@ -73,11 +75,56 @@ describe('command allowlist', () => {
     });
   });
 
-  it('returns line-specific editor errors and enforces rewrite parity', () => {
+  it('denies exact and wildcard matches while allowing ordinary non-matches', () => {
+    expect(evaluateCommandAllowlist(enabled(['git status'], 'deny'), ['git status'], 'powershell')).toMatchObject({
+      allowed: false, kind: 'denied'
+    });
+    expect(evaluateCommandAllowlist(enabled(['git status'], 'deny'), ['git status --short'], 'powershell').allowed).toBe(true);
+    expect(evaluateCommandAllowlist(enabled(['dotnet *'], 'deny'), ['dotnet --list-sdks'], 'powershell')).toMatchObject({
+      allowed: false, kind: 'denied'
+    });
+    expect(evaluateCommandAllowlist(enabled(['dotnet *'], 'deny'), ['dotnet --info'], 'powershell')).toMatchObject({
+      allowed: false, kind: 'denied'
+    });
+    expect(evaluateCommandAllowlist(enabled(['dotnet *'], 'deny'), ['git status'], 'powershell').allowed).toBe(true);
+    expect(evaluateCommandAllowlist(enabled([], 'deny'), ['git status'], 'powershell').allowed).toBe(true);
+  });
+
+  it('keeps unsupported syntax and malformed policies fail-closed in denylist mode', () => {
+    for (const command of ['git status; whoami', 'git status && whoami', 'git status | more', 'git $(whoami)']) {
+      expect(evaluateCommandAllowlist(enabled([], 'deny'), [command], 'powershell'), command).toMatchObject({
+        allowed: false, kind: 'unsupported'
+      });
+    }
+    expect(evaluateCommandAllowlist(enabled(['git status; whoami'], 'deny'), ['git status'], 'powershell')).toMatchObject({
+      allowed: false, kind: 'invalid-policy'
+    });
+    expect(evaluateCommandAllowlist({ enabled: true, mode: 'other' as 'deny', rules: [] }, ['git status'], 'powershell')).toMatchObject({
+      allowed: false, kind: 'invalid-policy'
+    });
+  });
+
+  it('rejects an entire denylist batch at the matching command index', () => {
+    expect(evaluateCommandAllowlist(enabled(['git diff *'], 'deny'), ['git status', 'git diff --stat'], 'powershell')).toMatchObject({
+      allowed: false, commandIndex: 1, kind: 'denied'
+    });
+  });
+
+  it('returns line-specific editor errors and enforces rewrite parity in both modes', () => {
     expect(parseCommandAllowlistText('git status\ngit diff *\ngit status; whoami').issues).toEqual([
       expect.objectContaining({ line: 3 })
     ]);
     expect(commandHasSameArguments(['git', 'status'], 'git status', 'powershell')).toBe(true);
     expect(commandHasSameArguments(['git', 'status'], 'git status --short', 'powershell')).toBe(false);
+    expect(evaluateCommandAllowlist(enabled(['git status']), ['git status'], 'powershell')).toEqual({
+      allowed: true, args: [['git', 'status']]
+    });
+    expect(evaluateCommandAllowlist(enabled(['dotnet *'], 'deny'), ['git status'], 'powershell')).toEqual({
+      allowed: true, args: [['git', 'status']]
+    });
+
+    const normalized = normalizeShellCommand('rg needle *.txt', 'powershell', () => ['one.txt', 'two.txt']).cmd;
+    expect(normalized).toBe("rg needle 'one.txt' 'two.txt'");
+    expect(commandHasSameArguments(['rg', 'needle', '*.txt'], normalized, 'powershell')).toBe(false);
   });
 });
