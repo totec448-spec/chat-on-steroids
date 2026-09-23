@@ -260,6 +260,26 @@ describe('settings migration', () => {
     expect(loaded.compaction.auto).toBe(true);
     expect(loaded.compaction.autoTokens).toBe(loaded.sessions.advisoryTokens);
     expect(loaded.compaction.autoTokens).toBe(400_000);
+    expect(loaded.compaction.handoffPrompt).toMatch(/2,000-6,000 tokens/i);
+  });
+
+  it('defaults, validates and preserves the editable handoff prompt', async () => {
+    const config = defaultConfig();
+    const older = structuredClone(config) as Record<string, any>;
+    delete older.compaction.handoffPrompt;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(older), 'utf8');
+    expect((await loadConfig()).compaction.handoffPrompt).toBe(config.compaction.handoffPrompt);
+
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, compaction: { ...config.compaction, handoffPrompt: '   ' } }),
+      'utf8'
+    );
+    expect((await loadConfig()).compaction.handoffPrompt).toBe(config.compaction.handoffPrompt);
+
+    const custom = 'Preserve the exact next action and unresolved evidence. Keep the rest compact.';
+    await saveConfig({ ...config, compaction: { ...config.compaction, handoffPrompt: custom } });
+    expect((await loadConfig()).compaction.handoffPrompt).toBe(custom);
   });
 
   /**

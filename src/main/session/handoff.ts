@@ -100,8 +100,8 @@ export function resumeBootstrapMatches(recorded: string, summary: string): boole
 /**
  * The shortest a brief may be before it is refused, for any session at all.
  *
- * Far below what the brief rules ask for — they target 10,000-30,000 tokens — because this
- * is not a quality bar. It is the line under which a document cannot be a handoff of
+ * Far below what the brief rules normally ask for — they prefer a dense multi-thousand-token
+ * operational summary for substantial work — because this is not a quality bar. It is the line under which a document cannot be a handoff of
  * anything, whatever the session held.
  */
 const MIN_BRIEF_CHARS = 200;

@@ -430,6 +430,8 @@ describe('the settings sheet', () => {
     expect(order.indexOf('goalReasoning')).toBeLessThan(order.indexOf('goalPromptEdit'));
     // Closed until asked for: the catalogue is several hundred long and costs a round trip.
     expect(document.getElementById('goalModels')!.hasAttribute('hidden')).toBe(true);
+    expect(document.getElementById('handoffPromptPanel')!.hasAttribute('hidden')).toBe(true);
+    expect(document.getElementById('handoffPrompt')?.tagName).toBe('TEXTAREA');
     expect(document.getElementById('goalPromptPanel')!.hasAttribute('hidden')).toBe(true);
     expect(document.getElementById('goalPrompt')?.tagName).toBe('TEXTAREA');
   });

@@ -2239,7 +2239,12 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    known pre-dispatch failure, but never click again merely because the receipt is missing.
 3. **Capture exact provenance.** Match the authored handoff request and assistant brief by
    token/message/turn identity. Enforce minimum and bounded brief content; do not capture the
-   latest convenient assistant text. Preparing a brief does not yet publish a rebind.
+   latest convenient assistant text. The user may edit the **content instructions** used to
+   write that brief; continuation markers, send/provenance framing, tool-detail policy and the
+   requirement that the compaction reply contain only the brief remain code-owned invariants.
+   The shipped content prompt prefers a dense roughly 2k-6k-token operational handoff for a
+   substantial session, shorter when less state exists and longer only when correctness needs
+   it. Preparing a brief does not yet publish a rebind.
 4. **Elect B and commit.** Destination creation/claim has one opening owner. B must present
    the exact continuation context; early B observations are gated to prevent a shadow local
    session. Persist the committing decision, rebind S's metadata, then publish projections.
@@ -2792,8 +2797,9 @@ row replacement; ordinary language tests preserve controls, drafts and authored 
 Authored prose uses automatic text direction; shell/code remain LTR with logical layout edges.
 Theme and layout preferences do not change backend authority.
 Settings places ChatGPT model defaults second and Workers & recovery third, after Continuation
-sources. Appearance has its own Settings navigation page, including the language selector and
-existing setup profiles. The connector-instructions editor
+sources. Continuation prompts include editable Handoff, Goal and Loop content instructions;
+Handoff editing cannot change Compact & Resume identity/recovery framing. Appearance has its own
+Settings navigation page, including the language selector and existing setup profiles. The connector-instructions editor
 is removed. Settings saves preserve existing stored MCP instructions for compatibility.
 Dropdowns use native customizable selects (`appearance: base-select`) with theme-matched
 top-layer pickers, wrapping option labels and native keyboard/focus semantics. Continuation timing
