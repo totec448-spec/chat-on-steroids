@@ -119,7 +119,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     );
     else lines.push('exec_command uses the host’s normal POSIX shell (zsh/bash/sh unless requested otherwise). The bundled ripgrep directory is first on PATH.');
     if (config.commandAllowlist.enabled) lines.push(
-      'Command allowlist enforcement is enabled. COMMAND_NOT_ALLOWED is the user\'s launch policy, not Read-only mode or an internal failure. Do not evade it through another tool, alternate spelling or apply_patch interception; ask the user to change Settings. Allowed programs remain trusted after launch, including stdin, child processes and project code.'
+      `Command launch policy is enabled in ${config.commandAllowlist.mode === 'deny' ? 'denylist' : 'allowlist'} mode. COMMAND_NOT_ALLOWED is the user\'s launch policy, not Read-only mode or an internal failure. Do not evade it through another tool, alternate spelling or apply_patch interception; ask the user to change Settings. Programs permitted to start remain trusted after launch, including stdin, child processes and project code.`
     );
   } else if (ctx.exposedFind ?? caps.search) {
     lines.push('find searches filenames or file contents without a shell. Narrow path and include patterns to the relevant area.');

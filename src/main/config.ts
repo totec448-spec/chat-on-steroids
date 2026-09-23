@@ -257,7 +257,7 @@ const capabilitiesSchema = z
  */
 export const MAX_MCP_INSTRUCTIONS_CHARS = 4000;
 const DEFAULT_MCP = { instructions: '' } as const;
-const DEFAULT_COMMAND_ALLOWLIST = { enabled: false, rules: [] } as const;
+const DEFAULT_COMMAND_ALLOWLIST = { enabled: false, mode: 'allow', rules: [] } as const;
 const commandAllowlistRuleSchema = z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHARS).superRefine((rule, ctx) => {
   const message = validateCommandAllowlistRule(rule);
   if (message) ctx.addIssue({ code: 'custom', message });
@@ -275,6 +275,7 @@ const configSchema = z.object({
   readOnly: z.boolean(),
   commandAllowlist: z.object({
     enabled: z.boolean(),
+    mode: z.enum(['allow', 'deny']).optional().default('allow'),
     rules: z.array(commandAllowlistRuleSchema).max(MAX_COMMAND_ALLOWLIST_RULES)
   }).optional().default({ ...DEFAULT_COMMAND_ALLOWLIST, rules: [] }),
   tunnel: z.object({
