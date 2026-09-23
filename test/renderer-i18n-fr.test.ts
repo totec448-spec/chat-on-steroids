@@ -38,7 +38,7 @@ it('restores French through both selectors and keeps drafts, focus and authored 
   const authored = document.createElement('p'); authored.textContent = 'Settings'; document.body.append(authored);
   const action = ui(document.createElement('button'), 'textContent', () => t('Remove {0}', ['<img src=x>']));
   document.body.append(action);
-  for (const locale of ['en', 'ja', 'es', 'zh-TW', 'zh-CN', 'tr', 'fr'] as const) {
+  for (const locale of ['en', 'ja', 'es', 'zh-TW', 'zh-CN', 'tr', 'pt-PT', 'fr'] as const) {
     setLanguage(locale);
     expect(document.activeElement).toBe(input);
     expect([input.selectionStart, input.selectionEnd]).toEqual([2, 9]);
