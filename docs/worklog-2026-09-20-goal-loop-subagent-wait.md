@@ -143,3 +143,13 @@ Two ambient results are recorded rather than claimed as passes: the first full-s
 `test/renderer-chat-models.test.ts` on `Intl.NumberFormat` rendering `400 000` with a space
 under the shell's non-US locale, and a second failed `test/code-mode-runtime.test.ts` on a
 message-kind assertion. Both passed in isolation and in the final full-suite run.
+
+## Keeping the map honest
+
+The shipped code changed a user-visible contract and a shipped default, so `AGENTS.md` was
+updated with the same change rather than after it: §3's checked-baseline table gained the new
+`Wait for sub-agents` row (Off, and a chat with no run or a run with no workers waits either
+way), §16 gained the section that names `waitingForSubAgents` as the one owner and lists its
+three consumers with the import-cycle reason it is not in `bridge.ts`, and §17's
+automatic-ticket paragraph gained the deferral sentence. No behaviour changed here; the
+documented contract now matches the merged code.
