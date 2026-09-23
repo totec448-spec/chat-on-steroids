@@ -351,6 +351,7 @@ async function mountChat(
       create: true, edit: true, move: true, deleteFile: true, command: true,
       screen: true, control: true, clipboardRead: true, clipboardWrite: true
     },
+    commandAllowlist: { enabled: false, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as const },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },

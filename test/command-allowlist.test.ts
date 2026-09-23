@@ -49,6 +49,18 @@ describe('command allowlist', () => {
     expect(evaluateCommandAllowlist(enabled(['tool "a|b"']), ['tool "a|b"'], 'bash').allowed).toBe(true);
   });
 
+  it('rejects shell forms whose effective arguments differ from the parsed literals', () => {
+    expect(evaluateCommandAllowlist(enabled(['Write-Output ab']), ["Write-Output 'a''b'"], 'powershell')).toMatchObject({
+      allowed: false, kind: 'unsupported'
+    });
+    expect(evaluateCommandAllowlist(enabled(['Write-Output "one,two"']), ['Write-Output one,two'], 'powershell')).toMatchObject({
+      allowed: false, kind: 'unsupported'
+    });
+    expect(evaluateCommandAllowlist(enabled(['printf "%s" "~"']), ['printf "%s" ~'], 'bash')).toMatchObject({
+      allowed: false, kind: 'unsupported'
+    });
+  });
+
   it('fails closed for an enabled empty or malformed policy but bypasses a disabled policy', () => {
     expect(evaluateCommandAllowlist(enabled([]), ['git status'], 'powershell')).toMatchObject({ allowed: false, kind: 'unmatched' });
     expect(evaluateCommandAllowlist({ enabled: false, rules: [] }, ['git status; whoami'], 'powershell').allowed).toBe(true);
