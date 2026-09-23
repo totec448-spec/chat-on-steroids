@@ -66,6 +66,7 @@ function parseInvocation(source: string, shell: ParseShell, mode: ParseMode): Pa
       if (character === '\r' || character === '\n') unsupported('Newlines are not supported.');
       if (character === '"' || character === "'") {
         if (character === "'" && shell === 'cmd') unsupported('Single quotes do not quote arguments in cmd.exe.');
+        if (hasSegment) unsupported('Quoted arguments must be wholly quoted.');
         const quote = character;
         hasSegment = true;
         index += 1;
@@ -93,6 +94,9 @@ function parseInvocation(source: string, shell: ParseShell, mode: ParseMode): Pa
           index += 1;
         }
         if (!closed) unsupported(`Unclosed ${quote === '"' ? 'double' : 'single'} quote.`);
+        if (index < source.length && source[index] !== ' ' && source[index] !== '\t') {
+          unsupported('Quoted arguments must be wholly quoted.');
+        }
         continue;
       }
 
@@ -101,9 +105,10 @@ function parseInvocation(source: string, shell: ParseShell, mode: ParseMode): Pa
       const glob = character === '*' || character === '?' || character === '[' || character === ']';
       const comment = character === '#';
       const posixEscape = character === '\\' && (shell === 'bash' || shell === 'sh' || shell === 'zsh');
+      const posixTilde = character === '~' && (shell === 'bash' || shell === 'sh' || shell === 'zsh');
       const cmdEscape = shell === 'cmd' && (character === '^' || character === '%' || character === '!');
-      const powershellSyntax = shell === 'powershell' && (character === '`' || (character === '@' && value.length === 0));
-      if (commonOperator || expansion || glob || comment || posixEscape || cmdEscape || powershellSyntax) {
+      const powershellSyntax = shell === 'powershell' && (character === ',' || character === '`' || (character === '@' && value.length === 0));
+      if (commonOperator || expansion || glob || comment || posixEscape || posixTilde || cmdEscape || powershellSyntax) {
         unsupported(`Unsupported shell syntax ${JSON.stringify(character)}.`);
       }
       hasSegment = true;
