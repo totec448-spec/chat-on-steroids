@@ -32,6 +32,7 @@ import { logInfo, logWarn } from '../logger.js';
 import { SandboxError, isAbsoluteVirtualPath, isNativeWindowsPath, resolvePath, strayVirtualPath } from '../sandbox.js';
 import { currentWorkspace } from '../workspace.js';
 import type { Capabilities, Root } from '../../shared/types.js';
+import { commandHasSameArguments, evaluateCommandAllowlist } from '../../shared/command-allowlist.js';
 import type { FileChange } from '../../shared/session.js';
 import { REASONING_EFFORTS } from '../../shared/session.js';
 import { DEFAULT_EXCLUDES, MAX_CONTENT_FILE_BYTES, globToRegExp, search, searchOneFile } from '../search.js';
@@ -704,6 +705,24 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
                 'No command was run. Omit shell to use the configured default, or provide an existing recognised shell binary.'
             );
           }
+          // One preflight owns direct calls and code-mode children. It runs before command
+          // normalization, patch interception, process-id allocation or process launch, and a
+          // batch is admitted only after every user-authored command passes.
+          const policy = evaluateCommandAllowlist(getConfig().commandAllowlist, rawCommands, shell.shellType);
+          if (!policy.allowed) {
+            const location = isBatch ? ` in command ${policy.commandIndex + 1}` : '';
+            const reason = policy.kind === 'unmatched'
+              ? 'the command did not match any allow rule'
+              : policy.kind === 'denied'
+                ? 'the command matched a deny rule'
+              : policy.kind === 'invalid-policy'
+                ? 'the saved policy is invalid'
+                : 'the command uses unsupported or ambiguous shell syntax';
+            return fail(
+              `COMMAND_NOT_ALLOWED${location}: ${reason}. ${policy.detail} No command was run. ` +
+              'Change the command policy in Settings if this launch should be permitted.'
+            );
+          }
           // Does only what the shell itself would have done — today, expanding a bare filename
           // glob PowerShell hands to a native program uninterpreted. Anything it does not
           // understand reaches the shell exactly as the model wrote it. A listing is read
@@ -723,11 +742,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           // line PowerShell can actually parse, and a line it cannot repair is left exactly
           // as written for the shell to refuse and the hint to explain.
           const commandNotes: string[] = [];
+          const normalizedCommands: string[] = [];
           const boundCommands = rawCommands.map((rawCommand, index) => {
             const repaired = repairPowerShellQuoting(rawCommand, shell.shellType);
             const normalized = normalizeShellCommand(repaired.cmd, shell.shellType, (relativeDirectory = '.') =>
               nodeFs.readdirSync(nodePath.resolve(dir.real, relativeDirectory))
             );
+            normalizedCommands.push(normalized.cmd);
             const prefix = (note: string): string => (isBatch ? `Command ${index + 1}: ${note}` : note);
             const bound = bindBundledRipgrep(
               normalized.cmd,
@@ -742,6 +763,17 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             );
             return chained.cmd;
           });
+          if (getConfig().commandAllowlist.enabled) {
+            const changed = normalizedCommands.findIndex((command, index) =>
+              !commandHasSameArguments(policy.args[index]!, command, shell.shellType)
+            );
+            if (changed !== -1) {
+              return fail(
+                `COMMAND_NOT_ALLOWED${isBatch ? ` in command ${changed + 1}` : ''}: command normalization changed the authorized argument list. ` +
+                'No command was run. Change the command policy in Settings if this launch should be permitted.'
+              );
+            }
+          }
           // Shell functions/aliases can resolve before applications on PATH. The app deliberately
           // ships ripgrep, parses rg's flags against that exact version, and puts it first on child
           // PATH, so a shadowing `rg` is not a harmless customization: it breaks the normalizer's

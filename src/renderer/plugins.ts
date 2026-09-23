@@ -102,8 +102,8 @@ function showConnection(): void {
     if (tunnel && !tunnel.value.trim()) { tunnel.focus(); throw new Error(t("Enter your Plugins tunnel ID.")); }
     if (key?.value) { const next = await run(window.api.setApiKey(key.value)); if (!next) return; key.value = ''; applyAppState(next); applyPluginsState(next); }
     if (tunnel) {
-      const { capabilities, readOnly, tunnel: previousTunnel, ui, sessions, compaction, multiAgent, goal, mcp } = appState.config;
-      const base: SettingsPatch = { capabilities, readOnly, tunnel: previousTunnel, ui, sessions, compaction, multiAgent, goal, mcp };
+      const { capabilities, readOnly, commandAllowlist, tunnel: previousTunnel, ui, sessions, compaction, multiAgent, goal, mcp } = appState.config;
+      const base: SettingsPatch = { capabilities, readOnly, commandAllowlist, tunnel: previousTunnel, ui, sessions, compaction, multiAgent, goal, mcp };
       const next = await run(window.api.saveSettings({ ...base, tunnel: { ...previousTunnel, pluginsTunnelId: tunnel.value.trim() } }, base));
       if (!next) return; applyAppState(next); applyPluginsState(next);
     }
