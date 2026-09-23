@@ -303,6 +303,12 @@ export interface MultiAgentSettings {
    * recovered, whatever this says.
    */
   recoverAgentTabs: boolean;
+  /**
+   * Hold a Goal/Loop chat's next automatic step until the workers it delegated to have
+   * stopped. Their reports land in the same chat, so deciding or sending before that reads a
+   * context that is about to change. Off by default; a chat with no workers is never held.
+   */
+  waitForSubAgents?: boolean;
 }
 
 /** The user's own additions to what each MCP connector tells the model about itself. */
