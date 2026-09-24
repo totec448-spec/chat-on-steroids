@@ -1843,6 +1843,34 @@ describe('native progress silence authority', () => {
     await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
   }
 
+  /**
+   * A rescue that was withdrawn must not stand in for the one the chat still needs.
+   *
+   * The ticket is cancelled for a good reason — the chat resumed on its own, so typing into it
+   * would be noise — but the check that keeps one ticket per turn counted the cancelled row all
+   * the same. Watched live on 2026-09-23: a rescue filed at 20:32:35, cancelled fifteen seconds
+   * later as "the source received new work", and the same turn broke again two minutes after
+   * that. The second rescue was refused on the strength of the first, and the chat sat until its
+   * owner typed into it.
+   */
+  it('files a second rescue for a turn whose first was cancelled without ever sending', async () => {
+    const source = await open('gpt-5.6-sol');
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+    const first = (await input.listInputs()).find(row => row.recovery)!;
+    expect(first.silenceBoundary?.turnId).toBe(source.turnId);
+
+    // Withdrawn because the chat carried on by itself — nothing was ever sent.
+    expect(await input.cancelInput(first.id)).toBe(true);
+    expect((await input.listInputs()).find(row => row.id === first.id)?.state).toBe('cancelled');
+
+    // The same turn breaks again. This is the rescue that used to be refused.
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true),
+      'a cancelled ticket still blocked the turn it never answered').toBe(true);
+    const live = (await input.listInputs()).filter(row => row.recovery && row.state === 'queued');
+    expect(live).toHaveLength(1);
+    expect(live[0]!.id).not.toBe(first.id);
+  });
+
   it('keeps authored queued work ahead of automatic Continue after a committed handoff', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {
