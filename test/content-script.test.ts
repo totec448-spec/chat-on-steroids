@@ -13613,31 +13613,90 @@ describe('the fresh chat the app opened', () => {
     const destination = '22222222-3333-4444-5555-666666666666';
     const text = '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nResume task';
     let sends = 0;
+    const trace: string[] = [];
+    let visible = { model: 'gpt-5-6', reasoningEffort: 'none' };
     live = await harness('https://chatgpt.com/?clf=cmd-resume-model', {
       redeem: () => redeemed,
       compact: message => ({ ok: true, data: message.destinationAttempt ? { allowed: true }
         : message.destinationDispatch ? { armed: true } : { committed: true, conversationId: destination } }),
-      ack: () => ({ ok: true }),
+      ack: () => { trace.push('ack'); return { ok: true }; },
       activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
         sessionId: sends ? 'resumed-model-session' : null, job: null, bootstrap: 'resume' } })
     }, (document, dom) => {
       document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
         sends++;
+        // The live regression: New Chat accepted the requested pair for Send, then the fresh
+        // /c route remounted the picker at the account default.
+        visible = { model: 'gpt-5-6', reasoningEffort: 'none' };
         dom.reconfigure({ url: `https://chatgpt.com/c/${destination}` });
         userTurn(document, 'verified-resume-user', text, { sent: false });
       });
     });
-    const picker = vi.fn(async () => confirmed);
+    const picker = vi.fn(async (model: string, reasoningEffort: string) => {
+      trace.push(`picker-${picker.mock.calls.length}`);
+      if (!confirmed) return false;
+      visible = picker.mock.calls.length === 1
+        ? { model, reasoningEffort }
+        : { model: 'gpt-5-6-thinking', reasoningEffort };
+      return true;
+    });
     (live.window as any).CLF_DOM.selectModelSettings = picker;
+    (live.window as any).CLF_DOM.visibleModelSelection = () => visible;
     release({ ok: true, command: { id: 'cmd-resume-model', type: 'resume', text, agent: null,
       model: 'gpt-5.6-sol', reasoningEffort: 'high' } });
     await settle(800); await live.hook.pullActivity(); await live.hook.flush();
     expect(picker).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function));
+    expect(picker).toHaveBeenCalledTimes(confirmed ? 2 : 1);
     expect(sends).toBe(confirmed ? 1 : 0);
     const selections = live.sent.filter(message => message.type === 'events').flatMap(message => message.entries)
       .filter(entry => entry.event.kind === 'model_selection');
-    expect(selections).toEqual(confirmed ? [expect.objectContaining({ conversationId: destination,
-      event: expect.objectContaining({ model: 'gpt-5.6-sol', reasoningEffort: 'high' }) })] : []);
+    if (confirmed) {
+      expect(trace.indexOf('ack')).toBeLessThan(trace.indexOf('picker-2'));
+      expect(selections.at(-1)).toEqual(expect.objectContaining({ conversationId: destination,
+        event: expect.objectContaining({ model: 'gpt-5-6-thinking', reasoningEffort: 'high' }) }));
+    } else {
+      expect(selections).toEqual([]);
+    }
+  });
+
+  it('acks an already-sent resume without inventing model evidence when destination restore fails', async () => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const destination = '22222222-3333-4444-5555-666666666666';
+    const text = '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nResume task';
+    let calls = 0;
+    const trace: string[] = [];
+    const acknowledgements: Record<string, unknown>[] = [];
+    live = await harness('https://chatgpt.com/?clf=cmd-resume-model-fallback', {
+      redeem: () => redeemed,
+      compact: message => ({ ok: true, data: message.destinationAttempt ? { allowed: true }
+        : message.destinationDispatch ? { armed: true } : { committed: true, conversationId: destination } }),
+      ack: message => { trace.push('ack'); acknowledgements.push(message); return { ok: true }; },
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
+        sessionId: 'resumed-model-session', job: null, bootstrap: 'resume' } })
+    }, (document, dom) => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        dom.reconfigure({ url: `https://chatgpt.com/c/${destination}` });
+        userTurn(document, 'resume-model-fallback-user', text, { sent: false });
+      });
+    });
+    (live.window as any).CLF_DOM.visibleModelSelection = () => ({ model: 'gpt-5-6', reasoningEffort: 'none' });
+    (live.window as any).CLF_DOM.selectModelSettings = vi.fn(async () => {
+      calls++;
+      trace.push(`picker-${calls}`);
+      return calls === 1;
+    });
+    release({ ok: true, command: { id: 'cmd-resume-model-fallback', type: 'resume', text, agent: null,
+      model: 'gpt-5.6-sol', reasoningEffort: 'high' } });
+    await settle(800); await live.hook.flush();
+
+    expect(acknowledgements).toContainEqual(expect.objectContaining({
+      id: 'cmd-resume-model-fallback', status: 'sent', conversationId: destination
+    }));
+    expect(trace.indexOf('ack')).toBeLessThan(trace.indexOf('picker-2'));
+    const selections = live.sent.filter(message => message.type === 'events').flatMap(message => message.entries)
+      .filter(entry => entry.event.kind === 'model_selection');
+    expect(selections.some(entry => entry.event.model === 'gpt-5.6-sol' && entry.event.reasoningEffort === 'high')).toBe(false);
   });
 
   it.each(['empty', 'draft', 'retargeted'])('proves an acknowledged failed opening worker is safe to retire only with an empty composer (%s)', async mode => {
@@ -14810,6 +14869,68 @@ describe('the context meter and automatic compaction', () => {
     await settle();
     expect(startedCompactions(live)).toHaveLength(1);
     expect(live.sent.filter((message) => message.type === 'focus_tab')).toHaveLength(1);
+  });
+
+  it('lets a claimed browser repair retry a responsive automatic source without reloading it', async () => {
+    let ticketCalls = 0;
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true, threshold: 200_000 }),
+        automaticTicket('not-attempted')),
+      compact: (message: Record<string, unknown>) => {
+        if (!message.ticket) return { ok: false };
+        ticketCalls++;
+        if (ticketCalls === 1) return { ok: false, error: 'temporary source preparation failure' };
+        return { ok: true, data: {
+          started: false,
+          token: 'tok-auto-repair',
+          prompt: null,
+          sourceSend: { state: 'not-attempted', messageId: null },
+          ...automaticTicket('not-attempted')
+        } };
+      }
+    });
+    live.hook.injectControl();
+    await live.hook.pullActivity();
+    await settle();
+    expect(ticketCalls).toBe(1);
+
+    expect(await live.runtimeMessage({
+      type: 'clf-resume-compaction',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    })).toEqual({ accepted: true });
+    await settle(400);
+
+    expect(ticketCalls).toBe(2);
+    expect(live.sent.filter((message) => message.type === 'focus_tab')).toHaveLength(2);
+  });
+
+  it('accepts a compaction repair poke without starting a second source attempt while one is busy', async () => {
+    let releaseTicket!: (value: unknown) => void;
+    const ticket = new Promise(resolve => { releaseTicket = resolve; });
+    let ticketCalls = 0;
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true, threshold: 200_000 }),
+        automaticTicket('not-attempted')),
+      compact: (message: Record<string, unknown>) => {
+        if (!message.ticket) return { ok: false };
+        ticketCalls++;
+        return ticket;
+      }
+    });
+    live.hook.injectControl();
+    const pulling = live.hook.pullActivity();
+    await settle();
+    expect(ticketCalls).toBe(1);
+
+    expect(await live.runtimeMessage({
+      type: 'clf-resume-compaction',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    })).toEqual({ accepted: true });
+    await settle();
+    expect(ticketCalls).toBe(1);
+
+    releaseTicket({ ok: false, error: 'temporary source preparation failure' });
+    await pulling;
   });
 
   /**
@@ -19193,6 +19314,189 @@ describe('ordinary Continue native recovery', () => {
   const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   const id = '11111111-2222-4333-8444-555555555555';
   const text = 'Continue until fully finished. Tur Tur Sahur.';
+  it.each(['idle', 'busy'] as const)('repairs a %s Continue whose fresh page-model scan cannot map the latest assistant turn', async scenario => {
+    live = await harness(`https://chatgpt.com/c/${chat}`, {
+      desktop_input: message => ({ ok: true, data: message.recoveryAction || message.authorize || message.ack || message.fail
+        ? { ok: true } : { input: { id, owner: 'input-owner', text, model: null, reasoningEffort: null,
+          recovery: { questionId: 'm-source', phase: 'ready' }, silenceBoundary: { turnId: 'source-turn' } } } })
+    });
+    const win = live.window as any;
+    const timed = win.setTimeout;
+    win.setTimeout = (fn: () => void, ms: number) => ms === 1500
+      ? globalThis.setTimeout(fn, 10) : timed(fn, ms);
+    const post = win.postMessage.bind(win);
+    let mapped = true, recoveryStarted = false;
+    let section: HTMLElement;
+    win.postMessage = (data: any, origin: string) => {
+      if (data?.source !== 'clf-fiber-ask') return post(data, origin);
+      queueMicrotask(() => {
+        if (mapped) section?.setAttribute('data-clf-fiber-turn', `${data.nonce}:0`);
+        else section?.removeAttribute('data-clf-fiber-turn');
+        win.dispatchEvent(new win.MessageEvent('message', { source: win, data: {
+          source: 'clf-fiber-reply', nonce: data.nonce, scanToken: data.nonce, v: 21, scanOk: true, rows: [],
+          turns: mapped ? [{
+            index: 0, conversationId: chat, turnId: 'native-answer', endMessageId: null,
+            calls: [], messages: [{ role: 'assistant', messageId: 'native-progress', rawMessageId: 'native-progress',
+              stable: true, rawText: 'Inspecting the task.' }]
+          }] : []
+        } }));
+      });
+    };
+    live.reply.set('repair_fiber', () => { if (recoveryStarted) mapped = true; return { ok: true }; });
+    userTurn(live.document, 'source', 'Complete the task');
+    section = assistantTurn(live.document, 'native-answer', []);
+    prose(live.document, section, 'native-progress', 'Inspecting the task.');
+    if (scenario === 'busy') startGenerating(live.document, { send: false });
+    live.hook.observe(); await settle();
+    const stop = vi.fn(() => stopGenerating(live!.document));
+    const stopButton = live.document.querySelector('[data-testid="stop-button"]');
+    if (stopButton) {
+      Object.defineProperty(stopButton, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
+      stopButton.addEventListener('click', stop);
+    }
+    const send = vi.fn(() => {
+      userTurn(live!.document, 'continued', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', send);
+    const repairsBefore = live.sent.filter(message => message.type === 'repair_fiber').length;
+    live.advance(5001);
+    mapped = false;
+    recoveryStarted = true;
+    await live.runtimeMessage({ type: 'clf-desktop-input', id, conversationId: chat, silenceTurnId: 'source-turn',
+      recovery: { questionId: 'm-source', stop: scenario === 'busy' } });
+    expect(live.sent.filter(message => message.type === 'repair_fiber')).toHaveLength(repairsBefore + 1);
+    expect(stop).toHaveBeenCalledTimes(scenario === 'busy' ? 1 : 0);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(live.sent.filter(message => message.ack)).toHaveLength(1);
+    expect(live.sent.filter(message => message.recoveryAction === 'stopped')).toHaveLength(scenario === 'busy' ? 1 : 0);
+    expect(live.sent.filter(message => message.silenceBusyTurnId)).toHaveLength(0);
+  });
+  it('repairs a latest-assistant Fiber mapping lost only after the recovery claim', async () => {
+    let mapped = true;
+    let claims = 0;
+    live = await harness(`https://chatgpt.com/c/${chat}`, {
+      desktop_input: message => {
+        if (message.requiresAuthorization && !message.authorize && !message.ack && !message.fail) {
+          claims++;
+          mapped = false;
+          return { ok: true, data: { input: { id, owner: 'input-owner', text, model: null, reasoningEffort: null,
+            recovery: { questionId: 'm-source', phase: 'ready' }, silenceBoundary: { turnId: 'source-turn' } } } };
+        }
+        return { ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : null };
+      }
+    });
+    const win = live.window as any;
+    const timed = win.setTimeout;
+    win.setTimeout = (fn: () => void, ms: number) => ms === 1500
+      ? globalThis.setTimeout(fn, 10) : timed(fn, ms);
+    const post = win.postMessage.bind(win);
+    let section: HTMLElement;
+    win.postMessage = (data: any, origin: string) => {
+      if (data?.source !== 'clf-fiber-ask') return post(data, origin);
+      queueMicrotask(() => {
+        if (mapped) section?.setAttribute('data-clf-fiber-turn', `${data.nonce}:0`);
+        else section?.removeAttribute('data-clf-fiber-turn');
+        win.dispatchEvent(new win.MessageEvent('message', { source: win, data: {
+          source: 'clf-fiber-reply', nonce: data.nonce, scanToken: data.nonce, v: 21, scanOk: true, rows: [],
+          turns: mapped ? [{
+            index: 0, conversationId: chat, turnId: 'native-answer', endMessageId: null,
+            calls: [], messages: [{ role: 'assistant', messageId: 'native-progress', rawMessageId: 'native-progress',
+              stable: true, rawText: 'Inspecting the task.' }]
+          }] : []
+        } }));
+      });
+    };
+    live.reply.set('repair_fiber', () => { mapped = true; return { ok: true }; });
+    userTurn(live.document, 'source', 'Complete the task');
+    section = assistantTurn(live.document, 'native-answer', []);
+    prose(live.document, section, 'native-progress', 'Inspecting the task.');
+    live.hook.observe(); await settle();
+    const send = vi.fn(() => {
+      userTurn(live!.document, 'continued', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', send);
+    const repairsBefore = live.sent.filter(message => message.type === 'repair_fiber').length;
+    live.advance(5001);
+
+    await live.runtimeMessage({ type: 'clf-desktop-input', id, conversationId: chat, silenceTurnId: 'source-turn',
+      recovery: { questionId: 'm-source', stop: false } });
+
+    expect(claims).toBe(1);
+    expect(live.sent.filter(message => message.type === 'repair_fiber')).toHaveLength(repairsBefore + 1);
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.authorize)).toHaveLength(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toHaveLength(1);
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.fail)).toHaveLength(0);
+  });
+
+  it('releases a recovery claim whose native Send never becomes ready, then retries exactly once', async () => {
+    let claims = 0;
+    let sendButton: HTMLButtonElement;
+    live = await harness(`https://chatgpt.com/c/${chat}`, {
+      desktop_input: message => {
+        if (message.requiresAuthorization && !message.authorize && !message.ack && !message.fail) {
+          claims++;
+          // Match the live failure window: the row is claimed successfully, then React leaves
+          // native Send unavailable while the already-prepared draft waits in CLF_DOM.send().
+          if (claims === 1) sendButton.setAttribute('aria-disabled', 'true');
+          return { ok: true, data: { input: { id, owner: 'input-owner', text, model: null, reasoningEffort: null,
+            recovery: { questionId: 'm-source', phase: 'ready' }, silenceBoundary: { turnId: 'source-turn' } } } };
+        }
+        return { ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : null };
+      }
+    });
+    userTurn(live.document, 'source', 'Complete the task');
+    const section = assistantTurn(live.document, 'native-answer', []);
+    prose(live.document, section, 'native-progress', 'Inspecting the task.');
+    const win = live.window as any;
+    const post = win.postMessage.bind(win);
+    win.postMessage = (data: any, origin: string) => {
+      if (data?.source !== 'clf-fiber-ask') return post(data, origin);
+      queueMicrotask(() => {
+        section.setAttribute('data-clf-fiber-turn', `${data.nonce}:0`);
+        win.dispatchEvent(new win.MessageEvent('message', { source: win, data: {
+          source: 'clf-fiber-reply', nonce: data.nonce, scanToken: data.nonce, v: 21, scanOk: true, rows: [], turns: [{
+            index: 0, conversationId: chat, turnId: 'native-answer', endMessageId: null,
+            calls: [], messages: [{ role: 'assistant', messageId: 'native-progress', rawMessageId: 'native-progress',
+              stable: true, rawText: 'Inspecting the task.' }]
+          }]
+        } }));
+      });
+    };
+    live.hook.observe(); await settle();
+    sendButton = live.document.querySelector<HTMLButtonElement>('[data-testid="send-button"]')!;
+    const send = vi.fn(() => {
+      userTurn(live!.document, 'continued', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    sendButton.addEventListener('click', send);
+    const timed = win.setTimeout;
+    win.setTimeout = (fn: () => void, ms: number) => (ms === 1500 || ms === 30000)
+      ? globalThis.setTimeout(fn, 10) : timed(fn, ms);
+    const offer = { type: 'clf-desktop-input', id, conversationId: chat, silenceTurnId: 'source-turn',
+      recovery: { questionId: 'm-source', stop: false } };
+
+    expect(await live.runtimeMessage(offer)).toEqual({ ok: false });
+    expect(claims).toBe(1);
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.authorize)).toHaveLength(0);
+    expect(send).not.toHaveBeenCalled();
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.fail)).toEqual([
+      expect.objectContaining({ id, owner: 'input-owner', error: 'After-turn pickup was withdrawn before Send.' })
+    ]);
+
+    sendButton.removeAttribute('aria-disabled');
+    expect(await live.runtimeMessage(offer)).toEqual({ ok: true });
+    expect(claims).toBe(2);
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.authorize)).toHaveLength(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toHaveLength(1);
+  });
+
   it.each(['reader-only', 'paired'] as const)('recovers a Continue blocked by a cached recorder protocol (%s repair)', async repair => {
     live = await harness(`https://chatgpt.com/c/${chat}`, {
       desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail

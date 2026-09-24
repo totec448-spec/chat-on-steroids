@@ -2709,6 +2709,19 @@ async function performBrowserRepairs(repairs, policy) {
           continue;
         }
       }
+      if (target && reason === 'compaction' && requiresClaim) {
+        // A responsive source already owns the durable compaction ticket. Reloading that exact
+        // document destroys an in-progress settle/Stop attempt and can create a two-minute loop
+        // where the watchdog keeps interrupting the recovery it is meant to help. Ask the current
+        // document to retry its own ticket first; only an unavailable/stale page falls through to
+        // the reload path below. The content script still has to pass every source Stop/Send fence.
+        const resumed = await tabReply(target.id,
+          { type: 'clf-resume-compaction', conversationId }, documentId ? { documentId } : undefined);
+        if (resumed?.accepted === true) {
+          await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=resumed`);
+          continue;
+        }
+      }
       if (target) await chrome.tabs.reload(target.id);
       else {
         await createChatTab(`https://chatgpt.com/c/${encodeURIComponent(conversationId)}`, policy.background === true, focus);

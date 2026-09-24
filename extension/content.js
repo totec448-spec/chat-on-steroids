@@ -282,6 +282,7 @@
   const seenMessages = new Map(); // occurrence -> last observed native reaction
   let reportedConversationTitle = '';
   let reportedModelSelection = '';
+  let bootstrapModelRestoreBusy = false;
   const MAX_SEEN_MESSAGES = 2000;
 
   /**
@@ -2368,7 +2369,7 @@
     // identity or guessing from DOM position.
     const pageTitle = conversationId && CLF_DOM.conversationTitle ? CLF_DOM.conversationTitle() : '';
     const modelSelection = conversationId && CLF_DOM.visibleModelSelection?.();
-    if (modelSelection && !modelCatalogBusy && !desktopInputBusy) {
+    if (modelSelection && !modelCatalogBusy && !desktopInputBusy && !bootstrapModelRestoreBusy) {
       const selectionKey = JSON.stringify(modelSelection);
       if (selectionKey !== reportedModelSelection) {
         reportedModelSelection = selectionKey;
@@ -3746,6 +3747,17 @@
       for (const call of batch) requestOwnersPending.delete(`${ownerConversation}\u0000${call.requestId}`);
     }
   }
+  async function repairFiberReader() {
+    const now = Date.now();
+    if (!fiberRepairing && now - fiberRepairAt >= 5000) {
+      fiberRepairAt = now;
+      fiberRepairing = ask({ type: 'repair_fiber' }).finally(() => {
+        fiberRepairing = null;
+      });
+    }
+    return fiberRepairing ? await fiberRepairing : null;
+  }
+
   async function refreshFiber(settled = null, presentationOnly = false) {
     // A bound chat can briefly lose its /c/<id> route during React/router churn, and a real
     // navigation to a fresh composer has the exact same pathname until ChatGPT assigns the
@@ -3774,14 +3786,7 @@
       // completed repair attempt that still cannot round-trip (or an explicit repair failure)
       // downgrades health; otherwise a transient timeout would flicker Overwrite and could
       // falsely complete interim prose through the degraded DOM fallback.
-      const now = Date.now();
-      if (!fiberRepairing && now - fiberRepairAt >= 5000) {
-        fiberRepairAt = now;
-        fiberRepairing = ask({ type: 'repair_fiber' }).finally(() => {
-          fiberRepairing = null;
-        });
-      }
-      const repair = fiberRepairing ? await fiberRepairing : null;
+      const repair = await repairFiberReader();
       if (repair && repair.ok === true) answer = await askFiber();
       if (answer === null) {
         if (!alive || epoch !== askedEpoch || conversationId !== askedConversation ||
@@ -8629,6 +8634,28 @@
     await startCompact(automatic);
   }
 
+  function resumePendingCompactionFromRepair(expectedConversationId) {
+    const source = job && job.stage === 'handoff-pending' ? job.sourceSend : null;
+    if (!alive || !expectedConversationId || conversationId !== expectedConversationId ||
+        CLF_DOM.conversationId() !== expectedConversationId || !source ||
+        (source.state !== 'not-attempted' && source.state !== 'attempted-unresolved')) return false;
+    // The browser recovery claim proves only that this exact document may be nudged. It does not
+    // own Stop or Send: those remain behind startCompact's source identity, settle and durable WAL
+    // checkpoints. If an attempt is already alive, merely acknowledge the healthy document so the
+    // background worker does not reload it out from under that work.
+    if (!nativeBusy) {
+      localError = '';
+      nativePhase = '';
+      pressedAt = 0;
+      const forId = conversationId, forEpoch = epoch;
+      queueMicrotask(() => {
+        if (alive && conversationId === forId && epoch === forEpoch)
+          void maybeResumePendingCompaction(forId, forEpoch);
+      });
+    }
+    return true;
+  }
+
   /**
    * Brings the conversation to a standstill so its recording can be copied.
    *
@@ -10372,10 +10399,39 @@
       return void (await fail('The requested model or reasoning is unavailable or could not be confirmed in ChatGPT'));
     }
     const selectionConfirmedAt = Date.now();
-    const publishBootstrapSelection = (id) => {
+    const publishBootstrapSelection = async (id) => {
       if (CLF_DOM.conversationId() !== id) return;
-      // Accepted Send owns the first turn even when no model was explicitly
-      // selected and no further native mutation will wake a hidden document.
+      if (boot.type === 'resume' && boot.model) {
+        // The New Chat picker proves the model used to submit the first resume turn, but route
+        // creation can immediately remount the composer with the account default. Never turn the
+        // frozen source intent into false destination evidence. Re-prove the exact /c route and,
+        // when ChatGPT reset it, restore the requested pair once for the next turn before
+        // journaling. This best-effort repair cannot replay or alter the already-submitted user
+        // message; failure simply leaves destination selection unknown instead of lying about it.
+        bootstrapModelRestoreBusy = true;
+        try {
+          // Adopt the concrete destination identity without publishing its transient default.
+          observe();
+          const ownsDestination = () => !attempt?.cancelled && sendingBootstrap() &&
+            CLF_DOM.conversationId() === id && conversationId === id;
+          if (!ownsDestination()) return;
+          // Re-run the picker proof on the concrete destination route. The requested model may
+          // be a saved family/display alias, so only the route-stamped native execution id that
+          // ChatGPT exposes after successful selection is valid destination evidence.
+          if (!(await CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, ownsDestination))) return;
+          if (!ownsDestination()) return;
+          const selected = CLF_DOM.visibleModelSelection?.();
+          if (!selected) return;
+          reportedModelSelection = JSON.stringify(selected);
+          emit({ kind: 'model_selection', model: selected.model,
+            ...(selected.reasoningEffort ? { reasoningEffort: selected.reasoningEffort } : {}), time: Date.now() });
+        } finally {
+          bootstrapModelRestoreBusy = false;
+        }
+        return;
+      }
+      // Accepted Send owns the first turn even when no model was explicitly selected and no
+      // further native mutation will wake a hidden document.
       observe();
       if (!boot.model) return;
       // The picker proved this selection before the new worker had a conversation.
@@ -10531,8 +10587,8 @@
     // send immediately with the already-proven target. Fresh worker/resume commands still need
     // the loop below because ChatGPT has not assigned their new conversation id yet.
     if (target) {
-      publishBootstrapSelection(target);
       const acknowledged = await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: target, agent, client: RUN_ID });
+      await publishBootstrapSelection(target);
       await clearAcknowledgedBootstrap(acknowledged);
       return;
     }
@@ -10546,8 +10602,8 @@
       () => !attempt?.cancelled && sendingBootstrap(), 40000);
     if (!found || !sendingBootstrap()) return;
     if (boot.type === 'resume') rememberResumeGoalPending(found, boot.id);
-    publishBootstrapSelection(found);
     const acknowledged = await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID });
+    await publishBootstrapSelection(found);
     await clearAcknowledgedBootstrap(acknowledged);
     } finally { bootstrapDraft.dispose(); }
   }
@@ -10854,9 +10910,21 @@
     const latest = CLF_DOM.turns().at(-1);
     if (latest?.role === 'assistant') {
       if (!await refreshFiber({ pageTurnId: latest.id, pageTurn: latest.node || latest.nodes?.[0] }) || !safe()) return false;
-      const current = CLF_DOM.turns().at(-1);
-      const native = current?.role === 'assistant' ? fiberTurnFor(current) : null;
-      if (!native) return false;
+      let current = CLF_DOM.turns().at(-1);
+      let native = current?.role === 'assistant' ? fiberTurnFor(current) : null;
+      // A successful page-model scan can still omit the latest React turn while a
+      // reloaded document is hydrating. Repair that reader join once, then require
+      // fresh exact native evidence before allowing either Stop or Send.
+      if (!native) {
+        const repair = await repairFiberReader();
+        if (repair?.ok !== true || !safe()) return false;
+        current = CLF_DOM.turns().at(-1);
+        if (current?.role !== 'assistant' ||
+            !await refreshFiber({ pageTurnId: current.id, pageTurn: current.node || current.nodes?.[0] }) || !safe()) return false;
+        current = CLF_DOM.turns().at(-1);
+        native = current?.role === 'assistant' ? fiberTurnFor(current) : null;
+        if (!native) return false;
+      }
       // A known native final vetoes Continue even while delivery to the app is pending.
       if (native?.endMessageId) { await flush(); return false; }
     }
@@ -11355,6 +11423,10 @@
       if (message.type === 'clf-repair-check') {
         void inspectRepairPage(message).then(sendResponse).catch(() => sendResponse({ safe: false }));
         return true;
+      }
+      if (message.type === 'clf-resume-compaction') {
+        sendResponse({ accepted: resumePendingCompactionFromRepair(message.conversationId) });
+        return false;
       }
       // Popup diagnostics. Ids and counters only — no prose, no transcript, no page text.
       if (message.type === 'clf-page-status') {
