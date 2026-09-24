@@ -3418,3 +3418,37 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .terminal-screen .xterm { height: 100%; }
 .terminal-empty { margin: 20px; }
 .terminal-empty[hidden] { display: none; }
+
+/* One quiet frame for right-side tools; the tool owners keep their own content state. */
+[data-panel='chat'].has-work-dock { grid-template-columns: minmax(0, 1fr) var(--work-panel-width, minmax(340px, 42%)); }
+.work-dock-right { position: relative; grid-column: 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--page); }
+.work-dock-bar { position: relative; z-index: 9; display: flex; align-items: center; gap: 4px; flex: 0 0 38px; min-width: 0; padding: 4px 9px; border-bottom: 1px solid var(--line); }
+.work-dock-tabs { display: flex; align-items: center; flex: 1; gap: 4px; min-width: 0; overflow-x: auto; }
+.work-dock-tab { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; max-width: 180px; border-radius: 7px; }
+.work-dock-tab.is-selected { background: var(--hover); }
+.work-dock-tab > .btn:first-child { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 5px 8px; font-size: calc(11px * var(--text-scale, 1)); white-space: nowrap; }
+.work-dock-tab .ico { width: 13px; height: 13px; }
+.work-dock-tab > .btn:last-child { padding: 5px; color: var(--faint); }
+.work-dock-bar > .btn, .work-dock-add > summary { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; padding: 5px; border-radius: 7px; color: var(--soft); }
+.work-dock-bar :is(.btn, summary):hover { background: var(--hover); color: var(--ink); }
+.work-dock-add { position: relative; flex: 0 0 auto; }
+.work-dock-add > summary { list-style: none; cursor: pointer; }
+.work-dock-add > summary::-webkit-details-marker { display: none; }
+.work-dock-menu { position: absolute; right: 0; top: calc(100% + 7px); width: 190px; padding: 5px; border: 1px solid var(--edge); border-radius: 10px; background: var(--card); box-shadow: 0 8px 28px #0003; }
+.work-dock-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; text-align: left; font-size: calc(12px * var(--text-scale, 1)); }
+.work-dock-menu-item:hover, .work-dock-menu-item:focus-visible { background: var(--hover); }
+.work-dock-body { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
+.work-dock-body > :is(.file-panel, .agent-panel) { width: 100%; flex: 1; border-left: 0; }
+.work-dock-empty { width: 100%; display: grid; place-items: center; padding: 24px; }
+.work-dock-launch { display: grid; gap: 5px; width: min(360px, 100%); }
+.work-dock-quick { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; text-align: left; color: var(--soft); }
+.work-dock-quick:hover, .work-dock-quick:focus-visible { background: var(--hover); color: var(--ink); }
+.work-dock-quick span { flex: 1; color: var(--ink); }
+.work-dock-quick kbd { color: var(--faint); font: inherit; font-size: calc(10px * var(--text-scale, 1)); }
+[data-panel='chat'].is-work-dock-expanded { grid-template-columns: 0 minmax(0, 1fr); }
+.is-work-dock-expanded > .is-session, .is-work-dock-expanded .work-panel-resize { display: none; }
+.app[data-screen='settings'] :is(#rightDockToggle, #terminalToggle) { display: none; }
+@media (max-width: 850px) {
+  [data-panel='chat'].has-work-dock { grid-template-columns: 0 minmax(0, 1fr); }
+  .has-work-dock > .is-session { display: none; }
+}

@@ -40,11 +40,13 @@ app.whenReady().then(async () => {
     window.ids=[];window.outputs={};window.exits={};
     window.api.onTerminalEvent(e=>{if('data' in e){window.outputs[e.id]=(window.outputs[e.id]||'')+e.data;}else window.exits[e.id]=e.exitCode;});
     const {createWorkspaceTerminal}=await import('/workspace-terminal.ts');
+    const {createWorkspaceDocks}=await import('/workspace-docks.ts');
     const {applyAppearance}=await import('/appearance.ts');
     const {defaultAppearance}=await import(${JSON.stringify('/@fs/' + path.join(root, 'src/shared/appearance.ts').replace(/\\/g, '/'))});
     document.body.append(document.getElementById('connectionPopover'));
     window.applyColor=(theme,background)=>{const settings=defaultAppearance();settings[theme].background=background;applyAppearance(theme,settings);};
-    createWorkspaceTerminal().update(${JSON.stringify(project)});
+    const docks=createWorkspaceDocks(document.querySelector('[data-panel="chat"]'));
+    createWorkspaceTerminal(docks.bottomToggle).update(${JSON.stringify(project)});
     const proto=crypto.randomUUID.bind(crypto);crypto.randomUUID=()=>{const id=proto();window.ids.push(id);return id;};
     window.ready=true;`;
   const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'terminal-fixture', configureServer(vite) {

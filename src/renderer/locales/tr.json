@@ -1558,5 +1558,14 @@
   "ChatGPT’s current model": "ChatGPT'nin mevcut modeli",
   "Sent without choosing a model": "Model seçilmeden gönderilir",
   "Use ChatGPT’s current model": "ChatGPT'nin mevcut modelini kullan",
-  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "ChatGPT planınızda model seçici yok. ChatGPT'nin zaten kullandığı modelle gönderin."
+  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "ChatGPT planınızda model seçici yok. ChatGPT'nin zaten kullandığı modelle gönderin.",
+  "Right panel": "Sağ panel",
+  "New tab": "Yeni sekme",
+  "Hide right panel": "Sağ paneli gizle",
+  "Restore right panel": "Sağ paneli daralt",
+  "Expand right panel": "Sağ paneli genişlet",
+  "Toggle right panel": "Sağ paneli aç/kapat",
+  "Toggle bottom panel": "Alt paneli aç/kapat",
+  "Toggle bottom panel (Ctrl+`)": "Alt paneli aç/kapat (Ctrl+`)",
+  "Close tab": "Sekmeyi kapat"
 }
