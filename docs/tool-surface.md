@@ -114,6 +114,12 @@ are actually working. Waking one needs a free slot, reopens or refocuses that wo
 and types the prime's message into it as an ordinary user message. A worker becomes permanently
 finished only when its chat reaches the context ceiling (400,000 tokens by the app's own session
 accounting); crossing it never interrupts work in flight, it only makes the next stop the last one.
+If that in-flight turn merely goes silent after bounded recovery, silence is not promoted into a
+terminal verdict. The worker may park with its slot free while retaining unresolved-turn state and,
+when the recorder knows it, the exact response identity; that state forbids new `message` wake/new
+work and is not eligible for tab reuse/closure. Only proven activity from a retained exact response
+may resume it. An explicit finish proven to belong to that response, a current canonical final, or
+a user terminal action still ends the ceiling worker normally.
 Workers never run Compact & Resume, automatically or manually: their conversation is their durable
 agent identity, so the 400,000-token boundary changes only later revive eligibility and never opens
 a replacement worker chat.
