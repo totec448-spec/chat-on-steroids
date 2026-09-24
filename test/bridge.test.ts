@@ -2430,11 +2430,12 @@ describe('automatic compaction', () => {
   });
 
   /**
-   * Before the prompt has reached ChatGPT the pickup is a two-minute clock with five raised
-   * reloads, and a ticket that still has not been sent after them is abandoned: nothing was
-   * fenced, and the next working turn opens a fresh one. Every pickup asks for the tab in front.
+   * Before the prompt has reached ChatGPT the pickup starts on a two-minute clock. Exhausting
+   * that first browser-recovery budget is not terminal authority for an automatic ticket: a
+   * responsive source may have spent the whole interval draining local/native work. The exact
+   * token survives and retries on a slower cadence until explicit policy/user/page evidence ends it.
    */
-  it.each([false, true])('reloads an unsent automatic ticket every 2 minutes with bounded attempts (restored: %s)', async restored => {
+  it.each([false, true])('retains an unsent automatic ticket after its first pickup budget and retries after backoff (restored: %s)', async restored => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -2476,8 +2477,13 @@ describe('automatic compaction', () => {
 
       await vi.advanceTimersByTimeAsync(2 * 60_000);
       expect(await takeRepair()).toBeNull();
-      expect(continuationByToken(token)).toMatchObject({ state: 'aborted', error: 'handoff_never_sent' });
-      expect(continuationForSession(filed.body.sessionId as string)).toBeNull();
+      expect(continuationByToken(token)).toMatchObject({ automatic: true, state: 'awaiting-summary' });
+      expect(continuationForSession(filed.body.sessionId as string)?.token).toBe(token);
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000 - 1);
+      expect(await takeRepair()).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await takeRepair()).toMatchObject({ conversationId, reason: 'compaction', focus: true });
     } finally {
       vi.useRealTimers();
     }
