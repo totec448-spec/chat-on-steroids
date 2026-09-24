@@ -4104,7 +4104,7 @@ export function initChat(next: Deps): void {
   const agentToolGroups = new Map<string, HTMLDetailsElement>();
   agentPanel = createAgentPanel({
     host: chatHost, mount: docks.body,
-    onShow: () => { filePanel?.hide(); docks.adopt('agents'); },
+    onShow: () => { if (docks.sideOf('files') === 'right') filePanel?.hide(); docks.adopt('agents'); },
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); },
     load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
     render: (source, id, current) => {
@@ -4280,7 +4280,10 @@ export function initChat(next: Deps): void {
   };
   filePanel = createFilePanel({
     host: chatHost, mount: docks.body,
-    onShow: () => { agentPanel?.hide(); docks.adopt('files'); },
+    onShow: () => {
+      if (docks.sideOf('files') !== 'bottom') agentPanel?.hide();
+      docks.adopt('files', docks.sideOf('files') ?? 'right');
+    },
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); },
     captureAttachment: () => {
       const owner = composerDraftOwner();
@@ -4288,10 +4291,14 @@ export function initChat(next: Deps): void {
     }
   });
   filePanel.update(selectedLocalProject());
-  docks.register('files', 'Files', 'i-folder', () => void filePanel?.show(), () => filePanel?.hide(), () => selectedLocalProject() !== null);
+  docks.register('files', 'Files', 'i-folder', (_side, mount) => {
+    filePanel?.mountAt(mount); void filePanel?.show();
+  }, () => filePanel?.hide(), () => selectedLocalProject() !== null, ['right', 'bottom']);
   docks.register('agents', 'Sub-agents', 'i-agents', () => agentPanel?.show(), () => agentPanel?.hide(), () => selectedId !== null);
-  workspaceTerminal = createWorkspaceTerminal(docks.bottomToggle);
+  workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody);
   workspaceTerminal.update(selectedLocalProject());
+  docks.register('terminal', 'Terminal', 'i-terminal', (_side, mount) => workspaceTerminal?.show(mount),
+    () => workspaceTerminal?.hide(), () => selectedLocalProject() !== null || !!workspaceTerminal?.hasTabs(), ['right', 'bottom']);
   $('attachImages').addEventListener('click', async () => {
     const owner = composerDraftOwner();
     appendImages(owner, await run(api.chooseFiles()));

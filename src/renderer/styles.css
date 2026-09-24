@@ -3401,8 +3401,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-skills-row > #composerAddSkill { width: 30px; height: 30px; padding: 7px; flex: none; justify-content: center; color: var(--soft); }
 .composer-skills-row > #composerAddSkill .ico { width: 15px; height: 15px; }
 
-.app.has-terminal { grid-template-rows: env(titlebar-area-height, 28px) auto auto minmax(0, 1fr) var(--terminal-height, 250px); }
-.workspace-terminal { grid-column: 2; grid-row: 5; position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; border-top: 1px solid var(--line); background: var(--page); }
+.workspace-terminal { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--page); }
 .workspace-terminal[hidden] { display: none; }
 .terminal-resize { position: absolute; left: 0; right: 0; top: -4px; height: 8px; z-index: 2; cursor: ns-resize; touch-action: none; }
 .terminal-resize:hover, .terminal-resize:focus-visible, .terminal-resize:active { background: linear-gradient(var(--accent-edge), var(--accent-edge)) center / 100% 1px no-repeat; outline: none; }
@@ -3445,6 +3444,13 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .work-dock-quick:hover, .work-dock-quick:focus-visible { background: var(--hover); color: var(--ink); }
 .work-dock-quick span { flex: 1; color: var(--ink); }
 .work-dock-quick kbd { color: var(--faint); font: inherit; font-size: calc(10px * var(--text-scale, 1)); }
+.app.has-bottom-dock { grid-template-rows: env(titlebar-area-height, 28px) auto auto minmax(0, 1fr) var(--terminal-height, 250px); }
+.work-dock-bottom { grid-column: 2; grid-row: 5; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: var(--page); }
+.work-dock-bottom .work-dock-empty { place-items: start center; padding-top: min(10vh, 72px); }
+.work-dock-body > .workspace-terminal { flex: 1; width: 100%; min-width: 0; min-height: 0; }
+.work-dock-bottom .file-panel { border-left: 0; }
+.app[data-screen='settings'].has-bottom-dock { grid-template-rows: auto auto auto minmax(0, 1fr); }
+.app[data-screen='settings'] .work-dock-bottom { display: none; }
 [data-panel='chat'].is-work-dock-expanded { grid-template-columns: 0 minmax(0, 1fr); }
 .is-work-dock-expanded > .is-session, .is-work-dock-expanded .work-panel-resize { display: none; }
 .app[data-screen='settings'] :is(#rightDockToggle, #terminalToggle) { display: none; }

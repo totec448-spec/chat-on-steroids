@@ -25,6 +25,9 @@ it('opens an empty right dock, presents only registered actions, and restores th
   right.querySelector<HTMLButtonElement>('.work-dock-quick')!.click();
   expect(files).toHaveBeenCalledOnce();
   expect(right.querySelectorAll('[role="tab"]')).toHaveLength(1);
+  const selectedTab = right.querySelector<HTMLButtonElement>('[role="tab"]')!;
+  selectedTab.focus(); docks.sync();
+  expect(document.activeElement).toBe(selectedTab);
   host.style.setProperty('--work-panel-width', '410px');
   right.querySelectorAll<HTMLButtonElement>('.work-dock-bar > button')[0]!.click();
   expect(host.classList.contains('is-work-dock-expanded')).toBe(true);
@@ -54,4 +57,24 @@ it('does not activate an unavailable view or leave a blank selected tab', () => 
   expect(files).toHaveBeenCalledOnce();
   available = false; docks.sync();
   expect(document.querySelector('.work-dock-empty')!.hasAttribute('hidden')).toBe(false);
+});
+
+it('moves one Files view between docks without recreating it and keeps Terminal custody when hidden', () => {
+  const { docks } = setup();
+  const fileNode = document.createElement('section'); fileNode.id = 'file-owner';
+  const terminalNode = document.createElement('section'); terminalNode.id = 'terminal-owner';
+  docks.register('files', 'Files', 'i-folder', (_side, mount) => { mount.append(fileNode); fileNode.hidden = false; },
+    () => { fileNode.hidden = true; }, () => true, ['right', 'bottom']);
+  docks.register('terminal', 'Terminal', 'i-terminal', (_side, mount) => { mount.append(terminalNode); terminalNode.hidden = false; },
+    () => { terminalNode.hidden = true; }, () => true, ['right', 'bottom']);
+  docks.activate('files', 'right'); docks.activate('terminal', 'bottom');
+  expect(fileNode.parentElement).toBe(docks.body);
+  expect(terminalNode.parentElement).toBe(docks.bottomBody);
+  docks.activate('files', 'bottom');
+  expect(fileNode.parentElement).toBe(docks.bottomBody);
+  expect(docks.sideOf('files')).toBe('bottom');
+  expect(terminalNode.hidden).toBe(true);
+  docks.activate('terminal', 'right');
+  expect(terminalNode.parentElement).toBe(docks.body);
+  expect(terminalNode).toBe(document.getElementById('terminal-owner'));
 });

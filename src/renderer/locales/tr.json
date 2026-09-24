@@ -1567,5 +1567,7 @@
   "Toggle right panel": "Sağ paneli aç/kapat",
   "Toggle bottom panel": "Alt paneli aç/kapat",
   "Toggle bottom panel (Ctrl+`)": "Alt paneli aç/kapat (Ctrl+`)",
-  "Close tab": "Sekmeyi kapat"
+  "Close tab": "Sekmeyi kapat",
+  "Bottom panel": "Alt panel",
+  "Hide bottom panel": "Alt paneli gizle"
 }
