@@ -54,6 +54,10 @@ import {
   reconcileAgentRequestOwners,
   dormantWorkerNotice,
   reactivateDormantRunForConversation,
+  reactivateSilentCeilingRunForTerminal,
+  recoverSilentCeilingWorker,
+  silentCeilingRecoveryAuthority,
+  silentCeilingWorkerNotice,
   endedWorkerNotice,
   hasDormantWorkerLeases,
   sleepSilentWorkers,
@@ -102,7 +106,13 @@ import {
 } from '../codex/ownership.js';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '../codex/unified-exec-constants.js';
 import { unattributedRepairEta } from '../bridge.js';
-import { conversationAttachment, readOverflowText } from '../session/store.js';
+import {
+  conversationAttachment,
+  findSessionByConversation,
+  readOverflowText,
+  requestBelongsToActiveTurn,
+  requestTurnOwnershipCutoff
+} from '../session/store.js';
 import { sessionFinishDeadline } from '../session/finish.js';
 import type { StoredText, ToolOutcome } from '../../shared/session.js';
 
@@ -187,7 +197,7 @@ async function withIdentityRecoveredNotice(context: CallContext, result: ToolRes
   // Recheck live restrictions after the await, including identity learned during a handler.
   if (isChatBlocked(caller.conversationId) || compactingConversation(caller.conversationId) ||
       retiredWorkerForConversation(caller.conversationId) || dormantWorkerNotice(caller.conversationId) ||
-      endedWorkerNotice(caller.conversationId)) return result;
+      silentCeilingWorkerNotice(caller.conversationId) || endedWorkerNotice(caller.conversationId)) return result;
   const pending: Array<{ tools: Set<string>; offer?: CallContext['publication'] }> = [];
   for (const [requestId, entry] of identityRecovery) {
     if (entry.offer && !entry.offer.failed) {
@@ -683,6 +693,7 @@ async function dispatchTracked(
   const supersededConversation = context.caller.conversationId
     ? (await conversationAttachment(context.caller.conversationId, context.caller.sessionId ?? null)) === 'superseded'
     : false;
+  let silentFinishAuthorized = false;
   // Two things about liveness, both before the agent is resolved so that the answer this
   // call gets is the state this call itself established.
   //
@@ -697,11 +708,48 @@ async function dispatchTracked(
   // thought asleep takes the free execution slot back for that family, so the liveness
   // bookkeeping below sees the same run it would have seen had the parking not happened. A
   // chat the user stopped from the app is refused below anyway and reclaims nothing.
-  if (!supersededConversation && !isFinish && !isChatBlocked(context.caller.conversationId)) {
-    reactivateDormantRunForConversation(context.caller.conversationId);
+  if (!supersededConversation && !isChatBlocked(context.caller.conversationId)) {
+    const conversationId = context.caller.conversationId;
+    const recoveryAuthority = silentCeilingRecoveryAuthority(conversationId);
+    let recovered = false;
+    if (conversationId && recoveryAuthority && requestId) {
+      const session = await findSessionByConversation(conversationId, { requireUnique: true });
+      if (
+        session &&
+        await requestBelongsToActiveTurn(
+          session.id,
+          conversationId,
+          requestId,
+          recoveryAuthority.turnId,
+          recoveryAuthority.requestOriginMax
+        )
+      ) {
+        // An exact late finish is terminal evidence, so restore its old turn without publishing
+        // the transient "still working" correction before the finish handler closes it.
+        if (isFinish) {
+          silentFinishAuthorized = reactivateSilentCeilingRunForTerminal(conversationId);
+          recovered = silentFinishAuthorized;
+        } else {
+          recovered = Boolean(recoverSilentCeilingWorker(conversationId, recoveryAuthority.turnId, true));
+        }
+      }
+    }
+    if (!recovered && !isFinish) reactivateDormantRunForConversation(conversationId);
   }
   const alive = supersededConversation || isChatBlocked(context.caller.conversationId) ? null : noteAgentAlive(context.caller.conversationId);
-  const quietWorkers = supersededConversation ? [] : sleepSilentWorkers(Date.now(), undefined, id => runningToolProgress(id) !== null);
+  const callerSession = !supersededConversation && context.caller.conversationId
+    ? await findSessionByConversation(context.caller.conversationId, { requireUnique: true }).catch(() => null)
+    : null;
+  const callerRequestOriginMax = callerSession && context.caller.conversationId
+    ? await requestTurnOwnershipCutoff(callerSession.id, context.caller.conversationId).catch(() => null)
+    : null;
+  const quietWorkers = supersededConversation ? [] : sleepSilentWorkers(
+    Date.now(),
+    undefined,
+    id => runningToolProgress(id) !== null,
+    id => callerSession?.conversationId === id ? callerSession.activeTurnId ?? null : undefined,
+    id => callerSession?.conversationId === id ? callerRequestOriginMax : undefined
+  );
   for (const quiet of quietWorkers) {
     if (quiet.report) await recordAgentMessage(quiet.report, 'sent', quiet.info.conversationId);
   }
@@ -741,6 +789,13 @@ async function dispatchTracked(
   }
   context.agent = isFinish ? agentForFinishCaller(context.caller) : agentForCaller(context.caller);
   const retiredWorker = retiredWorkerForConversation(context.caller.conversationId);
+  // A ceiling-silenced worker is deliberately neither reusable nor terminal. The only ordinary
+  // call allowed through is one whose request id proved the exact retained turn and therefore
+  // cleared the marker above. Conversation identity by itself is not enough: a new user turn in
+  // the same chat must remain fenced from local tools.
+  const silentCeilingWorker = isFinish && silentFinishAuthorized
+    ? null
+    : silentCeilingWorkerNotice(context.caller.conversationId);
   // Parking a run releases its global execution claim without retiring its worker chats. Those
   // exact conversations remain workers, though: a stale sleeping/terminal worker tab must not
   // turn into an ordinary unidentified chat and keep running local tools merely because another
@@ -806,6 +861,8 @@ async function dispatchTracked(
               'CONVERSATION_SUPERSEDED: Compact & Resume replaced this ChatGPT conversation. Its transcript remains readable, but it can no longer execute local tools. Continue only in the replacement chat; no local tool was run.'
             )
           )
+        : silentCeilingWorker
+        ? Promise.resolve(fail(silentCeilingWorker))
         : dormantWorker
         ? Promise.resolve(fail(dormantWorker))
         : retiredWorker
@@ -850,7 +907,8 @@ async function dispatchTracked(
   await reconcileAgentRequestOwners().catch(error => {
     logWarn(`Worker ownership recovery deferred after tool completion: ${error instanceof Error ? error.message : String(error)}`);
   });
-  const deliveryFenced = blockedChat || compacting || supersededConversation || isChatBlocked(context.caller.conversationId) ||
+  const deliveryFenced = blockedChat || compacting || supersededConversation || Boolean(silentCeilingWorker) ||
+    isChatBlocked(context.caller.conversationId) ||
     compactingConversation(context.caller.conversationId) !== null || Boolean(context.caller.conversationId &&
       (await conversationAttachment(context.caller.conversationId, context.caller.sessionId ?? null)) === 'superseded');
   // Never erase an identity a handler proved more strongly (agents::callerNow). The old
