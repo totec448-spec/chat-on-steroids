@@ -1054,6 +1054,7 @@ export function createFilePanel(options: FilePanelOptions) {
   return {
     hide,
     show,
+    mountAt(parent: HTMLElement): void { if (pane.parentElement !== parent) parent.append(pane); },
     visible: () => !pane.hidden,
     update(next: LocalProject | null): void {
       const changed = project?.id !== next?.id;

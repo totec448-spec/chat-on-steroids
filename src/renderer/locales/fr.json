@@ -1567,5 +1567,7 @@
   "Toggle right panel": "Afficher ou masquer le panneau droit",
   "Toggle bottom panel": "Afficher ou masquer le panneau inférieur",
   "Toggle bottom panel (Ctrl+`)": "Afficher ou masquer le panneau inférieur (Ctrl+`)",
-  "Close tab": "Fermer l’onglet"
+  "Close tab": "Fermer l’onglet",
+  "Bottom panel": "Panneau inférieur",
+  "Hide bottom panel": "Masquer le panneau inférieur"
 }

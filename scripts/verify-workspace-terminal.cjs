@@ -44,9 +44,12 @@ app.whenReady().then(async () => {
     const {applyAppearance}=await import('/appearance.ts');
     const {defaultAppearance}=await import(${JSON.stringify('/@fs/' + path.join(root, 'src/shared/appearance.ts').replace(/\\/g, '/'))});
     document.body.append(document.getElementById('connectionPopover'));
-    window.applyColor=(theme,background)=>{const settings=defaultAppearance();settings[theme].background=background;applyAppearance(theme,settings);};
+    window.applyColor=(theme,background)=>{const settings=defaultAppearance();settings.translucentSidebar=false;settings[theme].background=background;applyAppearance(theme,settings);};
     const docks=createWorkspaceDocks(document.querySelector('[data-panel="chat"]'));
-    createWorkspaceTerminal(docks.bottomToggle).update(${JSON.stringify(project)});
+    const terminal=createWorkspaceTerminal(()=>docks.toggleBottomTerminal(),docks.bottomBody);
+    terminal.update(${JSON.stringify(project)});
+    docks.register('terminal','Terminal','i-terminal',(_,mount)=>terminal.show(mount),()=>terminal.hide(),()=>true,['right','bottom']);
+    window.docks=docks;
     const proto=crypto.randomUUID.bind(crypto);crypto.randomUUID=()=>{const id=proto();window.ids.push(id);return id;};
     window.ready=true;`;
   const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'terminal-fixture', configureServer(vite) {
@@ -59,17 +62,23 @@ app.whenReady().then(async () => {
   const until = async expression => { const end = Date.now() + 15_000; while (Date.now() < end) { if (await js(expression)) return; await new Promise(resolve => setTimeout(resolve, 40)); } throw new Error('Timeout: ' + expression + ' ' + JSON.stringify(await js('({errors,outputs})'))); };
   try {
     await server.listen(); await win.loadURL(server.resolvedUrls.local[0] + 'fixture.html'); await until('window.ready');
-    await js("document.getElementById('terminalToggle').click()"); await until('ids.length===1 && document.querySelector(".terminal-tab").textContent.includes("powershell")');
+    await js("document.getElementById('terminalToggle').click();document.querySelector('#workDockBottom .work-dock-quick[data-view=terminal]').click()"); await until('ids.length===1 && document.querySelector(".terminal-tab").textContent.includes("powershell")');
     const first = await js('ids[0]');
     // Type via actual Chromium input into xterm, through the production preload and IPC.
     win.webContents.insertText("$proof='persisted'; cd child; Write-Output ('PROOF_'+$proof+'_'+(Split-Path (Get-Location) -Leaf))");
     win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' }); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
     await until(`outputs[${JSON.stringify(first)}]?.includes('PROOF_persisted_child')`);
-    await js("document.getElementById('terminalHide').click()");
+    await js("document.querySelector('#workDockBottom .work-dock-bar > button:last-child').click()");
     assert.equal(await js('document.getElementById("workspaceTerminal").hidden'), true);
     await js(`window.api.terminalWrite(${JSON.stringify(first)}, "Write-Output ('HIDDEN_'+$proof)\\r")`);
     await until(`outputs[${JSON.stringify(first)}]?.includes('HIDDEN_persisted')`);
-    await js("document.getElementById('terminalToggle').click();document.getElementById('terminalNew').click()");
+    await js("window.docks.activate('terminal','right')");
+    await until(`document.getElementById('workspaceTerminal').parentElement===document.querySelector('#workDockRight .work-dock-body')`);
+    await js(`window.api.terminalWrite(${JSON.stringify(first)}, "Write-Output ('RIGHT_'+$proof)\\r")`);
+    await until(`outputs[${JSON.stringify(first)}]?.includes('RIGHT_persisted')`);
+    await js("window.docks.activate('terminal','bottom')");
+    await until(`document.getElementById('workspaceTerminal').parentElement===document.querySelector('#workDockBottom .work-dock-body')`);
+    await js("document.getElementById('terminalNew').click()");
     await until('ids.length===2 && document.querySelectorAll(".terminal-tab")[1].textContent.includes("powershell")');
     const second = await js('ids[1]');
     // Update both the selected and hidden terminal without recreating either shell.
@@ -77,7 +86,8 @@ app.whenReady().then(async () => {
       await js(`window.applyColor(${JSON.stringify(theme)},${JSON.stringify(color)})`);
       const backgrounds = await js(`Array.from(document.querySelectorAll('.xterm .xterm-scrollable-element'), node=>getComputedStyle(node).backgroundColor)`);
       assert.deepEqual(backgrounds, [rgb, rgb]);
-      assert.equal(await js(`getComputedStyle(document.getElementById('connectionPopover')).backgroundColor`), rgb);
+      assert.equal(await js(`getComputedStyle(document.getElementById('connectionPopover')).backgroundColor`),
+        await js(`getComputedStyle(document.querySelector('.sidebar')).backgroundColor`));
     }
     await js(`window.api.terminalWrite(${JSON.stringify(second)}, "Write-Output ('SECOND_'+(Split-Path (Get-Location) -Leaf)); Start-Sleep -Seconds 30\\r")`);
     await until(`outputs[${JSON.stringify(second)}]?.includes('SECOND_project')`);

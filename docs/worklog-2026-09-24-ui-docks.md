@@ -23,3 +23,18 @@
 - Typecheck, the focused chat regression, 36 adjacent dock/File tests, and the
   production bundle build passed. The full renderer-timeline suite was stopped
   after a long silent run; its new regression passed in isolation.
+
+## Part 2 — `feat/ui-dock-tools`
+
+- Extended the single dock owner to right and bottom tab frames. Files and Terminal move
+  as single renderer views; Sub-agents remains right-only. File drafts and terminal PTYs
+  stay with their original modules rather than being reconstructed on each placement.
+- Moved bottom height control to the dock frame. The per-tool bottom shortcut retains
+  Ctrl+backtick; Ctrl+Shift+2/3/4 open right Terminal/Files/Sub-agents. A hidden dock
+  retires Files watches while keeping terminal processes alive.
+- Checks: typecheck, focused renderer/terminal suites, production renderer build and
+  isolated Electron terminal scenario. Electron exercised hidden-panel continuity,
+  right↔bottom reparenting of the same live PTY, a second tab, Ctrl+C, exit and sizing.
+  The Electron fixture now compares the detached connection popover to the sidebar
+  surface under a non-translucent test theme; the old assertion incorrectly equated
+  sidebar and page background colors.

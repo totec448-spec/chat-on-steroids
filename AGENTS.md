@@ -771,8 +771,10 @@ and nested code-mode calls do not receive or acknowledge these automatic pages.
 
 `workspace-terminal.ts` and `workspace-terminal-ipc.ts` own human-operated node-pty shells;
 `renderer/workspace-terminal.ts` renders them with xterm and FitAddon. These shells are separate
-from MCP process custody and never consume agent output. The header button or Ctrl+backtick opens
-a resizable bottom panel. Each new tab captures the selected approved project's canonical cwd;
+from MCP process custody and never consume agent output. `renderer/workspace-docks.ts` places
+the same terminal view in the right or bottom dock. The bottom header button opens that dock;
+Ctrl+backtick toggles its terminal view. Moving or hiding the view never restarts a PTY.
+Each new terminal tab captures the selected approved project's canonical cwd;
 changing chats does not retarget existing shells. No project means no guessed cwd. The live
 Command permission gates spawn/input, and input rechecks the original project path.
 
@@ -2909,8 +2911,11 @@ access. Main re-resolves current approved roots and rejects traversal, symbolic 
 and project-root mutation. The renderer's `workspace-docks.ts` owns the right work slot,
 its tab strip, launcher and expansion; Files and the read-only sub-agent panel retain their
 own content and async lifetimes. Closing the right dock hides its active tool but retains
-its tab selection. The top-right pair toggles right and bottom workspaces; layout controls
-grant no new file, terminal or worker authority.
+its tab selection. Files and Terminal are singleton renderer views movable between right and
+bottom docks; Sub-agents remains right-only. Moving Files retains its editor and unsaved draft;
+hiding it retires file watches. Terminal may hold up to eight distinct PTYs in either location.
+The top-right pair toggles right and bottom workspaces; layout controls grant no new file,
+terminal or worker authority.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
 Its tab close or Escape closes the pane; a selected worker retains its title and Back button.
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are
