@@ -102,7 +102,8 @@ import {
   restoreRecordedConversation,
   setCallAttributionListener,
   type ChatObservation,
-  type PageCallEvidence
+  type PageCallEvidence,
+  recordNote
 } from './session/recorder.js';
 import {
   autoCompactionReady,
@@ -7153,6 +7154,25 @@ const PICKUP_BACKOFF_MS = [2, 5, 10, 15].map((minutes) => minutes * 60_000) as [
  * The row is keyed to the exact `replyId` it was armed for. A newer final answer is a different
  * obligation and gets its own schedule; a discharged one takes its schedule with it.
  */
+/**
+ * How many uncollected reloads pass before the chat's own timeline says what is happening.
+ *
+ * The schedule below runs for twelve hours and tells nobody in that time: every two, five, ten,
+ * then fifteen minutes it reloads a page that is not collecting what it is offered, and the only
+ * trace is one `info` line per attempt. If the page never collects — a turn that has frozen, a
+ * document that will not take input — the schedule simply runs to its expiry and the chat sits.
+ *
+ * Measured on one machine on 2026-09-24: a chat whose turn had frozen was offered its queued
+ * message, the page never collected it, the app reloaded on schedule, and the chat waited until
+ * its owner noticed and typed into it. Three times in one morning, each time the person found it
+ * before the app said anything, and each time one typed line started it again.
+ *
+ * Three attempts is seventeen minutes of the backoff: long enough that an ordinary slow pickup
+ * has come and gone, short enough that the person is still at the machine.
+ */
+const PICKUP_SILENT_ATTEMPTS = 3;
+const pickupStuckTold = new Set<string>();
+
 const pickupWatch = new Map<string, { replyId: string; dueAt: number; attempts: number; expiresAt: number }>();
 const PICKUP_WATCH_LIFETIME_MS = 12 * 60 * 60_000;
 
@@ -7317,6 +7337,21 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     watch.dueAt = now + PICKUP_BACKOFF_MS[Math.min(watch.attempts, PICKUP_BACKOFF_MS.length - 1)]!;
     queued = true;
     logInfo(`bridge: next automation/input step uncollected in ${reply.conversationId} — reload ${watch.attempts}`);
+    // And written where the user reads, once the reloads have stopped being plausible. The
+    // schedule goes on either way — a page can still come back hours later, and nothing here
+    // gives up on it — but the person who can end this in one line should not have to be the one
+    // who notices it.
+    if (watch.attempts >= PICKUP_SILENT_ATTEMPTS && !pickupStuckTold.has(reply.replyId)) {
+      pickupStuckTold.add(reply.replyId);
+      if (pickupStuckTold.size > 500) {
+        for (const old of [...pickupStuckTold].slice(0, 100)) pickupStuckTold.delete(old);
+      }
+      void recordNote(
+        reply.sessionId,
+        `This chat has a message waiting that its page will not take: ${watch.attempts} reloads and it was ` +
+          'never collected. The app keeps trying, but typing into the chat yourself starts it again immediately.'
+      ).catch(() => undefined);
+    }
   }
   return queued;
 }
@@ -8068,6 +8103,7 @@ function clearUnattributedIncident(): void {
   repairsInFlight.clear();
   lastBrowserRecoveryAt.clear();
   turnRepairSpent.clear();
+  pickupStuckTold.clear();
 }
 
 /**
