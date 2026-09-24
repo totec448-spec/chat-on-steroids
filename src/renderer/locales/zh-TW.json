@@ -1558,5 +1558,14 @@
   "ChatGPT’s current model": "ChatGPT 目前的模型",
   "Sent without choosing a model": "不選擇模型直接傳送",
   "Use ChatGPT’s current model": "使用 ChatGPT 目前的模型",
-  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "你的 ChatGPT 方案沒有模型選擇器。使用 ChatGPT 目前正在使用的模型傳送。"
+  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "你的 ChatGPT 方案沒有模型選擇器。使用 ChatGPT 目前正在使用的模型傳送。",
+  "Right panel": "右側面板",
+  "New tab": "新增分頁",
+  "Hide right panel": "隱藏右側面板",
+  "Restore right panel": "還原右側面板",
+  "Expand right panel": "展開右側面板",
+  "Toggle right panel": "切換右側面板",
+  "Toggle bottom panel": "切換底部面板",
+  "Toggle bottom panel (Ctrl+`)": "切換底部面板 (Ctrl+`)",
+  "Close tab": "關閉分頁"
 }

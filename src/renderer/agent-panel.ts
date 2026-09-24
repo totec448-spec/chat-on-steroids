@@ -6,6 +6,7 @@ import { attachWorkPanelResize } from './work-panel-resize.js';
 /** A read-only second pane. Its selection never changes the main chat's composer. */
 export function createAgentPanel(options: {
   host: HTMLElement;
+  mount?: HTMLElement;
   toggle: HTMLButtonElement;
   onShow?: () => void;
   load: (id: string) => Promise<{ events: SessionEvent[] } | null>;
@@ -15,13 +16,13 @@ export function createAgentPanel(options: {
 }) {
   const pane = el('aside', 'agent-panel'); pane.hidden = true;
   ui(pane, 'aria-label', () => t("Sub-agents"));
-  attachWorkPanelResize(options.host, pane);
+  if (!options.mount) attachWorkPanelResize(options.host, pane);
   const head = el('div', 'agent-panel-header'); head.hidden = true;
   const back = el('button', 'btn', '←'); ui(back, 'title', () => t("Back to sub-agents")); back.setAttribute('type', 'button');
   ui(back, 'aria-label', () => t("Back to sub-agents"));
   const title = el('strong');
   const body = el('div', 'agent-panel-body');
-  head.append(back, title); pane.append(head, body); options.host.append(pane);
+  head.append(back, title); pane.append(head, body); (options.mount ?? options.host).append(pane);
   let parent: string | null = null, workers: SessionSummary[] = [], selected: string | null = null;
   let generation = 0;
   function hide(): void {
@@ -72,6 +73,7 @@ export function createAgentPanel(options: {
   options.toggle.onclick = () => { if (pane.hidden) { show(); list(); } else hide(); };
   return {
     hide,
+    show: () => { show(); list(); },
     open,
     update(id: string | null, next: SessionSummary[]): void {
       if (parent !== id) { hide(); parent = id; }

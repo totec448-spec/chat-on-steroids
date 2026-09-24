@@ -1,4 +1,5 @@
 import { createWorkspaceTerminal } from './workspace-terminal.js';
+import { createWorkspaceDocks } from './workspace-docks.js';
 import { ui, t } from './i18n.js';
 import { initSkills } from './skills.js';
 import { imageStorageButton } from './image-storage.js';
@@ -143,6 +144,7 @@ function projectGroup(id: string | null | undefined): string | null {
   return id && !projects.find(project => project.id === id)?.ungrouped ? id : null;
 }
 let workspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
+let workspaceDocks: ReturnType<typeof createWorkspaceDocks> | null = null;
 
 function selectedLocalProject(): LocalProject | null {
   if (selectedId) {
@@ -794,6 +796,7 @@ function paintSessions(): void {
     ?.querySelector<HTMLElement>('.project-heading')?.focus({ preventScroll: true });
   agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
   filePanel?.update(selectedLocalProject());
+  workspaceDocks?.sync();
   workspaceTerminal?.update(selectedLocalProject());
   badgeKey = badgeSignature();
   $('projectsEmpty').hidden = projectSections.length > 0;
@@ -4095,6 +4098,9 @@ export function initChat(next: Deps): void {
       .map(entry => ({ id: entry.id, scope: projectGroup(entry.projectId) ?? '' }))
   ], paintSessions);
   deps = next;
+  const chatHost = document.querySelector<HTMLElement>('[data-panel="chat"]')!;
+  const docks = createWorkspaceDocks(chatHost);
+  workspaceDocks = docks;
   const fileToggle = el('button', 'btn file-panel-toggle') as HTMLButtonElement;
   fileToggle.id = 'filePanelToggle'; fileToggle.type = 'button'; fileToggle.hidden = true;
   fileToggle.append(icon('i-folder'));
@@ -4102,11 +4108,11 @@ export function initChat(next: Deps): void {
   const agentToggle = el('button', 'btn btn-icon', '◫') as HTMLButtonElement;
   agentToggle.id = 'agentPanelToggle'; agentToggle.type = 'button'; agentToggle.hidden = true;
   ui(agentToggle, 'aria-label', () => t("Toggle sub-agent side panel")); agentToggle.setAttribute('aria-expanded', 'false');
-  $('headerConnect').after(fileToggle, agentToggle);
+  chatHost.append(fileToggle, agentToggle);
   const agentToolGroups = new Map<string, HTMLDetailsElement>();
   agentPanel = createAgentPanel({
-    host: document.querySelector<HTMLElement>('[data-panel="chat"]')!, toggle: agentToggle,
-    onShow: () => filePanel?.hide(),
+    host: chatHost, mount: docks.body, toggle: agentToggle,
+    onShow: () => { filePanel?.hide(); docks.adopt('agents'); },
     load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
     render: (source, id, current) => {
       let boundary = '';
@@ -4280,15 +4286,17 @@ export function initChat(next: Deps): void {
     return true;
   };
   filePanel = createFilePanel({
-    host: document.querySelector<HTMLElement>('[data-panel="chat"]')!, toggle: fileToggle,
-    onShow: () => agentPanel?.hide(),
+    host: chatHost, mount: docks.body, toggle: fileToggle,
+    onShow: () => { agentPanel?.hide(); docks.adopt('files'); },
     captureAttachment: () => {
       const owner = composerDraftOwner();
       return attachment => appendImages(owner, [attachment]);
     }
   });
   filePanel.update(selectedLocalProject());
-  workspaceTerminal = createWorkspaceTerminal();
+  docks.register('files', 'Files', 'i-folder', () => void filePanel?.show(), () => filePanel?.hide(), () => !fileToggle.hidden);
+  docks.register('agents', 'Sub-agents', 'i-agents', () => agentPanel?.show(), () => agentPanel?.hide(), () => !agentToggle.hidden);
+  workspaceTerminal = createWorkspaceTerminal(docks.bottomToggle);
   workspaceTerminal.update(selectedLocalProject());
   $('attachImages').addEventListener('click', async () => {
     const owner = composerDraftOwner();

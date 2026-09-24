@@ -12,6 +12,7 @@ import type { ProjectPdfViewer } from './file-pdf-viewer.js';
 
 interface FilePanelOptions {
   host: HTMLElement;
+  mount?: HTMLElement;
   toggle: HTMLButtonElement;
   onShow?: () => void;
   onAttach?: (attachment: InputAttachment) => void;
@@ -199,7 +200,7 @@ function requestFileConfirmation(options: { title: string; message: string; deta
 export function createFilePanel(options: FilePanelOptions) {
   const pane = el('aside', 'file-panel'); pane.hidden = true;
   ui(pane, 'aria-label', () => t('Files'));
-  attachWorkPanelResize(options.host, pane);
+  if (!options.mount) attachWorkPanelResize(options.host, pane);
 
   const refresh = el('button', 'btn btn-icon file-panel-refresh') as HTMLButtonElement;
   refresh.type = 'button'; refresh.append(icon('i-pulse'));
@@ -222,7 +223,7 @@ export function createFilePanel(options: FilePanelOptions) {
   previewResize.setAttribute('aria-orientation', 'horizontal');
   ui(previewResize, 'aria-label', () => t('Resize file preview'));
   body.append(tree, preview);
-  pane.append(toolbar, body); options.host.append(pane);
+  pane.append(toolbar, body); (options.mount ?? options.host).append(pane);
 
   let project: LocalProject | null = null;
   let generation = 0;
@@ -1050,6 +1051,7 @@ export function createFilePanel(options: FilePanelOptions) {
   updateActions();
   return {
     hide,
+    show,
     visible: () => !pane.hidden,
     update(next: LocalProject | null): void {
       const changed = project?.id !== next?.id;
