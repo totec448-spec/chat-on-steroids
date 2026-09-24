@@ -11828,6 +11828,73 @@ describe('the goal loop over the bridge', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  /**
+   * A page that will not take the next message, said out loud.
+   *
+   * The pickup schedule runs for twelve hours — every two, five, ten, then fifteen minutes — and
+   * in all that time the only trace is one `info` line per attempt. Measured on 2026-09-24: a
+   * chat whose turn had frozen was offered its rescue, the page never collected it, the app
+   * reloaded on schedule, and the chat sat until its owner noticed and typed. Three times in one
+   * morning, each time the person found it before the app said anything.
+   *
+   * The schedule is unchanged — a page can still come back hours later — but the person who can
+   * fix it in one line now hears about it.
+   */
+  it('says once that a page is not collecting its next message, and keeps trying anyway', async () => {
+    vi.useFakeTimers();
+    const { resetInputForTests, enqueueInput } = await import('../src/main/session/input.js');
+    resetInputForTests();
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0175-0000-4000-8000-000000000175';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'uncollected-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'uncollected-turn' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      await enqueueInput({ id: 'abca0175-0000-4000-8000-000000000175', sessionId: session.id,
+        text: 'next step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await vi.advanceTimersByTimeAsync(1);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'uncollected-turn', outcome: 'completed' }
+      ] } });
+      await recordFinalForTest(chat, 'uncollected-turn');
+
+      // Reloaded on schedule and never collected, which is the whole case.
+      for (const minutes of [2, 5]) {
+        await vi.advanceTimersByTimeAsync(minutes * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = (await request('GET', '/status')).body.repairs?.[0];
+        expect(repair).toMatchObject({ conversationId: chat, reason: 'goal' });
+        await request('GET', `/status?repaired=${repair.token}&repairAction=reloaded`);
+      }
+      const said = async (): Promise<number> => (await readEvents(session.id, { kinds: ['note'] }))
+        .flatMap(event => event.kind === 'note' ? [event.message.text] : [])
+        .filter(text => /will not take/i.test(text)).length;
+      expect(await said(), 'two reloads is still an ordinary slow pickup').toBe(0);
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      const third = (await request('GET', '/status')).body.repairs?.[0];
+      expect(third).toMatchObject({ conversationId: chat, reason: 'goal' });
+      await request('GET', `/status?repaired=${third.token}&repairAction=reloaded`);
+
+      expect(await said(), 'the chat was left waiting without a word').toBe(1);
+
+      // Still trying, and still only said once.
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      const fourth = (await request('GET', '/status')).body.repairs?.[0];
+      expect(fourth, 'the schedule gave up instead of carrying on').toMatchObject({ conversationId: chat, reason: 'goal' });
+      expect(await said(), 'it repeated itself').toBe(1);
+    } finally {
+      await writeDurableNow('session-input', []);
+      resetInputForTests();
+      vi.useRealTimers();
+    }
+  });
+
   it('gives a queued head the bounded pickup schedule without an enabled Goal', async () => {
     const { enqueueInput, cancelInput, reorderQueuedInputs, resetInputForTests } = await import('../src/main/session/input.js');
     vi.useFakeTimers();
