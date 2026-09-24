@@ -1,10 +1,10 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { initSessionStore } from '../src/main/session/store.js';
-import { stageInputAttachment, validateInputAttachments, readInputAttachmentChunk, ATTACHMENT_CHUNK_BYTES, MAX_ATTACHMENT_BYTES } from '../src/main/session/input-attachments.js';
+import { stageInputAttachment, stageInputAttachments, validateInputAttachments, readInputAttachmentChunk, ATTACHMENT_CHUNK_BYTES, MAX_ATTACHMENT_BYTES } from '../src/main/session/input-attachments.js';
 let directory: string;
 beforeEach(async () => { directory = await makeTempDir('cos-attachments-'); initSessionStore(directory); });
 afterEach(async () => { await removeTempDir(directory); });
@@ -27,6 +27,21 @@ it('keeps dropped Unicode text exact and permits empty native files', async () =
   expect(Buffer.from(await readInputAttachmentChunk(file, 0), 'base64').toString()).toBe(text);
   const empty = await stageInputAttachment({ text: '' }, new Set());
   expect(empty.size).toBe(0); await validateInputAttachments([empty]);
+});
+it('prunes and measures staging once for a multi-file batch', async () => {
+  const read = vi.spyOn(fs, 'readdir');
+  try {
+    const files = await stageInputAttachments([
+      { text: 'first' },
+      { text: 'second' },
+      { name: 'third.bin', bytes: new Uint8Array([1, 2, 3]) }
+    ], new Set());
+    expect(files).toHaveLength(3);
+    expect(read).toHaveBeenCalledTimes(1);
+    await validateInputAttachments(files);
+  } finally {
+    read.mockRestore();
+  }
 });
 it('rejects folders, traversal IDs, oversized files and oversized messages', async () => {
   await expect(stageInputAttachment(directory, new Set())).rejects.toThrow('folders');

@@ -6,6 +6,7 @@ import { marked } from 'marked';
 import { t, ui } from './i18n.js';
 import { el, icon, run, toast } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
+import { sanitizeHtmlTree } from './sanitize-html.js';
 import type { ProjectCodeEditor } from './file-code-editor.js';
 import type { ProjectPdfViewer } from './file-pdf-viewer.js';
 
@@ -65,40 +66,14 @@ function markdownPreview(source: string): HTMLElement {
   const root = el('div', 'file-preview-markdown');
   const template = document.createElement('template');
   template.innerHTML = marked.parse(source, { async: false, gfm: true });
-
-  const visit = (parent: ParentNode): void => {
-    for (const node of [...parent.childNodes]) {
-      if (node.nodeType !== 1) continue;
-      const element = node as Element;
-      const tag = element.tagName.toUpperCase();
-      if (DROP_MARKDOWN_TAGS.has(tag)) {
-        element.remove();
-        continue;
-      }
-      visit(element);
-      if (!MARKDOWN_TAGS.has(tag)) {
-        element.replaceWith(...element.childNodes);
-        continue;
-      }
-      const href = tag === 'A' ? element.getAttribute('href')?.trim() ?? '' : '';
-      const safeHref = href.startsWith('#') ? href : safeExternalLink(href) ? href : '';
-      const title = element.getAttribute('title');
-      const start = tag === 'OL' ? element.getAttribute('start') : null;
-      const colSpan = tag === 'TD' || tag === 'TH' ? element.getAttribute('colspan') : null;
-      const rowSpan = tag === 'TD' || tag === 'TH' ? element.getAttribute('rowspan') : null;
-      for (const attribute of [...element.attributes]) element.removeAttribute(attribute.name);
-      if (safeHref) {
-        element.setAttribute('href', safeHref);
-        element.setAttribute('target', '_blank');
-        element.setAttribute('rel', 'noreferrer noopener');
-      }
-      if (title) element.setAttribute('title', title.slice(0, 500));
-      if (start && /^\d{1,6}$/.test(start)) element.setAttribute('start', start);
-      if (colSpan && /^\d{1,3}$/.test(colSpan)) element.setAttribute('colspan', colSpan);
-      if (rowSpan && /^\d{1,3}$/.test(rowSpan)) element.setAttribute('rowspan', rowSpan);
+  sanitizeHtmlTree(template.content, {
+    allowedTags: MARKDOWN_TAGS,
+    dropTags: DROP_MARKDOWN_TAGS,
+    safeHref: value => {
+      const href = value.trim();
+      return safeExternalLink(href) ? href : null;
     }
-  };
-  visit(template.content);
+  });
   root.append(template.content);
   for (const table of root.querySelectorAll('table')) {
     const viewport = el('div', 'file-preview-markdown-table');
@@ -111,11 +86,6 @@ function markdownPreview(source: string): HTMLElement {
     if (!anchor || !root.contains(anchor)) return;
     const href = anchor.getAttribute('href') ?? '';
     event.preventDefault();
-    if (href.startsWith('#')) {
-      const id = href.slice(1);
-      [...root.querySelectorAll<HTMLElement>('[id]')].find(node => node.id === id)?.scrollIntoView({ block: 'nearest' });
-      return;
-    }
     if (safeExternalLink(href)) void run(window.api.openLink(href));
   });
   return root;

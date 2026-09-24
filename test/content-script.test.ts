@@ -15382,6 +15382,71 @@ describe('one live isolated-world recorder per document', () => {
     // watchToolRows observer also called refreshFiber(), producing a second page-context scan.
     expect(fiberAsks).toBe(1);
   });
+
+  it.each(['click', 'submit', 'keydown'] as const)(
+    'retires the predecessor user-send %s listener before stale Goal templates can rewrite the composer',
+    async (sendEvent) => {
+      let templateGoal = true;
+      live = await harness(undefined, {
+        activity: () => ({
+          ok: true,
+          data: {
+            entries: [],
+            stream: [],
+            nextSince: 0,
+            pendingTools: 0,
+            job: null,
+            goal: templateGoal
+              ? {
+                  enabled: true,
+                  own: true,
+                  mode: 'goal',
+                  backend: 'templates',
+                  hasKey: true,
+                  model: 'Offline Goal',
+                  objective: 'ship the recorder fix',
+                  draft: null
+                }
+              : null
+          }
+        })
+      });
+      await live.hook.pullActivity();
+
+      const window = live.window as any;
+      const composer = live.document.querySelector('#prompt-textarea') as HTMLElement;
+      const form = live.document.querySelector('#composer-form') as HTMLFormElement;
+      composer.textContent = 'template preflight';
+      form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+      expect(composerText(live.document)).toContain('[[COS_GOAL:COMPLETE]]');
+
+      window.chrome.runtime.id = 'clf-extension-id';
+      window.__CLF_CONTENT_RECORDER__.healthy = () => false;
+      templateGoal = false;
+      let successor: Hook | null = null;
+      window.CLF_TEST_HOOK = (api: Hook) => {
+        successor = api;
+      };
+      window.eval(contentSource.replace("if (!composer || !onTarget() || generating || CLF_DOM.generating()", "window.__inputDebug = { composer: !!composer, target: onTarget(), generating, native: CLF_DOM.generating(), text: composer?.textContent }; if (!composer || !onTarget() || generating || CLF_DOM.generating()"));
+      await settle(120);
+      expect(successor).not.toBeNull();
+
+      const send = live.document.querySelector('[data-testid="send-button"]') as HTMLElement;
+      composer.textContent = 'manual prompt';
+      if (sendEvent === 'click') {
+        send.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+      } else if (sendEvent === 'submit') {
+        form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+      } else {
+        composer.dispatchEvent(new window.KeyboardEvent('keydown', {
+          key: 'Enter', bubbles: true, cancelable: true
+        }));
+      }
+      await settle();
+
+      expect(composerText(live.document)).toBe('manual prompt');
+    }
+  );
 });
 
 /**

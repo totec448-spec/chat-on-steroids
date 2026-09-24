@@ -222,6 +222,29 @@ it('rejects traversal and links that leave the LocalProject even when the target
   await expect(projectFileTarget(project.id, 'linked-sibling/secret.txt')).rejects.toThrow(/symbolic links|junctions/);
 });
 
+it('revalidates a create parent when it is replaced by a junction after target resolution', async () => {
+  const projectPath = path.join(approved, 'project');
+  const siblingPath = path.join(approved, 'sibling');
+  const notes = path.join(projectPath, 'notes');
+  const parked = path.join(projectPath, 'notes-original');
+  const target = path.join(notes, 'race.txt');
+  await fs.mkdir(notes);
+  const project = await addProject(projectPath);
+  const lstat = fs.lstat.bind(fs);
+  let targetChecks = 0;
+  vi.spyOn(fs, 'lstat').mockImplementation((async (file: any, options?: any) => {
+    if (String(file) === target && ++targetChecks === 2) {
+      await fs.rename(notes, parked);
+      await fs.symlink(siblingPath, notes, process.platform === 'win32' ? 'junction' : 'dir');
+      throw Object.assign(new Error('Target is still missing'), { code: 'ENOENT' });
+    }
+    return lstat(file, options);
+  }) as typeof fs.lstat);
+
+  await expect(createProjectEntry(project.id, 'notes', 'race.txt', 'file')).rejects.toThrow(/symbolic links|junctions|changed location/);
+  expect(await fs.readdir(siblingPath)).not.toContain('race.txt');
+});
+
 it('keeps the original bytes when the final replacement cannot be renamed', async () => {
   const projectPath = path.join(approved, 'project');
   const file = path.join(projectPath, 'notes.txt');

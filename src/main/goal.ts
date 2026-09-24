@@ -50,7 +50,7 @@ import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-te
 import type { GoalBackend } from '../shared/types.js';
 import { createHash } from 'node:crypto';
 import { getConfig } from './config.js';
-import { writeDurableNow, writeDurableSoon } from './durable.js';
+import { writeDurableNow, writeDurableSnapshotSoon, writeDurableSoon } from './durable.js';
 import { logInfo, logWarn } from './logger.js';
 import { getSecret } from './secrets.js';
 import { findSessionByConversation, getSession, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
@@ -707,21 +707,58 @@ export interface GoalObjectivesSnapshot {
  * user type it again.
  */
 const goalObjectives = new Map<string, string>();
+let goalObjectiveEpoch = 0;
+const goalObjectiveRevisions = new Map<string, number>();
+let goalObjectiveWrites: Promise<unknown> = Promise.resolve();
+interface PendingGoalObjectiveWrite {
+  epoch: number;
+  targetConversationId: string;
+  revision: number;
+  moveGeneration: number;
+}
+const pendingGoalObjectiveWrites = new Set<PendingGoalObjectiveWrite>();
 
-export function snapshotGoalObjectives(): GoalObjectivesSnapshot {
+function goalObjectiveRevision(conversationId: string): number {
+  return goalObjectiveRevisions.get(conversationId) ?? 0;
+}
+
+function bumpGoalObjectiveRevision(...conversationIds: string[]): void {
+  for (const conversationId of conversationIds) {
+    goalObjectiveRevisions.set(conversationId, goalObjectiveRevision(conversationId) + 1);
+  }
+}
+
+function serialGoalObjective<T>(work: () => Promise<T>): Promise<T> {
+  const result = goalObjectiveWrites.then(work, work);
+  goalObjectiveWrites = result.catch(() => undefined);
+  return result;
+}
+
+function snapshotGoalObjectiveMap(objectives: ReadonlyMap<string, string>): GoalObjectivesSnapshot {
   return {
     version: 1,
     savedAt: Date.now(),
-    objectives: [...goalObjectives.entries()].map(([conversationId, objective]) => ({ conversationId, objective }))
+    objectives: [...objectives.entries()].map(([conversationId, objective]) => ({ conversationId, objective }))
   };
 }
 
+export function snapshotGoalObjectives(): GoalObjectivesSnapshot {
+  return snapshotGoalObjectiveMap(goalObjectives);
+}
+
 function persistGoalObjectives(): void {
-  writeDurableSoon(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives());
+  // Objective state is one whole-file ledger. Allocate its background snapshot only when the
+  // serialized durable writer actually reaches this generation; capturing it at mutation time
+  // can preserve another chat's pre-commit value while that chat has an immediate barrier in
+  // flight. The snapshot callback therefore merges every accepted live projection at the final
+  // write boundary instead of letting independent conversations overwrite each other on disk.
+  writeDurableSnapshotSoon(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives);
 }
 
 export function restoreGoalObjectives(snapshot: GoalObjectivesSnapshot | null): void {
   goalObjectives.clear();
+  goalObjectiveEpoch += 1;
+  goalObjectiveRevisions.clear();
   if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.objectives)) return;
   for (const raw of snapshot.objectives) {
     if (!raw || typeof raw.conversationId !== 'string' || !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId)) continue;
@@ -747,6 +784,7 @@ export function setGoalObjective(conversationId: string, text: string): string {
   const goal = text.trim();
   goalObjectives.delete(conversationId);
   if (goal) goalObjectives.set(conversationId, goal);
+  bumpGoalObjectiveRevision(conversationId);
   persistGoalObjectives();
   return goal;
 }
@@ -756,38 +794,99 @@ export function setGoalObjective(conversationId: string, text: string): string {
  *
  * `/goal/objective` tells the page the value was saved, so returning before the ordinary
  * 300 ms durable debounce leaves a real crash window where a successfully acknowledged goal
- * disappears on restart. Stage the in-memory value, make that exact snapshot durable, and only
- * then let the bridge publish success. If the write fails, restore the previous live value and
- * supersede durable.ts's retained failed generation with the still-authoritative snapshot.
+ * disappears on restart. Build the proposed state away from the live map, make that exact
+ * snapshot durable, and only then publish it. Objective barriers share one serialization lane;
+ * later synchronous set/clear projections supersede an older barrier, while a move retargets the
+ * accepted save to the replacement chat and repeats the barrier there. A failed generation is
+ * superseded with the live snapshot so durable.ts cannot retry an objective the caller was told
+ * did not save.
  */
 export async function setGoalObjectiveNow(conversationId: string, text: string): Promise<string> {
-  const before = goalObjectives.get(conversationId);
   const goal = text.trim();
-  goalObjectives.delete(conversationId);
-  if (goal) goalObjectives.set(conversationId, goal);
+  const epoch = goalObjectiveEpoch;
+  const pending: PendingGoalObjectiveWrite = {
+    epoch,
+    targetConversationId: conversationId,
+    revision: goalObjectiveRevision(conversationId),
+    moveGeneration: 0
+  };
+  pendingGoalObjectiveWrites.add(pending);
   try {
-    await writeDurableNow(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives());
-    return goal;
-  } catch (error) {
-    goalObjectives.delete(conversationId);
-    if (before) goalObjectives.set(conversationId, before);
-    writeDurableSoon(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives());
-    throw error;
+    return await serialGoalObjective(async () => {
+      for (;;) {
+        const targetConversationId = pending.targetConversationId;
+        const revision = pending.revision;
+        const moveGeneration = pending.moveGeneration;
+        // A later synchronous set/clear already superseded this request while it waited behind an
+        // older barrier. A move is different: it retargets this same accepted save below.
+        if (goalObjectiveEpoch !== epoch || goalObjectiveRevision(targetConversationId) !== revision) return goal;
+        const staged = new Map(goalObjectives);
+        staged.delete(targetConversationId);
+        if (goal) staged.set(targetConversationId, goal);
+        try {
+          await writeDurableNow(GOAL_OBJECTIVES_STATE, snapshotGoalObjectiveMap(staged));
+        } catch (error) {
+          persistGoalObjectives();
+          throw error;
+        }
+        if (goalObjectiveEpoch !== epoch) return goal;
+        // Compact & Resume can move the owning conversation while this exact whole-file write is
+        // in flight. Re-run the durable barrier against the moved owner before publishing so the
+        // acknowledged save cannot strand the new objective on the retired conversation.
+        if (pending.moveGeneration !== moveGeneration) continue;
+        if (goalObjectiveRevision(targetConversationId) !== revision) return goal;
+        // Publish only this operation. Another conversation may have changed while this full-file
+        // snapshot was on disk; its own newer durable generation owns that row and must stay live.
+        goalObjectives.delete(targetConversationId);
+        if (goal) goalObjectives.set(targetConversationId, goal);
+        // The barrier committed the exact requested transition, but another conversation may have
+        // changed while that full-file snapshot was in flight. Publish one fresh coalesced snapshot
+        // after memory commit so the eventual whole-file ledger cannot regress that neighboring row.
+        persistGoalObjectives();
+        return goal;
+      }
+    });
+  } finally {
+    pendingGoalObjectiveWrites.delete(pending);
   }
 }
 
 export function clearGoalObjective(conversationId: string): void {
-  if (goalObjectives.delete(conversationId)) persistGoalObjectives();
+  bumpGoalObjectiveRevision(conversationId);
+  goalObjectives.delete(conversationId);
+  // Persist even when the live map was already empty: the clear may be fencing an older durable
+  // save whose commit is currently in flight and would otherwise survive only on disk.
+  persistGoalObjectives();
 }
 
 /** Moves one chat-owned objective to the replacement conversation used by Compact & Resume. */
 export function moveGoalObjective(fromConversationId: string, toConversationId: string): boolean {
   if (!fromConversationId || !toConversationId || fromConversationId === toConversationId) return false;
   const objective = goalObjectives.get(fromConversationId);
-  if (!objective) return false;
+  const pendingMoves = [...pendingGoalObjectiveWrites].filter((pending) =>
+    pending.epoch === goalObjectiveEpoch &&
+    pending.targetConversationId === fromConversationId &&
+    pending.revision === goalObjectiveRevision(fromConversationId)
+  );
+  if (!objective && pendingMoves.length === 0) {
+    bumpGoalObjectiveRevision(fromConversationId);
+    // A no-op move can still race an uncommitted save for the source identity. Queue the
+    // authoritative live snapshot so an older source write cannot resurrect it after handoff.
+    persistGoalObjectives();
+    return false;
+  }
+  bumpGoalObjectiveRevision(fromConversationId, toConversationId);
+  const targetRevision = goalObjectiveRevision(toConversationId);
+  for (const pending of pendingMoves) {
+    pending.targetConversationId = toConversationId;
+    pending.revision = targetRevision;
+    pending.moveGeneration += 1;
+  }
   goalObjectives.delete(fromConversationId);
-  goalObjectives.delete(toConversationId);
-  goalObjectives.set(toConversationId, objective);
+  if (objective) {
+    goalObjectives.delete(toConversationId);
+    goalObjectives.set(toConversationId, objective);
+  }
   persistGoalObjectives();
   return true;
 }
@@ -1354,6 +1453,12 @@ export function resetGoalStateForTests(): void {
   drafts.clear();
   goalReplies.clear();
   goalObjectives.clear();
+  // Fence any objective barrier that a test deliberately leaves in flight; an old completion
+  // must not repopulate the freshly reset owner just because its per-chat revision was zero.
+  goalObjectiveEpoch += 1;
+  goalObjectiveRevisions.clear();
+  pendingGoalObjectiveWrites.clear();
+  goalObjectiveWrites = Promise.resolve();
   goalSwitches.clear();
   goalSwitchWrites = Promise.resolve();
   legacyCommittedResumeCache.clear();

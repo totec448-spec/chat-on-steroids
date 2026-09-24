@@ -21,6 +21,7 @@ import { renderRecoveryCountdowns } from './recovery.js';
 import type { RecoveryCountdown } from '../shared/recovery.js';
 import { communicationTitle, foldAgentCommunication } from './agent-communication.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
+import { sanitizeHtmlTree } from './sanitize-html.js';
 import { isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
@@ -391,6 +392,11 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   if (summary.id === activeId && summary.endedAt === null) row.classList.add('is-live');
 
   const top = el('div', 'sess-top');
+  top.setAttribute('role', 'button');
+  if (summary.id === selectedId) top.setAttribute('aria-current', 'true');
+  top.tabIndex = 0;
+  top.dataset.sessionSelect = '';
+  top.dataset.sortHandle = '';
   const title = el('b', '', () => summary.title || t("Untitled session")); title.dir = 'auto';
   top.append(title);
   const badges = sessionBadges(summary);
@@ -663,7 +669,7 @@ function paintSessions(): void {
     const projectId = projectGroup(entry.projectId);
     const target: HTMLElement[] = projectId ? [] : rows;
     const row = sessionRow(entry); target.push(row);
-    row.dataset.sortScope = projectId ?? ''; row.tabIndex = 0;
+    row.dataset.sortScope = projectId ?? '';
     const workers = children.get(entry.id); if (workers) group(entry.id, workers, row, target);
     if (projectId) {
       const tasks = projectRows.get(projectId) ?? [];
@@ -1374,6 +1380,39 @@ function safeRenderedHref(value: string): string | null {
 
 const PROVIDER_CITATION = /^\uE200(?:cite|filecite)\uE202[^\uE200\uE201]*\uE201/;
 const PROVIDER_URL = /^\uE200url\uE202([^\uE200-\uE202]*)\uE202([^\uE200-\uE202]*)\uE201/;
+const PROSE_BLOCK_TAGS = new Set(['P', 'DIV', 'LI', 'UL', 'OL', 'BLOCKQUOTE', 'PRE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'TR', 'TD', 'TH']);
+
+/** Normalized rendered prose immediately before each owned marker, in one DOM walk. */
+function prosePrefixes(root: ParentNode, marker: (element: Element) => string | null): Map<string, string> {
+  const prefixes = new Map<string, string>();
+  let text = '';
+  let spacing = false;
+  const feed = (value: string): void => {
+    for (const chunk of value.match(/\s+|[^\s]+/g) ?? []) {
+      if (/^\s+$/.test(chunk)) { spacing = true; continue; }
+      if (spacing && text) text += ' ';
+      text += chunk;
+      spacing = false;
+    }
+  };
+  const visit = (parent: ParentNode): void => {
+    for (const node of parent.childNodes) {
+      if (node.nodeType === 3) { feed(node.textContent ?? ''); continue; }
+      if (node.nodeType !== 1) continue;
+      const element = node as Element;
+      const key = marker(element);
+      if (key !== null) { prefixes.set(key, text); continue; }
+      const tag = element.tagName.toUpperCase();
+      if (tag === 'BR') { feed('\n'); continue; }
+      if (PROSE_BLOCK_TAGS.has(tag)) feed('\n');
+      visit(element);
+      if (PROSE_BLOCK_TAGS.has(tag)) feed('\n');
+    }
+  };
+  visit(root);
+  return prefixes;
+}
+
 /** Native citation labels and URLs may arrive before the DOM paints the rest of a canonical
  * revision. Use only exact source ranges with matching preceding prose, never substitute
  * the whole captured HTML or guess a destination from an opaque provider reference id. */
@@ -1389,15 +1428,40 @@ function citationLabels(source: string, capture?: StoredText): Map<string, strin
   for (const char of source) { offsets[points++] = units; units += char.length; }
   offsets[points] = units;
   const normalized = (text: string) => text.replace(/\s+/g, ' ').trim();
-  const prose = (fragment: DocumentFragment) => {
-    // Native HTML and Markdown emit different whitespace around hard breaks and
-    // list paragraphs. Compare the same rendered word boundaries in both trees.
-    for (const br of fragment.querySelectorAll('br')) br.replaceWith('\n');
-    for (const block of fragment.querySelectorAll('p,div,li,ul,ol,blockquote,pre,h1,h2,h3,h4,h5,h6,table,tr,td,th')) {
-      block.prepend('\n'); block.append('\n');
-    }
-    return normalized(fragment.textContent ?? '');
-  };
+  const capturedPrefixes = prosePrefixes(template.content, element =>
+    element.hasAttribute('data-content-reference-start') ? `capture:${element.getAttribute('data-content-reference-start')}:${element.getAttribute('data-content-reference-end')}` : null);
+
+  // Parsing every source prefix once per citation made a heavily sourced answer approach
+  // quadratic work. Parse the canonical Markdown once, replace only real inline citation
+  // tokens with private probe spans, then collect their normalized prose prefixes in one walk.
+  // Code spans/fences remain literal because Marked never invokes an inline extension inside them.
+  const probeAttribute = `data-cos-probe-${Math.random().toString(36).slice(2)}`;
+  const probeMarkers: string[] = [];
+  const probeParser = new Marked({ gfm: true, extensions: [{
+    name: 'providerCitationProbe', level: 'inline',
+    start: value => value.indexOf('\uE200'),
+    tokenizer(value) {
+      const match = value.match(PROVIDER_CITATION);
+      if (!match) return undefined;
+      const probe = probeMarkers.length;
+      probeMarkers.push(match[0]);
+      return { type: 'providerCitationProbe', raw: match[0], probe };
+    },
+    renderer(token) { return `<span ${probeAttribute}="${Number((token as unknown as { probe: number }).probe)}"></span>`; }
+  }] });
+  const canonical = document.createElement('template');
+  canonical.innerHTML = probeParser.parse(source, { async: false, gfm: true });
+  const probePrefixes = prosePrefixes(canonical.content, element => {
+    const value = element.getAttribute(probeAttribute);
+    return value !== null && /^\d+$/.test(value) ? `probe:${value}` : null;
+  });
+  const canonicalPrefixes = new Map<string, string>();
+  const markerCounts = new Map<string, number>();
+  for (const [probe, marker] of probeMarkers.entries()) {
+    markerCounts.set(marker, (markerCounts.get(marker) ?? 0) + 1);
+    const prefix = probePrefixes.get(`probe:${probe}`);
+    if (prefix !== undefined && !canonicalPrefixes.has(marker)) canonicalPrefixes.set(marker, prefix);
+  }
   for (const reference of template.content.querySelectorAll('[data-content-reference-start][data-content-reference-end]')) {
     const from = Number(reference.getAttribute('data-content-reference-start'));
     const to = Number(reference.getAttribute('data-content-reference-end'));
@@ -1405,12 +1469,21 @@ function citationLabels(source: string, capture?: StoredText): Map<string, strin
     const start = offsets[from]!, end = offsets[to]!;
     const marker = source.slice(start, end);
     if (marker.match(PROVIDER_CITATION)?.[0] !== marker) continue;
-    const before = document.createRange(); before.setStart(template.content, 0); before.setEndBefore(reference);
-    const preceding = before.cloneContents();
-    for (const prior of preceding.querySelectorAll('[data-content-reference-start]')) prior.remove();
-    const canonical = document.createElement('template');
-    canonical.innerHTML = marked.parse(source.slice(0, start).replace(/\uE200(?:cite|filecite)\uE202[^\uE200\uE201]*\uE201/g, ''), { async: false, gfm: true });
-    if (prose(preceding) !== prose(canonical.content)) continue;
+    const capturedPrefix = capturedPrefixes.get(`capture:${reference.getAttribute('data-content-reference-start')}:${reference.getAttribute('data-content-reference-end')}`);
+    let canonicalPrefix = canonicalPrefixes.get(marker);
+    if ((markerCounts.get(marker) ?? 0) > 1) {
+      // Identical provider markers can legitimately appear more than once. The fast map above is
+      // keyed by marker because the final renderer is too, but provenance still belongs to this
+      // exact source range. Fall back to the old exact-prefix proof only for that rare duplicate
+      // case so a hydrated later occurrence is not rejected against the first occurrence's text.
+      const exact = document.createElement('template');
+      exact.innerHTML = marked.parse(source.slice(0, start).replace(/\uE200(?:cite|filecite)\uE202[^\uE200\uE201]*\uE201/g, ''), { async: false, gfm: true });
+      const endProbe = document.createElement('span');
+      endProbe.dataset.cosPrefixEnd = '';
+      exact.content.append(endProbe);
+      canonicalPrefix = prosePrefixes(exact.content, element => element.hasAttribute('data-cos-prefix-end') ? 'end' : null).get('end');
+    }
+    if (capturedPrefix === undefined || capturedPrefix !== canonicalPrefix) continue;
     if (marker.startsWith('\uE200filecite\uE202')) {
       const names = [...reference.querySelectorAll('[data-file-citation-primary-file-id] button')]
         .map(node => normalized(node.textContent ?? '')).filter(name => name.length > 0 && name.length <= 500);
@@ -1498,50 +1571,12 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
   // Parsing untrusted captured HTML constructs a second tree before sanitisation. Bound it
   // before innerHTML so a valid but huge recorded turn cannot freeze/OOM the renderer.
   template.innerHTML = html.text.slice(0, MAX_RENDERED_HTML_CHARS);
-  const visit = (parent: ParentNode, directionOwned = false): void => {
-    for (const node of [...parent.childNodes]) {
-      // Namespace elements (SVG/MathML) are not HTMLElements. Checking HTMLElement here
-      // would let exactly the foreign content in DROP_RENDERED_TAGS bypass traversal and
-      // attribute stripping. nodeType is realm-agnostic and covers every DOM Element.
-      if (node.nodeType !== 1) continue;
-      const element = node as Element;
-      const tagName = element.tagName.toUpperCase();
-      if (DROP_RENDERED_TAGS.has(tagName)) {
-        element.remove();
-        continue;
-      }
-      const sourceDir = element.getAttribute('dir')?.toLowerCase();
-      const dir = sourceDir === 'ltr' || sourceDir === 'rtl' || sourceDir === 'auto' ? sourceDir : null;
-      // Native first-strong detection belongs to each prose block, not the whole
-      // answer. A list/quote or explicit captured direction owns its descendants:
-      // nested auto scopes would exclude their text from that owner's scan.
-      const automatic = !directionOwned && /^(P|H[1-6]|UL|OL|BLOCKQUOTE|TD|TH)$/.test(tagName);
-      const code = tagName === 'PRE' || tagName === 'CODE' || tagName === 'KBD';
-      const resolvedDir = RENDERED_TAGS.has(tagName) ? dir ?? (code ? 'ltr' : automatic ? 'auto' : null) : null;
-      visit(element, directionOwned || !!resolvedDir);
-      if (!RENDERED_TAGS.has(tagName)) {
-        element.replaceWith(...element.childNodes);
-        continue;
-      }
-      const href = tagName === 'A' ? safeRenderedHref(element.getAttribute('href') ?? '') : null;
-      const title = element.getAttribute('title');
-      const start = tagName === 'OL' ? element.getAttribute('start') : null;
-      const colSpan = tagName === 'TD' || tagName === 'TH' ? element.getAttribute('colspan') : null;
-      const rowSpan = tagName === 'TD' || tagName === 'TH' ? element.getAttribute('rowspan') : null;
-      for (const attribute of [...element.attributes]) element.removeAttribute(attribute.name);
-      if (resolvedDir) element.setAttribute('dir', resolvedDir);
-      if (href) {
-        element.setAttribute('href', href);
-        element.setAttribute('target', '_blank');
-        element.setAttribute('rel', 'noreferrer noopener');
-      }
-      if (title) element.setAttribute('title', title.slice(0, 500));
-      if (start && /^\d{1,6}$/.test(start)) element.setAttribute('start', start);
-      if (colSpan && /^\d{1,3}$/.test(colSpan)) element.setAttribute('colspan', colSpan);
-      if (rowSpan && /^\d{1,3}$/.test(rowSpan)) element.setAttribute('rowspan', rowSpan);
-    }
-  };
-  visit(template.content);
+  sanitizeHtmlTree(template.content, {
+    allowedTags: RENDERED_TAGS,
+    dropTags: DROP_RENDERED_TAGS,
+    safeHref: safeRenderedHref,
+    preserveDirection: true
+  });
   box.append(template.content);
   const openLink = (event: MouseEvent): void => {
     if (event.type === 'auxclick' && event.button !== 1) return;
@@ -4242,6 +4277,17 @@ export function initChat(next: Deps): void {
   $('sessionList').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-id]');
     if (!row?.dataset.id || row.dataset.id === selectedId) return;
+    pendingNewInput = null;
+    selectSession(row.dataset.id);
+  });
+  $('sessionList').addEventListener('keydown', (event) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || !['Enter', ' '].includes(event.key)) return;
+    const target = event.target as HTMLElement;
+    const control = target.closest<HTMLElement>('[data-session-select]');
+    const row = control?.closest<HTMLElement>('[data-id]');
+    if (!control || target !== control || !row?.dataset.id) return;
+    event.preventDefault();
+    if (row.dataset.id === selectedId) return;
     pendingNewInput = null;
     selectSession(row.dataset.id);
   });

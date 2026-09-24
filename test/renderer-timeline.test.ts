@@ -316,6 +316,29 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   };
 }
 
+it('makes parent and worker session selectors keyboard-focusable and activates them with Enter/Space', async () => {
+  const parent: SessionSummary = { ...summary([]), id: 'parent-session', title: 'Parent', conversationId: 'parent-chat', chatIds: ['parent-chat'] };
+  const worker: SessionSummary = { ...summary([]), id: 'worker-session', title: 'Worker', conversationId: 'worker-chat', chatIds: ['worker-chat'],
+    origin: { kind: 'worker', fromSessionId: parent.id, agentId: 'worker-1', task: 'Inspect' } };
+  const { w } = await boot([], false, [], [], { sessions: [parent, worker] });
+  const parentControl = w.document.querySelector<HTMLElement>(`[data-id="${parent.id}"] [data-session-select]`)!;
+  expect(parentControl.getAttribute('role')).toBe('button');
+  expect(parentControl.tabIndex).toBe(0);
+  parentControl.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await settle();
+  expect(w.document.querySelector(`.sess.is-sel[data-id="${parent.id}"]`)).not.toBeNull();
+
+  (w.document.querySelector(`[data-id="${parent.id}"] .worker-toggle`) as HTMLButtonElement).click();
+  await settle();
+  const workerControl = w.document.querySelector<HTMLElement>(`[data-id="${worker.id}"] [data-session-select]`)!;
+  expect(workerControl.tabIndex).toBe(0);
+  const activate = new w.KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+  workerControl.dispatchEvent(activate);
+  expect(activate.defaultPrevented).toBe(true);
+  await settle();
+  expect(w.document.querySelector(`.sess.is-sel[data-id="${worker.id}"]`)).not.toBeNull();
+});
+
 it('patches native reactions in place and hides streamed envelopes without changing authored messages', async () => {
   const user: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'extension', messageId: 'reaction-user', message: text('Question') };
   const answer: SessionEvent = { kind: 'assistant_message', seq: 2, time: T0 + 1, source: 'extension', messageId: 'reaction-answer', message: text('\uE200message_'), final: false };

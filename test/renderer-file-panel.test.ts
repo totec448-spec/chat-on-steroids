@@ -332,7 +332,7 @@ it('keeps one compact toolbar and closes through the Files toggle', async () => 
 it('renders markdown semantically and strips executable or remote-media markup', async () => {
   const markdown: ProjectFilePreview = {
     ...preview,
-    text: '# Heading\n\nA **bold** paragraph with a [safe link](https://example.com).\n\n```text\nlong code line\n```\n\n<script>alert(1)</script>\n\n![remote](https://example.com/image.png)'
+    text: '# Heading\n\nA **bold** paragraph with a [safe link](https://example.com) and [dead fragment](#heading).\n\n```text\nlong code line\n```\n\n<script>alert(1)</script>\n\n![remote](https://example.com/image.png)'
   };
   (window.api.previewProjectFile as any) = vi.fn(() => ok(markdown));
   const panel = createFilePanel({ host, toggle, onAttach: () => undefined });
@@ -345,7 +345,7 @@ it('renders markdown semantically and strips executable or remote-media markup',
   expect(rendered.querySelector('pre code')?.textContent).toContain('long code line');
   expect(rendered.querySelector('script')).toBeNull();
   expect(rendered.querySelector('img')).toBeNull();
-  expect(rendered.querySelector('a')?.getAttribute('href')).toBe('https://example.com');
+  expect([...rendered.querySelectorAll('a')].map(anchor => anchor.getAttribute('href'))).toEqual(['https://example.com', null]);
 });
 
 it('renders supported image previews inline instead of the generic binary placeholder', async () => {

@@ -241,7 +241,7 @@ interface Reply {
 function request(
   method: string,
   path: string,
-  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number } = {}
+  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number | null } = {}
 ): Promise<Reply> {
   const url = new URL(path, base);
   const payload = options.raw ?? (options.body === undefined ? null : JSON.stringify(options.body));
@@ -250,7 +250,7 @@ function request(
   // across incompatible app/extension builds instead of provisioning a token that can
   // only produce confusing downstream failures.
   headers['x-extension-version'] = options.extensionVersion ?? APP_VERSION;
-  headers['x-extension-protocol'] = String(options.protocol ?? BRIDGE_PROTOCOL);
+  if (options.protocol !== null) headers['x-extension-protocol'] = String(options.protocol ?? BRIDGE_PROTOCOL);
   if (payload !== null) {
     headers['content-type'] = 'application/json';
     headers['content-length'] = String(Buffer.byteLength(payload));
@@ -492,14 +492,31 @@ describe('who is allowed to talk to it', () => {
       const hello = await request('GET', '/hello', options);
       expect(hello.body.compatible).toBe(false);
       expect(changed).toHaveBeenCalledTimes(1);
-      expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', present: false, lastSeenAt: null });
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionCompatible: false, present: false, lastSeenAt: null });
+      await request('GET', '/hello', { auth: null, extensionVersion: '0.0.1', protocol: null });
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionCompatible: false });
+      expect(changed).toHaveBeenCalledTimes(1);
       const rejected = await request('POST', '/pair', options);
       expect(rejected.status).toBe(426);
       expect(changed).toHaveBeenCalledTimes(1);
       await request('GET', '/hello', { ...options, extensionVersion: '0.0.2' });
       expect(changed).toHaveBeenCalledTimes(2);
-      expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.2', present: false, paired: false });
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.2', extensionCompatible: false, present: false, paired: false });
     } finally { unsubscribe(); }
+  });
+
+  it('accepts an older extension release when it speaks the current bridge protocol', async () => {
+    const older = { auth: null, extensionVersion: '0.0.1', protocol: BRIDGE_PROTOCOL };
+    const hello = await request('GET', '/hello', older);
+    expect(hello.body.compatible).toBe(true);
+    const paired = await request('POST', '/pair', older);
+    expect(paired.status).toBe(200);
+    token = paired.body.token as string;
+    expect(await bridgeStatus()).toMatchObject({
+      extensionVersion: '0.0.1',
+      extensionCompatible: true,
+      present: true
+    });
   });
 
   it('binds a loopback port only', () => {

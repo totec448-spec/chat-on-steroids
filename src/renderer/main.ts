@@ -29,7 +29,6 @@ import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
 import type { AppState, Capability, ChatBrowser, LogEntry, SurfaceStatus } from '../shared/types.js';
 import {
   browserExtensionRequired,
-  isNewer,
   RELEASES_PAGE,
   CAPABILITY_DETAILS,
   CAPABILITY_LABELS,
@@ -806,18 +805,13 @@ let announced = false;
  * while the Activity line reports every state, including the good one.
  */
 function updateSummary({ bridge, update, config, status }: AppState): { text: string; tone: UpdateTone; notice: boolean; extensionAction: string | null } | null {
-  // Only an extension older than this app is the user's to fix. The other direction is an app
-  // that has not caught up yet - normal while an update downloads - and telling that user to
-  // load the bundled folder again would talk them into downgrading a working extension. The
-  // app sentence already owns being behind.
-  const stale =
-    bridge.extensionVersion && isNewer(update.current, bridge.extensionVersion)
-      ? bridge.extensionVersion
-      : null;
-  // A mismatched companion can fail the protocol gate before it becomes present.
-  // Retain its last observed version until a matching companion actually reports in.
-  const missing = !stale && bridge.running && !bridge.present && isRunning(status.state) && browserExtensionRequired(config);
-  if (!stale && !missing && !update.latest && update.stage === 'idle' && !update.checkedAt) return null;
+  // The bridge protocol is the compatibility fence. App/extension semver may differ across a
+  // hotfix that did not change the browser contract; version text remains diagnostic rather than
+  // inventing an update requirement. A mismatched peer reports compatibility before it can become
+  // present, so retain that actionable fact until a compatible companion reports in.
+  const incompatible = bridge.extensionCompatible === false;
+  const missing = !incompatible && bridge.running && !bridge.present && isRunning(status.state) && browserExtensionRequired(config);
+  if (!incompatible && !missing && !update.latest && update.stage === 'idle' && !update.checkedAt) return null;
 
   const lines: string[] = [];
   let tone: UpdateTone = 'work';
@@ -842,20 +836,20 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
     tone = 'bad';
   } else if (update.stage === 'checking') {
     lines.push(t("Checking for a newer version…"));
-  } else if (!stale && !missing) {
+  } else if (!incompatible && !missing) {
     const extension = bridge.present && bridge.extensionVersion ? t(" · extension {0}", [bridge.extensionVersion]) : '';
     lines.push(t("Up to date! Chat On Steroids {0}{1}", [update.current, extension]));
     tone = 'ok';
   }
-  if (stale) {
-    lines.push(
-      t("Update your browser extension: {0} → {1}. ", [stale, update.current]) +
+  if (incompatible) {
+    lines.push(bridge.extensionVersion
+      ? t("The browser extension {0} is incompatible with this app. ", [bridge.extensionVersion]) +
         t("Reload the extension from this app’s folder, then refresh ChatGPT.")
-    );
+      : t("The browser extension is incompatible with this app. Reload the matching extension, then refresh ChatGPT."));
     tone = 'bad';
   }
   if (missing) { lines.push(t("Browser extension not connected. Open ChatGPT and check the companion in Setup to load models and send messages.")); tone = 'bad'; }
-  return { text: lines.join(' '), tone, notice: Boolean(update.latest || stale || missing), extensionAction: stale ? t("Update extension") : missing ? t("Check extension") : null };
+  return { text: lines.join(' '), tone, notice: Boolean(update.latest || incompatible || missing), extensionAction: incompatible ? t("Update extension") : missing ? t("Check extension") : null };
 }
 
 /** The header bar, the Activity line and the one notification, from that single sentence. */
@@ -1027,7 +1021,7 @@ function apply(next: AppState): void {
 
   // ---- out of date, app or extension
   paintUpdate(next);
-  paintPluginRefreshReminder(next.update.current);
+  paintPluginRefreshReminder(next.connectorSchemas ?? {});
 
   // ---- health numbers and facts
   paintClock();

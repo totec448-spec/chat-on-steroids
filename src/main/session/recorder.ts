@@ -632,7 +632,7 @@ export function unattributedSession(): string | null {
  * splitting one assistant run across two local lifecycle generations. This app holds the
  * durable half of that lifecycle identity, so this is where it has to come from.
  */
-export function liveConversations(): Array<{
+export interface LiveConversationView {
   conversationId: string;
   sessionId: string;
   generating: boolean;
@@ -650,15 +650,28 @@ export function liveConversations(): Array<{
   endedTurns: number;
   /** Newest durable turn verdict; null when this chat has never reported an end. */
   lastTurnOutcome: TurnOutcome | null;
-}> {
-  return [...conversations.values()].map((entry) => ({
+}
+
+function liveConversationView(entry: LiveConversation): LiveConversationView {
+  return {
     conversationId: entry.conversationId,
     sessionId: entry.sessionId,
     generating: entry.turnStartedAt !== null,
     activeTurnId: entry.turnStartedAt !== null ? entry.turnId : null,
     endedTurns: entry.knownTurnEnds.size,
     lastTurnOutcome: entry.lastTurnOutcome
-  }));
+  };
+}
+
+/** One exact live conversation without allocating the full recorder snapshot. */
+export function liveConversation(conversationId: string | null | undefined): LiveConversationView | null {
+  if (!conversationId) return null;
+  const entry = conversations.get(conversationId);
+  return entry ? liveConversationView(entry) : null;
+}
+
+export function liveConversations(): LiveConversationView[] {
+  return [...conversations.values()].map(liveConversationView);
 }
 
 /**

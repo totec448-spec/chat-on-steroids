@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeArch, normalizePlatform, PLATFORM_INFO } from './packaging-targets.mjs';
@@ -17,6 +18,26 @@ const platform = normalizePlatform(value('platform', process.platform));
 const arches = value('arch', process.arch).split(',').map((item) => normalizeArch(item.trim()));
 const dirOnly = args.includes('--dir');
 
+function verifyReleaseMetadata() {
+  const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+  const manifest = JSON.parse(readFileSync(path.join(root, 'extension', 'manifest.json'), 'utf8'));
+  const versionSource = readFileSync(path.join(root, 'src', 'main', 'version.ts'), 'utf8');
+  const appVersion = versionSource.match(/APP_VERSION = '([^']+)'/)?.[1];
+  const versions = {
+    'package.json': pkg.version,
+    'package-lock.json': lock.version,
+    'package-lock.json root': lock.packages?.['']?.version,
+    'extension/manifest.json': manifest.version,
+    'src/main/version.ts': appVersion
+  };
+  const mismatches = Object.entries(versions).filter(([, version]) => version !== pkg.version);
+  if (mismatches.length) {
+    const details = Object.entries(versions).map(([name, version]) => `${name}=${version ?? '<missing>'}`).join(', ');
+    throw new Error(`Release metadata is not aligned: ${details}`);
+  }
+}
+
 function run(command, commandArgs, env = process.env) {
   const result = spawnSync(command, commandArgs, { cwd: root, stdio: 'inherit', env });
   if (result.error) throw result.error;
@@ -24,6 +45,7 @@ function run(command, commandArgs, env = process.env) {
 }
 
 const node = process.execPath;
+verifyReleaseMetadata();
 run(node, ['scripts/generate-third-party-notices.mjs']);
 run(node, ['scripts/make-icon.mjs']);
 run(node, [path.join('node_modules', 'electron-vite', 'bin', 'electron-vite.js'), 'build']);

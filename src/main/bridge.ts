@@ -93,6 +93,7 @@ import {
 import { logInfo, logWarn } from './logger.js';
 import {
   closeConversation,
+  liveConversation,
   liveConversations,
   noteChatOrigin,
   recordAgentMessage,
@@ -525,6 +526,7 @@ const commandRedeems = new Map<string, Promise<void>>();
 let requestWindow = { start: Date.now(), count: 0 };
 const listeners = new Set<() => void>();
 let extensionVersion: string | null = null;
+let observedExtensionProtocol: number | null = null;
 let versionWarned = false;
 let latestCompanionDiagnostics: CompanionDiagnostics | null = null;
 let companionDiagnosticsRevision = 0;
@@ -712,6 +714,7 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     paired: stored !== null && stored !== BROWSER_DISCONNECTED,
     present: browserPresent(),
     lastSeenAt,
+    extensionCompatible: observedExtensionProtocol === null ? null : observedExtensionProtocol === BRIDGE_PROTOCOL,
     extensionVersion
   };
 }
@@ -845,13 +848,21 @@ function protocolCompatible(req: http.IncomingMessage): boolean {
 function noteExtensionVersion(req: http.IncomingMessage): void {
   const version = req.headers['x-extension-version'];
   const protocol = extensionProtocol(req);
+  let statusChanged = false;
   if (typeof version === 'string' && version !== extensionVersion) {
     extensionVersion = version.slice(0, 32);
     logInfo(`bridge: browser extension ${extensionVersion} connected`);
-    // Even an incompatible peer reports its version before the protocol fence.
-    // Publish that evidence without falsely granting compatible browser presence.
-    changed();
+    statusChanged = true;
   }
+  // Missing protocol evidence cannot erase a previously observed compatibility result.
+  // Legacy/non-extension local requests may omit this header entirely.
+  if (protocol !== null && protocol !== observedExtensionProtocol) {
+    observedExtensionProtocol = protocol;
+    statusChanged = true;
+  }
+  // Even an incompatible peer reports its version/protocol before the protocol fence.
+  // Publish that evidence without falsely granting compatible browser presence.
+  if (statusChanged) changed();
   if (!versionWarned && protocol !== null && protocol !== BRIDGE_PROTOCOL) {
     versionWarned = true;
     logWarn(
@@ -1416,7 +1427,8 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
   // A persisted start is history, not proof that the provider is still generating.
   // Reuse the recorder's process-local observation (or an exact attributed running
   // tool) so opening old recordings after restart cannot resurrect Stop/Working.
-  const live = liveConversations().find(entry => entry.conversationId === id && entry.sessionId === sessionId);
+  const observed = liveConversation(id);
+  const live = observed?.sessionId === sessionId ? observed : null;
   const activityExpiry = sessionActivityExpiresAt(session);
   const stopping = commands.some(c => c.spec.type === 'stop' && c.spec.sessionId === sessionId && c.spec.turnId === session.activeTurnId);
   const activeTurnId = session.browserRecoveryDismissedAt === undefined && session.activeTurnId &&
@@ -1496,9 +1508,11 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string)
     // The shared startup owner launches only on positive process absence. An
     // existing browser remains the extension election's responsibility.
     await wakeBrowserUrl(chatUrl(id), false, getConfig().ui.backgroundChats === true, {
-      current: () => bridgeLifecycleEpoch === lifecycle && !bridgeShutdownRequested && commands.includes(command) &&
-        Date.now() < command.createdAt + STOP_COMMAND_TIMEOUT_MS &&
-        liveConversations().some(row => row.sessionId === sessionId && row.conversationId === id && row.activeTurnId === expectedTurnId)
+      current: () => {
+        const live = liveConversation(id);
+        return bridgeLifecycleEpoch === lifecycle && !bridgeShutdownRequested && commands.includes(command) &&
+          Date.now() < command.createdAt + STOP_COMMAND_TIMEOUT_MS && live?.sessionId === sessionId && live.activeTurnId === expectedTurnId;
+      }
     });
   }
   return sessionControlsFor(sessionId);
@@ -1508,7 +1522,7 @@ async function stopCommandCurrent(spec: Extract<CommandSpec, { type: 'stop' }>):
   return Boolean(session?.conversationId === spec.conversationId && session.activeTurnId === spec.turnId &&
     !await conversationWasSuperseded(spec.conversationId));
 }
-function stopRequestedFor(conversationId: string, turnId = liveConversations().find(row => row.conversationId === conversationId)?.activeTurnId): boolean {
+function stopRequestedFor(conversationId: string, turnId = liveConversation(conversationId)?.activeTurnId): boolean {
   return commands.some(command => command.spec.type === 'stop' && command.spec.conversationId === conversationId &&
     (!turnId || command.spec.turnId === turnId) && Date.now() - command.createdAt < STOP_COMMAND_TIMEOUT_MS);
 }
@@ -1527,7 +1541,7 @@ async function pendingStopCommands(): Promise<Array<{ id: string; conversationId
 function activateConversationGoalReply(id: string, active: boolean): Promise<boolean> {
   const grant = activeUntil.get(id);
   const idle = (silenceSourceTurnId?: string) => {
-    const live = liveConversations().find(row => row.conversationId === id);
+    const live = liveConversation(id);
     return activeUntil.get(id) === grant && runningToolCalls(id) === 0 &&
       (!chatIsWorking(id) || (!!silenceSourceTurnId && live?.activeTurnId === silenceSourceTurnId)) &&
       observationWritesInFlight === 0 && (!grant || grant.until <= Date.now());
@@ -1674,7 +1688,7 @@ export function recoveryInputAllowed(sessionId: string, id: string): boolean {
  * A global in-flight count cannot establish that ownership.
  */
 function chatIsWorking(conversationId: string): boolean {
-  const current = liveConversations().find((entry) => entry.conversationId === conversationId);
+  const current = liveConversation(conversationId);
   return Boolean(current && (current.generating || current.activeTurnId));
 }
 
@@ -2269,10 +2283,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // Read before closeConversation() forgets the page: the
       // page's own open turn, or this app's standing definition of a chat that is working —
       // an attributed call or current-turn observation inside the silence window.
-      const working =
-        liveConversations().some(
-          (entry) => entry.conversationId === id && (entry.generating || Boolean(entry.activeTurnId))
-        ) || (activeUntil.get(id)?.until ?? 0) > Date.now();
+      const live = liveConversation(id);
+      const working = Boolean(live && (live.generating || live.activeTurnId)) || (activeUntil.get(id)?.until ?? 0) > Date.now();
       const manual = body['manual'] === true;
       if (manual) {
         // User departure withdraws activity and pending browser actions. Preserve
@@ -2423,14 +2435,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     };
     // Every open ChatGPT tab polls this for its own conversation every few seconds, so
     // this is the app's primary first-hand evidence of which chats exist right now.
-    let live = liveConversations().find((entry) => entry.conversationId === id);
+    let live = liveConversation(id);
     if (!live || astraSession?.browserRecoveryDismissedAt !== undefined) {
       // `/activity` itself proves that this ChatGPT page is still open. After an app restart
       // the durable session can keep receiving exact MCP calls while the recorder's live map
       // is empty; returning an empty feed here leaves Overwrite stale forever. Reattach only
       // when a durable session already exists, so a random poll cannot manufacture history.
       await restoreRecordedConversation(id, receivedAt);
-      live = liveConversations().find((entry) => entry.conversationId === id);
+      live = liveConversation(id);
       if (live && astraSession?.browserRecoveryDismissedAt !== undefined)
         await restoreReturnedPageActivity(id, live.sessionId);
     }
@@ -2983,7 +2995,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         origin
       );
     }
-    const live = liveConversations().find((entry) => entry.conversationId === id);
+    const live = liveConversation(id);
     const known = live ? null : await findSessionByConversation(id, { requireUnique: true });
     const sessionId = live?.sessionId ?? known?.id ?? null;
     if (!sessionId) {
@@ -3271,7 +3283,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // old and this is the request that spends somebody's OpenRouter credit.
     if (!goalActiveFor(id)) return goalJson(res, 409, { error: 'goal_disabled' }, origin);
     if (!(await goalKeyPresent(goalModeFor(id)))) return goalJson(res, 409, { error: 'no_api_key' }, origin);
-    const live = liveConversations().find((entry) => entry.conversationId === id);
+    const live = liveConversation(id);
     const known = live ? null : await findSessionByConversation(id, { requireUnique: true });
     const sessionId = live?.sessionId ?? known?.id ?? null;
     if (!sessionId) {
@@ -4300,7 +4312,7 @@ async function wakeQueuedStoppedWorkers(ids: readonly string[], runId: string): 
  * its last write is hours old.
  */
 async function durableQuiescence(conversationId: string, now: number): Promise<DurableQuiescence> {
-  const live = liveConversations().find((entry) => entry.conversationId === conversationId);
+  const live = liveConversation(conversationId);
   if (live?.generating) return { quiescent: false, ended: false, lastOutcome: null };
   const summary = await findSessionByConversation(conversationId, {
     requireUnique: true
@@ -5413,8 +5425,7 @@ async function askForTheTabToWakeIn(command: Command, lifecycle: number): Promis
     if (bridgeLifecycleEpoch !== lifecycle || bridgeShutdownRequested || !commands.includes(command) ||
       command.owner !== null || revivalDeliveryProven(command)) return false;
     const revival = revivalFor(spec.agent, spec.runId);
-    return revival?.conversationId === spec.conversationId && revival.messageIds.length > 0 &&
-      !liveConversations().some(entry => entry.conversationId === spec.conversationId);
+    return revival?.conversationId === spec.conversationId && revival.messageIds.length > 0 && !liveConversation(spec.conversationId);
   };
   if (!current()) return;
   const session = await findSessionByConversation(spec.conversationId, { requireUnique: true });
@@ -5748,8 +5759,8 @@ export function sessionInputActivity(summary: SessionSummary): InputActivity {
   const mcpWindow = grant?.sessionId === summary.id && grant.mcpBacked && !grant.thinkingFailed &&
     (summary.activeTurnId || summary.lastTurnOutcome !== 'stopped') &&
     (!summary.activeTurnId || summary.activeTurnId === grant.turnId) && grant.until > Date.now();
-  const exact = !!mcpWindow || runningToolProgress(id) !== null ||
-    liveConversations().some(row => row.sessionId === summary.id && row.conversationId === id && !!row.activeTurnId);
+  const live = liveConversation(id);
+  const exact = !!mcpWindow || runningToolProgress(id) !== null || (live?.sessionId === summary.id && !!live.activeTurnId);
   return { exact, model: grant?.sessionId === summary.id && (grant.turnId === summary.activeTurnId || mcpWindow) ? grant.model : 'unknown',
     ...(exact && (summary.activeTurnId || (mcpWindow && grant?.turnId)) ? { turnId: summary.activeTurnId || grant!.turnId! } : {}),
     possible: exact || runningToolCalls(id) > 0 ||
@@ -6643,7 +6654,8 @@ async function noteRecoveryObservations(
     // A current-turn interim can push an existing deadline; historical transcript/page rows
     // never enter this verdict and therefore cannot keep a confirmed reload alive.
     if (sessionId && !activity.terminal && activity.working) {
-      const liveTurn = liveConversations().find(entry => entry.conversationId === conversationId && entry.sessionId === sessionId)?.activeTurnId;
+      const live = liveConversation(conversationId);
+      const liveTurn = live?.sessionId === sessionId ? live.activeTurnId : undefined;
       const previous = activeUntil.get(conversationId);
       const [sourceBoundary] = !previous && !liveTurn && activity.working
         ? await readRecentEvents(sessionId, 1, { kinds: ['turn_start', 'turn_end'] }) : [];
@@ -6794,7 +6806,7 @@ async function noteRecoveryObservations(
     // later. Counting the open turn as spent makes the next end after it the first that means
     // anything: a turn the chat actually got through, which is the one fact that says the page
     // recovered without help.
-    const live = liveConversations().find((entry) => entry.conversationId === conversationId);
+    const live = liveConversation(conversationId);
     const endedTurns = (live?.endedTurns ?? 0) + (live?.activeTurnId ? 1 : 0);
     if (
       sessionId && source &&
@@ -7502,9 +7514,8 @@ async function queueStalledTabRecovery(conversationId: string, now = Date.now())
   if (!agent && !compacting && !goalActiveFor(conversationId) && (session.toolCalls ?? 0) === 0) {
     return declined('it has never called a tool');
   }
-  const working =
-    liveConversations().some((entry) => entry.conversationId === conversationId && (entry.generating || Boolean(entry.activeTurnId))) ||
-    (activeUntil.get(conversationId)?.until ?? 0) > now;
+  const live = liveConversation(conversationId);
+  const working = Boolean(live && (live.generating || live.activeTurnId)) || (activeUntil.get(conversationId)?.until ?? 0) > now;
   if (!working && !compacting && agent?.role !== 'worker' && !(goalActiveFor(conversationId) && goalPendingReplyFor(conversationId))) {
     return declined('no turn is running in it');
   }
@@ -7720,7 +7731,7 @@ function noteCallAttribution(
 
 /** Frozen generation identity survives TTL expiry, but never a new turn or owner. */
 function unattributedCandidateCurrent(target: UnattributedCandidate): boolean {
-  const live = liveConversations().find(entry => entry.conversationId === target.conversationId);
+  const live = liveConversation(target.conversationId);
   if (!workerRecoveryAllowed(target.conversationId)) return false;
   return !isChatBlocked(target.conversationId) && !stopRequestedFor(target.conversationId) &&
     !supersededSourceConversations().includes(target.conversationId) &&
@@ -8047,7 +8058,7 @@ async function updateRepairProgress(conversationId: string, repair: Repair, text
   const turnId =
     repair.progress?.turnId ??
     repair.assistantSource?.turnId ??
-    liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ??
+    liveConversation(conversationId)?.activeTurnId ??
     (repair.reason === 'silence' && activeUntil.get(conversationId)?.sessionId === sessionId
       ? activeUntil.get(conversationId)?.turnId : null) ??
     null;
@@ -9077,6 +9088,7 @@ export function resetBridgeForTests(): void {
   lastBrowserLaunchAt = 0;
   lastSeenAt = null;
   extensionVersion = null;
+  observedExtensionProtocol = null;
   versionWarned = false;
   requestWindow = { start: Date.now(), count: 0 };
 }

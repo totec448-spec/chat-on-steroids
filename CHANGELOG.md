@@ -11,6 +11,12 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## Unreleased
 
+- Retire predecessor extension recorder listeners on takeover so stale Goal state cannot rewrite later manual prompts.
+- Serialize durable Goal-objective publication, merge cross-chat background snapshots safely, and revalidate Project Files mutation parents immediately before pathname changes.
+- Reduce attachment staging rescans and pathless clipboard memory, share renderer HTML sanitization, and avoid full live-conversation snapshots for exact bridge lookups.
+- Make session rows keyboard-selectable without nesting interactive controls.
+- Show the ChatGPT connector refresh reminder only after an exact published tool schema changes, and use the bridge protocol rather than release semver as the browser companion compatibility fence.
+- Refuse release packaging when app, lockfile, extension and internal runtime versions disagree.
 - Keep fresh background workers rendering while their editor hydrates, including pending initial navigation and exact document retirement.
 - Read live alternate-shell request metadata and public activity before history hydration; place recorded tools beside native prose without a reload.
 - Restore versioned response observers without duplicate active readers and recognize complete identity in native resume streams.

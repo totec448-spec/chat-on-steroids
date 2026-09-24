@@ -115,13 +115,33 @@ const api = {
   dropFiles: async (files: File[]): Promise<Reply<InputAttachment[]>> => {
     if (!files.length || files.length > 20) return { ok: false, error: 'Attach up to 20 files per message' };
     try {
-      const sources = [];
-      for (const file of files) {
+      const staged: Array<InputAttachment | undefined> = new Array(files.length);
+      const paths: Array<{ index: number; path: string }> = [];
+      const memory: Array<{ index: number; file: File }> = [];
+      for (const [index, file] of files.entries()) {
         const path = webUtils.getPathForFile(file);
         if (!path && file.size > 12 * 1024 * 1024) return { ok: false, error: 'Pasted images must be 12 MB or smaller' };
-        sources.push(path || { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
+        if (path) paths.push({ index, path });
+        else memory.push({ index, file });
       }
-      return await call<InputAttachment[]>('sessions:dropFiles', { files: sources });
+      // Disk drops carry only their paths over IPC, so keep their one-batch staging fast. Files
+      // without a native path (clipboard/paste) have to materialize bytes in the sandboxed
+      // preload. Send those one at a time so 20 x 12 MiB inputs never coexist in JS + IPC copies.
+      if (paths.length) {
+        const reply = await call<InputAttachment[]>('sessions:dropFiles', { files: paths.map(entry => entry.path) });
+        if (!reply.ok) return reply;
+        if (reply.data.length !== paths.length) return { ok: false, error: 'Could not stage the attachments' };
+        for (const [offset, entry] of paths.entries()) staged[entry.index] = reply.data[offset];
+      }
+      for (const entry of memory) {
+        const bytes = new Uint8Array(await entry.file.arrayBuffer());
+        const reply = await call<InputAttachment[]>('sessions:dropFiles', { files: [{ name: entry.file.name, bytes }] });
+        if (!reply.ok) return reply;
+        if (reply.data.length !== 1) return { ok: false, error: 'Could not stage the attachment' };
+        staged[entry.index] = reply.data[0];
+      }
+      if (staged.some(attachment => !attachment)) return { ok: false, error: 'Could not stage the attachments' };
+      return { ok: true, data: staged as InputAttachment[] };
     } catch { return { ok: false, error: 'Could not read the attachment' }; }
   },
   attachText: (text: string) => call<InputAttachment>('sessions:attachText', { text }),

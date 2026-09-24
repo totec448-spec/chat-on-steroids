@@ -469,6 +469,8 @@ describe('explicit settings replace the published tool contract', () => {
     };
     try {
       const before = snapshot();
+      const beforeState = await handlers.get('state:get')!(null, undefined) as any;
+      expect(beforeState.data.connectorSchemas.core).toBe(before.schemaId);
       const tool = kind === 'finish' ? 'session_finish' : 'exec_command';
       expect(before.tools.map(row => row.name)).toContain(tool);
       expect(before.tools.map(row => row.name)).not.toContain('session');
@@ -478,6 +480,8 @@ describe('explicit settings replace the published tool contract', () => {
         : { capabilities: { ...current.capabilities, command: false } }) };
       expect((await save(patch)).ok).toBe(true);
       const after = snapshot();
+      const afterState = await handlers.get('state:get')!(null, undefined) as any;
+      expect(afterState.data.connectorSchemas.core).toBe(after.schemaId);
       expect(after.tools.map(row => row.name)).not.toContain(tool);
       expect(after.tools.map(row => row.name)).not.toContain('session');
       expect(after.schemaId).not.toBe(before.schemaId);

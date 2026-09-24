@@ -13,7 +13,7 @@ import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } f
 import { releaseSessionFinish, requestSessionFinishGoal } from './session/finish.js';
 import { GOAL_MARKER_INSTRUCTION } from '../shared/goal-templates.js';
 import { validateInputImages } from './session/input-images.js';
-import { stageInputAttachment, type AttachmentSource } from './session/input-attachments.js';
+import { stageInputAttachment, stageInputAttachments, type AttachmentSource } from './session/input-attachments.js';
 import { recordDeliveredInput, recordedInputImage } from './session/input-history.js';
 import { UI_BASE_ZOOM, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { usageOverview } from './session/usage.js';
@@ -26,6 +26,7 @@ import { requestBrowserPreferences } from './browser-preferences.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from './session/start-input.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
+import { pluginRefreshPublications } from './plugin-refresh.js';
 /**
  * IPC surface.
  *
@@ -58,7 +59,7 @@ import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
 import { addProject, getSessionProject, listProjects, projectWorkspace, removeProject } from './projects.js';
-import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, saveProjectTextFile } from './project-files.js';
+import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { hasSecret, isEncryptionAvailable, secureStorageStatus, setSecret } from './secrets.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
@@ -380,6 +381,9 @@ async function buildState(): Promise<AppState> {
   return {
     config,
     status: getStatus(),
+    connectorSchemas: Object.fromEntries(
+      pluginRefreshPublications().map(({ surface, schemaId }) => [surface, schemaId])
+    ),
     platform: hostPlatformInfo(),
     loginStartupAvailable: supportsLoginStartup(process.platform, app.isPackaged),
     secureStorage: await secureStorageStatus(),
@@ -437,7 +441,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     });
     return buildState();
   });
-  registerPluginIpc(handle, getWindow);
   handle('usage:get', () => usageOverview());
   handle('state:get', async () => {
     const state = await buildState();
@@ -697,6 +700,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
     const target = await projectFileTarget(projectId, path, { allowRoot: false });
     if (target.kind !== 'file' && target.kind !== 'directory') throw new Error('Only regular files and folders can be deleted');
+    await revalidateProjectFileTarget(target);
     await shell.trashItem(target.real);
     return true;
   });
@@ -915,9 +919,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
 
   const stageFiles = async (sources: AttachmentSource[]) => {
     const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
-    const result = [];
-    for (const source of sources) result.push(await stageInputAttachment(source, retained));
-    return result;
+    return stageInputAttachments(sources, retained);
   };
   handle('sessions:files', async () => {
     const chosen = await dialog.showOpenDialog({ title: 'Attach files', properties: ['openFile', 'multiSelections'] });
@@ -1223,6 +1225,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   };
   onStatusChange(pushState);
   onBridgeChange(pushState);
+  registerPluginIpc(handle, getWindow, pushState);
   // Draft stages belong to session controls; state:changed only refreshes settings.
   onGoalChange(() => push('session:changed'));
   handle('tasks:cancel', async payload => cancelTaskRequest(z.object({ requestId: z.string().uuid() }).parse(payload).requestId));

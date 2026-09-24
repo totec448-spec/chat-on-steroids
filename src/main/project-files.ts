@@ -33,6 +33,29 @@ async function recheckTarget(target: Omit<ProjectFileTarget, 'kind'>): Promise<v
   }
 }
 
+/**
+ * Re-resolve the owning directory immediately before a pathname mutation.
+ *
+ * Node does not expose a portable openat/CreateFile-relative API, so pathname syscalls cannot
+ * make an OS-wide lock out of this check. Keeping the final parent identity check adjacent to
+ * the syscall still prevents stale project/link resolutions in the normal application path and
+ * catches a concurrent junction/symlink replacement whenever it is visible before mutation.
+ */
+async function recheckMutationParent(target: Omit<ProjectFileTarget, 'kind'>): Promise<void> {
+  const relativeParent = parentPath(target.path);
+  const current = await projectFileTarget(target.projectId, relativeParent, { allowRoot: true });
+  if (current.kind !== 'directory' || !sameRealPath(current.projectReal, target.projectReal) ||
+      !sameRealPath(current.real, path.dirname(target.real))) {
+    throw new Error('The project folder changed location. Reload it before continuing.');
+  }
+}
+
+/** Revalidate an already-resolved Files target at the last practical pathname boundary. */
+export async function revalidateProjectFileTarget(target: ProjectFileTarget): Promise<void> {
+  await recheckTarget(target);
+  await recheckMutationParent(target);
+}
+
 /** Exact bytes and identity from one bounded open file, including BOM and final line endings. */
 async function textSnapshot(target: Omit<ProjectFileTarget, 'kind'>) {
   const before = await fs.lstat(target.real);
@@ -423,6 +446,11 @@ export async function createProjectEntry(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
+  await recheckMutationParent(target);
+  const currentTarget = await resolveTarget(projectId, relative, { allowMissing: true, allowRoot: false });
+  if (!sameRealPath(currentTarget.projectReal, target.projectReal) || !sameRealPath(currentTarget.real, target.real)) {
+    throw new Error('The project folder changed location. Reload it before continuing.');
+  }
   if (kind === 'directory') await fs.mkdir(target.real);
   else {
     const handle = await fs.open(target.real, 'wx');
@@ -452,10 +480,16 @@ export async function renameProjectEntry(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
+  await revalidateProjectFileTarget(source);
+  await recheckMutationParent(destination);
+  const currentDestination = await resolveTarget(projectId, relative, { allowMissing: true, allowRoot: false });
+  if (!sameRealPath(currentDestination.projectReal, destination.projectReal) ||
+      !sameRealPath(currentDestination.real, destination.real)) {
+    throw new Error('The project folder changed location. Reload it before continuing.');
+  }
   // The sandbox resolution above validates the new spelling even when a Windows case-only
   // rename resolves back to the existing file identity. Use the sibling spelling for rename so
   // the requested case is not lost to realpath canonicalisation.
-  void destination;
   await fs.rename(source.real, lexicalDestination);
   return { projectId, path: relative, kind: source.kind };
 }
@@ -484,6 +518,7 @@ export async function saveProjectTextFile(
     if (original.revision !== expectedRevision || original.data.length !== expectedBytes || original.stat.mtime.toISOString() !== expectedModifiedAt) {
       throw new Error('File changed on disk. Reload it before saving your edits.');
     }
+    await recheckMutationParent(target);
     const handle = await fs.open(temporary, 'wx', original.stat.mode & 0o777);
     try {
       staged = await handle.stat();
@@ -492,6 +527,7 @@ export async function saveProjectTextFile(
     } finally { await handle.close(); }
     const latest = await textSnapshot(target);
     if (latest.revision !== original.revision) throw new Error('File changed on disk. Reload it before saving your edits.');
+    await recheckMutationParent(target);
     // There is no truncation of the original. Write/flush/rename failures retain its bytes.
     await fs.rename(temporary, target.real);
     staged = null;

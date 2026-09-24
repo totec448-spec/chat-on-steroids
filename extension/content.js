@@ -812,6 +812,7 @@
   }
 
   function rememberUserSend() {
+    if (!alive) return;
     // Only the explicitly selected offline Goal backend changes the user prompt.
     const composer = CLF_DOM.composer();
     if (goalConfig?.backend === 'templates' && (goalConfig?.enabled === true || (!goalConfig?.own && !!goalConfig?.objective)) && goalConfig?.mode !== 'loop' && !desktopDecision) {
@@ -838,17 +839,17 @@
       at: Date.now()
     };
   }
-  document.addEventListener('click', (event) => {
+  listen(document, 'click', (event) => {
     const button = CLF_DOM.sendButton?.();
     if (button && event.target && button.contains(event.target)) rememberUserSend();
   }, true);
-  document.addEventListener('submit', (event) => {
+  listen(document, 'submit', (event) => {
     const composer = CLF_DOM.composer();
     if (composer && event.target && typeof event.target.contains === 'function' && event.target.contains(composer)) {
       rememberUserSend();
     }
   }, true);
-  document.addEventListener('keydown', (event) => {
+  listen(document, 'keydown', (event) => {
     const composer = CLF_DOM.composer();
     if (
       composer &&
