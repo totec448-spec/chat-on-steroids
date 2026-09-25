@@ -1268,6 +1268,51 @@ describe('activity feed', () => {
     });
   });
 
+  /**
+   * A stream origin has no message to name, and that is not a defect in it.
+   *
+   * It is read off the `/f/conversation` SSE body before ChatGPT has mounted anything, so the page
+   * sends `messageId: null` by construction. This route reads only `requestId` — it never looks at
+   * the message — but the parser required one anyway, so every stream-derived id was dropped
+   * silently and the route answered `bad_request_evidence` with no log line.
+   *
+   * Measured on the live page and reported in #393: the origin was published up to eighteen
+   * seconds *before* the call arrived and still counted for nothing. The call waited out the full
+   * twenty-second identity window, was filed under Unattributed activity, and the bridge then
+   * reloaded the tab looking for the evidence it had already been given and thrown away.
+   * `identity_ms` 15001 -> 2 after the fix.
+   */
+  it('registers a stream origin the page cannot yet name a message for', async () => {
+    await pair();
+    const conversationId = '17171717-3939-6161-8383-959595959595';
+    const requestId = '11111111-2222-4333-8444-555555555555';
+    const mapped = await request('POST', '/correlations', {
+      body: { conversationId, calls: [{ messageId: null, requestId, createTime: Date.now() / 1000 }] }
+    });
+    expect(mapped.status, 'the stream origin was refused').toBe(200);
+    expect(mapped.body).toMatchObject({ ok: true, conversationId, confirmed: [requestId], complete: true });
+  });
+
+  /**
+   * Two stream origins in one batch are two ids, not one duplicate. Dedup keys on the message
+   * when there is one and on the request id when there is not; keying both on an absent message
+   * would have collapsed every stream row in a batch into the first.
+   */
+  it('keeps two stream origins apart when neither names a message', async () => {
+    await pair();
+    const conversationId = '18181818-4040-6262-8484-969696969696';
+    const first = '21111111-2222-4333-8444-555555555555';
+    const second = '31111111-2222-4333-8444-555555555555';
+    const mapped = await request('POST', '/correlations', {
+      body: { conversationId, calls: [
+        { messageId: null, requestId: first, createTime: Date.now() / 1000 },
+        { messageId: null, requestId: second, createTime: Date.now() / 1000 }
+      ] }
+    });
+    expect(mapped.status).toBe(200);
+    expect((mapped.body as { confirmed: string[] }).confirmed.sort()).toEqual([first, second].sort());
+  });
+
   it('still refuses correlation evidence that names no request id at all', async () => {
     await pair();
     const refused = await request('POST', '/correlations', {

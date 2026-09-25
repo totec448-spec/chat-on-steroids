@@ -980,12 +980,23 @@ function parseCallEvidence(input: unknown, untooled = false): PageCallEvidence[]
     const tool = typeof item['tool'] === 'string' && TOOL_NAME.test(item['tool']) ? item['tool'] : '';
     const messageId = typeof item['messageId'] === 'string' ? item['messageId'].slice(0, 120) : '';
     const bare = untooled && typeof item['requestId'] === 'string';
-    if ((!tool && !bare) || !messageId) continue;
-    if (seen.has(messageId)) {
-      duplicated.add(messageId);
+    if (!tool && !bare) continue;
+    // A stream origin has no message to name. It is read off the `/f/conversation` SSE body
+    // before ChatGPT has mounted anything, so `messageId` is null by construction — and the one
+    // route that accepts bare evidence, `/correlations`, reads only `requestId` and never looks
+    // at the message. Requiring one here therefore dropped every stream-derived id silently:
+    // the page published the exact join up to eighteen seconds *before* the call arrived, the app
+    // answered `bad_request_evidence` without a log line, and the call still waited out the full
+    // twenty-second identity window and was filed under Unattributed activity. Reported with
+    // before/after measurements on the live page in #393: `identity_ms` 15001 -> 2, and no
+    // attribution repair reload afterwards. Bare rows are deduplicated by the id they do carry.
+    const key = messageId || `request:${item['requestId'] as string}`;
+    if (!messageId && !bare) continue;
+    if (seen.has(key)) {
+      duplicated.add(key);
       continue;
     }
-    seen.add(messageId);
+    seen.add(key);
     out.push({
       messageId,
       tool,
@@ -1003,7 +1014,7 @@ function parseCallEvidence(input: unknown, untooled = false): PageCallEvidence[]
         typeof item['createTime'] === 'number' && Number.isFinite(item['createTime']) ? item['createTime'] : null
     });
   }
-  return out.filter((call) => !duplicated.has(call.messageId));
+  return out.filter((call) => !duplicated.has(call.messageId || `request:${call.requestId}`));
 }
 
 /**

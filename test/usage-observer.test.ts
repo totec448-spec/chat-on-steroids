@@ -136,6 +136,46 @@ describe('MAIN-world usage projection', () => {
     await h.feedSse([`data: {"conversation_id":"${id}","metadata":{"request_id":"wfr_replaced"}}\n\n`]);
     expect(h.posts.filter(row => row.requestIds?.includes('wfr_replaced'))).toHaveLength(1);
   });
+  /**
+   * The join ChatGPT split across two events.
+   *
+   * The first event of a `/f/conversation` response is the stream handoff and carries
+   * `conversation_id`; the `input_message` event after it carries the request id and names no
+   * conversation at all. `readOrigin` required both sides on one event and the id in one of two
+   * places, so it abstained on every turn — and every MCP call then waited out the full
+   * twenty-second identity window and was filed under Unattributed activity.
+   *
+   * Reported with before/after measurements on the live page in #393: `identity_ms` 15001 -> 2,
+   * and no attribution repair reload afterwards. Long agentic turns also stopped being cut off as
+   * `stalled`, because their tool calls finally counted as progress on the turn that made them.
+   */
+  it('joins a request id in input_message to the conversation the same response named', async () => {
+    const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const request_id = '11111111-2222-4333-8444-555555555555';
+    await h.feedSse([
+      `data: ${JSON.stringify({ conversation_id, turn_topic_id: 'topic-1' })}\n\n`,
+      `data: ${JSON.stringify({ type: 'input_message', input_message: { metadata: { request_id } } })}\n\n`
+    ], { method: 'POST' }, 'https://chatgpt.com/backend-api/f/conversation');
+    expect(h.posts.map(row => row.requestIds), 'the split join was never read').toEqual([[request_id]]);
+    expect(h.posts[0]!.conversationId).toBe(conversation_id);
+  });
+
+  /**
+   * One response is one conversation, and that is the whole of the authority claimed above.
+   * An event naming a different conversation abstains exactly as it always did — response order
+   * must never become authority across conversations.
+   */
+  it('abstains when a later event in the same response names a different conversation', async () => {
+    const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const other = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+    await h.feedSse([
+      `data: ${JSON.stringify({ conversation_id, turn_topic_id: 'topic-1' })}\n\n`,
+      `data: ${JSON.stringify({ conversation_id: other, type: 'input_message',
+        input_message: { metadata: { request_id: '11111111-2222-4333-8444-555555555555' } } })}\n\n`
+    ], { method: 'POST' }, 'https://chatgpt.com/backend-api/f/conversation');
+    expect(h.posts, 'a contradictory response published an origin anyway').toHaveLength(0);
+  });
+
   it('requires a fresh document for a legacy observer without a disposal handle', () => {
     const h = harness(); h.markLegacy(); const before = h.currentFetch();
     h.evaluate(); expect(h.needsReload()).toBe(true); expect(h.currentFetch()).toBe(before);
