@@ -525,7 +525,11 @@ async function lastSeqOnDisk(id: string): Promise<number> {
   try {
     size = (await fs.stat(file)).size;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+    // ENOTDIR is absence too: something with a session-shaped name is sitting in the history
+    // folder and is not a folder, so there is no journal under it and never was. Only a path
+    // that exists and will not be read is a read failure.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return 0;
     throw error;
   }
   // One valid event line may be almost MAX_LINE_BYTES and a crash can leave another
@@ -2201,7 +2205,8 @@ async function readMetaFile(
     raw = await fs.readFile(file, 'utf8');
   } catch (error) {
     const failure = error as NodeJS.ErrnoException;
-    if (failure.code === 'ENOENT') return { checkpoint: null, state: 'absent' };
+    // Same reasoning as the journal above: there is no projection under a file.
+    if (failure.code === 'ENOENT' || failure.code === 'ENOTDIR') return { checkpoint: null, state: 'absent' };
     return { checkpoint: null, state: 'unreadable', error: failure };
   }
   const checkpoint = normalizeSummary(id, raw);
