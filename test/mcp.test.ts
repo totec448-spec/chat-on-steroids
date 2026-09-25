@@ -2861,7 +2861,15 @@ describe('exec_command and write_stdin', () => {
     }
   });
 
-  it('reads a batch exit per command, so one search finding nothing is not a failure', async () => {
+  /**
+   * Both of these run a real ripgrep through the batch runner, so they need one to exist —
+   * `resources/rg` from packaging, or a copy on PATH. Without either, `rg` is not a command and
+   * the batch reports 127, which says nothing about per-command exit accounting. Skip rather
+   * than fail: the subject is the accounting, not whether this checkout ships the tool.
+   */
+  const ripgrep = locateRipgrep();
+
+  it.skipIf(!ripgrep)('reads a batch exit per command, so one search finding nothing is not a failure', async () => {
     // The batch that `cmds` exists for is several searches at once, and a search that finds
     // nothing exits 1. Handing the wrapper script to the single-command classifier would ask
     // whether a `for` loop is a search, so the batch used to report a plain failure and invite
@@ -2899,7 +2907,7 @@ describe('exec_command and write_stdin', () => {
     expect(brokenText).toContain('Batch: command 2 exited 3; the other command exited 0.');
   }, 60_000);
 
-  it('returns partial search results without exonerating an unreadable batch path', async () => {
+  it.skipIf(!ripgrep)('returns partial search results without exonerating an unreadable batch path', async () => {
     const result = await core('tools/call', { name: 'exec_command', arguments: {
       cmds: ['rg -n "export const name" src/app.ts missing-search-file.ts', 'rg -n "export const name" src/app.ts'],
       workdir: '/workspace', yield_time_ms: 8_000
