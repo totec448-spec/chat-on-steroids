@@ -4055,13 +4055,49 @@ async function placeSuccessorChat(raw, tabId) {
   }
   if (!id) return;
   if (typeof tabId !== 'number') {
+    /*
+     * A successor with nowhere to be placed is still a successor that was asked for.
+     *
+     * Everything below arranges the new tab *beside* its predecessor: the home conversation's
+     * own tab decides the window and the index, so a handoff reads as one piece of work rather
+     * than a tab appended to the far end of a long strip. That is placement, not permission —
+     * and when it cannot be worked out, this used to return without opening anything and without
+     * saying so. The app then waited out `WORKER_REDEEM_MS` and reported "the chat this app
+     * opened did not report back in time" about a chat it had never opened.
+     *
+     * Two ordinary situations reach that: a command from a caller with no ChatGPT conversation
+     * of its own — an unattributed MCP client spawning a worker, where the run starts "by
+     * conversation null" — and a home conversation whose tab the user has since closed. Both
+     * were reported from a live machine on 2026-09-25 with Background chats off, where no new
+     * tab appeared at all and the only trace was the timeout twenty seconds later.
+     *
+     * So the fallback opens it where a person would get one: the ordinary current window. The
+     * command is redeemed the same way wherever its page lands, and a tab in the wrong place is
+     * something a person can see and move — unlike one that was never opened.
+     */
     const conversationId = cleanConversationId(raw.homeConversationId);
-    if (!conversationId) return;
-    try {
-      const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
-      tabId = tabs.filter(tab => conversationForTab(tab) === conversationId).sort((a, b) => a.id - b.id)[0]?.id;
-    } catch { return; }
-    if (typeof tabId !== 'number') return;
+    if (conversationId) {
+      try {
+        const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+        tabId = tabs.filter(tab => conversationForTab(tab) === conversationId).sort((a, b) => a.id - b.id)[0]?.id;
+      } catch { /* Fall through to the placeless open below. */ }
+    }
+    if (typeof tabId !== 'number') {
+      const base = successorChatBase(raw.project, raw.homeConversationId);
+      const marker = `clf=${encodeURIComponent(id)}${base !== 'https://chatgpt.com/' ? '&clf_project=1' : ''}`;
+      const model = commandModelSlug(raw && raw.model);
+      const reasoningEffort = commandReasoningEffort(raw && raw.reasoningEffort);
+      const query = [marker];
+      if (model) query.push(`model=${encodeURIComponent(model)}`);
+      if (reasoningEffort) query.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
+      try {
+        const created = await createChatTab(`${base}?${query.join('&')}#${marker}`, false, raw.active !== false);
+        await protectCreatedTab(created, id);
+      } catch {
+        // Opening authority was spent. The command deadline reports an unsuccessful attempt.
+      }
+      return;
+    }
   }
   let home = null;
   try {
