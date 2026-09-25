@@ -10,6 +10,38 @@ import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt, userPromptText } from '..
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let directory: string;
+/**
+ * The frame as ChatGPT's composer hands it back.
+ *
+ * The editor treats what it is given as Markdown source and escapes it on readback — a
+ * backslash before ASCII punctuation, and one before a newline for a hard line break. The frame
+ * is punctuation and newlines almost entirely, so an escaped readback matched none of it, and
+ * the declared instruction length stopped matching too because escaping adds characters.
+ *
+ * Reported as #374 with a screenshot of both halves of the consequence: the app showed the
+ * internal instructions as a message of their own, ending in `[[/COS_CONTEXT]]\\`, beside the
+ * authored prompt — and the page kept the whole frame visible, so ChatGPT titled the
+ * conversation `[[COS_CONTEXT:19518]]You are a coding...`.
+ */
+it('reads a frame the page escaped, and keeps an authored backslash literal', () => {
+  const instructions = 'You are a coding agent.\nKeep task work there.';
+  const framed = prependUserPrompt('write me a plugin\n\nsecond line', instructions);
+  expect(userPromptText(framed)).toBe('write me a plugin\n\nsecond line');
+
+  // Exactly what the composer does: every ASCII punctuation mark and every newline.
+  const escaped = framed.replace(/([!-/:-@[-`{-~])/g, '\\$1').replace(/\n/g, '\\\n');
+  expect(escaped).toContain('\\[\\[COS\\_CONTEXT\\:');
+  expect(userPromptText(escaped)).toBe('write me a plugin\n\nsecond line');
+
+  // The tolerant read is a second attempt, never the first: a prompt that really contains a
+  // backslash keeps it, because the exact frame around it parses.
+  const literal = prependUserPrompt('use \\[ in the regex', instructions);
+  expect(userPromptText(literal)).toBe('use \\[ in the regex');
+
+  // And text that is not a frame at all stays unrecognised, escaped or not.
+  expect(userPromptText('\\[\\[COS\\_CONTEXT\\:9\\]\\]\\\nnot a frame')).toBeNull();
+});
+
 it('reduces AGENTS to 5000 before shortening every selected skill under char and byte limits', () => {
   const agents = { directory: '/work', text: 'A'.repeat(30_000), truncated: false };
   const skills = [{ id: 'first', text: 'FIRST\n' + '🐱漢字'.repeat(20_000) }, { id: 'second', text: 'SECOND\n' + 'z'.repeat(60_000) }];
