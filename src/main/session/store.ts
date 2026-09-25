@@ -1028,11 +1028,37 @@ export function automaticCompactionAllowed(summary?: SessionSummary | null): boo
     !(selected?.conversationId === summary?.conversationId && isProModel(selected?.model, selected?.reasoningEffort));
 }
 
-export function autoCompactionReady(summary: SessionSummary | null | undefined): boolean {
+export function autoCompactionReady(
+  summary: SessionSummary | null | undefined,
+  /**
+   * This chat is demonstrably working right now, so the stored refusal no longer describes it.
+   *
+   * A refusal is written when an automatic ticket is abandoned before its send, and it is a
+   * verdict about the turn that would not take the handoff — held afterwards so a restart cannot
+   * refile that same turn. It is read as still standing while no turn is running, which is right
+   * for a restart and wrong for a chat whose page has lost its turn while the connector keeps
+   * answering tool calls for it. `activeTurnId` is null for that whole stretch, so "no turn is
+   * running" is its permanent state and the refusal never lapses — and the level-based rule that
+   * is supposed to protect an oversized chat can never fire again.
+   *
+   * Measured on one machine on 2026-09-21, `compaction.autoTokens` at 400,000: a ticket filed at
+   * 417,733 tokens was given up at 16:34, the chat went on working with no turn on its page for
+   * the next twenty-two minutes, and nothing could file again. It reached 632,211.
+   *
+   * Bounded by the ticket rather than by a clock: a filing opens a continuation, and an open
+   * continuation is itself a fence against a second one, so the refiling cadence can never be
+   * faster than a ticket's own lifetime. A chat that refuses again simply refuses again.
+   */
+  working = false
+): boolean {
   if (!summary) return false;
   const refusal = summary.autoCompactionRefusal;
+  // A turn that is running is judged as before: only the refused turn is blocked, and more
+  // evidence from it cannot buy a second ticket behind the draft that just rejected the first.
+  // The relaxation is for the other branch — no turn at all — which is both "this chat stopped"
+  // and "this chat's page lost its turn while it kept working", and only the second should pass.
   if (refusal?.conversationId === summary.conversationId &&
-      (!summary.activeTurnId || summary.activeTurnId === refusal.turnId)) return false;
+      (summary.activeTurnId ? summary.activeTurnId === refusal.turnId : !working)) return false;
   const config = getConfig().compaction;
   return automaticCompactionAllowed(summary) && config.autoTokens > 0 && summary.contextTokens >= config.autoTokens;
 }
