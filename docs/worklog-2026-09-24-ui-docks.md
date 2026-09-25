@@ -26,15 +26,27 @@
 
 ## Part 2 — `feat/ui-dock-tools`
 
-- Extended the single dock owner to right and bottom tab frames. Files and Terminal move
-  as single renderer views; Sub-agents remains right-only. File drafts and terminal PTYs
-  stay with their original modules rather than being reconstructed on each placement.
-- Moved bottom height control to the dock frame. The per-tool bottom shortcut retains
-  Ctrl+backtick; Ctrl+Shift+2/3/4 open right Terminal/Files/Sub-agents. A hidden dock
-  retires Files watches while keeping terminal processes alive.
+- Extended the single dock owner to a right tool frame and bottom terminal frame. Files
+  and Sub-agents open on the right; the bottom frame owns only Terminal. Right terminal
+  sessions appear in the dock's single tab strip, while the bottom has its own terminal
+  tabs. Both keep live PTYs when their panel is hidden; closing a tab ends that PTY.
+- Moved bottom height control to the dock frame. Ctrl+backtick toggles bottom Terminal;
+  Ctrl+Shift+2/3/4 open right Terminal/Files/Sub-agents. Files drafts survive a hidden
+  panel while its watches retire. A projectless terminal starts in the main-owned home
+  directory without weakening exact project validation for selected projects.
 - Checks: typecheck, focused renderer/terminal suites, production renderer build and
   isolated Electron terminal scenario. Electron exercised hidden-panel continuity,
-  right↔bottom reparenting of the same live PTY, a second tab, Ctrl+C, exit and sizing.
+  independent right and bottom PTYs, additional tabs, Ctrl+C, exit and sizing.
   The Electron fixture now compares the detached connection popover to the sidebar
   surface under a non-translucent test theme; the old assertion incorrectly equated
   sidebar and page background colors.
+
+### PR preparation — terminal and Files ownership
+
+- Corrected the dock controls and placement to the final right-tools/bottom-Terminal
+  contract. Removed nested right terminal tabs, allowed projectless terminal creation
+  through the existing fixed IPC, and kept Files actions horizontally scrollable with
+  Refresh fixed at the edge. Dock tabs retain keyboard focus and hover as one capsule.
+- Typecheck, 90 focused renderer/terminal tests, the real Electron PowerShell fixture,
+  and the isolated Chromium workspace fixture passed. The latter checks Files drafts,
+  PDF/editor views and responsive layouts; no provider or installed app was involved.

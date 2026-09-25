@@ -325,6 +325,9 @@ it('keeps one compact toolbar and closes through the Files toggle', async () => 
   expect(host.querySelector('.file-panel-header')).toBeNull();
   expect(host.querySelector('.file-panel-close')).toBeNull();
   expect(host.querySelector('.file-panel-toolbar .file-panel-refresh')).not.toBeNull();
+  expect(host.querySelector('.file-panel-toolbar')?.lastElementChild?.classList.contains('file-panel-refresh')).toBe(true);
+  expect(host.querySelector('.file-panel-toolbar-actions')?.contains(host.querySelector('.file-panel-action'))).toBe(true);
+  expect(host.querySelector('.file-panel-toolbar-actions')?.contains(host.querySelector('.file-panel-refresh'))).toBe(false);
   toggle.click(); await tick();
   expect(host.querySelector<HTMLElement>('.file-panel')!.hidden).toBe(true);
 });
