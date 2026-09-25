@@ -563,6 +563,30 @@ describe('session store', () => {
   });
 
   /**
+   * A file where a session folder should be is an answer, not a refusal.
+   *
+   * Anything with a session-shaped name in the history folder is read as a session — a stray
+   * file somebody dropped there, a leftover from a copy. Opening `<that file>/meta.json` fails
+   * with ENOTDIR, which is not a filesystem refusing to cooperate: there is no projection under
+   * a file and never was. Reporting it as unreadable would stop the catalog from being cached
+   * for the life of the process because of one thing that is not a session at all.
+   */
+  it('reads a file sitting where a session folder would be as simply absent', async () => {
+    const present = await createSession({ title: 'real session', conversationId: 'stray-neighbour' });
+    await flushSessions();
+    const stray = path.join(sessionsRoot(), '2026-09-25-deadbeef');
+    await fs.writeFile(stray, 'not a session');
+    try {
+      resetRecorderForTests();
+      resetSessionStoreForTests();
+      expect((await findSessionByConversation('stray-neighbour', { requireUnique: true }))?.id).toBe(present.id);
+      expect(await getSession('2026-09-25-deadbeef')).toBeNull();
+    } finally {
+      await fs.rm(stray, { force: true });
+    }
+  });
+
+  /**
    * The three answers metadata can give, told apart.
    *
    * `refusing to treat it as an empty session` named neither the file's state nor whether the
