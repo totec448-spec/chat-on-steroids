@@ -2732,19 +2732,53 @@ function badgeSignature(): string {
   return sessions.map((entry) => sessionBadges(entry).map((badge) => badge.text).join(',')).join('|');
 }
 
+/**
+ * How recently a recorded tool call still means "working now" for the caption above.
+ *
+ * Short enough that a finished chat stops claiming to work within a minute and a half, long
+ * enough to survive the gaps between calls of a chat that is thinking between them. The app's
+ * own blind-work stretch uses three minutes before it starts repairing; this is the display
+ * half of the same fact and may be quicker, because being wrong here costs a stale word rather
+ * than an interrupted page.
+ */
+const BLIND_CAPTION_MS = 90_000;
+
 function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?: boolean; ticking?: boolean } {
   if (!deps.state()?.config.ui.developerMode) {
     const summary = sessions.find(entry => entry.id === selectedId);
     if (!summary || detailFor !== selectedId) return { text: '', tone: '' };
     const active = controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledTurnId : null;
     const lastBoundary = [...events].reverse().find(event => event.kind === 'turn_start' || event.kind === 'turn_end');
+    /*
+     * A chat whose page never opened a turn is still working, and this app knows it.
+     *
+     * Every line below needs a turn to describe, and a page that stopped reporting supplies
+     * none — so the caption fell silent, or worse, kept describing the *previous* turn as
+     * "Worked for 12s" while the chat went on editing files. Measured on 2026-09-25: a
+     * conversation resumed after an automatic compaction made 650 exactly attributed tool
+     * calls over two and a half hours without its page reporting a single turn, and the app
+     * said nothing about any of it. The complaint that follows is always the same one — the
+     * chat looks idle, there is no Stop control, and the person sits and waits for something
+     * that is already happening.
+     *
+     * The recorded tool clock is the honest witness the page is not: the app keeps
+     * `lastToolCallAt` from calls the request-id join has already tied to this exact
+     * conversation. A call in the last ninety seconds means work now, whatever the page says.
+     * This only changes what the caption admits — no turn is invented, and nothing here
+     * offers a Stop the app could not carry out.
+     */
+    const blind = !active && summary.lastToolCallAt !== null &&
+      Date.now() - summary.lastToolCallAt < BLIND_CAPTION_MS
+      ? { text: t("Working…"), tone: '' as const, working: true }
+      : null;
     const turnId = active ?? lastBoundary?.turnId;
-    if (!turnId) return { text: '', tone: '' };
+    if (!turnId) return blind ?? { text: '', tone: '' };
     const startedAt = summary.finishTurn?.turnId === turnId ? summary.finishTurn.startedAt
       : events.find(event => event.kind === 'turn_start' && event.turnId === turnId)?.time;
     const endedAt = events.find(event => event.kind === 'turn_end' && event.turnId === turnId)?.time;
-    if (startedAt === undefined) return { text: active ? t("Working…") : '', tone: '', working: !!active };
-    if (!active && endedAt === undefined) return { text: '', tone: '' };
+    if (startedAt === undefined) return active ? { text: t("Working…"), tone: '', working: true } : blind ?? { text: '', tone: '' };
+    if (!active && endedAt === undefined) return blind ?? { text: '', tone: '' };
+    if (blind) return blind;
     const seconds = Math.max(0, Math.floor(((active ? Date.now() : endedAt!) - startedAt) / 1000));
     return { text: t("{0} for {1}{2}s", [active ? t("Working") : t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };
   }
