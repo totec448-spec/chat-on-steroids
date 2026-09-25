@@ -563,6 +563,37 @@ describe('session store', () => {
   });
 
   /**
+   * An empty folder is not a session, and does not get a warning about one.
+   *
+   * `refusing to treat it as an empty session` was written for metadata that went missing under
+   * a session that still has its history. A folder with nothing in it says the same sentence,
+   * and it reached two bug reports that way: measured from a reporter's log on 2026-09-25, the
+   * same pair of warnings every few minutes for hours, both files simply absent, nothing lost
+   * and nothing for anybody to do about it.
+   */
+  it('says nothing about a session folder that holds nothing, and still reports one that lost its metadata', async () => {
+    const empty = path.join(sessionsRoot(), '2026-09-25-0000beef');
+    await fs.mkdir(empty, { recursive: true });
+    const log = vi.spyOn(console, 'warn');
+    try {
+      resetSessionStoreForTests();
+      expect(await getSession('2026-09-25-0000beef')).toBeNull();
+      const lines = getLog().filter(entry => entry.message.includes('2026-09-25-0000beef')).map(entry => entry.message);
+      expect(lines, `an empty folder was reported as a session: ${lines.join(' | ')}`).toHaveLength(0);
+
+      // The same folder with history and no metadata is the case the sentence was written for.
+      await fs.writeFile(path.join(empty, 'events.jsonl'),
+        `${JSON.stringify({ seq: 1, kind: 'note', time: 1, source: 'app', message: { text: 'kept', chars: 4, truncated: false } })}\n`);
+      resetSessionStoreForTests();
+      await getSession('2026-09-25-0000beef');
+      expect(getLog().some(entry => entry.message.includes('2026-09-25-0000beef') && /meta\.json absent/.test(entry.message))).toBe(true);
+    } finally {
+      log.mockRestore();
+      await fs.rm(empty, { recursive: true, force: true });
+    }
+  });
+
+  /**
    * A file where a session folder should be is an answer, not a refusal.
    *
    * Anything with a session-shaped name in the history folder is read as a session — a stray

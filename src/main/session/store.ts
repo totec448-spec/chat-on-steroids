@@ -844,7 +844,7 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
     for (const event of messages.values()) messageSeq = Math.max(messageSeq, event.seq);
     const journalSeq = await lastSeqOnDisk(id);
     const historySeq = Math.max(journalSeq, messageSeq);
-    const checkpoint = await readMetaCheckpoint(id);
+    const checkpoint = await readMetaCheckpoint(id, historySeq);
     const titleRepaired = checkpoint ? refreshUserTitle(checkpoint.summary, messages.values()) : false;
 
     // A pre-taxonomy checkpoint can have a current watermark but stale outcome classification.
@@ -2224,7 +2224,9 @@ async function readMetaFile(
  * whole pages of somebody's history from the app while the files sat intact on disk. Report
  * what actually happened: absent and damaged answer null, unreadable throws.
  */
-async function readMetaCheckpoint(id: string): Promise<MetaCheckpoint | null> {
+async function readMetaCheckpoint(id: string, historySeq = 0): Promise<MetaCheckpoint | null> {
+  // `historySeq` only decides whether an absence is worth a word. A caller that has not counted
+  // the history passes nothing: damaged metadata is still reported, an empty folder still is not.
   const dir = sessionDir(id);
   const primary = await readMetaFile(id, path.join(dir, 'meta.json'));
   if (primary.checkpoint) return primary.checkpoint;
@@ -2244,10 +2246,17 @@ async function readMetaCheckpoint(id: string): Promise<MetaCheckpoint | null> {
   if (failure) {
     throw new Error(`Session ${id} metadata could not be read (${failure.code ?? failure.message})`);
   }
-  logWarn(
-    `session ${id}: meta.json ${primary.state}, meta.backup.json ${backup.state}; ` +
-      'refusing to treat it as an empty session'
-  );
+  // A folder with no metadata and no history is not a session refusing to be empty — it is an
+  // empty folder, and saying otherwise is how this line reached two bug reports about data that
+  // was never at risk. Measured from a reporter's log on 2026-09-25: the same pair of warnings
+  // every few minutes for hours, both files simply absent, nothing lost and nothing to do.
+  // Metadata gone while history remains is the case worth a word, and the rebuild below says so.
+  if (historySeq > 0 || primary.state !== 'absent' || backup.state !== 'absent') {
+    logWarn(
+      `session ${id}: meta.json ${primary.state}, meta.backup.json ${backup.state}; ` +
+        'refusing to treat it as an empty session'
+    );
+  }
   return null;
 }
 
