@@ -201,3 +201,25 @@
   public-history privacy and third-party notices checks passed. The prior full
   `npm run verify` on the identical application tree had two Windows UIA failures
   and one MCP PowerShell parser assertion failure; no full-suite pass is claimed.
+
+## Follow-up — read-only branch comparison in Review
+
+- Review now displays the checked-out branch and offers a searchable local/ref-tracking
+  branch selector alongside the existing Working tree choice. The selector does not run
+  fetch, checkout, stage or any write operation. Remote-tracking names describe locally
+  cached refs, not current network state.
+- The main Git owner validates selections against its bounded ref catalog, then compares
+  merge-base to current HEAD within the selected Local Project. Its bounded status, line
+  counts and file blobs use the same commits; a diff request checks the snapshot revision.
+  Working tree edits and untracked files remain in their original separate mode.
+- The single Review header retains its fixed Refresh control and the branch menu opens
+  above dock content. Search, keyboard navigation, empty results, comparison reset and
+  project-change retirement are covered by renderer tests. Git tests cover local edits,
+  divergent history, subtree scope and stale comparison revisions.
+- Feature-branch validation: 164 focused Git/renderer/IPC/locale tests passed, TypeScript
+  typecheck passed, the production bundle built, and the isolated Electron workspace
+  fixture passed with captured branch-search and branch-comparison screens. `npm run verify`
+  passed privacy, notices and typecheck, then reproduced the previously known two Windows
+  UIA/accessibility failures and the MCP parser-recovery assertion; the long broad suite
+  was stopped after those failures, so no full-suite pass is claimed. No installed-app
+  behavior is claimed.

@@ -270,6 +270,55 @@ it('shows real Git groups, tree markers, unified diffs, and reconciles metadata 
   expect(host.querySelector('.test-diff-viewer')).toBeNull();
 });
 
+it('searches a comparison branch without checking out and keeps the chosen diff scoped to that branch', async () => {
+  const baseRef = 'refs/remotes/origin/main';
+  const branches = [{ ref: baseRef, label: 'origin/main' }, { ref: 'refs/heads/feature', label: 'feature' }];
+  (window.api.getProjectGitSnapshot as any).mockImplementation((_id: string, selected?: string) => ok({
+    ...cleanGit(), currentBranch: 'feature', branches,
+    ...(selected ? { comparison: { ref: selected, label: 'origin/main', baseOid: 'a'.repeat(40), headOid: 'b'.repeat(40) },
+      revision: 'compared', changes: [{ status: 'M', path: 'README.md', additions: 2, deletions: 1, binary: false }] } : {})
+  }));
+  (window.api.getProjectGitDiff as any).mockImplementation(() => ok({
+    projectId: projectA.id, status: 'M', path: 'README.md', additions: 2, deletions: 1,
+    binary: false, tooLarge: false, baseText: 'before', currentText: 'after'
+  }));
+  const panel = createFilePanel({ host, reviewOnly: true });
+  panel.update(projectA);
+  await panel.show(); await tick();
+  expect(host.querySelector('.file-changes-header-title')?.textContent).toBe('feature');
+  host.querySelector<HTMLButtonElement>('.file-branch-trigger')!.click();
+  const search = document.querySelector<HTMLInputElement>('.file-branch-search')!;
+  search.value = 'origin'; search.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  expect(document.querySelectorAll('.file-branch-option')).toHaveLength(1);
+  document.querySelector<HTMLButtonElement>('.file-branch-option')!.click(); await tick();
+  expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectA.id, baseRef);
+  expect(host.querySelector('.file-branch-trigger')?.textContent).toContain('origin/main');
+  expect(host.querySelector('.file-branch-stats')?.textContent).toContain('+2');
+  host.querySelector<HTMLButtonElement>('.file-change-row')!.click(); await tick();
+  expect(window.api.getProjectGitDiff).toHaveBeenLastCalledWith(projectA.id, 'README.md', baseRef, 'compared');
+  panel.update(projectB); await tick();
+  expect(document.querySelector('.file-branch-menu')).toBeNull();
+  expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectB.id, undefined);
+});
+
+it('lets Review leave a comparison whose branch disappeared', async () => {
+  const baseRef = 'refs/heads/removed';
+  (window.api.getProjectGitSnapshot as any).mockImplementation((_id: string, selected?: string) => ok(selected
+    ? { ...cleanGit(), state: 'unavailable', message: 'Branch disappeared' }
+    : { ...cleanGit(), currentBranch: 'feature', branches: [{ ref: baseRef, label: 'removed' }] }));
+  const panel = createFilePanel({ host, reviewOnly: true });
+  panel.update(projectA); await panel.show(); await tick();
+  host.querySelector<HTMLButtonElement>('.file-branch-trigger')!.click();
+  [...document.querySelectorAll<HTMLButtonElement>('.file-branch-option')].find(button => button.textContent === 'removed')!.click();
+  await tick();
+  expect(host.textContent).toContain('Git changes are unavailable.');
+  host.querySelector<HTMLButtonElement>('.file-branch-trigger')!.click();
+  [...document.querySelectorAll<HTMLButtonElement>('.file-branch-option')].find(button => button.textContent === 'Working tree')!.click();
+  await tick();
+  expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectA.id, undefined);
+  expect(host.textContent).toContain('Working tree is clean');
+});
+
 it('marks every ancestor folder, including paths of deleted and renamed files, then clears them from Git truth', async () => {
   let snapshot: ProjectGitSnapshot = {
     ...cleanGit(), revision: 'nested-dirty', changes: [

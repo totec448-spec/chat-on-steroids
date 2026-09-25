@@ -203,8 +203,10 @@ const api = {
   deleteProjectFileEntry: (projectId: string, path: string) => call<boolean>('projectFiles:delete', { projectId, path }),
   revealProjectFileEntry: (projectId: string, path = '') => call<boolean>('projectFiles:reveal', { projectId, path }),
   attachProjectFile: (projectId: string, path: string) => call<InputAttachment>('projectFiles:attach', { projectId, path }),
-  getProjectGitSnapshot: (projectId: string) => call<ProjectGitSnapshot>('projectGit:snapshot', { projectId }),
-  getProjectGitDiff: (projectId: string, path: string) => call<ProjectGitDiff>('projectGit:diff', { projectId, path }),
+  getProjectGitSnapshot: (projectId: string, baseRef?: string) => call<ProjectGitSnapshot>('projectGit:snapshot', { projectId, ...(baseRef ? { baseRef } : {}) }),
+  getProjectGitDiff: (projectId: string, path: string, baseRef?: string, expectedRevision?: string) => call<ProjectGitDiff>('projectGit:diff', {
+    projectId, path, ...(baseRef ? { baseRef } : {}), ...(expectedRevision ? { expectedRevision } : {})
+  }),
   getToolEditReview: (sessionId: string, callId: string, changeIndex: number) =>
     call<ToolEditReview | null>('sessions:toolEditReview', { sessionId, callId, changeIndex }),
   onProjectGitChanged: (listener: (event: ProjectGitChanged) => void): (() => void) => {

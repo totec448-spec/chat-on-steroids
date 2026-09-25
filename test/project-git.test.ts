@@ -104,6 +104,67 @@ it('reports a clean repository and a non-repository without inventing changes', 
   expect(await readProjectGitSnapshot(plain.id)).toMatchObject({ state: 'not-repository', changes: [] });
 });
 
+it('compares committed branch history without changing the checkout or including local edits', async () => {
+  const { root, id } = await committedProject();
+  const original = (await exec('git', ['branch', '--show-current'], { cwd: root })).stdout.trim();
+  await git(root, 'branch', 'comparison-base');
+  await git(root, 'switch', '-c', 'feature');
+  await fs.writeFile(path.join(root, 'modified.ts'), 'export const value = 2;\n');
+  await fs.writeFile(path.join(root, 'committed.ts'), 'export const committed = true;\n');
+  await git(root, 'mv', 'old-name.ts', 'renamed.ts');
+  await git(root, 'add', '.'); await git(root, 'commit', '-m', 'feature work');
+  await fs.writeFile(path.join(root, 'modified.ts'), 'export const value = 3;\n');
+  await fs.writeFile(path.join(root, 'untracked.ts'), 'local only\n');
+
+  const baseRef = 'refs/heads/comparison-base';
+  const snapshot = await readProjectGitSnapshot(id, baseRef);
+  expect(snapshot).toMatchObject({ state: 'ready', currentBranch: 'feature', comparison: { ref: baseRef, label: 'comparison-base' } });
+  expect(snapshot.branches).toEqual(expect.arrayContaining([{ ref: baseRef, label: 'comparison-base' }]));
+  expect(snapshot.changes.map(change => change.path).sort()).toEqual(['committed.ts', 'modified.ts', 'renamed.ts']);
+  expect(snapshot.changes.find(change => change.path === 'modified.ts')).toMatchObject({ additions: 1, deletions: 1 });
+  expect(snapshot.changes.find(change => change.path === 'renamed.ts')).toMatchObject({ status: 'R', previousPath: 'old-name.ts' });
+  expect(await readProjectGitDiff(id, 'modified.ts', baseRef)).toMatchObject({
+    baseText: 'export const value = 1;\n', currentText: 'export const value = 2;\n'
+  });
+  expect(await readProjectGitDiff(id, 'renamed.ts', baseRef)).toMatchObject({
+    baseText: 'export const renamed = 1;\n', currentText: 'export const renamed = 1;\n'
+  });
+  expect(await readProjectGitSnapshot(id)).toMatchObject({ state: 'ready', currentBranch: 'feature' });
+  expect((await exec('git', ['branch', '--show-current'], { cwd: root })).stdout.trim()).toBe('feature');
+  expect(original).not.toBe('feature');
+  expect(await readProjectGitSnapshot(id, 'refs/heads/missing')).toMatchObject({ state: 'unavailable' });
+});
+
+it('uses the common ancestor for diverged branches and limits a nested project to its subtree', async () => {
+  const root = path.join(approved, 'diverged');
+  const nested = path.join(root, 'packages', 'app');
+  await fs.mkdir(nested, { recursive: true });
+  await git(root, 'init');
+  await git(root, 'config', 'user.email', 'test@example.com');
+  await git(root, 'config', 'user.name', 'CoS Test');
+  await fs.writeFile(path.join(nested, 'inside.txt'), 'baseline\n');
+  await fs.writeFile(path.join(root, 'outside.txt'), 'baseline\n');
+  await git(root, 'add', '.'); await git(root, 'commit', '-m', 'baseline');
+  const project = await addProject(nested);
+  await git(root, 'switch', '-c', 'feature');
+  await fs.writeFile(path.join(nested, 'inside.txt'), 'feature\n');
+  await fs.writeFile(path.join(root, 'outside.txt'), 'feature\n');
+  await git(root, 'add', '.'); await git(root, 'commit', '-m', 'feature');
+  await git(root, 'switch', '-c', 'base', 'HEAD~1');
+  await fs.writeFile(path.join(nested, 'base-only.txt'), 'base\n');
+  await git(root, 'add', '.'); await git(root, 'commit', '-m', 'base only');
+  await git(root, 'switch', 'feature');
+
+  const snapshot = await readProjectGitSnapshot(project.id, 'refs/heads/base');
+  expect(snapshot.state).toBe('ready');
+  expect(snapshot.changes.map(change => change.path)).toEqual(['inside.txt']);
+  expect(await readProjectGitDiff(project.id, 'inside.txt', 'refs/heads/base', snapshot.revision)).toMatchObject({
+    baseText: 'baseline\n', currentText: 'feature\n'
+  });
+  await expect(readProjectGitDiff(project.id, 'inside.txt', 'refs/heads/base', '0'.repeat(64)))
+    .rejects.toThrow('comparison changed');
+});
+
 it('ignores inherited Git repository and index redirects when inspecting an approved project', async () => {
   const { id } = await committedProject();
   const previousDir = process.env.GIT_DIR;

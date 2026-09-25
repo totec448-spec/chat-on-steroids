@@ -1603,5 +1603,13 @@
   "Diff": "Diff",
   "Git changes in this folder: {0}": "Modifications Git dans ce dossier : {0}",
   "Refresh changes": "Actualiser les modifications",
-  "Review": "Révision"
+  "Review": "Révision",
+  "Compare branches": "Comparer les branches",
+  "Search branches…": "Rechercher des branches…",
+  "No branches found": "Aucune branche trouvée",
+  "More branches exist than can be shown.": "D’autres branches ne peuvent pas être affichées.",
+  "Locally cached remote branch; no automatic fetch": "Branche distante mise en cache localement ; aucune récupération automatique",
+  "No changes between branches": "Aucune différence entre les branches",
+  "Changes from comparison base": "Modifications depuis la base de comparaison",
+  "Committed changes only; local work is excluded": "Modifications validées uniquement ; travail local exclu"
 }

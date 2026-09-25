@@ -1603,5 +1603,13 @@
   "Diff": "Fark",
   "Git changes in this folder: {0}": "Bu klasördeki Git değişiklikleri: {0}",
   "Refresh changes": "Değişiklikleri yenile",
-  "Review": "İnceleme"
+  "Review": "İnceleme",
+  "Compare branches": "Dalları karşılaştır",
+  "Search branches…": "Dal ara…",
+  "No branches found": "Dal bulunamadı",
+  "More branches exist than can be shown.": "Gösterilebilenden daha fazla dal var.",
+  "Locally cached remote branch; no automatic fetch": "Yerelde kayıtlı uzak dal; otomatik güncelleme yapılmaz",
+  "No changes between branches": "Dallar arasında değişiklik yok",
+  "Changes from comparison base": "Karşılaştırma tabanından itibaren değişiklikler",
+  "Committed changes only; local work is excluded": "Yalnız commit edilmiş değişiklikler; yerel çalışmalar hariç"
 }

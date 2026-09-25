@@ -1603,5 +1603,13 @@
   "Diff": "差異",
   "Git changes in this folder: {0}": "此資料夾中的 Git 變更：{0}",
   "Refresh changes": "重新整理變更",
-  "Review": "檢閱"
+  "Review": "檢閱",
+  "Compare branches": "比較分支",
+  "Search branches…": "搜尋分支…",
+  "No branches found": "找不到分支",
+  "More branches exist than can be shown.": "還有更多分支無法顯示。",
+  "Locally cached remote branch; no automatic fetch": "本機快取的遠端分支；不會自動擷取更新",
+  "No changes between branches": "分支之間沒有變更",
+  "Changes from comparison base": "相對於比較基點的變更",
+  "Committed changes only; local work is excluded": "僅顯示已提交的變更；不包含本機工作"
 }
