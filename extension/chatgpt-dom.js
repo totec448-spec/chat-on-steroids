@@ -701,7 +701,7 @@ var CLF_DOM = (() => {
   /** Stop is a busy hint only; the exact provider terminal still owns turn completion. */
   function generating() {
     return safe(() => {
-      if (nativeComposerControls(STOP).length > 0) return true;
+      if (stopControls().length > 0) return true;
       // Historical interrupted exchanges can retain in_progress forever. Only the
       // latest native response can describe this composer's current generation.
       const latest = [...document.querySelectorAll(SHELL_TURN)].filter(node =>
@@ -710,9 +710,45 @@ var CLF_DOM = (() => {
     }, false);
   }
 
+  /**
+   * The stop control on a composer whose buttons carry nothing but a translated label.
+   *
+   * `STOP` is a list of English labels and two test ids. ChatGPT's newer composer has neither:
+   * voice, send and stop are the same `type="button"` in the same slot, and only the label and
+   * the icon change. On a localised install the label is translated — `aria-label="Durdur"`
+   * measured on a Turkish page on 2026-09-25 — so stop was never found, `generating()` never
+   * said yes, and nothing could end a turn through the page.
+   *
+   * What is not translated is the icon. Stop is a rounded square: one `path`, its `d` beginning
+   * `M4.5 5.75`. The dictation control in the same slot draws four paths and carries
+   * `data-state`; send draws an arrow. Matching the square is therefore both locale-free and
+   * narrow, and narrow is what matters here: a send button mistaken for stop would report a
+   * generation that never ends.
+   *
+   * Tried second, never first. Where the labels do match they stay authoritative.
+   */
+  const STOP_SQUARE = /^\s*M4\.5 5\.75/;
+  function localeFreeStopControls() {
+    const form = composer()?.closest('form');
+    if (!form) return [];
+    return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
+      .filter(button => {
+        if (!renderedComposerNode(button) || button.closest('form') !== form) return false;
+        // The dictation control keeps a popover state on itself; stop never does.
+        if (button.hasAttribute('data-state')) return false;
+        const paths = button.querySelectorAll('svg path');
+        return paths.length === 1 && STOP_SQUARE.test(paths[0].getAttribute('d') || '');
+      });
+  }
+
+  function stopControls() {
+    const labelled = nativeComposerControls(STOP);
+    return labelled.length > 0 ? labelled : localeFreeStopControls();
+  }
+
   function stopButton() {
     return safe(() => {
-      const buttons = nativeComposerControls(STOP);
+      const buttons = stopControls();
       return buttons.length === 1 ? buttons[0] : null;
     }, null);
   }
