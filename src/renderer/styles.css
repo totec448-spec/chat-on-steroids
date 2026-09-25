@@ -2350,6 +2350,18 @@ input[readonly] {
   color: var(--red);
 }
 
+.tool .metric .metric-added {
+  color: var(--green);
+}
+
+.tool .metric .metric-removed {
+  color: var(--red);
+}
+
+.tool-open-diff { display: grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--soft); cursor: pointer; }
+.tool-open-diff:hover { background: var(--hover); color: var(--ink); }
+.tool-open-diff:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+.tool-open-diff .ico { width: 14px; height: 14px; font-size: 14px; }
 /* One Compact & Resume as one row: the name, then one sentence saying where it is or where
    it died, coloured like the tool rows — green landed, red will not, grey in flight. Reuses
    the tool row's open/closed surface so it reads as one more foldable thing in the timeline. */
@@ -3211,7 +3223,10 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-panel-action { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 6px 7px; color: var(--soft); font-size: calc(10.5px * var(--text-scale, 1)); white-space: nowrap; }
 .file-panel-action:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
 .file-panel-action:disabled { opacity: .35; cursor: default; }
-.file-panel-action .ico { width: 13px; height: 13px; }
+.file-panel-action .ico { width: 14px; height: 14px; font-size: 14px; }
+.file-panel-action > span:not(.file-panel-changes-badge) { display: inline-flex; align-items: center; height: 14px; line-height: 14px; }
+.file-panel-changes-toggle.is-active { background: var(--hover); color: var(--ink); }
+.file-panel-changes-badge { display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--pill); background: var(--accent-wash); color: var(--accent); font-size: calc(9px * var(--text-scale, 1)); font-weight: 650; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; }
 .file-panel-body { position: relative; min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .file-tree { min-height: 0; flex: 1; overflow: auto; padding: 9px 7px 14px; }
 .file-tree-root, .file-tree-row { width: 100%; min-width: 0; height: 29px; display: flex; align-items: center; gap: 6px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: default; }
@@ -3225,12 +3240,56 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-tree-row[data-kind='file'] .file-tree-disclosure::before, .file-tree-row[data-kind='other'] .file-tree-disclosure::before { display: none; }
 .file-tree-icon { width: 14px; height: 14px; flex: 0 0 14px; color: var(--soft); fill: none; stroke: currentColor; stroke-width: 1.6; }
 .file-tree-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--text-scale, 1)); }
+.file-tree-git-status { width: 14px; height: 16px; flex: 0 0 14px; color: var(--orange); font-family: var(--mono); font-size: calc(10px * var(--text-scale, 1)); font-weight: 700; line-height: 16px; text-align: center; }
+.file-tree-git-status.is-a { color: var(--green); }
+.file-tree-git-status.is-d { color: var(--red); }
+.file-tree-git-status.is-r { color: var(--accent); }
+.file-tree-git-status.is-u { color: var(--soft); }
 .file-tree-size { flex: 0 0 auto; color: var(--faint); font-size: calc(9.5px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
 .file-tree-status { padding: 7px 12px 7px 26px; color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); line-height: 1.4; }
+.file-changes-view { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.file-changes-view[hidden] { display: none; }
+.file-changes-list[hidden] { display: none; }
+.file-changes-header { min-width: 0; min-height: 40px; display: flex; align-items: center; gap: 10px; padding: 5px 12px; border-bottom: 1px solid var(--line); }
+.file-changes-header-content { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; white-space: nowrap; }
+.file-changes-header-content > * { flex: 0 0 auto; }
+.review-panel .file-changes-header-content { overflow-x: auto; scrollbar-width: none; }
+.review-panel .file-changes-header-content::-webkit-scrollbar { display: none; }
+.review-panel .file-changes-header .file-panel-refresh { flex: 0 0 30px; margin-left: 0; }
+.file-changes-back { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--soft); font: inherit; font-size: calc(11px * var(--text-scale, 1)); cursor: pointer; }
+.file-changes-back:hover { color: var(--ink); background: var(--hover); }
+.file-changes-back:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+.file-changes-back .ico { width: 14px; height: 14px; font-size: 14px; }
+.file-changes-header-title { color: var(--ink); font-size: calc(11px * var(--text-scale, 1)); font-weight: 650; }
+.file-changes-list { min-height: 0; flex: 1; overflow: auto; padding: 10px 7px 16px; }
+.file-change-group + .file-change-group { margin-top: 12px; }
+.file-change-group-title { margin: 0; padding: 4px 8px 6px; color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); font-weight: 600; letter-spacing: .015em; }
+.file-change-row { width: 100%; min-width: 0; min-height: 31px; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: baseline; gap: 6px; padding: 5px 7px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.file-change-row:hover, .file-change-row.is-selected { background: var(--hover); }
+.file-change-row:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; background: var(--accent-wash); }
+.file-change-status { align-self: baseline; width: 18px; font-family: var(--mono); font-size: calc(11px * var(--text-scale, 1)); font-weight: 700; line-height: 1.4; text-align: center; color: var(--orange); }
+.file-change-status.is-a { color: var(--green); }
+.file-change-status.is-d { color: var(--red); }
+.file-change-status.is-r { color: var(--accent); }
+.file-change-status.is-u { color: var(--soft); }
+.file-change-names { min-width: 0; display: flex; align-items: baseline; gap: 5px; overflow: hidden; font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.4; }
+.file-change-path, .file-change-previous { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-change-previous { color: var(--faint); text-decoration: line-through; }
+.file-change-arrow { flex: 0 0 auto; color: var(--faint); }
+.file-change-stats { display: inline-flex; align-items: baseline; justify-content: flex-end; gap: 5px; color: var(--faint); font-family: var(--mono); font-size: calc(9.5px * var(--text-scale, 1)); line-height: 1.4; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.file-change-stats .is-added { color: var(--green); }
+.file-change-stats .is-deleted { color: var(--red); }
+.file-changes-empty, .file-changes-limit { margin: 0; padding: 18px 12px; color: var(--faint); font-size: calc(10.5px * var(--text-scale, 1)); line-height: 1.5; text-align: center; overflow-wrap: anywhere; }
+.file-changes-clean { min-height: 100%; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 24px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); text-align: center; }
+.file-changes-clean .ico { width: 18px; height: 18px; color: var(--green); }
 .file-preview { position: relative; flex: 0 0 auto; z-index: 4; height: 52%; min-height: 140px; overflow: auto; border-top: 1px solid var(--line); background: var(--sunk); }
 .file-tree [role='treeitem']:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; background: var(--accent-wash); }
 .file-panel-body.is-reading .file-tree, .file-panel-body.is-reading .file-preview-resize { display: none; }
 .file-panel-body.is-reading .file-preview { flex: 1; height: auto !important; min-height: 0; }
+.file-panel-body.is-diff-open .file-changes-view { flex: 0 0 auto; }
+.file-panel-body.is-diff-open .file-preview { flex: 1; height: auto !important; min-height: 0; }
+.file-panel-body.is-diff-open .file-preview-resize { display: none; }
+.file-review-counter { min-width: 28px; color: var(--soft); font-size: calc(10px * var(--text-scale, 1)); text-align: center; font-variant-numeric: tabular-nums; }
 .file-preview-toggle-tree[aria-pressed='true'] { background: var(--hover); }
 .file-panel .file-preview[hidden] { display: none; }
 .file-preview-resize { position: sticky; z-index: 3; top: 0; display: block; width: 100%; height: 3px; margin-bottom: -3px; cursor: row-resize; touch-action: none; background: transparent; }
@@ -3256,6 +3315,10 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-preview.is-editing .file-preview-head, .file-preview.is-editing .file-preview-meta { flex: 0 0 auto; }
 .file-code-editor-host { min-width: 0; min-height: 0; flex: 1; overflow: hidden; background: var(--sunk); }
 .file-code-editor-host .cm-editor { height: 100%; }
+/* The merge extension's light gradient otherwise wins over CoS's live appearance tokens. */
+.file-diff-viewer-host .cm-collapsedLines { color: var(--soft) !important; background: var(--hover) !important; border-block: 1px solid var(--line); }
+.file-diff-viewer-host .cm-collapsedLines::before, .file-diff-viewer-host .cm-collapsedLines::after { content: none; }
+.file-diff-viewer-host :is(.cm-insertedLine, .cm-deletedLine) { text-decoration: none; }
 .file-preview-text { margin: 0; padding: 12px 14px 20px; overflow: visible; white-space: pre; color: var(--ink); font-family: var(--mono); font-size: calc(11px * var(--text-scale, 1)); line-height: 1.5; tab-size: 2; }
 .file-preview-markdown { min-width: 0; padding: 14px 16px 24px; color: var(--ink); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.6; overflow-wrap: anywhere; word-break: normal; }
 .file-preview-markdown > :first-child { margin-top: 0; }
