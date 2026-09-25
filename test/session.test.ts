@@ -521,6 +521,117 @@ describe('session store', () => {
     expect(events.map((event) => event.kind)).toEqual(kinds);
   });
 
+  /**
+   * A file that cannot be read right now is not a file that holds nothing.
+   *
+   * Reported as #393 from Windows 11: thirteen `no valid metadata projection` warnings inside
+   * thirteen milliseconds across several sessions — one catalog sweep, which reads sixty-four
+   * folders at a time — and from then on the app behaved as if those chats did not exist.
+   * Genuine corruption does not arrive in every session at the same instant; a share lock or an
+   * exhausted descriptor table does. Every read path here used to answer such a failure with the
+   * value that means "empty", and the empty answer is the destructive one: an unread journal is
+   * reported as sequence zero, and the projection is then stamped over a full session.
+   */
+  it('answers a locked journal with a failure instead of stamping the session empty', async () => {
+    const session = await createSession({ title: 'locked journal', conversationId: 'locked-journal' });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'turn_start', turnId: 'work' });
+    await appendEvent(session.id, { time: 200, source: 'extension', kind: 'turn_end', turnId: 'work', outcome: 'completed' });
+    await flushSessions();
+    const folder = path.join(sessionsRoot(), session.id);
+    const metaBefore = await fs.readFile(path.join(folder, 'meta.json'), 'utf8');
+    const journalBefore = await fs.readFile(path.join(folder, 'events.jsonl'), 'utf8');
+    resetRecorderForTests();
+    resetSessionStoreForTests();
+
+    const stat = fs.stat.bind(fs);
+    const spy = vi.spyOn(fs, 'stat').mockImplementation((async (target, ...args) => {
+      if (String(target) === path.join(folder, 'events.jsonl')) throw Object.assign(new Error('locked'), { code: 'EBUSY' });
+      return stat(target, ...args);
+    }) as typeof fs.stat);
+    try {
+      await expect(getSession(session.id)).rejects.toThrow(/locked/);
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Nothing was rewritten while the answer was unknown, so the session is simply itself again.
+    expect(await fs.readFile(path.join(folder, 'events.jsonl'), 'utf8')).toBe(journalBefore);
+    expect(await fs.readFile(path.join(folder, 'meta.json'), 'utf8')).toBe(metaBefore);
+    resetSessionStoreForTests();
+    expect((await readEvents(session.id)).map(event => event.seq)).toEqual([1, 2]);
+    expect((await getSession(session.id))?.timelineTurns?.work).toMatchObject({ time: 100 });
+  });
+
+  /**
+   * The three answers metadata can give, told apart.
+   *
+   * `refusing to treat it as an empty session` named neither the file's state nor whether the
+   * validated checkpoint beside it was usable, so #393 could not be read as either "your
+   * meta.json was truncated" or "this machine would not let the app read it" — which are a
+   * restore and a lock, and nothing a reader does about one helps the other.
+   */
+  it('recovers a damaged projection from its checkpoint and refuses an unreadable one', async () => {
+    const session = await createSession({ title: 'damaged projection', conversationId: 'damaged-projection' });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'turn_start', turnId: 'work' });
+    await flushSessions();
+    await appendEvent(session.id, { time: 200, source: 'extension', kind: 'turn_end', turnId: 'work', outcome: 'completed' });
+    await flushSessions();
+    const folder = path.join(sessionsRoot(), session.id);
+    expect((await fs.stat(path.join(folder, 'meta.backup.json'))).size).toBeGreaterThan(0);
+
+    // Truncated bytes are the session's own damage, and the checkpoint is what it is for.
+    await fs.writeFile(path.join(folder, 'meta.json'), '{"id":"damaged-pro');
+    resetRecorderForTests();
+    resetSessionStoreForTests();
+    expect((await getSession(session.id))?.title).toBe('damaged projection');
+
+    // A refusal to read is not damage, and may not be answered as "no such session".
+    resetSessionStoreForTests();
+    const readFile = fs.readFile.bind(fs);
+    const spy = vi.spyOn(fs, 'readFile').mockImplementation((async (target, ...args) => {
+      if (String(target).startsWith(path.join(folder, 'meta'))) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      return readFile(target, ...args);
+    }) as typeof fs.readFile);
+    try {
+      await expect(getSession(session.id)).rejects.toThrow(/EACCES/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  /**
+   * One unreadable folder may not outlive the moment it was unreadable.
+   *
+   * The catalog is built once and kept for the life of the process — it answers ownership,
+   * retention and the newest resumable handoff — so a folder dropped from one sweep used to be
+   * missing from every later answer too. That is the shape #393 reports: the chats came back
+   * after a restart, because only the restart rebuilt the catalog.
+   */
+  it('does not keep a catalog that lost a folder to a read failure', async () => {
+    const present = await createSession({ title: 'readable', conversationId: 'catalog-readable' });
+    const blocked = await createSession({ title: 'blocked', conversationId: 'catalog-blocked' });
+    await flushSessions();
+    resetRecorderForTests();
+    resetSessionStoreForTests();
+
+    const folder = path.join(sessionsRoot(), blocked.id);
+    const readFile = fs.readFile.bind(fs);
+    const spy = vi.spyOn(fs, 'readFile').mockImplementation((async (target, ...args) => {
+      if (String(target).startsWith(path.join(folder, 'meta'))) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      return readFile(target, ...args);
+    }) as typeof fs.readFile);
+    try {
+      expect(await findSessionByConversation('catalog-readable', { requireUnique: true })).not.toBeNull();
+      expect(await findSessionByConversation('catalog-blocked', { requireUnique: true })).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+
+    // The lock is gone, and so is the belief that the session was not there.
+    expect((await findSessionByConversation('catalog-blocked', { requireUnique: true }))?.id).toBe(blocked.id);
+    expect((await findSessionByConversation('catalog-readable', { requireUnique: true }))?.id).toBe(present.id);
+  });
+
   it.each([false, true])('keeps recovered replies in their original turn across bounded reads and legacy restart (%s)', async restart => {
     const session = await createSession({ title: 'paged turn boundaries', conversationId: 'timeline-boundaries' });
     const text = (value: string) => ({ text: value, chars: value.length, truncated: false });
