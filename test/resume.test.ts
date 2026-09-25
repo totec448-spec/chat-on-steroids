@@ -246,6 +246,45 @@ describe('the whole move, when it works', () => {
     expect(stored.body.placement).toEqual({ id: pendingCommands()[0]!.id, model: null, reasoningEffort: null, active: true, homeConversationId: CHAT_A, project: null });
     expect(opened).toHaveLength(0);
   });
+
+  /**
+   * The browser that was offered the chat and never opened it.
+   *
+   * Placement is worth having — only A's own browser can put B in A's window — but it was offered
+   * with no deadline of its own. The only bound was the command's lease, and an automatic resume
+   * leases for fifteen minutes. Measured on 2026-09-22: the brief was captured at 04:32:53 and
+   * nothing happened at all until the lease let go at 04:47:53, at which point the app opened the
+   * chat itself and the handoff committed eight seconds later. One handoff in four that day; a
+   * quarter of an hour of a run doing nothing, with no sign of why.
+   */
+  it('opens the chat itself when the browser it was offered to never does', async () => {
+    vi.useFakeTimers();
+    try {
+      await connect();
+      await record();
+      const { token: continuation } = await press();
+      const stored = await capture(continuation);
+      expect(stored.body.placement, 'the offer under test was never made').toBeTruthy();
+      expect(opened, 'the app opened it straight away, so there is nothing to fall back from')
+        .toHaveLength(0);
+
+      // A page that is merely slow still wins: nothing is taken back inside the window.
+      await vi.advanceTimersByTimeAsync(50_000);
+      expect(opened).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(opened, 'the offer was never taken back').toHaveLength(1);
+      // The same command, not a second one: its ticket, its lease and its identity are intact.
+      expect(pendingCommands()).toHaveLength(1);
+      expect(pendingCommands()[0]!.id).toBe(stored.body.commandId);
+    } finally {
+      vi.useRealTimers();
+      // This case is the only one here that lets the app act on its own after the assertions.
+      // Let that work land before the next case removes the sessions directory under it.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await flushDurable();
+    }
+  });
 });
 
 describe('a brief that never really arrived', () => {
