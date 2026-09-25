@@ -2552,7 +2552,14 @@ var CLF_DOM = (() => {
     pluginInstalledButtons,
     pluginManagementIdle,
     selectModelSettings,
-    temporaryChatReady: () => safe(() => [...document.querySelectorAll('button')].some(button => {
+    temporaryChatReady: () => safe(() => {
+      // The page's own state, where a mounted turn has published it. The glyph below is the only
+      // evidence an empty document has, and a layout that stops drawing it stops proving the
+      // mode at all; React holds the answer either way. The stamp carries the pathname it was
+      // made on, so one left behind by another route cannot answer for this one.
+      if ([...document.querySelectorAll(`${SHELL_TURN}[data-clf-temporary-chat]`)]
+        .some(node => node.getAttribute('data-clf-temporary-chat') === location.pathname)) return true;
+      return [...document.querySelectorAll('button')].some(button => {
       if (button.closest(`${OWN_SURFACES}, [data-message-author-role], [data-testid^="conversation-turn-"]`) || !button.getClientRects().length) return false;
       // The provider renders both icons at once. Only the visible checked glyph proves
       // the mode; translated labels and the requested URL are not activation receipts.
@@ -2565,7 +2572,8 @@ var CLF_DOM = (() => {
         }
         return true;
       });
-    }), false),
+      });
+    }, false),
     confirmTemporaryChatIntroduction: () => {
       const dialog = [...document.querySelectorAll('[role="dialog"]')].find(node =>
         [...node.querySelectorAll('h1,h2,[role="heading"]')].some(heading => text(heading, 100) === 'Temporary Chat') && /Not in history/.test(text(node, 2000)));
