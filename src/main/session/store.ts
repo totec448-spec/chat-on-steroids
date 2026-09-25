@@ -93,6 +93,15 @@ interface AttachmentCatalog {
   orderedIds: string[];
   current: Map<string, Set<string>>;
   historical: Map<string, Set<string>>;
+  /**
+   * Whether this pass actually read every folder it enumerated.
+   *
+   * An incomplete catalog is still worth serving — the folders it did read are current — but it
+   * is not proof of absence, and absence is what the negative lookup cache below records
+   * permanently. A pass that lost folders to a lock or a descriptor limit may answer questions;
+   * it may not teach the process that somebody's chat has no session.
+   */
+  complete: boolean;
 }
 
 /**
@@ -499,36 +508,49 @@ export async function createSession(options: {
 
 // ----------------------------------------------------------------- append
 
-/** Reads the highest seq already on disk, so a restart never reuses a number. */
+/**
+ * Reads the highest seq already on disk, so a restart never reuses a number.
+ *
+ * Only an absent journal is zero. A journal that exists but cannot be read right now — a
+ * Windows share lock from a virus scanner or a backup agent, EMFILE during the 64-wide catalog
+ * sweep, an unplugged volume — used to be reported as zero as well, and zero is not a neutral
+ * answer here: `readDurableSnapshot()` stamps an empty projection over a session whose history
+ * it believes is missing, and the next append then restarts at sequence 1 on top of a journal
+ * that already holds thousands of lines. A transient read error must fail the read instead of
+ * fabricating the one value that destroys the session it was asked about.
+ */
 async function lastSeqOnDisk(id: string): Promise<number> {
+  const file = path.join(sessionDir(id), 'events.jsonl');
+  let size: number;
   try {
-    const file = path.join(sessionDir(id), 'events.jsonl');
-    const stat = await fs.stat(file);
-    // One valid event line may be almost MAX_LINE_BYTES and a crash can leave another
-    // almost-full torn line after it. Read enough for both, otherwise the only parseable
-    // predecessor can sit outside the tail window and restart would reuse sequence 1.
-    const from = Math.max(0, stat.size - (MAX_LINE_BYTES * 2 + 2));
-    const handle = await fs.open(file, 'r');
-    try {
-      const buffer = Buffer.alloc(stat.size - from);
-      await handle.read(buffer, 0, buffer.length, from);
-      const lines = buffer.toString('utf8').split('\n');
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i]?.trim();
-        if (!line) continue;
-        try {
-          const parsed = JSON.parse(line) as SessionEvent;
-          if (typeof parsed.seq === 'number') return parsed.seq;
-        } catch {
-          // A torn final line is expected after a crash; keep looking backwards.
-        }
-      }
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    // No file yet, or unreadable: start from zero and let the append recreate it.
+    size = (await fs.stat(file)).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+    throw error;
   }
+  // One valid event line may be almost MAX_LINE_BYTES and a crash can leave another
+  // almost-full torn line after it. Read enough for both, otherwise the only parseable
+  // predecessor can sit outside the tail window and restart would reuse sequence 1.
+  const from = Math.max(0, size - (MAX_LINE_BYTES * 2 + 2));
+  const handle = await fs.open(file, 'r');
+  try {
+    const buffer = Buffer.alloc(size - from);
+    await handle.read(buffer, 0, buffer.length, from);
+    const lines = buffer.toString('utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]?.trim();
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line) as SessionEvent;
+        if (typeof parsed.seq === 'number') return parsed.seq;
+      } catch {
+        // A torn final line is expected after a crash; keep looking backwards.
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+  // The file is there and holds no parseable line: a torn first write, and genuinely empty.
   return 0;
 }
 
@@ -1095,7 +1117,10 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
         // another queued writer is admitted. A complete line is treated as committed; a torn
         // line is sealed and the normal browser/MCP retry may safely reuse that absent seq.
         await sealTornTail(sessionId);
-        const durableSeq = await lastSeqOnDisk(sessionId);
+        // A failed reconciliation read must not replace the append error that caused it. Zero
+        // is safe here and only here: `Math.max` below cannot lower a sequence, so an unknown
+        // tail leaves the counter untouched and rethrows the original failure.
+        const durableSeq = await lastSeqOnDisk(sessionId).catch(() => 0);
         if (durableSeq < full.seq) {
           entry.nextSeq = Math.max(entry.nextSeq, durableSeq + 1);
           throw error;
@@ -2158,24 +2183,66 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
   }
 }
 
+/**
+ * Reads one metadata file, separating the three answers a caller has to tell apart.
+ *
+ * `absent` is a session that never wrote this file. `damaged` is bytes that are there and are
+ * not a projection of this session — truncated by an unclean shutdown, or belonging to another
+ * id after a folder was copied. `unreadable` is the filesystem refusing right now, which says
+ * nothing at all about the content and must never be answered as if the file were empty.
+ */
+async function readMetaFile(
+  id: string,
+  file: string
+): Promise<{ checkpoint: MetaCheckpoint } | { checkpoint: null; state: 'absent' | 'damaged'; }
+  | { checkpoint: null; state: 'unreadable'; error: NodeJS.ErrnoException }> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(file, 'utf8');
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException;
+    if (failure.code === 'ENOENT') return { checkpoint: null, state: 'absent' };
+    return { checkpoint: null, state: 'unreadable', error: failure };
+  }
+  const checkpoint = normalizeSummary(id, raw);
+  return checkpoint ? { checkpoint } : { checkpoint: null, state: 'damaged' };
+}
+
+/**
+ * The durable projection of one session, or a truthful refusal.
+ *
+ * Returning null here means "this session has no metadata on disk", and every caller acts on
+ * that: the catalog drops the row, `getSession()` reports no such session, `ensureOpen()`
+ * declares the session unrecoverable. A read that merely *failed* cannot support any of those
+ * conclusions, and a burst of them supports them least of all — the catalog sweep reads 64
+ * folders at once, so one lock storm or one exhausted file-descriptor table used to erase
+ * whole pages of somebody's history from the app while the files sat intact on disk. Report
+ * what actually happened: absent and damaged answer null, unreadable throws.
+ */
 async function readMetaCheckpoint(id: string): Promise<MetaCheckpoint | null> {
   const dir = sessionDir(id);
-  try {
-    const primary = normalizeSummary(id, await fs.readFile(path.join(dir, 'meta.json'), 'utf8'));
-    if (primary) return primary;
-  } catch {
-    // Try the last validated checkpoint below.
+  const primary = await readMetaFile(id, path.join(dir, 'meta.json'));
+  if (primary.checkpoint) return primary.checkpoint;
+
+  // A damaged or absent primary is exactly what the backup exists for, and a primary that
+  // could not be read is worth a second opinion too: if the checkpoint answers, the session
+  // opens instead of failing over a file nobody needed.
+  const backup = await readMetaFile(id, path.join(dir, 'meta.backup.json'));
+  if (backup.checkpoint) {
+    logWarn(`session ${id}: meta.json ${primary.state}; using the last validated checkpoint`);
+    return backup.checkpoint;
   }
-  try {
-    const backup = normalizeSummary(id, await fs.readFile(path.join(dir, 'meta.backup.json'), 'utf8'));
-    if (backup) {
-      logWarn(`session ${id}: primary meta.json unreadable; using the last validated checkpoint`);
-      return backup;
-    }
-  } catch {
-    // No recovery checkpoint.
+
+  const failure = primary.checkpoint === null && primary.state === 'unreadable' ? primary.error
+    : backup.checkpoint === null && backup.state === 'unreadable' ? backup.error
+      : null;
+  if (failure) {
+    throw new Error(`Session ${id} metadata could not be read (${failure.code ?? failure.message})`);
   }
-  logWarn(`session ${id}: no valid metadata projection; refusing to treat it as an empty session`);
+  logWarn(
+    `session ${id}: meta.json ${primary.state}, meta.backup.json ${backup.state}; ` +
+      'refusing to treat it as an empty session'
+  );
   return null;
 }
 
@@ -2293,7 +2360,7 @@ function publishClosedSummary(summary: SessionSummary): void {
 }
 
 function newAttachmentCatalog(): AttachmentCatalog {
-  return { summaries: new Map(), orderedIds: [], current: new Map(), historical: new Map() };
+  return { summaries: new Map(), orderedIds: [], current: new Map(), historical: new Map(), complete: true };
 }
 
 /**
@@ -2322,11 +2389,20 @@ async function ensureAttachmentCatalog(): Promise<AttachmentCatalog> {
       }
       const catalog = newAttachmentCatalog();
       const candidates = names.filter((name) => /^[0-9a-z-]{8,64}$/i.test(name));
+      let unread = 0;
       for (let offset = 0; offset < candidates.length; offset += ATTACHMENT_CATALOG_READ_CONCURRENCY) {
         const summaries = await Promise.all(
           candidates.slice(offset, offset + ATTACHMENT_CATALOG_READ_CONCURRENCY).map(async (name) => {
             const live = open.get(name);
-            return live?.summary ?? await readCatalogSummary(name).catch(() => null);
+            if (live) return live.summary;
+            try {
+              return await readCatalogSummary(name);
+            } catch (error) {
+              // A folder this pass could not read is not a folder that holds nothing.
+              unread += 1;
+              logWarn(`session catalog: ${name} could not be read this pass: ${(error as Error).message}`);
+              return null;
+            }
           })
         );
         for (const summary of summaries) if (summary) indexSummary(catalog, summary);
@@ -2335,6 +2411,16 @@ async function ensureAttachmentCatalog(): Promise<AttachmentCatalog> {
         .sort(compareSummariesNewestFirst)
         .map((summary) => summary.id);
       if (attachmentEpoch !== epoch) continue;
+      // The same reasoning the readdir failure above already follows, one level down: this
+      // catalog is the process-lifetime authority for ownership, retention and the newest
+      // resumable handoff, so caching a pass that lost folders to a lock storm or an exhausted
+      // descriptor table would answer "no such session" about intact history until the app is
+      // restarted. Serve this pass, keep nothing, and let the next call read disk again.
+      if (unread > 0) {
+        logWarn(`session catalog: ${unread} of ${candidates.length} folders unreadable; not caching this pass`);
+        catalog.complete = false;
+        return catalog;
+      }
       attachmentCatalog = catalog;
       logInfo(`session catalog ready: ${catalog.summaries.size} sessions in ${Date.now() - startedAt} ms`);
       return catalog;
@@ -2509,6 +2595,19 @@ export async function findSessionByConversation(
   if (!conversationId) return null;
   if (options.includeHistorical !== true && missingCurrentConversations.has(conversationId)) return null;
   const catalog = await ensureAttachmentCatalog();
+  // A lookup that could not read something did not prove anything. `missingCurrentConversations`
+  // is remembered for the life of the process and only a create or a rebind of this exact chat
+  // clears it, so one unreadable moment used to make a recorded chat permanently unrecorded:
+  // every later observation from it is treated as belonging to no session at all.
+  let unreadable = !catalog.complete;
+  const answer = async (id: string): Promise<SessionSummary | null> => {
+    try {
+      return await getSession(id);
+    } catch {
+      unreadable = true;
+      return null;
+    }
+  };
   const currentIds = new Set(catalog.current.get(conversationId) ?? []);
   // A create is deliberately visible to this process from the moment its live entry exists.
   // That prevents a concurrent recorder batch from manufacturing a second session while the
@@ -2517,11 +2616,7 @@ export async function findSessionByConversation(
   for (const [id, entry] of open) {
     if (entry.summary.conversationId === conversationId) currentIds.add(id);
   }
-  const current = (
-    await Promise.all(
-      [...currentIds].map((id) => getSession(id).catch(() => null))
-    )
-  )
+  const current = (await Promise.all([...currentIds].map(answer)))
     .filter((summary): summary is SessionSummary => summary?.conversationId === conversationId)
     .sort((a, b) => b.updatedAt - a.updatedAt);
   if (current.length === 1) return current[0] ?? null;
@@ -2536,18 +2631,14 @@ export async function findSessionByConversation(
     return current[0] ?? null;
   }
   if (options.includeHistorical !== true) {
-    rememberMissingCurrentConversation(conversationId);
+    if (!unreadable) rememberMissingCurrentConversation(conversationId);
     return null;
   }
   const historicalIds = new Set(catalog.historical.get(conversationId) ?? []);
   for (const [id, entry] of open) {
     if (entry.summary.chatIds.includes(conversationId)) historicalIds.add(id);
   }
-  const historical = (
-    await Promise.all(
-      [...historicalIds].map((id) => getSession(id).catch(() => null))
-    )
-  )
+  const historical = (await Promise.all([...historicalIds].map(answer)))
     .filter((summary): summary is SessionSummary => summary?.chatIds.includes(conversationId) === true)
     .sort((a, b) => b.updatedAt - a.updatedAt);
   if (historical.length === 1) return historical[0] ?? null;
