@@ -7,8 +7,9 @@ import { attachWorkPanelResize } from './work-panel-resize.js';
 export function createAgentPanel(options: {
   host: HTMLElement;
   mount?: HTMLElement;
-  toggle: HTMLButtonElement;
+  toggle?: HTMLButtonElement;
   onShow?: () => void;
+  onEscape?: () => void;
   load: (id: string) => Promise<{ events: SessionEvent[] } | null>;
   render: (events: SessionEvent[], id: string, current: () => boolean) => HTMLElement[];
   openMain: (id: string) => void;
@@ -27,11 +28,14 @@ export function createAgentPanel(options: {
   let generation = 0;
   function hide(): void {
     generation++; pane.hidden = true; selected = null;
-    options.host.classList.remove('has-agent-panel'); options.toggle.setAttribute('aria-expanded', 'false');
+    if (!options.mount) options.host.classList.remove('has-agent-panel');
+    options.toggle?.setAttribute('aria-expanded', 'false');
   }
   function show(): void {
     options.onShow?.();
-    pane.hidden = false; options.host.classList.add('has-agent-panel'); options.toggle.setAttribute('aria-expanded', 'true');
+    pane.hidden = false;
+    if (!options.mount) options.host.classList.add('has-agent-panel');
+    options.toggle?.setAttribute('aria-expanded', 'true');
   }
   function list(): void {
     generation++; selected = null; head.hidden = true; body.replaceChildren();
@@ -68,9 +72,10 @@ export function createAgentPanel(options: {
   back.onclick = list;
   pane.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
-    event.preventDefault(); hide(); options.toggle.focus();
+    event.preventDefault(); hide();
+    if (options.onEscape) options.onEscape(); else options.toggle?.focus();
   });
-  options.toggle.onclick = () => { if (pane.hidden) { show(); list(); } else hide(); };
+  if (options.toggle) options.toggle.onclick = () => { if (pane.hidden) { show(); list(); } else hide(); };
   return {
     hide,
     show: () => { show(); list(); },
@@ -78,8 +83,11 @@ export function createAgentPanel(options: {
     update(id: string | null, next: SessionSummary[]): void {
       if (parent !== id) { hide(); parent = id; }
       const previous = workers.find(worker => worker.id === selected);
-      workers = next; options.toggle.hidden = id === null;
-      ui(options.toggle, 'title', () => t("Sub-agents · {0} recorded", [workers.length]));
+      workers = next;
+      if (options.toggle) {
+        options.toggle.hidden = id === null;
+        ui(options.toggle, 'title', () => t("Sub-agents · {0} recorded", [workers.length]));
+      }
       if (pane.hidden) return;
       const latest = workers.find(worker => worker.id === selected);
       if (!selected || !latest) list();

@@ -4101,18 +4101,11 @@ export function initChat(next: Deps): void {
   const chatHost = document.querySelector<HTMLElement>('[data-panel="chat"]')!;
   const docks = createWorkspaceDocks(chatHost);
   workspaceDocks = docks;
-  const fileToggle = el('button', 'btn file-panel-toggle') as HTMLButtonElement;
-  fileToggle.id = 'filePanelToggle'; fileToggle.type = 'button'; fileToggle.hidden = true;
-  fileToggle.append(icon('i-folder'));
-  ui(fileToggle, 'aria-label', () => t('Toggle Files side panel')); fileToggle.setAttribute('aria-expanded', 'false');
-  const agentToggle = el('button', 'btn btn-icon', '◫') as HTMLButtonElement;
-  agentToggle.id = 'agentPanelToggle'; agentToggle.type = 'button'; agentToggle.hidden = true;
-  ui(agentToggle, 'aria-label', () => t("Toggle sub-agent side panel")); agentToggle.setAttribute('aria-expanded', 'false');
-  chatHost.append(fileToggle, agentToggle);
   const agentToolGroups = new Map<string, HTMLDetailsElement>();
   agentPanel = createAgentPanel({
-    host: chatHost, mount: docks.body, toggle: agentToggle,
+    host: chatHost, mount: docks.body,
     onShow: () => { filePanel?.hide(); docks.adopt('agents'); },
+    onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); },
     load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
     render: (source, id, current) => {
       let boundary = '';
@@ -4286,16 +4279,17 @@ export function initChat(next: Deps): void {
     return true;
   };
   filePanel = createFilePanel({
-    host: chatHost, mount: docks.body, toggle: fileToggle,
+    host: chatHost, mount: docks.body,
     onShow: () => { agentPanel?.hide(); docks.adopt('files'); },
+    onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); },
     captureAttachment: () => {
       const owner = composerDraftOwner();
       return attachment => appendImages(owner, [attachment]);
     }
   });
   filePanel.update(selectedLocalProject());
-  docks.register('files', 'Files', 'i-folder', () => void filePanel?.show(), () => filePanel?.hide(), () => !fileToggle.hidden);
-  docks.register('agents', 'Sub-agents', 'i-agents', () => agentPanel?.show(), () => agentPanel?.hide(), () => !agentToggle.hidden);
+  docks.register('files', 'Files', 'i-folder', () => void filePanel?.show(), () => filePanel?.hide(), () => selectedLocalProject() !== null);
+  docks.register('agents', 'Sub-agents', 'i-agents', () => agentPanel?.show(), () => agentPanel?.hide(), () => selectedId !== null);
   workspaceTerminal = createWorkspaceTerminal(docks.bottomToggle);
   workspaceTerminal.update(selectedLocalProject());
   $('attachImages').addEventListener('click', async () => {

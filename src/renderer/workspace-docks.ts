@@ -141,5 +141,5 @@ export function createWorkspaceDocks(host: HTMLElement) {
     items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]!.focus();
   });
   paint();
-  return { body, bottomToggle, register, activate, adopt, setOpen, sync: paint };
+  return { body, rightToggle, bottomToggle, register, activate, adopt, setOpen, sync: paint };
 }
