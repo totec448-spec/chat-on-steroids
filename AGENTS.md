@@ -2908,14 +2908,16 @@ refresh complete or starts a browser action.
 The Files panel projects the current session's LocalProject through fixed IPC using a project
 UUID and relative paths. It does not change the main composer or grant additional filesystem
 access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
-and project-root mutation. The renderer's `workspace-docks.ts` owns the right work slot,
-its tab strip, launcher and expansion; Files and the read-only sub-agent panel retain their
-own content and async lifetimes. Closing the right dock hides its active tool but retains
-its tab selection. Files and Terminal are singleton renderer views movable between right and
-bottom docks; Sub-agents remains right-only. Moving Files retains its editor and unsaved draft;
-hiding it retires file watches. Terminal may hold up to eight distinct PTYs in either location.
-The top-right pair toggles right and bottom workspaces; layout controls grant no new file,
-terminal or worker authority.
+and project-root mutation. The renderer's `workspace-docks.ts` owns the right tool dock and
+bottom terminal dock; Files, Sub-agents and Terminal retain their own content and async
+lifetimes. Closing the right dock hides its active tool but retains its tab selection. Only
+the right dock has launcher shortcuts, tool tabs and a `+` tool menu. Files and Sub-agents
+actions open right tabs; Terminal actions create a right terminal tab. The bottom dock owns
+only Terminal and its own tabs. Hiding Files retires its watches without discarding an unsaved
+draft. Hiding either dock preserves PTYs; closing a terminal tab retires its process. A
+projectless terminal uses the main-owned home directory; a selected project still requires
+its exact workspace. The top-right controls order right expansion, bottom toggle and right
+toggle; layout controls grant no new file, terminal or worker authority.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
 Its tab close or Escape closes the pane; a selected worker retains its title and Back button.
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are

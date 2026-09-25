@@ -13,7 +13,7 @@ beforeEach(() => { vi.clearAllMocks(); mocks.command = true; mocks.spawn.mockRet
 it('captures project cwd and cancels a pending spawn when its tab closes', async () => {
   let resolve!: (value: { real: string }) => void;
   mocks.workspace.mockReturnValueOnce(new Promise(done => { resolve = done; }));
-  const service = new WorkspaceTerminals(vi.fn());
+  const service = new WorkspaceTerminals(vi.fn(), '/home');
   const opening = service.create('one', 'project-a', 80, 24); service.close('one');
   resolve({ real: '/project' }); await expect(opening).rejects.toThrow('cancelled'); expect(mocks.spawn).not.toHaveBeenCalled();
   await expect(service.create('two', 'project-a', 80, 24)).resolves.toMatchObject({ cwd: '/project' });
@@ -21,14 +21,14 @@ it('captures project cwd and cancels a pending spawn when its tab closes', async
   service.dispose(); expect(mocks.pty.kill).toHaveBeenCalledOnce();
 });
 it('rechecks command permission and original project identity before interactive input', async () => {
-  const service = new WorkspaceTerminals(vi.fn()); await service.create('one', 'project-a', 80, 24);
+  const service = new WorkspaceTerminals(vi.fn(), '/home'); await service.create('one', 'project-a', 80, 24);
   mocks.command = false; await expect(service.write('one', 'rm file\r')).rejects.toThrow('disabled');
   mocks.command = true; mocks.workspace.mockResolvedValue({ real: '/other' });
   await expect(service.write('one', 'pwd\r')).rejects.toThrow('changed'); expect(mocks.pty.write).not.toHaveBeenCalled();
   service.dispose();
 });
 it('pauses output until xterm has parsed it and releases exited or disposed terminals', async () => {
-  const emit = vi.fn(), service = new WorkspaceTerminals(emit); await service.create('one', 'project-a', 80, 24);
+  const emit = vi.fn(), service = new WorkspaceTerminals(emit, '/home'); await service.create('one', 'project-a', 80, 24);
   const data = mocks.pty.onData.mock.calls[0]![0]; data('a'.repeat(262_144));
   expect(emit).toHaveBeenCalledTimes(16); expect(mocks.pty.pause).toHaveBeenCalledOnce();
   service.acknowledge('one', 262_144); expect(mocks.pty.resume).toHaveBeenCalledOnce();
@@ -37,8 +37,26 @@ it('pauses output until xterm has parsed it and releases exited or disposed term
   service.dispose(); expect(mocks.pty.kill).not.toHaveBeenCalled();
 });
 it('bounds active plus pending tabs and prevents spawn after renderer retirement', async () => {
-  const service = new WorkspaceTerminals(vi.fn());
+  const service = new WorkspaceTerminals(vi.fn(), '/home');
   for (let index = 0; index < 8; index++) await service.create(String(index), 'project-a', 80, 24);
   await expect(service.create('ninth', 'project-a', 80, 24)).rejects.toThrow('maximum 8');
   service.dispose(); expect(mocks.pty.kill).toHaveBeenCalledTimes(8);
+});
+it('starts projectless shells in the main-owned home cwd without resolving a project', async () => {
+  const service = new WorkspaceTerminals(vi.fn(), '/home');
+  await expect(service.create('one', null, 80, 24)).resolves.toMatchObject({ projectId: null, cwd: '/home' });
+  expect(mocks.workspace).not.toHaveBeenCalled();
+  expect(mocks.spawn).toHaveBeenCalledWith('shell', [], expect.objectContaining({ cwd: '/home' }));
+  await service.write('one', 'pwd\r');
+  expect(mocks.workspace).not.toHaveBeenCalled();
+  expect(mocks.pty.write).toHaveBeenCalledWith('pwd\r');
+  mocks.command = false;
+  await expect(service.write('one', 'echo denied\r')).rejects.toThrow('disabled');
+  service.dispose();
+});
+it('never falls back to home when a selected project cannot be resolved', async () => {
+  mocks.workspace.mockRejectedValueOnce(new Error('Project is unavailable'));
+  const service = new WorkspaceTerminals(vi.fn(), '/home');
+  await expect(service.create('one', 'missing-project', 80, 24)).rejects.toThrow('Project is unavailable');
+  expect(mocks.spawn).not.toHaveBeenCalled();
 });

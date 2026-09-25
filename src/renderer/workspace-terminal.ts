@@ -6,12 +6,15 @@ import { t, ui } from './i18n.js';
 import { onAppearanceChanged } from './appearance.js';
 import type { LocalProject } from '../shared/projects.js';
 
-type Tab = { id: string; projectId: string; title: string; node: HTMLElement; term: Terminal; fit: FitAddon; ready: boolean; exited: boolean; queued: number; writes: Promise<void> };
+type Tab = { id: string; title: string; node: HTMLElement; term: Terminal; fit: FitAddon; ready: boolean; exited: boolean; queued: number; writes: Promise<void> };
+export type WorkspaceTerminalTab = { id: string; title: string; exited: boolean };
 
-/** A hidden panel retains its shells; tabs keep the project captured at creation. */
-export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount: HTMLElement) {
+/** A hidden panel retains its shells; each dock owns only the tabs it created. */
+export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount: HTMLElement,
+  options: { id?: string; onEmpty?: () => void; onClosePanel?: () => void;
+    dockedTabs?: boolean; onTabsChanged?: () => void } = {}) {
   const app = document.querySelector<HTMLElement>('.app')!;
-  const panel = el('section', 'workspace-terminal'); panel.id = 'workspaceTerminal'; panel.hidden = true;
+  const panel = el('section', 'workspace-terminal'); panel.id = options.id ?? 'workspaceTerminal'; panel.hidden = true;
   ui(panel, 'aria-label', () => t('Terminal'));
   const bar = el('div', 'terminal-bar'), tabsHost = el('div', 'terminal-tabs'), body = el('div', 'terminal-body');
   const button = (glyph: string, label: string): HTMLButtonElement => {
@@ -19,16 +22,24 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     ui(node, 'title', () => t(label)); ui(node, 'aria-label', () => t(label)); return node;
   };
   const add = button('i-plus', 'New terminal');
-  add.id = 'terminalNew';
+  add.id = panel.id === 'workspaceTerminal' ? 'terminalNew' : `${panel.id}New`;
   const addMenu = el('details', 'work-dock-add') as HTMLDetailsElement;
   const addTrigger = el('summary'); addTrigger.append(icon('i-plus'));
   ui(addTrigger, 'title', () => t('New tab')); ui(addTrigger, 'aria-label', () => t('New tab'));
   const addChoices = el('div', 'work-dock-menu');
-  add.className = 'btn work-dock-menu-item';
+  add.className = 'btn work-dock-menu-item'; add.replaceChildren(icon('i-terminal'));
   add.append(el('span', '', () => t('Terminal')));
   addChoices.append(add); addMenu.append(addTrigger, addChoices);
   const empty = el('button', 'btn terminal-empty', () => t('Open a terminal in this project')) as HTMLButtonElement;
-  empty.type = 'button'; body.append(empty); bar.append(tabsHost, addMenu); panel.append(bar, body); initialMount.append(panel);
+  empty.type = 'button'; body.append(empty); bar.append(tabsHost, addMenu);
+  if (options.onClosePanel) {
+    const closePanel = button('i-x', 'Hide bottom panel');
+    closePanel.classList.add('terminal-panel-close');
+    closePanel.addEventListener('click', options.onClosePanel);
+    bar.append(closePanel);
+  }
+  if (!options.dockedTabs) panel.append(bar);
+  panel.append(body); initialMount.append(panel);
   const tabs = new Map<string, Tab>();
   const terminalTheme = () => {
     const colors = getComputedStyle(app);
@@ -50,35 +61,40 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     open = value; panel.hidden = !value;
     if (value) requestAnimationFrame(() => { fit(); if (selected) tabs.get(selected)?.term.focus(); });
   };
+  const closeTab = (id: string): void => {
+    const tab = tabs.get(id); if (!tab) return;
+    tabs.delete(id); tab.term.dispose(); tab.node.remove(); void window.api.terminalClose(id);
+    if (selected === id) selected = [...tabs.keys()].at(-1) ?? null;
+    paint(); fit();
+    if (!tabs.size) options.onEmpty?.();
+  };
   const paint = (): void => {
-    tabsHost.replaceChildren();
+    if (!options.dockedTabs) tabsHost.replaceChildren();
     for (const tab of tabs.values()) {
       tab.node.hidden = tab.id !== selected;
+      if (options.dockedTabs) continue;
       const wrapper = el('div', `terminal-tab${tab.id === selected ? ' is-selected' : ''}`);
       const pick = el('button', 'btn', () => `${tab.title}${tab.exited ? ` · ${t('exited')}` : ''}`) as HTMLButtonElement;
       pick.type = 'button'; pick.title = tab.title;
       pick.setAttribute('aria-pressed', String(tab.id === selected));
       pick.addEventListener('click', () => { selected = tab.id; paint(); fit(); tab.term.focus(); });
       const close = button('i-x', 'Close terminal');
-      close.addEventListener('click', () => {
-        tabs.delete(tab.id); tab.term.dispose(); tab.node.remove(); void window.api.terminalClose(tab.id);
-        if (selected === tab.id) selected = [...tabs.keys()].at(-1) ?? null;
-        paint(); fit();
-      });
+      close.addEventListener('click', () => closeTab(tab.id));
       wrapper.append(pick, close); tabsHost.append(wrapper);
     }
-    empty.hidden = tabs.size > 0; add.disabled = !project || tabs.size >= 8; empty.disabled = !project;
-    if (!project) ui(empty, 'textContent', () => t('Select a project to open a terminal'));
-    else ui(empty, 'textContent', () => t('Open a terminal in this project'));
+    empty.hidden = options.dockedTabs || tabs.size > 0; add.disabled = tabs.size >= 8;
+    ui(empty, 'textContent', () => project ? t('Open a terminal in this project') : t('New terminal'));
   };
-  const create = async (): Promise<void> => {
-    const scope = project; if (!scope || tabs.size >= 8) return;
+  const create = (): string | null => {
+    const scope = project; if (tabs.size >= 8) return null;
     const id = crypto.randomUUID();
     const node = el('div', 'terminal-screen'); body.append(node);
     const term = new Terminal({ theme: terminalTheme(), cursorBlink: true, fontSize: 13, fontFamily: 'Cascadia Code, Consolas, monospace', scrollback: 5000, allowProposedApi: false });
     const addon = new FitAddon(); term.loadAddon(addon); term.open(node);
-    const tab: Tab = { id, projectId: scope.id, title: scope.name, node, term, fit: addon, ready: false, exited: false, queued: 0, writes: Promise.resolve() };
-    tabs.set(id, tab); selected = id; setOpen(true); paint(); fit();
+    const tab: Tab = { id, title: scope?.name ?? t('Terminal'), node, term, fit: addon, ready: false, exited: false, queued: 0, writes: Promise.resolve() };
+    tabs.set(id, tab); selected = id;
+    if (!options.dockedTabs) setOpen(true);
+    paint(); fit();
     term.onData(data => {
       if (tab.exited || !tab.ready) return;
       if (tab.queued + data.length > 262_144) { toast(t('Terminal input is busy. Try a smaller paste.')); return; }
@@ -100,16 +116,19 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
       }
       return true;
     });
-    const result = await window.api.terminalCreate(id, scope.id, Math.min(500, term.cols), Math.min(200, term.rows));
-    if (!tabs.has(id)) { void window.api.terminalClose(id); return; }
-    if (!result.ok) { tab.exited = true; term.writeln(`\r\n${result.error}`); }
-    else { tab.ready = true; tab.title = `${scope.name} · ${result.data.shell}`; node.title = result.data.cwd; }
-    paint(); fit(); if (open && selected === id) term.focus();
+    void (async () => {
+      const result = await window.api.terminalCreate(id, scope?.id ?? null, Math.min(500, term.cols), Math.min(200, term.rows));
+      if (!tabs.has(id)) { void window.api.terminalClose(id); return; }
+      if (!result.ok) { tab.exited = true; term.writeln(`\r\n${result.error}`); }
+      else { tab.ready = true; tab.title = scope ? `${scope.name} · ${result.data.shell}` : result.data.shell; node.title = result.data.cwd; }
+      paint(); fit(); options.onTabsChanged?.(); if (open && selected === id) term.focus();
+    })();
+    return id;
   };
   const stopEvents = window.api.onTerminalEvent(event => {
     const tab = tabs.get(event.id); if (!tab) return;
     if ('data' in event) tab.term.write(event.data, () => { void window.api.terminalAck(event.id, event.data.length); });
-    else { tab.exited = true; tab.term.write(`\r\n[${t('Process exited: {0}', [event.exitCode])}]\r\n`); paint(); }
+    else { tab.exited = true; tab.term.write(`\r\n[${t('Process exited: {0}', [event.exitCode])}]\r\n`); paint(); options.onTabsChanged?.(); }
   });
   add.addEventListener('click', () => { addMenu.open = false; void create(); }); empty.addEventListener('click', () => void create());
   addMenu.addEventListener('keydown', event => { if (event.key === 'Escape') { addMenu.open = false; addTrigger.focus(); } });
@@ -119,11 +138,15 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
   paint();
   return {
     update(value: LocalProject | null): void { project = value; paint(); },
-    show(mount: HTMLElement): void {
+    show(mount: HTMLElement, createIfEmpty = true): void {
       if (panel.parentElement !== mount) mount.append(panel);
       setOpen(true);
-      if (!tabs.size && project) void create();
+      if (createIfEmpty && !tabs.size) void create();
     },
+    newTab(): string | null { return create(); },
+    tabs(): WorkspaceTerminalTab[] { return [...tabs.values()].map(tab => ({ id: tab.id, title: tab.title, exited: tab.exited })); },
+    selectTab(id: string): void { if (!tabs.has(id)) return; selected = id; paint(); fit(); if (open) tabs.get(id)?.term.focus(); },
+    closeTab,
     hide(): void { setOpen(false); },
     visible(): boolean { return open; },
     hasTabs(): boolean { return tabs.size > 0; }

@@ -109,8 +109,8 @@ app.whenReady().then(async () => {
     assert.equal(await js('document.querySelectorAll("#projectList .sess[data-id]").length'),2);
     assert.equal(await js('document.querySelectorAll("#chatList .sess[data-id]").length'),1);
     await js(`document.querySelector('.sess[data-id="task-0"]').click()`);
-    await until('!document.getElementById("filePanelToggle").hidden');
-    await js(`document.getElementById('filePanelToggle').click()`);
+    await until('!document.querySelector("#workDockRight .work-dock-quick[data-view=files]").disabled');
+    await js(`document.getElementById('rightDockToggle').click();document.querySelector('#workDockRight .work-dock-quick[data-view=files]').click()`);
     await until('document.querySelectorAll(".file-tree-row[data-path]").length>=3');
     await js(`document.querySelector('.file-tree-row[data-path="README.md"]').click()`);
     await until('!!document.querySelector(".file-preview-markdown h1")');
@@ -149,7 +149,7 @@ app.whenReady().then(async () => {
     await js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
     assert.equal(await js('document.getElementById("connectionPopover").hidden'),true);
     assert.equal(await js('document.activeElement.id'),'sidebarConnection');
-    await js(`document.getElementById('filePanelToggle').click();document.getElementById('sidebarPlugins').click()`);
+    await js(`document.getElementById('rightDockToggle').click();document.getElementById('sidebarPlugins').click()`);
     assert.equal(await js('document.querySelector(".app").dataset.screen'),'library');
     assert.equal(await js('document.getElementById("sidebarPrimary").hidden'),false);
     await js(`document.querySelector('[data-new-project="project-b"]').click()`);
@@ -226,4 +226,3 @@ app.whenReady().then(async () => {
   } finally { win?.destroy(); await server?.close(); }
   app.exit(0);
 }).catch(error=>{console.error(error);app.exit(1)});
-
