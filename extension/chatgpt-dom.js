@@ -64,14 +64,27 @@ var CLF_DOM = (() => {
 
   // Wire framing matches shared/user-prompt.ts; neither reader changes provider text.
   const promptContinuation = value => /^\[\[CLF-(?:HANDOFF|RESUME):[A-Za-z0-9_-]{16,64}\]\]\n\n/.exec(value)?.[0] ?? '';
-  function userPromptText(value) {
-    value = value.replace(/\r\n?/g, '\n');
+  // The composer treats what it is given as Markdown source and escapes it on readback: a
+  // backslash before ASCII punctuation, and one before a newline for a hard line break. The
+  // frame is punctuation and newlines almost entirely, so an escaped readback matches none of
+  // it — and the declared length stops matching too, because escaping adds characters. Read
+  // exactly first, as everywhere else; only a frame that cannot be read as sent is read as one
+  // the page escaped. Keep in sync with asTyped() in shared/user-prompt.ts.
+  const promptAsTyped = value => value.replace(/\\\n/g, '\n').replace(/\\([!-/:-@[-`{-~])/g, '$1');
+  function readPromptFrame(value) {
     const identity = promptContinuation(value);
     const header = /^\[\[COS_CONTEXT:(\d{1,6})\]\]\n/.exec(value.slice(identity.length));
     if (!header) return null;
     const end = identity.length + header[0].length + Number(header[1]);
     const boundary = '\n[[/COS_CONTEXT]]\n\n';
     return value.startsWith(boundary, end) ? identity + value.slice(end + boundary.length) : null;
+  }
+  function userPromptText(value) {
+    value = value.replace(/\r\n?/g, '\n');
+    const exact = readPromptFrame(value);
+    if (exact !== null) return exact;
+    const typed = promptAsTyped(value);
+    return typed === value ? null : readPromptFrame(typed);
   }
   function presentUserPrompts(readUserText) {
     return safe(() => {
