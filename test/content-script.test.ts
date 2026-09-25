@@ -8096,6 +8096,51 @@ describe('a stop button that goes missing while the turn is still running', () =
     );
   });
 
+  /**
+   * The stall nobody could report: a live turn with nothing mounted under it.
+   *
+   * The report is about the absence of output, and it used to require a mounted assistant section
+   * to say so — which meant the worst case, a turn with no section at all, was the one case it
+   * stayed silent about. That is not a rare shape: a turn adopted after a reload routinely has no
+   * section of its own (see seedResumeBaseline, which deliberately leaves an adopted turn with no
+   * evidence on screen when the page came back showing only the question), and the outcome verdict
+   * is separately locked behind the Stop control going away.
+   *
+   * Measured on 2026-09-25: the generation died at 19:14 with the Stop control still up and no
+   * section mounted, so both paths were closed and nothing was ever said. The app reloaded that
+   * chat twelve times over two and a half hours — each reload re-arming this clock and mounting
+   * nothing — and the turn was still open, and still blocking the rescue message queued behind
+   * it, three hours later.
+   */
+  it('reports a stalled live turn that never mounted an assistant section', async () => {
+    live = await harness();
+    userTurn(live.document, 'turn-bare-user', 'do the long thing');
+    startGenerating(live.document);
+    live.hook.observe();
+    await settle();
+    const opened = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+    expect(opened, 'the turn never opened, so this proves nothing about the stall').toBeTruthy();
+    expect(emitted(live.sent, 'chat_error'), 'a fresh turn was called stalled').toHaveLength(0);
+
+    live.advance(live.hook.STALL_MS + 1);
+    live.hook.observe();
+    await settle();
+
+    const errors = emitted(live.sent, 'chat_error').map((entry) => entry.event);
+    expect(errors.map((error) => error.text)).toContain(
+      'No visible progress for ten minutes. The app could not confirm that this turn finished.'
+    );
+    // The turn it names, so the app can place it: recovery authority stays where it was.
+    expect(errors.at(-1)).toMatchObject({ turnId: opened, recoverable: true });
+    expect(live.sent.some((message) => message.type === 'reload_owned_chat'),
+      'the page took recovery into its own hands').toBe(false);
+    // Said once, not once per observation: a stalled turn is observed every two seconds.
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'chat_error').filter((entry) =>
+      entry.event.text.startsWith('No visible progress')), 'it repeated itself').toHaveLength(1);
+  });
+
   it('does not let historical activity keep an unrelated live turn from stalling', async () => {
     let stream: any[] = [];
     live = await harness(undefined, {

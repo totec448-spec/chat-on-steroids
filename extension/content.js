@@ -2577,7 +2577,17 @@
       });
     }
 
-    if (generating && turn) {
+    // `turnId` and not `turn`: the report below is about the *absence* of output, and requiring a
+    // mounted assistant section to say so kept it silent in the one state where it is the only
+    // thing left. A turn adopted after a reload frequently has no section of its own — see
+    // seedResumeBaseline, where a page that came back showing only the question deliberately
+    // leaves the adopted turn with no evidence on screen — and the outcome verdict below is
+    // locked behind the Stop control going away. Measured on 2026-09-25: a turn whose generation
+    // died at 19:14 had both paths closed, so nothing was ever said about it; the app reloaded
+    // that chat twelve times over two and a half hours, each reload re-arming this clock and
+    // mounting no section, and the turn was still open three hours later. Nothing in the body
+    // ever read `turn`.
+    if (generating && turnId) {
       // Stay on the generation we opened. ChatGPT can reorder/replace assistant sections
       // while a turn is running; re-reading the newest DOM turn here has reproduced
       // progress from request -7 being filed under the older request -5.
