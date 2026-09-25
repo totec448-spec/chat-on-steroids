@@ -98,12 +98,14 @@ import {
   recordAgentMessage,
   recordChatObservations,
   recordRequestEvidence,
+  recordNote,
   recordProgress,
   restoreRecordedConversation,
   setCallAttributionListener,
   type ChatObservation,
   type PageCallEvidence
 } from './session/recorder.js';
+import { noticeChatStopped } from './stuck-notice.js';
 import {
   autoCompactionReady,
   automaticCompactionAllowed,
@@ -6414,6 +6416,31 @@ const lastBrowserRecoveryAt = new Map<string, number>();
  * Reserved at the browser's action claim, before Chrome can reload. A lost ACK cannot
  * refund it when another recovery takes over. Only a positive no-action failure can release it.
  */
+/**
+ * Chats whose last turn ended `failed` or `stalled` and which have produced nothing since.
+ *
+ * This is the shape of a stopped chat that no watchdog was ever going to report. The reload
+ * budget's verdict — the one that reaches the desktop — is only reached by a chat that keeps
+ * answering reloads with the same failure. A turn that simply ends and is followed by nothing
+ * never gets there: there is no open turn left to watch, the app considers the matter closed,
+ * and the conversation sits there.
+ *
+ * Both outcomes belong here. `failed` is a transport failure; `stalled` is what the page writes
+ * for "no visible output and no progress for ten minutes" — a turn that produced nothing at all.
+ * For the person watching they are the same standstill, and `stalled` is arguably the worse of
+ * the two: a failed turn at least failed visibly, while this one looks like thinking until
+ * somebody gives up waiting.
+ *
+ * Measured on one machine on 2026-09-13: four episodes, 24 + 53 + 76 + 45 minutes, 198 minutes
+ * of a working day. The last of them ended when the user noticed, forty-five minutes in. And on
+ * 2026-09-25 the `stalled` half: a turn opened at 17:31:59 after a resume, produced nothing, was
+ * closed `stalled` at 17:44:44, and the chat then sat untouched with four workers still running
+ * until its owner typed a word by hand.
+ *
+ * Cleared by the chat starting another turn, which is what "it carried on" looks like.
+ */
+const failedTurnQuiet = new Map<string, { sessionId: string; outcome: 'failed' | 'stalled' }>();
+
 const turnRepairSpent = new Map<string, { sessionId: string; turnKey: string; token: string }>();
 
 async function assistantRepairSource(sessionId: string): Promise<NonNullable<Repair['assistantSource']>> {
@@ -6693,6 +6720,10 @@ async function noteRecoveryObservations(
     await inspectSilentChats(Date.now());
     armSilenceSweep();
   }
+  // Another turn is the chat carrying on, and the only thing that is. Read before the failure
+  // below rather than after it: one batch can carry a turn's start and its failed end, and
+  // clearing afterwards would file exactly that batch as a chat that kept going.
+  if (observations.some((item) => item.kind === 'turn_start')) failedTurnQuiet.delete(conversationId);
   const proTerminal = terminalGrant?.model === 'pro' && (activity.endedTurnId === terminalGrant.turnId ||
     (activity.terminal && !observations.some(item => item.kind === 'turn_end')));
   const awaitingSilenceRefresh = !!lastEnd && !!sessionId &&
@@ -6743,7 +6774,12 @@ async function noteRecoveryObservations(
     if (proTerminal) endActivity(conversationId);
     else if (lastEnd === 'unknown' && terminalGrant?.model === 'unknown' && terminalGrant.sessionId === sessionId) {
       // Loss of browser completion evidence does not change the last meaningful-work clock.
-    } else if (lastEnd === 'failed' && sessionId) grantActivity(conversationId, sessionId, Math.min(Date.now(), activity.at ?? Date.now()));
+    } else if ((lastEnd === 'failed' || lastEnd === 'stalled') && sessionId) {
+      // Without the mark a `stalled` turn took the `endActivity` branch below instead — it left
+      // the silence watch entirely, so nothing reached finishSilentChats, and nothing was said.
+      failedTurnQuiet.set(conversationId, { sessionId, outcome: lastEnd });
+      grantActivity(conversationId, sessionId, Math.min(Date.now(), activity.at ?? Date.now()));
+    }
     else endActivity(conversationId);
   }
 
@@ -7119,6 +7155,31 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
 /** Retires a confirmed one-shot silence recovery after the caller has handled any Worker slot. */
 function finishSilentChats(conversationIds: readonly string[]): void {
   for (const conversationId of conversationIds) {
+    // The last moment anything is watching this chat. If its final turn failed or stalled and
+    // nothing followed, this is where it would otherwise be put down in silence — see
+    // failedTurnQuiet. The wording says which of the two happened, because "ended in a transport
+    // failure" is not true of a turn that simply never spoke.
+    const quiet = failedTurnQuiet.get(conversationId);
+    if (quiet) {
+      const { sessionId, outcome } = quiet;
+      failedTurnQuiet.delete(conversationId);
+      void recordNote(
+        sessionId,
+        outcome === 'stalled'
+          ? 'This chat stopped: its last turn ran for ten minutes without producing anything and nothing ' +
+            'followed it. Send a message here to start a fresh turn, or continue in a new chat.'
+          : 'This chat stopped: its last turn ended in a transport failure and nothing followed it. ' +
+            'Send a message here to start a fresh turn, or continue in a new chat.'
+      ).catch(() => undefined);
+      noticeChatStopped(
+        'A chat stopped',
+        outcome === 'stalled'
+          ? 'Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.'
+          : 'Its last turn failed and nothing followed. Send a message there to start a fresh turn.',
+        sessionId
+      );
+      logWarn(`bridge: ${conversationId} stopped after a ${outcome} turn with nothing following it`);
+    }
     forgetActivity(conversationId);
     // Keep the existing exact receipt until genuine activity retires it. A large
     // replacement page can report Thinking failed after this maintenance pass.
@@ -8068,6 +8129,7 @@ function clearUnattributedIncident(): void {
   repairsInFlight.clear();
   lastBrowserRecoveryAt.clear();
   turnRepairSpent.clear();
+  failedTurnQuiet.clear();
 }
 
 /**
