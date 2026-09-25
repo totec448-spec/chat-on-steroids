@@ -83,6 +83,7 @@ const {
   unpair
 } = await import('../src/main/bridge.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
+const { setStuckNotifier } = await import('../src/main/stuck-notice.js');
 const {
   GOAL_OBJECTIVES_STATE,
   GOAL_REPLIES_STATE,
@@ -1975,6 +1976,60 @@ describe('automatic compaction', () => {
         else expect(continuationForSession(sessionId)).toBeNull();
       });
     });
+
+  /**
+   * A chat whose last turn produced nothing, and the silence nobody reported.
+   *
+   * The watchdog that reaches the desktop is the reload budget's, and only a chat that keeps
+   * answering reloads with the same failure ever reaches it. The commonest stop does not: a turn
+   * ends, nothing follows it, and there is no open turn left to watch. The app treats that as
+   * settled — correctly, there is nothing left to repair — and says so only to its log.
+   *
+   * `stalled` is the worse half and only ever fell outside by omission. The page writes it for
+   * "no visible output and no progress for ten minutes": a turn that produced nothing at all,
+   * which for the person watching is the same standstill as a failure. Without the mark such a
+   * chat took the branch that drops it out of the silence watch entirely, so nothing reached
+   * finishSilentChats and nothing was ever said.
+   *
+   * Measured on one machine on 2026-09-13: four episodes, 24 + 53 + 76 + 45 minutes, 198 minutes
+   * of a working day, the last ended by the user noticing. And on 2026-09-25 the `stalled` half:
+   * a turn opened at 17:31:59 after a resume, produced nothing, was closed `stalled` at 17:44:44,
+   * and the chat sat untouched with four workers still running until its owner typed by hand.
+   */
+  it.each(['stalled', 'failed'] as const)('reports a chat whose last turn ended %s with nothing after it', async outcome => {
+    const told: Array<{ title: string; body: string }> = [];
+    setStuckNotifier((title, body) => { told.push({ title, body }); return true; });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = `a1a1a1a1-0000-4000-8000-00000000${outcome === 'stalled' ? 'de01' : 'de02'}`;
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), text: 'audit the homelab', messageId: `m-${outcome}` },
+        { kind: 'turn_start', time: Date.now(), turnId: `turn-${outcome}` }
+      ] } });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: `turn-${outcome}`, outcome,
+          ...(outcome === 'stalled' ? { detail: 'no visible output and no progress for ten minutes' } : {}) }
+      ] } });
+
+      // Nothing follows it: no new turn, no reply, no call.
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS + 30_000);
+      await sweepStaleSwarm(Date.now());
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS + 30_000);
+      await sweepStaleSwarm(Date.now());
+
+      expect(told.map(item => item.title), `a ${outcome} turn left the chat unreported`)
+        .toContain('A chat stopped');
+      // The wording says which of the two happened: "ended in a transport failure" is not true
+      // of a turn that simply never spoke.
+      expect(told.find(item => item.title === 'A chat stopped')!.body)
+        .toContain(outcome === 'stalled' ? 'produced nothing' : 'failed');
+    } finally {
+      setStuckNotifier(null);
+      vi.useRealTimers();
+    }
+  });
 
   it('observes Astra per chat, refuses automatic tickets, and preserves manual compaction', async () => {
     await pair();
