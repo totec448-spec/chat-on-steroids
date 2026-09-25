@@ -11,6 +11,7 @@ import { isContained } from './sandbox.js';
 
 const MAX_GIT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_CHANGES = 2_000;
+const MAX_BRANCHES = 1_000;
 const MAX_DIFF_SIDE_BYTES = 512 * 1024;
 const UNTRACKED_STAT_BATCH = 16;
 const GIT_TIMEOUT_MS = 15_000;
@@ -182,6 +183,59 @@ function parseStatus(buffer: Buffer, prefix: string): ProjectGitChange[] {
   return changes;
 }
 
+function parseCommittedChanges(buffer: Buffer, prefix: string): ProjectGitChange[] {
+  const parts = splitZero(buffer);
+  const changes: ProjectGitChange[] = [];
+  for (let index = 0; index < parts.length && changes.length < MAX_CHANGES;) {
+    const status = parts[index++]!;
+    if (!/^[ACDMRTUXB][0-9]*$/.test(status)) throw new Error('Git returned an invalid change status');
+    const renamed = status[0] === 'R' || status[0] === 'C';
+    const oldPath = parts[index++];
+    const newPath = renamed ? parts[index++] : oldPath;
+    if (!oldPath || !newPath) throw new Error('Git returned an incomplete change');
+    const before = projectRelative(oldPath, prefix);
+    const after = projectRelative(newPath, prefix);
+    if (!before && !after) continue;
+    const kind: ProjectGitStatus = renamed
+      ? !before ? 'A' : !after ? 'D' : 'R'
+      : status[0] === 'A' ? 'A' : status[0] === 'D' ? 'D' : 'M';
+    changes.push({
+      status: kind, path: kind === 'D' ? before! : after!,
+      previousPath: kind === 'R' ? before! : undefined,
+      additions: null, deletions: null, binary: false
+    });
+  }
+  return changes;
+}
+
+async function branchIdentity(context: RepositoryContext): Promise<{
+  currentBranch: string; headOid: string | null; branches: Array<{ ref: string; label: string }>;
+  branchesTruncated: boolean;
+}> {
+  const [symbolic, head, listed] = await Promise.all([
+    runGit(context.projectReal, ['symbolic-ref', '--quiet', '--short', 'HEAD'], 512),
+    runGit(context.projectReal, ['rev-parse', '--verify', '--quiet', 'HEAD'], 128),
+    runGit(context.projectReal, ['for-each-ref', `--count=${MAX_BRANCHES + 1}`,
+      '--format=%(refname)%00%(refname:short)%00%(symref)', 'refs/heads', 'refs/remotes'])
+  ]);
+  if (listed.code !== 0) throw new Error(listed.stderr || 'Git branches could not be inspected');
+  const headOid = head.code === 0 ? decode(head.stdout).trim() : null;
+  if (headOid && !/^[0-9a-f]{40,64}$/.test(headOid)) throw new Error('Git returned an invalid HEAD');
+  const branches: Array<{ ref: string; label: string }> = [];
+  let branchesTruncated = false;
+  for (const line of decode(listed.stdout).split('\n')) {
+    if (!line) continue;
+    const [ref, label, symbolicTarget] = line.replace(/\r$/, '').split('\0');
+    if (symbolicTarget || !ref || !label || !/^refs\/(heads|remotes)\//.test(ref)) continue;
+    if (branches.length >= MAX_BRANCHES) { branchesTruncated = true; break; }
+    branches.push({ ref, label });
+  }
+  return {
+    currentBranch: symbolic.code === 0 ? decode(symbolic.stdout).trim() : headOid ? headOid.slice(0, 8) : 'HEAD',
+    headOid, branches, branchesTruncated
+  };
+}
+
 interface Numstat { additions: number | null; deletions: number | null; binary: boolean; }
 
 function parseNumstat(buffer: Buffer, prefix: string): Map<string, Numstat> {
@@ -230,12 +284,42 @@ function unavailable(projectId: string, message: string): ProjectGitSnapshot {
   return { projectId, state: 'unavailable', changes: [], truncated: false, revision: '', message };
 }
 
-export async function readProjectGitSnapshot(projectId: string): Promise<ProjectGitSnapshot> {
+export async function readProjectGitSnapshot(projectId: string, baseRef?: string): Promise<ProjectGitSnapshot> {
   let context: RepositoryContext | null;
   try { context = await repositoryContext(projectId); }
   catch (error) { return unavailable(projectId, error instanceof Error ? error.message : String(error)); }
   if (!context) return { projectId, state: 'not-repository', changes: [], truncated: false, revision: '' };
   try {
+    const identity = await branchIdentity(context);
+    if (baseRef) {
+      const branch = identity.branches.find(entry => entry.ref === baseRef);
+      if (!branch) throw new Error('The selected comparison branch is no longer available');
+      if (!identity.headOid) throw new Error('This branch has no commits to compare');
+      const base = await runGit(context.projectReal, ['rev-parse', '--verify', '--quiet', baseRef], 128);
+      const baseOid = base.code === 0 ? decode(base.stdout).trim() : '';
+      if (!/^[0-9a-f]{40,64}$/.test(baseOid)) throw new Error('The selected comparison branch changed');
+      const ancestor = await runGit(context.projectReal, ['merge-base', baseOid, identity.headOid], 128);
+      const ancestorOid = ancestor.code === 0 ? decode(ancestor.stdout).trim() : '';
+      if (!/^[0-9a-f]{40,64}$/.test(ancestorOid)) throw new Error('These branches have no common ancestor');
+      const [status, statsResult] = await Promise.all([
+        runGit(context.projectReal, ['diff', '--name-status', '-z', '--no-ext-diff', '--no-textconv', '--find-renames=50%', ancestorOid, identity.headOid, '--', '.']),
+        runGit(context.projectReal, ['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '--find-renames=50%', ancestorOid, identity.headOid, '--', '.'])
+      ]);
+      if (status.code !== 0 || statsResult.code !== 0) throw new Error(status.stderr || statsResult.stderr || 'Git comparison failed');
+      const changes = parseCommittedChanges(status.stdout, context.prefix);
+      const stats = parseNumstat(statsResult.stdout, context.prefix);
+      for (const change of changes) {
+        const measured = stats.get(change.path);
+        if (measured) Object.assign(change, measured);
+      }
+      const comparison = { ref: branch.ref, label: branch.label, baseOid: ancestorOid, headOid: identity.headOid };
+      return {
+        projectId, state: 'ready', changes, truncated: changes.length >= MAX_CHANGES,
+        revision: createHash('sha256').update(JSON.stringify([comparison, changes])).digest('hex'),
+        currentBranch: identity.currentBranch, branches: identity.branches,
+        branchesTruncated: identity.branchesTruncated, comparison
+      };
+    }
     const hasHead = await headExists(context);
     const status = await runGit(context.projectReal, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=dirty', '--find-renames=50%', '--', '.']);
     if (status.code !== 0) throw new Error(status.stderr || 'Git status failed');
@@ -258,7 +342,9 @@ export async function readProjectGitSnapshot(projectId: string): Promise<Project
     }
     const truncated = changes.length >= MAX_CHANGES;
     const revision = createHash('sha256').update(JSON.stringify(changes)).digest('hex');
-    return { projectId, state: 'ready', changes, truncated, revision };
+    return { projectId, state: 'ready', changes, truncated, revision,
+      currentBranch: identity.currentBranch, branches: identity.branches,
+      branchesTruncated: identity.branchesTruncated };
   } catch (error) {
     return unavailable(projectId, error instanceof Error ? error.message : String(error));
   }
@@ -273,8 +359,8 @@ function textFromBytes(bytes: Buffer): string | null {
   try { return decode(bytes); } catch { return null; }
 }
 
-async function readHeadFile(context: RepositoryContext, relative: string): Promise<{ text: string | null; tooLarge: boolean }> {
-  const object = `HEAD:${repositoryPath(context, relative)}`;
+async function readHeadFile(context: RepositoryContext, relative: string, oid = 'HEAD'): Promise<{ text: string | null; tooLarge: boolean }> {
+  const object = `${oid}:${repositoryPath(context, relative)}`;
   const size = await runGit(context.projectReal, ['cat-file', '-s', object], 128);
   if (size.code !== 0) return { text: '', tooLarge: false };
   const bytes = Number(decode(size.stdout).trim());
@@ -289,19 +375,22 @@ async function readWorkingFile(projectId: string, relative: string): Promise<{ t
   return { text: result.tooLarge ? null : textFromBytes(result.bytes), tooLarge: result.tooLarge };
 }
 
-export async function readProjectGitDiff(projectId: string, relativePath: string): Promise<ProjectGitDiff> {
-  const snapshot = await readProjectGitSnapshot(projectId);
+export async function readProjectGitDiff(projectId: string, relativePath: string, baseRef?: string, expectedRevision?: string): Promise<ProjectGitDiff> {
+  const snapshot = await readProjectGitSnapshot(projectId, baseRef);
   if (snapshot.state !== 'ready') throw new Error(snapshot.message || 'This folder is not a Git repository');
+  if (expectedRevision && snapshot.revision !== expectedRevision) throw new Error('The Git comparison changed; refresh Review');
   const change = snapshot.changes.find(entry => entry.path === relativePath);
   if (!change) throw new Error('This file is no longer changed');
   const context = await repositoryContext(projectId);
   if (!context) throw new Error('This folder is not a Git repository');
   const base = change.status === 'A' || change.status === 'U'
     ? { text: '', tooLarge: false }
-    : await readHeadFile(context, change.previousPath ?? change.path);
+    : await readHeadFile(context, change.previousPath ?? change.path, snapshot.comparison?.baseOid);
   const current = change.status === 'D'
     ? { text: '', tooLarge: false }
-    : await readWorkingFile(projectId, change.path);
+    : snapshot.comparison
+      ? await readHeadFile(context, change.path, snapshot.comparison.headOid)
+      : await readWorkingFile(projectId, change.path);
   const tooLarge = base.tooLarge || current.tooLarge;
   const binary = change.binary || (!tooLarge && (base.text === null || current.text === null));
   return {

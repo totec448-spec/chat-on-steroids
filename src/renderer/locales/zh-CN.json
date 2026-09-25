@@ -1603,5 +1603,13 @@
   "Diff": "差异",
   "Git changes in this folder: {0}": "此文件夹中的 Git 更改：{0}",
   "Refresh changes": "刷新更改",
-  "Review": "审阅"
+  "Review": "审阅",
+  "Compare branches": "比较分支",
+  "Search branches…": "搜索分支…",
+  "No branches found": "未找到分支",
+  "More branches exist than can be shown.": "还有更多分支无法显示。",
+  "Locally cached remote branch; no automatic fetch": "本地缓存的远程分支；不会自动抓取更新",
+  "No changes between branches": "分支之间没有更改",
+  "Changes from comparison base": "相对于比较基点的更改",
+  "Committed changes only; local work is excluded": "仅显示已提交的更改；不包括本地工作"
 }

@@ -253,6 +253,14 @@ export function createFilePanel(options: FilePanelOptions) {
   const changesHeaderTitle = el('strong', 'file-changes-header-title', () => t('Working tree'));
   const changesHeaderContent = el('div', 'file-changes-header-content');
   changesHeaderContent.append(backToFiles, changesHeaderTitle);
+  const branchArrow = el('span', 'file-branch-arrow', '→');
+  const branchTrigger = el('button', 'file-branch-trigger') as HTMLButtonElement;
+  branchTrigger.type = 'button';
+  branchTrigger.setAttribute('aria-haspopup', 'dialog');
+  branchTrigger.setAttribute('aria-expanded', 'false');
+  branchTrigger.append(el('span', 'file-branch-trigger-label', () => t('Working tree')), icon('i-chev'));
+  const branchStats = el('span', 'file-branch-stats');
+  if (options.reviewOnly) changesHeaderContent.append(branchArrow, branchTrigger, branchStats);
   changesHeader.append(changesHeaderContent);
   if (options.reviewOnly) changesHeader.append(refresh);
   const changesList = el('div', 'file-changes-list');
@@ -300,6 +308,8 @@ export function createFilePanel(options: FilePanelOptions) {
   let reviewValue: ToolEditReview | null = null;
   let reviewGeneration = 0;
   let gitSnapshot: ProjectGitSnapshot | null = null;
+  let selectedBaseRef: string | null = null;
+  let branchMenu: HTMLElement | null = null;
   let gitLoading = false;
   let gitGeneration = 0;
   let gitDiffGeneration = 0;
@@ -482,6 +492,7 @@ export function createFilePanel(options: FilePanelOptions) {
   resetPreviewHeight();
 
   function hide(): void {
+    closeBranchMenu();
     generation++;
     if (gitReconcileTimer !== null) window.clearTimeout(gitReconcileTimer);
     gitReconcileTimer = null;
@@ -1018,7 +1029,7 @@ export function createFilePanel(options: FilePanelOptions) {
         change.additions === null ? '—' : t('{0} lines', [change.additions])));
       return stats;
     }
-    stats.title = t('Changes since HEAD');
+    stats.title = gitSnapshot?.comparison ? t('Changes from comparison base') : t('Changes since HEAD');
     if (change.additions !== null) stats.append(el('span', 'is-added', `+${change.additions}`));
     if (change.deletions !== null) stats.append(el('span', 'is-deleted', `−${change.deletions}`));
     if (change.additions === null && change.deletions === null) {
@@ -1053,7 +1064,7 @@ export function createFilePanel(options: FilePanelOptions) {
     }
     if (!gitSnapshot.changes.length) {
       const clean = el('div', 'file-changes-clean');
-      clean.append(icon('i-check'), el('span', '', () => t('Working tree is clean')));
+      clean.append(icon('i-check'), el('span', '', () => t(gitSnapshot?.comparison ? 'No changes between branches' : 'Working tree is clean')));
       changesList.append(clean);
       return;
     }
@@ -1217,12 +1228,15 @@ export function createFilePanel(options: FilePanelOptions) {
     destroyDiffViewer();
     render();
     if (entering) backToFiles.focus();
-    const value = await run(window.api.getProjectGitDiff(current.id, change.path));
+    const baseRef = selectedBaseRef;
+    const expectedRevision = baseRef ? gitSnapshot?.revision : undefined;
+    const value = await run(window.api.getProjectGitDiff(current.id, change.path, baseRef ?? undefined, expectedRevision));
     if (!value) {
       if (token === gitDiffGeneration && project?.id === current.id && gitDiffPath === change.path) closeGitDiff();
       return;
     }
-    if (token !== gitDiffGeneration || project?.id !== current.id || mode !== 'changes' || gitDiffPath !== change.path) return;
+    if (token !== gitDiffGeneration || project?.id !== current.id || mode !== 'changes' ||
+        gitDiffPath !== change.path || selectedBaseRef !== baseRef) return;
     gitDiffValue = value;
     render();
   }
@@ -1235,8 +1249,9 @@ export function createFilePanel(options: FilePanelOptions) {
     const token = ++gitGeneration;
     gitLoading = true;
     if (mode === 'changes') renderChangesList();
-    const snapshot = await run(window.api.getProjectGitSnapshot(current.id));
-    if (token !== gitGeneration || project?.id !== current.id) return;
+    const baseRef = selectedBaseRef;
+    const snapshot = await run(window.api.getProjectGitSnapshot(current.id, baseRef ?? undefined));
+    if (token !== gitGeneration || project?.id !== current.id || selectedBaseRef !== baseRef) return;
     if (!snapshot) {
       gitLoading = false;
       gitSnapshot = { projectId: current.id, state: 'unavailable', changes: [], truncated: false, revision: '' };
@@ -1318,7 +1333,24 @@ export function createFilePanel(options: FilePanelOptions) {
     tree.hidden = showingChanges || showingReview;
     changesView.hidden = !showingChanges && !showingReview;
     changesList.hidden = showingDiff;
-    ui(changesHeaderTitle, 'textContent', () => t(showingReview ? 'Review edit' : showingDiff ? 'Diff' : 'Working tree'));
+    ui(changesHeaderTitle, 'textContent', () => t(showingReview ? 'Review edit' : showingDiff ? 'Diff' :
+      options.reviewOnly && gitSnapshot?.state === 'ready' ? gitSnapshot.currentBranch ?? 'HEAD' : 'Working tree'));
+    branchArrow.hidden = !options.reviewOnly || showingDiff || !project ||
+      (gitSnapshot?.state !== 'ready' && !selectedBaseRef);
+    branchTrigger.hidden = branchArrow.hidden;
+    branchTrigger.querySelector('.file-branch-trigger-label')!.textContent = selectedBaseRef
+      ? gitSnapshot?.comparison?.label ?? selectedBaseRef.replace(/^refs\/(heads|remotes)\//, '')
+      : t('Working tree');
+    branchStats.hidden = branchTrigger.hidden || !gitSnapshot?.comparison || gitSnapshot.truncated;
+    branchStats.replaceChildren();
+    if (!branchStats.hidden && gitSnapshot?.state === 'ready') {
+      const additions = gitSnapshot.changes.reduce((sum, change) => sum + (change.additions ?? 0), 0);
+      const deletions = gitSnapshot.changes.reduce((sum, change) => sum + (change.deletions ?? 0), 0);
+      branchStats.append(el('span', 'is-added', `+${additions.toLocaleString()}`),
+        el('span', 'is-deleted', `−${deletions.toLocaleString()}`));
+      branchStats.title = gitSnapshot.truncated ? t('More changes exist than can be shown at once.') :
+        t('Committed changes only; local work is excluded');
+    }
     const backToChanges = showingReview ? reviewReturnMode === 'changes' : showingChanges && gitDiffPath !== null;
     backToFiles.hidden = !!options.reviewOnly && showingChanges && !showingDiff;
     ui(backToFilesLabel, 'textContent', () => t(backToChanges ? 'Changes' : 'Files'));
@@ -1547,6 +1579,79 @@ export function createFilePanel(options: FilePanelOptions) {
   }
 
   refresh.onclick = () => void (mode === 'changes' ? reconcileGitChanges(true) : refreshAll());
+  function closeBranchMenu(restoreFocus = false): void {
+    if (!branchMenu) return;
+    branchMenu.remove(); branchMenu = null;
+    document.removeEventListener('pointerdown', dismissBranchMenu, true);
+    document.removeEventListener('keydown', branchMenuKeydown, true);
+    window.removeEventListener('resize', dismissBranchMenuOnResize);
+    branchTrigger.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) branchTrigger.focus();
+  }
+  function dismissBranchMenu(event: PointerEvent): void {
+    if (branchMenu && !branchMenu.contains(event.target as Node) && !branchTrigger.contains(event.target as Node)) closeBranchMenu();
+  }
+  function branchMenuKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeBranchMenu(true); }
+  }
+  function dismissBranchMenuOnResize(): void { closeBranchMenu(); }
+  branchTrigger.addEventListener('click', () => {
+    if (branchMenu) { closeBranchMenu(); return; }
+    if (!project || (gitSnapshot?.state !== 'ready' && !selectedBaseRef)) return;
+    const menu = el('div', 'file-branch-menu');
+    menu.setAttribute('role', 'dialog');
+    menu.setAttribute('aria-label', t('Compare branches'));
+    const search = el('input', 'file-branch-search') as HTMLInputElement;
+    search.type = 'search'; search.placeholder = t('Search branches…');
+    search.setAttribute('aria-label', t('Search branches…'));
+    const items = el('div', 'file-branch-items');
+    const renderItems = (): void => {
+      items.replaceChildren();
+      const query = search.value.trim().toLocaleLowerCase();
+      const choices = [{ ref: '', label: t('Working tree') }, ...(gitSnapshot?.branches ?? [])];
+      for (const choice of choices.filter(entry => entry.label.toLocaleLowerCase().includes(query))) {
+        const option = el('button', 'file-branch-option') as HTMLButtonElement;
+        option.type = 'button';
+        if (choice.ref.startsWith('refs/remotes/')) option.title = t('Locally cached remote branch; no automatic fetch');
+        option.append(el('span', '', choice.label));
+        if (choice.ref === (selectedBaseRef ?? '')) option.append(icon('i-check'));
+        option.addEventListener('click', () => {
+          closeBranchMenu();
+          if (selectedBaseRef === (choice.ref || null)) return;
+          selectedBaseRef = choice.ref || null;
+          gitDiffGeneration++; gitDiffPath = null; gitDiffValue = null;
+          gitSnapshot = null;
+          destroyDiffViewer(); render();
+          void reconcileGitChanges();
+        });
+        items.append(option);
+      }
+      if (!items.childElementCount) items.append(el('p', 'file-branch-empty', () => t('No branches found')));
+      if (gitSnapshot?.branchesTruncated) items.append(el('p', 'file-branch-empty', () => t('More branches exist than can be shown.')));
+    };
+    search.addEventListener('input', renderItems);
+    search.addEventListener('keydown', event => {
+      if (event.key === 'ArrowDown') { event.preventDefault(); items.querySelector<HTMLButtonElement>('button')?.focus(); }
+      if (event.key === 'Enter') { event.preventDefault(); items.querySelector<HTMLButtonElement>('button')?.click(); }
+    });
+    items.addEventListener('keydown', event => {
+      const buttons = [...items.querySelectorAll<HTMLButtonElement>('button')];
+      const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault(); buttons[Math.max(0, Math.min(buttons.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
+      }
+    });
+    menu.append(search, items);
+    const rect = branchTrigger.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 300))}px`;
+    menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 270))}px`;
+    document.body.append(menu); branchMenu = menu;
+    branchTrigger.setAttribute('aria-expanded', 'true');
+    document.addEventListener('pointerdown', dismissBranchMenu, true);
+    document.addEventListener('keydown', branchMenuKeydown, true);
+    window.addEventListener('resize', dismissBranchMenuOnResize);
+    renderItems(); search.focus();
+  });
   pane.addEventListener('keydown', event => {
     if (editingPath && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
@@ -1579,6 +1684,7 @@ export function createFilePanel(options: FilePanelOptions) {
       }
       project = next;
       if (changed) watchSignature = '';
+      if (changed) { closeBranchMenu(); selectedBaseRef = null; }
       if (options.toggle) {
         options.toggle.hidden = next === null;
         ui(options.toggle, 'title', () => next ? t('Files · {0}', [next.name]) : t('Files'));

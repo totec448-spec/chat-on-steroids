@@ -1603,5 +1603,13 @@
   "Diff": "差分",
   "Git changes in this folder: {0}": "このフォルダー内の Git 変更: {0}",
   "Refresh changes": "変更を更新",
-  "Review": "レビュー"
+  "Review": "レビュー",
+  "Compare branches": "ブランチを比較",
+  "Search branches…": "ブランチを検索…",
+  "No branches found": "ブランチが見つかりません",
+  "More branches exist than can be shown.": "表示できる数を超えるブランチがあります。",
+  "Locally cached remote branch; no automatic fetch": "ローカルに保存されたリモートブランチ。自動取得はしません",
+  "No changes between branches": "ブランチ間に変更はありません",
+  "Changes from comparison base": "比較基点からの変更",
+  "Committed changes only; local work is excluded": "コミット済みの変更のみ。ローカルの作業は含みません"
 }

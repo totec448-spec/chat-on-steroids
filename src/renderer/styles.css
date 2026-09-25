@@ -3261,6 +3261,24 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-changes-back:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
 .file-changes-back .ico { width: 14px; height: 14px; font-size: 14px; }
 .file-changes-header-title { color: var(--ink); font-size: calc(11px * var(--text-scale, 1)); font-weight: 650; }
+.file-branch-arrow { color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
+.file-branch-trigger { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; max-width: 190px; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--soft); font: inherit; font-size: calc(11px * var(--text-scale, 1)); cursor: pointer; }
+.file-branch-trigger:hover, .file-branch-trigger[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
+.file-branch-trigger:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+.file-branch-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-branch-trigger .ico { flex: 0 0 auto; width: 13px; height: 13px; transform: rotate(90deg); }
+.file-branch-stats { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: calc(10px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+.file-branch-stats .is-added { color: var(--green); }
+.file-branch-stats .is-deleted { color: var(--red); }
+.file-branch-arrow[hidden], .file-branch-trigger[hidden], .file-branch-stats[hidden] { display: none; }
+.file-branch-menu { position: fixed; z-index: 1000; width: min(292px, calc(100vw - 16px)); max-height: 260px; display: flex; flex-direction: column; gap: 5px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); box-shadow: var(--lift); }
+.file-branch-search { width: 100%; min-height: 30px; padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--r-xs); background: var(--sunk); color: var(--ink); font: inherit; font-size: calc(11px * var(--text-scale, 1)); }
+.file-branch-search:focus-visible { outline: 1px solid var(--accent-edge); }
+.file-branch-items { min-height: 0; overflow-y: auto; }
+.file-branch-option { width: 100%; min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 7px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: calc(11px * var(--text-scale, 1)); text-align: left; cursor: pointer; }
+.file-branch-option:hover, .file-branch-option:focus-visible { background: var(--hover); outline: none; }
+.file-branch-option .ico { flex: 0 0 auto; color: var(--accent); }
+.file-branch-empty { margin: 0; padding: 12px 7px; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
 .file-changes-list { min-height: 0; flex: 1; overflow: auto; padding: 10px 7px 16px; }
 .file-change-group + .file-change-group { margin-top: 12px; }
 .file-change-group-title { margin: 0; padding: 4px 8px 6px; color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); font-weight: 600; letter-spacing: .015em; }

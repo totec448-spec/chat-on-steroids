@@ -64,7 +64,11 @@ app.whenReady().then(async () => {
         listProjectFiles:(id,directory='')=>ok({projectId:id,projectName:'Demo workspace',directory,truncated:false,
           entries:['README.md','example.ts','preview.pdf'].map(name=>({name,path:name,kind:'file',bytes:files[name]?.length??${pdf.length}}))}),
         watchProjectFiles:()=>ok(true),previewProjectFile:(id,name)=>ok(info(id,name)),
-        getProjectGitSnapshot:id=>ok({projectId:id,state:'ready',truncated:false,revision:'fixture-dirty',changes:[
+        getProjectGitSnapshot:(id,baseRef)=>ok({projectId:id,state:'ready',truncated:false,revision:baseRef?'fixture-compared':'fixture-dirty',
+          currentBranch:'feature',branches:[{ref:'refs/remotes/origin/main',label:'origin/main'},{ref:'refs/heads/feature',label:'feature'}],
+          ...(baseRef?{comparison:{ref:baseRef,label:'origin/main',baseOid:'a'.repeat(40),headOid:'b'.repeat(40)}}:{}),changes:baseRef?[
+          {status:'M',path:'README.md',additions:2,deletions:1,binary:false}
+        ]:[
           {status:'M',path:'README.md',additions:2,deletions:1,binary:false},
           {status:'U',path:'notes.txt',additions:3,deletions:0,binary:false}
         ]}),
@@ -130,7 +134,17 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('.file-panel-changes-toggle').click()`);
     await until('!document.querySelector("#workDockRight .review-panel .file-changes-view").hidden && document.querySelectorAll("#workDockRight .review-panel .file-change-row").length===2');
     await screenshot('git-changes');
-    assert.equal(await js('document.querySelector(".review-panel .file-changes-header-title").textContent'),'Working tree');
+    assert.equal(await js('document.querySelector(".review-panel .file-changes-header-title").textContent'),'feature');
+    await js(`document.querySelector('.review-panel .file-branch-trigger').click()`);
+    await until('!!document.querySelector(".file-branch-menu .file-branch-search")');
+    await js(`{const input=document.querySelector('.file-branch-search');input.value='origin';input.dispatchEvent(new Event('input',{bubbles:true}));}`);
+    assert.equal(await js(`document.querySelectorAll('.file-branch-option').length`),1);
+    await screenshot('review-branch-search');
+    await js(`document.querySelector('.file-branch-option').click()`);
+    await until(`document.querySelector('.review-panel .file-branch-trigger')?.textContent.includes('origin/main') && document.querySelectorAll('.review-panel .file-change-row').length===1`);
+    await screenshot('review-branch-compare');
+    await js(`document.querySelector('.review-panel .file-branch-trigger').click();document.querySelector('.file-branch-option').click()`);
+    await until(`document.querySelectorAll('.review-panel .file-change-row').length===2`);
     assert.equal(await js('document.querySelector(".review-panel .file-change-row[data-path=\\"README.md\\"] .file-change-status").textContent'),'M');
     assert.ok(await js(`!document.querySelector('.review-panel .file-panel-toolbar') && !!document.querySelector('.review-panel .file-changes-header .file-panel-refresh')`));
     assert.deepEqual(await js(`[...document.querySelectorAll('.header-dock-controls > button')].map(button=>button.id)`),
@@ -150,7 +164,7 @@ app.whenReady().then(async () => {
     assert.equal(await js('document.querySelector(".review-panel .file-changes-header-title").textContent'),'Diff');
     assert.ok(await js('document.querySelector(".review-panel .file-preview-meta").textContent.includes("README.md")'));
     await js(`document.querySelector('.review-panel .file-changes-back').click()`);
-    await until('document.querySelector(".review-panel .file-changes-header-title").textContent==="Working tree"');
+    await until('document.querySelector(".review-panel .file-changes-header-title").textContent==="feature"');
     await js(`document.querySelector('#workDockRight .work-dock-tab [role=tab][aria-selected=false]').click()`);
     await until('!document.querySelector(".file-tree").hidden');
     await js(`document.querySelector('.file-tree-row[data-path="README.md"]').click()`);

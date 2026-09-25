@@ -2946,6 +2946,12 @@ subprocesses and exposes no stage, commit, reset,
 checkout or push authority. Review projects `M/A/D/R/U`, ancestor-folder markers and
 bounded unified diffs; Files may open it from its toolbar. Files and Review are alternate right
 tabs; Review does not add a second file watcher or expose file-write actions.
+Review also identifies the checked-out branch and offers a searchable, read-only comparison
+against locally known branch refs. Selecting a ref never switches branches or fetches remote
+data. The comparison shows committed changes from the selected ref's merge base to current
+HEAD, scoped to the Local Project; the existing Working tree view separately includes local
+uncommitted and untracked changes. Its list, line counts and file preview must share the same
+comparison identity, and a changed ref/HEAD cannot publish an old diff as current.
 A non-repository, binary file, oversized diff or truncated change set is an
 explicit state rather than a reason to invent content or mutate the worktree.
 

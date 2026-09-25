@@ -727,12 +727,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return request === projectWatchRequest && watchedWindow === target;
   });
   handle('projectGit:snapshot', async payload => {
-    const { projectId } = z.object({ projectId: projectFileId }).strict().parse(payload);
-    return readProjectGitSnapshot(projectId);
+    const { projectId, baseRef } = z.object({ projectId: projectFileId,
+      baseRef: z.string().min(1).max(256).optional() }).strict().parse(payload);
+    return readProjectGitSnapshot(projectId, baseRef);
   });
   handle('projectGit:diff', async payload => {
-    const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
-    return readProjectGitDiff(projectId, path);
+    const { projectId, path, baseRef, expectedRevision } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1),
+      baseRef: z.string().min(1).max(256).optional(), expectedRevision: z.string().length(64).regex(/^[0-9a-f]+$/).optional() }).strict().parse(payload);
+    return readProjectGitDiff(projectId, path, baseRef, expectedRevision);
   });
   handle('sessions:toolEditReview', async payload => {
     const { sessionId, callId, changeIndex } = z.object({

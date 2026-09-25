@@ -17,6 +17,13 @@ export interface ProjectGitSnapshot {
   truncated: boolean;
   /** Stable content identity used to avoid remounting an unchanged open diff. */
   revision: string;
+  /** The checked-out branch, or a short commit when HEAD is detached. */
+  currentBranch?: string;
+  /** Local and locally cached remote branches; selecting one never checks it out or fetches. */
+  branches?: Array<{ ref: string; label: string }>;
+  branchesTruncated?: boolean;
+  /** Present only for committed branch comparisons (merge-base → HEAD). */
+  comparison?: { ref: string; label: string; baseOid: string; headOid: string };
   message?: string;
 }
 
