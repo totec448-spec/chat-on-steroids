@@ -798,6 +798,27 @@ describe('saying what to do next', () => {
     }
   });
 
+  /**
+   * The same unterminated string, as a German Windows install reports it.
+   *
+   * PowerShell localises the wrapper around this diagnostic, and the batch runner's
+   * ScriptBlock.Create path is the one that carries it. Matching the English sentence made
+   * the hint English-only: on a localised Windows the model saw a foreign-language exception
+   * and no statement that nothing had parsed, which is the one thing it needed to act on.
+   * The method name and the parser's caret underline are the parts nothing translates.
+   */
+  it('recognises the batch parser diagnostic on a localized Windows', () => {
+    const output = [
+      'Ausnahme beim Aufrufen von "Create" mit 1 Argument(en):  "In Zeile:1 Zeichen:14',
+      "+ Write-Output 'unterminated",
+      '+              ~~~~~~~~~~~~~',
+      `Die Zeichenfolge hat kein Abschlusszeichen: '."`
+    ].join('\n');
+
+    expect(execRecoveryHints("Write-Output 'unterminated", output).join(' '))
+      .toMatch(/PowerShell parsed none of the command/i);
+  });
+
   it('stays silent on a shell where the operators work', () => {
     // PowerShell 7 runs `&&` without complaint, so there is no refusal text and no hint. The
     // hint keys off the shell's own error, never off the command containing the operator.
