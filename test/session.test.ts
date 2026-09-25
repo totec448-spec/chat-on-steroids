@@ -521,6 +521,53 @@ describe('session store', () => {
     expect(events.map((event) => event.kind)).toEqual(kinds);
   });
 
+  /**
+   * The publishing rename may not outrun the bytes it publishes.
+   *
+   * `writeFile` then `rename` makes the *name* change atomically and says nothing about the
+   * contents: the entry can be in place while the data is still in the page cache, so an unclean
+   * shutdown in that window leaves a meta.json that exists and is empty — which is exactly the
+   * damage the recovery path above cannot undo, since a zero-length projection is no longer a
+   * projection of anything. Both the summary and the checkpoint it rotates are flushed first.
+   */
+  it('flushes a summary and its checkpoint before the rename that publishes them', async () => {
+    const steps: string[] = [];
+    const label = (file: unknown): string =>
+      String(file).includes('meta.backup.json') ? 'checkpoint' : String(file).includes('meta.json') ? 'summary' : '';
+    const open = fs.open.bind(fs);
+    const rename = fs.rename.bind(fs);
+    const openSpy = vi.spyOn(fs, 'open').mockImplementation((async (file, ...args) => {
+      const handle = await open(file as string, ...args as []);
+      const named = label(file);
+      if (named) {
+        const sync = handle.sync.bind(handle);
+        handle.sync = async () => { steps.push(`flush ${named}`); return sync(); };
+      }
+      return handle;
+    }) as typeof fs.open);
+    const renameSpy = vi.spyOn(fs, 'rename').mockImplementation((async (from, to) => {
+      if (label(to)) steps.push(`publish ${label(to)}`);
+      return rename(from as string, to as string);
+    }) as typeof fs.rename);
+    try {
+      const session = await createSession({ title: 'durable summary' });
+      await appendEvent(session.id, { time: 100, source: 'extension', kind: 'turn_start', turnId: 'work' });
+      await flushSessions();
+    } finally {
+      openSpy.mockRestore();
+      renameSpy.mockRestore();
+    }
+    // The first write has no valid predecessor to keep; the second rotates one.
+    expect(steps.slice(0, 2)).toEqual(['flush summary', 'publish summary']);
+    expect(steps).toContain('flush checkpoint');
+    for (let i = 0; i < steps.length; i++) {
+      if (steps[i]!.startsWith('publish')) {
+        expect(steps.slice(0, i), `${steps[i]} was published unflushed`)
+          .toContain(`flush ${steps[i]!.slice('publish '.length)}`);
+      }
+    }
+  });
+
   it.each([false, true])('keeps recovered replies in their original turn across bounded reads and legacy restart (%s)', async restart => {
     const session = await createSession({ title: 'paged turn boundaries', conversationId: 'timeline-boundaries' });
     const text = (value: string) => ({ text: value, chars: value.length, truncated: false });

@@ -329,6 +329,25 @@ function emptySummary(id: string, title: string, conversationId: string | null):
 }
 
 /**
+ * Writes one file's complete contents and waits until they are actually on the device.
+ *
+ * `writeFile` then `rename` is atomic for the *name* only: the directory entry changes in one
+ * step, while the bytes behind it may still be in the page cache. An unclean shutdown in that
+ * window leaves the rename intact and the file empty — the one shape that turns a crash into
+ * lost metadata, because a zero-length meta.json is no longer a projection of anything. The
+ * flush is what the surrounding code's word "atomically" has always implied.
+ */
+async function writeFileDurably(file: string, contents: string): Promise<void> {
+  const handle = await fs.open(file, 'w');
+  try {
+    await handle.writeFile(contents, 'utf8');
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * Persists one summary atomically, without any live-entry bookkeeping.
  *
  * Split out so a *staged* summary can be written before it is published into memory. That
@@ -342,7 +361,7 @@ async function writeSummary(summary: SessionSummary, historySeq: number): Promis
   const persisted: PersistedSummary = { ...summary, [META_HISTORY_SEQ]: historySeq, [META_CANONICAL_PROJECTION]: 1, [META_TOKEN_ESTIMATE]: 1 };
   await fs.mkdir(dir, { recursive: true });
   try {
-    await fs.writeFile(tmp, JSON.stringify(persisted, null, 2), 'utf8');
+    await writeFileDurably(tmp, JSON.stringify(persisted, null, 2));
     // Preserve the last validated checkpoint. Never copy arbitrary corrupt bytes over the
     // backup: parse/id validation is what makes this a recovery source rather than a second
     // name for the same damage.
@@ -351,7 +370,7 @@ async function writeSummary(summary: SessionSummary, historySeq: number): Promis
       if (current?.id === summary.id) {
         const backupTmp = `${backup}.${process.pid}.${randomUUID()}.tmp`;
         try {
-          await fs.writeFile(backupTmp, JSON.stringify(current, null, 2), 'utf8');
+          await writeFileDurably(backupTmp, JSON.stringify(current, null, 2));
           await fs.rename(backupTmp, backup);
         } finally {
           await fs.rm(backupTmp, { force: true }).catch(() => undefined);
