@@ -9,6 +9,19 @@
  */
 (() => {
   'use strict';
+  // ChatGPT's SPA strips our cos-* URL markers after hydration. Capture the raw
+  // navigation markers at document_start so the isolated side can still prove
+  // this page owns its input/refresh/catalog request.
+  try {
+    const u = new URL(location.href), h = new URLSearchParams(u.hash.slice(1));
+    const bootMarkers = {
+      input: u.searchParams.get('cos-input') || h.get('cos-input'),
+      refresh: u.searchParams.get('cos-plugin-refresh') || h.get('cos-plugin-refresh'),
+      catalog: u.searchParams.get('cos-model-catalog') || h.get('cos-model-catalog')
+    };
+    if (bootMarkers.input || bootMarkers.refresh || bootMarkers.catalog)
+      sessionStorage.setItem('cosBootMarkers', JSON.stringify(bootMarkers));
+  } catch { /* marker capture is best-effort */ }
   const OBSERVER_VERSION = 2;
   const prior = window.__cosUsageObserver;
   if (prior?.version === OBSERVER_VERSION && typeof prior.refresh === 'function' && prior.refresh() === true) return;

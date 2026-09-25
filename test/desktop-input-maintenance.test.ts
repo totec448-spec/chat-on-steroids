@@ -1581,3 +1581,19 @@ it('releases departed-chat ownership so input claims and model discovery cannot 
   expect(h.localSaved.inputOpenings).toMatchObject({ [firstId]: { tab: 7, stage: 'ready' } });
   expect(h.create).not.toHaveBeenCalled();
 });
+
+it('still claims a desktop input after ChatGPT strips the cos-input URL marker', async () => {
+  const h = await worker([{ id: firstId, conversationId: null }]);
+  await h.maintain();
+  const tab = h.tabs.find(row => String(row.pendingUrl || row.url || '').includes(`cos-input=${firstId}`))!;
+  // The provider SPA strips our marker after hydration. The persisted election
+  // must keep custody of that same live tab: no re-election, no second opening.
+  await h.update(tab.id, { url: 'https://chatgpt.com/' });
+  await h.maintain();
+  expect(h.create).toHaveBeenCalledTimes(1);
+  const sender = { tab: { id: tab.id }, documentId: 'marked-page', frameId: 0, url: tab.url };
+  const source = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+  const result = await h.desktopInput({ id: firstId, conversationId: null, requiresAuthorization: true }, sender, source);
+  expect(result.ok).toBe(true);
+  expect(h.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/input/claim')).toBe(true);
+});

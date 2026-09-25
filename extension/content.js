@@ -10758,7 +10758,7 @@
   function temporaryPlannerPage() {
     if (!alive || !window.document) return false;
     return new URL(location.href).searchParams.get('temporary-chat') === 'true' &&
-      (location.href.includes('cos-input=') || desktopDecisionSession?.temporary === true || desktopDecision?.temporary === true);
+      (location.href.includes('cos-input=') || BOOT_MARKERS.input || desktopDecisionSession?.temporary === true || desktopDecision?.temporary === true);
   }
   function desktopDecisionChat() {
     return Boolean((desktopDecisionSession && desktopDecisionSession.conversationId === CLF_DOM.conversationId()) || desktopDecision?.onTarget());
@@ -10947,7 +10947,7 @@
     if (message.directTurn && (!target || ((generating || CLF_DOM.generating()) &&
         (!sourceUser || sourceTurn !== message.directTurn.id)))) return false;
     const ownsFreshPage = () => !target && onTarget() && location.pathname === '/' &&
-      new URL(location.href).searchParams.get('cos-input') === message.id && !CLF_DOM.turns().length;
+      (cosMarker('cos-input') === message.id || BOOT_MARKERS.input === message.id) && !CLF_DOM.turns().length;
     if (!target && !ownsFreshPage()) return false;
     desktopInputBusy = true;
     let decision = null;
@@ -11110,10 +11110,39 @@
 
   let modelCatalogBusy = false;
   let pluginRefreshBusy = false;
+  // ChatGPT's SPA strips our cos-* URL markers after hydration. usage.js stashed the
+  // raw navigation markers at document_start; merge them with whatever is still live.
+  const BOOT_MARKERS = (() => {
+    let live = {};
+    try {
+      const u = new URL(location.href), h = new URLSearchParams(u.hash.slice(1));
+      live = {
+        input: u.searchParams.get('cos-input') || h.get('cos-input'),
+        refresh: u.searchParams.get('cos-plugin-refresh') || h.get('cos-plugin-refresh'),
+        catalog: u.searchParams.get('cos-model-catalog') || h.get('cos-model-catalog')
+      };
+    } catch {}
+    let stored = {};
+    try { stored = JSON.parse(sessionStorage.getItem('cosBootMarkers') || 'null') || {}; } catch {}
+    const merged = { input: live.input || stored.input || null, refresh: live.refresh || stored.refresh || null, catalog: live.catalog || stored.catalog || null };
+    if (live.input || live.refresh || live.catalog) {
+      try { sessionStorage.setItem('cosBootMarkers', JSON.stringify(merged)); } catch {}
+    }
+    return merged;
+  })();
+  const cosMarker = (name) => {
+    try {
+      const u = new URL(location.href);
+      return u.searchParams.get(name) || new URLSearchParams(u.hash.slice(1)).get(name);
+    } catch { return null; }
+  };
   function ownsPluginRefreshPage(id) {
     const url = new URL(location.href);
-    return alive && !generating && !CLF_DOM.generating() && url.pathname === '/' &&
-      /^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash) && url.searchParams.get('cos-plugin-refresh') === id;
+    const route = (url.pathname === '/' && /^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash)) ||
+      /^\/settings\/plugins-settings(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?\/?$/.test(url.pathname) ||
+      /^\/plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?\/?$/.test(url.pathname);
+    return alive && !generating && !CLF_DOM.generating() && route &&
+      (cosMarker('cos-plugin-refresh') === id || BOOT_MARKERS.refresh === id);
   }
   function waitPageView(read, current, milliseconds) {
     return new Promise(resolve => {
@@ -11208,7 +11237,7 @@
       !modelCatalogBusy && !pluginRefreshBusy && !desktopDecision && !commandAttempt && !commandJournalGate &&
       queue.length === 0 && !flushWork && CLF_DOM.composerVisible() && !CLF_DOM.hasComposerAttachments() &&
       !(CLF_DOM.composer()?.textContent || '').trim() &&
-      (home ? !rows.length && !marker.has('cos-input') && !marker.has('temporary-chat') :
+      (home ? !rows.length && !marker.has('cos-input') && !BOOT_MARKERS.input && !marker.has('temporary-chat') :
         !!CLF_DOM.conversationId() && rows.at(-1)?.role === 'assistant');
   }
   async function prepareDesktopInputPage(message) {
@@ -11242,6 +11271,8 @@
       url.searchParams.set('cos-input', message.id);
       url.hash = `cos-input=${message.id}`;
       history.replaceState(history.state, '', url.href);
+      BOOT_MARKERS.input = message.id;
+      try { sessionStorage.setItem('cosBootMarkers', JSON.stringify(BOOT_MARKERS)); } catch {}
       return { ready: true, navigationEpoch: epoch, url: location.href };
     } finally {
       desktopInputBusy = false;
@@ -11415,7 +11446,7 @@
       if (message.type === 'clf-close-temporary-planner') {
         const users = CLF_DOM.messages().filter(row => row.role === 'user');
         const exact = desktopDecision?.id === message.id && desktopDecision?.owner === message.owner;
-        sendResponse({ safe: temporaryPlannerPage() && location.href.includes(`cos-input=${message.id}`) &&
+        sendResponse({ safe: temporaryPlannerPage() && (location.href.includes(`cos-input=${message.id}`) || BOOT_MARKERS.input === message.id) &&
           !generating && !CLF_DOM.generating() && pendingTools === 0 && !CLF_DOM.hasComposerAttachments() &&
           !(CLF_DOM.composer()?.textContent || '').trim() &&
           (users.length === 0 || (exact && users.length === 1 && matchesSubmittedUser(users[0], desktopDecision.text))) });
