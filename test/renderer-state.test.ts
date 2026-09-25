@@ -1,4 +1,7 @@
-vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({ update: vi.fn() }) }));
+vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
+  update: vi.fn(), show: vi.fn(), hide: vi.fn(), newTab: vi.fn(() => null),
+  tabs: vi.fn(() => []), selectTab: vi.fn(), closeTab: vi.fn()
+}) }));
 // Native animation/media APIs are covered by pet DOM and real Electron tests.
 vi.mock('../src/renderer/pet.js', () => ({ initPet: () => () => {} }));
 import { promises as fs } from 'node:fs';

@@ -36,7 +36,8 @@ import type {
   SessionEvent,
   SessionOrigin,
   SessionSummary,
-  StoredText
+  StoredText,
+  ToolEditReview
 } from '../../shared/session.js';
 import { continuationMarkerOf, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
 import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline,
@@ -2093,6 +2094,28 @@ export async function readHydratedActivityCall(
       event.kind === 'tool_call' && event.call.callId === callId && (!held || event.seq > held.seq) ? event : held, null);
     return newest && exact(newest) ? newest : null;
   });
+}
+
+/** Retrieves one immutable, bounded edit artifact by its durable session/call/index identity. */
+export async function readToolEditReview(sessionId: string, callId: string, changeIndex: number): Promise<ToolEditReview | null> {
+  assertSessionId(sessionId);
+  if (!/^[0-9a-f-]{36}$/i.test(callId) || !Number.isSafeInteger(changeIndex) || changeIndex < 0 || changeIndex >= 64) return null;
+  await flushSession(sessionId);
+  const [event] = await readRecentEventsFromDisk(sessionId, 1, {
+    kinds: ['tool_call'], before: Number.POSITIVE_INFINITY,
+    acceptEvent: value => value.kind === 'tool_call' && value.call.callId === callId
+  });
+  if (event?.kind !== 'tool_call' || event.call.callId !== callId) return null;
+  const change = event.call.changes?.[changeIndex];
+  if (!change?.reviewAssetId) return null;
+  const data = await readAsset(sessionId, change.reviewAssetId, 512 * 1024);
+  if (!data) return null;
+  try {
+    const parsed = JSON.parse(data.toString('utf8')) as { before?: unknown; after?: unknown };
+    if (typeof parsed.before !== 'string' || typeof parsed.after !== 'string') return null;
+    return { callId, changeIndex, path: change.path, added: change.added, removed: change.removed,
+      baseText: parsed.before, currentText: parsed.after };
+  } catch { return null; }
 }
 
 /**

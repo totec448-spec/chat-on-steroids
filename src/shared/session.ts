@@ -140,6 +140,19 @@ export interface FileChange {
   removed: number;
   /** True when the counts come from a bounded heuristic rather than a full diff. */
   approximate: boolean;
+  /** Immutable before/after text from this exact tool call, stored beside its session log. */
+  reviewAssetId?: string;
+}
+
+/** Historical edit evidence, independent of the current Git working tree. */
+export interface ToolEditReview {
+  callId: string;
+  changeIndex: number;
+  path: string;
+  added: number;
+  removed: number;
+  baseText: string;
+  currentText: string;
 }
 
 /** Only `tool_internal_error` is a connector defect. */

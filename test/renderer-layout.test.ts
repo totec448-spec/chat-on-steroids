@@ -74,6 +74,32 @@ it('keeps the context circle in the gear group rather than an auto-placed compos
   expect(document.getElementById('contextMeterInfo')!.parentElement?.id).toBe('contextMeter');
 });
 
+it('centers the accessible Chats refresh icon without an extra grid text row', () => {
+  const refresh = document.getElementById('chatRefresh')!;
+  expect(refresh.getAttribute('aria-label')).toBe('Refresh chats');
+  expect(refresh.children).toHaveLength(1);
+  expect(refresh.firstElementChild?.tagName.toLowerCase()).toBe('svg');
+  expect(refresh.textContent?.trim()).toBe('');
+});
+
+it('defines the back-arrow glyph used by Review navigation', () => {
+  const back = document.getElementById('i-back');
+  expect(back?.querySelector('path')?.getAttribute('d')).toBeTruthy();
+});
+
+it('keeps dock tabs and Files actions on one horizontally scrollable row without visible scrollbars', () => {
+  expect(css).toMatch(/\.work-dock-tabs\s*\{[^}]*overflow-x:\s*auto;[^}]*scrollbar-width:\s*none;/);
+  expect(css).toMatch(/\.work-dock-tabs::-webkit-scrollbar\s*\{\s*display:\s*none;/);
+  expect(css).toMatch(/\.file-panel-toolbar-actions\s*\{[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*auto;[^}]*scrollbar-width:\s*none;/);
+  expect(css).toMatch(/\.file-panel-toolbar-actions::-webkit-scrollbar\s*\{\s*display:\s*none;/);
+  expect(css).toMatch(/\.file-panel-toolbar > \.file-panel-refresh\s*\{\s*flex:\s*0 0 30px;/);
+  expect(css).toMatch(/\.review-panel \.file-changes-header-content\s*\{[^}]*overflow-x:\s*auto;[^}]*scrollbar-width:\s*none;/);
+  expect(css).toMatch(/\.review-panel \.file-changes-header-content::-webkit-scrollbar\s*\{\s*display:\s*none;/);
+  expect(css).toMatch(/\.work-dock-tab:is\(\.is-selected, :hover, :focus-within\)\s*\{\s*background:\s*var\(--hover\);/);
+  expect(css).toMatch(/\.work-dock-bar \.work-dock-tab > \.btn:hover:not\(:disabled\)\s*\{\s*background:\s*transparent;/);
+  expect(css).toMatch(/\.work-dock-tab > \.btn:focus-visible\s*\{\s*outline:/);
+});
+
 it('does not expose a periodic Astra continuation outside session_finish', () => {
   expect(document.getElementById('goalImpulseMinutes')).toBeNull();
   expect(chatSource).not.toContain("number('goalImpulseMinutes'");
@@ -524,11 +550,12 @@ describe('the window as a whole', () => {
   });
 
   it('never scrolls sideways', () => {
-    // Wide authored tables/code may scroll locally; the surrounding app must not.
+    // Wide authored content and compact dock controls may scroll locally; the app must not.
     const horizontal = [...css.matchAll(/([^{}]+)\{[^{}]*overflow-x:\s*(?:auto|scroll)[^{}]*\}/g)];
     expect(horizontal.map(match => match[1]!.trim())).toEqual([
       '.msg.rich .markdown-table',
       '.file-panel-toolbar-actions',
+      '.review-panel .file-changes-header-content',
       '.file-preview-markdown pre',
       '.file-preview-markdown-table',
       '.file-pdf-viewport',
