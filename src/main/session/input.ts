@@ -100,6 +100,8 @@ const entrySchema = inputArgs.extend({
 export type InputEntry = z.infer<typeof entrySchema>;
 const STATE = 'session-input';
 const TOOL_INPUT_TEXT_BYTES = 128000;
+/** A confirmed send receipt lands in seconds. This only bounds one that is never reported. */
+const UNCERTAIN_SEND_MS = 15 * 60_000;
 export const TOOL_INPUT_HEADER = '\n--- New instructions from the user ---\n';
 export interface ToolInputBatch {
   messages: Array<{ text: string; images: InputImage[] }>;
@@ -446,6 +448,15 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
         ? 'Not sent: browser preparation timed out. This attempt was cancelled.'
         : 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.' };
     }
+    // An authorized claim that never reports its outcome is already unsendable: a
+    // browser row past authorization is not preparable, so no path re-offers or
+    // replays it. Left in place it still owns its whole session, so every later
+    // message waits behind an outcome nobody will ever publish. Retire it visibly
+    // after a bounded wait. Automatic Continue, an opening's first send and a
+    // combined delivery keep their existing custody.
+    if (row.state === 'browser' && row.sendAuthorizedAt !== undefined && !row.recovery && !row.opening &&
+        !row.companionInputId && manualInput(row) && Date.now() - row.sendAuthorizedAt >= UNCERTAIN_SEND_MS)
+      return { ...row, state: 'cancelled', error: 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.' };
     return row;
   }));
   for (let i = 0; i < next.length; i++) {
