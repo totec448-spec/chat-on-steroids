@@ -1888,6 +1888,24 @@
           const running = shell.entry.turn.status === 'in_progress' ? location.pathname : null;
           if (running && section.getAttribute('data-clf-shell-running') !== running) section.setAttribute('data-clf-shell-running', running);
           else if (!running) section.removeAttribute('data-clf-shell-running');
+          /*
+           * Whether this is a temporary chat, said by the page's own state rather than read off
+           * an icon.
+           *
+           * `temporaryChatReady()` proves the mode from the checked glyph in the toolbar, which
+           * is the only evidence a document has while nothing is mounted. Once a turn exists,
+           * React holds the answer directly — measured on 2026-09-25 across both kinds of chat:
+           * `entry.isTemporaryChat` is true on `/c/<id>?temporary-chat=true` and false on an
+           * ordinary chat, at every depth it appears. A layout that stops drawing that glyph
+           * therefore stops proving the mode, while this keeps proving it.
+           *
+           * Stamped with the pathname for the same reason the running hint is: a stamp left on a
+           * section from another route must not answer for this one. Absent state leaves no
+           * stamp at all, so the glyph remains the proof where React says nothing.
+           */
+          const temporary = shell.entry.isTemporaryChat === true ? location.pathname : null;
+          if (temporary && section.getAttribute('data-clf-temporary-chat') !== temporary) section.setAttribute('data-clf-temporary-chat', temporary);
+          else if (!temporary) section.removeAttribute('data-clf-temporary-chat');
         }
         if (!conversation.conflict) for (const [node, id] of exactAnchors) {
           desiredMessageStamps.set(node, `${scanToken}:${index}:${encodeURIComponent(id)}`);
@@ -1935,7 +1953,10 @@
             if (currentImage !== null) node.removeAttribute('data-clf-fiber-image');
           } else if (currentImage !== wantedImage) node.setAttribute('data-clf-fiber-image', wantedImage);
         }
-        if (!desiredTurnStamps.has(section)) section.removeAttribute('data-clf-shell-running');
+        if (!desiredTurnStamps.has(section)) {
+          section.removeAttribute('data-clf-shell-running');
+          section.removeAttribute('data-clf-temporary-chat');
+        }
         for (const stamped of [section, ...section.querySelectorAll('[data-content-search-unit-key]')]) {
           const wanted = desiredTurnStamps.get(stamped);
           const current = stamped.getAttribute('data-clf-fiber-turn');
