@@ -706,7 +706,27 @@ var CLF_DOM = (() => {
       // latest native response can describe this composer's current generation.
       const latest = [...document.querySelectorAll(SHELL_TURN)].filter(node =>
         !node.closest(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`)).at(-1);
-      return latest?.getAttribute('data-clf-shell-running') === location.pathname;
+      if (latest?.getAttribute('data-clf-shell-running') !== location.pathname) return false;
+      /*
+       * The stamp alone is not enough, and the comment above understates why: `in_progress` is
+       * React's own word, it outlives an interrupted exchange, and the "latest turn only" guard
+       * does not help when the latest turn *is* the interrupted one.
+       *
+       * Measured on the live page on 2026-09-26, in the chat this was found in: all three shell
+       * turns carried `data-clf-shell-running` for the current pathname at once, hours after the
+       * generation had died. Three turns cannot be running. `generating()` therefore answered yes
+       * for the rest of the chat's life, `nowGenerating` never went false, and the observer's whole
+       * outcome branch — the only path that can end a turn — was unreachable. The turn stayed open
+       * for nine hours, and with it the compaction handoff and every queued follow-up behind it.
+       *
+       * The composer settles it without a label or a clock: voice, send and stop are one button in
+       * one slot on this shell, so a slot occupied by anything that is not the stop square is a
+       * page that is not generating, whatever React still says. An empty slot proves nothing and is
+       * left to the stamp.
+       */
+      const primary = primarySlotControls();
+      if (primary.length > 0 && !primary.some(isStopSquare)) return false;
+      return true;
     }, false);
   }
 
@@ -728,17 +748,28 @@ var CLF_DOM = (() => {
    * Tried second, never first. Where the labels do match they stay authoritative.
    */
   const STOP_SQUARE = /^\s*M4\.5 5\.75/;
-  function localeFreeStopControls() {
+  /**
+   * The composer's primary-action slot: the one button that is voice, send or stop by turn.
+   *
+   * Named separately because who occupies it is evidence in its own right — see `generating`.
+   */
+  function primarySlotControls() {
     const form = composer()?.closest('form');
     if (!form) return [];
     return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
-      .filter(button => {
-        if (!renderedComposerNode(button) || button.closest('form') !== form) return false;
-        // The dictation control keeps a popover state on itself; stop never does.
-        if (button.hasAttribute('data-state')) return false;
-        const paths = button.querySelectorAll('svg path');
-        return paths.length === 1 && STOP_SQUARE.test(paths[0].getAttribute('d') || '');
-      });
+      .filter(button => renderedComposerNode(button) && button.closest('form') === form);
+  }
+
+  /** The rounded square, which is the one thing about stop that nobody translates. */
+  function isStopSquare(button) {
+    // The dictation control keeps a popover state on itself; stop never does.
+    if (!button || button.hasAttribute('data-state')) return false;
+    const paths = button.querySelectorAll('svg path');
+    return paths.length === 1 && STOP_SQUARE.test(paths[0].getAttribute('d') || '');
+  }
+
+  function localeFreeStopControls() {
+    return primarySlotControls().filter(isStopSquare);
   }
 
   function stopControls() {

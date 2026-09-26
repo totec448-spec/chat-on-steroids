@@ -652,6 +652,51 @@ it('finds the stop control by its square when the label is translated', () => {
  * asserted here to stay out of it, because a dictation button clicked as send starts a recording
  * and a stop square clicked as send ends somebody's turn.
  */
+/**
+ * A turn React still calls `in_progress`, hours after it died.
+ *
+ * `generating()` falls back to `data-clf-shell-running`, which fiber.js stamps from
+ * `shell.entry.turn.status === 'in_progress'`. That status outlives an interrupted exchange, and the
+ * existing guard — trust only the newest turn, and only for this pathname — does not help when the
+ * newest turn *is* the interrupted one.
+ *
+ * Measured on the live page on 2026-09-26 over the Chrome debugging port, in the chat this was found
+ * in: all three shell turns carried the stamp for the current pathname at once, `stopButton()` was
+ * null, and `generating()` said true. Three turns cannot be running. The consequence ran the whole
+ * night: `nowGenerating` never went false, so the observer's outcome branch — the only path that can
+ * end a turn — was unreachable, the turn stayed open for nine hours, and the compaction handoff and
+ * every queued follow-up behind it were blocked on it.
+ *
+ * The composer settles it without a label or a clock: voice, send and stop are one button in one slot
+ * on this shell, so a slot holding anything but the stop square is a page that is not generating.
+ */
+it('does not call a page generating when its composer offers voice, whatever React still says', () => {
+  const f = fixture();
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  f.doc.querySelector('button[type="submit"]')!.remove();
+
+  // Every shell turn stamped as running, exactly as the live page had it.
+  const turns = [...f.doc.querySelectorAll('[data-app-shell-main-surface] [data-thread-find-target="conversation"] [data-turn-key]')];
+  expect(turns.length, 'the fixture has no shell turns to stamp').toBeGreaterThan(0);
+  for (const turn of turns) turn.setAttribute('data-clf-shell-running', f.win.location.pathname);
+  expect(f.api.generating(), 'the stamp alone stopped meaning anything').toBe(true);
+
+  // The slot holds dictation: the composer is idle, so the page is not generating.
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot} relative" aria-label="Sprachchat starten" data-state="closed">` +
+    '<svg aria-hidden="true" class="icon-primary-action"><path d="M8.22266 2.45825C8"></path><path d="M12.4443 4.62524C1"></path>' +
+    '<path d="M4 6.95825C4.48325"></path><path d="M16.667 7.45825C17"></path></svg></button>');
+  expect(f.api.generating(), 'a composer offering voice was still called generating').toBe(false);
+  expect(f.api.stopButton()).toBeNull();
+
+  // And the stop square in that same slot still means generating, stamp and all.
+  form.querySelector('button[aria-label="Sprachchat starten"]')!.outerHTML =
+    `<button type="button" class="${slot}" aria-label="Durdur">` +
+    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
+  expect(f.api.generating(), 'a stop control stopped proving a live generation').toBe(true);
+});
+
 it('finds the send control by its slot when the label is translated', () => {
   const f = fixture(), edit = editing(f);
   const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
