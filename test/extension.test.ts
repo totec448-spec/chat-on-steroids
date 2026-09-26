@@ -4461,3 +4461,29 @@ it.each([
   if (scenario.freshAt === 2) expect(proof).toHaveBeenCalledOnce();
   expect(policy.conversationActivityAt[conversationId]).toBe(now - 3_600_000);
 });
+
+/**
+ * 2026-09-26: after an extension update, open tabs kept the old MAIN-world usage observer. The
+ * worker asks usage.js to replace itself, and only while the page says it is not streaming.
+ */
+it('replaces the usage observer of an open tab only once it is not streaming', async () => {
+  const source = backgroundSource.slice(backgroundSource.indexOf('const USAGE_REPLACE_RETRY_MS'),
+    backgroundSource.indexOf('async function restoreOpenChatgptTabs('));
+  const statuses: Array<unknown> = [{ ok: true, streaming: true }, null, { ok: true, streaming: false }];
+  const timers: Array<() => void> = [];
+  const executed: Array<Record<string, unknown>> = [];
+  const replace = vm.runInNewContext(`${source}\nreplaceUsageObserver`, {
+    tabReply: async () => statuses.shift(),
+    setTimeout: (fn: () => void) => { timers.push(fn); return timers.length; },
+    chrome: { scripting: { executeScript: async (options: Record<string, unknown>) => { executed.push(options); return []; } } }
+  });
+  expect(await replace(7)).toBe(false);
+  expect(executed).toEqual([]);
+  timers.shift()!();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(executed).toEqual([]);
+  timers.shift()!();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(executed.map(options => options.files ?? 'flag')).toEqual(['flag', ['usage.js']]);
+  expect(executed.every(options => options.world === 'MAIN')).toBe(true);
+});

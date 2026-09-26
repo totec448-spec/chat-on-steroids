@@ -36,7 +36,9 @@ function harness() {
     listeners.set(type, rows.filter(row => !row.once));
     for (const row of rows) row.handler(event);
   };
-  const evaluate = (source = script) => runInNewContext(source, { window, document, location: { origin: 'https://chatgpt.com' }, URL, Date: Clock, TextDecoder,
+  window.dispatchEvent = (event: { type: string }) => { dispatch(event.type, event); return true; };
+  class MessageEvent { constructor(readonly type: string, init: Record<string, unknown>) { Object.assign(this, init); } }
+  const evaluate = (source = script) => runInNewContext(source, { window, document, location: { origin: 'https://chatgpt.com' }, URL, Date: Clock, TextDecoder, MessageEvent,
     setTimeout: (run: () => void, ms: number) => { timers.set(++timerId, { at: now + ms, run }); return timerId; },
     clearTimeout: (id: number) => timers.delete(id) });
   evaluate();
@@ -111,7 +113,8 @@ function harness() {
     currentFetch: () => window.fetch,
     holdNextBody: () => { let release = () => {}; nextBodyGate = new Promise<void>(resolve => { release = resolve; }); return () => release(); },
     advance: (ms: number) => { now += ms; for (const [id, timer] of timers) if (timer.at <= now) { timers.delete(id); timer.run(); } },
-    request: (source: unknown = window, origin = 'https://chatgpt.com') => dispatch('message', { source, origin, data: { type: 'cos-usage-request' } })
+    request: (source: unknown = window, origin = 'https://chatgpt.com') => dispatch('message', { source, origin, data: { type: 'cos-usage-request' } }),
+    askReplace: () => { window.__cosUsageReplace = true; }
   };
 }
 
@@ -446,5 +449,33 @@ describe('MAIN-world usage projection', () => {
     await h.feedSse([`data: {"conversation_id":"${a}","request_id":"not-a-workflow"}\n\n`]);
     await h.feedSse([`data: {"conversation_id":"${a}","nested":{"conversation_id":"${b}"},"request_id":"wfr_conflict"}\n\n`]);
     expect(h.posts).toEqual([]);
+  });
+});
+
+describe('replacing the MAIN-world observer after an extension update', () => {
+  // 2026-09-26: open tabs kept running the old request-id reader after an update, because the
+  // same protocol version returned early. Only an explicit request from the service worker
+  // replaces it, and the retained origins reach the page before the old reader forgets them.
+  it('keeps the running observer on an ordinary re-execution', () => {
+    const h = harness(), first = h.observer();
+    h.evaluate();
+    expect(h.observer()).toBe(first);
+  });
+
+  it('replaces it when asked, handing over retained request origins first', async () => {
+    const h = harness();
+    h.ready();
+    await h.feedSse([`data: ${JSON.stringify({ conversation_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      message: { metadata: { request_id: 'wfr_handover_1' } } })}\n\n`]);
+    const first = h.observer();
+    h.posts.length = 0;
+    h.askReplace();
+    h.evaluate();
+    expect(h.observer()).not.toBe(first);
+    expect(h.posts).toContainEqual(expect.objectContaining({ type: 'cos-request-origin', requestIds: ['wfr_handover_1'] }));
+    // The flag is consumed: the next ordinary re-execution keeps the new observer.
+    const second = h.observer();
+    h.evaluate();
+    expect(h.observer()).toBe(second);
   });
 });
