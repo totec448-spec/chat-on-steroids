@@ -10599,11 +10599,13 @@
    * surface instead of the chat. Seen live after a reload that landed mid-turn: the model went
    * on calling tools server-side while this page showed nothing, so the turn could never be
    * seen to end. The surface must hold for LOAD_FAILURE_SETTLE_MS first — the shell passes
-   * through empty states while it mounts — and later presses back off, so a conversation that
-   * genuinely cannot load is asked a few times, not hammered.
+   * through empty states while it mounts — and later presses back off to once a minute, and stay
+   * there: measured the same day, presses in the first half-minute after a reload could fail while
+   * a press a minute later restored the chat, so a schedule that gave up after a few minutes left
+   * the tab dead. One press of the page's own Retry a minute costs one request.
    */
   const LOAD_FAILURE_SETTLE_MS = 5_000;
-  const LOAD_FAILURE_BACKOFF_MS = [0, 15_000, 60_000, 5 * 60_000];
+  const LOAD_FAILURE_BACKOFF_MS = [0, 15_000, 30_000, 60_000];
   let loadFailureSince = 0;
   let loadFailureRetries = 0;
   let loadFailureRoute = null;
