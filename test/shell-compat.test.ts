@@ -95,6 +95,42 @@ function fixture() {
   return { api: (win as any).CLF_DOM, doc, win, entry, row, top, props, versions, selections, trigger, actions, queries, ask, chain };
 }
 
+it('projects bounded native file and web references through the complete recorder boundary', async () => {
+  const f = fixture();
+  f.entry.turn.items[2].content = ':chatgpt-content-reference{index="0"}[report](sandbox:/mnt/data/report.py)';
+  f.entry.turn.items[2].contentReferences = [
+    { type: 'file', file_name: 'report.py', sandbox_path: '/mnt/data/report.py', message_id: ANSWER, download_url: 'NEVER_COPY_SIGNED_URL' },
+    { type: 'grouped_webpages', items: [{ title: 'Research', url: 'https://example.com/research' }] }
+  ];
+  const r = await recorder(f);
+  const final = r.events().filter((e: any) => e.kind === 'assistant_message').at(-1);
+  expect(final.presentation).toEqual({ conversationId: THREAD, references: [
+    { index: 0, type: 'file', name: 'report.py', path: '/mnt/data/report.py', sourceMessageId: ANSWER },
+    { index: 1, type: 'web', sources: [{ title: 'Research', url: 'https://example.com/research' }] }
+  ] });
+  expect(JSON.stringify(r.events())).not.toContain('NEVER_COPY_SIGNED_URL');
+  f.entry.turn.items[2].contentReferences[0].file_name = 'new-name.py';
+  await r.hook.refreshFiber(); await r.hook.flush();
+  expect(r.events().filter((e: any) => e.kind === 'assistant_message').at(-1).presentation.references[0].name).toBe('new-name.py');
+});
+
+it('projects Python execution status by its stable native id without reading code or outputs', async () => {
+  const f = fixture();
+  const step = { type: 'chatgpt-python-execution', id: OTHER, status: 'running', code: 'PRIVATE_CODE', output: 'PRIVATE_OUTPUT' };
+  f.entry.turn.items[1].items.push(step);
+  const first = await f.ask();
+  expect(first.turns[0].activities).toContainEqual({ messageId: `native-python:${OTHER}`, label: 'Analyzing' });
+  step.status = 'completed';
+  const next = await f.ask();
+  expect(next.turns[0].activities).toContainEqual({ messageId: `native-python:${OTHER}`, label: 'Analyzed' });
+  expect(JSON.stringify(next)).not.toMatch(/PRIVATE_CODE|PRIVATE_OUTPUT/);
+});
+
+it('never turns an unknown typed assistant phase into public commentary', async () => {
+  const f = fixture(); f.entry.turn.items[2].phase = 'analysis'; f.entry.turn.items[2].content = 'PRIVATE_REASONING';
+  expect(JSON.stringify(await f.ask())).not.toContain('PRIVATE_REASONING');
+});
+
 // Models the observed Markdown editor's native text/break serialization, not
 // the app's receipt check. No exported scripts, credentials or chat text are used.
 function editing(f: ReturnType<typeof fixture>) {
@@ -181,6 +217,16 @@ it('reads the real shell composer, messages and tools through existing contracts
   expect(f.api.turns().map((t: any) => t.role)).toEqual(['user', 'assistant']);
   expect(f.api.messages().map((m: any) => [m.id, m.role, m.text])).toEqual([[USER, 'user', 'hello'], [ANSWER, 'assistant', 'Answer']]);
   expect(f.api.presentationTurns().map((t: any) => t.role)).toEqual(['user', 'assistant']);
+});
+
+it('reads literal shell user text only through the current exact message stamp', async () => {
+  const f = fixture(); await f.ask();
+  const user = f.api.messages().find((message: any) => message.role === 'user');
+  expect(f.api.userMessageReadback(user)).toBe('hello');
+  expect(f.api.userMessageReadback({ ...user, id: OTHER })).toBeNull();
+  expect(f.api.userMessageReadback({ ...user, role: 'assistant' })).toBeNull();
+  user.node.removeAttribute('data-clf-fiber-message');
+  expect(f.api.userMessageReadback(user)).toBeNull();
 });
 
 it.each(['in_progress', 'cancelled', 'complete', 'unknown', undefined])('does not invent a tool receipt from turn status %s', async status => {

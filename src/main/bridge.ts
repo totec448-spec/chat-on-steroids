@@ -1,4 +1,5 @@
 import { conversationProgress } from './session/progress.js';
+import { messagePresentation } from '../shared/message-presentation.js';
 import { messageReaction } from '../shared/message-reaction.js';
 import { browserControl } from './browser-control.js';
 import type { BrowserResult } from '../shared/browser-control.js';
@@ -10,7 +11,7 @@ import { isProModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { injectedUserMessage, recordedRequestTurn, responseTurnId } from '../shared/chronology.js';
 import type { SessionSummary } from '../shared/session.js';
-import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, type InputActivity } from './session/input.js';
+import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserOpening, collectRecordedBrowserDecision, type InputActivity } from './session/input.js';
 import { pluginRefreshPublications, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { wakeBrowserUrl } from './browser-startup.js';
@@ -1128,6 +1129,7 @@ function parseObservations(input: unknown): ChatObservation[] {
     }
     if (typeof item['turnId'] === 'string') observation.turnId = item['turnId'].slice(0, 100);
     if (typeof item['renderedHtml'] === 'string') observation.renderedHtml = item['renderedHtml'].slice(0, 120_000);
+    if (kind === 'assistant_message') observation.presentation = messagePresentation(item['presentation']);
     if (item['state'] === 'streaming' || item['state'] === 'final') observation.state = item['state'];
     if (typeof item['fiberConversationId'] === 'string') {
       const fiberId = conversationId(item['fiberConversationId']);
@@ -2186,7 +2188,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         if (woke?.report) await recordAgentMessage(woke.report, 'sent', id);
         if (woke?.revived) tidyCommands();
       }
-      if (!superseded && result.sessionId) await collectRecordedBrowserDecision(id);
+      if (!superseded && result.sessionId) {
+        await collectRecordedBrowserOpening(id);
+        await collectRecordedBrowserDecision(id);
+      }
       // The stable assistant message, not the page-local turn id, is the exactly-once Goal
       // checkpoint. Freeze app config/key policy before 200 lets the browser retire this
       // terminal observation from its durable journal.
@@ -2578,6 +2583,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
               kind: 'assistant_message',
               text: event.message.text,
               renderedHtml: event.renderedHtml?.text ?? '',
+              ...(event.presentation ? { presentation: event.presentation } : {}),
               state: event.state ?? (event.final ? 'final' : 'streaming'),
               final: event.final,
               messageId: event.messageId ?? null,

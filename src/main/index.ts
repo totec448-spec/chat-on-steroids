@@ -448,7 +448,9 @@ void app.whenReady().then(async () => {
   if (browserExtensionRequired(getConfig())) {
     void startBridge();
   }
-  if (getConfig().ui.autoConnect) void connect();
+  // An explicit launch request may reconnect after a manual update without
+  // changing the user's saved auto-connect preference.
+  if (getConfig().ui.autoConnect || process.argv.includes('--connect')) void connect();
 
   // Never awaited: an unreachable GitHub, a slow download or a broken release must not delay a
   // window that is already on screen. Everything it learns arrives through the ordinary state

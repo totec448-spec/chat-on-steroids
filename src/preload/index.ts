@@ -220,6 +220,7 @@ const api = {
   setZoom: (factor: number) => call<number>('window:zoom', { factor }),
   getZoom: () => call<number>('window:getZoom'),
   openSessionChat: (id: string) => call<boolean>('sessions:openChat', { id }),
+  openSessionReference: (id: string, messageId: string, index: number) => call<boolean>('sessions:openReference', { id, messageId, index }),
   // Stops a chat this app cannot stop in the page: every tool call it has already been proved
   // to own is refused until it is released. Returns the whole blocked set, so one press
   // repaints without a second read.

@@ -2223,6 +2223,18 @@ input[readonly] {
   text-decoration: underline;
 }
 
+.msg.rich .writing-card { margin-block: 16px; border: 1px solid var(--edge); border-radius: var(--r-lg); background: var(--card); overflow: hidden; }
+.writing-card-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 18px; border-bottom: 1px solid var(--line); font-weight: 600; }
+.writing-card-body { padding: 18px; overflow-wrap: anywhere; }
+.writing-card-body > :first-child { margin-top: 0; }
+.writing-card-body > :last-child { margin-bottom: 0; }
+.writing-copy { flex: none; font-size: .85em; font-weight: 400; }
+.returned-files { display: grid; gap: 10px; margin-block: 14px; max-width: 580px; }
+.returned-file { display: grid; gap: 5px; width: 100%; padding: 16px 18px; border: 1px solid var(--edge); border-radius: var(--r-lg); background: var(--card); color: var(--ink); font: inherit; text-align: start; cursor: pointer; }
+.returned-file:hover, .returned-file:focus-visible { background: var(--hover); border-color: var(--blue); }
+.returned-file:disabled { cursor: progress; opacity: .65; }
+.returned-file-name { color: var(--blue); overflow-wrap: anywhere; }
+
 .msg.rich .markdown-table {
   max-width: 100%;
   overflow-x: auto;

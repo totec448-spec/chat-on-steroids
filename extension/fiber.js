@@ -1702,9 +1702,56 @@
         if (nodes.length === 1) exactAnchors.set(nodes[0], source.id);
       }
     }
+    // Python's public execution card has its own stable id and status. Its code,
+    // output and images are not required to show Analyzing/Analyzed activity.
+    const executions = shell.entry.turn.items.flatMap(item => item?.type === 'chatgpt-reasoning-group' &&
+      Array.isArray(item.items) && item.reasoningRecap?.type !== 'hide_all' ? item.items : [item])
+      .filter(item => item?.type === 'chatgpt-python-execution').slice(0, MAX_CALLS);
+    for (const item of executions) {
+      const id = str(item.id);
+      if (!id || executions.filter(other => other.id === id).length !== 1) continue;
+      const label = item.status === 'completed' ? 'Analyzed' : item.status === 'failed' || item.status === 'error' ? 'Analysis failed' :
+        ['running', 'in_progress'].includes(item.status) ? 'Analyzing' : null;
+      if (label) events.push({ messageId: `native-python:${id}`, label, order: order.get(id) });
+    }
     rendered.sort((a, b) => a.order - b.order);
     return { events, notifications: [] };
   }
+  /** Bounded public reference metadata, kept separate from canonical message text.
+   * Opaque file ids never become guessed URLs; files are opened through their native control. */
+  function shellMessagePresentation(item, conversationId) {
+    if (!/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(conversationId || '') ||
+        !Array.isArray(item.contentReferences) || item.contentReferences.length > 64) return undefined;
+    const references = [];
+    const label = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+    const webSource = source => {
+      if (!label(source?.url, 2048)) return null;
+      try {
+        const url = new URL(source.url);
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+        return { title: label(source.title, 300) ? source.title : url.hostname, url: source.url };
+      } catch { return null; }
+    };
+    for (const [index, ref] of item.contentReferences.entries()) {
+      if (ref?.type === 'file' && label(ref.file_name || ref.name, 300) && label(ref.sandbox_path, 1024) &&
+          ref.sandbox_path.startsWith('/mnt/data/') && !/[\\?#]/.test(ref.sandbox_path) &&
+          ref.sandbox_path.split('/').every(part => part !== '..' && part !== '.') &&
+          /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(ref.message_id || '')) {
+        references.push({ index, type: 'file', name: ref.file_name || ref.name, path: ref.sandbox_path, sourceMessageId: ref.message_id });
+      } else if (['webpage', 'grouped_webpages'].includes(ref?.type)) {
+        const entries = ref.type === 'webpage' ? [ref] : Array.isArray(ref.items) ? ref.items.slice(0, 8) : [];
+        const sources = entries.map(webSource).filter(Boolean);
+        if (sources.length) references.push({ index, type: 'web', sources });
+      }
+    }
+    const result = { conversationId, references };
+    // Bound only the allowlisted strings; never serialize a provider object.
+    const chars = references.reduce((total, ref) => total + 128 + (ref.type === 'file'
+      ? ref.name.length + ref.path.length + ref.sourceMessageId.length
+      : ref.sources.reduce((size, source) => size + 64 + source.title.length + source.url.length, 0)), 64);
+    return chars <= 16000 ? result : undefined;
+  }
+
   /** Translate only publicly identified items in the mounted exchange. Missing item ids
    * stay missing; a stopped turn does not manufacture replies to its tool calls. */
   function shellTurnSource(fiber, section, turnId) {
@@ -1720,6 +1767,7 @@
       if (++work > MAX_ROWS) return null;
       if (item?.type === 'user-message' || item?.type === 'assistant-message') {
         const user = item.type === 'user-message', id = str(item.messageId) || (user ? str(item.serverMessageId) : null);
+        if (!user && !['final_answer', 'commentary'].includes(item.phase)) continue;
         if (!id) continue;
         if (!remember(id) || (user && item.serverMessageId && item.messageId && item.serverMessageId !== item.messageId)) return null;
         const role = user ? 'user' : 'assistant', text = user ? item.message : item.content;
@@ -1835,6 +1883,10 @@
         const turnBudget = { remaining: Math.min(MAX_TURN_TEXT, responseBudget.remaining) };
         const before = turnBudget.remaining;
         const renderedMessages = renderedMessagesOf(group.sections, messages, turnBudget, exactAnchors, conversation.conversationId);
+        if (shell && !conversation.conflict) for (const message of renderedMessages) {
+          const items = shell.entry.turn.items.filter(item => item?.type === 'assistant-message' && item.messageId === message.rawMessageId);
+          if (items.length === 1) message.presentation = shellMessagePresentation(items[0], conversation.conversationId);
+        }
         const nativeActivities = shell ? shellPublicActivity(shell, metadata, renderedMessages, turnBudget, section, exactAnchors) : nativeActivitiesOf(group.sections, messages, exactThoughtRows);
         responseBudget.remaining -= before - turnBudget.remaining;
         const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes);

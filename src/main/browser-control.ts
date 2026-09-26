@@ -1,6 +1,6 @@
 /** Short-lived browser RPCs. Claims are never replayed, including after response loss. */
 import { randomUUID } from 'node:crypto';
-import { BROWSER_LIMITS, type BrowserCommand, type BrowserResult, type BrowserTool } from '../shared/browser-control.js';
+import { BROWSER_LIMITS, type BrowserCommand, type BrowserResult, type BrowserOperation } from '../shared/browser-control.js';
 import { wakeBrowserWork } from './browser-wake.js';
 
 interface Pending {
@@ -71,7 +71,7 @@ export class BrowserControlBroker {
     return allowed && this.pending.get(id) === p && p.command.expiresAt > Date.now();
   }
 
-  async execute(tool: BrowserTool, input: Record<string, unknown>, owner: string, conversationId: string | null,
+  async execute(tool: BrowserOperation, input: Record<string, unknown>, owner: string, conversationId: string | null,
     allowed: () => Promise<boolean>): Promise<BrowserResult> {
     const args = { ...input };
     const browsers = this.browsers();

@@ -21,7 +21,7 @@ import { inFlightToolCalls } from '../mcp/call-context.js';
 import { automaticFinishEnabled, goalDrivingMode, consumeGoalReplyForInputNow } from '../goal.js';
 import { finishInstruction } from '../../shared/finish.js';
 import { attachmentSchema, validateInputAttachments, normalizeInputAttachments } from './input-attachments.js';
-import { MAX_CHATGPT_MESSAGE_CHARS } from '../../shared/user-prompt.js';
+import { MAX_CHATGPT_MESSAGE_CHARS, normalizeUserPromptFrame } from '../../shared/user-prompt.js';
 import type { PromptLimits } from './prompt.js';
 import { recoveryMessage, recoveryBusyMs } from '../../shared/recovery.js';
 
@@ -1600,6 +1600,27 @@ export function completeBrowserDecision(id: string, owner: string, response: str
     waiter?.resolve(response);
     return !!waiter;
   });
+}
+
+/** Recover only a previously authorized, exactly bound opening whose native user
+ * record now proves receipt. An ambiguous or later user message cannot spend it. */
+export async function collectRecordedBrowserOpening(conversationId: string): Promise<void> {
+  const pending = (await listInputs()).filter(row => row.state === 'browser' && row.opening === true && row.purpose !== 'decision' &&
+    row.conversationId === conversationId && row.sessionId && row.owner && row.requiresAuthorization === true &&
+    Number.isFinite(row.sendAuthorizedAt) && typeof row.deliveryText === 'string');
+  if (pending.length !== 1 || isChatBlocked(conversationId) || await conversationWasSuperseded(conversationId)) return;
+  const row = pending[0]!;
+  const session = await findSessionByConversation(conversationId, { requireUnique: true });
+  if (!session || session.id !== row.sessionId) return;
+  const users = await readRecentEvents(session.id, 2, { kinds: ['user_message'], maxBytes: 1_048_576 });
+  if (users.length !== 1) return;
+  const user = users[0];
+  if (user?.kind !== 'user_message' || user.source !== 'extension' || !user.messageId || user.messageId.startsWith('input:') || user.message.truncated) return;
+  const compact = (value: string) => normalizeUserPromptFrame(value).replace(/\s+/g, '');
+  if (compact(user.message.text) !== compact(row.deliveryText!)) return;
+  // The original authorized, already-bound opening owns this late receipt.
+  // No new claim, tab adoption or repeat Send is permitted by this recovery.
+  await acknowledgeBrowserInput(row.id, row.owner!, conversationId, user.messageId);
 }
 
 /** The outbox's exact native-send receipt survives losing the helper document.

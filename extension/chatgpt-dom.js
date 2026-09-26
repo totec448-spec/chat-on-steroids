@@ -490,6 +490,14 @@ var CLF_DOM = (() => {
     if (!turn || node.getAttribute('data-clf-fiber-turn') !== turn || !stamp?.startsWith(`${turn}:`)) return null;
     try { return decodeURIComponent(stamp.slice(turn.length + 1)) || null; } catch { return null; }
   }
+  /** A current exact shell user slot may expose literal display text while its
+   * provider object contains Markdown serialization escapes. This is a readback,
+   * never a new message identity or permission to decode an arbitrary prompt. */
+  function userMessageReadback(message) {
+    return safe(() => message?.role === 'user' && message.node?.isConnected &&
+      message.node.matches(SHELL_UNIT) && shellRole(message.node) === 'user' &&
+      messageIdOf(message.node) === message.id ? messageText(message.node, 'user') : null, null);
+  }
   function turns() {
     return safe(() => {
       const out = [];
@@ -2578,6 +2586,7 @@ var CLF_DOM = (() => {
     turns,
     presentationTurns,
     messages,
+    userMessageReadback,
     messagesIn,
     sectionSignature,
     generating,

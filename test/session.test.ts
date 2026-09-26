@@ -106,6 +106,25 @@ const evidence = (patch: Partial<ReturnType<typeof emptyEvidence>> = {}) => ({ .
 // ------------------------------------------------------------------- store
 
 describe('session store', () => {
+  it('persists reference-only revisions without changing authored chronology and drops stale references with new prose', async () => {
+    const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const session = await createSession({ title: 'Reference persistence', conversationId });
+    const message = { kind: 'assistant_message' as const, source: 'extension' as const, time: 1000,
+      messageId: '11111111-2222-4333-8444-555555555555', message: { text: 'An answer.', chars: 10, truncated: false }, state: 'final' as const, final: true };
+    const first = await upsertMessageEvent(session.id, message);
+    const presentation = { conversationId, references: [{ index: 0, type: 'web' as const, sources: [{ title: 'Source', url: 'https://example.com/source' }] }] };
+    const enriched = await upsertMessageEvent(session.id, { ...message, presentation });
+    expect(enriched.changed).toBe(true); expect(enriched.contentChanged).toBe(false);
+    expect(enriched.event.origin).toBe(first.event.origin); expect(enriched.event.time).toBe(first.event.time);
+    expect(enriched.event.seq).toBeGreaterThan(first.event.seq);
+    expect((await upsertMessageEvent(session.id, message)).event).toMatchObject({ presentation });
+    await flushSessions(); resetSessionStoreForTests();
+    const restored = (await readEvents(session.id, { kinds: ['assistant_message'] }))[0];
+    expect(restored).toMatchObject({ presentation });
+    const revised = await upsertMessageEvent(session.id, { ...message, message: { text: 'Changed answer.', chars: 15, truncated: false } });
+    expect(revised.event).not.toHaveProperty('presentation');
+  });
+
   it('uses original call time and exact conversation for late attribution health proof', async () => {
     const conversationId = 'health-current';
     const session = await createSession({ title: 'attribution health', conversationId });

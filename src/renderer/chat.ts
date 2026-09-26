@@ -4,6 +4,8 @@ import { initSkills } from './skills.js';
 import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, ensureComposerModel } from './chat-models.js';
 import { marked, Marked } from 'marked';
+import { providerMarkdown, nativeFileHref } from './provider-markdown.js';
+import { messagePresentation, type MessagePresentation } from '../shared/message-presentation.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { createAgentPanel } from './agent-panel.js';
 import { createFilePanel } from './file-panel.js';
@@ -1452,7 +1454,8 @@ function citationLabels(source: string, capture?: StoredText): Map<string, strin
  * heading and list item is a newline, so it keeps `msg`'s pre-wrap — flowing it would run a
  * whole brief together into one paragraph.
  */
-export function renderedMarkdown(source: string, capture?: StoredText): HTMLElement {
+export function renderedMarkdown(source: string, capture?: StoredText, presentation?: MessagePresentation,
+  openReference?: (index: number) => Promise<unknown>): HTMLElement {
   // Fiber's canonical text can be complete while a background provider tab still
   // paints its first words. Render this revision directly; captured DOM HTML is
   // never evidence that it contains the current message revision.
@@ -1475,8 +1478,45 @@ export function renderedMarkdown(source: string, capture?: StoredText): HTMLElem
       return citations.get(token.raw) ?? (token.raw.startsWith('\uE200filecite\uE202') ? '' : '<span title="The recording does not include this source URL">[source link unavailable]</span>');
     }
   }] });
+  parser.use(providerMarkdown(presentation));
   const html = parser.parse(text, { async: false });
-  return renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
+  const box = renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
+  for (const block of box.querySelectorAll<HTMLElement>('[data-cos-writing-block]')) {
+    block.classList.add('writing-card');
+    const title = block.querySelector<HTMLElement>('[data-cos-writing-title]');
+    const body = block.querySelector<HTMLElement>('[data-cos-writing-body]');
+    title?.classList.add('writing-card-title'); body?.classList.add('writing-card-body');
+    if (title && body) {
+      const copy = el('button', 'btn writing-copy', () => t('Copy')) as HTMLButtonElement;
+      copy.type = 'button';
+      copy.addEventListener('click', () => void run(api.writeClipboard(body.innerText || body.textContent || '')));
+      title.append(copy);
+    }
+  }
+  const files = messagePresentation(presentation)?.references.filter(ref => ref.type === 'file') ?? [];
+  if (files.length) {
+    const cards = el('div', 'returned-files');
+    for (const file of files) {
+      const card = el('button', 'returned-file') as HTMLButtonElement;
+      card.type = 'button'; card.disabled = !openReference;
+      card.append(el('strong', 'returned-file-name', file.name), el('span', 'meta', () => t('Open in ChatGPT')));
+      ui(card, 'aria-label', () => t('Open {0} in ChatGPT', [file.name]));
+      const open = () => {
+        if (!openReference || card.disabled) return;
+        card.disabled = true;
+        void Promise.resolve(openReference(file.index)).finally(() => { card.disabled = false; });
+      };
+      card.addEventListener('click', open);
+      for (const link of box.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+        if (link.getAttribute('href') !== nativeFileHref(file.index)) continue;
+        link.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); open(); });
+        link.addEventListener('auxclick', event => { event.preventDefault(); event.stopPropagation(); if (event.button === 1) open(); });
+      }
+      cards.append(card);
+    }
+    box.append(cards);
+  }
+  return box;
 }
 
 export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
@@ -1528,7 +1568,9 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
       const start = tagName === 'OL' ? element.getAttribute('start') : null;
       const colSpan = tagName === 'TD' || tagName === 'TH' ? element.getAttribute('colspan') : null;
       const rowSpan = tagName === 'TD' || tagName === 'TH' ? element.getAttribute('rowspan') : null;
+      const writing = tagName === 'DIV' ? ['data-cos-writing-block', 'data-cos-writing-title', 'data-cos-writing-body'].filter(name => element.getAttribute(name) === 'true') : [];
       for (const attribute of [...element.attributes]) element.removeAttribute(attribute.name);
+      for (const name of writing) element.setAttribute(name, 'true');
       if (resolvedDir) element.setAttribute('dir', resolvedDir);
       if (href) {
         element.setAttribute('href', href);
@@ -1864,7 +1906,12 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
     case 'assistant_message': {
       const box = el('div', 'said');
       box.append(el('b', '', () => event.final ? 'ChatGPT' : t("ChatGPT (partial)")));
-      box.append(renderedMarkdown(event.message.text, event.renderedHtml));
+      const sessionId = context?.id ?? selectedId;
+      box.append(renderedMarkdown(event.message.text, event.renderedHtml, event.presentation,
+        sessionId && event.messageId ? async index => {
+          if (context && !context.current()) return;
+          await run(api.openSessionReference(sessionId, event.messageId!, index));
+        } : undefined));
       return box;
     }
     case 'native_image': {
@@ -3390,7 +3437,7 @@ function scheduleReload(): void {
       listTimer = undefined;
       if (listRefreshDirty) scheduleReload();
     });
-  }, 400);
+  }, 0);
 }
 
 /** Retired automatic drafts belong to their creation time, never the live composer queue. */

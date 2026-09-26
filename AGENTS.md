@@ -1647,6 +1647,33 @@ bounded page observer owns both waits; insertion failures retain their bounded p
 Goal preparation/rollback reuses the existing exact composer draft lease; identical text in a
 replacement editor or a user's intervening edit never grants cleanup authority.
 
+### Native rich-content presentation
+
+Native serialized user text and literal bubble text may differ. A Send comparison
+can consult the current exact shell message stamp's literal readback, but not an
+unrelated bubble, a guessed id or a punctuation-stripped prompt. Late opening
+receipt recovery requires the original durable authorization and binding, one
+recorded native user message and matching length-validated context framing.
+It reuses the acknowledgement transaction and never creates a new send claim.
+
+`shared/message-presentation.ts` bounds public message references separately from canonical
+authored Markdown. Shell observation copies only exact web-source URLs or native file
+name/path/message identity. Every process boundary revalidates the projection. A reference-only
+revision advances the publication cursor without moving authored chronology or creating work;
+a changed body must not inherit stale references. The original source conversation survives
+Compact & Resume and is checked against the recording's lineage before a file action.
+
+`renderer/provider-markdown.ts` tokenizes native content references and writing blocks through
+Marked, so fenced/inline code stays literal. Output still passes the existing HTML sanitizer.
+Writing cards and file controls are attached as local UI, never executed from captured HTML.
+`sessions:openReference` accepts only a recorded session/message/index. The existing short-lived
+browser RPC performs a fixed native file-preview action, not a new general browser tool: wait
+for exact provider identity, recheck permission, then click once in the same document. Never
+reinterpret `sandbox:` as a local path, invent a download endpoint, cache a signed download URL,
+or retry an unconfirmed click. Public Python activity uses the native execution id/status,
+without copying code, output or private reasoning. Desktop reload coalescing retains its single
+flight/dirty guard but adds no second delay after the main-process durable-change notification.
+
 ### Account-evaluated model selection
 
 `chat-models.ts` owns the app catalog and selection validation. The existing MAIN bridge reads

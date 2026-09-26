@@ -1198,6 +1198,9 @@ export function upsertMessageEvent(
               // markup for different content.
               ...(event.renderedHtml === undefined && sameMessage
                 ? { renderedHtml: previous.renderedHtml }
+                : {}),
+              ...(event.presentation === undefined && sameMessage
+                ? { presentation: previous.presentation }
                 : {})
             }
           : previous?.kind === 'user_message' && event.kind === 'user_message'
@@ -1252,6 +1255,7 @@ export function upsertMessageEvent(
         (previous.kind !== 'assistant_message' ||
           (nextEvent.kind === 'assistant_message' &&
             storedTextEqual(previous.renderedHtml, nextEvent.renderedHtml) &&
+            JSON.stringify(previous.presentation) === JSON.stringify(nextEvent.presentation) &&
             previous.state === nextEvent.state &&
             previous.final === nextEvent.final &&
             previous.goalEligible === nextEvent.goalEligible &&
@@ -1516,6 +1520,16 @@ export interface ReadOptions {
  * an append-only log is that a half-written final line costs one event, not the
  * session. Reading the file in one go is fine at the sizes the caps allow.
  */
+export async function readRecordedAssistantMessage(sessionId: string, messageId: string): Promise<Extract<SessionEvent, { kind: 'assistant_message' }> | undefined> {
+  assertSessionId(sessionId);
+  const active = open.get(sessionId);
+  if (active) await active.queue;
+  const records = active?.messages ?? await readCanonicalMessages(sessionId);
+  const matches = [...records.values()].filter((event): event is Extract<SessionEvent, { kind: 'assistant_message' }> =>
+    event.kind === 'assistant_message' && event.messageId === messageId);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 export async function readEvents(sessionId: string, options: ReadOptions = {}): Promise<SessionEvent[]> {
   assertSessionId(sessionId);
   await flushSession(sessionId);

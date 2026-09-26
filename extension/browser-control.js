@@ -1,4 +1,5 @@
 import { browserPage, boundedBrowserValue, browserFramePoint } from './browser-control-page.js';
+import { openRecordedReferencePage } from './recorded-reference-page.js';
 
 /** One browser-lifetime tab custodian. No selected-tab fallback and no action replay. */
 export function createBrowserControl(chrome, transport, protectedTab = () => false) {
@@ -475,8 +476,34 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
   async function execute(command) {
     if (command.epoch !== epoch || command.expiresAt <= Date.now()) error('BROWSER_EXPIRED: no operation dispatched.');
     const {tool,args} = command;
-    const writes = ['browser_action','browser_navigate','browser_evaluate'].includes(tool) || tool === 'browser_tabs' && ['new','close'].includes(args.action);
+    const writes = ['browser_action','browser_navigate','browser_evaluate','open_recorded_reference'].includes(tool) || tool === 'browser_tabs' && ['new','close'].includes(args.action);
     if (!(writes ? policy.write : policy.read)) error('BROWSER_PERMISSION_REVOKED');
+    if (tool === 'open_recorded_reference') {
+      if (!command.owner.startsWith('ui-reference:') || args.conversationId !== command.conversationId ||
+          !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(args.conversationId || '')) error('BROWSER_REFERENCE_INVALID');
+      await authorize(command);
+      const matching = (await chrome.tabs.query({ url: ['https://chatgpt.com/*', 'https://chat.openai.com/*'] })).filter(tab => {
+        try { return new URL(tab.url).pathname === '/c/' + args.conversationId ||
+          new RegExp('^/g/[^/]+/c/' + args.conversationId + '/?$').test(new URL(tab.url).pathname); } catch { return false; }
+      });
+      // A file click may reveal its original conversation, never borrow another chat or reload it.
+      if (matching.length > 1) error('BROWSER_REFERENCE_AMBIGUOUS: close duplicate copies of this conversation before opening the file.');
+      const tab = matching[0] || await chrome.tabs.create({ url: 'https://chatgpt.com/c/' + args.conversationId, active: true });
+      if (!matching.length) await waitForCreatedDocument(tab.id, 'https://chatgpt.com/c/' + args.conversationId, command);
+      await authorize(command);
+      await chrome.tabs.update(tab.id, { active: true });
+      const nativeWindow = await chrome.windows.get(tab.windowId);
+      await chrome.windows.update(tab.windowId, { ...(nativeWindow.state === 'minimized' ? { state: 'normal' } : {}), focused: true });
+      const ready = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: openRecordedReferencePage,
+        args: [{ ...args, waitOnly: true, expiresAt: command.expiresAt }] });
+      if (!ready[0]?.documentId || ready[0].result?.ready !== true) return { value: ready[0]?.result || { error: 'The file message is not loaded.' } };
+      // Re-earn permission after hydration. The second phase may not wait, borrow
+      // a replacement document or open a different reference after revocation.
+      await authorize(command);
+      const results = await chrome.scripting.executeScript({ target: { tabId: tab.id, documentIds: [ready[0].documentId] }, world: 'MAIN',
+        func: openRecordedReferencePage, args: [{ ...args, openNow: true, expiresAt: command.expiresAt }] });
+      return { value: results[0]?.result || { error: 'No result from the native file preview.' } };
+    }
     if (tool === 'browser_tabs') {
       if (args.action === 'list') {
         const list = await chrome.tabs.query({});

@@ -65,6 +65,22 @@ beforeEach(async () => {
   await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: false }, goal: { ...defaultConfig().goal, enabled: false } });
 });
 
+it.each(['exact', 'escaped', 'different', 'two-users'])('recovers only the original authorized opening from a late exact native receipt (%s)', async mode => {
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'Receipt recovery test' });
+  const claim = await input.claimBrowserInput(row.id, 'original-opening-document', null, true);
+  expect(claim).not.toBeNull();
+  expect(await input.authorizeBrowserInput(row.id, 'original-opening-document', null)).toBe(true);
+  const conversationId = randomUUID(), messageId = randomUUID();
+  expect(await input.bindBrowserInputProject(row.id, 'original-opening-document', conversationId)).toBe(true);
+  let text = claim!.text;
+  if (mode === 'escaped') text = text.replace(/\\/g, '\\\\').replace(/^#/gm, '\\#').replace(/\n/g, '\\\n');
+  if (mode === 'different') text += 'not the same request';
+  const events = [{ kind: 'user_message', messageId, text, time: Date.now() }];
+  if (mode === 'two-users') events.push({ kind: 'user_message', messageId: randomUUID(), text: 'another user request', time: Date.now() + 1 });
+  await post('/events', { conversationId, events });
+  expect((await input.listInputs()).find(item => item.id === row.id)?.state).toBe(['exact', 'escaped'].includes(mode) ? 'sent' : 'browser');
+});
+
 it.each([false, true])('pauses completed queued input at manual close through the final Send fence (claimed: %s)', async claimed => {
   let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
   try {

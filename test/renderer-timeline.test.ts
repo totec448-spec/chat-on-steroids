@@ -360,6 +360,41 @@ it('keeps a reaction on the native question across 100 interim messages, tool ca
   expect(w.document.getElementById('timeline')!.textContent).not.toContain('message_reaction');
 });
 
+it('coalesces durable change notifications without a second 400ms streaming delay', async () => {
+  const app = await boot([]);
+  const api = (app.w as any).api, list = api.listSessions;
+  api.listSessions = vi.fn(list);
+  try {
+    vi.useFakeTimers();
+    app.live.events.push({ seq: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'stream-live',
+      state: 'streaming', final: false, message: text('A live revision') });
+    app.notifySession(); app.notifySession(); app.notifySession();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(app.w.document.getElementById('timeline')?.textContent).toContain('A live revision');
+    expect(api.listSessions.mock.calls.length).toBeLessThanOrEqual(2);
+  } finally { vi.useRealTimers(); }
+});
+
+it('renders native writing, references and file cards through the real sanitized timeline', async () => {
+  const id = '11111111-2222-4333-8444-555555555555';
+  const event: SessionEvent = { seq: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: id, providerMessageId: id,
+    message: text(':::writing{variant="document" title="A fresh start"}\nA **formatted** paragraph.\n:::\n\nSource :chatgpt-content-reference{index="0"}.\n\n:chatgpt-content-reference{index="1"}[Download `report.py`](sandbox:/mnt/data/report.py)'),
+    state: 'final', final: true, presentation: { conversationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', references: [
+      { index: 0, type: 'web', sources: [{ title: 'Research', url: 'https://example.com/research' }] },
+      { index: 1, type: 'file', name: 'report.py', path: '/mnt/data/report.py', sourceMessageId: id }
+    ] } };
+  const { w } = await boot([event]);
+  const api = (w as any).api; api.openSessionReference = vi.fn(async () => ({ ok: true, data: true }));
+  const timeline = w.document.getElementById('timeline')!;
+  expect(timeline.textContent).not.toMatch(/:::writing|chatgpt-content-reference/);
+  expect(timeline.querySelector('.writing-card-title')?.textContent).toContain('A fresh start');
+  expect(timeline.querySelector('.writing-card-body strong')?.textContent).toBe('formatted');
+  expect(timeline.querySelector('a[href="https://example.com/research"]')).not.toBeNull();
+  (timeline.querySelector('.returned-file') as HTMLButtonElement).click(); await settle();
+  expect(api.openSessionReference).toHaveBeenCalledExactlyOnceWith(summary([]).id, id, 1);
+  expect(timeline.querySelector('a[href^="sandbox:"]')).toBeNull();
+});
+
 it.each(['compaction', 'blocked', 'worker'])('retires %s control status when leaving its session, including late IPC and locale refresh', async kind => {
   const { w, append } = await boot([]);
   const api = (w as any).api;

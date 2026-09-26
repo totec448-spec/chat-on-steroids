@@ -1713,6 +1713,7 @@ export interface ChatObservation {
   reaction?: string | null;
   /** ChatGPT's already-rendered authored markup for this same logical message. */
   renderedHtml?: string;
+  presentation?: import('../../shared/message-presentation.js').MessagePresentation;
   messageId?: string;
   /** Raw public provider message UUID, retained as evidence, never used to guess ownership. */
   providerMessageId?: string;
@@ -1991,7 +1992,8 @@ async function supersededLineage(conversationId: string): Promise<string | null>
  */
 async function recordSupersededMessages(
   sessionId: string,
-  observations: readonly ChatObservation[]
+  observations: readonly ChatObservation[],
+  conversationId: string
 ): Promise<number> {
   let stored = 0;
   for (const item of observations) {
@@ -2029,6 +2031,7 @@ async function recordSupersededMessages(
             : {}),
           messageId: item.messageId,
           state,
+          ...(item.presentation?.conversationId === conversationId ? { presentation: item.presentation } : {}),
           ...(item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
           final: state === 'final'
         },
@@ -2059,7 +2062,7 @@ async function recordChatObservationsNow(
   if (!conversations.has(conversationId)) {
     const lineage = await supersededLineage(conversationId);
     if (lineage) {
-      const stored = await recordSupersededMessages(lineage, observations);
+      const stored = await recordSupersededMessages(lineage, observations, conversationId);
       return { sessionId: lineage, stored, activity, goalCandidates: [] };
     }
   }
@@ -2175,6 +2178,7 @@ async function recordChatObservationsNow(
           messageId: item.messageId,
           state,
           final: state === 'final',
+          ...(item.presentation?.conversationId === conversationId ? { presentation: item.presentation } : {}),
           ...(item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
           ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
         }, { preferTime: item.authoredTime === true, work: item.activeNow === true });

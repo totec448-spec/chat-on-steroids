@@ -325,6 +325,8 @@ export type SessionEvent =
       messageId?: string;
       /** ChatGPT's canonical rendered representation captured from the page. */
       renderedHtml?: StoredText;
+      /** Exact public citations/files for this message revision; never execution authority. */
+      presentation?: import('./message-presentation.js').MessagePresentation;
       /** Public provider object UUID. Evidence for identity drift; not a canonical key or turn owner. */
       providerMessageId?: string;
       state?: MessageState;
