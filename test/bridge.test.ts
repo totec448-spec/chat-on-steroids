@@ -7205,6 +7205,77 @@ describe('unattributed activity recovery', () => {
     } finally { await writeDurableNow('session-input', []); input.resetInputForTests(); vi.useRealTimers(); await saveConfig(previous); }
   });
 
+  /**
+   * A thinking turn is not a silent one.
+   *
+   * The silence window is chosen by model family — Pro gets ten minutes, everything else two — and
+   * a reasoning effort of `high` or above is legitimately quiet for far longer than two minutes
+   * between tool calls. Until request attribution worked this never mattered: every silence path is
+   * gated on `turnHasMcpCall`, so while calls landed under Unattributed activity the watchdog never
+   * ran at all. Fixing attribution (#414) switched it on for the first time.
+   *
+   * Measured by @moderntanri in #393, twice in a single task: an Extra-high turn went quiet after a
+   * long render, `active chat silent for 2 minutes — asking the browser to reload` fired, the reload
+   * killed the streaming turn, and the Continue queued behind it was claimed and never delivered.
+   * Their workaround was to turn Automatic Continue off entirely, which gives up the feature to
+   * avoid the watchdog.
+   *
+   * So the window follows the effort that was actually observed. Deliberately not by widening
+   * `model === 'pro'`: Pro carries other rules — Continue eligibility among them — that must not
+   * extend to an ordinary model merely because it is thinking hard.
+   */
+  it.each(['xhigh', 'max', 'ultra'] as const)('gives a %s reasoning turn the long silence window, not two minutes', async effort => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), turnId = `thinking-${effort}`;
+      await events(chat, [
+        { kind: 'user_message', messageId: 'question', text: 'Do the long analysis', time: Date.now(), authoredNow: true },
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: effort, time: Date.now() },
+        openTurn(turnId)
+      ]);
+      await attributed(chat, false, Date.now());
+
+      // Two minutes of quiet is an ordinary pause for this turn, not a dead page.
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 30_000);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance(), `a ${effort} turn was reloaded mid-thought`).toBeNull();
+
+      // The watchdog still exists: the Pro window applies, and past it the reload is offered.
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance(), `a ${effort} turn was never recovered at all`)
+        .toMatchObject({ conversationId: chat, reason: 'silence' });
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
+  /**
+   * The control, and `high` is the one that matters in it: `high` is the ordinary effort for the
+   * current models and every other test here uses it as the plain non-Pro case. Widening it would
+   * be the opposite mistake — a genuinely dead page waiting ten minutes instead of two.
+   */
+  it.each(['medium', 'high'] as const)('keeps the two-minute silence window for %s, the ordinary effort', async effort => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID();
+      await events(chat, [
+        { kind: 'user_message', messageId: 'question', text: 'Quick question', time: Date.now(), authoredNow: true },
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: effort, time: Date.now() },
+        openTurn(`ordinary-${effort}`)
+      ]);
+      await attributed(chat, false, Date.now());
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 30_000);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance(), 'an ordinary turn lost its two-minute watchdog')
+        .toMatchObject({ conversationId: chat, reason: 'silence' });
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
   it.each(['normal', 'pro'] as const)('keeps the %s silence countdown and reload valid across same-turn corrections', async model => {
     const previous = getConfig();
     await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
