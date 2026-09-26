@@ -1730,6 +1730,47 @@ describe('worker settings authority', () => {
    * cannot decide this from outside. It answers the capture request with the successor instead,
    * and the browser that holds chat A creates the tab in chat A's own window.
    */
+  /**
+   * A successor with nowhere to be placed is still opened.
+   *
+   * The placement below arranges the new tab beside its predecessor, which needs the home
+   * conversation's own tab to decide the window and the index. When that cannot be worked out the
+   * opener used to return without opening anything and without saying so, and the app then waited
+   * out its redeem deadline and reported "the chat this app opened did not report back in time"
+   * about a chat it had never opened.
+   *
+   * Two ordinary situations reach it, both reported from a live machine on 2026-09-25 with
+   * Background chats off: a command from a caller that has no ChatGPT conversation of its own —
+   * an unattributed MCP client spawning a worker, where the run starts "by conversation null" —
+   * and a home conversation whose tab the user has since closed. In both, no tab appeared at all
+   * and the only trace was the timeout twenty seconds later.
+   */
+  it('opens a successor that names no home conversation instead of silently giving up', async () => {
+    let offered = false;
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/status') {
+        if (offered) return response(200, { ok: true, repairs: [] });
+        offered = true;
+        // What a worker spawn from an unattributed caller answers with: a command to redeem and
+        // no conversation to sit beside.
+        return response(200, { ok: true, repairs: [], placement: { id: 'cmd-orphan' } });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(41);
+    await worker.fireAlarm();
+
+    expect(worker.tabsCreate, 'the command was left to time out with no tab').toHaveBeenCalledTimes(1);
+    const created = worker.tabsCreate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(created.url)).toBe('https://chatgpt.com/?clf=cmd-orphan#clf=cmd-orphan');
+    // The ordinary current window: no placement was possible, and none is claimed.
+    expect(created.windowId).toBeUndefined();
+    expect(created.active).toBe(true);
+  });
+
   it('opens the replacement chat in the window of the chat it continues', async () => {
     const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
       const url = new URL(input);
