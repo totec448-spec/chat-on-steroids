@@ -187,7 +187,8 @@ const settingsPatch = z.object({
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
     maxWorkers: z.number().int().min(1).max(8),
     allowUnattributedCalls: z.boolean(),
-    recoverAgentTabs: z.boolean()
+    recoverAgentTabs: z.boolean(),
+    waitForSubAgents: z.boolean().optional()
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS) }).strict().optional(),
   goal: z.object({
@@ -329,6 +330,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.multiAgent.recoverAgentTabs,
         base.multiAgent.recoverAgentTabs,
         wanted.multiAgent.recoverAgentTabs
+      ),
+      waitForSubAgents: pick(
+        current.multiAgent.waitForSubAgents,
+        base.multiAgent.waitForSubAgents,
+        wanted.multiAgent.waitForSubAgents
       )
     },
     goal: {

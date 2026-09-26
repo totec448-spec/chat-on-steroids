@@ -11098,6 +11098,82 @@ describe('the goal loop over the bridge', () => {
     resetGoalStateForTests();
   });
 
+  /**
+   * A chat's own workers report back into that same chat, so its next automatic Goal step must
+   * not be decided from a context that is about to change. One rule decides that, in the module
+   * that owns worker state; the pickup tree asks it by deferring the reload rather than spending
+   * it, and both surfaces describe the same wait. Off, everything below is exactly what it was.
+   */
+  it.each([true, false] as const)('waits for this chat’s own workers only when the setting asks (waitForSubAgents=%s)', async waiting => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = 'cafe0093-0000-4000-8000-000000000093';
+      const workerChat = 'cafe0094-0000-4000-8000-000000000094';
+      const previous = getConfig();
+      await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'goal' },
+        multiAgent: { ...previous.multiAgent, enabled: true, waitForSubAgents: waiting, recoverAgentTabs: false } });
+      const recorded = await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-wait-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'g-wait' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'g-wait', outcome: 'completed' },
+        { kind: 'assistant_message', time: Date.now(), turnId: 'g-wait', messageId: 'a-wait', text: 'First half done.',
+          state: 'final', final: true, goalEligible: true, activeNow: true }
+      ] } });
+      const sessionId = recorded.body.sessionId as string;
+      expect(goalPendingReplyFor(chat)).not.toBeNull();
+      spawn({ workers: [{ task: 'carry the second half of this chat’s work' }], caller: { conversationId: chat } });
+      expect(bindConversation('worker-1', workerChat)).toBe(true);
+
+      const held = { reason: 'workers' }, settling = { reason: 'settling' };
+      expect((await sessionControlsFor(sessionId)).goalWait).toEqual(waiting ? held : settling);
+      expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.wait)
+        .toEqual(waiting ? held : settling);
+
+      // A wait is a delay, never a spent step: the debt is untouched, so the sweep after the
+      // last worker stops still finds it owed with the whole backoff ahead of it.
+      await vi.advanceTimersByTimeAsync(120_001);
+      await sweepStaleSwarm(Date.now());
+      const firstSweep = ((await request('GET', '/status')).body.repairs ?? []).filter((row: any) => row.conversationId === chat);
+      expect(firstSweep).toEqual(waiting ? [] : [expect.objectContaining({ conversationId: chat, reason: 'goal' })]);
+
+      finishAgent({ conversationId: workerChat }, 'second half done');
+      expect((await sessionControlsFor(sessionId)).goalWait).not.toEqual(held);
+      await vi.advanceTimersByTimeAsync(120_001);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs ?? [])
+        .toEqual(expect.arrayContaining([expect.objectContaining({ conversationId: chat, reason: 'goal' })]));
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('never lets another chat’s sub-agents hold this one', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = 'cafe0095-0000-4000-8000-000000000095';
+      const stranger = 'cafe0096-0000-4000-8000-000000000096';
+      const previous = getConfig();
+      await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'goal' },
+        multiAgent: { ...previous.multiAgent, enabled: true, waitForSubAgents: true, recoverAgentTabs: false } });
+      const recorded = await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-stranger-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'g-stranger' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'g-stranger', outcome: 'completed' },
+        { kind: 'assistant_message', time: Date.now(), turnId: 'g-stranger', messageId: 'a-stranger', text: 'First half done.',
+          state: 'final', final: true, goalEligible: true, activeNow: true }
+      ] } });
+      const sessionId = recorded.body.sessionId as string;
+      spawn({ workers: [{ task: 'belongs to somebody else entirely' }], caller: { conversationId: stranger } });
+      expect(bindConversation('worker-1', 'cafe0097-0000-4000-8000-000000000097')).toBe(true);
+
+      expect((await sessionControlsFor(sessionId)).goalWait).toEqual({ reason: 'settling' });
+      await vi.advanceTimersByTimeAsync(120_001);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs ?? [])
+        .toEqual(expect.arrayContaining([expect.objectContaining({ conversationId: chat, reason: 'goal' })]));
+    } finally { vi.useRealTimers(); }
+  });
+
   it('advertises the configured Loop helper rather than the inactive API model', async () => {
     await pair();
     const config = defaultConfig();

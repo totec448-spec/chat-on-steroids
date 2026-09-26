@@ -191,6 +191,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Recording | On, 30-day retention. | Explicit Off stays Off; retention still applies to old history. |
 | Context / compaction | Advisory 400,000; limit rounded from advisory × 4/3; auto-compaction on at advisory. | Estimated local units. Automatic execution additionally requires live work, current ownership and eligible model/role. |
 | Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8. | Legacy absent enabled/allow-unattributed fields remain false. Existing choices stay exact. |
+| Wait for sub-agents | Off. | When on, a Goal/Loop chat's next automatic step waits for the workers that exact chat started. A chat with no run, or a run with no workers, waits either way. See §16. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
@@ -2443,6 +2444,36 @@ commit publication gap. Old source requests retain their historical proof and ca
 prime authority in the successor. Distinct fleets remain distinct; process custody stays with
 the same durable session.
 
+### A chat's automatic step waits for its own workers
+
+A prime that delegated half its task has not finished it. Its workers report back into the same
+conversation, so taking the next Goal/Loop decision while they run reads a context that is about
+to change and then types the instruction into a chat that is still being worked on. When
+`multiAgent.waitForSubAgents` is on, that decision waits.
+
+`agents.ts::waitingForSubAgents` is the one owner of that answer, because worker state lives
+there. It resolves through the same per-family lookup (`runForConversation`) and the private
+`workingWorkers` that `freeWorkerSlots` already trusts, so one family can never hold another,
+an invited worker already counts, and an unknown, ambiguous, runless or workerless chat never
+waits: a hold can only come from work this exact chat started. The predicate lives here rather
+than in `bridge.ts` because `bridge.ts` imports `session/finish.js` and the finish decision needs
+the same answer, so a predicate in the bridge would close an import cycle.
+
+Three consumers needed that one fact. `owedPickups` deletes the owed key while its workers run
+instead of teaching each caller to skip it, which covers the pre-action re-check, the silence
+re-check and the handout from a single rule, and spends nothing: no attempt, no backoff window,
+no schedule movement; the debt is collected on the first sweep after the last worker stops.
+`goalWaitFor` returns a `workers` reason that `sessionControlsFor` and `/activity` already both
+read, with no `until` because the end of the wait is not a moment this app can predict, so both
+UIs name the wait without inventing a countdown. `prepareNotice` returns before the provider call
+that drafts the automatic decision and **releases** the hold rather than leaving it held, so the
+user's own answer is never stuck behind workers they did not ask about; the durable reply
+obligation survives and the pickup tree collects it later. A notice-only hold is untouched.
+
+The wait cannot starve the reports it is waiting for: worker reports reach their prime through
+the kernel's caller offer, never through the browser outbox. `/goal/draft` needed no change; it
+already answers `409 chat_still_working` and the extension already retries that code.
+
 The app's configurable worker capacity is distinct from the coding agent's delegation policy
 in §19. Do not infer permission to launch development subagents from a product feature toggle.
 
@@ -2508,6 +2539,9 @@ reply-ID prefixes cannot grant it. Recheck restored automatic debt, provider sta
 This condition does not change ordinary Goal mode or user-message delivery.
 Automatic tickets retain exact source ownership. Native busy uses the shared one/five-minute
 wait and one Stop claim; uncollected tickets use the shared 2/5/10/15 pickup schedule (§14).
+A chat that started its own workers defers that pickup and the automatic decision
+`session_finish` would otherwise draft until the last of them stops, when the switch asks
+for it (§16). The debt is deferred, never spent.
 Fresh work and queue priority are checked again before Send. A Thinking-failed notice learned
 from an already-confirmed refresh reuses that receipt rather than earning another immediate
 reload. Genuine new work retires the receipt.

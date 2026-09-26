@@ -17862,6 +17862,11 @@ describe('the goal loop', () => {
       stage: 'Waiting for tool inactivity', detail: 'Checking again in 2:05', at: 0
     });
     expect(view({ phase: 'settling', wait: { reason: 'tools' } })).toMatchObject({ stage: 'Waiting for running tools', detail: '' });
+    // No deadline to show: the wait ends when the last worker stops, and a guessed clock
+    // ticking toward nothing is worse than saying what is actually being waited for.
+    expect(view({ phase: 'settling', wait: { reason: 'workers' } })).toMatchObject({
+      stage: 'Waiting for this chat’s sub-agents', detail: '', at: 0
+    });
     expect(view({ phase: 'settling', wait: { reason: 'listening', until: live.window.Date.now() + 60_000 } })).toMatchObject({
       stage: 'Waiting for activity after recovery', detail: 'Checking again in 1:00'
     });
