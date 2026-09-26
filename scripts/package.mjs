@@ -26,6 +26,9 @@ function run(command, commandArgs, env = process.env) {
 const node = process.execPath;
 run(node, ['scripts/generate-third-party-notices.mjs']);
 run(node, ['scripts/make-icon.mjs']);
+// Before the bundle is built, so the stamp that ships is the stamp of what ships. The app and the
+// extension both read this one file to tell which extension build a browser is running.
+run(node, ['scripts/write-extension-stamp.mjs']);
 run(node, [path.join('node_modules', 'electron-vite', 'bin', 'electron-vite.js'), 'build']);
 
 for (const arch of arches) {
