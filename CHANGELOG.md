@@ -11,6 +11,19 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## Unreleased
 
+## [2.1.15] — New ChatGPT layout
+
+- Recognise the first message of a chat started from the app on the new layout, which stores inserted text Markdown-escaped: its delivery is confirmed again, its turn start and end are recorded, and Goal and Loop act on its answer.
+- Work with ChatGPT's new layout: find Send and Stop by their slot when their labels are translated (#405, #418), read the request id ChatGPT now splits across two events (#414, #432), identify turns by their turn key (#423), and read Markdown hard breaks and escaped prompt frames the new composer stores (#401, #434).
+- Pick up models and reasoning effort from the new picker: map the Pro and Extra High lanes to their real efforts and fall back to the nearest effort ChatGPT still offers (#427, #443).
+- Keep chats alive on the new shell: recognise its stream failures as recoverable (#439, #450), press ChatGPT's own Retry when a chat "could not be loaded" (#429), give an answer another reload once a reload brought it back to work (#455), and stop reloading a page that is still streaming (#433).
+- Make recovery say what it did: report stalled or stopped chats that never reached a verdict (#412, #413), say why an automatic Continue was not filed (#447), keep the latest recovery verdict in view (#448), and say in the chat when its page is not taking the next message (#396).
+- Fix automatic Continue and rescue edge cases: rescue a turn again after a withdrawn first rescue (#397), credit a restart with work from any turn on the same question (#445), never reopen a question the app already ended (#431), and stop treating React's stale in_progress as a running turn (#422).
+- Workers and temporary chats: bind a fresh worker's chat as soon as its bootstrap is sent (#434), let a slept worker's wake reach it when its tab returns (#428), prove temporary chats from React state (#406, #437), and collect temporary plans across route and scan changes (#441, #449).
+- Browser and tabs: recognise plugin-refresh helper tabs on the new settings route (#430), report tabs the extension pruned itself as not the user's close (#446), replace an open tab's usage observer after an update (#444), retry a lost command redeem before sending (#440), and refuse work to an out-of-date second browser while an up-to-date one is present (#453).
+- Sessions: tell an unreadable session from an empty one and flush summaries before publishing them (#399, #400); keep the context meter counting app-sent prompt weight (#438).
+- Setup: warn when two connectors share one Secure Tunnel ID (#421), and offer OAuth for custom remote MCP servers (#452).
+- Windows: recognise PowerShell parse failures in other languages (#404).
 - Keep fresh background workers rendering while their editor hydrates, including pending initial navigation and exact document retirement.
 - Read live alternate-shell request metadata and public activity before history hydration; place recorded tools beside native prose without a reload.
 - Restore versioned response observers without duplicate active readers and recognize complete identity in native resume streams.

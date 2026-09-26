@@ -18,7 +18,7 @@ export function createAgentPanel(options: {
   attachWorkPanelResize(options.host, pane);
   const head = el('div', 'agent-panel-header'); head.hidden = true;
   const back = el('button', 'btn', '←'); ui(back, 'title', () => t("Back to sub-agents")); back.setAttribute('type', 'button');
-  back.setAttribute('aria-label', back.title);
+  ui(back, 'aria-label', () => t("Back to sub-agents"));
   const title = el('strong');
   const body = el('div', 'agent-panel-body');
   head.append(back, title); pane.append(head, body); options.host.append(pane);

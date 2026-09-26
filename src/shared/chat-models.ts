@@ -11,6 +11,25 @@ export function isProModel(model: string | null | undefined, effort?: ReasoningE
   const normalized = (model ?? '').trim().toLowerCase().replace(/\s+/g, '-');
   return effort === 'pro' || isAstraModel(model, effort) || /^(?:pro|(?:gpt-?)?\d+(?:[.-]\d+)?-pro)$/.test(normalized);
 }
+/**
+ * Whether this reasoning effort makes long silences normal.
+ *
+ * A model above `high` routinely goes minutes without touching the page between tool calls, and
+ * the silence watchdog's two-minute window reads that as a dead tab. Pro is excluded here only
+ * because it already has its own, wider window; `isProModel` covers it.
+ *
+ * `high` is deliberately **not** in this list. It is the ordinary effort for the current models —
+ * the whole bridge suite uses it as the plain non-Pro case — and widening it would make a
+ * genuinely dead page wait ten minutes instead of two. The harm this exists for was measured at
+ * Extra high (#393): "An Extra-high turn that thinks longer than that between tool calls".
+ *
+ * Deliberately not "anything above medium as a number" either: the list is the vocabulary in
+ * REASONING_EFFORTS, so a level added there has to be classified here on purpose rather than
+ * inheriting a threshold nobody revisited.
+ */
+export function isDeliberateEffort(effort?: ReasoningEffort | null): boolean {
+  return effort === 'xhigh' || effort === 'max' || effort === 'ultra';
+}
 /** Keep the selected generation intact; Pro is already a complete model label. */
 export function chatModelDisplayLabel(label: string, effort: ReasoningEffort, effortLabel: string): string {
   if (effort === 'pro') return /\bpro$/i.test(label) ? label : `${label.replace(/\s+Sol$/i, '')} Pro`;

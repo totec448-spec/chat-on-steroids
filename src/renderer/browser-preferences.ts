@@ -22,7 +22,7 @@ export function initBrowserPreferences(): void {
     try {
       const response = await window.api.browserPreferences(patch);
       if (response.ok) { confirmed = response.data; ui(status, 'textContent', () => t("Confirmed by the browser extension.")); }
-      else { confirmed = null; status.textContent = response.error; }
+      else { confirmed = null; ui(status, 'textContent', () => t(response.error)); }
     } catch { confirmed = null; ui(status, 'textContent', () => t("Unable to reach the extension. Connect it and refresh.")); }
     finally { busy = false; paint(); }
   };
