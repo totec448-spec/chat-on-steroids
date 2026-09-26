@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-// @ts-ignore js-yaml is a transitive electron-builder dependency; tests only need its runtime parser.
 import { load as loadYaml } from 'js-yaml';
 // @ts-ignore Build scripts are intentionally plain ESM JavaScript.
 import * as packagingVersions from '../scripts/packaging-versions.mjs';
@@ -69,15 +69,15 @@ describe('cross-platform packaging targets', () => {
       });
 
     await expect(assertCurrentTunnelRelease({
-      pinnedVersion: 'v0.0.14',
-      fetchImpl: response({ tag_name: 'v0.0.14', draft: false, prerelease: false })
-    })).resolves.toMatchObject({ tag_name: 'v0.0.14' });
-    await expect(assertCurrentTunnelRelease({
-      pinnedVersion: 'v0.0.13',
-      fetchImpl: response({ tag_name: 'v0.0.14', draft: false, prerelease: false })
-    })).rejects.toThrow(/v0\.0\.13 is stale.*v0\.0\.14/);
+      pinnedVersion: TUNNEL_CLIENT.version,
+      fetchImpl: response({ tag_name: TUNNEL_CLIENT.version, draft: false, prerelease: false })
+    })).resolves.toMatchObject({ tag_name: TUNNEL_CLIENT.version });
     await expect(assertCurrentTunnelRelease({
       pinnedVersion: 'v0.0.14',
+      fetchImpl: response({ tag_name: TUNNEL_CLIENT.version, draft: false, prerelease: false })
+    })).rejects.toThrow(/v0\.0\.14 is stale.*v0\.0\.15/);
+    await expect(assertCurrentTunnelRelease({
+      pinnedVersion: TUNNEL_CLIENT.version,
       fetchImpl: response({ message: 'rate limited' }, 403)
     })).rejects.toThrow(/refusing to publish without proving the pin is current/);
   });
@@ -104,23 +104,30 @@ describe('cross-platform packaging targets', () => {
     expect(tarExecutableForPlatform('linux')).toBe('tar');
   });
 
-  it('keeps scripts for all six release targets and legacy Windows aliases', () => {
+  it('uses one package entry point for local and CI builds', () => {
     const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
-    for (const script of [
-      'dist', 'dist:x64', 'dist:arm64',
-      'dist:mac:x64', 'dist:mac:arm64',
-      'dist:linux:x64', 'dist:linux:arm64'
-    ]) expect(pkg.scripts[script]).toBeTypeOf('string');
+    expect(pkg.scripts.dist).toContain('scripts/package.mjs');
+    expect(pkg.scripts['dist:dir']).toContain('scripts/package.mjs');
+    expect(Object.keys(pkg.scripts).filter((name) => name.startsWith('dist:'))).toEqual(['dist:dir']);
   });
 
-  it('pins Electron 44.3.0 exactly and proves packaged runners use those runtime bytes', () => {
+  it('rejects packaging for a different operating system before staging resources', () => {
+    const otherPlatform = process.platform === 'linux' ? 'darwin' : 'linux';
+    const result = spawnSync(process.execPath, ['scripts/package.mjs', '--platform', otherPlatform], {
+      cwd: root, encoding: 'utf8'
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`Package ${otherPlatform} on a ${otherPlatform} host`);
+  });
+
+  it('pins Electron exactly and proves packaged runners use those runtime bytes', () => {
     const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
     const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
     const smoke = readFileSync(path.join(root, 'scripts', 'smoke-packaged-runtime.mjs'), 'utf8');
 
-    expect(pkg.devDependencies.electron).toBe('44.3.0');
-    expect(lock.packages?.['']?.devDependencies?.electron).toBe('44.3.0');
-    expect(lock.packages?.['node_modules/electron']?.version).toBe('44.3.0');
+    expect(pkg.devDependencies.electron).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(lock.packages?.['']?.devDependencies?.electron).toBe(pkg.devDependencies.electron);
+    expect(lock.packages?.['node_modules/electron']?.version).toBe(pkg.devDependencies.electron);
     expect(smoke).toContain('const expectedElectronVersion = sourcePackage.devDependencies?.electron;');
     expect(smoke).toContain('electron: process.versions.electron');
     expect(smoke).toContain('runtime.electron !== expectedElectronVersion');
@@ -151,34 +158,36 @@ describe('cross-platform packaging targets', () => {
     expect(matrix).toEqual([
       {
         name: 'Windows x64', platform: 'win32', arch: 'x64', runner: 'windows-2025',
-        script: 'dist:x64', artifact: 'package-windows-x64', files: 'release/Chat-On-Steroids-Setup-x64.exe'
+        artifact: 'package-windows-x64', files: 'release/Chat-On-Steroids-Setup-x64.exe'
       },
       {
         name: 'Windows arm64', platform: 'win32', arch: 'arm64', runner: 'windows-11-arm',
-        script: 'dist:arm64', artifact: 'package-windows-arm64', files: 'release/Chat-On-Steroids-Setup-arm64.exe'
+        artifact: 'package-windows-arm64', files: 'release/Chat-On-Steroids-Setup-arm64.exe'
       },
       {
         name: 'macOS x64', platform: 'darwin', arch: 'x64', runner: 'macos-15-intel',
-        script: 'dist:mac:x64', artifact: 'package-macos-x64',
+        artifact: 'package-macos-x64',
         files: 'release/Chat-On-Steroids-macOS-x64.dmg\nrelease/Chat-On-Steroids-macOS-x64.zip\n'
       },
       {
         name: 'macOS arm64', platform: 'darwin', arch: 'arm64', runner: 'macos-15',
-        script: 'dist:mac:arm64', artifact: 'package-macos-arm64',
+        artifact: 'package-macos-arm64',
         files: 'release/Chat-On-Steroids-macOS-arm64.dmg\nrelease/Chat-On-Steroids-macOS-arm64.zip\n'
       },
       {
         name: 'Linux x64', platform: 'linux', arch: 'x64', runner: 'ubuntu-24.04',
-        script: 'dist:linux:x64', artifact: 'package-linux-x64',
+        artifact: 'package-linux-x64',
         files: 'release/Chat-On-Steroids-Linux-x64.AppImage\nrelease/Chat-On-Steroids-Linux-x64.deb\n'
       },
       {
         name: 'Linux arm64', platform: 'linux', arch: 'arm64', runner: 'ubuntu-24.04-arm',
-        script: 'dist:linux:arm64', artifact: 'package-linux-arm64',
+        artifact: 'package-linux-arm64',
         files: 'release/Chat-On-Steroids-Linux-arm64.AppImage\nrelease/Chat-On-Steroids-Linux-arm64.deb\n'
       }
     ]);
     expect(parsed.jobs.package['runs-on']).toBe('${{ matrix.runner }}');
+    expect(parsed.jobs.package.steps.find((step: any) => step.name === 'Package').run)
+      .toBe('node scripts/package.mjs --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}');
     expect(workflow).toContain('name: chat-on-steroids-candidate-${{ github.run_id }}');
     expect(workflow).toContain('Install generated DEB on target distro');
     expect(workflow).toContain('Launch installed DEB normally under Xvfb');

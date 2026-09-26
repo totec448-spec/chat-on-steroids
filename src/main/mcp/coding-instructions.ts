@@ -4,7 +4,7 @@
  * Source: gpt-6-astra.model_messages.instructions_template. Retained prose is copied.
  * CoS changes identity/channel terminology and replaces Codex tool routing, permission
  * flows, skills, plugins, compaction and app-specific rendering with its own live contracts.
- * See docs/licenses/codex and docs/codex-instructions-and-agent-plan-2026-09-09.md.
+ * See docs/licenses/codex for the retained attribution and license.
  */
 export const CODING_INSTRUCTIONS = `You are a coding agent working with the user through Chat On Steroids. You and the user share one workspace, and your job is to collaborate with them until their intended goal is completely handled.
 

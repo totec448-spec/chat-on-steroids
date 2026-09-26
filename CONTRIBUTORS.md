@@ -109,16 +109,14 @@ drain protection from [#324](https://github.com/totec448-spec/chat-on-steroids/p
 one shared teardown without the proposed grace timer or optional-connector policy change.
 It also incorporates [@okayamajwcc-coder](https://github.com/okayamajwcc-coder) / Masatoshi Shisaka's
 contradictory AX window-ID guard from [#309](https://github.com/totec448-spec/chat-on-steroids/pull/309).
-The larger off-Space/focus change remains unincorporated. Exact source revisions, validation,
-and public GitHub co-author trailers are recorded in
-[`docs/worklog-2026-09-20-selective-pr-review.md`](docs/worklog-2026-09-20-selective-pr-review.md).
+The larger off-Space/focus change remains unincorporated. The linked pull requests and Git
+history retain the source revisions, validation and co-author trailers.
 
 The September 22 follow-up incorporates [@PourrezJ](https://github.com/PourrezJ)'s French
 translation from [#369](https://github.com/totec448-spec/chat-on-steroids/pull/369). Its
 1,431 translated entries are retained with one wording correction; 21 newer strings are
 added independently. Integration preserves Turkish and the existing language controls,
-drafts and preference storage. Validation is recorded in
-[the follow-up worklog](docs/worklog-2026-09-22-french-locale.md).
+drafts and preference storage. The linked pull request retains the review history.
 
 ## Reports, review and proposed work
 
@@ -129,9 +127,7 @@ Plugins route correction (#351) and explicit refresh retry (#363),
 [@Haz4rdovisk](https://github.com/Haz4rdovisk)'s installer-close correction from #345.
 The adaptations reuse the existing outbox, refresh ledger, sidebar order and locale owners.
 Independent fixes also address the cancellation, adopted-Astra input and scrolling reports
-in #357, #361 and #359. Validation and the disposition of every reviewed issue/PR are recorded
-in [the worklog](docs/worklog-2026-09-22-github-triage.md) and
-[review ledger](docs/github-triage-2026-09-22.md).
+in #357, #361 and #359. The linked issues and pull requests retain the discussion.
 
 The September 20 connection and Skills integration incorporates
 [@K4viar](https://github.com/K4viar) / Lucas Pazini Pinha's approved, package-bounded Skills

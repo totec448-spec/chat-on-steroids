@@ -11,6 +11,10 @@ it('rejects ambiguous, executable and malformed policy metadata instead of enabl
     'policy:\n  allow_implicit_invocation: false\n  allow_implicit_invocation: true', 'policy: !!js/function function() {}'])
     expect(() => parseSkillInterface(text)).toThrow();
   expect(() => parseSkillInterface('a: '.repeat(30) + 'false')).toThrow();
+  expect(() => parseSkillInterface(Array.from({ length: 2100 }, (_, index) => `key${index}: value`).join('\n')))
+    .toThrow(/too many values/);
+  expect(() => parseSkillInterface('policy: &policy { allow_implicit_invocation: false }\ncopy: *policy'))
+    .toThrow();
 });
 it('reads TOML controls with ordinary TOML string, comment and inline-table syntax', () => {
   expect(parseSkillConfiguration('[skills]\ninclude_instructions = false\nmax_context_tokens = 2_000\nbundled = { enabled = false }\n[[skills.config]]\nname = "Review #1" # literal hash\nenabled = false')).toEqual({

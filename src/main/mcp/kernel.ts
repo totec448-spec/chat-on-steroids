@@ -6,7 +6,7 @@ import { WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-compu
  *
  * The tools themselves are split by connector — `tools-core.ts` and `tools-desktop.ts` —
  * because a connector is a discovery boundary and that split is the whole point of the
- * design (see `docs/tool-surface.md` §6.4). None of what is in this file is surface-shaped:
+ * design (see `docs/tool-surface.md`). None of what is in this file is surface-shaped:
  * error mapping, the call clock, the recording context, the agent key and the result
  * formatters behave identically wherever a tool is registered, and duplicating them per
  * surface is how two connectors would quietly start reporting the same thing differently.

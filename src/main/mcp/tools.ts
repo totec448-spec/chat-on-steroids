@@ -4,7 +4,7 @@
  * There is no "the" tool list any more. Each connector is its own server with its own
  * `tools/list`, because that list is the unit ChatGPT discovers: a no-query discovery pull
  * returns everything one server advertises, so the only real way to bound what a
- * conversation can be handed is to publish less per server (`docs/tool-surface.md` §6.4).
+ * conversation can be handed is to publish less per server (`docs/tool-surface.md`).
  *
  * The invariant this file enforces is that the boundary is *real*. A server registers the
  * tools its surface names and nothing else, so a Core server has no handler for `computer`

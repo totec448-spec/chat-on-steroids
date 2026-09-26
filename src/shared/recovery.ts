@@ -37,7 +37,6 @@ const RECOVERY_NOTES = [
   'This looks like an interrupted turn; inspect the current results for completed work even if earlier tool calls are no longer visible, then finish what remains.'
 ] as const;
 
-// Artist facts and source links: docs/worklog-2026-09-17-auto-continue.md.
 // The three meme entries remain explicitly labeled jokes, not artist biographies.
 const RECOVERY_SUFFIXES = [
   'Meme joke: tur tur sahur is my imaginary alarm clock.',

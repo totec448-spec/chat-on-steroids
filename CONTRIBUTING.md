@@ -14,7 +14,7 @@ Contributions and examples should follow the [responsible-use notice](README.md#
 
 ## Development setup
 
-Development requires Node 22+ and is supported on Windows, macOS and Linux. Desktop/computer-use has platform-native Windows and macOS helpers behind one protocol; Core, extension, sessions, agents and tunnel behavior must stay portable. macOS helper changes require Xcode/Swift and a packaged arm64 or x64 smoke check.
+Development uses Node 24 LTS and is supported on Windows, macOS and Linux. `nix develop` supplies Node and build tools on Linux and macOS. Desktop/computer-use has platform-native Windows and macOS helpers behind one protocol; Core, extension, sessions, agents and tunnel behavior must stay portable. macOS helper changes require Xcode/Swift and a packaged arm64 or x64 smoke check.
 
 ```sh
 npm ci
@@ -26,18 +26,17 @@ A behavior change should include a deterministic regression test where practical
 
 ## Packaging
 
-Release packages are platform/architecture-specific:
+Release packages are platform/architecture-specific. For example:
 
 ```sh
-npm run dist:x64
-npm run dist:arm64
-npm run dist:mac:x64
-npm run dist:mac:arm64
-npm run dist:linux:x64
-npm run dist:linux:arm64
+node scripts/package.mjs --platform win32 --arch x64
+node scripts/package.mjs --platform darwin --arch arm64
+node scripts/package.mjs --platform linux --arch x64
 ```
 
 Release CI builds and smoke-tests every platform/architecture on a native runner. Packaging downloads/stages pinned external assets and verifies their checksums, so the first packaging run needs network access. Do not claim a cross-OS package is validated merely because electron-builder can sometimes emit it from another host.
+
+The [build guide](docs/build.md) covers all build, test and Nix commands.
 
 ## Pull requests
 

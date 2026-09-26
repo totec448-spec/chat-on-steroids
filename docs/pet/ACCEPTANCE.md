@@ -28,7 +28,7 @@ main/preload/renderer with isolated local userData.
 Runtime: `src/renderer/pet.ts`, `pet-machine.ts`, `pet-choreography.ts`, `pet.css`,
 and `pet-assets/*`. Shell integration adds the import and initialization in
 `src/renderer/main.ts`; seven strings are added to the existing es/zh-CN/zh-TW
-locale catalogs. `AGENTS.md` describes the feature owner.
+locale catalogs.
 
 Tests: `test/pet.test.ts`, `pet-dom.test.ts`, `pet-atlas.test.ts`, and
 `pet-choreography.test.ts`. Existing renderer state/timeline fixtures isolate the

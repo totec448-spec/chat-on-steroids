@@ -1,12 +1,12 @@
 import { toolDeclaration } from './tool-declarations.js';
 /**
- * The Desktop connector: seeing and driving the native desktop.
+ * The macOS native tools on the Desktop connector.
  *
- * Two tools, and they are deliberately not on Core. Desktop control is gated on permissions
+ * These two tools are deliberately not on Core. Desktop control is gated on permissions
  * most users leave off, its schemas are the largest this app publishes, and the majority of
  * coding sessions never touch the desktop — so folding it into Core would put its weight
  * into every no-query discovery of the coding surface for a capability nobody asked for.
- * Separate connector, separate discovery boundary (`docs/tool-surface.md` §6.4).
+ * Separate connector, separate discovery boundary (`docs/tool-surface.md`).
  *
  * The split between the two is looking versus touching, and it is load-bearing rather than
  * cosmetic: `observe` never requires the foreground and can never fail for lack of it, while

@@ -20,14 +20,20 @@ function boolean(value: unknown): boolean | undefined {
 }
 function yaml(text: string): Record<string, unknown> {
   if (Buffer.byteLength(text, 'utf8') > 64 * 1024) throw new Error('Skill metadata exceeds 64 KiB');
-  let depth = 0, nodes = 0;
-  const value: unknown = load(text, { schema: JSON_SCHEMA, listener(event) {
-    if (event === 'open') {
-      if (++depth > 24 || ++nodes > 4096) throw new Error('Skill metadata is too deeply nested or contains too many values');
-    } else depth--;
-  } });
+  const value: unknown = load(text, { schema: JSON_SCHEMA, maxDepth: 24, maxAliases: 0 });
   const parsed = object(value);
   if (!parsed) throw new Error('Skill metadata must be a mapping');
+  const pending: unknown[] = [parsed];
+  let nodes = 0;
+  while (pending.length > 0) {
+    const item = pending.pop();
+    if (++nodes > 4096) throw new Error('Skill metadata contains too many values');
+    if (Array.isArray(item)) pending.push(...item);
+    else {
+      const mapping = object(item);
+      if (mapping) for (const [key, child] of Object.entries(mapping)) pending.push(key, child);
+    }
+  }
   return parsed;
 }
 

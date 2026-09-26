@@ -14,8 +14,12 @@ function value(name, fallback) {
 }
 
 const platform = normalizePlatform(value('platform', process.platform));
-const arches = value('arch', process.arch).split(',').map((item) => normalizeArch(item.trim()));
+const arches = [...new Set(value('arch', process.arch).split(',').map((item) => normalizeArch(item.trim())))];
 const dirOnly = args.includes('--dir');
+
+if (platform !== process.platform) {
+  throw new Error(`Package ${platform} on a ${platform} host so native helpers and runtime smoke checks match the target`);
+}
 
 function run(command, commandArgs, env = process.env) {
   const result = spawnSync(command, commandArgs, { cwd: root, stdio: 'inherit', env });

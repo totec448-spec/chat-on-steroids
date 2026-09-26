@@ -63,7 +63,7 @@ export interface UsageFormula {
 }
 // Standard short-context cached-input comparison rates verified 2026-09-07.
 // GPT-6 Pro is ChatGPT's Astra label; Astra cached input is $1 per million tokens.
-// Sources are linked next to the editable formula and in usage-model-attribution.md.
+// Source links are shown next to the editable formula in Settings.
 export const DEFAULT_USAGE_FORMULA: UsageFormula = {
   divisor: 2, multiplier: 1.2,
   rates: { 'gpt-5.6': 0.4, 'gpt-5.6-sol': 0.4, 'gpt-5.6-terra': 0.2, 'gpt-5.6-luna': 0.02, 'gpt-6-astra': 1, 'gpt-6-pro': 1, 'gpt-5.5': 0.5 }

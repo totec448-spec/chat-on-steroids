@@ -63,7 +63,7 @@ You choose the approved folders and capabilities. File tools enforce those roots
 
 History is stored locally, with recording on and 30-day retention by default. Credentials use the operating system's secure storage. Review permissions before connecting: fresh installs enable Core capabilities and two workers; Windows also starts with Desktop permissions enabled.
 
-[Security policy](../SECURITY.md) · [Tool reference](tool-surface.md) · [Architecture](../AGENTS.md)
+[Security policy](../SECURITY.md) · [Tool reference](tool-surface.md) · [Build and test](build.md)
 
 ## Sessions, workers and Astra
 
@@ -95,28 +95,7 @@ These continuity features do not grant additional quota or access. Do not use ne
 
 ## Build from source and contribute
 
-## Development
-
-```sh
-npm ci
-npm run dev
-npm run verify
-```
-
-Read [AGENTS.md](../AGENTS.md) before changing the app and [CONTRIBUTING.md](../CONTRIBUTING.md) before opening a PR.
-
-## Building
-
-```sh
-npm run dist:x64          # Windows x64
-npm run dist:arm64        # Windows ARM64
-npm run dist:mac:x64      # macOS Intel
-npm run dist:mac:arm64    # macOS Apple silicon
-npm run dist:linux:x64    # Linux x64
-npm run dist:linux:arm64  # Linux ARM64
-```
-
-Build on the target OS. The release workflow uses native runners for all six targets, checks the packaged runtimes and assembles the complete artifact set with checksums and corresponding native library sources.
+Use the [build and test guide](build.md) for npm, Nix and native packaging commands. Read [AGENTS.md](../AGENTS.md) before changing the app and [CONTRIBUTING.md](../CONTRIBUTING.md) before opening a PR.
 
 ---
 

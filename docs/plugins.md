@@ -89,11 +89,11 @@ notice file. Packaging regenerates the notices for its installed dependencies.
 
 Notice completeness is not binary-release clearance. Exact corresponding-source and
 replacement obligations for LGPL/MPL native dependencies remain a separate release check;
-see [the audit](plugin-notice-audit.md).
+see [native source requirements](licenses/native/SOURCE-BUILD.md).
 
 ## Validation
 
 The plugin suites cover archive path and expansion limits, installation, subprocess discovery,
 schema/result preservation, credential redaction, durable disabled state, rollback, and routing
 through the real loopback MCP endpoint. `COS_PLUGIN_LIVE_TEST=1` enables an opt-in network test
-of the pinned upstream Memory server. See [the notice and validation audit](plugin-notice-audit.md).
+of the pinned upstream Memory server. See [the license inventory](licenses/plugins/README.md).

@@ -30,25 +30,25 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
       - name: Verify
-        run: npm run verify:ci
+        run: npm run verify
 
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.12'
+          python-version: '3.14'
 
       - name: Install plugin Python runtime
-        run: python -m pip install uv==0.12.5
+        run: python -m pip install uv==0.12.19
 
       - name: Exercise published plugins on this OS
         env:

@@ -13,12 +13,12 @@
  *
  * It is deliberately not a splitting free-for-all. Every extra surface is another
  * connector the user has to create, name, describe and keep connected, and on the
- * OpenAI tunnel it is another tunnel id as well (see `docs/tool-surface.md` §6.4).
+ * OpenAI tunnel it is another tunnel id as well (see `docs/tool-surface.md`).
  * A surface has to earn that. The test applied here is: a distinct capability boundary
  * the user already thinks in, plus enough schema weight that folding it into Core
  * would meaningfully raise Core's no-query cost.
  *
- * Two surfaces pass that test today.
+ * Core and Desktop use fixed tool sets; Plugins publishes a bounded dynamic set.
  */
 
 import type { Capabilities } from '../../shared/types.js';

@@ -115,7 +115,7 @@ export interface TunnelSettings {
    * A second id rather than a second channel on the first: `tunnel-client` really does
    * multiplex channels, but ChatGPT's connector UI addresses a tunnel id and normalises
    * everything to the `main` channel, so the extra channels are reachable only from Codex
-   * and the API (`docs/tool-surface.md` §6.5). One id per connector is what actually works.
+   * and the API (`docs/tool-surface.md`). One id per connector is what actually works.
    */
   desktopTunnelId: string;
   /** Optional shared connector for installed external MCP plugins. */

@@ -17,14 +17,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
       - name: Verify and archive corresponding native sources
         run: node scripts/package-native-sources.mjs
       - name: Upload source artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: package-native-sources
           path: release/Chat-On-Steroids-Native-Sources.tar.gz
@@ -41,21 +41,18 @@ jobs:
             platform: win32
             arch: x64
             runner: windows-2025
-            script: dist:x64
             artifact: package-windows-x64
             files: release/Chat-On-Steroids-Setup-x64.exe
           - name: Windows arm64
             platform: win32
             arch: arm64
             runner: windows-11-arm
-            script: dist:arm64
             artifact: package-windows-arm64
             files: release/Chat-On-Steroids-Setup-arm64.exe
           - name: macOS x64
             platform: darwin
             arch: x64
             runner: macos-15-intel
-            script: dist:mac:x64
             artifact: package-macos-x64
             files: |
               release/Chat-On-Steroids-macOS-x64.dmg
@@ -64,7 +61,6 @@ jobs:
             platform: darwin
             arch: arm64
             runner: macos-15
-            script: dist:mac:arm64
             artifact: package-macos-arm64
             files: |
               release/Chat-On-Steroids-macOS-arm64.dmg
@@ -73,7 +69,6 @@ jobs:
             platform: linux
             arch: x64
             runner: ubuntu-24.04
-            script: dist:linux:x64
             artifact: package-linux-x64
             files: |
               release/Chat-On-Steroids-Linux-x64.AppImage
@@ -82,7 +77,6 @@ jobs:
             platform: linux
             arch: arm64
             runner: ubuntu-24.04-arm
-            script: dist:linux:arm64
             artifact: package-linux-arm64
             files: |
               release/Chat-On-Steroids-Linux-arm64.AppImage
@@ -91,11 +85,11 @@ jobs:
     timeout-minutes: 75
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
           architecture: ${{ matrix.arch }}
           cache: npm
 
@@ -107,13 +101,13 @@ jobs:
         run: node -e "const v=require('./package.json').version;if(process.env.GITHUB_REF_NAME!=='v'+v)throw new Error('Tag '+process.env.GITHUB_REF_NAME+' does not match package version '+v)"
 
       - name: Verify
-        run: npm run verify:ci
+        run: npm run verify
 
       - name: Prove native runner target
         run: node -e "if(process.platform!=='${{ matrix.platform }}'||process.arch!=='${{ matrix.arch }}')throw new Error('Expected ${{ matrix.platform }}-${{ matrix.arch }}, got '+process.platform+'-'+process.arch)"
 
       - name: Package
-        run: npm run ${{ matrix.script }}
+        run: node scripts/package.mjs --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
 
       - name: Smoke packaged runtime natively
         run: node scripts/smoke-packaged-runtime.mjs --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
@@ -324,7 +318,7 @@ jobs:
           run_appimage_smoke forced-fallback "$fallback_smoke_root" "$fake_bin:$PATH" appimage-fallback-gui.log
 
       - name: Upload package artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.files }}
@@ -338,10 +332,10 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download packages
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: package-*
           path: release
@@ -391,7 +385,7 @@ jobs:
           cat release/SHA256SUMS.txt
 
       - name: Upload release candidate
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # Artifact names reject `/`, so direct candidate runs from feature/foo refs must not
           # fail after all six package jobs. A run id is filesystem-safe and caller-stable.

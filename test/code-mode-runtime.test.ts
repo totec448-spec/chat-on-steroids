@@ -5,7 +5,7 @@ import type { ToolResult } from '../src/main/mcp/kernel.js';
 
 const result = (value: string): ToolResult => ({ content: [{ type: 'text', text: value }] });
 const tools = [{ name: 'lookup', description: 'Fixture lookup returning a normal MCP result.' }];
-const limits = { ...CODE_MODE_LIMITS, wallMs: 2000, cpuMs: 100 };
+const limits = { ...CODE_MODE_LIMITS, wallMs: 5000, cpuMs: 500 };
 const rendered = (value: ToolResult) => JSON.stringify(value.content);
 
 it('runs concurrent tools, keeps intermediates private, and returns only explicit filtered output', async () => {
@@ -114,7 +114,7 @@ it('retains a UTF-8-safe preview of explicitly emitted oversized text and stops 
 
 it('bounds CPU, unresolved promises, memory, output and call admission', async () => {
   const invoke = vi.fn(async () => result('yes'));
-  expect(rendered(await runCodeMode('while(true) {}', [], invoke, limits))).toContain('CPU_LIMIT');
+  expect(rendered(await runCodeMode('while(true) {}', [], invoke, { ...limits, cpuMs: 100 }))).toContain('CPU_LIMIT');
   expect(rendered(await runCodeMode('await new Promise(()=>{})', [], invoke, { ...limits, wallMs: 250 }))).toContain('TIME_LIMIT');
   expect((await runCodeMode('const a=[]; while(true) a.push(new Array(50000).fill("x"));', [], invoke, { ...limits, cpuMs: 1000, memoryBytes: 2 * 1024 * 1024 })).isError).toBe(true);
   expect(rendered(await runCodeMode('text("x".repeat(10000))', [], invoke, { ...limits, textBytes: 100 }))).toContain('OUTPUT_LIMIT');

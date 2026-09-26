@@ -1106,7 +1106,7 @@ describe('a pipeline stopped early by Select-Object -First', () => {
   // Verbatim from a worker's session: the diff printed 383 lines and the call was still filed
   // as an error, so the model ran it again.
   const WORKER_1_DIFF_CUT =
-    "Select-String -Path docs/bug-audit-2026-08-24.md -Pattern 'DONE|SSE' -Context 2,3; " +
+    "Select-String -Path docs/setup.md -Pattern 'DONE|SSE' -Context 2,3; " +
     'git diff -- test/agents.test.ts test/goal.test.ts src/main/agents.ts src/main/goal.ts | ' +
     'Select-Object -First 220';
   const DIFF_OUTPUT = ['diff --git a/src/main/goal.ts b/src/main/goal.ts', '@@ -1,4 +1,4 @@', '-const a = 1;'].join('\n');
