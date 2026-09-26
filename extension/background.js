@@ -4284,6 +4284,35 @@ async function restoreSilentRecorders(tabs, intent) {
   } finally { recorderCheckRunning = false; }
 }
 
+/**
+ * Brings the MAIN-world usage observer of an already-open tab up to the updated code.
+ *
+ * Re-injection replaces content.js and fiber.js, but usage.js keeps its running instance at the
+ * same protocol version — on 2026-09-26 open tabs went on reading request ids with the code from
+ * before the update that fixed that reader. usage.js now swaps itself when asked. Disposal
+ * cancels the reader of a response in flight, so ask only while the page says it is not
+ * streaming; a busy or silent page is asked again later, bounded, instead of being reloaded.
+ */
+const USAGE_REPLACE_RETRY_MS = 20_000;
+const USAGE_REPLACE_ATTEMPTS = 90;
+async function replaceUsageObserver(tabId, attempt = 0) {
+  const later = () => {
+    if (attempt + 1 < USAGE_REPLACE_ATTEMPTS) setTimeout(() => { void replaceUsageObserver(tabId, attempt + 1); }, USAGE_REPLACE_RETRY_MS);
+    return false;
+  };
+  let status = null;
+  try { status = await tabReply(tabId, { type: 'clf-page-status' }); } catch { status = null; }
+  if (status?.ok !== true || status.streaming !== false) return later();
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => { window.__cosUsageReplace = true; } });
+    await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['usage.js'] });
+    return true;
+  } catch {
+    // A tab that closed or navigated gets a fresh usage.js from its own document start.
+    return false;
+  }
+}
+
 async function restoreOpenChatgptTabs() {
   let tabs = [];
   try {
@@ -4293,7 +4322,9 @@ async function restoreOpenChatgptTabs() {
   }
   for (const tab of tabs) {
     const id = tab && typeof tab.id === 'number' ? tab.id : null;
-    if (id !== null) await restoreChatgptTab(id);
+    if (id === null) continue;
+    await restoreChatgptTab(id);
+    void replaceUsageObserver(id);
   }
 }
 

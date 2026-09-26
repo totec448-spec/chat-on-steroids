@@ -11,10 +11,21 @@
   'use strict';
   const OBSERVER_VERSION = 2;
   const prior = window.__cosUsageObserver;
-  if (prior?.version === OBSERVER_VERSION && typeof prior.refresh === 'function' && prior.refresh() === true) return;
+  // An extension update re-executes this file in pages that stay open, and the same protocol
+  // version used to keep the *old* code running until the tab was reloaded — measured
+  // 2026-09-26: open tabs kept a request-id reader without the #414 fixes after the update that
+  // shipped them. The service worker asks for a replacement explicitly, and only while the page
+  // is not streaming, so the in-flight response a disposal would cancel does not exist.
+  const replace = window.__cosUsageReplace === true;
+  try { delete window.__cosUsageReplace; } catch { window.__cosUsageReplace = false; }
+  if (!replace && prior?.version === OBSERVER_VERSION && typeof prior.refresh === 'function' && prior.refresh() === true) return;
   // A legacy boolean has no listener/reader disposal handle. A fresh document is
   // required to replace it; stacking another active observer is not a repair.
   if (prior && typeof prior.dispose !== 'function') { window.__cosUsageObserverNeedsReload = true; return; }
+  if (replace && prior) {
+    // Hand the retained request origins to the page before the old reader forgets them.
+    try { window.dispatchEvent(new MessageEvent('message', { data: { type: 'cos-usage-request' }, origin: location.origin, source: window })); } catch { /* Best effort. */ }
+  }
   prior?.dispose();
   let active = true;
   const nativePost = window.postMessage.bind(window);
