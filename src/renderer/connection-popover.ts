@@ -32,7 +32,8 @@ function queryInternalBrowser(): Promise<InternalBrowserReply> {
 
 type CaptureState = 'ok' | 'bad' | 'wait' | 'off';
 type StageState = 'done' | 'failed' | 'running' | 'off';
-type Stage = [StageState, string?];
+type TextValue = string | (() => string);
+type Stage = [StageState, TextValue?];
 
 const ATTRIBUTION: Record<string, string> = {
   request_id: 'exact request id',
@@ -52,9 +53,9 @@ function shorten(value: string | null, keep = 6): string {
 function ageToken(at: number): string {
   if (!at) return '—';
   const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  return `${Math.round(seconds / 3600)}h`;
+  if (seconds < 60) return t('{0}s', [seconds]);
+  if (seconds < 3600) return t('{0}m', [Math.round(seconds / 60)]);
+  return t('{0}h', [Math.round(seconds / 3600)]);
 }
 
 function isChatGptUrl(value: string | null | undefined): boolean {
@@ -79,21 +80,22 @@ function activeInternalTab(host: InternalBrowserDockState | null): InternalBrows
 }
 
 function paintDiagnosticAge(host: InternalBrowserDockState | null, diagnostics: CompanionDiagnostics | null): void {
-  $('connectionAdvancedAge').textContent = host?.ready
+  ui($('connectionAdvancedAge'), 'textContent', () => host?.ready
     ? diagnostics
       ? t('Internal Chromium · companion {0} ago', [ageToken(diagnostics.capturedAt)])
       : t('Internal Chromium · companion pending')
     : diagnostics
       ? t('Companion · updated {0} ago', [ageToken(diagnostics.capturedAt)])
-      : t('No runtime diagnostics yet');
+      : t('No runtime diagnostics yet'));
 }
 
-function captureRow(id: string, state: CaptureState, meta: string, copyValue: string | null = null): void {
+function captureRow(id: string, state: CaptureState, meta: TextValue, copyValue: string | null = null): void {
   const row = $(id);
   row.className = `connection-advanced-row is-${state}`;
   const value = row.querySelector<HTMLElement>('.meta')!;
-  ui(value, 'textContent', () => t(meta));
-  ui(row, 'title', () => copyValue ?? t(meta));
+  const readMeta = () => typeof meta === 'function' ? meta() : t(meta);
+  ui(value, 'textContent', readMeta);
+  ui(row, 'title', () => copyValue ?? readMeta());
   const copy = row.querySelector<HTMLButtonElement>('button.copy');
   if (copy) {
     copy.disabled = !copyValue;
@@ -104,14 +106,17 @@ function captureRow(id: string, state: CaptureState, meta: string, copyValue: st
 function stage(id: string, value: Stage): void {
   const row = $(id);
   row.className = `connection-pipeline-stage is-${value[0]}`;
-  row.querySelector('em')!.textContent = value[1] ?? '';
+  ui(row.querySelector('em')!, 'textContent', () => {
+    const meta = value[1];
+    return meta === undefined ? '' : typeof meta === 'function' ? meta() : meta;
+  });
 }
 
 function pipeline(diagnostics: CompanionDiagnostics): {
   read: Stage;
   sent: Stage;
   owner: Stage;
-  why: string;
+  why: TextValue;
   bad: boolean;
 } {
   const info = diagnostics.tab;
@@ -124,46 +129,46 @@ function pipeline(diagnostics: CompanionDiagnostics): {
 
   if (!info?.isChat) return { read: ['off'], sent: ['off'], owner: ['off'], why: '', bad: false };
   if (!info.recorder || !page) {
-    return { read: ['failed'], sent: ['off'], owner: ['off'], why: t('No recorder in this tab. Reload the page.'), bad: true };
+    return { read: ['failed'], sent: ['off'], owner: ['off'], why: () => t('No recorder in this tab. Reload the page.'), bad: true };
   }
   if (read === 0) {
-    return { read: ['running'], sent: ['off'], owner: ['off'], why: t('Waiting for the first message.'), bad: false };
+    return { read: ['running'], sent: ['off'], owner: ['off'], why: () => t('Waiting for the first message.'), bad: false };
   }
 
   const readStage: Stage = calls.length ? ['done', String(calls.length)] : ['running'];
   if (!ready) {
     return {
       read: readStage,
-      sent: ['failed', pending ? `${pending} held` : ''],
+      sent: ['failed', pending ? () => t('{0} held', [pending]) : ''],
       owner: ['off'],
-      why: t('Delivery is blocked until the app is connected and protocol compatibility is confirmed.'),
+      why: () => t('Delivery is blocked until the app is connected and protocol compatibility is confirmed.'),
       bad: true
     };
   }
   if (sent?.ok === false) {
     return {
       read: readStage,
-      sent: ['failed', sent.error || 'failed'],
+      sent: ['failed', sent.error || (() => t('failed'))],
       owner: ['off'],
-      why: t('The app rejected the last delivery ({0}).', [sent.error || t('failed')]),
+      why: () => t('The app rejected the last delivery ({0}).', [sent.error || t('failed')]),
       bad: true
     };
   }
   if (page.blocked) {
     return {
       read: readStage,
-      sent: ['failed', page.queued ? `${page.queued} held in page` : page.blocked],
+      sent: ['failed', page.queued ? () => t('{0} held in page', [page.queued]) : page.blocked],
       owner: ['off'],
-      why: t('The extension is not accepting this tab’s observations ({0}). Reload the ChatGPT tab.', [page.blocked]),
+      why: () => t('The extension is not accepting this tab’s observations ({0}). Reload the ChatGPT tab.', [page.blocked]),
       bad: true
     };
   }
   if (pending > 0) {
     return {
       read: readStage,
-      sent: ['running', `${pending} queued`],
+      sent: ['running', () => t('{0} queued', [pending])],
       owner: ['off'],
-      why: t('Queued here. Retrying delivery to the app.'),
+      why: () => t('Queued here. Retrying delivery to the app.'),
       bad: false
     };
   }
@@ -172,7 +177,7 @@ function pipeline(diagnostics: CompanionDiagnostics): {
       read: readStage,
       sent: ['running'],
       owner: ['running'],
-      why: t('App reachable. Waiting for this chat’s session receipt.'),
+      why: () => t('App reachable. Waiting for this chat’s session receipt.'),
       bad: false
     };
   }
@@ -181,7 +186,7 @@ function pipeline(diagnostics: CompanionDiagnostics): {
       read: ['running'],
       sent: ['off'],
       owner: ['off'],
-      why: t('Chat recorded. Waiting for a request ID from the latest turn.'),
+      why: () => t('Chat recorded. Waiting for a request ID from the latest turn.'),
       bad: false
     };
   }
@@ -196,7 +201,7 @@ function pipeline(diagnostics: CompanionDiagnostics): {
       read: readStage,
       sent: sentStage,
       owner: ['failed', `${placed}/${calls.length}`],
-      why: t('{0} calls could not be assigned by request ID ({1}).', [missed.length, t(ATTRIBUTION[missed[0]!.app!] || missed[0]!.app!)]),
+      why: () => t('{0} calls could not be assigned by request ID ({1}).', [missed.length, t(ATTRIBUTION[missed[0]!.app!] || missed[0]!.app!)]),
       bad: true
     };
   }
@@ -204,7 +209,7 @@ function pipeline(diagnostics: CompanionDiagnostics): {
     read: ['done', String(calls.length)],
     sent: sentStage,
     owner: [confirmed === calls.length ? 'done' : 'running', `${confirmed}/${calls.length}`],
-    why: placed > 0
+    why: () => placed > 0
       ? t('{0} request IDs matched to recorded tool activity.', [placed])
       : confirmed > 0
         ? t('Request owner confirmed. No matching tool activity recorded yet.')
@@ -233,22 +238,36 @@ function paintCalls(calls: CompanionTraceEntry[]): void {
         pips.append(pip);
       }
       const tool = document.createElement('span');
-      tool.textContent = entry.tool || 'request ID';
+      if (entry.tool) tool.textContent = entry.tool;
+      else ui(tool, 'textContent', () => t('request ID'));
       const request = document.createElement('code');
       request.textContent = shorten(entry.requestId, 5);
-      row.title = `${entry.requestId} — found ${entry.read ? 'yes' : 'no'} · app receipt ${entry.sent || entry.app === 'request_id' ? 'confirmed' : 'pending'} · owner ${entry.confirmed ? 'confirmed' : 'pending'} · tool activity ${entry.app ? ATTRIBUTION[entry.app] || entry.app : 'no record'}`;
+      ui(row, 'title', () => t('{0} — found {1} · app receipt {2} · owner {3} · tool activity {4}', [
+        entry.requestId,
+        t(entry.read ? 'yes' : 'no'),
+        t(entry.sent || entry.app === 'request_id' ? 'confirmed' : 'pending'),
+        t(entry.confirmed ? 'confirmed' : 'pending'),
+        entry.app ? t(ATTRIBUTION[entry.app] || entry.app) : t('no record')
+      ]));
       row.append(pips, tool, request);
       return row;
     })
   );
 }
 
-function detail(list: HTMLElement, term: string, value: string | number | null, bad = false): void {
+function detail(list: HTMLElement, term: string, value: string | number | null | (() => string | number | null), bad = false): void {
   const dt = document.createElement('dt');
   ui(dt, 'textContent', () => t(term));
   const dd = document.createElement('dd');
-  dd.textContent = value === null || value === '' ? '—' : String(value);
-  dd.title = dd.textContent;
+  const read = () => typeof value === 'function' ? value() : value;
+  ui(dd, 'textContent', () => {
+    const current = read();
+    return current === null || current === '' ? '—' : String(current);
+  });
+  ui(dd, 'title', () => {
+    const current = read();
+    return current === null || current === '' ? '—' : String(current);
+  });
   if (bad) dd.className = 'is-bad';
   list.append(dt, dd);
 }
@@ -274,17 +293,17 @@ function paintDiagnostics(
   const status = diagnostics?.status ?? null;
   const incompatible = Boolean(status?.connected && status.compatible === false);
   const recentPageError = page?.lastError && Date.now() - page.lastError.at < 10 * 60 * 1000 ? page.lastError.text : '';
-  const alert = incompatible
-    ? `App v${status?.appVersion || '?'} (protocol ${status?.appProtocol ?? '?'}); companion v${status?.extensionVersion || '?'} (protocol ${status?.extensionProtocol ?? '?'}).`
+  const alert = () => incompatible
+    ? t('App v{0} (protocol {1}); companion v{2} (protocol {3}).', [status?.appVersion || '?', status?.appProtocol ?? '?', status?.extensionVersion || '?', status?.extensionProtocol ?? '?'])
     : status?.pairError?.message || status?.pairError?.error || recentPageError || '';
   const alertNode = $('connectionAdvancedAlert');
-  alertNode.textContent = alert;
-  alertNode.hidden = !alert;
+  ui(alertNode, 'textContent', alert);
+  alertNode.hidden = !alert();
 
   captureRow(
     'connectionAdvancedTab',
     isChat ? 'ok' : 'off',
-    !isChat ? 'none open' : hostTab ? `#${hostTab.id} · ${hostTab.status}` : ''
+    () => !isChat ? t('none open') : hostTab ? `#${hostTab.id} · ${t(hostTab.status)}` : ''
   );
   captureRow(
     'connectionAdvancedRecording',
@@ -308,7 +327,7 @@ function paintDiagnostics(
           read: ['running'] as Stage,
           sent: ['off'] as Stage,
           owner: ['off'] as Stage,
-          why: internal
+          why: () => internal
             ? t('Internal Chromium is live. Waiting for the companion recorder snapshot for this tab.')
             : t('Waiting for companion diagnostics.'),
           bad: false
@@ -323,33 +342,33 @@ function paintDiagnostics(
   stage('connectionPipelineRead', flow.read);
   stage('connectionPipelineSent', flow.sent);
   stage('connectionPipelineOwner', flow.owner);
-  $('connectionPipelineWhy').textContent = flow.why;
+  ui($('connectionPipelineWhy'), 'textContent', () => typeof flow.why === 'function' ? flow.why() : flow.why);
   $('connectionPipelineWhy').className = flow.bad ? 'is-bad' : '';
   paintCalls(page?.trace ?? []);
 
   const grid = $('connectionAdvancedGrid');
   grid.replaceChildren();
-  detail(grid, 'browser host', internal ? 'Internal Chromium · ready' : 'companion browser');
-  detail(grid, 'active tab', hostTab ? `#${hostTab.id} · ${hostTab.status}` : info?.tab ?? null);
-  detail(grid, 'browser tabs', host ? `${host.tabs.length} open · dock ${host.open ? 'shown' : 'hidden'}` : info ? `${info.chatTabs} ChatGPT` : null);
-  detail(grid, 'app', status ? `v${status.appVersion || '?'} · port ${status.port || '—'}` : null);
-  detail(grid, 'extension', status ? `v${status.extensionVersion || '?'} · protocol ${status.extensionProtocol ?? '—'}` : null, status?.compatible === false);
+  detail(grid, 'browser host', () => internal ? t('Internal Chromium · ready') : t('companion browser'));
+  detail(grid, 'active tab', () => hostTab ? `#${hostTab.id} · ${t(hostTab.status)}` : info?.tab ?? null);
+  detail(grid, 'browser tabs', () => host ? t('{0} open · dock {1}', [host.tabs.length, t(host.open ? 'shown' : 'hidden')]) : info ? t('{0} ChatGPT', [info.chatTabs]) : null);
+  detail(grid, 'app', () => status ? t('v{0} · port {1}', [status.appVersion || '?', status.port || '—']) : null);
+  detail(grid, 'extension', () => status ? t('v{0} · protocol {1}', [status.extensionVersion || '?', status.extensionProtocol ?? '—']) : null, status?.compatible === false);
   detail(grid, 'chat id', chatId);
   detail(grid, 'app session', page?.session ?? null, Boolean(page && !page.session));
-  detail(grid, 'companion tab', info ? `${info.tab ?? '—'} · epoch ${info.epoch ?? '—'}` : companionTab ? `${companionTab.tab ?? '—'} · syncing` : null);
-  detail(grid, 'ownership', info ? (info.terminal ? 'retired' : info.bound ? 'bound' : 'unbound') : null, Boolean(info?.terminal));
-  detail(grid, 'recorder', page ? `fiber v${page.recorderVersion ?? '—'} · run ${page.runId ?? '—'}` : internal && isChat ? 'waiting for companion' : 'not attached', Boolean(!internal && isChat && !page));
-  detail(grid, 'turn', page ? (page.generating ? `${shorten(page.turnId, 8)} · live` : 'idle') : null);
-  detail(grid, 'observed', page ? `${page.events} events · ${page.calls} calls` : null);
-  detail(grid, 'in this browser', info ? `${info.pending} held · ${info.pendingAll} total` : null, Boolean(info?.pendingAll));
+  detail(grid, 'companion tab', () => info ? t('{0} · epoch {1}', [info.tab ?? '—', info.epoch ?? '—']) : companionTab ? t('{0} · syncing', [companionTab.tab ?? '—']) : null);
+  detail(grid, 'ownership', () => info ? t(info.terminal ? 'retired' : info.bound ? 'bound' : 'unbound') : null, Boolean(info?.terminal));
+  detail(grid, 'recorder', () => page ? t('fiber v{0} · run {1}', [page.recorderVersion ?? '—', page.runId ?? '—']) : internal && isChat ? t('waiting for companion') : t('not attached'), Boolean(!internal && isChat && !page));
+  detail(grid, 'turn', () => page ? (page.generating ? t('{0} · live', [shorten(page.turnId, 8)]) : t('idle')) : null);
+  detail(grid, 'observed', () => page ? t('{0} events · {1} calls', [page.events, page.calls]) : null);
+  detail(grid, 'in this browser', () => info ? t('{0} held · {1} total', [info.pending, info.pendingAll]) : null, Boolean(info?.pendingAll));
   detail(
     grid,
     'last delivery',
-    sent?.at ? `${sent.ok ? 'ok' : sent.error || 'failed'} · ${sent.events} · ${ageToken(sent.at)} ago` : null,
+    () => sent?.at ? t('{0} · {1} · {2} ago', [sent.ok ? t('ok') : sent.error || t('failed'), sent.events, ageToken(sent.at)]) : null,
     sent?.ok === false
   );
   detail(grid, 'delivered', sent ? sent.total : null);
-  detail(grid, 'page sends', page ? `${page.sends} · ${page.failures} failed` : null, Boolean(page?.failures));
+  detail(grid, 'page sends', () => page ? t('{0} · {1} failed', [page.sends, page.failures]) : null, Boolean(page?.failures));
 }
 
 export interface ConnectionAdvancedController {
@@ -371,7 +390,7 @@ export function initConnectionAdvanced(): ConnectionAdvancedController {
   const request = async (): Promise<void> => {
     if (busy) return;
     busy = true;
-    $('connectionAdvancedAge').textContent = t('refreshing…');
+    ui($('connectionAdvancedAge'), 'textContent', () => t('refreshing…'));
     paintControls();
     try {
       const [hostResponse, diagnosticsResponse] = await Promise.all([
@@ -382,11 +401,9 @@ export function initConnectionAdvanced(): ConnectionAdvancedController {
       current = diagnosticsResponse.ok ? diagnosticsResponse.data : null;
       if (!host && !current) {
         paintDiagnostics(null, null);
-        $('connectionAdvancedAge').textContent = !hostResponse.ok
-          ? hostResponse.error
-          : !diagnosticsResponse.ok
-            ? diagnosticsResponse.error
-            : t('No runtime diagnostics yet');
+        if (!hostResponse.ok) $('connectionAdvancedAge').textContent = hostResponse.error;
+        else if (!diagnosticsResponse.ok) $('connectionAdvancedAge').textContent = diagnosticsResponse.error;
+        else ui($('connectionAdvancedAge'), 'textContent', () => t('No runtime diagnostics yet'));
         $('connectionAdvancedGrid').replaceChildren();
         return;
       }
