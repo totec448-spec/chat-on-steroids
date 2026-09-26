@@ -4461,3 +4461,34 @@ it.each([
   if (scenario.freshAt === 2) expect(proof).toHaveBeenCalledOnce();
   expect(policy.conversationActivityAt[conversationId]).toBe(now - 3_600_000);
 });
+
+/**
+ * #393, 2026-09-26: an attribution refresh reloaded a page in the middle of its stream, and the
+ * turn was lost ("Resume stream unavailable"). Only that reason stands down for a streaming page;
+ * silence and error recovery exist for pages that look busy and are not, and keep reloading.
+ */
+it.each([
+  ['unattributed', { ok: true, draft: false, streaming: true }, 0],
+  ['unattributed', { ok: true, draft: false, streaming: false }, 1],
+  ['unattributed', null, 1],
+  ['silence', { ok: true, draft: false, streaming: true }, 1]
+])('for reason %s and page status %j reloads %i time(s)', async (reason, status, reloads) => {
+  const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const tab = { id: 76, url: `https://chatgpt.com/c/${conversationId}`, discarded: false, frozen: false };
+  const reload = vi.fn();
+  const call = vi.fn(async () => ({ ok: true }));
+  const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+    backgroundSource.indexOf('\nfunction conversationStillOpen('));
+  const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+    tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
+    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
+    createChatTab: vi.fn(), call, tabReply: async () => status,
+    chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+  });
+  await repair([{ conversationId, token: `stream-${reason}`, reason, suspended: false }], {});
+  expect(reload).toHaveBeenCalledTimes(reloads);
+  const reported = call.mock.calls.map((args: unknown[]) => String(args[0]));
+  expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(1 - reloads);
+});
+
