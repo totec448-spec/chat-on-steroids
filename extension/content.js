@@ -711,7 +711,11 @@
   const pageViewChecks = new Set(); // Existing readiness waits also observe accepted MAIN-world snapshots.
   const sendText = (value) => String(value || '').replace(/\s+/g, '');
   /** Undo page-readback punctuation escapes only; never rewrite authored Send text. */
-  const unescapeMarkdown = (value) => String(value || '').replace(/\\([!-\/:-@\[-`{-~])/g, '$1');
+  // Two escapes, both measured: ASCII punctuation (2026-09-11), and a backslash before a line
+  // break — ChatGPT stores the composer's hard breaks as Markdown `\<newline>`. The second made a
+  // worker's 20k-character bootstrap unrecognisable to its own receipt (2026-09-26, #426): every
+  // hard break kept its backslash, so the page never bound the worker until its turn had ended.
+  const unescapeMarkdown = (value) => String(value || '').replace(/\\\r?\n/g, '\n').replace(/\\([!-\/:-@\[-`{-~])/g, '$1');
   /** The leading continuation marker, as typed or as the composer escaped it. */
   const markedAs = (value) => {
     const text = String(value || '');
