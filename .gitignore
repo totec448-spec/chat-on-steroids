@@ -48,3 +48,6 @@ proof-*.txt
 /outputs/
 /.codex-remote-attachments/
 /docs/audit-user-requests-20260905-06.md
+
+# Written by scripts/write-extension-stamp.mjs at packaging time; see that script.
+/extension/build-stamp.txt

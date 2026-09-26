@@ -17,7 +17,7 @@ function showImageStorage(): void {
   if (document.querySelector('.image-storage-dialog')) return;
   const dialog = document.createElement('dialog');
   dialog.className = 'image-storage-dialog';
-  dialog.setAttribute('aria-label', t('Free image storage'));
+  ui(dialog, 'aria-label', () => t('Free image storage'));
   const status = el('p', 'muted', () => t('Loading storage usage…'));
   status.setAttribute('role', 'status');
   const choices = el('div', 'image-storage-actions');
