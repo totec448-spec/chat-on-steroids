@@ -299,7 +299,7 @@ describe('settings migration', () => {
     expect(loaded.compaction.auto).toBe(true);
     expect(loaded.compaction.autoTokens).toBe(loaded.sessions.advisoryTokens);
     expect(loaded.compaction.autoTokens).toBe(400_000);
-    expect(loaded.compaction.handoffPrompt).toMatch(/2,000-6,000 tokens/i);
+    expect(loaded.compaction.handoffPrompt).toMatch(/10,000[–-]30,000 tokens/i);
   });
 
   it('defaults, validates and preserves the editable handoff prompt', async () => {
