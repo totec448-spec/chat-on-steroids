@@ -455,6 +455,8 @@
    * it observes anything.
    */
   let appActiveTurnId = null;
+  /** The question of the app's newest turn once it has ended — see claimUnrecordedGeneration. */
+  let appSettledQuestionId = null;
   /**
    * When this document first saw ChatGPT generating a turn that nobody has recorded.
    *
@@ -1433,7 +1435,11 @@
     for (const message of CLF_DOM.messages()) {
       if (message.role === 'user' && message.id && message.text) newest = message.id;
     }
-    if (!newest || newest === openedUserMessageId) {
+    // A question whose turn the app has already ended is not a turn nobody recorded. After a
+    // recovery reload ChatGPT can show Stop for seconds over a turn it has lost, and claiming it
+    // minted a turn with no work that stalled, earned another reload and hid the dead turn from
+    // the automatic Continue (measured 2026-09-26, three rounds in 41 minutes).
+    if (!newest || newest === openedUserMessageId || newest === appSettledQuestionId) {
       unrecordedGeneratingSince = 0;
       return null;
     }
@@ -6292,6 +6298,7 @@
       // reply. Until this document has owned a turn, exact question proof may
       // still restore it through this same feed, even after native completion.
       appActiveTurnId = typeof data.activeTurnId === 'string' && data.activeTurnId ? data.activeTurnId : null;
+      appSettledQuestionId = typeof data.settledQuestionId === 'string' && data.settledQuestionId ? data.settledQuestionId : null;
       if (!generating && pendingTools > 0 && appActiveTurnId === turnId && fiberSettled?.reason === 'thinking_failed') noteTurnProgress();
       const recordedQuestionId = typeof data.recordedQuestionId === 'string' ? data.recordedQuestionId : null;
       if (resumedStoppedTurn && !generating && appActiveTurnId === turnId) adoptOpenTurn(turnId, recordedQuestionId);
