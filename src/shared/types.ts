@@ -189,6 +189,8 @@ export interface CompactionSettings {
   auto: boolean;
   /** Estimated recorded tokens at which automatic compaction fires. */
   autoTokens: number;
+  /** Editable content instructions for the brief; protocol/recovery framing stays code-owned. */
+  handoffPrompt: string;
 }
 
 /**

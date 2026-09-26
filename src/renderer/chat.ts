@@ -63,6 +63,7 @@ import {
   DEFAULT_GOAL_SYSTEM_PROMPT,
   MAX_GOAL_SYSTEM_PROMPT_CHARS
 } from '../shared/goal.js';
+import { DEFAULT_HANDOFF_PROMPT, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, el, filterSettingsSections, icon, run, toast } from './dom.js';
 
@@ -3011,7 +3012,8 @@ export function chatSettingsPatch(current: Config): {
     },
     compaction: {
       auto: $<HTMLInputElement>('autoCompact').checked,
-      autoTokens: threshold
+      autoTokens: threshold,
+      handoffPrompt: $<HTMLTextAreaElement>('handoffPrompt').value.trim() || DEFAULT_HANDOFF_PROMPT
     },
     multiAgent: {
       defaultModel: $<HTMLSelectElement>('workerModel').value,
@@ -3254,6 +3256,18 @@ function applyGoal(state: AppState, previous?: Config): void {
 }
 
 function wireGoal(save: () => Promise<void>): void {
+  $<HTMLTextAreaElement>('handoffPrompt').maxLength = MAX_HANDOFF_PROMPT_CHARS;
+  $('handoffPromptEdit').addEventListener('click', () => {
+    const panel = $('handoffPromptPanel');
+    panel.hidden = !panel.hidden;
+    $('handoffPromptEdit').textContent = panel.hidden ? 'Edit prompt' : 'Close prompt';
+    if (!panel.hidden) $<HTMLTextAreaElement>('handoffPrompt').focus();
+  });
+  $('handoffPromptReset').addEventListener('click', async () => {
+    $<HTMLTextAreaElement>('handoffPrompt').value = DEFAULT_HANDOFF_PROMPT;
+    await save();
+    toast('Handoff prompt restored to default');
+  });
   $<HTMLTextAreaElement>('goalPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalPromptEdit').addEventListener('click', () => {
     const panel = $('goalPromptPanel');
@@ -3402,6 +3416,7 @@ const CHAT_INPUTS = [
   'goalBaseUrl',
   'goalCustomModel',
   'goalReasoning',
+  'handoffPrompt',
   'goalPrompt',
   'goalObjectivePrompt',
   'goalLoopPrompt'
@@ -3419,6 +3434,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLInputElement>('autoCompactTokens'),
     String(config.compaction.autoTokens),
     previous?.compaction.autoTokens
+  );
+  applyChatValue(
+    $<HTMLTextAreaElement>('handoffPrompt'),
+    config.compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
+    previous?.compaction.handoffPrompt
   );
   applyAutoCompactHint(config);
 
