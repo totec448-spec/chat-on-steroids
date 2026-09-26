@@ -1722,6 +1722,29 @@ export async function turnHasMcpCall(sessionId: string, conversationId: string, 
   return calls.length > 0;
 }
 
+/**
+ * Recorded local execution by any turn that answered the same question as `turnId`.
+ *
+ * A reload can reopen a question as a new local turn with no work of its own — measured
+ * 2026-09-26, three such turns followed a prime whose real turn had run tools for an hour — and
+ * judging only the newest turn refused that chat's automatic restart as "no confirmed local tool
+ * call". The question the turns share is what the restart continues.
+ */
+export async function questionHasMcpCall(sessionId: string, conversationId: string, turnId: string): Promise<boolean> {
+  if (await turnHasMcpCall(sessionId, conversationId, turnId)) return true;
+  const turns = (await getSession(sessionId))?.timelineTurns ?? {};
+  const question = turns[turnId]?.questionId;
+  if (!question) return false;
+  const siblings = new Set(Object.entries(turns).filter(([id, turn]) => id !== turnId && turn.questionId === question).map(([id]) => id));
+  if (!siblings.size) return false;
+  const calls = await readRecentEventsFromDisk(sessionId, 1, {
+    kinds: ['tool_call'], before: Number.POSITIVE_INFINITY,
+    acceptEvent: call => call.kind === 'tool_call' && !!call.turnId && siblings.has(call.turnId) && call.source === 'mcp' &&
+      call.call?.conversationId === conversationId && call.call.attribution === 'request_id'
+  });
+  return calls.length > 0;
+}
+
 /** Late exact attribution can prove chat health without pretending historical work is new. */
 export async function conversationHasMcpCallSince(
   sessionId: string, conversationId: string, startedAt: number, turnId: string | null
