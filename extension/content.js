@@ -284,6 +284,7 @@
   const seenMessages = new Map(); // occurrence -> last observed native reaction
   let reportedConversationTitle = '';
   let reportedModelSelection = '';
+  let bootstrapModelRestoreBusy = false;
   const MAX_SEEN_MESSAGES = 2000;
 
   /**
@@ -2404,7 +2405,7 @@
     // identity or guessing from DOM position.
     const pageTitle = conversationId && CLF_DOM.conversationTitle ? CLF_DOM.conversationTitle() : '';
     const modelSelection = conversationId && CLF_DOM.visibleModelSelection?.();
-    if (modelSelection && !modelCatalogBusy && !desktopInputBusy) {
+    if (modelSelection && !modelCatalogBusy && !desktopInputBusy && !bootstrapModelRestoreBusy) {
       const selectionKey = JSON.stringify(modelSelection);
       if (selectionKey !== reportedModelSelection) {
         reportedModelSelection = selectionKey;
@@ -8680,6 +8681,28 @@
     await startCompact(automatic);
   }
 
+  function resumePendingCompactionFromRepair(expectedConversationId) {
+    const source = job && job.stage === 'handoff-pending' ? job.sourceSend : null;
+    if (!alive || !expectedConversationId || conversationId !== expectedConversationId ||
+        CLF_DOM.conversationId() !== expectedConversationId || !source ||
+        (source.state !== 'not-attempted' && source.state !== 'attempted-unresolved')) return false;
+    // The browser recovery claim proves only that this exact document may be nudged. It does not
+    // own Stop or Send: those remain behind startCompact's source identity, settle and durable WAL
+    // checkpoints. If an attempt is already alive, merely acknowledge the healthy document so the
+    // background worker does not reload it out from under that work.
+    if (!nativeBusy) {
+      localError = '';
+      nativePhase = '';
+      pressedAt = 0;
+      const forId = conversationId, forEpoch = epoch;
+      queueMicrotask(() => {
+        if (alive && conversationId === forId && epoch === forEpoch)
+          void maybeResumePendingCompaction(forId, forEpoch);
+      });
+    }
+    return true;
+  }
+
   /**
    * Brings the conversation to a standstill so its recording can be copied.
    *
@@ -10443,10 +10466,39 @@
       return void (await fail('The requested model or reasoning is unavailable or could not be confirmed in ChatGPT'));
     }
     const selectionConfirmedAt = Date.now();
-    const publishBootstrapSelection = (id) => {
+    const publishBootstrapSelection = async (id) => {
       if (CLF_DOM.conversationId() !== id) return;
-      // Accepted Send owns the first turn even when no model was explicitly
-      // selected and no further native mutation will wake a hidden document.
+      if (boot.type === 'resume' && boot.model) {
+        // The New Chat picker proves the model used to submit the first resume turn, but route
+        // creation can immediately remount the composer with the account default. Never turn the
+        // frozen source intent into false destination evidence. Re-prove the exact /c route and,
+        // when ChatGPT reset it, restore the requested pair once for the next turn before
+        // journaling. This best-effort repair cannot replay or alter the already-submitted user
+        // message; failure simply leaves destination selection unknown instead of lying about it.
+        bootstrapModelRestoreBusy = true;
+        try {
+          // Adopt the concrete destination identity without publishing its transient default.
+          observe();
+          const ownsDestination = () => !attempt?.cancelled && sendingBootstrap() &&
+            CLF_DOM.conversationId() === id && conversationId === id;
+          if (!ownsDestination()) return;
+          // Re-run the picker proof on the concrete destination route. The requested model may
+          // be a saved family/display alias, so only the route-stamped native execution id that
+          // ChatGPT exposes after successful selection is valid destination evidence.
+          if (!(await CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, ownsDestination))) return;
+          if (!ownsDestination()) return;
+          const selected = CLF_DOM.visibleModelSelection?.();
+          if (!selected) return;
+          reportedModelSelection = JSON.stringify(selected);
+          emit({ kind: 'model_selection', model: selected.model,
+            ...(selected.reasoningEffort ? { reasoningEffort: selected.reasoningEffort } : {}), time: Date.now() });
+        } finally {
+          bootstrapModelRestoreBusy = false;
+        }
+        return;
+      }
+      // Accepted Send owns the first turn even when no model was explicitly selected and no
+      // further native mutation will wake a hidden document.
       observe();
       if (!boot.model) return;
       // The picker proved this selection before the new worker had a conversation.
@@ -10602,8 +10654,8 @@
     // send immediately with the already-proven target. Fresh worker/resume commands still need
     // the loop below because ChatGPT has not assigned their new conversation id yet.
     if (target) {
-      publishBootstrapSelection(target);
       const acknowledged = await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: target, agent, client: RUN_ID });
+      await publishBootstrapSelection(target);
       await clearAcknowledgedBootstrap(acknowledged);
       return;
     }
@@ -10617,8 +10669,8 @@
       () => !attempt?.cancelled && sendingBootstrap(), 40000);
     if (!found || !sendingBootstrap()) return;
     if (boot.type === 'resume') rememberResumeGoalPending(found, boot.id);
-    publishBootstrapSelection(found);
     const acknowledged = await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID });
+    await publishBootstrapSelection(found);
     await clearAcknowledgedBootstrap(acknowledged);
     } finally { bootstrapDraft.dispose(); }
   }
@@ -11548,6 +11600,10 @@
       if (message.type === 'clf-repair-check') {
         void inspectRepairPage(message).then(sendResponse).catch(() => sendResponse({ safe: false }));
         return true;
+      }
+      if (message.type === 'clf-resume-compaction') {
+        sendResponse({ accepted: resumePendingCompactionFromRepair(message.conversationId) });
+        return false;
       }
       // Popup diagnostics. Ids and counters only — no prose, no transcript, no page text.
       if (message.type === 'clf-page-status') {

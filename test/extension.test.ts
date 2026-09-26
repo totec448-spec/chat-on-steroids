@@ -1021,7 +1021,8 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
         tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${navigated ? OTHER : CHAT}` }),
         tabsSendMessage: async (_id, message) => message.type === 'clf-repair-check'
-          ? { safe: true, revision: 1, turnId: 'source', questionId: 'question' } : { ok: true },
+          ? { safe: true, revision: 1, turnId: 'source', questionId: 'question' }
+          : message.type === 'clf-resume-compaction' ? { accepted: true } : { ok: true },
         tabsQuery: async () => {
           if (handed) {
             trace.push('scan');
@@ -1037,7 +1038,8 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       expect(trace.indexOf('scan')).toBeGreaterThan(trace.indexOf('handout'));
       expect(trace.indexOf('claim')).toBeGreaterThan(trace.indexOf('scan'));
       if (mode === 'unresolved') {
-        expect(worker.tabsReload).toHaveBeenCalledExactlyOnceWith(21);
+        if (reason === 'compaction') expect(worker.tabsReload).not.toHaveBeenCalled();
+        else expect(worker.tabsReload).toHaveBeenCalledExactlyOnceWith(21);
         expect(trace).toContain('repaired');
       } else {
         expect(worker.tabsReload).not.toHaveBeenCalled();
