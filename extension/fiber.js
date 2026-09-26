@@ -77,7 +77,7 @@
   /** ChatGPT-rendered authored prose. Tool rows and this extension's own surfaces are excluded. */
   const MARKDOWN = '.markdown, [data-content-search-unit-key$=":assistant"] [data-markdown-text-style="assistant-message"]';
   const TOOL = 'span[class*="tool-message"], div.pointer-events-none.contents, div:has(> [data-testid="cot-v5-tool-icon-pile"])';
-  const GENERATED_IMAGE = '[class~="group/imagegen-image"] img';
+  const GENERATED_IMAGE = '[class~="group/imagegen-image"] img, [class~="group/generated-image-preview"] img';
   const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot';
   const MAX_RENDERED_HTML = 120_000;
   // A 15k–20k-token compaction answer is routinely 60k–90k characters. Capping public
@@ -100,33 +100,17 @@
     return taken;
   }
   /**
-   * The connectors this app is reached through. Nothing else is ours to vouch for.
-   *
-   * There is more than one now: 1.7.1 split the model-facing surface into a Core and a
-   * Desktop connector, so a single hardcoded name stopped matching *anything* the page
-   * held — every call in every chat lost its page evidence at once and was filed outside
-   * the conversation that made it. The name is not user input: ChatGPT takes `app_name`
-   * from the `resource_name` this app serves in its own protected-resource metadata
-   * (`server.ts`), so these are this app naming itself rather than labels somebody typed.
-   * The pre-1.7.1 name stays so an older chat's evidence still reads.
-   *
-   * Exact names, never a prefix: `Chat On Steroids Backup` would be somebody else's
-   * connector, and a prefix test would have this app vouch for its traffic.
+   * Connector names are user-chosen presentation. They may be compared only to validate that
+   * two page objects describe the same candidate call; they never decide that a call is ours.
+   * Local ownership is confirmed later by the app from the opaque MCP request id.
    */
-  const OUR_APPS = ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins', 'TobisComputer'];
-
-  /** Whether an `invoked_resource.app_name` names one of this app's own connectors. */
-  function ourApp(name) {
-    if (typeof name !== 'string') return false;
-    for (let at = 0; at < OUR_APPS.length; at++) if (OUR_APPS[at] === name) return true;
-    return false;
+  function connectorName(value) {
+    return typeof value === 'string' && value.length > 0 && value.length <= 200 ? value : null;
   }
-
-  /** Whether a request path — `/<connector>/link_…/<tool>` — is one of ours. */
-  function ourPath(path) {
-    if (typeof path !== 'string' || path.charCodeAt(0) !== 47) return false;
-    const end = path.indexOf('/', 1);
-    return end > 1 && ourApp(path.slice(1, end));
+  function sameConnector(left, right) {
+    left = connectorName(left); right = connectorName(right);
+    if (!left || !right) return false;
+    return left === right || left.replaceAll(' ', '_') === right || right.replaceAll(' ', '_') === left;
   }
   /**
    * The tool path at the very front of a request payload.
@@ -655,7 +639,7 @@
    * uploads and every other role/channel is private or unknown. Only the provider message UUID,
    * sediment file id and bounded geometry cross worlds; no signed URL or arbitrary metadata does.
    */
-  function generatedImagesOf(sections, messages, exactImageNodes) {
+  function generatedImagesOf(sections, messages, exactImageNodes, shellImages = new Map()) {
     const out = [];
     const seen = new Set();
     if (!Array.isArray(messages)) return out;
@@ -712,8 +696,24 @@
       for (const node of nodes) {
         try {
           const url = new URL(node.currentSrc || node.src, location.href);
-          if (url.origin !== location.origin || url.pathname !== '/backend-api/estuary/content') continue;
-          const assetId = url.searchParams.get('id');
+          if (url.origin !== location.origin) continue;
+          let assetId = url.pathname === '/backend-api/estuary/content' ? url.searchParams.get('id') : null;
+          if (url.protocol === 'blob:') {
+            // Current image previews use blob pixels. Only the mounted typed item
+            // and its exact per-image control can identify those pixels; a blob URL
+            // or a nearby gallery alone is not an asset identity.
+            let control = null;
+            for (let at = fiberOf(node), up = 0; at && up < MAX_CLIMB; up++, at = at.return) {
+              const props = at.memoizedProps;
+              if (props?.imageId && !control) control = props;
+              if (shellImages.has(props?.item)) {
+                if (control?.imageId === props.item.id && control.isComplete === true && control.isPreview === false)
+                  assetId = shellImages.get(props.item);
+                break;
+              }
+              if (props?.entry) break;
+            }
+          }
           if (!assetId || !descriptorsByAsset.has(assetId)) continue;
           const list = nodesByAsset.get(assetId) || [];
           list.push(node);
@@ -1196,7 +1196,7 @@
     }
     for (const message of messages || []) {
       const result = resultOf(message);
-      if (!result || !ourApp(result.app)) continue;
+      if (!result || !connectorName(result.app) || !toolName(result.resource)) continue;
       const visited = new Set();
       let id = str(message.metadata?.parent_id), parentId = null;
       while (id && visited.size < MAX_CALLS && !visited.has(id)) {
@@ -1223,10 +1223,10 @@
     const result = resultOf(message);
     const messageId = str(message.id), requestId = str(message.metadata?.request_id);
     const tool = result && toolName(result.resource);
-    if (!result || !ourApp(result.app) || !messageId || !requestId || !tool) return null;
+    if (!result || !connectorName(result.app) || !messageId || !requestId || !tool) return null;
     return { ...result, messageId, requestId, tool, createTime: num(message.create_time) };
   }
-  /** Exact number of this app's own invocations represented by the whole turn, or null. */
+  /** Bounded number of structurally valid connector candidates represented by the turn. */
   function localCountOf(messages, resultParents = resultParentsOf(messages)) {
     if (!Array.isArray(messages)) return null;
     const ids = [];
@@ -1243,12 +1243,12 @@
     for (let at = 0; at < messages.length; at++) {
       const message = messages[at];
       const request = requestOf(message);
-      if (request && ourPath(request.path)) {
+      if (request && toolName(request.path)) {
         remember(request.messageId);
       }
 
       const result = resultOf(message);
-      if (result && ourApp(result.app)) {
+      if (result && connectorName(result.app) && toolName(result.resource)) {
         remember(resultParents.get(message) || completedCallOf(message)?.messageId);
       }
     }
@@ -1305,13 +1305,14 @@
     // Never borrow a neighbor's result to complete that request or a still-running group.
     if (request && !result && group.isCompletionRequestInProgress === false && messages.length === 2 &&
         messages[0].status === 'finished_successfully' && messages[1].status === 'finished_successfully' &&
-        !conflictingRequestScope(messages[0], messages[1]) && ourPath(request.path)) {
+        !conflictingRequestScope(messages[0], messages[1]) && toolName(request.path)) {
       const displayed = completedCallOf(messages[1]);
       if (displayed && displayed.requestId === request.requestId && identify(request, displayed) === displayed.tool) completed = displayed;
     }
     if (completed) return { v: VERSION, index, tool: completed.tool, path: null, app: completed.app,
       resource: completed.resource, messageId: completed.messageId, turnId: str(group.turnId),
       conversationId: str(group.clientThreadId) || str(group.conversationId), createTime: completed.createTime,
+      requestId: completed.requestId,
       hidden: int(own.call(group, 'collapsedSameToolCallCount') ? group.collapsedSameToolCallCount : null),
       localCount, answered: true };
     if (!request) return null;
@@ -1334,6 +1335,7 @@
       app: result ? result.app : null,
       resource: result ? result.resource : null,
       messageId: request.messageId,
+      requestId: request.requestId,
       turnId,
       conversationId: str(group.clientThreadId) || str(group.conversationId),
       createTime: request.createTime,
@@ -1439,7 +1441,7 @@
     for (let at = 0; at < messages.length && answered.size < MAX_CALLS; at++) {
       const message = messages[at];
       const result = resultOf(message);
-      if (!result || !ourApp(result.app)) continue;
+      if (!result || !connectorName(result.app) || !toolName(result.resource)) continue;
       const parent = resultParents.get(message);
       if (parent) answered.add(parent);
     }
@@ -1448,7 +1450,7 @@
     for (let at = 0; at < messages.length && out.length < MAX_CALLS; at++) {
       const request = requestOf(messages[at]);
       const completed = request ? null : completedCallOf(messages[at]);
-      if ((!request || !ourPath(request.path)) && !completed) continue;
+      if ((!request || !toolName(request.path)) && !completed) continue;
       const tool = completed ? completed.tool : toolName(request.path);
       const id = completed ? completed.messageId : request.messageId;
       if (!tool || !id) continue;
@@ -1531,14 +1533,27 @@
       if (!candidate || typeof candidate !== 'object' || inspected.has(candidate)) return;
       inspected.add(candidate);
       const conversation = value(candidate, 'renderedConversation'), turns = value(candidate, 'renderedTurns');
-      const mapping = value(conversation, 'mapping');
-      if (!mapping || !Array.isArray(turns) || turns.length > 4096 ||
-          turns.filter(turn => turn?.id === entry.id && turn.turn === entry.turn).length !== 1) return;
+      let mapping = value(conversation, 'mapping');
+      let snapshot = candidate;
+      if (mapping) {
+        if (!Array.isArray(turns) || turns.length > 4096 ||
+            turns.filter(turn => turn?.id === entry.id && turn.turn === entry.turn).length !== 1) return;
+      } else {
+        // The current shell publishes the exact conversation mapping directly as one hook
+        // snapshot instead of wrapping it in { renderedConversation, renderedTurns }. The
+        // owning component still names this entry's local conversation and the mapping must
+        // contain this exact native user message. Treat only that root object as a candidate;
+        // never search arbitrary nested objects for a convenient request id.
+        mapping = candidate;
+        snapshot = { renderedConversation: { mapping }, renderedTurns: [{ id: entry.id, turn: entry.turn }] };
+      }
       const node = value(mapping, userId), message = value(node, 'message');
       if (value(node, 'id') !== userId || value(message, 'id') !== userId || message.author?.role !== 'user') return;
       const prior = snapshots.get(mapping);
-      if (prior && prior.renderedConversation.current_node !== conversation.current_node) conflict = true;
-      snapshots.set(mapping, candidate);
+      const previousCurrent = value(prior?.renderedConversation, 'current_node');
+      const current = value(snapshot.renderedConversation, 'current_node');
+      if (prior && previousCurrent && current && previousCurrent !== current) conflict = true;
+      if (!prior || !previousCurrent && current) snapshots.set(mapping, snapshot);
     };
     let remaining = 2048;
     for (let at = fiber, up = 0; at && up < MAX_CLIMB && remaining > 0; up++, at = at.return) {
@@ -1617,21 +1632,21 @@
       const message = messageAt(id);
       if (message?.author?.role === 'assistant' && message.recipient === 'functions.exec') invocationIds.add(id);
     }
-    const serverName = name => OUR_APPS.find(app => name === app || name === app.replaceAll(' ', '_'));
     for (const call of shell.calls) {
       const reference = shell.callSources.get(call.messageId);
       if (!reference?.id || !selected.has(reference.id) || sourceCounts.get(reference.id) !== 1) continue;
       const result = messageAt(reference.id);
       if (result?.author?.role !== 'tool') continue;
       const resource = resultOf(result);
-      if (resource && (serverName(resource.app) !== serverName(reference.server) || toolName(resource.resource) !== call.tool)) continue;
+      if (resource && (!sameConnector(resource.app, reference.server) || toolName(resource.resource) !== call.tool)) continue;
       const invocation = messageAt(call.messageId);
       if (invocation) {
         const asked = requestOf(invocation), path = asked?.path;
         // Native N() keeps callId while replacing sourceMessage with the result.
         // This mounted relation, not cache position or a sibling's request id,
         // permits reading the original invocation's metadata after a reload.
-        if (invocation.recipient !== 'api_tool.call_tool' || !path || serverName(path.slice(1, path.indexOf('/', 1))) !== serverName(reference.server) ||
+        const separator = path?.indexOf('/', 1) ?? -1;
+        if (invocation.recipient !== 'api_tool.call_tool' || separator <= 1 || !sameConnector(path.slice(1, separator), reference.server) ||
             toolName(path) !== call.tool) continue;
         for (const key of ['request_id', 'working_turn_id', 'turn_exchange_id']) {
           const a = str(invocation.metadata?.[key]), b = str(result.metadata?.[key]);
@@ -1713,7 +1728,8 @@
       if (Array.isArray(at.memoizedProps?.entry?.turn?.items)) { entry = at.memoizedProps.entry; break; }
     }
     if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_ROWS) return null;
-    const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [];
+    const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map();
+    let lastAnswer = null;
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
     let work = 0;
     for (const [index, item] of entry.turn.items.entries()) {
@@ -1724,6 +1740,7 @@
         if (!remember(id) || (user && item.serverMessageId && item.messageId && item.serverMessageId !== item.messageId)) return null;
         const role = user ? 'user' : 'assistant', text = user ? item.message : item.content;
         const final = !user && item.phase === 'final_answer';
+        if (final) lastAnswer = item;
         const completed = final && item.completed === true && entry.turn.status === 'complete';
         messages.push({ id, author: { role }, content: { content_type: 'text', parts: [typeof text === 'string' ? text : ''] },
           channel: user ? null : final ? 'final' : 'commentary', end_turn: completed,
@@ -1732,6 +1749,18 @@
         const nodes = [...section.querySelectorAll('[data-content-search-unit-key]')].filter(node =>
           node.closest('[data-turn-key]') === section && node.getAttribute('data-content-search-unit-key') === key);
         if (nodes.length === 1) slots.push({ node: nodes[0], id });
+      } else if (item?.type === 'generated-image') {
+        lastAnswer = item;
+        const id = str(item.chatGptMessageId);
+        const asset = typeof item.src === 'string' && /^sediment:\/\/(file_[A-Za-z0-9_-]{8,100})$/.exec(item.src)?.[1];
+        if (!id || !asset || !Array.isArray(entry.turn.messageIds) || !entry.turn.messageIds.includes(id)) continue;
+        images.set(item, asset);
+        // Typed generated outputs are public tool media, never assistant prose.
+        // Multiple assets may share their owning provider message.
+        messages.push({ id, author: { role: 'tool' }, recipient: 'all', channel: 'final',
+          status: item.status === 'completed' && item.isPreview !== true ? 'finished_successfully' : 'in_progress',
+          content: { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer',
+            asset_pointer: item.src, width: item.width, height: item.height }] } });
       } else {
         const steps = item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items) ? item.items : [item];
         for (const step of steps) {
@@ -1743,8 +1772,7 @@
             executionIds.push(id);
             continue;
           }
-          if (step?.type !== 'mcp-tool-call' || !OUR_APPS.some(app =>
-            step.invocation?.server === app || step.invocation?.server === app.replaceAll(' ', '_'))) continue;
+          if (step?.type !== 'mcp-tool-call' || !connectorName(step.invocation?.server)) continue;
           const id = str(step.callId), tool = toolName(step.invocation?.tool);
           if (!id || !tool) continue;
           if (!remember(id) || calls.length >= MAX_CALLS) return null;
@@ -1753,7 +1781,18 @@
         }
       }
     }
-    return { entry, messages, calls, slots, callSources, executionIds };
+    // Media may share a provider message with other media, never an authored row
+    // or local call. Keep malformed cross-kind identities out of the whole scan.
+    if ([...images.keys()].some(item => seen.has(item.chatGptMessageId))) return null;
+    // Image-only answers have no assistant final item. Both the selected public
+    // images and the containing turn must finish; previews/retries cannot settle it.
+    const imageAnswer = lastAnswer?.type === 'generated-image';
+    const imageEnd = imageAnswer && entry.turn.status === 'complete' && images.has(lastAnswer) &&
+      entry.turn.items.filter(item => item?.type === 'generated-image').every(item =>
+        images.has(item) && item.status === 'completed' && item.isPreview !== true)
+      ? lastAnswer.chatGptMessageId : null;
+    return { entry, messages, calls, slots, callSources, executionIds, images,
+      endMessageId: imageAnswer ? imageEnd : turnEndMessageId(messages) };
   }
   function turnsOf(scanToken) {
     const out = [];
@@ -1837,9 +1876,9 @@
         const renderedMessages = renderedMessagesOf(group.sections, messages, turnBudget, exactAnchors, conversation.conversationId);
         const nativeActivities = shell ? shellPublicActivity(shell, metadata, renderedMessages, turnBudget, section, exactAnchors) : nativeActivitiesOf(group.sections, messages, exactThoughtRows);
         responseBudget.remaining -= before - turnBudget.remaining;
-        const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes);
+        const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes, shell?.images);
         const activities = nativeActivities.events;
-        const endMessageId = turnEndMessageId(messages);
+        const endMessageId = shell ? shell.endMessageId : turnEndMessageId(messages);
         // The shell supplies the completed final item's own exact message id,
         // without the classic thought-parent/timestamp tuple. Preserve that
         // identity for handoff capture; streaming and cancelled items stay weak.
@@ -1934,6 +1973,11 @@
           if (wantedImage === undefined) {
             if (currentImage !== null) node.removeAttribute('data-clf-fiber-image');
           } else if (currentImage !== wantedImage) node.setAttribute('data-clf-fiber-image', wantedImage);
+          const blobSource = wantedImage !== undefined && (node.currentSrc || node.src)?.startsWith('blob:')
+            ? node.currentSrc || node.src : null;
+          if (blobSource === null) node.removeAttribute('data-clf-fiber-image-source');
+          else if (node.getAttribute('data-clf-fiber-image-source') !== blobSource)
+            node.setAttribute('data-clf-fiber-image-source', blobSource);
         }
         if (!desiredTurnStamps.has(section)) section.removeAttribute('data-clf-shell-running');
         for (const stamped of [section, ...section.querySelectorAll('[data-content-search-unit-key]')]) {
@@ -2189,8 +2233,10 @@
         if (props.actions === observedActions) continue;
         if (observedActions) return null;
         observedActions = props.actions;
-        const externalPlugins = props.connector.name === 'Chat On Steroids Plugins';
-        if ((!props.actions.length && !externalPlugins) || props.actions.length > (externalPlugins ? 257 : 16) || typeof props.connector.name !== 'string') return null;
+        // Connector display names are user-owned presentation. All surfaces use
+        // the same bounded observation envelope; exact App ID and declarations
+        // decide refresh ownership in the isolated world.
+        if (props.actions.length > 257 || typeof props.connector.name !== 'string') return null;
         const budget = { bytes: 280000, nodes: 20000 };
         const tools = props.actions.map(action => ({ name: action.name, description: copySchema(action.description_model ?? action.description, budget), inputSchema: copySchema(action.params, budget) }));
         if (tools.some(tool => !NAME.test(tool.name) || typeof tool.description !== 'string' || !tool.inputSchema || tool.inputSchema.type !== 'object') ||

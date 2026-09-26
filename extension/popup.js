@@ -14,7 +14,7 @@ const RENDER_STREAM_KEY = 'renderStreamEnabled';
 const SHOW_TIMES_KEY = 'showStreamTimes';
 const POLL_MS = 1500;
 
-let overwriteEnabled = true;
+let overwriteEnabled = false;
 let showTimes = false;
 let latest = { status: null, tab: null };
 let openedOnFailure = false;
@@ -364,7 +364,7 @@ function syncOverwrite() {
 
 async function loadPreferences() {
   const stored = await chrome.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
-  overwriteEnabled = stored[RENDER_STREAM_KEY] !== false;
+  overwriteEnabled = stored[RENDER_STREAM_KEY] === true;
   showTimes = stored[SHOW_TIMES_KEY] === true;
   syncOverwrite();
   $('timeToggle').checked = showTimes;

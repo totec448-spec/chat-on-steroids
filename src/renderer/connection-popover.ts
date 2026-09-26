@@ -2,34 +2,6 @@ import type { CompanionDiagnostics, CompanionTraceEntry } from '../shared/types.
 import { $, toast } from './dom.js';
 import { t, ui } from './i18n.js';
 
-interface InternalBrowserTabState {
-  id: number;
-  active: boolean;
-  status: 'loading' | 'complete';
-  title: string;
-  url: string;
-}
-
-interface InternalBrowserDockState {
-  open: boolean;
-  ready: boolean;
-  tabId: number | null;
-  tabs: InternalBrowserTabState[];
-}
-
-type InternalBrowserReply =
-  | { ok: true; data: InternalBrowserDockState | null }
-  | { ok: false; error: string };
-
-function queryInternalBrowser(): Promise<InternalBrowserReply> {
-  const optional = window.api as typeof window.api & {
-    internalBrowser?: (request: { action: 'query' }) => Promise<InternalBrowserReply>;
-  };
-  return typeof optional.internalBrowser === 'function'
-    ? optional.internalBrowser({ action: 'query' })
-    : Promise.resolve({ ok: true, data: null });
-}
-
 type CaptureState = 'ok' | 'bad' | 'wait' | 'off';
 type StageState = 'done' | 'failed' | 'running' | 'off';
 type Stage = [StageState, string?];
@@ -57,35 +29,10 @@ function ageToken(at: number): string {
   return `${Math.round(seconds / 3600)}h`;
 }
 
-function isChatGptUrl(value: string | null | undefined): boolean {
-  if (!value) return false;
-  try {
-    const url = new URL(value);
-    return url.origin === 'https://chatgpt.com' || url.origin === 'https://chat.openai.com';
-  } catch { return false; }
-}
-
-function conversationFromUrl(value: string | null | undefined): string | null {
-  if (!value) return null;
-  try {
-    const match = /^\/c\/([^/?#]+)/.exec(new URL(value).pathname);
-    return match?.[1] ? decodeURIComponent(match[1]) : null;
-  } catch { return null; }
-}
-
-function activeInternalTab(host: InternalBrowserDockState | null): InternalBrowserTabState | null {
-  if (!host) return null;
-  return host.tabs.find((tab) => tab.id === host.tabId) ?? host.tabs.find((tab) => tab.active) ?? null;
-}
-
-function paintDiagnosticAge(host: InternalBrowserDockState | null, diagnostics: CompanionDiagnostics | null): void {
-  $('connectionAdvancedAge').textContent = host?.ready
-    ? diagnostics
-      ? t('Internal Chromium · companion {0} ago', [ageToken(diagnostics.capturedAt)])
-      : t('Internal Chromium · companion pending')
-    : diagnostics
-      ? t('Companion · updated {0} ago', [ageToken(diagnostics.capturedAt)])
-      : t('No runtime diagnostics yet');
+function paintDiagnosticAge(diagnostics: CompanionDiagnostics | null): void {
+  $('connectionAdvancedAge').textContent = diagnostics
+    ? t('Companion · updated {0} ago', [ageToken(diagnostics.capturedAt)])
+    : t('No runtime diagnostics yet');
 }
 
 function captureRow(id: string, state: CaptureState, meta: string, copyValue: string | null = null): void {
@@ -253,23 +200,15 @@ function detail(list: HTMLElement, term: string, value: string | number | null, 
   list.append(dt, dd);
 }
 
-function paintDiagnostics(
-  host: InternalBrowserDockState | null,
-  diagnostics: CompanionDiagnostics | null
-): void {
-  const hostTab = activeInternalTab(host);
-  const internal = host?.ready === true;
-  const hostIsChat = isChatGptUrl(hostTab?.url);
-  const companionTab = diagnostics?.tab ?? null;
-  const companionMatchesHost = !hostTab || companionTab?.tab === hostTab.id;
-  const info = companionMatchesHost ? companionTab : null;
+function paintDiagnostics(diagnostics: CompanionDiagnostics | null): void {
+  const info = diagnostics?.tab ?? null;
   const page = info?.page;
   const sent = info?.delivery;
-  const isChat = internal ? hostIsChat : info?.isChat === true;
-  const chatId = info?.conversationId ?? conversationFromUrl(hostTab?.url);
+  const isChat = info?.isChat === true;
+  const chatId = info?.conversationId ?? null;
   const requestId = page?.requestId ?? null;
 
-  paintDiagnosticAge(host, diagnostics);
+  paintDiagnosticAge(diagnostics);
 
   const status = diagnostics?.status ?? null;
   const incompatible = Boolean(status?.connected && status.compatible === false);
@@ -284,33 +223,28 @@ function paintDiagnostics(
   captureRow(
     'connectionAdvancedTab',
     isChat ? 'ok' : 'off',
-    !isChat ? 'none open' : hostTab ? `#${hostTab.id} · ${hostTab.status}` : ''
+    !isChat ? 'none open' : info?.tab ? `#${info.tab}` : ''
   );
   captureRow(
     'connectionAdvancedRecording',
-    !isChat ? 'off' : info?.recorder ? 'ok' : internal ? 'wait' : 'bad',
+    !isChat ? 'off' : info?.recorder ? 'ok' : 'bad',
     !isChat
       ? ''
       : info?.recorder
         ? (page?.generating ? 'answering' : '')
-        : internal
-          ? companionTab && !companionMatchesHost ? 'syncing tab' : 'companion pending'
-          : 'reload'
+        : 'reload'
   );
   captureRow('connectionAdvancedChat', !isChat ? 'off' : chatId ? 'ok' : 'wait', !isChat ? '' : chatId ? shorten(chatId, 8) : 'new chat', chatId);
   captureRow('connectionAdvancedRequest', !isChat ? 'off' : requestId ? 'ok' : 'wait', !isChat ? '' : requestId ? shorten(requestId, 9) : 'none yet', requestId);
 
-  const scopedDiagnostics = diagnostics && companionMatchesHost ? diagnostics : null;
-  const flow = scopedDiagnostics
-    ? pipeline(scopedDiagnostics)
+  const flow = diagnostics
+    ? pipeline(diagnostics)
     : isChat
       ? {
           read: ['running'] as Stage,
           sent: ['off'] as Stage,
           owner: ['off'] as Stage,
-          why: internal
-            ? t('Internal Chromium is live. Waiting for the companion recorder snapshot for this tab.')
-            : t('Waiting for companion diagnostics.'),
+          why: t('Waiting for companion diagnostics.'),
           bad: false
         }
       : { read: ['off'] as Stage, sent: ['off'] as Stage, owner: ['off'] as Stage, why: '', bad: false };
@@ -318,7 +252,7 @@ function paintDiagnostics(
   captureRow(
     'connectionAdvancedApp',
     !isChat ? 'off' : flow.bad ? 'bad' : flowing ? 'ok' : 'wait',
-    !isChat ? '' : flow.bad ? 'blocked' : flowing ? 'tool matched' : flow.owner[0] === 'done' ? 'ID confirmed' : internal && !info ? 'companion pending' : 'waiting'
+    !isChat ? '' : flow.bad ? 'blocked' : flowing ? 'tool matched' : flow.owner[0] === 'done' ? 'ID confirmed' : 'waiting'
   );
   stage('connectionPipelineRead', flow.read);
   stage('connectionPipelineSent', flow.sent);
@@ -329,16 +263,16 @@ function paintDiagnostics(
 
   const grid = $('connectionAdvancedGrid');
   grid.replaceChildren();
-  detail(grid, 'browser host', internal ? 'Internal Chromium · ready' : 'companion browser');
-  detail(grid, 'active tab', hostTab ? `#${hostTab.id} · ${hostTab.status}` : info?.tab ?? null);
-  detail(grid, 'browser tabs', host ? `${host.tabs.length} open · dock ${host.open ? 'shown' : 'hidden'}` : info ? `${info.chatTabs} ChatGPT` : null);
+  detail(grid, 'browser host', 'companion browser');
+  detail(grid, 'active tab', info?.tab ?? null);
+  detail(grid, 'browser tabs', info ? `${info.chatTabs} ChatGPT` : null);
   detail(grid, 'app', status ? `v${status.appVersion || '?'} · port ${status.port || '—'}` : null);
   detail(grid, 'extension', status ? `v${status.extensionVersion || '?'} · protocol ${status.extensionProtocol ?? '—'}` : null, status?.compatible === false);
   detail(grid, 'chat id', chatId);
   detail(grid, 'app session', page?.session ?? null, Boolean(page && !page.session));
-  detail(grid, 'companion tab', info ? `${info.tab ?? '—'} · epoch ${info.epoch ?? '—'}` : companionTab ? `${companionTab.tab ?? '—'} · syncing` : null);
+  detail(grid, 'companion tab', info ? `${info.tab ?? '—'} · epoch ${info.epoch ?? '—'}` : null);
   detail(grid, 'ownership', info ? (info.terminal ? 'retired' : info.bound ? 'bound' : 'unbound') : null, Boolean(info?.terminal));
-  detail(grid, 'recorder', page ? `fiber v${page.recorderVersion ?? '—'} · run ${page.runId ?? '—'}` : internal && isChat ? 'waiting for companion' : 'not attached', Boolean(!internal && isChat && !page));
+  detail(grid, 'recorder', page ? `fiber v${page.recorderVersion ?? '—'} · run ${page.runId ?? '—'}` : 'not attached', Boolean(isChat && !page));
   detail(grid, 'turn', page ? (page.generating ? `${shorten(page.turnId, 8)} · live` : 'idle') : null);
   detail(grid, 'observed', page ? `${page.events} events · ${page.calls} calls` : null);
   detail(grid, 'in this browser', info ? `${info.pending} held · ${info.pendingAll} total` : null, Boolean(info?.pendingAll));
@@ -356,16 +290,43 @@ export interface ConnectionAdvancedController {
   refreshIfOpen(): void;
 }
 
-export function initConnectionAdvanced(): ConnectionAdvancedController {
+export function initConnectionAdvanced(onLayoutChanged?: () => void): ConnectionAdvancedController {
   const details = $<HTMLDetailsElement>('connectionAdvanced');
+  const summary = details.querySelector<HTMLElement>('summary')!;
+  const runtime = $<HTMLDetailsElement>('connectionRuntime');
   const refresh = $<HTMLButtonElement>('connectionAdvancedRefresh');
   const copy = $<HTMLButtonElement>('connectionAdvancedCopy');
+  const overwrite = $<HTMLInputElement>('connectionAdvancedOverwrite');
+  const durations = $<HTMLInputElement>('connectionAdvancedDurations');
   let current: CompanionDiagnostics | null = null;
-  let host: InternalBrowserDockState | null = null;
   let busy = false;
+  let preferenceBusy = false;
 
   const paintControls = (): void => {
     refresh.disabled = busy;
+    const preferencesReady = Boolean(current?.preferences) && !busy && !preferenceBusy;
+    overwrite.disabled = durations.disabled = !preferencesReady;
+    overwrite.checked = current?.preferences.overwrite ?? false;
+    durations.checked = current?.preferences.durations ?? false;
+  };
+
+  const updatePreference = async (patch: { overwrite?: boolean; durations?: boolean }): Promise<void> => {
+    if (busy || preferenceBusy || !current) return;
+    preferenceBusy = true;
+    paintControls();
+    try {
+      const response = await window.api.browserPreferences(patch);
+      if (!response.ok) {
+        toast(response.error);
+        return;
+      }
+      current = { ...current, preferences: response.data };
+    } catch {
+      toast(t('Unable to reach the extension. Connect it and refresh.'));
+    } finally {
+      preferenceBusy = false;
+      paintControls();
+    }
   };
 
   const request = async (): Promise<void> => {
@@ -374,23 +335,17 @@ export function initConnectionAdvanced(): ConnectionAdvancedController {
     $('connectionAdvancedAge').textContent = t('refreshing…');
     paintControls();
     try {
-      const [hostResponse, diagnosticsResponse] = await Promise.all([
-        queryInternalBrowser(),
-        window.api.companionDiagnostics()
-      ]);
-      host = hostResponse.ok ? hostResponse.data : null;
+      const diagnosticsResponse = await window.api.companionDiagnostics();
       current = diagnosticsResponse.ok ? diagnosticsResponse.data : null;
-      if (!host && !current) {
-        paintDiagnostics(null, null);
-        $('connectionAdvancedAge').textContent = !hostResponse.ok
-          ? hostResponse.error
-          : !diagnosticsResponse.ok
-            ? diagnosticsResponse.error
-            : t('No runtime diagnostics yet');
+      if (!current) {
+        paintDiagnostics(null);
+        $('connectionAdvancedAge').textContent = !diagnosticsResponse.ok
+          ? diagnosticsResponse.error
+          : t('No runtime diagnostics yet');
         $('connectionAdvancedGrid').replaceChildren();
         return;
       }
-      paintDiagnostics(host, current);
+      paintDiagnostics(current);
     } finally {
       busy = false;
       paintControls();
@@ -408,6 +363,8 @@ export function initConnectionAdvanced(): ConnectionAdvancedController {
     });
   }
   refresh.addEventListener('click', () => void request());
+  overwrite.addEventListener('change', () => void updatePreference({ overwrite: overwrite.checked }));
+  durations.addEventListener('change', () => void updatePreference({ durations: durations.checked }));
   copy.addEventListener('click', () => {
     const lines = [$('connectionPipelineWhy').textContent ?? ''];
     const cells = [...$('connectionAdvancedGrid').children].map((node) => node.textContent ?? '');
@@ -416,9 +373,26 @@ export function initConnectionAdvanced(): ConnectionAdvancedController {
       if (response.ok && response.data) toast(t('Diagnostics copied'));
     });
   });
-  details.addEventListener('toggle', () => { if (details.open) void request(); });
+  // The native <details> toggle event is queued after the click. If we let the browser own
+  // that first state change, the 160px popover becomes 340px for one frame at its old x,
+  // then `toggle` moves it back around the anchor. Own the click instead so width + x settle
+  // in one task before Chromium paints anything.
+  summary.addEventListener('click', (event) => {
+    event.preventDefault();
+    const opening = !details.open;
+    details.open = opening;
+    if (opening) runtime.open = false;
+    onLayoutChanged?.();
+  });
+  details.addEventListener('toggle', () => {
+    if (details.open) {
+      runtime.open = false;
+      void request();
+    }
+    onLayoutChanged?.();
+  });
   window.setInterval(() => {
-    if (details.open && (host || current) && !busy) paintDiagnosticAge(host, current);
+    if (details.open && current && !busy) paintDiagnosticAge(current);
   }, 1000);
   paintControls();
 

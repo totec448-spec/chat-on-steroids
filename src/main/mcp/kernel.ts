@@ -23,7 +23,7 @@ import { WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-compu
  */
 
 import { rawPromises as fs } from '../rawfs.js';
-import { beginToolTiming, inboundRequestId, inboundPublication } from './inbound.js';
+import { beginToolTiming, inboundRequestId, inboundPublication, noteInboundToolRequest } from './inbound.js';
 import { McpServer, type ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { Capabilities, Root } from '../../shared/types.js';
@@ -581,6 +581,9 @@ async function dispatchTracked(
   run: () => Promise<ToolResult>,
   nested: boolean
 ): Promise<ToolResult> {
+  // Publish local admission before any wait for page identity. The page can then retry a
+  // first-call correlation without the handler and browser waiting on one another.
+  if (!nested) noteInboundToolRequest(requestId);
   noteTransportIdentity(transportKey);
   const markTiming = beginToolTiming();
   // Recorded here rather than in `guard` because only this layer knows which server

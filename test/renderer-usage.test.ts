@@ -116,14 +116,19 @@ it.each([256_000, 400_000])('shows the calculated %i context cap and edits formu
   const divisor = field('usageDivisor');
   initUsage(); await refreshUsage();
   expect(dom.window.document.getElementById('usageFormula')!.textContent).toContain(`capped at ${contextTokenCap.toLocaleString()} tokens`);
-  const formulaDetails = dom.window.document.getElementById('usageFormulaDetails') as HTMLDetailsElement;
-  expect(formulaDetails.open).toBe(false);
-  expect(divisor.closest('details')).toBe(formulaDetails);
-  expect(dom.window.document.getElementById('usageRates')!.closest('details')).toBe(formulaDetails);
-  expect(dom.window.document.getElementById('usageDays')!.closest('details')).toBeNull();
-  expect(dom.window.document.getElementById('usageTotalCost')!.closest('details')).toBeNull();
-  formulaDetails.querySelector('summary')!.click();
-  expect(formulaDetails.open).toBe(true);
+  const formulaDetails = dom.window.document.getElementById('usageFormulaDetails')!;
+  const formulaToggle = dom.window.document.getElementById('usageFormulaToggle') as HTMLButtonElement;
+  expect(formulaDetails.hidden).toBe(true);
+  expect(formulaToggle.getAttribute('aria-expanded')).toBe('false');
+  expect(formulaToggle.getAttribute('aria-controls')).toBe(formulaDetails.id);
+  expect(formulaToggle.closest('.settings-section-head')).not.toBeNull();
+  expect(divisor.closest('#usageFormulaDetails')).toBe(formulaDetails);
+  expect(dom.window.document.getElementById('usageRates')!.closest('#usageFormulaDetails')).toBe(formulaDetails);
+  expect(dom.window.document.getElementById('usageModels')!.closest('#usageFormulaDetails')).toBeNull();
+  expect(dom.window.document.getElementById('usageDays')!.closest('#usageFormulaDetails')).toBeNull();
+  formulaToggle.click();
+  expect(formulaDetails.hidden).toBe(false);
+  expect(formulaToggle.getAttribute('aria-expanded')).toBe('true');
   const balances = dom.window.document.getElementById('modelUsage')!;
   for (const label of ['Deep research', 'File uploads', 'Pasted text files', 'Image generation']) expect(balances.textContent).toContain(label);
   expect(balances.textContent).not.toMatch(/deep_research|file_upload|paste_text_to_file|image_gen|below/);
@@ -133,8 +138,9 @@ it.each([256_000, 400_000])('shows the calculated %i context cap and edits formu
   change(divisor, '4');
   expect(cost()).toContain(usd(0.24));
   expect(dom.window.document.getElementById('usageFormula')!.textContent).toContain('÷ 4');
-  formulaDetails.querySelector('summary')!.click();
-  expect(formulaDetails.open).toBe(false);
+  formulaToggle.click();
+  expect(formulaDetails.hidden).toBe(true);
+  expect(formulaToggle.getAttribute('aria-expanded')).toBe('false');
   expect(cost()).toContain(usd(0.24));
   change(divisor, '0'); // Invalid edits do not corrupt the active calculation.
   expect(cost()).toContain(usd(0.24));
@@ -164,15 +170,15 @@ it('shows the Sol picker alias rate and preserves an explicitly cleared rate aft
   const rate = () => dom.window.document.querySelector('input[aria-label="gpt-5-6-thinking cached-input USD per million tokens"]') as HTMLInputElement;
   expect(rate().value).toBe('0.4');
   expect(dom.window.document.getElementById('usageTotalCost')!.textContent).toContain(usd(0.21));
-  expect(dom.window.document.getElementById('usageDays')!.textContent).not.toContain('Rate unknown');
+  expect(dom.window.document.getElementById('usageModels')!.textContent).not.toContain('Rate unknown');
   rate().value = ''; rate().dispatchEvent(new dom.window.Event('input'));
   expect(getUsage).toHaveBeenCalledTimes(1);
-  expect(dom.window.document.getElementById('usageDays')!.textContent).toContain('Rate unknown');
+  expect(dom.window.document.getElementById('usageModels')!.textContent).toContain('Rate unknown');
   vi.resetModules();
   const restored = await import('../src/renderer/usage.js');
   restored.initUsage(); await restored.refreshUsage();
   expect(rate().value).toBe('');
-  expect(dom.window.document.getElementById('usageDays')!.textContent).toContain('Rate unknown');
+  expect(dom.window.document.getElementById('usageModels')!.textContent).toContain('Rate unknown');
 });
 
 it('combines equivalent recorded names in the table while keeping raw rate edits and partial unknown cost', async () => {
@@ -183,7 +189,7 @@ it('combines equivalent recorded names in the table while keeping raw rate edits
   const getUsage = vi.fn(async () => ({ ok: true, data }));
   Object.assign(dom.window, { api: { getUsage, getChatModels: async () => ({ ok: true, data: { models: [] } }) } });
   const usage = await import('../src/renderer/usage.js'); usage.initUsage(); await usage.refreshUsage();
-  const table = () => dom.window.document.querySelector('#usageDays table')!;
+  const table = () => dom.window.document.querySelector('#usageModels table')!;
   expect(table().querySelectorAll('tr')).toHaveLength(2);
   expect(table().textContent).toContain('gpt-5.6-sol · high');
   expect(table().textContent).toContain(usd(1.44));

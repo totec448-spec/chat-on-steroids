@@ -6,9 +6,7 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <!-- Icon sprite. Inline so there is no request and no font, and every glyph
-         inherits currentColor. Stroke-based on a 24 grid; every <use> carries a
-         viewBox or the browser shows the top-left corner of that grid. -->
+    <!-- The product mark stays bespoke; interface actions use one Phosphor family. -->
     <svg class="sprite" aria-hidden="true">
       <defs>
         <!-- The product mark: the same folder-behind-a-message shape as the app and
@@ -19,95 +17,39 @@
             d="M5.5 8.5h13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-8L7 20v-3.5H5.5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z"
           />
         </g>
-        <g id="i-bolt"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" /></g>
-        <g id="i-skill"><path d="m12 3 7 4v10l-7 4-7-4V7Z" /><path d="m5 7 7 4 7-4M12 11v10" /></g>
-        <g id="i-home"><path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1Z" /></g>
-        <g id="i-steps"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" /></g>
-        <g id="i-pulse"><path d="M3 12h4l3 8 4-16 3 8h4" /></g>
-        <g id="i-folder"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z" /></g>
-        <g id="i-file"><path d="M6 3.5h8l4 4V20.5H6Z" /><path d="M14 3.5v4h4" /></g>
-        <g id="i-image"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m4 17 5-5 4 4 3-3 4 4"/></g>
-        <g id="i-plus"><path d="M12 5v14M5 12h14" /></g>
-        <g id="i-eye">
-          <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
-          <circle cx="12" cy="12" r="3" />
-        </g>
-        <g id="i-pencil"><path d="M4 20h4L20 8l-4-4L4 16Z" /><path d="M14 6l4 4" /></g>
-        <g id="i-monitor">
-          <rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M9 20h6M12 16v4" />
-        </g>
-        <g id="i-globe"><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><path d="M3 12h18M5 7h14M5 17h14" /></g>
-        <g id="i-target"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></g>
-        <g id="i-loop"><path d="M4 8a8 8 0 1 1-1 7M4 3v5h5"/></g>
-        <g id="i-terminal">
-          <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M13 15h4" />
-        </g>
-        <g id="i-power"><path d="M12 4v8" /><path d="M7.5 7a7 7 0 1 0 9 0" /></g>
-        <g id="i-lock">
-          <rect x="4.5" y="10.5" width="15" height="9.5" rx="2" /><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" />
-        </g>
-        <g id="i-copy"><rect x="8.5" y="8.5" width="11" height="11" rx="2" /><path d="M15.5 5.5h-11v11" /></g>
-        <g id="i-retry"><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6" /></g>
-        <g id="i-check"><path d="M5 12.5 10 17.5 19 7" /></g>
-        <g id="i-clock"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></g>
-        <g id="i-chev"><path d="M9.5 5.5 16 12l-6.5 6.5" /></g>
-        <g id="i-out"><path d="M13 5h6v6" /><path d="M19 5 11 13" /><path d="M18 14.5V19H5V6h4.5" /></g>
-        <g id="i-trash">
-          <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9L17.5 7" />
-        </g>
-        <g id="i-x"><path d="M6 6l12 12M18 6 6 18" /></g>
-        <g id="i-ban"><circle cx="12" cy="12" r="8" /><path d="M6.3 6.3 17.7 17.7" /></g>
-        <g id="i-play"><path d="M8 5.5 18.5 12 8 18.5Z" /></g>
-        <g id="i-key"><circle cx="8" cy="12" r="3.5" /><path d="M11.5 12H20M17 12v3M20 12v2.5" /></g>
-        <g id="i-sun">
-          <circle cx="12" cy="12" r="4" />
-          <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4" />
-        </g>
-        <g id="i-chat">
-          <path d="M4 5.5h16a1 1 0 0 1 1 1v8.5a1 1 0 0 1-1 1h-8.5L7 19.5V16H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1Z" />
-        </g>
-        <g id="i-search"><circle cx="11" cy="11" r="6" /><path d="M15.4 15.4 20 20" /></g>
-        <g id="i-gear">
-          <circle cx="12" cy="12" r="3" />
-          <polygon points="18.560,9.283 18.918,10.403 20.889,10.592 20.889,13.408 18.918,13.597 18.560,14.717 18.021,15.762 19.281,17.290 17.290,19.281 15.762,18.021 14.717,18.560 13.597,18.918 13.408,20.889 10.592,20.889 10.403,18.918 9.283,18.560 8.238,18.021 6.710,19.281 4.719,17.290 5.979,15.762 5.440,14.717 5.082,13.597 3.111,13.408 3.111,10.592 5.082,10.403 5.440,9.283 5.979,8.238 4.719,6.710 6.710,4.719 8.238,5.979 9.283,5.440 10.403,5.082 10.592,3.111 13.408,3.111 13.597,5.082 14.717,5.440 15.762,5.979 17.290,4.719 19.281,6.710 18.021,8.238" />
-        </g>
       </defs>
     </svg>
 
     <div class="app" data-screen="chat">
       <div class="app-topbar">
-        <button class="btn" id="sidebarToggle" type="button" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true" title="Toggle sidebar (Ctrl+B)"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /></svg></button>
-        <details class="view-menu" id="viewMenu"><summary>View</summary><div class="view-menu-items">
-          <button class="btn" id="sidebarMenuToggle" type="button">Toggle Sidebar <kbd>Ctrl+B</kbd></button>
-          <hr />
-          <button class="btn" id="zoomIn" type="button">Zoom In <kbd>Ctrl++</kbd></button>
-          <button class="btn" id="zoomOut" type="button">Zoom Out <kbd>Ctrl+−</kbd></button>
-          <button class="btn" id="zoomActualSize" type="button">Actual Size <span id="zoomReset">100%</span><kbd>Ctrl+0</kbd></button>
-        </div></details>
+        <button class="btn" id="sidebarToggle" type="button" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true" title="Toggle sidebar (Ctrl+B)"><i class="ico ph ph-sidebar-simple" aria-hidden="true"></i></button>
+        <button class="btn view-menu-trigger" id="viewMenuToggle" type="button" aria-label="View" aria-haspopup="menu" aria-expanded="false" title="View"><i class="ico ph ph-dots-three" aria-hidden="true"></i></button>
       </div>
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
-        <button class="btn" id="backToChat" type="button" hidden>← Back to chat</button>
-        <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong></div>
+        <button class="btn" id="backToChat" type="button" hidden><i class="ico ph ph-arrow-left" aria-hidden="true"></i><span>Back to chat</span></button>
+        <div class="sidebar-brand"><span class="mark"><svg class="ico brand-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong></div>
         <div class="sidebar-primary" id="sidebarPrimary">
-          <button class="btn new-chat" id="newChat" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pencil" /></svg>New chat</button>
-          <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>Plugins</button>
+          <button class="btn new-chat" id="newChat" type="button"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i>New chat</button>
+          <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
+          <button class="btn sidebar-primary-link" id="sidebarSkills" data-sidebar-page="skills" type="button"><i class="ico ph ph-cube" aria-hidden="true"></i>Skills</button>
+          <button class="btn sidebar-primary-link" id="sidebarPets" data-sidebar-page="pets" type="button"><i class="ico ph ph-paw-print" aria-hidden="true"></i>Pets</button>
         </div>
       <nav id="tabs" aria-label="Settings navigation" hidden>
         <button class="is-sel" data-tab="home" type="button">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-home" /></svg>Workspace
+          <i class="ico ph ph-house" aria-hidden="true"></i>Workspace
         </button>
-        <button data-tab="usage" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Usage</button>
+        <button data-tab="usage" type="button"><i class="ico ph ph-chart-line" aria-hidden="true"></i>Usage</button>
 <button data-tab="setup" type="button">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-steps" /></svg>Setup
+          <i class="ico ph ph-list-checks" aria-hidden="true"></i>Setup
           <span class="badge" id="setupBadge" hidden></span>
         </button>
         <button data-tab="settings" type="button">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg>Agents &amp; automation
+          <i class="ico ph ph-robot" aria-hidden="true"></i>Agents &amp; automation
         </button>
-        <button data-tab="appearance" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-sun" /></svg>Appearance</button>
+        <button data-tab="appearance" type="button"><i class="ico ph ph-sun" aria-hidden="true"></i>Appearance</button>
         <button data-tab="activity" type="button">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Activity
+          <i class="ico ph ph-activity" aria-hidden="true"></i>Activity
         </button>
       </nav>
         <section class="sidebar-sessions">
@@ -115,16 +57,16 @@
             <div id="sessionList">
               <details class="sidebar-session-section" id="projectsSection" open>
                 <summary class="sidebar-session-heading">
-                  <span class="sidebar-session-label"><svg class="ico sidebar-section-chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev" /></svg>Projects</span>
-                  <span class="acts"><button class="btn" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button></span>
+                  <span class="sidebar-session-label"><svg class="disclosure-chevron sidebar-section-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Projects</span>
+                  <span class="acts"><button class="btn" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder"><i class="ico ph ph-plus" aria-hidden="true"></i></button></span>
                 </summary>
                 <div id="projectList"><p class="empty" role="status">Loading projects…</p></div>
                 <p class="empty sidebar-section-empty" id="projectsEmpty" hidden>No projects yet.</p>
               </details>
               <details class="sidebar-session-section" id="chatsSection" open>
                 <summary class="sidebar-session-heading">
-                  <span class="sidebar-session-label"><svg class="ico sidebar-section-chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev" /></svg>Chats</span>
-                  <span class="acts"><button class="btn" id="chatRefresh" type="button" title="Refresh chats" aria-label="Refresh chats"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Refresh</button></span>
+                  <span class="sidebar-session-label"><svg class="disclosure-chevron sidebar-section-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Chats</span>
+                  <span class="acts"><button class="btn" id="chatRefresh" type="button" title="Refresh chats" aria-label="Refresh chats"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button></span>
                 </summary>
                 <div id="chatList"><p class="empty" role="status">Loading chats…</p></div>
                 <p class="empty sidebar-section-empty" id="sessionsEmpty" hidden>No chats outside projects yet.</p>
@@ -134,8 +76,9 @@
         </section>
 
         <div class="sidebar-bottom">
-          <button class="btn" id="workspaceSettings" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg>Settings</button>
+          <button class="btn" id="workspaceSettings" type="button" aria-label="Settings" title="Settings"><i class="ico ph ph-gear-six" aria-hidden="true"></i></button>
           <div class="connection-anchor">
+            <button class="sidebar-connect-action" id="sidebarConnect" type="button" data-collapsed="true" aria-hidden="true" tabindex="-1" disabled>Connect</button>
             <button
               class="sidebar-connection"
               id="sidebarConnection"
@@ -169,9 +112,7 @@
                 </div>
               </div>
               <details class="connection-advanced" id="connectionAdvanced">
-                <summary aria-label="Advanced" title="Advanced">
-                  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg>
-                </summary>
+                <summary aria-label="Advanced" title="Advanced">Advanced</summary>
                 <div class="connection-advanced-body">
                   <p class="connection-advanced-alert" id="connectionAdvancedAlert" hidden></p>
 
@@ -184,7 +125,19 @@
                     <div class="connection-advanced-row" id="connectionAdvancedApp"><span>Reaching the app</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
                   </div>
 
-                  <details class="connection-runtime" id="connectionRuntime"><summary>Runtime diagnostics</summary>
+                  <div class="connection-advanced-caption"><span>Augment ChatGPT</span></div>
+                  <div class="connection-advanced-card connection-advanced-preferences">
+                    <label class="connection-advanced-setting" for="connectionAdvancedOverwrite">
+                      <span>Overwrite ChatGPT</span>
+                      <span class="sw"><input id="connectionAdvancedOverwrite" type="checkbox" disabled /><i></i></span>
+                    </label>
+                    <label class="connection-advanced-setting" for="connectionAdvancedDurations">
+                      <span>Timestamps</span>
+                      <span class="sw"><input id="connectionAdvancedDurations" type="checkbox" disabled /><i></i></span>
+                    </label>
+                  </div>
+
+                  <details class="connection-runtime" id="connectionRuntime"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Runtime diagnostics</summary>
                   <span class="connection-advanced-age" id="connectionAdvancedAge">Runtime diagnostics</span>
                   <div class="connection-pipeline" id="connectionPipeline">
                     <div class="connection-pipeline-stage" id="connectionPipelineRead"><i></i><span>Request ID found</span><em></em></div>
@@ -195,14 +148,13 @@
                   </div>
 
                   <dl class="connection-advanced-grid" id="connectionAdvancedGrid"></dl>
-                  <div class="connection-advanced-actions">
-                    <button class="btn" id="connectionAdvancedCopy" type="button">Copy</button>
-                    <button class="btn" id="connectionAdvancedRefresh" type="button">Refresh</button>
-                  </div></details>
+                  </details>
                 </div>
               </details>
               <div class="connection-popover-actions">
-                <button class="btn btn-solid" id="connectionPopoverToggle" type="button">Connect</button>
+                <button class="btn connection-advanced-action" id="connectionAdvancedCopy" type="button">Copy</button>
+                <button class="btn connection-advanced-action" id="connectionAdvancedRefresh" type="button">Refresh</button>
+                <button class="btn btn-solid" id="connectionPopoverDisconnect" type="button" disabled>Disconnect</button>
               </div>
             </section>
           </div>
@@ -215,18 +167,17 @@
           <span aria-hidden="true">/</span>
           <span id="chatProjectName"></span>
         </span>
-        <span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>
+        <span class="mark"><svg class="ico brand-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-mark" /></svg></span>
         <span class="title">
           Chat On Steroids
           <span id="headerSub">Not set up yet</span>
         </span>
-        <span class="state">
-          <button class="btn connect-prompt" id="headerConnect" type="button" hidden>Connect</button>
+        <span class="state" id="headerActions">
           <!-- Only ever visible with a downloaded, digest-checked update waiting. This app
                lives in the tray and is closed to it, so "installs the next time you start it"
                can mean days. This is the press that means now. -->
           <button class="btn btn-install" id="installUpdate" type="button" hidden>
-            <svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>
+            <i class="ico ph ph-lightning" aria-hidden="true"></i>
             <span>Install update</span>
           </button>
         </span>
@@ -237,29 +188,37 @@
            src/main/update.ts. Hidden whenever there is nothing to say. -->
       <div class="notices">
       <div class="notice" id="updateNotice" hidden>
-        <svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>
+        <i class="ico ph ph-lightning" aria-hidden="true"></i>
         <span id="updateText"></span>
         <button class="btn btn-quiet" id="updateGet" type="button" hidden>Get it</button>
         <button class="btn btn-quiet" id="updateInstall" type="button" hidden>Install now</button>
         <button class="btn btn-quiet" id="updateExtension" type="button" hidden>Update extension</button>
       </div>
       <div class="notice" id="pluginRefreshReminder" role="status" hidden>
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-pulse" /></svg>
+        <i class="ico ph ph-activity" aria-hidden="true"></i>
         <span>Please remember to refresh the plugins in ChatGPT.</span>
-        <button class="btn btn-icon" id="dismissPluginRefreshReminder" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg></button>
+        <button class="btn btn-icon" id="dismissPluginRefreshReminder" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><i class="ico ph ph-x" aria-hidden="true"></i></button>
       </div>
       </div>
 
       <main>
 
         <section class="panel appearance-panel scroll" data-panel="appearance" id="appearancePanel" aria-labelledby="appearanceTitle">
-          <div class="appearance-content">
-            <div class="settings-heading"><h1 id="appearanceTitle">Appearance</h1><p>Make this workspace yours. Changes appear immediately.</p></div>
-            <div class="appearance-preview" aria-label="Appearance preview">
-              <div class="appearance-preview-sidebar"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg><span></span><span class="is-selected"></span><span></span></div>
-              <div class="appearance-preview-chat"><p>How will your next idea look?</p><div class="appearance-preview-answer">A little color. Your kind of workspace.</div><div class="appearance-preview-composer"><span>Ask anything…</span><b aria-hidden="true">↑</b></div></div>
-            </div>
-            <div class="pane">
+          <div class="appearance-content settings-page-content">
+            <header class="settings-page-head appearance-page-head">
+              <div><h1 id="appearanceTitle">Appearance</h1><p>Make this workspace yours. Changes appear immediately.</p></div>
+              <button class="btn" id="appearanceReset" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Reset appearance</button>
+            </header>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Preview</h2><p>See changes as you adjust the workspace.</p></div></header>
+              <div class="appearance-preview" aria-label="Appearance preview">
+                <div class="appearance-preview-sidebar"><svg class="ico brand-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-mark" /></svg><span></span><span class="is-selected"></span><span></span></div>
+                <div class="appearance-preview-chat"><p>How will your next idea look?</p><div class="appearance-preview-answer">A little color. Your kind of workspace.</div><div class="appearance-preview-composer"><span>Ask anything…</span><b aria-hidden="true"><i class="ph ph-arrow-up"></i></b></div></div>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Colors</h2><p>Tune surfaces and accents for the selected theme.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
               <label class="setting"><span class="setting-text"><b>Theme</b><em>Light and dark keep their own colors.</em></span><select id="appearanceTheme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
 
               <div class="setting"><label class="setting-text" for="appearance-accent"><b>Accent color</b></label><div class="appearance-color"><input id="appearance-accent" type="color" data-color="accent" aria-label="Accent color" /><input id="appearance-accent-hex" type="text" data-hex="accent" aria-label="Accent color HEX" pattern="#[0-9a-fA-F]{6}" maxlength="7" spellcheck="false" autocomplete="off" /></div></div>
@@ -267,30 +226,34 @@
               <div class="setting"><label class="setting-text" for="appearance-sidebar"><b>Sidebar color</b></label><div class="appearance-color"><input id="appearance-sidebar" type="color" data-color="sidebar" aria-label="Sidebar color" /><input id="appearance-sidebar-hex" type="text" data-hex="sidebar" aria-label="Sidebar color HEX" pattern="#[0-9a-fA-F]{6}" maxlength="7" spellcheck="false" autocomplete="off" /></div></div>
               <label class="setting"><span class="setting-text"><b>Contrast</b><em>Adjust the separation between surfaces and text.</em></span><span class="appearance-range"><input id="appearanceContrast" type="range" min="0" max="100" aria-label="Contrast" /><output id="appearanceContrastValue" for="appearanceContrast"></output></span></label>
               <label class="setting"><span class="setting-text"><b>Translucent sidebar</b><em>Blend your sidebar color softly into the background.</em></span><input id="appearanceTranslucent" type="checkbox" /></label>
-            </div>
-            <h2 class="settings-section-title">Typography</h2>
-            <div class="pane">
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Typography</h2><p>Choose how text reads throughout the workspace.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
               <label class="setting"><span class="setting-text"><b>Font</b></span><select id="appearanceFont"><option value="system">System default</option><option value="sans">Sans serif</option><option value="serif">Serif</option><option value="mono">Monospace</option></select></label>
               <label class="setting"><span class="setting-text"><b>Text size</b></span><span class="appearance-range"><input id="appearanceSize" type="range" min="12" max="18" aria-label="Text size" /><output id="appearanceSizeValue" for="appearanceSize"></output></span></label>
-            </div>
-            <div class="appearance-reset"><button class="btn" id="appearanceReset" type="button">Reset appearance</button></div>
-                            <h2 class="settings-section-title">Preferences</h2>
-                <div class="pane">
-                  <label class="setting" for="uiLanguage"><span class="setting-text"><b>Language</b><em>Changes the app interface immediately. Your messages stay as written.</em></span><select id="uiLanguage" class="language-select" translate="no"><option value="en" lang="en">English</option><option value="es" lang="es">Español</option><option value="zh-CN" lang="zh-CN">简体中文</option><option value="zh-TW" lang="zh-TW">繁體中文</option><option value="ja" lang="ja">日本語</option><option value="tr" lang="tr">Türkçe</option><option value="fr" lang="fr">Français</option></select></label>
-                  <div class="setting setup-profile-setting">
-                    <span class="setting-text"><b id="setupProfileLabel">Setup profile</b></span>
-                    <div class="setup-profile-controls">
-                      <button class="btn" id="setupProfile" type="button" popovertarget="setupProfileMenu" aria-labelledby="setupProfileLabel setupProfileCurrent"><span id="setupProfileCurrent" translate="no">Default</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4" /></svg></button>
-                      <button class="btn" id="setupProfileAdd" type="button" title="Add profile" aria-label="Add profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button>
-                    </div>
-                    <div id="setupProfileMenu" popover aria-labelledby="setupProfileLabel"></div>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Preferences</h2><p>Language and setup profiles stay independent of appearance.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting" for="uiLanguage"><span class="setting-text"><b>Language</b><em>Changes the app interface immediately. Your messages stay as written.</em></span><select id="uiLanguage" class="language-select" translate="no"><option value="en" lang="en">English</option><option value="es" lang="es">Español</option><option value="zh-CN" lang="zh-CN">简体中文</option><option value="zh-TW" lang="zh-TW">繁體中文</option><option value="ja" lang="ja">日本語</option><option value="tr" lang="tr">Türkçe</option><option value="fr" lang="fr">Français</option></select></label>
+                <div class="setting setup-profile-setting">
+                  <span class="setting-text"><b id="setupProfileLabel">Setup profile</b></span>
+                  <div class="setup-profile-controls">
+                    <button class="btn" id="setupProfile" type="button" popovertarget="setupProfileMenu" aria-labelledby="setupProfileLabel setupProfileCurrent"><span id="setupProfileCurrent" translate="no">Default</span><svg class="disclosure-chevron dropdown-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg></button>
+                    <button class="btn" id="setupProfileAdd" type="button" title="Add profile" aria-label="Add profile"><i class="ico ph ph-plus" aria-hidden="true"></i></button>
                   </div>
+                  <div id="setupProfileMenu" popover aria-labelledby="setupProfileLabel"></div>
                 </div>
+              </div>
+            </section>
           </div>
         </section>
         <section class="panel plugins-panel" data-panel="plugins">
           <div class="plugins-content">
-          <header class="plugin-page-head"><div><h1>Plugins</h1><p>Bring your favorite tools into the conversation.</p></div><div class="plugin-search-actions"><label class="plugin-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search" /></svg><input id="pluginsSearch" type="search" placeholder="Search plugins" aria-label="Search plugins" /></label><button class="btn plugin-add" id="pluginsAdd" type="button" aria-label="Add a plugin" title="Add a plugin"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button></div></header>
+          <header class="plugin-page-head"><div><h1>Plugins</h1><p>Bring your favorite tools into the conversation.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="pluginsSearch" type="search" placeholder="Search plugins" aria-label="Search plugins" /></label><button class="btn plugin-add" id="pluginsAdd" type="button" aria-label="Add a plugin" title="Add a plugin"><i class="ico ph ph-plus" aria-hidden="true"></i></button></div></header>
           <section class="plugin-connection" aria-labelledby="pluginsSetupTitle">
             <div><h2 id="pluginsSetupTitle">Set up plugins before your first use</h2><p id="pluginsSetupHint">Add the Chat On Steroids Plugins connector in ChatGPT once so it can use your installed plugins.</p><span id="pluginsConnectionStatus" role="status">Setup required · connect your plugins</span></div>
             <button class="btn btn-solid" id="pluginsSetupLink" type="button">Set up plugins</button>
@@ -300,141 +263,218 @@
           <div id="pluginsInstalled" aria-live="polite"></div>
           <div class="plugin-section-head"><h2>Explore plugins</h2><span class="muted">Made for your workflow</span></div>
           <div id="pluginsExplore" class="plugin-directory"></div>
-          <details class="plugin-legal"><summary>Legal Notices / Third-party Licenses</summary><p>Catalog illustrations are original Chat On Steroids artwork, Copyright © 2026 Chat On Steroids contributors, licensed under the app’s MIT license. They illustrate independent integrations and are not official product logos or endorsements. Product names belong to their respective owners.</p><p>Installed plugins retain their own licenses. Open a plugin’s details to see its source, version and license. Review the upstream project before installation. Bundled dependency notices and reviewed catalog license texts are included in THIRD-PARTY-NOTICES.txt with the application; external plugins are downloaded separately.</p><button class="btn" id="pluginsLegalOpen" type="button">Open full third-party license texts</button></details>
+          <details class="plugin-legal"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Legal Notices / Third-party Licenses</summary><p>Catalog illustrations are original Chat On Steroids artwork, Copyright © 2026 Chat On Steroids contributors, licensed under the app’s MIT license. They illustrate independent integrations and are not official product logos or endorsements. Product names belong to their respective owners.</p><p>Installed plugins retain their own licenses. Open a plugin’s details to see its source, version and license. Review the upstream project before installation. Bundled dependency notices and reviewed catalog license texts are included in THIRD-PARTY-NOTICES.txt with the application; external plugins are downloaded separately.</p><button class="btn" id="pluginsLegalOpen" type="button">Open full third-party license texts</button></details>
+          </div>
+        </section>
+        <section class="panel plugins-panel skills-panel" data-panel="skills">
+          <div class="plugins-content">
+            <header class="plugin-page-head"><div><h1>Skills</h1><p>Reusable instructions for the work you do in Chat On Steroids.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="skillsSearch" type="search" placeholder="Search skills" aria-label="Search skills" /></label><details class="plugin-menu skill-import-menu"><summary class="btn plugin-add" aria-label="Import a skill" title="Import a skill"><i class="ico ph ph-plus" aria-hidden="true"></i></summary><div class="plugin-menu-actions"><button class="btn" id="skillsImportFolder" type="button">Import folder</button><button class="btn" id="skillsImportFile" type="button">Import SKILL.md</button><button class="btn" id="skillsImportGithub" type="button">Import from GitHub</button></div></details></div></header>
+            <div class="plugin-refresh-guide pet-import-guide"><p>Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.</p></div>
+            <dialog class="plugin-dialog pet-delete-dialog" id="skillGithubDialog" aria-labelledby="skillGithubTitle">
+              <div class="plugin-dialog-head"><h2 id="skillGithubTitle">Import from GitHub</h2><button class="btn" id="skillGithubClose" type="button">Close</button></div>
+              <form id="skillGithubForm" class="plugin-dialog-body">
+                <p id="skillGithubDescription">Paste a public GitHub folder link or a link to its SKILL.md. The complete skill folder will be copied to your CoS library.</p>
+                <label class="plugin-field" for="skillGithubUrl">GitHub URL<input id="skillGithubUrl" type="url" required autocomplete="url" spellcheck="false" placeholder="https://github.com/owner/repo/tree/main/skill" /></label>
+                <p id="skillGithubError" class="plugin-error" role="alert" hidden></p>
+                <div class="pet-delete-actions"><button class="btn" id="skillGithubCancel" type="button">Cancel</button><button class="btn btn-solid" id="skillGithubSubmit" type="submit">Import skill</button></div>
+              </form>
+            </dialog>
+            <div class="plugin-section-head"><h2>Installed <span id="skillsCount" class="plugin-count">Loading…</span></h2><button class="btn" id="skillsRefresh" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button></div>
+            <div id="skillsInstalled" class="pet-library-grid" aria-live="polite"></div>
+          </div>
+        </section>
+        <section class="panel plugins-panel pets-panel" data-panel="pets">
+          <div class="plugins-content">
+            <header class="plugin-page-head"><div><h1>Pets</h1><p>Your little desktop companions.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="petsSearch" type="search" placeholder="Search pets" aria-label="Search pets" /></label><button class="btn plugin-add" id="petsImport" type="button" aria-label="Import CoS Pet folder" title="Import CoS Pet folder"><i class="ico ph ph-plus" aria-hidden="true"></i></button></div></header>
+            <div class="plugin-refresh-guide pet-import-guide">
+              <p>A compatible pet is a folder with three files.</p>
+              <button class="btn" id="petsFormatGuide" type="button">What can I import?</button>
+            </div>
+            <dialog class="plugin-dialog" id="petFormatDialog" aria-labelledby="petFormatTitle">
+              <div class="plugin-dialog-head"><h2 id="petFormatTitle">What can I import?</h2><button class="btn" id="petsFormatClose" type="button">Close</button></div>
+              <div class="plugin-dialog-body pet-format-content">
+                <div class="pet-format-guide-head"><p>A compatible pet is a folder with three files.</p><button class="btn" id="petsCopyInstructions" type="button">Copy instructions</button></div>
+                <p class="pet-format-folder">Import the folder itself with <code>pet.json</code>, <code>atlas.png</code>, and <code>animations.json</code>. Chat On Steroids validates all three before copying the pet into your local library.</p>
+                <div class="pet-format-ai-help">
+                  <strong>AI-assisted creation</strong>
+                  <p>Copy the production brief below and replace <code>&lt;describe your character here&gt;</code> with the character, personality, colors, style, accessories, and references you want. In Codex, invoke <code>$hatch-pet</code> for visual generation and QA; its official URL is included for discovery, while this app’s 96-frame CoS format remains authoritative.</p>
+                </div>
+                <pre id="petsFormatInstructions"></pre>
+              </div>
+            </dialog>
+            <section id="petsFavoritesSection" hidden>
+              <div class="plugin-section-head"><h2>Favorites <span id="petsFavoritesCount" class="plugin-count"></span></h2></div>
+              <div id="petsFavorites" class="pet-library-grid" aria-live="polite"></div>
+            </section>
+            <div class="plugin-section-head"><h2>Library <span id="petsCount" class="plugin-count">Loading…</span></h2></div>
+            <div id="petsInstalled" class="pet-library-grid" aria-live="polite"></div>
           </div>
         </section>
         <section class="panel usage-panel" data-panel="usage">
-          <div class="settings-heading"><span class="eyebrow">YOUR ACTIVITY</span><h1>Usage</h1><p>Model availability and the work recorded in this workspace.</p></div>
-          <div class="usage-summary" id="usageSummary"></div>
-          <section class="usage-section"><h2>Token activity per day</h2><div id="usageHeatmap" class="usage-heatmap"></div><p class="muted">Estimated context processed per tool call · last 52 weeks</p></section>
-          <section class="usage-section"><h2>Cost estimate per day</h2>
-            <details id="usageFormulaDetails"><summary>Edit cost formula</summary>
-            <p id="usageFormula" class="muted"></p>
-            <p class="muted">Automatic baselines use Standard short-context cached-input prices, checked 7 September 2026: <a href="https://developers.openai.com/api/docs/models/gpt-5.6-sol" target="_blank" rel="noopener noreferrer">GPT-5.6 Sol</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-terra" target="_blank" rel="noopener noreferrer">GPT-5.6 Terra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-luna" target="_blank" rel="noopener noreferrer">GPT-5.6 Luna</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-astra" target="_blank" rel="noopener noreferrer">GPT-6 Astra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.5" target="_blank" rel="noopener noreferrer">GPT-5.5</a>. These are editable cost comparisons, not actual bills.</p>
-            <label class="setting"><span class="setting-text"><b>Context times unique tool calls, divided by</b><em>Changes estimated tokens and costs.</em></span><input id="usageDivisor" aria-label="Usage token divisor" type="number" min="0.01" step="0.01" value="2" /></label>
-            <label class="setting"><span class="setting-text"><b>Cached-input cost multiplier</b><em>Applied after each model's cached-input rate.</em></span><input id="usageMultiplier" aria-label="Cached-input cost multiplier" type="number" min="0" step="0.01" value="1.2" /></label>
-            <div id="usageRates"></div></details>
-            <p id="usageCost" class="muted">Set per-model cached-input rates to compare costs.</p><div id="usageDays"></div>
-          </section>
-          <section class="usage-section usage-messages" aria-labelledby="usageMessagesTitle">
-            <h2><span id="usageMessagesTitle">Messages and limits</span><button class="btn" id="refreshUsage" type="button">Refresh</button></h2>
-            <button class="btn usage-week-start" id="usageWeekStart" type="button" title="Change start day" aria-describedby="usageMessagePeriod"><span id="usageWeekStartLabel"></span><span aria-hidden="true">›</span></button>
-            <span class="sr-only" id="usageMessagePeriod"></span>
-            <p class="muted usage-status" id="usageStatus" role="status">Updating usage in the background. After an update, this can take a few minutes. You can keep using the app.</p>
-            <div id="modelUsage">
-              <dl class="usage-message-counts" id="usageMessageCounts" aria-live="polite">
-                <div class="usage-limit"><dt translate="no">GPT-5.6</dt><dd><strong id="usageMessages56" translate="no">—</strong><span class="muted">sent</span></dd></div>
-                <div class="usage-limit"><dt translate="no">GPT-6</dt><dd><strong id="usageMessages6" translate="no">—</strong><span class="muted">sent</span></dd></div>
-              </dl>
-              <div id="usageLimits"></div>
+          <div class="settings-page-content usage-content">
+            <header class="settings-page-head">
+              <h1>Usage</h1>
+              <p>Model availability and the work recorded in this workspace.</p>
+            </header>
+            <div class="usage-status-line">
+              <i class="ico ph ph-info" aria-hidden="true"></i>
+              <p class="muted usage-status" id="usageStatus" role="status">Updating usage in the background. After an update, this can take a few minutes. You can keep using the app.</p>
             </div>
-          </section>
+            <div class="settings-surface usage-summary" id="usageSummary"></div>
+            <div class="usage-sections">
+              <section class="settings-section usage-section">
+                <header class="settings-section-head">
+                  <div><h2>Token activity per day</h2><p>Estimated context processed per tool call · last 52 weeks</p></div>
+                </header>
+                <div class="settings-surface usage-heatmap-surface"><div id="usageHeatmap" class="usage-heatmap"></div></div>
+              </section>
+              <section class="settings-section usage-section">
+                <header class="settings-section-head">
+                  <div><h2>Cost estimates</h2></div>
+                  <button class="btn" id="usageFormulaToggle" type="button" aria-controls="usageFormulaDetails" aria-expanded="false"><i class="ico ph ph-sliders-horizontal" aria-hidden="true"></i>Edit cost formula</button>
+                </header>
+                <div id="usageFormulaDetails" class="settings-surface usage-formula-panel" hidden>
+                  <p id="usageFormula" class="muted"></p>
+                  <p class="muted">Automatic baselines use Standard short-context cached-input prices, checked 7 September 2026: <a href="https://developers.openai.com/api/docs/models/gpt-5.6-sol" target="_blank" rel="noopener noreferrer">GPT-5.6 Sol</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-terra" target="_blank" rel="noopener noreferrer">GPT-5.6 Terra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-luna" target="_blank" rel="noopener noreferrer">GPT-5.6 Luna</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-astra" target="_blank" rel="noopener noreferrer">GPT-6 Astra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.5" target="_blank" rel="noopener noreferrer">GPT-5.5</a>. These are editable cost comparisons, not actual bills.</p>
+                  <label class="setting"><span class="setting-text"><b>Context times unique tool calls, divided by</b><em>Changes estimated tokens and costs.</em></span><input id="usageDivisor" aria-label="Usage token divisor" type="number" min="0.01" step="0.01" value="2" /></label>
+                  <label class="setting"><span class="setting-text"><b>Cached-input cost multiplier</b><em>Applied after each model's cached-input rate.</em></span><input id="usageMultiplier" aria-label="Cached-input cost multiplier" type="number" min="0" step="0.01" value="1.2" /></label>
+                  <div id="usageRates"></div>
+                </div>
+                <p id="usageCost" class="muted usage-cost-summary">Set per-model cached-input rates to compare costs.</p>
+                <div class="usage-cost-groups">
+                  <div class="usage-cost-group">
+                    <h3>By model</h3>
+                    <div id="usageModels" class="settings-surface usage-table-stack"></div>
+                  </div>
+                  <div class="usage-cost-group">
+                    <h3>By day</h3>
+                    <div id="usageDays" class="settings-surface usage-table-stack"></div>
+                  </div>
+                </div>
+              </section>
+              <section class="settings-section usage-section usage-messages" aria-labelledby="usageMessagesTitle">
+                <header class="settings-section-head">
+                  <div><h2 id="usageMessagesTitle">Messages and limits</h2><p>Verified native sends alongside model, shared and feature limits reported by ChatGPT.</p></div>
+                  <button class="btn" id="refreshUsage" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button>
+                </header>
+                <div class="settings-surface usage-message-surface">
+                  <button class="btn usage-week-start" id="usageWeekStart" type="button" title="Change start day" aria-describedby="usageMessagePeriod"><i class="ico ph ph-calendar-dots" aria-hidden="true"></i><span id="usageWeekStartLabel"></span></button>
+                  <dl class="usage-message-counts" id="usageMessageCounts" aria-live="polite" translate="no"><div><dt>GPT-5.6</dt><dd><strong id="usageMessages56">—</strong><span class="muted">sent</span></dd></div><div><dt>GPT-6</dt><dd><strong id="usageMessages6">—</strong><span class="muted">sent</span></dd></div></dl>
+                  <p class="muted" id="usageMessagePeriod"></p>
+                </div>
+                <div class="settings-surface" id="modelUsage"><div class="usage-limits" id="usageLimits"></div></div>
+              </section>
+            </div>
+          </div>
         </section>
         <!-- ============================================================ Home -->
         <section class="panel" data-panel="home">
-          <div class="settings-heading"><h1>Workspace</h1><p>Choose what ChatGPT can access and keep your connection healthy.</p></div>
-          <div class="top">
-            <!-- ------------------------------------------------- permissions -->
-            <section class="card">
-              <h2>
-                Permissions
-                <span class="acts">
-                  <button class="btn" id="readOnlyBtn" type="button">
-                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-lock" /></svg>Read-only
-                  </button>
-                </span>
-              </h2>
-              <div class="scroll">
-                <div id="groups"></div>
-                <div class="desktop-access" id="desktopAccess" hidden>
-                  <strong id="desktopAccessTitle">Desktop access needs attention</strong>
-                  <p id="desktopAccessDetail"></p>
-                  <button class="btn btn-solid" id="requestDesktopAccessibility" type="button">Request Accessibility</button>
-                  <button
-                    class="btn"
-                    id="openDesktopScreen"
-                    type="button"
-                    data-link="x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-                  >Open Screen Recording settings</button>
-                  <button
-                    class="btn"
-                    id="openDesktopAccessibility"
-                    type="button"
-                    data-link="x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-                  >Open Accessibility settings</button>
-                </div>
-              </div>
-            </section>
-
-            <!-- ----------------------------------------------------- folders -->
-            <section class="card" id="foldersCard">
-              <h2>
-                Folders
-                <span class="acts">
-                  <button class="btn" id="addFolder" type="button">
-                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>Add
-                  </button>
-                </span>
-              </h2>
-              <div class="scroll">
-                <div id="rootList"></div>
-                <p class="empty" id="rootsEmpty">
-                  Nothing shared yet. Press Add or drop a folder here. ChatGPT sees short names
-                  like <code>/project</code> — your real system paths are never sent.
-                </p>
-              </div>
-            </section>
-
-            <!-- ------------------------------------------------------ health -->
-            <section class="card">
-              <h2>
-                Health
-                <span class="acts">
-                  <button class="btn" id="runChecks" type="button">
-                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>
-                    <span id="runChecksLabel">Run checks</span>
-                  </button>
-                </span>
-              </h2>
-              <div class="scroll">
-                <div class="big">
-                  <div><b id="bigHandshake">—</b><span>verified link</span></div>
-                  <div><b id="bigRequest">—</b><span>last ChatGPT call</span></div>
-                </div>
-                <div class="facts" id="facts"></div>
-                <div class="checks" id="checksBox" hidden>
-                  <div class="checks-head">
-                    <strong id="checksSummary"></strong>
-                    <button class="btn btn-quiet" id="closeChecks" type="button">
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-x" /></svg>
+          <div class="settings-page-content workspace-content">
+            <header class="settings-page-head workspace-page-head">
+              <h1>Workspace</h1>
+              <p>Choose what ChatGPT can access and keep your connection healthy.</p>
+            </header>
+            <div class="workspace-layout">
+              <div class="workspace-column">
+                <!-- ----------------------------------------------- permissions -->
+                <section class="settings-section workspace-section workspace-permissions">
+                  <header class="settings-section-head workspace-section-head">
+                    <div><h2>Permissions</h2><p>Control which local capabilities ChatGPT can use.</p></div>
+                    <button class="btn" id="readOnlyBtn" type="button">
+                      <i class="ico ph ph-lock-key" aria-hidden="true"></i>Read-only
                     </button>
+                  </header>
+                  <div class="settings-surface workspace-surface scroll">
+                    <div id="groups"></div>
+                    <div class="desktop-access" id="desktopAccess" hidden>
+                      <strong id="desktopAccessTitle">Desktop access needs attention</strong>
+                      <p id="desktopAccessDetail"></p>
+                      <button class="btn btn-solid" id="requestDesktopAccessibility" type="button">Request Accessibility</button>
+                      <button
+                        class="btn"
+                        id="openDesktopScreen"
+                        type="button"
+                        data-link="x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+                      >Open Screen Recording settings</button>
+                      <button
+                        class="btn"
+                        id="openDesktopAccessibility"
+                        type="button"
+                        data-link="x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+                      >Open Accessibility settings</button>
+                    </div>
                   </div>
-                  <ul id="checkList"></ul>
-                </div>
-              </div>
-            </section>
-          </div>
+                </section>
 
-          <!-- ---------------------------------------------------- activity -->
-          <section class="card">
-            <h2>
-              Activity
-              <span class="acts">
-                <span class="problems" id="homeProblems" hidden></span>
-                <button class="btn" id="copyLog" type="button">
-                  <svg class="ico" viewBox="0 0 24 24"><use href="#i-copy" /></svg>Copy
-                </button>
-              </span>
-            </h2>
-            <div class="scroll feed" id="homeFeed"></div>
-          </section>
+                <!-- -------------------------------------------------- activity -->
+                <section class="settings-section workspace-section workspace-activity">
+                  <header class="settings-section-head workspace-section-head">
+                    <div><h2>Activity</h2><p>Recent local events and failures.</p></div>
+                    <span class="workspace-section-actions">
+                      <span class="problems" id="homeProblems" hidden></span>
+                      <button class="btn" id="copyLog" type="button">
+                        <i class="ico ph ph-copy" aria-hidden="true"></i>Copy
+                      </button>
+                    </span>
+                  </header>
+                  <div class="settings-surface workspace-surface scroll feed" id="homeFeed"></div>
+                </section>
+              </div>
+
+              <div class="workspace-column">
+                <!-- --------------------------------------------------- folders -->
+                <section class="settings-section workspace-section" id="foldersCard">
+                  <header class="settings-section-head workspace-section-head">
+                    <div><h2>Folders</h2><p>Approved locations available to local tools.</p></div>
+                    <button class="btn" id="addFolder" type="button">
+                      <i class="ico ph ph-plus" aria-hidden="true"></i>Add
+                    </button>
+                  </header>
+                  <div class="settings-surface workspace-surface scroll">
+                    <div id="rootList"></div>
+                    <p class="empty" id="rootsEmpty">
+                      Nothing shared yet. Press Add or drop a folder here. ChatGPT sees short names
+                      like <code>/project</code> — your real system paths are never sent.
+                    </p>
+                  </div>
+                </section>
+
+                <!-- ---------------------------------------------------- health -->
+                <section class="settings-section workspace-section workspace-health">
+                  <header class="settings-section-head workspace-section-head">
+                    <div><h2>Health</h2><p>Connection and runtime status.</p></div>
+                    <button class="btn" id="runChecks" type="button">
+                      <i class="ico ph ph-activity" aria-hidden="true"></i>
+                      <span id="runChecksLabel">Run checks</span>
+                    </button>
+                  </header>
+                  <div class="settings-surface workspace-surface scroll">
+                    <div class="big">
+                      <div><b id="bigHandshake">—</b><span>verified link</span></div>
+                      <div><b id="bigRequest">—</b><span>last ChatGPT call</span></div>
+                    </div>
+                    <div class="facts" id="facts"></div>
+                    <div class="checks" id="checksBox" hidden>
+                      <div class="checks-head">
+                        <strong id="checksSummary"></strong>
+                        <button class="btn btn-quiet" id="closeChecks" type="button">
+                          <i class="ico ph ph-x" aria-hidden="true"></i>
+                        </button>
+                      </div>
+                      <ul id="checkList"></ul>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
         </section>
 
         <!-- =========================================================== Setup -->
-        <section class="panel scroll" data-panel="setup">
-          <div class="sheet">
-            <div class="setup-heading">
-              <div class="settings-heading"><h1>Setup</h1><p>Connect your workspace to ChatGPT.</p></div>
+        <section class="panel setup-panel scroll" data-panel="setup">
+          <div class="sheet settings-page-content">
+            <header class="setup-heading settings-page-head">
+              <div><h1>Setup</h1><p>Connect your workspace to ChatGPT.</p></div>
               <div class="language-tabs" role="group" aria-label="Language">
                 <button type="button" data-language="zh-TW" lang="zh-TW" translate="no" title="繁體中文" aria-label="繁體中文" aria-pressed="false"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#fe0000" d="M0 0h60v40H0z"/><path fill="#000095" d="M0 0h30v20H0z"/><path fill="#fff" d="m15 2 1.1 3.7 2.9-2.6-.9 3.8 3.8-.9-2.6 2.9L23 10l-3.7 1.1 2.6 2.9-3.8-.9.9 3.8-2.9-2.6L15 18l-1.1-3.7-2.9 2.6.9-3.8-3.8.9 2.6-2.9L7 10l3.7-1.1-2.6-2.9 3.8.9-.9-3.8 2.9 2.6z"/><circle cx="15" cy="10" r="4.5" fill="#000095"/><circle cx="15" cy="10" r="3.5" fill="#fff"/></svg></button>
                 <button type="button" data-language="en" lang="en" translate="no" title="English" aria-label="English" aria-pressed="true"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#012169" d="M0 0h60v40H0z"/><path stroke="#fff" stroke-width="8" d="m0 0 60 40M60 0 0 40"/><path stroke="#c8102e" stroke-width="3" d="m0 0 60 40M60 0 0 40"/><path stroke="#fff" stroke-width="13" d="M30 0v40M0 20h60"/><path stroke="#c8102e" stroke-width="7" d="M30 0v40M0 20h60"/></svg></button>
@@ -444,7 +484,7 @@
                 <button type="button" data-language="tr" lang="tr" translate="no" title="Türkçe" aria-label="Türkçe" aria-pressed="false"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#e30a17" d="M0 0h60v40H0z"/><circle cx="25" cy="20" r="10" fill="#fff"/><circle cx="28" cy="20" r="8" fill="#e30a17"/><path fill="#fff" d="m39 13 1.6 4.8h5l-4 3 1.5 4.7-4.1-2.9-4.1 2.9 1.5-4.7-4-3h5z"/></svg></button>
                 <button type="button" data-language="fr" lang="fr" translate="no" title="Français" aria-label="Français" aria-pressed="false"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#002395" d="M0 0h20v40H0z"/><path fill="#fff" d="M20 0h20v40H20z"/><path fill="#ed2939" d="M40 0h20v40H40z"/></svg></button>
               </div>
-            </div>
+            </header>
             <div class="lede">
               <p>
                 Follow these six steps once. The pictures show where to click. Start with Core;
@@ -457,7 +497,7 @@
               <!-- 1 -->
               <li class="step" data-step="folder">
                 <div class="step-mark">
-                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                  <i class="ico ph ph-check tick" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Pick a folder to share</h3>
@@ -466,7 +506,7 @@
                   </p>
                   <div class="step-actions">
                     <button class="btn btn-solid" id="wizAddFolder" type="button">
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-folder" /></svg>Choose folder
+                      <i class="ico ph ph-folder" aria-hidden="true"></i>Choose folder
                     </button>
                     <button class="btn" id="wizManageFolders" type="button">Manage folders</button>
                     <span class="chosen" id="wizFolders">None yet</span>
@@ -477,7 +517,7 @@
               <!-- 2 -->
               <li class="step" data-step="tunnel">
                 <div class="step-mark">
-                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                  <i class="ico ph ph-check tick" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Create a tunnel</h3>
@@ -493,7 +533,7 @@
                       type="button"
                       data-link="https://platform.openai.com/settings/organization/tunnels"
                     >
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open Tunnels
+                      <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open Tunnels
                     </button>
                   </div>
                   <div class="setup-guide" data-setup-guide="tunnel"></div>
@@ -512,7 +552,7 @@
                        second tunnel of its own. Hidden unless desktop permissions are on, so
                        nobody is asked to create a tunnel for a feature they never enabled. -->
                   <details class="setup-optional" id="desktopTunnelField" hidden>
-                    <summary>Desktop control <span class="tag is-optional">optional</span></summary>
+                    <summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Desktop control <span class="tag is-optional">optional</span></summary>
                     <div class="field">
                       <label for="desktopTunnelId">Tunnel ID — Desktop connector</label>
                       <input
@@ -534,7 +574,7 @@
               <!-- 3 -->
               <li class="step" data-step="key">
                 <div class="step-mark">
-                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                  <i class="ico ph ph-check tick" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Create an API key</h3>
@@ -550,7 +590,7 @@
                       type="button"
                       data-link="https://platform.openai.com/settings/organization/api-keys"
                     >
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open API keys
+                      <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open API keys
                     </button>
                   </div>
                   <div class="setup-guide" data-setup-guide="key"></div>
@@ -568,7 +608,7 @@
               <!-- 4 -->
               <li class="step" data-step="connect">
                 <div class="step-mark">
-                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                  <i class="ico ph ph-check tick" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Start the tunnel</h3>
@@ -587,7 +627,7 @@
               <!-- 5 -->
               <li class="step" data-step="chatgpt">
                 <div class="step-mark">
-                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                  <i class="ico ph ph-check tick" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Add it in ChatGPT</h3>
@@ -597,7 +637,7 @@
                   <h4 class="setup-subheading">B · Create the Core plugin</h4>
                   <div class="step-actions">
                     <button class="btn btn-solid" type="button" data-link="https://chatgpt.com/plugins">
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open ChatGPT Plugins
+                      <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open ChatGPT Plugins
                     </button>
                   </div>
                   <ol class="setup-instructions">
@@ -632,7 +672,7 @@
               -->
               <li class="step" data-step="browser">
                 <div class="step-mark">
-                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                  <i class="ico ph ph-check tick" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Add the Chrome extension</h3>
@@ -650,14 +690,10 @@
                   </p>
                   <div class="step-actions">
                     <button class="btn btn-solid" id="bridgeFolder" type="button">
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-folder" /></svg>Open extension folder
+                      <i class="ico ph ph-folder" aria-hidden="true"></i>Open extension folder
                     </button>
-                    <button
-                      class="btn"
-                      id="bridgeDownload"
-                      type="button"
-                    >
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Download extension ZIP
+                    <button class="btn" id="bridgeDownload" type="button">
+                      <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Download extension ZIP
                     </button>
                     <button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button>
                     <span class="chosen" id="bridgeState"></span>
@@ -669,7 +705,7 @@
 
             <details class="advanced">
               <summary>
-                <svg class="ico sum-chev" viewBox="0 0 24 24"><use href="#i-chev" /></svg>
+                <svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>
                 Advanced — method, program, startup
               </summary>
 
@@ -716,8 +752,6 @@
                 <button class="is-sel" data-view="timeline" type="button">Timeline</button>
                 <button data-view="compact" type="button">Handoff</button>
               </span>
-              <span class="subhead-note" id="chatState"></span>
-
             </div>
 
             <div class="scroll" id="chatBody">
@@ -728,7 +762,7 @@
                 <div id="timeline"></div>
                 <div id="inputQueue" class="input-queue" aria-live="polite"></div>
                 <p class="empty" id="timelineEmpty">
-                  <svg class="ico welcome-mark" viewBox="0 0 24 24"><use href="#i-mark" /></svg><span>What would you like to build?</span>
+                  <svg class="ico brand-icon welcome-mark" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-mark" /></svg><span>What would you like to build?</span>
                 </p>
               </div>
 
@@ -738,7 +772,7 @@
                   <h3 id="handoffHead" hidden>
                     Latest handoff
                     <button class="btn" id="copyHandoff" type="button" hidden>
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-copy" /></svg>Copy
+                      <i class="ico ph ph-copy" aria-hidden="true"></i>Copy
                     </button>
                   </h3>
                   <div id="handoffBox"></div>
@@ -754,11 +788,14 @@
                 three overlapping ones. The pairing instructions moved into Setup, where
                 the rest of the once-only work already lives.
               -->
-              <div class="view" data-view="settings" hidden>
-                <div class="settings-heading"><h1>Agents &amp; automation</h1><p>Fine-tune your workspace and the way your agents work.</p><label class="sr-only" for="settingsSearch">Search settings</label><input id="settingsSearch" type="search" placeholder="Search settings…" /></div>
+              <div class="view settings-page-content automation-content" data-view="settings" hidden>
+                <header class="settings-page-head automation-page-head">
+                  <div><h1>Agents &amp; automation</h1><p>Fine-tune your workspace and the way your agents work.</p></div>
+                  <div class="automation-search"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="settingsSearch" type="search" placeholder="Search settings…" aria-label="Search settings" /></label></div>
+                </header>
                 <p id="settingsSearchEmpty" class="muted" role="status" hidden>No settings match your search.</p>
-                <h2 class="settings-section-title">Continuation sources</h2>
-                <div class="pane">
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Continuation sources</h2><p>Choose where continuations come from and what their handoffs include.</p></div></header>
+                <div class="settings-surface pane">
                   <label class="setting">
                     <span class="setting-text">
                       <b>Automatically continue interrupted responses</b>
@@ -772,14 +809,14 @@
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan reasoning</b><em>Used with the ChatGPT model above; independent from API reasoning.</em></span><select id="helperReasoning" aria-label="Goal, Loop and Plan reasoning"></select></div>
                   <label class="setting"><span class="setting-text"><b>Include tool details in handoffs</b><em>Handoff briefs retain tool details. Goal and Loop use user messages and assistant updates and answers.</em></span><input id="goalIncludeToolCalls" type="checkbox" /></label>
                   </div>
-                <h2 class="settings-section-title">ChatGPT models</h2>
-                <div class="pane">
-                  <div class="setting"><span class="setting-text"><b>Available ChatGPT models</b><em id="chatModelStatus">Read model choices from your account.</em></span><button class="btn" id="refreshChatModels" type="button">Refresh</button></div>
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">ChatGPT models</h2><p>Use account-observed models for sub-agents.</p></div><button class="btn" id="refreshChatModels" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button></header>
+                <div class="settings-surface pane">
+                  <div class="setting"><span class="setting-text"><b>Available ChatGPT models</b><em id="chatModelStatus">Read model choices from your account.</em></span></div>
                   <div class="setting"><span class="setting-text"><b>Default sub-agent model</b><em>Confirmed in ChatGPT before a worker starts.</em></span><select id="workerModel"><option value="" disabled>No observed choices</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Default sub-agent reasoning</b><em>Selected independently from the model.</em></span><select id="workerReasoning"><option value="" disabled>No observed choices</option></select></div>
                   </div>
-                <h2 class="settings-section-title">Workers & recovery</h2>
-                <div class="pane">
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Workers &amp; recovery</h2><p>Set worker limits and which chats can resume after interruptions.</p></div></header>
+                <div class="settings-surface pane">
                   <div class="setting">
                     <span class="setting-text">
                       <b>Sub-agent workers</b>
@@ -807,18 +844,18 @@
 
                   <div id="swarmList"></div>
                   <div class="step-actions">
-                    <button class="btn" id="swarmReset" type="button">Clear swarm</button>
+                    <button class="btn" id="swarmReset" type="button"><i class="ico ph ph-trash" aria-hidden="true"></i>Clear swarm</button>
                   </div>
                 </div>
-                <h2 class="settings-section-title">Keep the turn open</h2>
-                <div class="pane">
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Keep the turn open</h2><p>Control plan generation and what happens near the end of a turn.</p></div></header>
+                <div class="settings-surface pane">
                   <label class="setting"><span class="setting-text"><b>Plan generation</b><em>Create staged tasks. ChatGPT uses the Goal, Loop and Plan model above; API uses the model and reasoning in API provider settings.</em></span><select id="planBackend"><option value="chatgpt">ChatGPT</option><option value="api">API provider</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Session finish</b><em>Ask Astra to keep the turn open for your next instruction. With Automatic plugin refresh enabled, tool changes refresh the connector after 20 seconds.</em></span><input id="finishTool" type="checkbox" /></label>
                   <div class="setting"><span class="setting-text"><b>When ChatGPT is wrapping up</b><em>When Goal or Loop is enabled for this chat, finishing generates a follow-up using your Loop instructions and source. When Off, you receive a notification.</em></span></div>
                   <div class="setting"><span class="setting-text"><b>Requested notice</b><em>A request to the model, not a guaranteed countdown.</em></span><select id="finishLeadMinutes"><option value="3">3 minutes</option><option value="5">5 minutes</option></select></div>
                   </div>
-                <h2 class="settings-section-title">Browser & history</h2>
-                <div class="pane">
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Browser &amp; history</h2><p>Manage background tabs, browser preferences, and history compaction.</p></div></header>
+                <div class="settings-surface pane">
                   <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Browser bridge port</b><em id="browserBridgePortHint">Auto uses the first available port. A fixed port must be available.</em></span><select id="browserBridgePort"><option value="auto">Auto</option><option value="8765">8765</option><option value="8766">8766</option><option value="8767">8767</option><option value="8768">8768</option><option value="8769">8769</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
@@ -827,7 +864,7 @@
                   <p class="muted">Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.</p>
                   <label class="setting"><span class="setting-text"><b>Overwrite ChatGPT tool rows</b><em>Show recorded local activity in the ChatGPT page.</em></span><input id="browserOverwrite" type="checkbox" disabled /></label>
                   <label class="setting"><span class="setting-text"><b>Show durations in ChatGPT</b><em>Uses the same preference as the extension popup.</em></span><input id="browserDurations" type="checkbox" disabled /></label>
-                  <div class="setting"><span class="setting-text"><b>Browser preferences</b><em id="browserPreferencesStatus" role="status">Refresh to read the browser's current preferences.</em></span><button id="browserPreferencesRefresh" class="btn" type="button">Refresh browser preferences</button></div>
+                  <div class="setting"><span class="setting-text"><b>Browser preferences</b><em id="browserPreferencesStatus" role="status">Refresh to read the browser's current preferences.</em></span><button id="browserPreferencesRefresh" class="btn" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh browser preferences</button></div>
                   <div class="setting">
                     <span class="setting-text">
                       <b>Compact automatically</b>
@@ -838,8 +875,8 @@
                     <span class="sw"><input type="checkbox" id="autoCompact" /><i></i></span>
                   </div>
                   </div>
-                <h2 class="settings-section-title">API provider</h2>
-                <div class="pane">
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">API provider</h2><p>Set the provider, model, and credentials for API-based decisions.</p></div></header>
+                <div class="settings-surface pane">
                   <div class="setting">
                     <span class="setting-text">
                       <b>Provider</b>
@@ -872,7 +909,7 @@
                     <div class="step-actions">
                       <button class="btn" id="goalKeyRemove" type="button">Remove stored key</button>
                       <button class="btn" type="button" data-link="https://openrouter.ai/settings/keys">
-                        <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open OpenRouter keys
+                        <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open OpenRouter keys
                       </button>
                     </div>
                   </div>
@@ -908,8 +945,8 @@
                   </div>
 
                   </div>
-                <h2 class="settings-section-title">Continuation prompts</h2>
-                <div class="pane">
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Continuation prompts</h2><p>Shape how Goal and Loop write their next instruction.</p></div></header>
+                <div class="settings-surface pane">
                   <div class="setting">
                     <span class="setting-text">
                       <b>Goal prompt, no task</b>
@@ -965,49 +1002,68 @@
 
               </div>
             </div>
+            <div class="turn-status-rail" id="turnStatus" hidden>
+              <span class="turn-status-indicator" id="turnStatusIcon" aria-hidden="true">
+                <svg class="turn-status-snake" viewBox="0 0 16 16">
+                  <rect class="turn-status-snake-segment" x="1" y="1" width="3" height="3" rx=".5" />
+                  <rect class="turn-status-snake-segment" x="6.5" y="1" width="3" height="3" rx=".5" />
+                  <rect class="turn-status-snake-segment" x="12" y="1" width="3" height="3" rx=".5" />
+                  <rect class="turn-status-snake-segment" x="12" y="6.5" width="3" height="3" rx=".5" />
+                  <rect class="turn-status-snake-segment" x="12" y="12" width="3" height="3" rx=".5" />
+                  <rect class="turn-status-snake-segment" x="6.5" y="12" width="3" height="3" rx=".5" />
+                  <rect class="turn-status-snake-segment" x="1" y="12" width="3" height="3" rx=".5" />
+                  <rect class="turn-status-snake-segment" x="1" y="6.5" width="3" height="3" rx=".5" />
+                </svg>
+                <i class="ico ph ph-check turn-status-check" hidden></i>
+              </span>
+              <span class="turn-status-copy" id="chatState"></span>
+            </div>
             <div class="composer-dock" id="composerDock"><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div>
             <form class="composer" id="composer">
               <div id="skillPicker" class="skill-autocomplete" aria-label="Skills" hidden></div>
-              <div id="composerSelectedSkills" class="composer-selected-skills" aria-label="Selected skills" hidden></div>
+              <div id="composerSelectedSkills" class="composer-selected-skills" aria-label="Selected skills and actions" hidden></div>
               <label class="sr-only" for="chatInput">Message ChatGPT</label>
               <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" placeholder="Ask anything…"></textarea>
               <div class="composer-toolbar">
                 <details class="composer-menu" id="attachmentMenu">
-                  <summary aria-label="Add attachments" title="Add attachments"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></summary>
+                  <summary aria-label="Add attachments" title="Add attachments"><i class="ico ph ph-plus" aria-hidden="true"></i></summary>
                   <div class="composer-popover">
-                    <button id="attachImages" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-image" /></svg>Add photos &amp; files</button>
-                    <button id="composerFolder" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-folder" /></svg>Share a folder</button>
+                    <button id="attachImages" type="button"><i class="ico ph ph-image" aria-hidden="true"></i>Add photos &amp; files</button>
+                    <button id="composerFolder" type="button"><i class="ico ph ph-folder" aria-hidden="true"></i>Share a folder</button>
                     <div class="composer-skills-row">
-                      <button id="composerSkills" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-skill" /></svg>Skills</button>
-                      <button id="composerAddSkill" type="button" aria-label="Add Skills" title="Add Skills"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button>
+                      <button id="composerSkills" type="button"><i class="ico ph ph-cube" aria-hidden="true"></i>Skills</button>
+                      <button id="composerAddSkill" type="button" aria-label="Add Skills" title="Add Skills"><i class="ico ph ph-plus" aria-hidden="true"></i></button>
                     </div>
                   </div>
                 </details>
                 <div class="composer-options">
-                  <details class="composer-menu" id="composerSettings">
-                    <summary aria-label="Chat options" title="Chat options"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg></summary>
-                    <div class="composer-popover">
-                      <div class="automation-switch" id="automationSwitch" role="radiogroup" aria-label="Chat mode">
-                        <button type="button" role="radio" aria-checked="true" data-mode="off" data-keep-menu="true">Off</button>
-                        <button type="button" role="radio" aria-checked="false" data-mode="goal" data-keep-menu="true">Goal</button>
-                        <button type="button" role="radio" aria-checked="false" data-mode="loop" data-keep-menu="true">Loop</button>
-                        </div><select hidden id="chatAutomation" aria-label="Chat automation"><option value="off">Off</option><option value="goal">Goal</option><option value="loop">Loop</option></select>
-                      <label id="loopDeliveryRow" hidden>Continuation timing<select id="loopDelivery"><option value="finish">Only finish</option><option value="after-turn">After this turn + finish</option></select></label>
-              <div id="sessionControls" hidden>
-                <div class="session-controls-menu">
-                  <label for="sessionObjective">This chat's goal</label>
-                  <textarea dir="auto" id="sessionObjective" rows="3" maxlength="16000" placeholder="What should this chat achieve?"></textarea>
-                  <button id="saveSessionObjective" data-keep-menu="true" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check" /></svg><span>Save task</span></button>
-                  <select hidden id="sessionObjectiveMode" aria-label="Goal behavior"><option value="goal">Goal · stop when complete</option><option value="loop">Loop · keep going</option></select>
-                  <button id="createPlan" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg><span>Create plan</span></button>
-                  <button id="queueAtFinish" type="button" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-clock" /></svg><span>Queue at Session finish</span></button>
-                  <button id="compactSession" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-copy" /></svg><span>Compact &amp; resume</span></button>
-                  <button id="cancelCompaction" type="button" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg><span>Cancel compaction</span></button>
-                  <p id="sessionControlStatus" role="status"></p>
+                  <div class="composer-mode-control" id="composerModeControl">
+                    <details class="composer-menu" id="composerSettings">
+                      <summary id="composerSettingsSummary" aria-label="Chat options" title="Chat options"><i class="ico ph ph-gear-six" id="composerModeIcon" aria-hidden="true"></i><span id="composerModeLabel" aria-live="polite" hidden></span></summary>
+                      <div class="composer-popover">
+                        <div class="automation-switch" id="automationSwitch" role="radiogroup" aria-label="Chat mode">
+                          <button type="button" role="radio" aria-checked="true" data-mode="off" data-keep-menu="true">Off</button>
+                          <button type="button" role="radio" aria-checked="false" data-mode="goal" data-keep-menu="true">Goal</button>
+                          <button type="button" role="radio" aria-checked="false" data-mode="loop" data-keep-menu="true">Loop</button>
+                          </div><select hidden id="chatAutomation" aria-label="Chat automation"><option value="off">Off</option><option value="goal">Goal</option><option value="loop">Loop</option></select>
+                        <label id="loopDeliveryRow" hidden>Continuation timing<select id="loopDelivery"><option value="finish">Only finish</option><option value="after-turn">After this turn + finish</option></select></label>
+                <div id="sessionControls" hidden>
+                  <div class="session-controls-menu">
+                    <label for="sessionObjective">This chat's goal</label>
+                    <textarea dir="auto" id="sessionObjective" rows="3" maxlength="16000" placeholder="What should this chat achieve?"></textarea>
+                    <button id="saveSessionObjective" data-keep-menu="true" type="button"><i class="ico ph ph-check" aria-hidden="true"></i><span>Save task</span></button>
+                    <select hidden id="sessionObjectiveMode" aria-label="Goal behavior"><option value="goal">Goal · stop when complete</option><option value="loop">Loop · keep going</option></select>
+                    <button id="createPlan" type="button"><i class="ico ph ph-chat-circle" aria-hidden="true"></i><span>Create plan</span></button>
+                    <button id="queueAtFinish" type="button" hidden><i class="ico ph ph-clock" aria-hidden="true"></i><span>Queue at Session finish</span></button>
+                    <button id="compactSession" type="button"><i class="ico ph ph-copy" aria-hidden="true"></i><span>Compact &amp; resume</span></button>
+                    <button id="cancelCompaction" type="button" hidden><i class="ico ph ph-x" aria-hidden="true"></i><span>Cancel compaction</span></button>
+                    <p id="sessionControlStatus" role="status"></p>
+                  </div>
                 </div>
-              </div>
-                    </div>
-                  </details>
+                      </div>
+                    </details>
+                    <button class="composer-mode-clear" id="clearComposerMode" type="button" aria-label="Chat options" title="Chat options" hidden><i class="ico ph ph-x" aria-hidden="true"></i></button>
+                  </div>
                 <div class="context-meter" id="contextMeter">
                   <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-controls="contextMeterInfo">
                     <svg viewBox="0 0 16 16" aria-hidden="true"><circle class="context-track" cx="8" cy="8" r="6"/><circle id="contextMeterArc" cx="8" cy="8" r="6" stroke-dasharray="0 37.7"/></svg>
@@ -1016,11 +1072,13 @@
                 </div>
                 </div>
                 <details class="composer-menu model-menu" id="modelMenu">
-                  <summary><span id="composerModelLabel">Model</span><svg class="ico picker-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg></summary>
+                  <summary><span id="composerModelLabel">Model</span><svg class="disclosure-chevron dropdown-chevron picker-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg></summary>
                   <div class="composer-popover">
-                    <div class="power-header"><div class="power-caption"><strong id="composerPowerTitle">Choose a level</strong><span id="composerPowerModel">Observed models</span></div><button class="btn model-reload" id="refreshComposerModels" data-keep-menu="true" type="button" title="Reload ChatGPT models" aria-label="Reload ChatGPT models"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5M20 7l-3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+                    <div class="power-header"><strong>Model</strong><button class="btn model-reload" id="refreshComposerModels" data-keep-menu="true" type="button" title="Reload ChatGPT models" aria-label="Reload ChatGPT models"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i></button>
                     </div><p id="composerModelStatus" class="muted" role="status" hidden></p>
-                    <div id="composerModelChoices" role="group" aria-label="Model"></div><div id="composerPowerChoices" role="group" aria-label="Thinking effort"></div><label hidden>Model<select id="composerModel" aria-label="ChatGPT model"><option value="" disabled>No observed choices</option></select></label>
+                    <div id="composerModelChoices" role="group" aria-label="Model"></div>
+                    <div class="power-caption"><span id="composerPowerModel">Thinking effort</span><strong id="composerPowerTitle">Choose a level</strong></div>
+                    <div id="composerPowerChoices" role="group" aria-label="Thinking effort"></div><label hidden>Model<select id="composerModel" aria-label="ChatGPT model"><option value="" disabled>No observed choices</option></select></label>
                     <label hidden>Reasoning<select id="composerReasoning" aria-label="Reasoning effort"><option value="" disabled>No observed choices</option></select></label>
                   </div>
                 </details>
@@ -1028,13 +1086,13 @@
                 <div class="send-control">
                   <div class="send-options" id="sendOptions" hidden>
                     <div class="delivery-choices" role="radiogroup" aria-label="Message delivery">
-                      <button type="button" role="radio" aria-checked="true" data-delivery="auto"><span id="immediateDeliveryLabel">Send</span><svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
-                      <button type="button" role="radio" aria-checked="false" data-delivery="tool"><span>Inject now</span><svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
-                      <button type="button" role="radio" aria-checked="false" data-delivery="after-turn"><span id="afterTurnLabel">After this turn</span><svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
+                      <button type="button" role="radio" aria-checked="true" data-delivery="auto"><span id="immediateDeliveryLabel">Send</span><i class="ico ph ph-check" aria-hidden="true"></i></button>
+                      <button type="button" role="radio" aria-checked="false" data-delivery="tool"><span>Inject now</span><i class="ico ph ph-check" aria-hidden="true"></i></button>
+                      <button type="button" role="radio" aria-checked="false" data-delivery="after-turn"><span id="afterTurnLabel">After this turn</span><i class="ico ph ph-check" aria-hidden="true"></i></button>
                     </div>
                     <select id="sendMode" aria-label="Message delivery" hidden><option value="auto">Send</option><option value="tool">Inject now</option><option value="after-turn">After this turn</option></select>
                   </div>
-                  <button class="send-button" id="chatSend" type="submit" aria-label="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+                  <button class="send-button" id="chatSend" type="submit" aria-label="Send message" disabled><i class="ph ph-arrow-up send-icon" aria-hidden="true"></i></button>
                 </div>
               </div>
               <p id="composerStatus" role="status" aria-live="polite"></p>
@@ -1056,10 +1114,10 @@
                 </span>
                 <span class="problems" id="logProblems" hidden></span>
                 <button class="btn" id="copyLogJson" type="button">
-                  <svg class="ico" viewBox="0 0 24 24"><use href="#i-copy" /></svg>JSON
+                  <i class="ico ph ph-copy" aria-hidden="true"></i>JSON
                 </button>
                 <button class="btn" id="copyLogText" type="button">
-                  <svg class="ico" viewBox="0 0 24 24"><use href="#i-copy" /></svg>Text
+                  <i class="ico ph ph-copy" aria-hidden="true"></i>Text
                 </button>
               </span>
             </h2>

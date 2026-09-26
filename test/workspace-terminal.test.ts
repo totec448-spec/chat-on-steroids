@@ -36,6 +36,15 @@ it('pauses output until xterm has parsed it and releases exited or disposed term
   await expect(service.write('one', 'echo x')).rejects.toThrow('closed');
   service.dispose(); expect(mocks.pty.kill).not.toHaveBeenCalled();
 });
+it('resizes ConPTY only when the terminal grid actually changes', async () => {
+  const service = new WorkspaceTerminals(vi.fn()); await service.create('one', 'project-a', 80, 24);
+  service.resize('one', 80, 24);
+  service.resize('one', 100, 32);
+  service.resize('one', 100, 32);
+  expect(mocks.pty.resize).toHaveBeenCalledOnce();
+  expect(mocks.pty.resize).toHaveBeenCalledWith(100, 32);
+  service.dispose();
+});
 it('bounds active plus pending tabs and prevents spawn after renderer retirement', async () => {
   const service = new WorkspaceTerminals(vi.fn());
   for (let index = 0; index < 8; index++) await service.create(String(index), 'project-a', 80, 24);

@@ -3,14 +3,19 @@ import type { ChatModelCatalog } from '../shared/chat-models.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
 import type { TaskProgress } from '../shared/task-progress.js';
 import type { BrowserPreferences } from '../shared/browser-preferences.js';
+import type { BrowserUseBounds, BrowserUseDesignContext, BrowserUseRequest, BrowserUseState } from '../shared/browser-use.js';
 import type { SessionControlsView } from '../main/bridge.js';
 import type { InputAttachment } from '../shared/input.js';
 import type { UsageOverview } from '../shared/usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
-import type { SkillSummary, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
+import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
+import type { ToolEditReview } from '../shared/session.js';
+import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
+import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
+import type { ViewMenuCommand, ViewMenuToggleRequest, ViewMenuToggleState } from '../shared/view-menu.js';
 /**
  * The entire renderer-facing API.
  *
@@ -82,6 +87,24 @@ export interface SessionDetail {
 }
 
 const api = {
+  petsList: () => call<PetLibraryState>('pets:list'),
+  petsOverlayState: () => call<PetOverlayControlState>('pets:overlayState'),
+  petsSetOverlayVisible: (visible: boolean) => call<PetOverlayControlState>('pets:overlayVisible', { visible }),
+  petsImport: () => call<PetLibraryState | null>('pets:import'),
+  petsSetEnabled: (id: string, enabled: boolean) => call<PetLibraryState>('pets:enabled', { id, enabled }),
+  petsSetFavorite: (id: string, favorite: boolean) => call<PetLibraryState>('pets:favorite', { id, favorite }),
+  petsDelete: (id: string) => call<PetLibraryState>('pets:delete', { id }),
+  petsAsset: (id: string, preview = false) => call<PetRuntimeAsset>('pets:asset', { id, preview }),
+  onPetOverlayStateChanged: (listener: (state: PetOverlayControlState) => void): (() => void) => {
+    const wrapped = (_event: unknown, state: PetOverlayControlState): void => listener(state);
+    ipcRenderer.on('pet-overlay:stateChanged', wrapped);
+    return () => ipcRenderer.removeListener('pet-overlay:stateChanged', wrapped);
+  },
+  onPetOverlayOpenOwner: (listener: (screen: 'chat' | 'pets') => void): (() => void) => {
+    const wrapped = (_event: unknown, screen: 'chat' | 'pets'): void => listener(screen);
+    ipcRenderer.on('pet-overlay:openOwner', wrapped);
+    return () => ipcRenderer.removeListener('pet-overlay:openOwner', wrapped);
+  },
   terminalCreate: (id: string, projectId: string, cols: number, rows: number) => call<WorkspaceTerminalInfo>('workspaceTerminal:request', { action: 'create', id, projectId, cols, rows }),
   terminalWrite: (id: string, data: string) => call<void>('workspaceTerminal:request', { action: 'write', id, data }),
   terminalResize: (id: string, cols: number, rows: number) => call<void>('workspaceTerminal:request', { action: 'resize', id, cols, rows }),
@@ -111,6 +134,13 @@ const api = {
   },
   chooseFiles: () => call<InputAttachment[]>('sessions:files'),
   listSkills: () => call<SkillSummary[]>('skills:list'),
+  listManagedSkills: () => call<ManagedSkill[]>('skills:managed'),
+  skillsImport: (kind: 'folder' | 'file') => call<ManagedSkill[] | null>('skills:import', { kind }),
+  skillsImportGithub: (url: string) => call<ManagedSkill[]>('skills:githubImport', { url }),
+  skillsLinkGithub: (id: string, url: string) => call<ManagedSkill[]>('skills:githubLink', { id, url }),
+  skillsCheckGithub: (id: string) => call<GitHubSkillUpdateCheck[]>('skills:githubCheck', { id }),
+  skillsUpdateGithub: (id: string) => call<{ status: 'current' | 'updated'; skills: ManagedSkill[]; warning?: string }>('skills:githubUpdate', { id }),
+  skillsRemove: (id: string) => call<ManagedSkill[]>('skills:remove', { id }),
   skillLibrary: (scope: SkillsDraftScope) => call<SkillLibrary>('skills:library', scope),
   dropFiles: async (files: File[]): Promise<Reply<InputAttachment[]>> => {
     if (!files.length || files.length > 20) return { ok: false, error: 'Attach up to 20 files per message' };
@@ -180,6 +210,15 @@ const api = {
   deleteProjectFileEntry: (projectId: string, path: string) => call<boolean>('projectFiles:delete', { projectId, path }),
   revealProjectFileEntry: (projectId: string, path = '') => call<boolean>('projectFiles:reveal', { projectId, path }),
   attachProjectFile: (projectId: string, path: string) => call<InputAttachment>('projectFiles:attach', { projectId, path }),
+  getProjectGitSnapshot: (projectId: string) => call<ProjectGitSnapshot>('projectGit:snapshot', { projectId }),
+  getProjectGitDiff: (projectId: string, path: string) => call<ProjectGitDiff>('projectGit:diff', { projectId, path }),
+  getToolEditReview: (sessionId: string, callId: string, changeIndex: number) =>
+    call<ToolEditReview | null>('sessions:toolEditReview', { sessionId, callId, changeIndex }),
+  onProjectGitChanged: (listener: (event: ProjectGitChanged) => void): (() => void) => {
+    const wrapped = (_event: unknown, change: ProjectGitChanged): void => listener(change);
+    ipcRenderer.on('projectGit:changed', wrapped);
+    return () => ipcRenderer.removeListener('projectGit:changed', wrapped);
+  },
   getSessionImage: (id: string, assetId: string) => call<string | null>('sessions:image', { id, assetId }),
   getImageStorage: () => call<ImageStorageInfo>('sessions:imageStorage'),
   clearImageStorage: (mode: ImageStorageClearMode) => call<ImageStorageClearResult>('sessions:clearImageStorage', { mode }),
@@ -203,6 +242,21 @@ const api = {
     return () => ipcRenderer.removeListener('chatModels:changed', wrapped);
   },
   getSessionControls: (id: string) => call<SessionControlsView>('sessions:controls', { id }),
+  browserUse: (request: BrowserUseRequest) => call<BrowserUseState>('browserUse:panel', request),
+  browserUseDesignContext: (tabId: number, selectionId: number) =>
+    call<BrowserUseDesignContext>('browserUse:designContext', { tabId, selectionId }),
+  browserUseLayout: (bounds: BrowserUseBounds): void => ipcRenderer.send('browserUse:layout', bounds),
+  browserUseLayoutSync: (bounds: BrowserUseBounds): boolean => ipcRenderer.sendSync('browserUse:layoutSync', bounds) === true,
+  onBrowserUseShowRequested: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('browserUse:showRequested', wrapped);
+    return () => ipcRenderer.removeListener('browserUse:showRequested', wrapped);
+  },
+  onBrowserUseStateChanged: (listener: (state: BrowserUseState) => void): (() => void) => {
+    const wrapped = (_event: unknown, state: BrowserUseState): void => listener(state);
+    ipcRenderer.on('browserUse:stateChanged', wrapped);
+    return () => ipcRenderer.removeListener('browserUse:stateChanged', wrapped);
+  },
   setSessionAutomation: (id: string, automation: SessionControlsView['automation'], afterTurn?: boolean) => call<SessionControlsView>('sessions:automation', { id, automation, afterTurn }),
   setSessionObjective: (id: string, text: string, mode: 'goal' | 'loop') => call<SessionControlsView>('sessions:objective', { id, text, mode }),
   compactSession: (id: string) => call<SessionControlsView>('sessions:compact', { id }),
@@ -219,6 +273,17 @@ const api = {
   setInputAutomation: (id: string, mode: 'off' | 'goal' | 'loop', loopAfterTurn?: boolean) => call<boolean>('sessions:inputAutomation', { id, mode, loopAfterTurn }),
   setZoom: (factor: number) => call<number>('window:zoom', { factor }),
   getZoom: () => call<number>('window:getZoom'),
+  toggleViewMenu: (request: ViewMenuToggleRequest) => call<ViewMenuToggleState>('viewMenu:toggle', request),
+  onViewMenuOpenChanged: (listener: (open: boolean) => void): (() => void) => {
+    const wrapped = (_event: unknown, open: boolean): void => listener(open === true);
+    ipcRenderer.on('viewMenu:openChanged', wrapped);
+    return () => ipcRenderer.removeListener('viewMenu:openChanged', wrapped);
+  },
+  onViewMenuCommand: (listener: (command: ViewMenuCommand) => void): (() => void) => {
+    const wrapped = (_event: unknown, command: ViewMenuCommand): void => listener(command);
+    ipcRenderer.on('viewMenu:command', wrapped);
+    return () => ipcRenderer.removeListener('viewMenu:command', wrapped);
+  },
   openSessionChat: (id: string) => call<boolean>('sessions:openChat', { id }),
   // Stops a chat this app cannot stop in the page: every tool call it has already been proved
   // to own is refused until it is released. Returns the whole blocked set, so one press
@@ -236,6 +301,7 @@ const api = {
   openExtensionFolder: () => call<string>('bridge:openExtensionFolder'),
 
   getSwarm: () => call<SwarmState>('swarm:get'),
+  getSessionSwarm: (id: string) => call<SwarmState>('swarm:getForSession', { id }),
   resetSwarm: () => call<SwarmState>('swarm:reset'),
   // Clearing the prime ends the run; clearing a worker frees that slot. Which of the two
   // happened comes back in the result — the renderer does not decide it.

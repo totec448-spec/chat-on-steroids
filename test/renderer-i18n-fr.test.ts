@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import fr from '../src/renderer/locales/fr.json';
+import tr from '../src/renderer/locales/tr.json';
 
 let dom: JSDOM;
 beforeEach(() => {
@@ -11,10 +12,14 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); dom.window.close(); });
 
-it('covers the current catalogs including Turkish and preserves numbered arguments', () => {
-  const keys = new Set(['es', 'zh-CN', 'zh-TW', 'ja', 'tr'].flatMap(locale =>
-    Object.keys(JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')))));
-  expect([...keys].filter(source => !Object.hasOwn(fr, source))).toEqual([]);
+it('covers every current catalog key and preserves numbered arguments in French', () => {
+  const keys = new Set([
+    ...Object.keys(tr),
+    ...['es', 'zh-CN', 'zh-TW', 'ja'].flatMap((locale) =>
+      Object.keys(JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8'))),
+    ),
+  ]);
+  expect([...keys].filter((source) => !Object.hasOwn(fr, source))).toEqual([]);
   const args = (value: string) => (value.match(/\{\d+\}/g) ?? []).sort();
   for (const [source, value] of Object.entries(fr)) {
     expect(value.trim(), source).not.toBe('');

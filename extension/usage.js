@@ -9,7 +9,7 @@
  */
 (() => {
   'use strict';
-  const OBSERVER_VERSION = 2;
+  const OBSERVER_VERSION = 3;
   const prior = window.__cosUsageObserver;
   if (prior?.version === OBSERVER_VERSION && typeof prior.refresh === 'function' && prior.refresh() === true) return;
   // A legacy boolean has no listener/reader disposal handle. A fresh document is
@@ -99,22 +99,28 @@
   }
   /**
    * Reads bounded complete SSE events from a clone without changing the page's response.
-   * Only a conversation id and server request metadata from the same event are projected.
+   * Complete events own their metadata. Native input_message events may instead use the
+   * explicit root identity of this response/linked socket chain (upstream #414).
    */
   function readOrigin(frame, stream = {}) {
-      if (!frame || frame.length > 512 * 1024) { stream.header = null; return; }
+      if (!frame) return;
+      if (frame.length > 512 * 1024) { stream.header = null; stream.conversationId = false; return; }
       const lines = frame.split(/\r?\n/);
       const type = lines.filter(line => line.startsWith('event:')).at(-1)?.slice(6).trim() || 'message';
+      const data = lines.filter(line => line.startsWith('data:'));
+      if (!data.length) return; // SSE comments/heartbeats do not change identity.
       let event;
       try {
-        event = JSON.parse(lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n'));
+        event = JSON.parse(data.map(line => line.slice(5).trimStart()).join('\n'));
       } catch {
+        stream.conversationId = false;
         if (type === 'delta' || type === 'delta_encoding') stream.header = null;
         if (type === 'delta_encoding') stream.encoding = false;
         return;
       }
       if (type === 'delta_encoding') {
         stream.encoding = event === 'v1';
+        if (!stream.encoding) stream.conversationId = false;
         stream.header = stream.encoding ? { c: 0, p: '', o: 'add' } : null;
         return;
       }
@@ -126,12 +132,12 @@
         body = event.v;
       } else if (type === 'delta') {
         // Native v1 omits repeated headers, including on complete root messages.
-        // Keep only format state in this stream, never prior message values.
-        if (!stream.header || !event || typeof event !== 'object' || Array.isArray(event)) { stream.header = null; return; }
+        // Retain format headers, never reconstruct prior message values.
+        if (!stream.header || !event || typeof event !== 'object' || Array.isArray(event)) { stream.header = null; stream.conversationId = false; return; }
         const field = key => Object.prototype.hasOwnProperty.call(event, key) ? event[key] : stream.header[key];
         const c = field('c'), p = field('p'), o = field('o');
         if (!Number.isInteger(c) || c < 0 || c > 1023 || typeof p !== 'string' || p.length > 1024 ||
-            !['add', 'replace', 'append', 'patch', 'remove', 'truncate'].includes(o)) { stream.header = null; return; }
+            !['add', 'replace', 'append', 'patch', 'remove', 'truncate'].includes(o)) { stream.header = null; stream.conversationId = false; return; }
         stream.header = { c, p, o };
         if (p !== '' || (o !== 'add' && o !== 'replace')) return;
         body = event.v;
@@ -144,14 +150,23 @@
       for (let match; (match = CONVERSATION_FIELD.exec(frame));) {
         if (CONVERSATION.test(match[1])) conversations.add(match[1]);
       }
-      // One complete server event must carry both sides of the join. Retaining an id from a
-      // prior frame would turn response order into authority; a contradictory frame abstains.
-      if (conversations.size !== 1) return;
-      const conversationId = conversations.values().next().value;
+      const explicit = typeof body?.conversation_id === 'string' && CONVERSATION.test(body.conversation_id)
+        ? body.conversation_id : null;
+      // Never seed from nested data. A contradictory identity permanently retires inheritance
+      // for this stream; another A/B/A event cannot silently choose a new owner. Complete
+      // classic events retain their independent proof, even when inheritance is unavailable.
+      if ((conversations.size > 0 && !explicit) || (body?.conversation_id !== undefined && !explicit) || conversations.size > 1 ||
+          (explicit && stream.socketConversationId && explicit !== stream.socketConversationId) ||
+          (explicit && stream.conversationId && explicit !== stream.conversationId)) stream.conversationId = false;
+      if (conversations.size > 1) return;
+      if (explicit && conversations.size === 1 && stream.conversationId !== false) stream.conversationId = explicit;
+      const inputMessage = body?.type === 'input_message';
+      const conversationId = explicit || (inputMessage && conversations.size === 0 && stream.conversationId);
+      if (!conversationId || (stream.socketConversationId && conversationId !== stream.socketConversationId)) return;
       // Only server metadata in a complete JSON event owns a request id. A key in
       // quoted model text, tool arguments or an unrelated nested object is not proof.
-      if (body?.conversation_id !== conversationId) return;
-      const requestIds = new Set([body.metadata?.request_id, body.message?.metadata?.request_id]
+      const requestIds = new Set([...(explicit ? [body.metadata?.request_id, body.message?.metadata?.request_id] : []),
+        inputMessage ? body.input_message?.metadata?.request_id : null]
         .filter(id => typeof id === 'string' && REQUEST.test(id)));
       return requestIds.size ? { conversationId, requestIds: [...requestIds] } : null;
   }
@@ -233,12 +248,13 @@
         }
         if (retained.seen.has(payload.stream_item_id)) continue;
         // Only the exact preceding item can supply omitted format headers.
-        if (payload.parent_stream_item_id !== retained.last) retained.header = null;
+        if (payload.parent_stream_item_id !== retained.last) { retained.header = null; retained.conversationId = false; }
         retained.last = payload.stream_item_id;
         if (retained.seen.size >= 128) retained.seen.delete(retained.seen.values().next().value);
         retained.seen.add(payload.stream_item_id);
         stream = retained;
       } else if (key) streams.delete(key);
+      stream.socketConversationId = payload.conversation_id;
       for (const frame of frames) {
         if (!frame.trim()) continue;
         const origin = readOrigin(frame, stream);

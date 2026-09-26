@@ -14,13 +14,13 @@ it('keeps Prime selection independent and rejects late results after parent navi
   const load = vi.fn(() => new Promise<{ events: [] }>(done => { resolve = done; }));
   const render = vi.fn(() => [document.createElement('article')]);
   const openMain = vi.fn();
-  const panel = createAgentPanel({ host, toggle, load, render, openMain, working: () => false });
+  const panel = createAgentPanel({ host, toggle, load, render, openMain });
   const worker = { id: 'worker-session', title: 'Worker', updatedAt: 1 } as SessionSummary;
-  panel.update('prime-session', [worker]); toggle.click();
+  panel.update('prime-session', [worker], null); toggle.click();
   expect(host.textContent).toContain('History · 1');
   const opening = panel.open(worker.id);
   expect(openMain).not.toHaveBeenCalled();
-  panel.update('another-prime', []);
+  panel.update('another-prime', [], null);
   resolve({ events: [] }); await opening;
   expect(render).not.toHaveBeenCalled();
   expect(host.querySelector('aside')!.hidden).toBe(true);
@@ -34,8 +34,8 @@ it('renders a selected worker and offers an explicit full-chat navigation', asyn
   const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
   const openMain = vi.fn();
   const panel = createAgentPanel({ host, toggle, load: async () => ({ events: [] }),
-    render: () => { const p = document.createElement('p'); p.textContent = 'Recorded response'; return [p]; }, openMain, working: () => true });
-  panel.update('prime', [{ id: 'worker', title: 'Worker', updatedAt: 1 } as SessionSummary]);
+    render: () => { const p = document.createElement('p'); p.textContent = 'Recorded response'; return [p]; }, openMain });
+  panel.update('prime', [{ id: 'worker', title: 'Worker', updatedAt: 1 } as SessionSummary], null);
   await panel.open('worker');
   expect(host.textContent).toContain('Recorded response');
   expect(openMain).not.toHaveBeenCalled();
@@ -50,18 +50,43 @@ it('preserves a readers scroll position during refresh and Escape returns focus'
   const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
   let resolve!: (value: { events: [] }) => void;
   const load = vi.fn().mockResolvedValueOnce({ events: [] }).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  const panel = createAgentPanel({ host, toggle, load, render: () => [document.createElement('article')], openMain: vi.fn(), working: () => false });
+  const panel = createAgentPanel({ host, toggle, load, render: () => [document.createElement('article')], openMain: vi.fn() });
   const worker = { id: 'worker', title: 'Worker', updatedAt: 1 } as SessionSummary;
-  panel.update('prime', [worker]); await panel.open(worker.id);
+  panel.update('prime', [worker], null); await panel.open(worker.id);
   const body = host.querySelector<HTMLElement>('.agent-panel-body')!;
   Object.defineProperties(body, { scrollHeight: { value: 1000 }, clientHeight: { value: 100 } });
   body.scrollTop = 250;
   const article = body.querySelector('article');
-  panel.update('prime', [{ ...worker, updatedAt: 2 }]);
+  panel.update('prime', [{ ...worker, updatedAt: 2 }], null);
   expect(body.querySelector('article')).toBe(article);
   resolve({ events: [] }); await Promise.resolve(); await Promise.resolve();
   expect(body.scrollTop).toBe(250);
   body.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   expect(host.querySelector('aside')!.hidden).toBe(true);
   expect(document.activeElement).toBe(toggle);
+});
+
+it('shows broker lifecycle before a worker session exists and keeps terminal failures visible', () => {
+  dom = new JSDOM('<main></main><button></button>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
+  const panel = createAgentPanel({ host, toggle, load: vi.fn(), render: () => [], openMain: vi.fn() });
+  const base = {
+    role: 'worker', label: '', task: 'Inspect the renderer', reasoningEffort: null, model: null,
+    createdAt: 1, activatedAt: null, finishedAt: null, result: null, pending: 0,
+    awaitingAck: 0, delivered: 0, conversationId: null, detachedAt: null, lastSeenAt: null,
+    revivable: false, sleptAt: null, contextTokens: 0, primeConversationId: 'prime-chat'
+  } as const;
+  panel.update('prime-session', [], { enabled: true, running: true, agents: [
+    { ...base, id: 'worker-1', runId: 'run-1', state: 'invited' },
+    { ...base, id: 'worker-2', runId: 'run-1', state: 'failed', result: 'Chat did not report back' }
+  ] as any });
+  toggle.click();
+
+  expect(host.textContent).toContain('Active · 1');
+  expect(host.textContent).toContain('Starting');
+  expect(host.textContent).toContain('History · 1');
+  expect(host.textContent).toContain('failed');
+  expect(host.textContent).toContain('Chat did not report back');
+  expect(host.querySelectorAll('button.agent-panel-row')).toHaveLength(0);
 });

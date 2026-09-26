@@ -588,6 +588,66 @@ describe('committing', () => {
     expect(await claimContinuationNow(token, 'new-command')).toBeNull();
   });
 
+  it.each([false, true])('binds a late destination receipt after ACK commitment (restart=%s)', async restart => {
+    const { sessionId, token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    await beginContinuationDestinationSendNow(token);
+    await dispatchContinuationDestinationSendNow(token);
+    expect(await commitContinuation(token, CHAT_B)).toBe(true);
+    if (restart) {
+      const snapshot = snapshotContinuations();
+      resetContinuationsForTests();
+      await restoreContinuations(snapshot);
+    }
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_C, 'foreign-message')).toBe(false);
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_A, 'source-message')).toBe(false);
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).toBe(true);
+    expect(continuationByToken(token)).toMatchObject({ state: 'committed', to: CHAT_B,
+      destinationSend: { state: 'sent', conversationId: CHAT_B, messageId: 'resume-message-b' } });
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'other-message')).toBe(false);
+    expect(await releaseContinuationDestinationSendNow(token)).toBe(false);
+    expect(await beginContinuationDestinationSendNow(token)).toBeNull();
+    expect(await attachedChat(sessionId)).toBe(CHAT_B);
+  });
+
+  it('keeps the committed receipt unresolved when its durable write fails', async () => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    await beginContinuationDestinationSendNow(token);
+    await dispatchContinuationDestinationSendNow(token);
+    await commitContinuation(token, CHAT_B);
+    const durable = await import('../src/main/durable.js');
+    vi.spyOn(durable, 'writeDurableNow').mockRejectedValueOnce(new Error('disk full'));
+    await expect(bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).rejects.toThrow('disk full');
+    expect(continuationByToken(token)).toMatchObject({ state: 'committed', to: CHAT_B,
+      destinationSend: { state: 'dispatched-unresolved', messageId: null } });
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).toBe(true);
+  });
+
+  it.each(['aborted', 'unattempted'] as const)('does not invent a late receipt for a %s destination', async state => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    if (state === 'aborted') {
+      await beginContinuationDestinationSendNow(token);
+      await dispatchContinuationDestinationSendNow(token);
+      await abortContinuationNow(token, 'cancelled');
+    } else await commitContinuation(token, CHAT_B);
+    const before = snapshotContinuations().entries;
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).toBe(false);
+    expect(snapshotContinuations().entries).toEqual(before);
+  });
+
+  it('refuses a command ACK that contradicts the already bound destination message', async () => {
+    const { sessionId, token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    await beginContinuationDestinationSendNow(token);
+    await dispatchContinuationDestinationSendNow(token);
+    await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b');
+    expect(await commitContinuation(token, CHAT_C)).toBe(false);
+    expect(await attachedChat(sessionId)).toBe(CHAT_A);
+    expect(await commitContinuation(token, CHAT_B)).toBe(true);
+  });
+
   it('re-proves the exact destination message after the continuation already committed', async () => {
     const { token } = await readyContinuation();
     await claimContinuationNow(token, 'tab-1');
@@ -606,6 +666,32 @@ describe('committing', () => {
 });
 
 describe('the commit lock', () => {
+  it('serializes a destination marker behind an in-flight ACK commit', async () => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    await beginContinuationDestinationSendNow(token);
+    await dispatchContinuationDestinationSendNow(token);
+    const rebind = store.rebindSession;
+    let entered!: () => void, release!: () => void;
+    const reached = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    const spy = vi.spyOn(store, 'rebindSession').mockImplementationOnce(async (...args) => {
+      entered(); await resume; return rebind(...args);
+    });
+    try {
+      const committing = commitContinuation(token, CHAT_B);
+      await reached;
+      const foreign = bindContinuationDestinationMessageNow(token, CHAT_C, 'foreign-message');
+      const marked = bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b');
+      release();
+      expect(await committing).toBe(true);
+      expect(await foreign).toBe(false);
+      expect(await marked).toBe(true);
+      expect(continuationByToken(token)).toMatchObject({ state: 'committed', to: CHAT_B,
+        destinationSend: { state: 'sent', conversationId: CHAT_B, messageId: 'resume-message-b' } });
+    } finally { release(); spy.mockRestore(); }
+  });
+
   it('keeps a commit behind an earlier automatic cancellation until its refusal is durable', async () => {
     const summary = await createSession({ title: 'cancel before commit', conversationId: CHAT_A });
     const ticket = await openContinuationNow(summary.id, CHAT_A, true);

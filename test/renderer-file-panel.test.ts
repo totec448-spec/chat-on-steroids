@@ -1,9 +1,11 @@
 import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createFilePanel } from '../src/renderer/file-panel.js';
+import { setLanguage } from '../src/renderer/i18n.js';
 import { createAgentPanel } from '../src/renderer/agent-panel.js';
 import type { LocalProject } from '../src/shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFilePreview, ProjectFilesChanged } from '../src/shared/project-files.js';
+import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../src/shared/project-git.js';
 
 const createPdfViewer = vi.hoisted(() => vi.fn());
 const codeMount = vi.hoisted(() => ({ wait: null as Promise<void> | null, calls: 0 }));
@@ -16,6 +18,13 @@ vi.mock('../src/renderer/file-code-editor.js', () => ({
     options.parent.append(input);
     input.addEventListener('input', () => options.onChange?.(input.value));
     return { getValue: () => input.value, focus: () => input.focus(), destroy: () => input.remove(), language: 'Plain text' };
+  },
+  createProjectDiffViewer: async (options: { parent: HTMLElement; baseText: string; currentText: string }) => {
+    const view = document.createElement('pre');
+    view.className = 'test-diff-viewer';
+    view.textContent = `${options.baseText}\n---\n${options.currentText}`;
+    options.parent.append(view);
+    return { destroy: () => view.remove(), language: 'TypeScript' };
   }
 }));
 
@@ -24,6 +33,7 @@ let host: HTMLElement;
 let toggle: HTMLButtonElement;
 let attached: string[];
 let projectFilesChanged: ((event: ProjectFilesChanged) => void) | null;
+let projectGitChanged: ((event: ProjectGitChanged) => void) | null;
 
 const projectA: LocalProject = { id: '11111111-1111-4111-8111-111111111111', name: 'alpha', path: 'C:\\alpha', createdAt: 1 };
 const projectB: LocalProject = { id: '22222222-2222-4222-8222-222222222222', name: 'beta', path: 'C:\\beta', createdAt: 2 };
@@ -53,6 +63,9 @@ const preview: ProjectFilePreview = {
 };
 
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
+const cleanGit = (project = projectA): ProjectGitSnapshot => ({
+  projectId: project.id, state: 'ready', changes: [], truncated: false, revision: 'clean'
+});
 const tick = async (): Promise<void> => { await Promise.resolve(); await Promise.resolve(); await new Promise(resolve => setTimeout(resolve, 0)); };
 const submitEntryDialog = async (value: string): Promise<void> => {
   const dialog = document.querySelector<HTMLDialogElement>('.file-entry-dialog')!;
@@ -73,6 +86,7 @@ beforeEach(() => {
   toggle = document.getElementById('toggle') as HTMLButtonElement;
   attached = [];
   projectFilesChanged = null;
+  projectGitChanged = null;
   createPdfViewer.mockReset();
   createPdfViewer.mockImplementation(async ({ parent }: { parent: HTMLElement }) => {
     const marker = document.createElement('div');
@@ -90,6 +104,12 @@ beforeEach(() => {
       onProjectFilesChanged: vi.fn((listener: (event: ProjectFilesChanged) => void) => {
         projectFilesChanged = listener;
         return () => { if (projectFilesChanged === listener) projectFilesChanged = null; };
+      }),
+      getProjectGitSnapshot: vi.fn(() => ok(cleanGit())),
+      getProjectGitDiff: vi.fn(),
+      onProjectGitChanged: vi.fn((listener: (event: ProjectGitChanged) => void) => {
+        projectGitChanged = listener;
+        return () => { if (projectGitChanged === listener) projectGitChanged = null; };
       }),
       createProjectFileEntry: vi.fn(),
       renameProjectFileEntry: vi.fn(),
@@ -125,6 +145,213 @@ it('is unavailable without a local project and lazily expands only the chosen di
   expect((window.api.listProjectFiles as any)).toHaveBeenLastCalledWith(projectA.id, 'src');
   expect(host.textContent).toContain('main.ts');
   expect((window.api.watchProjectFiles as any)).toHaveBeenLastCalledWith(projectA.id, ['', 'src']);
+});
+
+it('shows real Git groups, tree markers, unified diffs, and reconciles metadata changes', async () => {
+  let snapshot: ProjectGitSnapshot = {
+    projectId: projectA.id,
+    state: 'ready',
+    truncated: false,
+    revision: 'dirty-1',
+    changes: [
+      { status: 'M', path: 'README.md', additions: 2, deletions: 1, binary: false },
+      { status: 'A', path: 'src/staged.ts', additions: 1, deletions: 0, binary: false },
+      { status: 'U', path: 'src/new.ts', additions: 4, deletions: 0, binary: false },
+      { status: 'D', path: 'old.ts', additions: 0, deletions: 3, binary: false },
+      { status: 'R', path: 'src/main.ts', previousPath: 'src/old-main.ts', additions: 1, deletions: 1, binary: false }
+    ]
+  };
+  (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok(snapshot));
+  const diff: ProjectGitDiff = {
+    projectId: projectA.id, status: 'M', path: 'README.md', additions: 2, deletions: 1,
+    binary: false, tooLarge: false, baseText: '# old', currentText: '# new\nnext'
+  };
+  (window.api.getProjectGitDiff as any).mockImplementation(() => ok(diff));
+
+  const requestGitReview = vi.fn();
+  const panel = createFilePanel({ host, toggle, onRequestGitReview: requestGitReview });
+  panel.update(projectA);
+  toggle.click(); await tick(); await tick();
+  const marker = host.querySelector<HTMLElement>('[data-path="README.md"] .file-tree-git-status');
+  expect(marker?.getAttribute('aria-label')).toBe('Modified');
+  expect(marker?.textContent).toBe('M');
+  expect(host.querySelector('[data-path="old.ts"]')).toBeNull();
+  expect(host.querySelector('.file-panel-changes-badge')?.textContent).toBe('5');
+  expect(host.querySelector('[data-path="src"] .file-tree-git-status')?.getAttribute('aria-label')).toBe('Git changes in this folder: 3');
+  expect(host.querySelector('[data-path="src"] .file-tree-git-status')?.textContent).toBe('M');
+  expect(host.querySelector('.file-tree-root .file-tree-git-status')?.getAttribute('aria-label')).toBe('Git changes in this folder: 5');
+
+  host.querySelector<HTMLButtonElement>('.file-panel-changes-toggle')!.click(); await tick(); await tick();
+  expect(host.querySelector('.file-changes-header-title')?.textContent).toBe('Working tree');
+  const askAgent = host.querySelector<HTMLButtonElement>('.file-changes-request')!;
+  expect(askAgent.hidden).toBe(false);
+  askAgent.click();
+  expect(requestGitReview).toHaveBeenCalledExactlyOnceWith(projectA.id);
+  expect(host.querySelector('.file-panel-refresh')?.getAttribute('aria-label')).toBe('Refresh changes');
+  expect(host.textContent).toContain('Modified (1)');
+  expect(host.textContent).toContain('Added (1)');
+  expect(host.textContent).toContain('Deleted (1)');
+  expect(host.textContent).toContain('Renamed (1)');
+  expect(host.textContent).toContain('Untracked (1)');
+  expect(host.querySelector('.file-change-row[data-path="src/new.ts"] .file-change-status')?.textContent).toBe('U');
+  expect(host.querySelector('.file-change-row[data-path="src/new.ts"] .file-change-stats')?.textContent).toBe('4 lines');
+  expect(host.querySelector('.file-change-row[data-path="src/staged.ts"] .file-change-stats')?.textContent).toContain('+1');
+  expect(window.api.watchProjectFiles).toHaveBeenLastCalledWith(projectA.id, ['', 'src']);
+  const action = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.file-panel-toolbar button')]
+    .find(button => button.textContent?.includes(label))!;
+  expect(action('New file').disabled).toBe(true);
+  expect(action('New folder').disabled).toBe(true);
+  expect(action('Reveal').disabled).toBe(true);
+  expect(action('Rename').disabled).toBe(true);
+  expect(action('Delete').disabled).toBe(true);
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="README.md"]')!.click(); await tick(); await tick();
+  expect(host.querySelector('.file-changes-header-title')?.textContent).toBe('Diff');
+  expect(askAgent.hidden).toBe(true);
+  expect(document.activeElement).toBe(host.querySelector('.file-changes-back'));
+  try {
+    setLanguage('es');
+    expect(host.querySelector('.file-changes-header-title')?.textContent).toBe('Diferencias');
+    expect(host.querySelector('.file-changes-back')?.getAttribute('aria-label')).toBe('Volver a cambios');
+    expect(host.querySelector('.file-panel-refresh')?.getAttribute('aria-label')).toBe('Actualizar cambios');
+  } finally { setLanguage('en'); }
+  expect(host.querySelector('.test-diff-viewer')?.textContent).toContain('# old\n---\n# new');
+  expect(host.querySelector('.file-preview-title > strong')?.textContent).toBe('README.md');
+  expect(host.querySelector('.file-preview-meta')?.textContent).toContain('README.md');
+  let finishDiff!: (result: { ok: true; data: ProjectGitDiff }) => void;
+  (window.api.getProjectGitDiff as any).mockImplementationOnce(() => new Promise(resolve => { finishDiff = resolve; }));
+  snapshot = { ...snapshot, revision: 'dirty-1b' };
+  projectGitChanged?.({ projectId: projectA.id });
+  await new Promise(resolve => setTimeout(resolve, 150)); await tick();
+  expect(host.querySelector('.test-diff-viewer')).toBeNull();
+  expect(host.textContent).toContain('Loading diff');
+  finishDiff({ ok: true, data: { ...diff, currentText: '# revised' } }); await tick();
+  expect(host.querySelector('.test-diff-viewer')?.textContent).toContain('# revised');
+  (window.api.getProjectGitDiff as any).mockImplementationOnce(() => ok({ ...diff, currentText: '# same-count edit' }));
+  projectGitChanged?.({ projectId: projectA.id });
+  await new Promise(resolve => setTimeout(resolve, 150)); await tick();
+  expect(host.querySelector('.test-diff-viewer')?.textContent).toContain('# same-count edit');
+  expect(host.querySelector('.file-panel-body')?.classList.contains('is-diff-open')).toBe(true);
+  expect(host.querySelector<HTMLElement>('.file-changes-list')?.hidden).toBe(true);
+  expect(action('Rename').disabled).toBe(true);
+  expect(action('Delete').disabled).toBe(true);
+  action('Reveal').click(); await tick();
+  expect(window.api.revealProjectFileEntry).not.toHaveBeenCalled();
+  const backToFiles = host.querySelector<HTMLButtonElement>('.file-changes-back')!;
+  expect(backToFiles.getAttribute('aria-label')).toBe('Back to changes');
+  backToFiles.click(); await tick();
+  expect(host.querySelector('.test-diff-viewer')).toBeNull();
+  expect(host.querySelector('.file-changes-header-title')?.textContent).toBe('Working tree');
+  expect(host.querySelector<HTMLElement>('.file-changes-list')?.hidden).toBe(false);
+  expect(host.querySelector('.file-panel-body')?.classList.contains('is-diff-open')).toBe(false);
+  expect(backToFiles.getAttribute('aria-label')).toBe('Back to files');
+  backToFiles.click(); await tick();
+  expect(host.querySelector<HTMLElement>('.file-tree')?.hidden).toBe(false);
+  expect(document.activeElement).toBe(host.querySelector('.file-tree-root'));
+  expect(host.querySelector<HTMLElement>('.file-changes-view')?.hidden).toBe(true);
+  expect(action('New file').disabled).toBe(false);
+  expect(action('Reveal').disabled).toBe(false);
+  expect(host.querySelector('[data-path="src"] .file-tree-git-status')).not.toBeNull();
+  host.querySelector<HTMLButtonElement>('.file-panel-changes-toggle')!.click(); await tick(); await tick();
+
+  snapshot = {
+    ...snapshot,
+    revision: 'dirty-2',
+    changes: snapshot.changes.map(change => change.path === 'src/new.ts' ? { ...change, additions: 7 } : change)
+  };
+  projectFilesChanged?.({ projectId: projectA.id, directory: 'src' });
+  await new Promise(resolve => setTimeout(resolve, 150)); await tick();
+  expect(host.querySelector('[data-path="src/new.ts"] .file-change-stats')?.textContent).toBe('7 lines');
+
+  // A push/metadata event is not authority to clear Changes; only the reread snapshot is.
+  projectGitChanged?.({ projectId: projectA.id });
+  await new Promise(resolve => setTimeout(resolve, 150)); await tick();
+  expect(host.querySelector('.file-panel-changes-badge')?.textContent).toBe('5');
+
+  snapshot = { ...cleanGit(), revision: 'clean-2' };
+  projectGitChanged?.({ projectId: projectA.id });
+  await new Promise(resolve => setTimeout(resolve, 150)); await tick();
+  expect(host.textContent).toContain('Working tree is clean');
+  expect(askAgent.hidden).toBe(true);
+  expect(host.querySelector('.file-panel-changes-badge')?.hasAttribute('hidden')).toBe(true);
+  expect(host.querySelector('.test-diff-viewer')).toBeNull();
+});
+
+it('marks every ancestor folder, including paths of deleted and renamed files, then clears them from Git truth', async () => {
+  let snapshot: ProjectGitSnapshot = {
+    ...cleanGit(), revision: 'nested-dirty', changes: [
+      { status: 'M', path: 'src/nested/main.ts', additions: 1, deletions: 1, binary: false },
+      { status: 'U', path: 'src/nested/loose.ts', additions: 2, deletions: 0, binary: false },
+      { status: 'D', path: 'docs/removed.ts', additions: 0, deletions: 2, binary: false },
+      { status: 'R', path: 'src/nested/new.ts', previousPath: 'docs/old.ts', additions: 0, deletions: 0, binary: false }
+    ]
+  };
+  (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok(snapshot));
+  (window.api.listProjectFiles as any).mockImplementation((_id: string, directory: string) => ok({
+    projectId: projectA.id, projectName: projectA.name, directory, truncated: false,
+    entries: directory === '' ? [
+      { name: 'src', path: 'src', kind: 'directory', bytes: null },
+      { name: 'docs', path: 'docs', kind: 'directory', bytes: null },
+      { name: 'src-other', path: 'src-other', kind: 'directory', bytes: null }
+    ] : directory === 'src' ? [
+      { name: 'nested', path: 'src/nested', kind: 'directory', bytes: null }
+    ] : directory === 'src/nested' ? [
+      { name: 'main.ts', path: 'src/nested/main.ts', kind: 'file', bytes: 10 },
+      { name: 'loose.ts', path: 'src/nested/loose.ts', kind: 'file', bytes: 10 },
+      { name: 'new.ts', path: 'src/nested/new.ts', kind: 'file', bytes: 10 }
+    ] : []
+  }));
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA); toggle.click(); await tick(); await tick();
+  const label = (path: string) => host.querySelector(`[data-path="${path}"] .file-tree-git-status`)?.getAttribute('aria-label');
+  expect(label('src')).toBe('Git changes in this folder: 3');
+  expect(label('docs')).toBe('Git changes in this folder: 2');
+  expect(host.querySelector('[data-path="src"] .file-tree-git-status')?.textContent).toBe('M');
+  expect(host.querySelector('[data-path="docs"] .file-tree-git-status')?.textContent).toBe('M');
+  expect(label('src-other')).toBeUndefined();
+  host.querySelector<HTMLButtonElement>('[data-path="src"]')!.click(); await tick();
+  expect(label('src/nested')).toBe('Git changes in this folder: 3');
+  host.querySelector<HTMLButtonElement>('[data-path="src/nested"]')!.click(); await tick();
+  expect(host.querySelector('[data-path="src/nested/main.ts"] .file-tree-git-status')?.textContent).toBe('M');
+  expect(host.querySelector('[data-path="src/nested/loose.ts"] .file-tree-git-status')?.textContent).toBe('U');
+  expect(host.querySelector('[data-path="src/nested/new.ts"] .file-tree-git-status')?.textContent).toBe('R');
+  snapshot = { ...cleanGit(), revision: 'nested-clean' };
+  projectGitChanged?.({ projectId: projectA.id });
+  await new Promise(resolve => setTimeout(resolve, 150)); await tick();
+  expect(label('src')).toBeUndefined();
+  expect(label('docs')).toBeUndefined();
+  expect(label('src/nested')).toBeUndefined();
+  expect(label('src/nested/main.ts')).toBeUndefined();
+});
+
+it('reviews the exact edit independently of current Git changes and returns to Files', async () => {
+  const review = vi.fn((_sessionId: string, _callId: string, index: number) => ok({
+    callId: 'call-id', changeIndex: index, path: index === 0 ? 'src/main.ts' : 'src/other.ts',
+    added: 1, removed: 1, baseText: index === 0 ? 'before' : 'old', currentText: index === 0 ? 'after' : 'new'
+  }));
+  (window.api as any).getToolEditReview = review;
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA);
+  expect(await panel.openReview(projectB.id, 'session-id', 'call-id', [0])).toBe(false);
+  expect(await panel.openReview(projectA.id, 'session-id', 'call-id', [-1])).toBe(false);
+  expect((window.api.getProjectGitSnapshot as any)).not.toHaveBeenCalled();
+  expect(await panel.openReview(projectA.id, 'session-id', 'call-id', [0, 1])).toBe(true);
+  await tick();
+  expect(document.activeElement).toBe(host.querySelector('.file-changes-back'));
+  expect(panel.visible()).toBe(true);
+  expect(host.querySelector<HTMLElement>('.file-changes-view')?.hidden).toBe(false);
+  expect(host.querySelector<HTMLElement>('.file-changes-list')?.hidden).toBe(true);
+  expect(host.querySelector('.file-panel-body')?.classList.contains('is-diff-open')).toBe(true);
+  expect(host.querySelector<HTMLButtonElement>('.file-changes-back')?.getAttribute('aria-label')).toBe('Back to files');
+  expect(host.querySelector('.test-diff-viewer')?.textContent).toBe('before\n---\nafter');
+  expect((window.api.getProjectGitDiff as any)).not.toHaveBeenCalled();
+  expect(review).toHaveBeenCalledWith('session-id', 'call-id', 0);
+  host.querySelector<HTMLButtonElement>('[title="Next edited file"]')!.click(); await tick();
+  expect(host.querySelector('.test-diff-viewer')?.textContent).toBe('old\n---\nnew');
+  expect(review).toHaveBeenLastCalledWith('session-id', 'call-id', 1);
+  host.querySelector<HTMLButtonElement>('.file-changes-back')!.click(); await tick();
+  expect(host.querySelector('.test-diff-viewer')).toBeNull();
+  expect(host.querySelector<HTMLElement>('.file-tree')?.hidden).toBe(false);
+  expect(document.activeElement).toBe(host.querySelector('.file-tree-root'));
 });
 
 it('keeps tree focus through directory loading and supports arrow, parent and boundary navigation', async () => {
@@ -201,6 +428,16 @@ it('refreshes a watched directory automatically when the filesystem changes', as
   expect(host.textContent).toContain('generated.ts');
 });
 
+it('retires a pending Git reconciliation when the panel closes', async () => {
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA); toggle.click(); await tick(); await tick();
+  const before = (window.api.getProjectGitSnapshot as any).mock.calls.length;
+  projectGitChanged?.({ projectId: projectA.id });
+  toggle.click();
+  await new Promise(resolve => setTimeout(resolve, 150));
+  expect((window.api.getProjectGitSnapshot as any)).toHaveBeenCalledTimes(before);
+});
+
 it('previews and attaches a selected project file without exposing a native path', async () => {
   const panel = createFilePanel({ host, toggle, onAttach: file => attached.push(file.name) });
   panel.update(projectA); toggle.click(); await tick();
@@ -214,6 +451,41 @@ it('previews and attaches a selected project file without exposing a native path
   expect((window.api.attachProjectFile as any)).toHaveBeenCalledWith(projectA.id, 'README.md');
   expect(attached).toEqual(['README.md']);
   expect(JSON.stringify((window.api.attachProjectFile as any).mock.calls)).not.toContain('C:\\alpha');
+});
+
+it('uses the file name as the title and its relative path as metadata in file and diff previews', async () => {
+  const nestedPreview = { ...preview, path: 'src/main.ts', name: 'main.ts', text: 'export {}' };
+  (window.api.previewProjectFile as any).mockImplementation(() => ok(nestedPreview));
+  (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({
+    projectId: projectA.id,
+    state: 'ready',
+    changes: [{ status: 'M', path: 'src/main.ts', additions: 1, deletions: 0, binary: false }],
+    truncated: false,
+    revision: 'nested-dirty'
+  } satisfies ProjectGitSnapshot));
+  (window.api.getProjectGitDiff as any).mockImplementation(() => ok({
+    projectId: projectA.id,
+    status: 'M',
+    path: 'src/main.ts',
+    additions: 1,
+    deletions: 0,
+    binary: false,
+    tooLarge: false,
+    baseText: '',
+    currentText: 'export {}'
+  } satisfies ProjectGitDiff));
+
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA); toggle.click(); await tick();
+  host.querySelector<HTMLButtonElement>('[data-path="src"]')!.click(); await tick();
+  host.querySelector<HTMLButtonElement>('[data-path="src/main.ts"]')!.click(); await tick();
+  expect(host.querySelector('.file-preview-title > strong')?.textContent).toBe('main.ts');
+  expect(host.querySelector('.file-preview-meta')?.textContent).toContain('src/main.ts');
+
+  host.querySelector<HTMLButtonElement>('.file-panel-changes-toggle')!.click(); await tick(); await tick();
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="src/main.ts"]')!.click(); await tick(); await tick();
+  expect(host.querySelector('.file-preview-title > strong')?.textContent).toBe('main.ts');
+  expect(host.querySelector('.file-preview-meta')?.textContent).toContain('src/main.ts');
 });
 
 it('lets the user close only the file preview without closing Files or changing the selection', async () => {
@@ -324,7 +596,11 @@ it('keeps one compact toolbar and closes through the Files toggle', async () => 
   expect(disclosure.getAttribute('aria-hidden')).toBe('true');
   expect(host.querySelector('.file-panel-header')).toBeNull();
   expect(host.querySelector('.file-panel-close')).toBeNull();
-  expect(host.querySelector('.file-panel-toolbar .file-panel-refresh')).not.toBeNull();
+  expect(host.querySelector('.file-panel-toolbar .file-panel-refresh .ph-arrow-clockwise')).not.toBeNull();
+  expect(host.querySelector('[title="New file"] .ph-file-plus')).not.toBeNull();
+  expect(host.querySelector('[title="New folder"] .ph-folder-plus')).not.toBeNull();
+  expect(disclosure.querySelector('.disclosure-chevron path')?.getAttribute('d')).toBe('M6 3.5 10.5 8 6 12.5');
+  expect(host.querySelector('[data-path="src"] .ph-folder')).not.toBeNull();
   toggle.click(); await tick();
   expect(host.querySelector<HTMLElement>('.file-panel')!.hidden).toBe(true);
 });
@@ -592,8 +868,7 @@ it('shares the right work slot exclusively with the Sub-agents panel', async () 
     onShow: () => files.hide(),
     load: async () => ({ events: [] }),
     render: () => [],
-    openMain: () => undefined,
-    working: () => false
+    openMain: () => undefined
   });
   files = createFilePanel({
     host,
@@ -607,7 +882,7 @@ it('shares the right work slot exclusively with the Sub-agents panel', async () 
     startedAt: 1, updatedAt: 1, endedAt: null, events: 0, agents: ['worker-1'],
     estimatedTokens: 0, contextTokens: 0,
     origin: { kind: 'worker', fromSessionId: 'prime-session', agentId: 'worker-1', task: 'Inspect' }
-  } as any]);
+  } as any], null);
 
   toggle.click(); await tick();
   expect(files.visible()).toBe(true);
@@ -631,22 +906,34 @@ it('gives Files and Sub-agents the same horizontally resizable work-panel width'
   document.body.append(agentToggle);
   const agents = createAgentPanel({
     host, toggle: agentToggle, load: async () => ({ events: [] }), render: () => [],
-    openMain: () => undefined, working: () => false
+    openMain: () => undefined
   });
   const files = createFilePanel({ host, toggle, onAttach: () => undefined });
   files.update(projectA);
 
   const fileHandle = host.querySelector<HTMLElement>('.file-panel .work-panel-resize')!;
   expect(fileHandle.getAttribute('role')).toBe('separator');
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('500px');
   fileHandle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
   const width = host.style.getPropertyValue('--work-panel-width');
   expect(width).toMatch(/^\d+px$/);
 
-  agents.update('prime-session', []);
+  agents.update('prime-session', [], null);
   const agentHandle = host.querySelector<HTMLElement>('.agent-panel .work-panel-resize')!;
   expect(agentHandle.getAttribute('aria-valuenow')).toBe(width.replace('px', ''));
   agentHandle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
   expect(host.style.getPropertyValue('--work-panel-width')).not.toBe(width);
+});
+
+it('stops horizontal resize before the Files toolbar can be swallowed', () => {
+  host.getBoundingClientRect = () => ({ width: 1000 } as DOMRect);
+  createFilePanel({ host, toggle, onAttach: () => undefined });
+  const handle = host.querySelector<HTMLElement>('.work-panel-resize')!;
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('500px');
+  expect(handle.getAttribute('aria-valuemin')).toBe('500');
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('500px');
 });
 
 async function editFile(): Promise<HTMLTextAreaElement> {

@@ -22,4 +22,12 @@ it('transports pathless clipboard bytes and disk paths through one bounded image
   expect(await api.dropFiles(Array(21).fill({ name: 'clipboard.png', size: 3, arrayBuffer }))).toMatchObject({ ok: false });
   expect(arrayBuffer).not.toHaveBeenCalled();
   expect(invoke).not.toHaveBeenCalled();
+  await api.getProjectGitSnapshot('project-id');
+  await api.getProjectGitDiff('project-id', 'src/main.ts');
+  await api.getToolEditReview('session-id', '00000000-0000-4000-8000-000000000000', 1);
+  expect(invoke).toHaveBeenNthCalledWith(1, 'projectGit:snapshot', { projectId: 'project-id' });
+  expect(invoke).toHaveBeenNthCalledWith(2, 'projectGit:diff', { projectId: 'project-id', path: 'src/main.ts' });
+  expect(invoke).toHaveBeenNthCalledWith(3, 'sessions:toolEditReview', {
+    sessionId: 'session-id', callId: '00000000-0000-4000-8000-000000000000', changeIndex: 1
+  });
 });

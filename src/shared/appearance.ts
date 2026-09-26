@@ -89,6 +89,8 @@ export function paletteTokens(background: string, accent: string, contrast: numb
     '--knob-off': ink, '--knob-on': readableInk(accent),
     '--green': readableTint('#258552', card, 4.5), '--green-wash': mixColor(background, '#258552', .12),
     '--green-line': mixColor(background, '#258552', .3),
+    '--orange': readableTint('#c26b14', card, 4.5), '--orange-wash': mixColor(background, '#c26b14', .12),
+    '--orange-line': mixColor(background, '#c26b14', .3),
     '--red': readableTint('#d44545', card, 4.5), '--red-wash': mixColor(background, '#d44545', .12),
     '--red-line': mixColor(background, '#d44545', .3)
   };

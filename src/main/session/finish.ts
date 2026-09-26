@@ -198,7 +198,7 @@ export async function releaseSessionFinish(sessionId: string, expectedTurnId: st
   const latest = await getSession(sessionId);
   if (latest?.activeTurnId !== expectedTurnId || latest.conversationId !== session.conversationId) throw new Error('The active turn changed; refresh before ending it');
   const message = reason === 'stop'
-    ? 'Stop requested. The finish hold was released; ChatGPT has not yet confirmed that generation stopped.'
+    ? 'Stop requested. The finish hold was released.'
     : 'Finish hold released. ChatGPT may finish its answer; generation has not been stopped.';
   const receipt = await recordProgress(sessionId, `finish-release:${expectedTurnId}`, message,
     undefined, expectedTurnId, { state: 'released', conversationId: session.conversationId });

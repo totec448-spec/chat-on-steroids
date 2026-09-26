@@ -25,26 +25,32 @@ let document: Document;
 let css = '';
 let chatSource = '';
 let browserPreferencesSource = '';
+let disclosureSource = '';
 
 beforeAll(async () => {
   browserPreferencesSource = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'browser-preferences.ts'), 'utf8');
-  const [html, styles, chat] = await Promise.all([
+  const [html, styles, chat, main, filePanel, agentPlan, plugins] = await Promise.all([
     fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8'),
     fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'styles.css'), 'utf8'),
-    fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'chat.ts'), 'utf8')
+    fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'chat.ts'), 'utf8'),
+    fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'main.ts'), 'utf8'),
+    fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'file-panel.ts'), 'utf8'),
+    fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'agent-plan.ts'), 'utf8'),
+    fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'plugins.ts'), 'utf8')
   ]);
   document = new JSDOM(html).window.document;
   css = styles;
   chatSource = chat;
+  disclosureSource = [chat, main, filePanel, agentPlan, plugins].join('\n');
 });
 
 it('searches whole settings sections without empty headings, orphaned controls or lost conditional visibility', () => {
   const view = document.querySelector<HTMLElement>('[data-view="settings"]')!;
-  const sections = [...view.querySelectorAll<HTMLElement>('.settings-section-title')];
+  const sections = [...view.querySelectorAll<HTMLElement>('.automation-section-head')];
   const conditional = document.getElementById('goalModels')!;
   expect(conditional.hidden).toBe(true);
   filterSettingsSections(view, '  SESSION FINISH  ');
-  expect(sections.filter(section => !section.hidden).map(section => section.textContent)).toEqual(['Keep the turn open']);
+  expect(sections.filter(section => !section.hidden).map(section => section.querySelector('h2')?.textContent)).toEqual(['Keep the turn open']);
   for (const section of sections) expect((section.nextElementSibling as HTMLElement).hidden).toBe(section.hidden);
   expect(document.getElementById('finishTool')!.closest('.pane')!.hasAttribute('hidden')).toBe(false);
   expect(document.getElementById('goalKey')!.closest('.pane')!.hasAttribute('hidden')).toBe(true);
@@ -55,6 +61,87 @@ it('searches whole settings sections without empty headings, orphaned controls o
   expect(sections.every(section => !section.hidden && !(section.nextElementSibling as HTMLElement).hidden)).toBe(true);
   expect(conditional.hidden).toBe(true);
   expect(document.getElementById('settingsSearchEmpty')!.hidden).toBe(true);
+});
+
+it('gives Plugins, Skills and Pets the same restrained page entrance as Settings', () => {
+  expect(rule(".app[data-screen='library'] .panel.is-active")).toContain('animation: surface-in 160ms ease-out');
+  expect(document.querySelectorAll("[data-panel='plugins'], [data-panel='skills'], [data-panel='pets']")).toHaveLength(3);
+  expect(document.getElementById('skillsRefresh')!.querySelector('.ph-arrow-clockwise')).not.toBeNull();
+  expect(css).toContain('@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important;');
+});
+
+it('animates Agents & automation only at its inner view boundary', () => {
+  expect(css).toContain(".app[data-screen='settings'] .panel.is-active:not([data-panel='chat']),\n.app[data-screen='library'] .panel.is-active { animation: surface-in 160ms ease-out; }");
+  expect(rule(".app[data-screen='settings'] [data-view='settings']:not([hidden])")).toContain('animation: surface-in 160ms ease-out');
+  expect(css).not.toContain(".app[data-screen='settings'] .panel.is-active, .app[data-screen='settings'] [data-view='settings']");
+});
+
+it('keeps Agents & automation on the shared settings canvas with its model action in the section header', () => {
+  const view = document.querySelector<HTMLElement>('[data-view="settings"]')!;
+  const sections = [...view.querySelectorAll<HTMLElement>('.automation-section-head')];
+  expect(view.classList.contains('settings-page-content')).toBe(true);
+  expect(view.querySelector('.settings-page-head #settingsSearch')).not.toBeNull();
+  expect(document.getElementById('settingsSearch')!.closest('.plugin-search')?.querySelector('.ph-magnifying-glass')).not.toBeNull();
+  expect(sections).toHaveLength(7);
+  expect(sections.every(section => Boolean(section.querySelector('p')?.textContent?.trim()))).toBe(true);
+  expect(sections.every(section => section.nextElementSibling?.classList.contains('settings-surface'))).toBe(true);
+  expect(document.getElementById('refreshChatModels')!.closest('.automation-section-head')?.querySelector('h2')?.textContent).toBe('ChatGPT models');
+  expect(document.getElementById('swarmReset')!.closest('.pane')?.previousElementSibling?.querySelector('h2')?.textContent).toBe('Workers & recovery');
+});
+
+it('uses the same navigation typography in the chat and settings sidebars', () => {
+  expect(rule('.sidebar-primary .new-chat, .sidebar .sidebar-primary-link')).toContain('min-height: 38px');
+  expect(rule('.sidebar-primary .new-chat, .sidebar .sidebar-primary-link')).toContain('font-size: calc(13px * var(--text-scale, 1))');
+  expect(rule('nav button')).toContain('min-height: 38px');
+  expect(rule('nav button')).toContain('font-size: calc(13px * var(--text-scale, 1))');
+  expect(rule('nav button')).toContain('font-weight: 550');
+});
+
+it('reveals settings navigation inside the sidebar without animating its shell geometry', () => {
+  expect(rule(".app[data-screen='settings'] #backToChat")).toContain('animation: sidebar-content-in 170ms cubic-bezier(.16, 1, .3, 1)');
+  expect(rule(".app[data-screen='settings'] #tabs,\n.app[data-screen='chat'] .sidebar-sessions")).toContain('animation: sidebar-content-in 200ms cubic-bezier(.16, 1, .3, 1)');
+  expect(rule(".app[data-screen='chat'] #sidebarPrimary")).toContain('animation: sidebar-content-in 170ms cubic-bezier(.16, 1, .3, 1)');
+  expect(css).toContain('@keyframes sidebar-content-in { from { opacity: .35; transform: translateX(-6px); clip-path: inset(0 0 0 8px); }');
+  expect(rule('.sidebar')).not.toContain('sidebar-content-in');
+});
+
+it('groups Appearance into the shared settings sections without moving its controls or reset scope', () => {
+  const panel = document.getElementById('appearancePanel')!;
+  const content = panel.querySelector('.appearance-content')!;
+  const sections = [...content.querySelectorAll('.appearance-section')];
+  expect(content.classList.contains('settings-page-content')).toBe(true);
+  expect(sections.map(section => section.querySelector('h2')?.textContent)).toEqual(['Preview', 'Colors', 'Typography', 'Preferences']);
+  expect(sections.every(section => Boolean(section.querySelector('.settings-section-head p')?.textContent?.trim()))).toBe(true);
+  expect(sections.every(section => Boolean(section.querySelector('.appearance-preview, .appearance-settings-card')))).toBe(true);
+  expect(document.getElementById('appearanceReset')!.closest('.appearance-page-head')).not.toBeNull();
+  expect(document.getElementById('uiLanguage')!.closest('.appearance-section')?.querySelector('h2')?.textContent).toBe('Preferences');
+  expect(document.getElementById('setupProfile')!.closest('.appearance-section')?.querySelector('h2')?.textContent).toBe('Preferences');
+});
+
+it('uses one centered vector geometry for animated disclosure and dropdown indicators', () => {
+  const staticIndicators = [...document.querySelectorAll<SVGElement>('svg.disclosure-chevron')];
+  expect(staticIndicators).toHaveLength(8);
+  expect(staticIndicators.every(node => node.getAttribute('viewBox') === '0 0 16 16')).toBe(true);
+  expect(staticIndicators.every(node => node.querySelector('path')?.getAttribute('d') === 'M6 3.5 10.5 8 6 12.5')).toBe(true);
+  expect(document.querySelectorAll('.sidebar-section-chev.ph, .sum-chev.ph, .picker-chevron.ph')).toHaveLength(0);
+  expect(disclosureSource).not.toContain("icon('i-chev'");
+  expect(disclosureSource.match(/disclosureChevron\(/g)).toHaveLength(10);
+  expect(rule('.disclosure-chevron')).toContain('transform-box: view-box');
+  expect(rule('.disclosure-chevron')).toContain('transform-origin: 50% 50%');
+  expect(rule('.dropdown-chevron')).toContain('rotate(90deg)');
+  expect(rule('select::picker-icon')).toContain("content: ''");
+  expect(rule('select::picker-icon')).toContain('mask: url(');
+  expect(rule('select:open::picker-icon')).toContain('rotate(270deg)');
+  expect(css).toContain(':where(.plugin-about, .plugin-legal, .setup-optional, .session-diagnostics, .connection-runtime)[open] > summary .details-chevron { transform: rotate(90deg); }');
+});
+
+it('optically centers the Chats refresh glyph inside its hover target', () => {
+  const refresh = document.getElementById('chatRefresh')!;
+  expect(refresh.getAttribute('aria-label')).toBe('Refresh chats');
+  expect(refresh.querySelector('.ph-arrow-clockwise')).not.toBeNull();
+  expect(rule('.sidebar-session-heading .acts .btn')).toContain('width: 26px; height: 26px');
+  expect(rule('#chatRefresh .ico')).toContain('width: 16px; height: 16px; font-size: 16px');
+  expect(rule('#chatRefresh .ico::before')).toContain('translate: -1px 2px');
 });
 
 it('limits the existing tool-detail preference to handoff briefs', () => {
@@ -68,10 +155,20 @@ it('limits the existing tool-detail preference to handoff briefs', () => {
 });
 
 it('keeps the context circle in the gear group rather than an auto-placed composer grid cell', () => {
-  const group = document.getElementById('composerSettings')!.parentElement!;
+  const group = document.getElementById('composerModeControl')!.parentElement!;
   expect(group.classList.contains('composer-options')).toBe(true);
   expect(document.getElementById('contextMeter')!.parentElement).toBe(group);
   expect(document.getElementById('contextMeterInfo')!.parentElement?.id).toBe('contextMeter');
+  expect(document.getElementById('clearComposerMode')!.parentElement?.id).toBe('composerModeControl');
+  expect(document.getElementById('composerSettingsSummary')!.contains(document.getElementById('clearComposerMode'))).toBe(false);
+});
+
+it('anchors the composer mode menu to the fixed icon slot instead of the variable-width mode pill', () => {
+  const popover = document.querySelector('#composerSettings .composer-popover');
+  expect(popover).not.toBeNull();
+  expect(rule('#composerSettings .composer-popover')).toContain('left: 18px');
+  expect(rule('#composerSettings .composer-popover')).toContain('translate: -50% 0');
+  expect(rule('#composerSettings .composer-popover')).not.toContain('left: 50%');
 });
 
 it('does not expose a periodic Astra continuation outside session_finish', () => {
@@ -100,8 +197,12 @@ describe('the session card header', () => {
   it('keeps global connection status out of the chat header and in the sidebar footer', () => {
     const header = document.querySelector('#chatTitle')!.closest('header')!;
     const connection = document.getElementById('sidebarConnection')!;
+    const connect = document.getElementById('sidebarConnect')!;
     const footer = connection.closest('.sidebar-bottom')!;
     expect(header.contains(connection)).toBe(false);
+    expect(header.querySelector('#headerConnect')).toBeNull();
+    expect(document.getElementById('headerActions')).toBe(header.querySelector('.state'));
+    expect(connect.parentElement).toBe(connection.parentElement);
     expect(footer).not.toBeNull();
     expect([...footer.children].map((node) => (node as HTMLElement).id || (node as HTMLElement).className)).toEqual([
       'workspaceSettings',
@@ -110,11 +211,32 @@ describe('the session card header', () => {
     expect(document.getElementById('connectionPopover')!.closest('.connection-anchor')).not.toBeNull();
     expect(rule('.connection-popover')).toContain('position: fixed');
     expect(rule('.connection-popover')).toContain('max-height: min(580px, calc(100vh - 70px))');
+    expect(rule('.connection-popover:not([hidden])')).toContain('animation: surface-in 140ms ease-out');
     expect(rule('.connection-popover::-webkit-scrollbar-track')).toContain('margin-block: 10px');
-    expect(rule('#workspaceSettings')).toContain('height: 36px');
+    expect(rule('#workspaceSettings')).toContain('flex: 0 0 36px');
+    expect(rule('#workspaceSettings')).toContain('place-items: center');
+    expect(rule('#workspaceSettings')).toContain('justify-content: center');
+    expect(rule('#workspaceSettings')).toContain('border: 0');
+    expect(rule('#workspaceSettings:hover')).toContain('background: var(--hover)');
+    expect(rule('#workspaceSettings')).toContain('background: transparent');
+    expect(rule('#workspaceSettings.is-sel')).toContain('background: var(--hover)');
+    expect(rule('#workspaceSettings .ico')).toContain('font-size: 22px');
+    expect(document.getElementById('workspaceSettings')!.textContent?.trim()).toBe('');
+    expect(document.getElementById('workspaceSettings')!.getAttribute('aria-label')).toBe('Settings');
     expect(rule('.sidebar-connection')).toContain('width: 36px; height: 36px');
+    expect(rule('.connection-anchor')).toContain('margin-left: auto');
+    expect(rule('.sidebar-connect-action')).toContain('height: 36px');
+    expect(rule('.sidebar-connect-action:not(:disabled)')).toContain('background: var(--green-wash)');
+    expect(rule(".connection-anchor:has(.sidebar-connect-action[data-collapsed='false'])")).toContain('112px');
+    expect(css).not.toContain('.connection-anchor:has(.sidebar-connection.is-busy)');
     expect(document.getElementById('connectionAdvanced')).not.toBeNull();
+    expect(rule('.connection-advanced > summary')).toContain('margin-top: 8px');
+    expect(rule('.connection-advanced[open] > .connection-advanced-body')).toContain('animation: surface-in 140ms ease-out');
     expect(document.getElementById('connectionAdvancedGrid')).not.toBeNull();
+    expect(document.getElementById('connectionPopoverDisconnect')).not.toBeNull();
+    expect(rule('#connectionPopoverDisconnect')).toContain('background: var(--red-wash)');
+    expect(rule('#connectionPopoverDisconnect:disabled')).toContain('background: transparent');
+    expect(document.getElementById('connectionPopoverToggle')).toBeNull();
     expect(document.getElementById('sessionControls')!.closest('#composerSettings')).not.toBeNull();
     expect(header.querySelector('.session-controls')).toBeNull();
   });
@@ -155,8 +277,11 @@ describe('the session card header', () => {
 
   it('has a place to say what is happening without opening the Activity log', () => {
     const note = document.getElementById('chatState')!;
-    expect(note.closest('.subhead')).not.toBeNull();
-    expect(rule('.subhead-note')).toContain('text-overflow: ellipsis');
+    const rail = note.closest('.turn-status-rail')!;
+    expect(rail.nextElementSibling?.id).toBe('composerDock');
+    expect(rule('.turn-status-rail')).toContain('max-width: 860px');
+    expect(rule('.turn-status-copy')).toContain('text-overflow: ellipsis');
+    expect(rule('.turn-status-rail:not([hidden]) ~ .composer')).toContain('margin-top: 4px');
   });
 });
 
@@ -296,13 +421,21 @@ describe('the chat panel cards', () => {
 
   it('gives the session card one row per child, including its navigation row', () => {
     const card = document.getElementById('chatBody')!.closest('.card')!;
-    // Subhead, scrolling conversation, shared plan/queue dock, composer and footer.
+    // Subhead, scrolling conversation, turn status, shared plan/queue dock, composer and footer.
     const layoutChildren = [...card.children].filter(child => child.id !== 'chatSettingsBtn');
-    expect(layoutChildren.length).toBe(5);
+    expect(layoutChildren.length).toBe(6);
     expect(document.getElementById('composerDock')!.firstElementChild?.id).toBe('agentPlan');
     expect(document.getElementById('inputQueue')!.closest('#chatBody')).not.toBeNull();
     expect(card.classList.contains('is-session')).toBe(true);
     expect(tracks("[data-panel='chat'] .card.is-session")).toHaveLength(layoutChildren.length);
+  });
+
+  it('joins Plan, Goal and Compact rows to the composer without covering their content', () => {
+    const dock = rule('.composer-dock');
+    const joined = rule(".composer-dock:not([hidden]):has(> :not([hidden])) + .composer");
+    expect(dock).toContain('margin: 10px auto -1px');
+    expect(dock).not.toContain('margin: 10px auto -15px');
+    expect(joined).toContain('margin-top: 0');
   });
 
   /**
@@ -498,8 +631,34 @@ describe('the session timeline', () => {
 });
 
 describe('the window as a whole', () => {
+  it('keeps the Files toolbar on one stable row and integrates Refresh with its actions', () => {
+    expect(rule('.file-panel-toolbar')).toContain('flex-wrap: nowrap');
+    expect(rule('.file-panel-toolbar')).toContain('overflow-x: auto');
+    expect(rule('.file-panel-toolbar .file-panel-action')).toContain('flex: 0 0 auto');
+    expect(rule('.file-panel-refresh')).toContain('flex: 0 0 30px');
+    expect(rule('.file-panel-refresh')).not.toContain('margin-left');
+    expect(css).not.toContain('.file-panel-toolbar .file-panel-action span { display: none; }');
+  });
+
+  it('keeps right work-panel grid tracks interpolation-compatible with their closed state', () => {
+    const closed = rule("[data-panel='chat']");
+    const open = rule("[data-panel='chat'].has-agent-panel,\n[data-panel='chat'].has-file-panel,\n[data-panel='chat'].has-browser-panel");
+    expect(closed).toContain('grid-template-columns: minmax(0, 1fr) minmax(0, 0px)');
+    expect(closed).toContain('transition: grid-template-columns 220ms cubic-bezier(.16, 1, .3, 1)');
+    expect(open).toContain('grid-template-columns: minmax(0, 1fr) minmax(0, var(--work-panel-width, 42%))');
+  });
+
+  it('anchors composer rows to the bottom while its measured height animates', () => {
+    expect(rule('.composer')).toContain('align-content: end');
+    expect(rule('.composer.is-resizing')).toContain('overflow: clip');
+    expect(rule('.composer.is-resizing')).toContain('will-change: height');
+  });
+
   it('keeps workspace settings in a scrollable column', () => {
     expect(rule("[data-panel='home']")).toContain('overflow-y: auto');
+    expect(rule('#rootsEmpty')).toContain('margin: 0');
+    expect(rule('#rootsEmpty')).toContain('padding: 10px 14px');
+    expect(rule('#rootsEmpty')).toContain('line-height: 1.5');
   });
 
   /**
@@ -517,10 +676,15 @@ describe('the window as a whole', () => {
   });
 
   it('never scrolls sideways', () => {
-    // Wide authored tables/code may scroll locally; the surrounding app must not.
+    // Authored tables/code and dense Usage data may scroll locally; the
+    // surrounding app must not.
     const horizontal = [...css.matchAll(/([^{}]+)\{[^{}]*overflow-x:\s*(?:auto|scroll)[^{}]*\}/g)];
     expect(horizontal.map(match => match[1]!.trim())).toEqual([
       '.msg.rich .markdown-table',
+      '.usage-heatmap-surface',
+      '.usage-table-stack',
+      '.browser-use-tabs-viewport',
+      '.file-panel-toolbar',
       '.file-preview-markdown pre',
       '.file-preview-markdown-table',
       '.file-pdf-viewport',

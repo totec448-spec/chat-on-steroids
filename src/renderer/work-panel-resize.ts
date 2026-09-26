@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'chat-on-steroids.work-panel-width';
-const MIN_WIDTH = 280;
+const DEFAULT_WIDTH = 500;
+const MIN_WIDTH = DEFAULT_WIDTH;
 const MIN_MAIN_WIDTH = 360;
 
 function hostWidth(host: HTMLElement): number {
@@ -16,7 +17,7 @@ function currentWidth(host: HTMLElement, pane: HTMLElement): number {
   if (Number.isFinite(explicit) && explicit > 0) return explicit;
   const measured = pane.getBoundingClientRect().width;
   if (measured > 0) return measured;
-  return Math.min(maximum(host), Math.max(MIN_WIDTH, hostWidth(host) * 0.42));
+  return Math.min(maximum(host), DEFAULT_WIDTH);
 }
 
 function setWidth(host: HTMLElement, width: number, persist = false): number {
@@ -36,10 +37,16 @@ function setWidth(host: HTMLElement, width: number, persist = false): number {
 }
 
 /**
- * Adds the shared horizontal resize affordance used by the right-side Files and Sub-agents panes.
+ * Adds the shared horizontal resize affordance used by right-side work panes.
  * The width belongs to the work slot, not to either pane, so switching tools preserves it.
+ * Native surfaces keep the same hit target but render their visible rail wholly on the DOM
+ * side of the compositor boundary, where a WebContentsView cannot occlude it.
  */
-export function attachWorkPanelResize(host: HTMLElement, pane: HTMLElement): HTMLElement {
+export function attachWorkPanelResize(
+  host: HTMLElement,
+  pane: HTMLElement,
+  options: { onResize?: () => void; nativeBoundary?: boolean } = {}
+): HTMLElement {
   const view = host.ownerDocument.defaultView;
   if (!host.style.getPropertyValue('--work-panel-width')) {
     try {
@@ -49,15 +56,26 @@ export function attachWorkPanelResize(host: HTMLElement, pane: HTMLElement): HTM
   }
 
   const handle = document.createElement('div');
-  handle.className = 'work-panel-resize';
+  handle.className = `work-panel-resize${options.nativeBoundary ? ' is-native-boundary' : ''}`;
   handle.tabIndex = 0;
   handle.setAttribute('role', 'separator');
   handle.setAttribute('aria-orientation', 'vertical');
   handle.setAttribute('aria-label', 'Resize work panel');
+  if (options.nativeBoundary) {
+    const rail = document.createElement('span');
+    rail.className = 'work-panel-resize-rail';
+    rail.setAttribute('aria-hidden', 'true');
+    handle.append(rail);
+  }
   pane.prepend(handle);
 
   let drag: { id: number; x: number; width: number } | null = null;
-  const paintAria = () => setWidth(host, currentWidth(host, pane));
+  const resize = (width: number, persist = false): number => {
+    const next = setWidth(host, width, persist);
+    options.onResize?.();
+    return next;
+  };
+  const paintAria = () => resize(currentWidth(host, pane));
   paintAria();
 
   handle.addEventListener('pointerdown', event => {
@@ -70,14 +88,14 @@ export function attachWorkPanelResize(host: HTMLElement, pane: HTMLElement): HTM
   handle.addEventListener('pointermove', event => {
     if (drag?.id !== event.pointerId) return;
     // The handle is the panel's left edge, so moving it left makes the right panel wider.
-    setWidth(host, drag.width + drag.x - event.clientX);
+    resize(drag.width + drag.x - event.clientX);
   });
   const finish = (event: PointerEvent): void => {
     if (drag?.id !== event.pointerId) return;
     drag = null;
     host.classList.remove('is-resizing-work-panel');
     if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
-    setWidth(host, currentWidth(host, pane), true);
+    resize(currentWidth(host, pane), true);
   };
   handle.addEventListener('pointerup', finish);
   handle.addEventListener('pointercancel', finish);
@@ -90,10 +108,10 @@ export function attachWorkPanelResize(host: HTMLElement, pane: HTMLElement): HTM
   });
   handle.addEventListener('keydown', event => {
     const width = currentWidth(host, pane);
-    if (event.key === 'ArrowLeft') setWidth(host, width + 10, true);
-    else if (event.key === 'ArrowRight') setWidth(host, width - 10, true);
-    else if (event.key === 'Home') setWidth(host, MIN_WIDTH, true);
-    else if (event.key === 'End') setWidth(host, maximum(host), true);
+    if (event.key === 'ArrowLeft') resize(width + 10, true);
+    else if (event.key === 'ArrowRight') resize(width - 10, true);
+    else if (event.key === 'Home') resize(MIN_WIDTH, true);
+    else if (event.key === 'End') resize(maximum(host), true);
     else return;
     event.preventDefault();
   });

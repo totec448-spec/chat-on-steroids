@@ -102,6 +102,9 @@ it('loads bounded PDF bytes and renders the first page with navigation controls'
   expect(parent.querySelector('.file-pdf-page')?.textContent).toBe('1 / 2');
   expect(requestedPages).toEqual([1]);
   expect(parent.querySelector<HTMLCanvasElement>('.file-pdf-canvas')?.hidden).toBe(false);
+  expect(parent.querySelector('[aria-label="Previous page"] .ph-caret-left')).not.toBeNull();
+  expect(parent.querySelector('[aria-label="Next page"] .ph-caret-right')).not.toBeNull();
+  expect(parent.querySelector('[aria-label="Fit to width"] .ph-arrows-out-line-horizontal')).not.toBeNull();
 
   parent.querySelector<HTMLButtonElement>('[aria-label="Next page"]')!.click();
   await Promise.resolve(); await Promise.resolve();

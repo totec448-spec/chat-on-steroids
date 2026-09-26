@@ -22,6 +22,7 @@ import { effectiveCapabilities, getConfig, MAX_MCP_INSTRUCTIONS_CHARS } from '..
 import { isGitRepository } from '../toolchain.js';
 import type { ToolContext } from './kernel.js';
 import { surfaceDefinition, type SurfaceId } from './surfaces.js';
+import { BROWSER_SURFACE_ROUTING, BROWSER_USE_SCOPE, COMPANION_BROWSER_SCOPE } from '../../shared/browser-routing.js';
 
 export function serverInstructions(
   ctx: ToolContext,
@@ -35,7 +36,9 @@ export function serverInstructions(
 
 function browserInstructions(): string {
   return [
-    'Browser control runs through the companion extension inside your existing browser, on Desktop. Prefer browser_* tools for web work: they read the DOM and operate background tabs without moving the OS cursor or foregrounding Chrome.',
+    COMPANION_BROWSER_SCOPE,
+    BROWSER_SURFACE_ROUTING,
+    'Use browser_* only for work that belongs in an existing user browser. These tools read the DOM and operate background tabs without moving the OS cursor or foregrounding Chrome.',
     'Start with browser_tabs action=list and choose a returned tabId by title/URL. access.snapshot and access.input distinguish DOM reading from interaction; pendingUrl identifies a destination still loading. browser_snapshot reads existing HTTP(S) tabs directly, including protected ChatGPT pages and foreign attachments. An attach refusal does not require another tab: inspect that same tab. Attach for input, screenshots and captured diagnostics. action=new starts the requested URL directly in a background tab; created and attached are separate facts. If created is true and attached is false, inspect or attach that same tab instead of repeating new. Release leaves it open. No additional per-tab confirmation is required.',
     'Keep existing-browser work on this Desktop connector. External Playwright/browser plugins can launch a separate empty browser on about:blank; they do not inherit this browser\'s tabs, login, tabId or refs. Switching connectors or opening duplicate ChatGPT chats cannot repair an ownership or protected-input refusal. Use browser_snapshot for the available read path.',
     'Unattached/foreign browser_snapshot returns inspectionOnly and documentId without action refs. Your attached tab returns refs/pageId; mode:inspect preserves existing refs. format:dom adds bounded element attributes, CSS and rectangles for DOM/layout diagnosis without arbitrary JavaScript. selector scopes to a CSS subtree such as main. filter is a literal case-insensitive match, not regex. Truncation never proves absence. Snapshot again after navigation or stale refs. Attached frameId selects an observed iframe; inspection uses document: frameIds. browser_screenshot supplies image-pixel coordinates and screenshotId; full-page images are inspection-only.',
@@ -104,6 +107,9 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     'read batches paths, lists folders, expands globs and returns numbered text. Read whole files for orientation; otherwise use known regions. A start_line/end_line range applies to every file the call reads.',
   );
   if (caps.read) lines.push('view_image inspects a local image. Use it when visual evidence matters.');
+  if ((ctx.exposedCaps ?? caps).browserUse) lines.push(
+    `${BROWSER_USE_SCOPE} ${BROWSER_SURFACE_ROUTING} The Core browser tool never addresses the app-owned ChatGPT transport browser. Begin with a top-level list call. If there is no active tab, use top-level open. New origins return approval_required immediately without navigating; wait for the user to approve the exact origin in the Browser panel, then retry the supplied navigation at top level. Use select to change tabs explicitly; state observes a named tab without selecting it. After approval, start each short Core exec burst with state compact:true on the selected tab; use the returned tabId/snapshotId only inside that burst, never across exec calls. Reobserve compactly after every click/type/key/scroll. Inspect each structured status: target_lost means the page changed, so observe again instead of opening another tab. Keep full-text state outside exec when semantic reading is needed. done ends only the agent-driving mission and never closes or reopens the panel or tabs. Avoid top-level return in exec JavaScript.`
+  );
   if (caps.command) {
     lines.push(
       'Use rg or rg --files for searches; if unavailable, use the next best tool. Prefer rg -g \'*.ts\' src over shell globs.',

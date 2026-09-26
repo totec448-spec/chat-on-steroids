@@ -1,6 +1,10 @@
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({ update: vi.fn() }) }));
 // Native animation/media APIs are covered by pet DOM and real Electron tests.
-vi.mock('../src/renderer/pet.js', () => ({ initPet: () => () => {} }));
+vi.mock('../src/renderer/pet.js', () => ({
+  initPet: () => Object.assign(() => {}, {
+    toggle: vi.fn(), isVisible: () => false, isReady: () => true, refresh: vi.fn(), applyLibraryState: vi.fn()
+  })
+}));
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
@@ -97,6 +101,7 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
   stateListener(structuredClone(state));
   expect(w.document.activeElement).toBe(multiAgent);
   expect(multiAgent.checked).toBe(true);
+  expect(w.document.querySelector('[data-group="agents"] .ph-robot')).not.toBeNull();
 
   const allowUnattributed = w.document.getElementById('allowUnattributedCalls') as HTMLInputElement;
   allowUnattributed.focus();
@@ -508,6 +513,141 @@ it('keeps project keyboard focus across activity repaint without taking composer
   expect(listSessions).toHaveBeenCalledTimes(reads + 1);
 });
 
+it('moves Connect into the sidebar control and preserves status diagnostics after it contracts', async () => {
+  let connected: any;
+  let disconnected: any;
+  const connect = vi.fn(() => Promise.resolve({ ok: true, data: connected }));
+  const disconnect = vi.fn(() => Promise.resolve({ ok: true, data: disconnected }));
+  const mounted = await mountChat({ hasApiKey: true }, [], { connect, disconnect });
+  const doc = mounted.window.document;
+  const action = doc.getElementById('sidebarConnect') as HTMLButtonElement;
+  const disconnectAction = doc.getElementById('connectionPopoverDisconnect') as HTMLButtonElement;
+  const status = doc.getElementById('sidebarConnection') as HTMLButtonElement;
+  const popover = doc.getElementById('connectionPopover') as HTMLElement;
+  connected = structuredClone(mounted.state);
+  connected.status.state = 'connected';
+  connected.status.handshakeAt = Date.now();
+  disconnected = structuredClone(mounted.state);
+
+  expect(doc.getElementById('headerConnect')).toBeNull();
+  expect(action.dataset.collapsed).toBe('false');
+  expect(action.disabled).toBe(false);
+  expect(action.textContent).toBe('Connect');
+  expect(disconnectAction.hidden).toBe(false);
+  expect(disconnectAction.disabled).toBe(true);
+  action.focus(); action.click(); await settle();
+  expect(connect).toHaveBeenCalledOnce();
+  expect(action.dataset.collapsed).toBe('true');
+  expect(action.getAttribute('aria-hidden')).toBe('true');
+  expect(action.tabIndex).toBe(-1);
+  expect(doc.activeElement).toBe(status);
+  expect(status.classList.contains('is-connected')).toBe(true);
+  expect(disconnectAction.hidden).toBe(false);
+  expect(disconnectAction.disabled).toBe(false);
+
+  status.click();
+  expect(popover.hidden).toBe(false);
+  disconnectAction.click();
+  expect(popover.hidden).toBe(true);
+  await settle();
+  expect(disconnect).toHaveBeenCalledOnce();
+  expect(action.dataset.collapsed).toBe('false');
+  expect(action.getAttribute('aria-hidden')).toBe('false');
+  expect(action.disabled).toBe(false);
+  expect(disconnectAction.hidden).toBe(false);
+  expect(disconnectAction.disabled).toBe(true);
+});
+
+it('holds a failed Connect as orange Attention until its error toast is dismissed', async () => {
+  let failed: any;
+  const connect = vi.fn(() => Promise.resolve({ ok: true as const, data: failed }));
+  const mounted = await mountChat({ hasApiKey: true }, [], { connect });
+  const doc = mounted.window.document;
+  const action = doc.getElementById('sidebarConnect') as HTMLButtonElement;
+  failed = structuredClone(mounted.state);
+  failed.status.state = 'tunnel-unavailable';
+  failed.status.detail = 'No connector is available.';
+
+  vi.useFakeTimers();
+  try {
+    action.click();
+    expect(action.textContent).toBe('Connecting…');
+    expect(action.disabled).toBe(true);
+    await Promise.resolve(); await Promise.resolve();
+    expect(action.textContent).toBe('Attention!');
+    expect(action.classList.contains('is-attention')).toBe(true);
+    expect(action.closest('.connection-anchor')?.classList.contains('is-attention')).toBe(true);
+    expect(action.disabled).toBe(true);
+    expect(doc.querySelector('.toast')?.textContent).toBe('No connector is available.');
+
+    vi.advanceTimersByTime(3_200);
+    expect(doc.querySelector('.toast')).toBeNull();
+    expect(action.textContent).toBe('Connect');
+    expect(action.classList.contains('is-attention')).toBe(false);
+    expect(action.disabled).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('routes an unconfigured Connect action to Setup without attempting a connection', async () => {
+  const connect = vi.fn();
+  const mounted = await mountChat({}, [], { connect });
+  const doc = mounted.window.document;
+  const action = doc.getElementById('sidebarConnect') as HTMLButtonElement;
+  expect(action.dataset.collapsed).toBe('false');
+  expect(action.title).toContain('API key');
+  action.click();
+  expect(connect).not.toHaveBeenCalled();
+  expect(doc.querySelector('.app')?.getAttribute('data-screen')).toBe('settings');
+});
+
+it.each(['wizConnect', 'sidebarConnect'])(
+  'persists valid Setup drafts before %s starts the tunnel',
+  async (buttonId) => {
+    let live: any;
+    const order: string[] = [];
+    const connect = vi.fn(() => {
+      order.push('connect');
+      expect(live.config.tunnel.tunnelId).toBe(`tunnel_${'b'.repeat(32)}`);
+      expect(live.hasApiKey).toBe(true);
+      live.status.state = 'connected';
+      return Promise.resolve({ ok: true as const, data: structuredClone(live) });
+    });
+    const mounted = await mountChat({}, [], {
+      saveSettings: (patch: any) => {
+        order.push('settings');
+        live.config = { ...live.config, ...structuredClone(patch) };
+        return Promise.resolve({ ok: true as const, data: structuredClone(live) });
+      },
+      setApiKey: () => {
+        order.push('key');
+        live.hasApiKey = true;
+        return Promise.resolve({ ok: true as const, data: structuredClone(live) });
+      },
+      connect
+    });
+    live = mounted.state;
+    live.config.tunnel.tunnelId = '';
+    live.hasApiKey = false;
+    mounted.push(structuredClone(live));
+
+    const doc = mounted.window.document;
+    const tunnel = doc.getElementById('tunnelId') as HTMLInputElement;
+    const key = doc.getElementById('apiKey') as HTMLInputElement;
+    tunnel.value = `tunnel_${'b'.repeat(32)}`;
+    tunnel.dispatchEvent(new mounted.window.Event('input'));
+    key.value = 'sk-valid-setup-draft';
+    key.dispatchEvent(new mounted.window.Event('input'));
+
+    expect((doc.getElementById('wizConnect') as HTMLButtonElement).disabled).toBe(false);
+    (doc.getElementById(buttonId) as HTMLButtonElement).click();
+    expect((doc.getElementById('wizConnect') as HTMLButtonElement).textContent).toBe('Connecting…');
+    await vi.waitFor(() => expect(connect).toHaveBeenCalledOnce());
+    expect(order).toEqual(['settings', 'key', 'connect']);
+  }
+);
+
 it('keeps global connection controls in a compact sidebar popover', async () => {
   const mounted = await mountChat({ hasApiKey: true });
   const doc = mounted.window.document;
@@ -547,6 +687,7 @@ it('keeps global connection controls in a compact sidebar popover', async () => 
   expect(doc.getElementById('connectionPopoverSettings')).toBeNull();
   const advanced = doc.getElementById('connectionAdvanced') as HTMLDetailsElement;
   const runtime = doc.getElementById('connectionRuntime') as HTMLDetailsElement;
+  expect(advanced.querySelector('summary')!.textContent?.trim()).toBe('Advanced');
   advanced.open = runtime.open = true;
   trigger.click(); trigger.click();
   expect(advanced.open).toBe(false);
@@ -560,7 +701,9 @@ it('keeps global connection controls in a compact sidebar popover', async () => 
   expect(doc.getElementById('connectionPopoverTitle')!.title).toMatch(/verified/i);
   expect(doc.getElementById('connectionPipeline')!.closest('details')).toBe(runtime);
   expect(doc.getElementById('connectionPopoverExtension')!.textContent).toBe('v2.1.13');
-  expect((doc.getElementById('connectionPopoverToggle') as HTMLButtonElement).textContent).toBe('Disconnect');
+  const disconnectAction = doc.getElementById('connectionPopoverDisconnect') as HTMLButtonElement;
+  expect(disconnectAction.textContent).toBe('Disconnect');
+  expect(disconnectAction.hidden).toBe(false);
 
   doc.body.dispatchEvent(new mounted.window.MouseEvent('click', { bubbles: true }));
   expect(popover.hidden).toBe(true);
@@ -572,6 +715,8 @@ it('keeps the Settings footer action visible while settings are open', async () 
   const settings = doc.getElementById('workspaceSettings') as HTMLButtonElement;
 
   expect(settings.hidden).toBe(false);
+  expect(settings.textContent?.trim()).toBe('');
+  expect(settings.getAttribute('aria-label')).toBe('Settings');
   settings.click();
   expect(settings.hidden).toBe(false);
   expect(settings.classList.contains('is-sel')).toBe(true);
@@ -606,9 +751,16 @@ it('renders companion diagnostics in the native Advanced connection drawer', asy
       delivery: { at: now - 1_000, ok: true, events: 4, total: 42, status: 200, error: null }
     }
   };
+  const browserPreferences = vi.fn(async (patch: any = {}) => ({
+    ok: true,
+    data: {
+      overwrite: typeof patch.overwrite === 'boolean' ? patch.overwrite : true,
+      durations: typeof patch.durations === 'boolean' ? patch.durations : false
+    }
+  }));
   const mounted = await mountChat({}, [], {
     companionDiagnostics: () => Promise.resolve({ ok: true, data: diagnostics }),
-    browserPreferences: () => Promise.resolve({ ok: true, data: { overwrite: true, durations: false } })
+    browserPreferences
   });
   const doc = mounted.window.document;
   const details = doc.getElementById('connectionAdvanced') as HTMLDetailsElement;
@@ -622,36 +774,18 @@ it('renders companion diagnostics in the native Advanced connection drawer', asy
   expect(doc.getElementById('connectionPipelineOwner')!.classList.contains('is-done')).toBe(true);
   expect(doc.getElementById('connectionAdvancedGrid')!.textContent).toContain('companion browser');
   expect(doc.getElementById('connectionAdvancedGrid')!.textContent).toContain('fiber v13 · run run-live');
-});
+  const overwrite = doc.getElementById('connectionAdvancedOverwrite') as HTMLInputElement;
+  const durations = doc.getElementById('connectionAdvancedDurations') as HTMLInputElement;
+  expect(overwrite.checked).toBe(true);
+  expect(durations.checked).toBe(false);
+  expect(overwrite.disabled).toBe(false);
+  expect(durations.disabled).toBe(false);
+  expect((doc.getElementById('connectionRuntime') as HTMLDetailsElement).open).toBe(false);
 
-it('uses Internal Chromium as the host source when the optional #237 API is present', async () => {
-  const mounted = await mountChat({}, [], {
-    internalBrowser: () => Promise.resolve({
-      ok: true,
-      data: {
-        open: false,
-        ready: true,
-        tabId: 3,
-        tabs: [
-          { id: 1, active: false, status: 'complete', title: 'ChatGPT', url: 'https://chatgpt.com/' },
-          { id: 3, active: true, status: 'complete', title: 'Current chat · ChatGPT',
-            url: 'https://chatgpt.com/c/6aaa1c34-6bd0-83e9-9677-183c1030b86f' }
-        ]
-      }
-    }),
-    companionDiagnostics: () => Promise.resolve({ ok: true, data: null }),
-    browserPreferences: () => Promise.resolve({ ok: true, data: { overwrite: true, durations: false } })
-  });
-  const doc = mounted.window.document;
-  const details = doc.getElementById('connectionAdvanced') as HTMLDetailsElement;
-  details.open = true;
-  details.dispatchEvent(new mounted.window.Event('toggle'));
-
-  await vi.waitFor(() => expect(doc.getElementById('connectionAdvancedGrid')!.textContent).toContain('Internal Chromium · ready'));
-  expect(doc.getElementById('connectionAdvancedTab')!.textContent).toContain('#3 · complete');
-  expect(doc.getElementById('connectionAdvancedRecording')!.textContent).toContain('companion pending');
-  expect(doc.getElementById('connectionAdvancedChat')!.textContent).toContain('6aaa1c34…b86f');
-  expect(doc.getElementById('connectionPipelineWhy')!.textContent).toContain('Internal Chromium is live');
+  durations.checked = true;
+  durations.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(browserPreferences).toHaveBeenCalledWith({ durations: true }));
+  expect(durations.checked).toBe(true);
 });
 
 it('always offers setup collapse and preserves the choice across incomplete status updates', async () => {
@@ -983,8 +1117,8 @@ it('guides rootless setup from the capabilities that actually need a filesystem 
   ];
 
   mounted.push(mixed);
-  const connect = mounted.window.document.getElementById('connectionPopoverToggle') as HTMLButtonElement;
-  expect(connect.disabled).toBe(true);
+  const connect = mounted.window.document.getElementById('sidebarConnect') as HTMLButtonElement;
+  expect(connect.disabled).toBe(false);
   expect(connect.title).toContain('Choose a folder');
   expect(mounted.window.document.querySelector('[data-step="folder"]')?.classList.contains('is-current')).toBe(true);
 
@@ -992,7 +1126,7 @@ it('guides rootless setup from the capabilities that actually need a filesystem 
   commandAndDesktop.config.capabilities.browse = false;
   commandAndDesktop.config.capabilities.command = true;
   mounted.push(commandAndDesktop);
-  expect(connect.disabled).toBe(true);
+  expect(connect.disabled).toBe(false);
   expect(connect.title).toContain('Choose a folder');
 
   const desktopOnly = structuredClone(mixed) as any;
@@ -1277,17 +1411,27 @@ it('asks for an extension reload only when the extension is older than this app'
   expect(action.hidden).toBe(true);
 });
 
-it('shows a missing-extension reminder while connected and clears it after the companion reports in', async () => {
-  const mounted = await mountChat();
-  const connected = structuredClone(mounted.state) as any;
-  connected.status.state = 'connected'; connected.bridge.running = true; connected.bridge.present = false;
-  mounted.push(connected);
+it('keeps the missing-extension reminder through a failed Connect attempt and clears it only with companion evidence', async () => {
+  const mounted = await mountChat({ hasApiKey: true });
   const doc = mounted.window.document;
-  expect(doc.getElementById('updateText')!.textContent).toContain('Browser extension not connected');
-  expect(doc.getElementById('updateExtension')!.hidden).toBe(false);
-  connected.bridge.present = true; connected.bridge.extensionVersion = connected.update.current;
-  mounted.push(connected);
-  expect(doc.getElementById('updateNotice')!.hidden).toBe(true);
+  const notice = doc.getElementById('updateNotice')!;
+  const state = structuredClone(mounted.state) as any;
+  expect(notice.hidden).toBe(false);
+  for (const status of ['starting-server', 'connecting-tunnel', 'tunnel-unavailable', 'disconnected', 'connected', 'offline']) {
+    state.status.state = status;
+    mounted.push(state);
+    expect(notice.hidden, `missing companion remains actionable through ${status}`).toBe(false);
+    expect(doc.getElementById('updateText')!.textContent).toContain('Browser extension not connected');
+    expect(doc.getElementById('updateExtension')!.hidden).toBe(false);
+  }
+  state.bridge.present = true; state.bridge.extensionVersion = state.update.current;
+  mounted.push(state);
+  expect(notice.hidden).toBe(true);
+
+  state.bridge.present = false;
+  state.config.tunnel.tunnelId = '';
+  mounted.push(state);
+  expect(notice.hidden, 'an incomplete Setup should not show a competing extension reminder').toBe(true);
 });
 
 it('keeps plugin connection controls out of general Setup and preserves its tunnel during unrelated saves', async () => {

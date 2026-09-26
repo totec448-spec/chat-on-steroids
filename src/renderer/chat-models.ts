@@ -1,5 +1,5 @@
 import { ui, uiText, t } from './i18n.js';
-import type { ChatModelCatalog } from '../shared/chat-models.js';
+import type { ChatModelCatalog, ChatModelOption } from '../shared/chat-models.js';
 import { chatModelDisplayLabel } from '../shared/chat-models.js';
 import type { Config } from '../shared/types.js';
 import type { ReasoningEffort } from '../shared/session.js';
@@ -46,12 +46,19 @@ export function applyComposerSessionModel(scope: string | null, observation: Obs
   paintComposerContext(); paintStatus();
 }
 
-/** Provider order and available efforts define the slider, including newly released models. */
+/** Expand abbreviated native version labels for presentation, never selection authority. */
+function modelName(model: ChatModelOption): string {
+  const label = model.label.trim();
+  if (/^(?:GPT[- ]?)?5\.6$/i.test(label) && /^gpt-5[.-]6(?:-thinking)?$/.test(model.id)) return 'GPT-5.6 Sol';
+  return /^\d+(?:\.\d+)?(?:\s+(?:Pro|Sol|Astra|Luna))?$/i.test(label) ? `GPT-${label}` : label;
+}
+
+/** Model choice and effort are separate axes; a range must never cross models. */
 function composerModels() {
   if (!catalog.models.length) return [];
   return catalog.models
+    .map(model => ({ ...model, label: modelName(model), efforts: composerEfforts.filter(effort => model.efforts.includes(effort)) }))
     .filter(model => !/^gpt[ -]?5\.5(?:$|[ -])/i.test(model.label))
-    .map(model => ({ ...model, efforts: composerEfforts.filter(effort => model.efforts.includes(effort)) }))
     .filter(model => model.efforts.length > 0);
 }
 
@@ -80,7 +87,7 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
   const model = document.getElementById(modelId) as HTMLSelectElement | null;
   const effort = document.getElementById(effortId) as HTMLSelectElement | null;
   if (!model || !effort) return;
-  const models = modelId === 'composerModel' ? composerModels() : catalog.models;
+  const models = modelId === 'composerModel' ? composerModels() : catalog.models.map(model => ({ ...model, label: modelName(model) }));
   let nextModel = modelValue ?? model.value;
   let nextEffort = effortValue ?? effort.value;
   const observed = observedModel(nextModel);
@@ -119,28 +126,43 @@ function paintComposerChoices(): void {
   models.dataset.signature = signature;
   models.replaceChildren();
   powers.replaceChildren();
-  // Order supported levels from Low upwards; never manufacture an unobserved step.
-  const steps = choices.flatMap(choice => choice.efforts.map(power => ({
-    model: choice.id, modelLabel: choice.label, effort: power, label: () => chatModelDisplayLabel(choice.label, power, effortLabel(power))
-  })));
+  for (const choice of choices) {
+    const button = el('button', 'model-choice') as HTMLButtonElement;
+    button.type = 'button'; button.dataset.model = choice.id; button.dataset.keepMenu = 'true';
+    button.setAttribute('aria-pressed', String(choice.id === selected.value));
+    const check = el('i', 'ico ph ph-check'); check.setAttribute('aria-hidden', 'true');
+    button.append(el('span', '', choice.label), check);
+    button.onclick = () => {
+      selected.value = choice.id;
+      selected.dispatchEvent(new window.Event('change'));
+      [...models.querySelectorAll<HTMLButtonElement>('button')].find(node => node.dataset.model === choice.id)?.focus();
+    };
+    models.append(button);
+  }
+  // Only the deliberately selected model supplies this range's steps.
+  const choice = choices.find(choice => choice.id === selected.value);
+  const steps = choice?.efforts.map(power => ({
+    model: choice.id, effort: power, label: () => chatModelDisplayLabel(choice.label, power, effortLabel(power))
+  })) ?? [];
   const title = document.getElementById('composerPowerTitle');
   const subtitle = document.getElementById('composerPowerModel');
   if (!steps.length) {
-    if (title) ui(title, 'textContent', () => catalog.state === 'pending' ? t("Loading models…") : t("Models unavailable"));
-    if (subtitle) ui(subtitle, 'textContent', () => catalog.state === 'pending' ? t("Reading your ChatGPT account") : t("Reload models"));
+    if (title) ui(title, 'textContent', () => choices.length ? t('Select model') : catalog.state === 'pending' ? t("Loading models…") : t("Models unavailable"));
+    if (subtitle) ui(subtitle, 'textContent', () => t('Thinking effort'));
     return;
   }
   const current = steps.findIndex(step => step.model === selected.value && step.effort === effort.value);
   const track = el('div', 'power-track');
+  track.hidden = steps.length === 1 && current >= 0;
   const dots = el('div', 'power-dots'); dots.setAttribute('aria-hidden', 'true');
   dots.append(...steps.map(() => el('span', 'power-dot')));
   const slider = document.createElement('input'); slider.type = 'range'; slider.min = '0'; slider.max = String(steps.length - 1); slider.step = '1';
   slider.value = String(Math.max(0, current));
-  ui(slider, 'aria-label', () => t("Model and thinking effort"));
+  ui(slider, 'aria-label', () => t("Thinking effort"));
   const show = () => {
     const step = steps[Number(slider.value)]!;
     if (title) ui(title, 'textContent', () => effortLabel(step.effort));
-    if (subtitle) subtitle.textContent = step.modelLabel;
+    if (subtitle) ui(subtitle, 'textContent', () => t('Thinking effort'));
     ui(slider, 'aria-valuetext', step.label);
     track.style.setProperty('--power-position', `${steps.length > 1 ? Number(slider.value) / (steps.length - 1) * 100 : 100}%`);
     return step;
@@ -148,7 +170,7 @@ function paintComposerChoices(): void {
   if (current >= 0) show();
   else {
     if (title) ui(title, 'textContent', () => t("Choose a level"));
-    if (subtitle) ui(subtitle, 'textContent', () => t("Previous selection unavailable"));
+    if (subtitle) ui(subtitle, 'textContent', () => t('Thinking effort'));
     ui(slider, 'aria-valuetext', () => t('Choose an available model and effort'));
   }
   const choose = () => {
@@ -163,6 +185,10 @@ function paintComposerChoices(): void {
   // Keep the range node alive through pointer/keyboard adjustment; hidden selects remain
   // the existing send authority, and no separate model selection state is introduced.
   track.append(dots, slider); powers.append(track);
+  const labels = el('div', 'power-levels');
+  labels.hidden = track.hidden;
+  for (const step of steps) labels.append(el('span', '', () => effortLabel(step.effort)));
+  labels.setAttribute('aria-hidden', 'true'); powers.append(labels);
 }
 
 /** Admission guard for desktop sends: a stale selection is not permission to use defaults. */
@@ -177,7 +203,7 @@ export function confirmedComposerModel(): { model: string; reasoningEffort: Reas
 function paintComposerLabel(): void {
   // Display the same admission decision as Send, including discovery and removed efforts.
   const confirmed = confirmedComposerModel();
-  const modelLabel = confirmed ? catalog.models.find(model => model.id === confirmed.model)!.label : '';
+  const modelLabel = confirmed ? modelName(catalog.models.find(model => model.id === confirmed.model)!) : '';
   const label = () => confirmed
     ? chatModelDisplayLabel(modelLabel, confirmed.reasoningEffort, effortLabel(confirmed.reasoningEffort))
     : catalog.state === 'pending' ? t("Loading models…") : t("Select model");

@@ -3636,6 +3636,29 @@ export function swarmState(runId?: string): SwarmState {
     agents: visible.flatMap(r => stateForAgents(r.agents, true).agents) };
 }
 
+/**
+ * Renderer projection for one durable local session, across Compact & Resume frontends.
+ *
+ * The renderer supplies only conversation ids read from that session. It cannot select a run
+ * by the reusable display name `worker-1`, and this lookup never reactivates parked history.
+ * Keeping this beside the broker state is what lets an invited or failed worker remain visible
+ * before (or without) a recorded worker session.
+ */
+export function swarmStateForPrimeConversations(conversationIds: readonly string[]): SwarmState {
+  const wanted = new Set(conversationIds.filter(Boolean));
+  const owned = allFamilies().filter(owner =>
+    (!('runId' in owner) || !unpublishedRuns.has(owner)) &&
+    owner.primeConversationId &&
+    wanted.has(owner.primeConversationId)
+  );
+  return {
+    enabled: getConfig().multiAgent.enabled,
+    running: owned.some(owner => 'runId' in owner),
+    retainedHistory: owned.some(owner => !('runId' in owner)),
+    agents: owned.flatMap(owner => stateForAgents(owner.agents, 'runId' in owner).agents)
+  };
+}
+
 export function agentConversation(id: string, runId?: string): string | null {
   const run = scopedRun(runId);
   return run?.agents.get(id)?.info.conversationId ?? null;

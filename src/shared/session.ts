@@ -140,6 +140,19 @@ export interface FileChange {
   removed: number;
   /** True when the counts come from a bounded heuristic rather than a full diff. */
   approximate: boolean;
+  /** Immutable before/after text from this exact tool call, stored beside its session log. */
+  reviewAssetId?: string;
+}
+
+/** Historical edit evidence, independent of the current Git working tree. */
+export interface ToolEditReview {
+  callId: string;
+  changeIndex: number;
+  path: string;
+  added: number;
+  removed: number;
+  baseText: string;
+  currentText: string;
 }
 
 /** Only `tool_internal_error` is a connector defect. */
@@ -395,7 +408,7 @@ export type SessionEvent =
    * call under the same server turn then proved it had not. Absent on the page's own starts.
    */
   | (BaseEvent & { kind: 'turn_start'; detail?: string })
-  | (BaseEvent & { kind: 'turn_end'; outcome: TurnOutcome; detail?: string; reason?: 'thinking_failed' })
+  | (BaseEvent & { kind: 'turn_end'; outcome: TurnOutcome; detail?: string; reason?: 'thinking_failed'; providerMessageId?: string })
   | (BaseEvent & { kind: 'chat_error'; message: StoredText; recoverable?: boolean; blocking?: boolean; reason?: 'thinking_failed' })
   | (BaseEvent & { kind: 'tool_call'; call: ToolCallRecord; origin?: number })
   /**
@@ -1018,9 +1031,15 @@ export function foldProgress(events: readonly SessionEvent[]): SessionEvent[] {
     }
     out[index] = null;
   }
-  // A page-local stopped verdict is not provider cancellation confirmation.
-  // Preserve the recorded request instead of manufacturing a stronger receipt.
-  return out.filter((event): event is SessionEvent => event !== null);
+  // A request is a historical fact, not a permanently pending status. Normalize
+  // only the legacy app-authored sentence; never infer provider cancellation.
+  return out.filter((event): event is SessionEvent => event !== null).map(event =>
+    event.kind === 'progress' && event.source === 'app' && event.turnId &&
+    event.progressId === `finish-release:${event.turnId}` && event.message.text ===
+      'Stop requested. The finish hold was released; ChatGPT has not yet confirmed that generation stopped.'
+      ? { ...event, message: { ...event.message, text: 'Stop requested. The finish hold was released.',
+          chars: 'Stop requested. The finish hold was released.'.length } }
+      : event);
 }
 
 export interface TokenPressure {

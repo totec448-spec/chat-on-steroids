@@ -17,7 +17,7 @@ it('bounds dragging, releases capture, preserves width through collapse and smal
   handle.setPointerCapture = () => { captured = true; };
   handle.hasPointerCapture = () => captured;
   handle.releasePointerCapture = () => { captured = false; };
-  initSidebarResize();
+  const controller = initSidebarResize();
   const pointer = (type: string, x: number) => {
     const event = new dom.window.MouseEvent(type, { clientX: x, button: 0 });
     Object.defineProperty(event, 'pointerId', { value: 7 });
@@ -39,9 +39,11 @@ it('bounds dragging, releases capture, preserves width through collapse and smal
   dom.window.dispatchEvent(new dom.window.Event('resize'));
   expect(app.style.getPropertyValue('--sidebar-width')).toBe('480px');
   handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home' }));
-  expect(app.style.getPropertyValue('--sidebar-width')).toBe('180px');
+  expect(app.style.getPropertyValue('--sidebar-width')).toBe('220px');
   handle.dispatchEvent(new dom.window.MouseEvent('dblclick'));
   expect(app.style.getPropertyValue('--sidebar-width')).toBe('');
-  expect(doc.getElementById('zoomIn')!.closest('#viewMenu')).not.toBeNull();
-  expect(sidebar.querySelector('#zoomIn')).toBeNull();
+  controller.toggle();
+  expect(controller.isCollapsed()).toBe(true);
+  expect(doc.getElementById('viewMenuToggle')).not.toBeNull();
+  expect(doc.getElementById('viewMenu')).toBeNull();
 });

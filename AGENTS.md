@@ -223,7 +223,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Terminal custody | `src/main/codex/{manager,ownership,unified-exec,unified-exec-constants,shell,command-batch,head-tail-buffer,truncate,exec-output}.ts`. |
 | Patching/images | `src/main/codex/apply-patch/*`, `codex/{filesystem,read-backend,view-image}.ts`. |
 | Projects/cwd | `src/main/projects.ts`, `workspace.ts`, `src/shared/projects.ts`: explicit local folder catalog, session binding, inherited/learned workspaces. |
-| Project Files UI | `src/main/project-files.ts`, `project-file-watcher.ts`, `src/shared/project-files.ts`, `src/renderer/{file-panel,file-code-editor,file-pdf-viewer,work-panel-resize}.ts`: bounded project views, revision-checked saves and renderer-owned drafts. |
+| Project Files UI | `src/main/{project-files,project-file-watcher,project-git}.ts`, `src/shared/{project-files,project-git}.ts`, `src/renderer/{file-panel,file-code-editor,file-pdf-viewer,work-panel-resize}.ts`: bounded project views, read-only Git changes, revision-checked saves and renderer-owned drafts. |
 | Durable history | `src/main/session/{store,recorder,correlation,retention,summarize,progress}.ts`, `src/shared/{session,chronology}.ts`: canonical messages, tool truth, chronology and indexes. |
 | Input | `src/main/session/{input,start-input,input-history,input-attachments,input-images,prompt}.ts`, `src/shared/{input,user-prompt}.ts`: outbox, native files, prompt frame and receipts. |
 | Finish/planning | `src/main/session/finish.ts`, `task-request.ts`, `goal.ts`, `src/shared/{finish,task-progress}.ts`: held turn, decision/plan invocation and cancellation. |
@@ -234,10 +234,12 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Extension | `extension/{manifest.json,chatgpt-dom.js,content.js,fiber.js,background.js,usage.js,overlay.css,popup.html,popup.css,popup.js}`: injection worlds, native observations/actions, journal and UI. |
 | Models/usage | `src/main/chat-models.ts`, `session/usage.ts`; `src/shared/{chat-models,usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
 | External plugins | `src/main/plugins/{catalog,installer,manager,exposure,oauth}.ts`, `plugins-ipc.ts`, `plugin-refresh.ts`, `src/shared/{plugins,plugin-refresh}.ts`, `src/renderer/plugins.ts`. |
-| Renderer boundary | `src/main/ipc.ts`, `edit-context-menu.ts`, `src/preload/index.ts`; `src/renderer/{main,chat,dom,tool-result,timeline-scroll,sidebar-resize,browser-preferences,connection-popover,i18n}.ts`, `locales/{es,zh-CN}.json`, `index.html`, `styles.css`. |
+| Renderer boundary | `src/main/{ipc,view-menu}.ts`, `edit-context-menu.ts`, `src/preload/{index,view-menu}.ts`; `src/renderer/{main,chat,dom,tool-result,timeline-scroll,sidebar-resize,browser-preferences,connection-popover,i18n,view-menu}.ts`, `locales/{es,zh-CN}.json`, `index.html`, `styles.css`, `view-menu.{html,css}`. |
 | Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography, field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. |
+| Desktop Pets | `src/main/{pet-library,pet-overlay}.ts`, `src/shared/{pets,pet-activity}.ts`, `src/preload/pet-overlay.ts`, `src/renderer/{pet-overlay,pet-machine,pet-choreography,pets,pet}.ts`: package validation, overlay host, task projection, animation and library controls. |
 | Native Desktop | `src/main/computer/{index,helper,browser-chords,windows-api,windows-capture,windows-apps,windows-keys}.ts`, `src/shared/windows-computer.ts`, `mcp/tools-desktop-{windows,macos}.ts`, `native/macos-desktop-helper/*`, `native/macos-desktop-addon/*`. |
 | Direct browser control | `src/main/browser-control.ts`, `mcp/tools-browser.ts`, `src/shared/browser-control.ts`, `extension/browser-control{,-page}.js`: short-lived RPCs, session-owned debugger tabs, bounded DOM/diagnostics and background input. |
+| Browser Use | `src/main/browser-use.ts`, `mcp/browser-tool.ts`, `src/shared/browser-use.ts`, `src/renderer/{browser-panel,browser-tab-strip}.ts`: isolated in-app web session, consent, snapshots, model input and native panel. It has no Internal Chromium, bridge, recorder or companion-extension authority. |
 | Delivery/build | `src/main/{update,extension-path,version,logger,durable}.ts`, `electron.vite.config.ts`, `electron-builder.yml`, `scripts/*`, `.github/workflows/*`, `vitest.config.ts`. |
 
 ### One durable fact, one authoritative owner
@@ -247,7 +249,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Permissions and settings | `config.ts` / `config.json` | Validate every load/save; enforce effective current capabilities at use. |
 | Credentials | `secrets.ts` / encrypted `secrets.bin`; plugin OAuth's encrypted installation store | Main process only; publish updated cache after the encrypted write. |
 | Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
-| Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | First exact proof wins; retain local session epoch; reconcile from history on startup. |
+| Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | First exact proof wins; retain local session epoch; new proof is committed before browser acknowledgement. Versioned legacy snapshots reconcile from history once. |
 | Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. |
 | Agent progress plan | `request-plans.ts` → `store.ts::updateSessionPlan` / `sessions/<id>/plan.json` | Request-scoped storage before proof; exact session and invocation ordering on attachment; atomically replace the whole plan. |
 | Input and checkpoints | `input.ts` / `state/session-input.json` | Serialized acceptance, frozen payload, exclusive claim and receipt; stages belong here. |
@@ -261,6 +263,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Stop/block/finish | Stop command; `blocked-chats.ts` durable set; finish facts in recorded progress/session projection | Each names exact chat/turn; no false terminal event. |
 | Browser repair | `bridge.ts` process-memory episodes | Re-earn from live evidence; never restore an old reload token as action authority. |
 | Catalog/usage | Saved successful `chat-models`; derived `usage-cache`; live usage snapshot | Catalog is observation, not a send receipt; estimates are not provider billing. |
+| Pets | `pet-library.ts` / `state/pet-library.json` and installed `pets/` packages; overlay positions in its persistent Chromium partition | Main owns enabled/favorite membership and task snapshots; renderer owns per-pet position and animation. |
 | Connector refresh | `plugin-refresh.ts` / `state/plugin-refresh.json` | Exact installed app id + schema fingerprint, claimed before Refresh, verified after. |
 
 ## 5. Startup, configuration and shutdown
@@ -329,7 +332,7 @@ still checks live policy. Schema visibility is never the security boundary.
 
 | Surface | Advertised operations under current eligibility |
 | --- | --- |
-| Core — `chat-on-steroids-core` | `read`, `view_image`, `find` when command execution is off, `apply_patch`, `exec_command`/`write_stdin`, `update_plan`, `agents`, `session_finish`, code-mode `exec`. |
+| Core — `chat-on-steroids-core` | `read`, `view_image`, `find` when command execution is off, `apply_patch`, `exec_command`/`write_stdin`, isolated `browser` when Browser Use is enabled, `update_plan`, `agents`, `session_finish`, code-mode `exec`. |
 | Desktop — `chat-on-steroids-desktop` | All Chromium extension hosts: `browser_tabs`, `browser_snapshot`, `browser_screenshot`, `browser_console`, `browser_network`, `browser_navigate`, `browser_action`, `browser_evaluate`. Windows additionally exposes 13 Window2 operations, clipboard and `exec` with `sky`; macOS adds `observe`/`computer`. Surface `exec` composes browser tools too. |
 | Plugins — `chat-on-steroids-plugins` | Enabled external tools with their upstream names and schemas, plus code-mode `exec` when that composition name is available. |
 
@@ -402,9 +405,37 @@ then acts as a package-bounded alias for that target; resource paths are revalid
 cannot traverse above the linked package. The managed root itself and linked `SKILL.md` files
 remain non-linkable. Desktop and external plugins receive no managed root.
 
+The sidebar Skills page sits below Plugins and lists only the managed CoS library. Its import
+control chooses a complete package folder (with `SKILL.md` and resources), one Markdown file
+through the OS picker, or a public GitHub folder/`SKILL.md` URL. `skills.ts` validates and
+publishes all three into the same canonical root. GitHub imports carry CoS-owned origin metadata
+in a reserved sidecar, not the model-facing catalog. Opening the Skills page checks GitHub
+imports for updates using one bounded metadata-only tree read per repository/ref; the cards
+show checking, current, available or failed observations. A recent result can be reused on
+navigation; explicit Refresh checks again. A check never installs anything and its result is
+accepted only for the exact installed origin revision. The per-card confirmed update then
+checks a pinned public repository snapshot, stages a complete replacement, and moves the
+previous version to OS Trash; unchanged packages are left alone, and local edits to `SKILL.md`
+veto replacement. The update dialog warns that resource edits will be replaced. No background
+poller, GitHub credential, new root or execution authority is introduced. Remove moves a
+managed package to the OS Trash after confirmation. Search is a catalog projection; project
+and external skills remain discoverable in the composer but are not presented as installed CoS packages.
+
+Local cards show a concise “Local” status. Their menu can link a public GitHub
+source only when its verified `SKILL.md` bytes match the installed file and its folder name
+maps to the same skill id. Linking does not replace local files: the sidecar records their
+actual package revision, so missing/different resources show as an available update instead
+of a false “Up to date.” Any later replacement still requires the user's confirmation.
+
 Skills open through leading `/` completion in the composer; the attachment popup's Skills button
 inserts that leading slash and focuses the input while preserving existing draft text. Commands and Skills are
-separate compact sections; there is no sidebar entry, modal library or native import/remove UI.
+separate compact sections; the sidebar library does not add a second Skills selection ledger.
+A Goal, Loop or Plan selected through completion projects the owning automation/workflow state on
+the compact Chat options control. Goal/Loop and Plan may coexist, so combined labels show both;
+the label and semantic icon are presentation only and never become another mode ledger. Selecting
+Compact through completion arms a removable composer pill. It invokes the existing exact-session
+compaction owner only when Send is pressed, retains the authored message for the resumed chat and
+keeps the pill on a refused call; it is unavailable without an existing eligible session.
 A small plus icon to the right of that Skills button inserts `Please add the following skills to my COS skills:`
 into the authored draft without sending it. ChatGPT can create Markdown instructions through
 the existing permission-checked `/skills` filesystem root. Leading `/id` or `/prompt id` completion projects selected
@@ -482,10 +513,14 @@ HTTP request -> bounded body / host-origin / secret-path checks
 ```
 
 The MCP payload has no trustworthy conversation id. Accepted ownership joins the normalized
-HTTP `x-request-id` to native page `metadata.request_id`. `fiber.js` emits bounded allowlisted
-evidence; `content.js` confirms the current route and descriptor; `background.js` validates the
-Chrome sender document/epoch; bridge `/correlations` files exact pairs through recorder and
-reads them back before returning `confirmed[]`. `/events` may publish the same exact evidence.
+HTTP `x-request-id` to native page `metadata.request_id`. Connector display names are arbitrary
+user-owned presentation and never participate in ownership, filtering or authorization.
+`fiber.js` emits bounded structural candidates; `content.js` confirms the current route and
+descriptor; `background.js` validates the Chrome sender document/epoch; bridge `/correlations`
+accepts only request ids already observed at local MCP ingress, files exact pairs through recorder
+and reads them back before returning `confirmed[]`. A page-first candidate stays pending and is
+retried; it cannot create a session or local traffic. `/events` may publish only the same confirmed
+exact evidence.
 For a reserved New Chat opening, the shared `/input/bind` route commits its exact claim first;
 only that claim retires, and its promoted conversation/document epoch precedes correlation or event publication.
 Ownership acknowledgement is separate from slow transcript/image writes.
@@ -497,16 +532,20 @@ The native WebSocket `conversation-turn-stream` handoff uses the same complete-e
 requiring its outer conversation to match the inner event. It observes existing messages on
 ChatGPT secure sockets without sending, subscribing or polling; envelopes and frames are bounded.
 Native v1 delta headers may omit repeated channel/path/operation fields. The observer retains
-only those bounded format fields per HTTP response, or per linked conversation/turn socket
-stream. Missing predecessors, malformed/unknown encoding and retired streams discard that
-state. Identity still requires both ids in one complete root value; partial values, message
-text and cached answer branches never supply the join.
+bounded format fields per HTTP response, or per linked conversation/turn socket stream.
+Complete root values still provide independent identity proof. A native `input_message`
+may instead supply `input_message.metadata.request_id` after an explicit root conversation id
+in that same response or linked socket chain. No other request-only event inherits identity.
+Contradictory/malformed identity, unknown encoding or a missing socket predecessor permanently
+retires inherited identity for that stream; nested ids cannot seed it. Socket envelopes must
+agree with the inner identity. SSE comments do not invalidate it; done and new responses/turns
+cannot reuse it. Partial values, message text and cached answer branches never supply the join.
 A 64-pair document cache deduplicates both transports and replays IDs at content readiness.
 Content requires the matching route and document epoch, retaining one-shot stream proof through
 temporary ACK failures for at most 15 minutes using the existing observer/backoff. Missing stream
 metadata retains the Fiber path. Fetch reattachment at DOM readiness captures each downstream
 wrapper separately and deduplicates responses to avoid recursion through page instrumentation.
-The native `f/conversation/resume` stream uses the same complete-event reader. Observer version 2
+The native `f/conversation/resume` stream uses the same bounded reader. Observer version 3
 has an explicit refresh/disposal handle, also reached by existing MAIN-helper restoration.
 Replacing a versioned instance cancels its readers and retires listeners; a provider's wrapper
 can still delegate through an inactive instance. A legacy boolean has no disposal handle and
@@ -522,8 +561,10 @@ or “only generating chat” is never a replacement proof.
 
 `correlation.ts` keeps the first exact request owner and its **local session epoch**. Conflicting
 claims do not overwrite it. Proof has no time TTL but the index is bounded to 50,000 recently
-observed request ids; recorded exact calls reconcile the index on startup even when a snapshot
-already exists. Late proof can repair Unattributed history only to the proved historical owner.
+observed request ids. A complete current snapshot is committed before the browser receives an
+ownership acknowledgement and is authoritative on later starts. Older snapshots reconcile
+recorded exact calls once and publish that migration boundary before traffic is admitted. Late
+proof can repair Unattributed history only to the proved historical owner.
 
 Unresolved requests with an id get the recorder's 20-second production evidence grace. A
 headerless call has no exact proof to await and lands Unattributed immediately. Evidence waits
@@ -762,6 +803,12 @@ from MCP process custody and never consume agent output. The header button or Ct
 a resizable bottom panel. Each new tab captures the selected approved project's canonical cwd;
 changing chats does not retarget existing shells. No project means no guessed cwd. The live
 Command permission gates spawn/input, and input rechecks the original project path.
+Manual panel drag disables the open/close grid transition, fits xterm at most once per animation
+frame, and synchronizes the PTY once when pointer custody ends. Main deduplicates unchanged grid
+sizes, so repeated layout observations cannot make ConPTY redraw the prompt. Window/layout resize
+still synchronizes the selected live shell when its actual rows or columns change. Opening motion
+likewise fits the local canvas throughout but waits for its grid transition to settle before the
+single PTY synchronization.
 
 Up to eight tabs retain interactive shell state. Hiding the panel preserves processes; closing
 a tab, renderer reload/destruction or app shutdown retires them. UUIDs and pending-create tickets
@@ -810,7 +857,14 @@ synchronously, including New Chat and A-to-B-to-A, before any asynchronous read 
 The desktop composer uses native CSS content sizing, bounded at 220px. Layout owns its
 height across draft changes, hidden panels and width changes; do not persist a measured
 `scrollHeight` as an inline height. Empty and fitting input must not overflow; longer text
-remains scrollable at the cap. `scripts/verify-composer-layout.cjs` checks real Electron layout.
+remains scrollable at the cap. A composer-local `ResizeObserver` bridges only its previous and
+next border-box height with a bounded Web Animation, then releases height back to CSS. Hidden
+views establish a fresh baseline, rapid changes converge to the newest native size, and reduced
+motion skips the spatial transition. `scripts/verify-composer-layout.cjs` checks real Electron layout.
+On an empty chat, the welcome prompt is anchored to the stable composition viewport spanning
+the conversation body, dock and composer. Selected Skill/action pills and attachments may grow
+the composer without recentering that prompt against the smaller residual body row;
+`scripts/verify-composer-context.cjs` checks the invariant across widths and wrapped pill rows.
 
 `session/start-input.ts` returns durable local admission before waiting for connector readiness
 or browser delivery. Each New Chat opening reserves its own local session in the outbox, then
@@ -973,9 +1027,30 @@ editor/route identity and attachment changes still do.
 The witnessed Send receipt captures the pre-send assistant baseline. If app identity or native
 message source arrives after a fast reply has rendered, that question still owns its reply and
 exact final marker. A later observation must not classify its own answer as old history.
+Conversely, a remounted historical answer above the exact sent question is not a new response
+node. Classic in-place section reuse still requires the existing baseline-signature proof.
+Framed app sends compare the exact prepared text against bounded provider readback forms,
+including hard line breaks decoded before Markdown punctuation. Authored bytes are not rewritten;
+route, epoch, message identity and the complete text comparison remain required.
+Mounted user rows and canonical-history publication resolve accepted input through the same
+source. No intermediate history upsert may publish a serialized or incomplete private frame;
+checking only the final corrected row misses a visible leak. Pending DOM presentation may
+conceal a reserved header whose native BR boundaries collapsed, but cannot grant a receipt.
+Historical frame recovery also recognizes escaped delimiters. Their hard-break form selects
+one private-prefix decoder before checking the declared length; alternate decodings must not
+compensate for damaged content. Authored suffix bytes retain their provider representation.
+The exact shared frame parser and receipt owner/comparison rules remain unchanged. Incomplete
+escaped headers may conceal/quarantine only; they never publish a reconstructed message.
+The provider's provisional document title can contain that same prepared frame. It is not a
+conversation-name observation; omit it until a real title arrives. Native page text stays intact.
 An exact accepted fresh-chat receipt remains valid when native submit promotes its null
 conversation to the delivered conversation. The same receipt, message, epoch and send lifetime
 must still agree; a second navigation or replaced receipt cannot inherit that acceptance.
+A fresh native user row may mount before that first concrete route. Route reconciliation must
+re-run the existing receipt observer so the same row and route can agree; it never invents a
+receipt or clicks Send again. If an authorized click remains ambiguous, retain at most the
+main-owned authored draft under the exact untouched composer lease. Never expose the prepared
+transport frame or preserve staged attachments as a user-editable retry.
 While an exact send receipt still has a bounded evidence reader, the existing observation also
 requests canonical MAIN-world text even after native generation stops. Rendered Markdown can
 remove submitted bytes; recognizing the generation must not be a prerequisite for reading the
@@ -1040,6 +1115,11 @@ late file cannot attach to a later draft, while ordinary edits and parallel impo
 
 Bridge chunks are bounded to 512 KiB and require the exact pre-send claimed input and attachment
 membership. Native upload completion and final provider submission are separate checks.
+Upload inputs are elected by kind within the exact current composer form, not React-generated
+ids. Ambiguous, disabled and foreign-form inputs fail closed. Classic attachment controls and
+the current shell's named image tile/unique remove button supply the same exact-file receipt;
+neither a successful change event nor a preview alone proves submission. Delivery errors wrap
+below the pending message instead of inheriting the status icon's fixed width.
 Explicit image injection freezes `attachmentDelivery: tool` plus normalized `toolImages` in
 the same outbox row, preserving authored attachment IDs for idempotent retries. Staging owns
 the bounded original reads; `input-images.ts` fully decodes at most 12 MiB/30 million pixels
@@ -1194,6 +1274,14 @@ chronological anchors across revisions. Metadata coalesces ordinary updates but 
 at ownership boundaries; it can rebuild history-derived fields without inventing an empty session
 when recovery lacks proof. Legacy files overlay lazily rather than triggering a whole-history rewrite.
 
+Unreadable metadata/history is not empty or absent history. Filesystem access/resource errors
+propagate before reconstruction can replace a checkpoint or a catalog can prove ownership.
+Only missing/damaged primary metadata may use the validated backup; a locked primary may hide
+a newer conversation rebind. A failed catalog pass is not cached, and indexed-owner read failures
+cannot become cached misses or unique-owner proof. An uncertain append whose tail is unreadable
+marks only its existing live writer for reconciliation: the same per-session queue must restore
+its durable snapshot before another mutation allocates a sequence. No retry timer is added.
+
 Native image-only user messages keep their exact message identity, empty authored text and
 bounded attachment metadata. They participate in the same turn/receipt chronology as text and
 render an attachment placeholder immediately. Native metadata grants no local file custody;
@@ -1203,10 +1291,19 @@ retained-outbox fallback states use that same footprint; fallback pixels remain 
 as not saved to history. Asset hydration must not move the opened tail or a deliberate reader.
 
 ChatGPT-generated images use their own canonical `native_image` row, keyed by provider message
-UUID plus sediment asset id. They are neither assistant prose nor local tool calls and cannot
-establish turn completion, Goal eligibility or activity. Typed public tool/assistant image
+UUID plus sediment asset id. They are neither assistant prose nor local tool calls; a recorded
+image or its pixels alone cannot establish turn completion, Goal eligibility or activity.
+For an image-only shell response, the mounted provider turn must be complete and every selected
+typed image must be completed, non-preview and belong to that turn's exact message ids. This
+provider completion closes the turn without inventing assistant prose. Its exact provider message id
+travels on the completed `turn_end`; the canonical completion reader joins that boundary with the
+matching completed native image before retiring activity or admitting the next input. Batch order
+does not change ownership; a later question, conflicting turn or fresh work invalidates the proof.
+Typed public tool/assistant image
 outputs supply metadata first; final provider status and a complete, exactly owned native IMG
 permit optional preview capture. Main/thumbnail/mask clones of the same asset share that identity.
+Shell blob previews require the exact mounted typed item and completed per-image control; a
+nearby gallery, copied Fiber object or blob URL alone cannot establish asset ownership.
 The extension captures already-loaded pixels without fetching signed URLs; route, document epoch,
 owner, node and source revision must survive each await. At most two captures run concurrently.
 Previews are WebP, at most 384,000 encoded bytes, 1,600 pixels per edge and 2.56 million decoded
@@ -1351,6 +1448,11 @@ hidden-output byte limit must not discard them. A large collapsed group can rema
 until it leaves the measured area. Tool argument/result DOM is populated only on expansion,
 so large hidden outputs neither consume paint work nor evict surrounding messages. Empty live
 deltas preserve the resident page instead of silently applying a new eviction pass.
+The viewport owner also reserves a bounded visual scroll extent around unloaded pages so the
+native scrollbar does not resize when a 30-record stage enters or leaves the 160-record window.
+This estimate never decides event identity, retention or fetch boundaries. Edge demand follows
+the first/last rendered row, not the virtual padding; session/filter/disclosure changes retire
+obsolete geometry. Direct seeking still drains bounded history stages before showing distant rows.
 Overlapping activity groups keep their disclosure identity across page boundaries. The
 viewport owner preserves a surviving visible row and any underfilled tail space; new
 content consumes that space, while an unchanged refresh cannot collapse it. Compensating for
@@ -1607,8 +1709,9 @@ Existing maintenance also checks at most 64 live ChatGPT pages once per minute i
 flight. It reuses recorder restoration, including the idempotent MAIN helper, without delaying
 repair/input delivery or opening/reloading tabs. Loading, discarded, frozen, navigated and
 disconnected pages are skipped; the existing page-reply deadline bounds recorder pings.
-Adopted generation recovery excludes historical assistant nodes above its user question, even
-when hydration remounts them. When a proven new question closes the adopted turn, its answer
+Generation ownership excludes historical assistant nodes above its exact user question, whether
+hydration remounts, revises in place or previously held them. Classic section reuse remains valid
+below the question. When a proven new question closes the adopted turn, its answer
 lookup ends before that exact new message, preserving legitimate completion of the prior answer.
 When the exact current question matches the generation, a newly mounted assistant section may
 replace its still-mounted interim section as the native response owner. Reordered or revised
@@ -1636,7 +1739,10 @@ question grants no such veto; a presentation artifact must not mint another acti
 
 Native Send/Stop controls belong to the current composer's form and must be rendered outside
 transcript/extension surfaces. Hidden, inert or quoted controls grant no action; multiple Send
-buttons are ambiguous. The existing transcript observer also follows composer-side relabel/hide
+buttons are ambiguous. The alternate shell's `Stop` label is recognized only inside its native
+composer form. Before assistant prose mounts, an app Stop command can use the exact accepted
+question, revalidated against the redeemed command after every await; the click is not completion.
+The existing transcript observer also follows composer-side relabel/hide
 mutations so hidden tabs notice Stop transitions without waiting for a throttled timer.
 Submission observes native Send readiness and acceptance within one 30-second deadline, freezes
 the editor/text/document, and clicks once. It never substitutes synthetic Enter. Goal-token and
@@ -1656,6 +1762,11 @@ entitlement. Do not enumerate every model × effort or create helper tabs to com
 uncertain catalog. Exact family rules live in `shared/chat-models.ts`.
 
 Model names and recovery policy checked against native picker metadata on **2026-09-17**:
+
+The desktop picker separates observed models from the effort range of the selected model.
+Changing effort never crosses into another model. Abbreviated native version labels expand
+only for display; provider ids, aliases, account eligibility and Send validation stay unchanged.
+The existing composer exclusions still apply to short version labels as well as full labels.
 
 | Display family / compatible short name | Execution identity / selected effort | Silence refresh |
 | --- | --- | --- |
@@ -2142,6 +2253,10 @@ turn; exact Thinking failed uses the activity-based two/five-minute silence rule
 supersedes a stale transport banner and retains ordinary Goal/Loop eligibility.
 
 Automatic response recovery follows the shared decision and conditional busy wait above.
+An automatically withdrawn rescue with no Send authorization or delivery receipt does not
+permanently consume its source. Refiling still requires fresh current-owner/source proof and
+an empty live outbox. Manual cancellation and failed/live attempts retain their episode veto;
+any Send authorization or receipt remains spent across episodes, including after restart.
 Authored queue delivery retains its own input eligibility under §11 and takes precedence over
 a generated Continue or Goal/Loop message. A synthetic unfinished Goal decision is no longer
 filed automatically: recovery uses Continue until a canonical final appears.
@@ -2179,6 +2294,16 @@ the app does not manufacture a final answer or infer cancellation from a click/t
 The desktop logs admission with its exact session, conversation, turn and command. An empty
 or repeated form submit cannot request Stop: the submitting control must be the button while
 it displays Stop/Cancel. End turn only releases an Astra finish hold.
+The recorded Stop notice describes that historical request, not an indefinitely
+pending cancellation. Legacy app-owned notices drop the stale present-tense
+disclaimer at readback without changing their recorded facts or claiming provider success.
+
+The DOM adapter prefers the established Stop ids/labels. When none match, the
+current composer's primary non-submit button may be recognized by its exact
+observed square SVG path, without a translated-label allowlist. Hidden, foreign,
+popover and ambiguous controls cannot become action targets; the existing
+enabled/visible and current-turn checks still guard the click.
+
 Stop elects an existing exact tab, including a loading document, or opens the missing chat
 once under the same durable command. Its absolute two-minute deadline covers browser loading
 without renewing on retries. Browser election is saved before opening; lost receipts, navigation
@@ -2265,6 +2390,10 @@ long". Captured/claimed phases and an unobserved selection keep the ordinary ten
 An explicit desktop compaction immediately uses the existing exact-tab recovery path, which can
 open a missing source while Chrome is already running. It may replace an unclaimed ordinary
 repair, but cannot create a second browser action while another repair is already claimed.
+This initial source preparation does not emit a recovery incident; genuine preparation
+failures and later pickup episodes still do. The ticket reply supplies the latest recorded
+native question independently of an active turn, so an idle source waits for its history
+to hydrate before freezing its identity or preparing Send.
 Every compaction reload rechecks its original continuation token and phase at handout and the
 browser action claim. Cancellation, replacement, source dispatch and completed capture revoke
 obsolete pickup authority. Recovery text distinguishes an unsent request from an outstanding
@@ -2273,12 +2402,18 @@ editable composer and recorded original question before freezing the source iden
 the turn. Already observed identities and a real user Send remain cancellation boundaries during
 hydration; an empty loading DOM must not be treated as a different conversation. The source
 rechecks the composer before insertion. Failed manual preparation retires only its exact pre-Send token and
-stores a bounded concrete failure reason. Existing user drafts remain intact. Ambiguous dispatched
+stores a bounded concrete failure reason. A transient native Send-readiness failure instead keeps
+that same unsent ticket for the existing bounded pickup schedule, without a local retry loop.
+Existing user drafts remain intact. Ambiguous dispatched
 requests retain their existing custody and cannot be sent again merely because a receipt is absent.
 
 An unnamed destination never reports a successful resume ACK, even after a transport banner.
 Keep its armed dispatch and journal gate for exact marker reconciliation; a missing id plus
 generic timeout text is not proof of non-delivery and cannot authorize another Send.
+The command ACK and marked-message observation may arrive in either order. A late marked
+message may complete an already-dispatched checkpoint after commit only for the WAL's exact
+destination. It cannot reopen Send, replace a known message or move the session again.
+Conversely, a bound destination receipt vetoes an ACK naming a different chat.
 Continuation readback accepts one layer of Markdown escaping on ASCII punctuation, never
 escapes on letters/digits. Main/store/renderer and the unbundled content script must agree on
 the marker and preserve its exact removable span. Match an escaped marker separately from
@@ -2302,6 +2437,16 @@ Before a pickup can Stop the original answer, refresh the ticket's source-send c
 An already dispatched or sent summary request can only be observed, never stopped by another
 pickup. Keep the original user-message/turn identity across that await; repeated presses
 must not revoke the operation already in flight.
+
+A claimed compaction repair carries the continuation token, independently of its repair token.
+A responsive source revalidates that exact existing ticket in main before Stop or Send,
+even when its local activity projection has not arrived. A stale/cancelled token cannot create
+or adopt another ticket. An already-running source attempt keeps custody without a reload.
+An unavailable document retains the existing reload recovery. The `resumed` acknowledgement
+reports that distinction, does not stamp a reload cooldown, and does not wait for a replacement
+document. Responsive refusals and navigation during the probe do not grant reload. Continue recovery reuses
+the bounded Fiber-reader repair when a successful hydration scan lacks the latest exact mapping;
+fresh native proof is still required before Stop or Send.
 
 The timeline keeps one Compact & Resume card for the marked token across late or refused
 source calls. Later activity is not evidence that summary writing, saving or destination
@@ -2632,32 +2777,144 @@ Dark is the default theme. Theme selection belongs in Appearance settings; the m
 has no light/dark shortcut. Files and worker-panel controls attach to the header independently
 of appearance controls.
 
+### Browser Use
+
+Browser Use is an ordinary, isolated agent tool and right-side workspace panel. It owns the
+separate persistent `persist:cos-web` session and only accepts HTTP(S) documents. It does not
+load the companion extension, participate in ChatGPT delivery/recording/recovery, reuse the
+bridge, or import the Internal Chromium subsystem. In the Internal variant, `internal-browser.ts`
+and Browser Use remain independent owners with different partitions and no cross-imports.
+Model-facing routing preserves that boundary explicitly: a request naming Browser Use or its
+Browser panel uses only Core's `browser` tool.
+Desktop `browser_*` tools mean existing tabs exposed through the companion extension;
+their missing-browser result says nothing about Browser Use availability. Generic ordinary web
+work defaults to Browser Use, while an existing logged-in tab or ChatGPT-page inspection uses
+Desktop. Descriptions and refusal guidance may name the other surface but never dispatch to it.
+
+The main-process owner holds tabs, active-tab identity, origin consent, navigation/layout epochs,
+snapshots and native `WebContentsView` geometry. A first agent request for an unapproved exact
+origin publishes one panel decision and returns `approval_required` immediately, before network
+navigation. Approval grants trust only; the agent must explicitly retry the returned navigation.
+Denial or expiry retires a still-unused provisional blank tab. No MCP or code-mode call waits on
+human consent. Renderer chrome projects that state through the
+fixed Browser Use IPC allowlist. Files, Sub-agents and Browser Use are mutually exclusive views
+of the same right work slot. Hiding the panel does not retire the browser session or grant new
+navigation authority.
+
+Design inspection is an explicit user-owned mode on the active Browser Use tab. Main binds it to
+that tab and its current navigation epoch, while Chromium's CDP Overlay owns hover highlighting
+and consumes the selection click before the page can act on it. The renderer receives only the
+bounded selected-element summary (tag, accessible role/name, selector, classes, dimensions, box
+model and a fixed allowlist of relevant computed styles). When the document itself exposes them,
+main also publishes at most five probabilistic source candidates from React/Vue development
+metadata and exact matched author-style locations; absence remains empty rather than guessed.
+These candidates are evidence to verify, never source ownership or edit authority. “Ask agent” explicitly captures a
+bounded viewport-clamped PNG crop from that same selected element and prepares editable composer
+context; selection alone captures no image and sends nothing. Escape, panel hiding,
+navigation/reload, tab switching, tab closure and an explicit toggle-off clear the mode and
+highlight. After selection, main applies a restrained inline outline to the exact backend node,
+preserving its prior inline outline values; it removes the outline for Ask agent's bounded
+screenshot and restores it afterward. This annotation adds no page node, timer or layout owner.
+Stale node events cannot publish across a document or tab change. This mode
+does not expose CDP to the renderer/model and has no authority over Internal Chromium.
+
+Agent input follows `inspect → act → inspect`. Tab selection is an explicit action; observing a
+named background tab cannot change the active tab. A loading state is returned before snapshot
+work, and `wait` listens to Chromium's loading boundary within its explicit bound or a bounded
+one-second default rather than sleeping and guessing. `list` and `state` are passive: they refresh
+an existing mission but
+cannot start a new one after `done`; an explicit control action starts mission visuals. A state
+observation binds refs, semantic ARIA state and viewport CSS coordinates to the exact tab,
+top-level document, authorized origin and panel size. Its document commands abort on an epoch
+change. Prefer compact observations for semantic target discovery and pre-action revalidation;
+request full page text only when the task needs it. Document commands have their own bound below
+code-mode's outer deadline, so replaced pages cannot leave
+a detached observation running. Navigation, resize or one completed action invalidates that
+snapshot. Pointer actions accept an observed element ref or bounded viewport coordinates.
+Drag/swipe/long-press run as one cancellable gesture;
+mouse buttons and touch contacts receive best-effort release/cancel if navigation, replacement
+input or teardown interrupts the gesture. Browser Use never exposes arbitrary CDP, Electron or
+main-process methods to the model. Recoverable approval and changed-document outcomes are
+structured non-errors with an explicit next action; missing tabs and policy violations remain
+refusals. `done` ends only agent mission visuals and preserves the panel and tabs.
+
 ### Renderer and IPC
 
-`renderer/pet-machine.ts` owns the optional Tur Tur Sahur companion's gesture,
-animation and autonomous-action state. `renderer/pet.ts` projects it with Pointer
-Events and one visible-window animation clock. The composer launcher and context
-menu share visibility/position in the validated renderer preference
-`cos.ui.turTurPet.v1`. The machine's next frame/phase/decision deadline owns each
-wake: stationary sprites sleep until that deadline; travel and interpolated props
-retain display-frame updates. Menus, hidden documents and static reduced-motion
-poses park the clock. One pending timer or animation frame is cancelled on pause,
-interaction rescheduling and disposal. Deliberate frame holds count in full while
-unexpected stalls beyond the requested wake retain a 100 ms allowance. DOM paint
-only writes changed values; target/hit visibility is resolved once per paint.
-These preferences grant no backend permission. Hide, drag and viewport
-changes retire scene props synchronously. Reduced motion disables autonomous
-travel/actions while keeping static click feedback. Company targets are plain DOM
-text; bat, bin and hit effects carry no company logos. `pet-assets/animations.json`
-maps 96 local character frames with contact/release timing. Asset production and
-regeneration are documented in `docs/pet/PRODUCTION.md`; pet unit/DOM tests and
-`scripts/verify-pet-electron.cjs` cover this owner without provider conversations.
-`scripts/verify-pet-performance.cjs` measures the production pet in isolated
-Electron with unchanged artwork, process CPU deltas and actual animation wakes.
+`main/pet-library.ts` validates imported CoS Pets (`pet.json`, `atlas.png`,
+`animations.json`; 8×12 cells, 96 frames), and owns enabled/favorite membership.
+`main/pet-overlay.ts` hosts a transparent desktop-sized Pets window independent of
+the main window and projects exact session/swarm activity. The fullscreen surface remains
+non-focusable. On Windows/Linux, entering interactive content applies a bounded native window
+shape around the pets/tray/menu before disabling click-through, so the transparent desktop-sized
+rectangle never becomes an occluding input window. Leaving restores click-through before the full
+visual shape. Its private persistent Chromium
+partition retains per-pet positions across restarts. `renderer/pet-overlay.ts`
+draws one 160×160 CSS background cell per pet from the native-size atlas, with
+pixel-exact frame offsets and `image-rendering: pixelated`; it does not scale the
+96-frame sheet down to a preview. `pet-overlay.html` loads its stylesheet as an
+external link so the overlay's restrictive CSP works in both Vite dev and the
+built renderer. `renderer/pet-machine.ts` owns gesture,
+animation and autonomous actions for both built-in and imported manifests;
+`pet-choreography.ts` positions text and effects for each manifest. Multiple pets
+may run together. A short click pokes the pet and restores/focuses the owner
+without changing its current screen; a drag does not raise the owner. The pet's
+context-menu Hide action temporarily dismisses that pet without changing its
+Active membership in the library. The View menu's global visibility toggle hides
+all remaining pets and restores all active pets when switched on. A favorite
+anchors the task badge and compact tray. Its task rows keep state, title and
+summary on one line, scroll within a bounded height, and open their proven local
+session. Task transitions use the authored atlas: running/start → `spawn`,
+waiting/sleeping → `look`, failed/blocked → `angry`, and finished/review →
+`celebrate`; ordinary idle/walk behavior continues between transitions. The Prime task derives
+from its canonical session rather than the broker's reusable `active` lifecycle; workers retain
+their exact AgentInfo state. When a worker is the last recorded session after its family parks,
+its durable `origin.fromSessionId` resolves the Prime task without guessing an unlinked parent.
+A completed turn keeps one green review row and green task badge for 45 seconds even when
+it ends with tools and no final prose. Failed overrides running, running overrides review, and
+review overrides sleeping/waiting; the existing review deadline removes the row. The library's
+copied creation brief may reuse `$hatch-pet` for canonical-reference,
+generation and visual-QA discipline only. Its Codex 8×9/192×208/WebP contract is
+not import-compatible; the CoS 8×12/160×160/PNG manifest remains authoritative.
+`renderer/pet.ts` is only the main-window controller.
+Reduced motion disables autonomous travel/actions while retaining static click
+feedback. The machine's next frame/phase/decision deadline owns each wake:
+stationary sprites sleep until that deadline, while travel, carry, throw and
+interpolated props retain display-frame updates. Hidden documents and static
+reduced-motion poses park the clock. The overlay owns at most one pending timer or
+animation frame and cancels it on pause, interaction rescheduling and disposal.
+macOS forwards mouse movement through the ignored transparent window. Windows deliberately does
+not: Electron forwarding lets both Chromium surfaces publish a cursor for one physical move.
+Windows and Linux instead use main's bounded native cursor poll, while the renderer owns proximity
+and publishes quantized bounded hit regions only when native click-through must change.
+Moving interactive pets update those regions only after crossing the quantization boundary.
+While a shaped window is interactive, main temporarily samples the native cursor so movement
+outside the shape can restore click-through; the poll stops again immediately on leave.
+Main suppresses unchanged pointer/control/activity projections. Pet travel uses
+composited transforms, and prop roots have no desktop-sized layout box; neither
+movement nor an idle interaction surface may invalidate the fullscreen layout.
+Asset production remains in `docs/pet/PRODUCTION.md`; unit/DOM tests plus
+`scripts/verify-pet-overlay-electron.cjs` check the bundled overlay without
+requiring a provider conversation, and `scripts/verify-pet-performance.cjs`
+`--full-host` measures the desktop-sized transparent host, pointer transport and
+underlying owner in addition to actual animation wakes and process CPU.
 
-`renderer/main.ts` owns the shell/setup/settings; `chat.ts` owns sessions, composer and timeline.
+`renderer/main.ts` owns the shell/setup/settings; `chat.ts` owns sessions, composer and timeline;
+interface actions use the shared Phosphor glyph map in
+`renderer/dom.ts` and `renderer/icons.css`; keep the bespoke CoS mark, language flags and data
+visualizations distinct, but do not introduce a second ad-hoc action-icon family.
+The header View trigger opens a narrow local `WebContentsView` owned by `main/view-menu.ts`, not
+a renderer dropdown. Its isolated preload accepts only Pets, Sidebar and zoom commands; the
+mainstream menu has no ChatGPT-browser command. Every action glyph and visible state check uses
+the shared Phosphor map from `icons.css`; the menu must not grow a parallel inline-SVG icon set.
+A hidden renderer prewarms after the shell loads, so the first press only snapshots, attaches and
+reveals it. Each opening snapshot restarts the composer's short surface reveal, with a reduced-motion
+path. The shell admits one toggle request at a time while main remains the open-state owner.
+A renderer snapshot supplies translated labels,
+current check states and the active Appearance palette/font settings. Native blur, a second
+trigger press and Escape close the menu without reopening it or changing shell geometry.
 Projects, workers, plans, model choice, usage and plugins have focused modules (§4). The renderer
-calls a fixed `preload/index.ts` allowlist into validated `ipc.ts`/`plugins-ipc.ts` handlers.
+calls a fixed `preload/index.ts` allowlist into validated
+`ipc.ts`/`plugins-ipc.ts` handlers.
 No arbitrary IPC invocation, Node access, filesystem path opening or renderer-side secret store.
 Changing the selected session synchronously retires prior data/control ownership and handoff.
 Keep the last painted transcript and images inert while the destination detail loads, then
@@ -2672,6 +2929,13 @@ evicted. Historical browsing leaves committed inputs with history. Never infer m
 the minimum event timestamp: old observations and tool start times can occur on newer pages.
 Pushes and async loads are scoped to selection/draft generation; a late load must not overwrite
 focused edits or a newer A → B → A view.
+Canonical assistant text revisions render directly; no renderer-owned queue delays text that
+the recorder already supplied. The confirmed-input thinking dots retire when real assistant
+content, tool activity or an error arrives. Copy appears only on the last canonical final
+message after that exact turn's recorded end; late tools or a reopened turn keep it hidden.
+An unowned final cannot borrow another turn's end. The composer Stop action belongs only to an
+active turn or pending input, never to presentation;
+the compact Working/Worked rail uses the recorded turn start/end for its final elapsed time.
 
 First-run Setup keeps the six-step flow, with reviewed screenshots in `renderer/setup-images/`
 and translated numbered highlights in `renderer/setup-guide.ts`. Sensitive identifiers must
@@ -2698,6 +2962,10 @@ Electron fixture, including simultaneous images, zoom, translated labels and nat
 The sidebar groups local projects/sessions, exposes worker state and retains deliberate width
 and expansion preferences. Project chat titles align with the project name. Groups initially
 start collapsed; a summary pointer/keyboard click commits its disclosure intent before a repaint.
+Shell panels preserve their spatial origin during routine toggles: Chats reveal from the left,
+Files and Sub-agents reveal from the right, and Terminal reveals upward. Stable grid tracks
+animate the workspace reflow instead of abruptly replacing layout. Reduced motion keeps all
+state changes immediate. Resizing never inherits toggle transitions.
 Activity repaints preserve the focused project summary without taking composer focus, and repeated
 activation of the already visible chat panel does not start another sidebar refresh.
 Selecting a project chat or project-scoped New Chat deliberately expands that group. An open
@@ -2716,7 +2984,8 @@ receipt. Native edit context menus respect the focused editable control and sele
 Setup's Show/Hide guide button stays available even while setup is incomplete. Manual collapse
 survives status pushes. Profile management stays out of first-run Setup: a compact row below
 Language in Appearance has a dropdown, a plus button with a name dialog and a delete button
-on each profile entry. New chat uses the existing
+on each profile entry. The dropdown anchors below and right-aligned to its trigger, flipping only
+when there is insufficient viewport space. New chat uses the existing
 pencil icon, with white foreground in dark mode. `scripts/verify-sidebar-setup.cjs` exercises
 real Electron pointer/keyboard input and layout against isolated production renderer modules.
 The base zoom is 1.17 (10% below the former 1.3); the existing zoom controls remain relative to it.
@@ -2791,6 +3060,28 @@ repaints. `scripts/verify-renderer-label-memory.cjs` checks real Chromium collec
 row replacement; ordinary language tests preserve controls, drafts and authored values.
 Authored prose uses automatic text direction; shell/code remain LTR with logical layout edges.
 Theme and layout preferences do not change backend authority.
+Workspace Settings uses the same centered 940px canvas, heading hierarchy and bounded surfaces
+as the Plugins, Skills and Pets libraries. Its sections remain one semantic column in the order
+Permissions, Folders, Health and Activity: the approved-folder list has unbounded height and must
+not displace or strand a neighboring column. The empty Folders guidance resets paragraph margins
+and uses symmetric vertical padding so one-line and wrapped copy stay centered in its surface.
+Existing control IDs and main-process owners remain
+unchanged. `scripts/verify-workspace-ui.cjs` checks the order, shared width and overflow in real
+Chromium with both desktop and narrow viewports, including a long folder list.
+Usage Settings shares that canvas and one-column section rhythm: recorded summary, estimated
+daily token activity, comparison costs split into model and day surfaces, and independently
+reported ChatGPT balances. The cost formula opens inline from the right-aligned section action.
+The summary and heatmap use local estimates, never provider billing; model/shared/feature
+remaining balances are only what ChatGPT reported. The 52-week grid and tables scroll within
+their own bounded surfaces on narrow windows, not across the Settings page.
+`scripts/verify-usage-ui.cjs` checks section geometry, summary reflow and local scrolling
+in real Chromium at desktop and narrow widths without reading user data.
+Agents & automation Settings uses the same 940px one-column canvas and section surfaces.
+Its search shares the Pets/Skills/Plugins pill treatment, and each section has a short
+description. Search filters whole header-and-surface pairs while leaving conditional editors
+hidden until requested. Model refresh belongs in its section header; Clear swarm remains beside
+the worker list. `scripts/verify-agents-automation-ui.cjs` checks alignment and overflow in
+isolated Chromium at desktop and narrow widths without reading the live profile.
 Settings places ChatGPT model defaults second and Workers & recovery third, after Continuation
 sources. Appearance has its own Settings navigation page, including the language selector and
 existing setup profiles. The connector-instructions editor
@@ -2804,6 +3095,9 @@ do not change neighboring rasterized edges at fractional zoom. Top-layer options
 outside that clip. `scripts/verify-settings-focus.cjs` checks unchanged geometry, pixel-exact
 restoration after closing/blurring, and hit testing options beyond the card edge.
 
+Appearance Settings shares the 940px one-column canvas and section-header rhythm with Workspace,
+Usage and Agents. Its live preview leads, followed by Colors, Typography and Preferences;
+Reset appearance sits in the page header because it affects both palettes and typography.
 Appearance uses `ui.appearance` in the existing config, with separate Light/Dark background,
 sidebar and accent RGB colors plus contrast. Native color pickers and HEX fields allow every
 six-digit RGB color. A shared font choice, 12–18px base text size and translucent-sidebar switch
@@ -2841,10 +3135,12 @@ access. Main re-resolves current approved roots and rejects traversal, symbolic 
 and project-root mutation. Files and the read-only sub-agent panel share one resizable work slot.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
 Its outer toggle or Escape closes the pane; a selected worker retains its title and Back button.
-Directories load one level at a time (500 entries); at most 128 expanded directory watches are
-retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.
+Directories load one level at a time (500 entries); at most 128 directory watches are retained,
+prioritizing the parent folders of current Git changes before expanded tree folders. Collapse,
+panel hiding, renderer reload/destruction and root removal retire watchers.
 Files uses one action toolbar with Refresh; the outer Files toggle closes the panel. Its shared
-work slot can grow to host width minus 360 px for chat, without a fixed maximum pixel width.
+work slot has a 500 px toolbar-safe minimum and can grow to host width minus 360 px for chat,
+without a fixed maximum pixel width.
 Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep
 the previous accepted preview until replacement content is ready; hidden previews stay hidden.
 The horizontal preview separator paints a one-pixel hover line with a three-pixel drag area.
@@ -2852,6 +3148,39 @@ The tree keeps keyboard focus across refreshes and supports arrow/Home/End navig
 Enter to activate. Preview and tree share layout space rather than overlapping; the preview's
 Files toggle temporarily hides the tree for reading. Closing the preview restores it.
 Creating an entry uses the same unsaved-edit guard as changing the selected file.
+
+Changes is one toolbar mode of Files, not a second explorer. Its own header has an explicit Back
+to Files control that restores the existing tree and selection; the toolbar remains available.
+Main owns a bounded, read-only
+`HEAD -> working tree` Git snapshot and returns only project-relative paths. Porcelain status and
+numstat supply Modified/Added/Deleted/Renamed truth; `??` remains a distinct Untracked (`U`)
+status, with its total text-line count rather than a misleading `+/-` Git delta. Added (`A`)
+means added to Git but absent from HEAD. Deleted entries never become synthetic tree nodes.
+The normal Files tree shows Git status letters on changed files and every parent folder of a
+changed path, including deleted paths and both sides of a rename. A folder's accessible marker
+reports the number of affected descendants; markers disappear when the Git snapshot is clean.
+Filesystem and Git-metadata watches only invalidate the view:
+every badge, marker, count and open diff is reconciled from Git again, including after commit or
+push. The Changes list and a selected diff are mutually exclusive views of the same panel;
+the renderer window owns the bounded reconciliation debounce, and closing the panel or document
+cancels it before its preload/DOM authority can disappear.
+When the list is dirty, its Ask agent action only appends a review/check/commit/push request to
+the current project composer for user review. It never sends the draft, stages files or invokes
+Git itself, preserves existing authored text and selected Skills, and is absent from clean/diff
+and historical-review states.
+the diff fills the space below its header and opens at the first changed chunk. Back from a Git
+diff restores Changes, then Back restores Files. A historical edit review similarly fills the
+panel, and Back returns to the view from which it was opened. While Changes or an edit review is
+open, New file, New folder, Rename, Delete and Reveal are disabled. Refresh is the portable
+fallback. Git execution uses no shell, optional locks, external diff,
+textconv or fsmonitor command, and never stages, restores or mutates repository state. Binary and
+oversized diffs remain explicit unavailable states. A lazily loaded unified CodeMirror merge view
+owns syntax highlighting, intraline changes and collapsed unchanged context.
+A successful, exactly recorded apply_patch tool call may link to its own immutable before/after
+review, independent of current Git state. The recorder bounds and stores these artifacts under
+the exact session/call/change identity; a failed, approximate or oversized edit does not get a
+review link. Multiple reviewed files have previous/next navigation. The link does not expand
+the tool call or attribute current Git changes to an agent.
 
 Text previews/editor input are bounded to 256 KiB; full editable previews retain exact UTF-8,
 BOM and line endings plus a content/file-identity revision. Save stages complete replacement bytes
@@ -2951,12 +3280,25 @@ tooltips; Advanced chat/request labels retain their copy action, with full value
 and Runtime diagnostics. Verification/last-seen ages remain in tooltips. A small plus opens Advanced, including
 the extension version and session capture. The request pipeline lives inside Runtime diagnostics.
 Every opening collapses Advanced and its nested Runtime diagnostics.
-Extension-only Overwrite/Timestamps and the redundant settings link are absent. A red header
-Connect action remains visible while disconnected and disappears only on confirmed connection,
-briefly highlighting the footer status (respecting reduced motion). Setup stays reachable from
-Settings and from Connect when configuration is incomplete. The View menu has its own foreground
+Extension-only Overwrite/Timestamps and the redundant settings link are absent. The footer
+expands Connect beside the status square while disconnected or connecting; confirmed connection
+contracts it back to the square, which always opens diagnostics. Settings remains an unframed
+22-pixel gear in a 36-pixel hit target; hover changes only its color, while the selected Settings
+state retains the shared navigation highlight. The connection control stays pinned to the footer's
+right edge. Sidebar resizing stops at 220 pixels so the expanded connection control remains inside
+the footer padding. Connect routes to Setup when
+configuration is incomplete. Focus moves to the square if connection completes while Connect
+is focused, and reduced-motion settings suppress the morph. The popover keeps Disconnect in a
+stable footer slot: it is neutral and disabled until a confirmed connection, then receives the
+danger treatment and closes the popover before disconnection begins. It never duplicates Connect
+or displays the pending Disconnecting phase. Connect, Connecting and Disconnecting share one expanded geometry
+in the footer so a phase label never triggers a second resize. Compact diagnostics and the expanded
+Advanced content use the composer's short surface reveal; Connect carries the success wash and
+Disconnect the danger wash without replacing their text labels. The View menu has its own foreground
 stacking layer; Appearance rows align controls at a shared minimum height and Setup uses a stable
 responsive title/language grid across locales.
+Once Setup is ready, the missing-companion banner follows bridge presence rather than tunnel
+startup. A failed Connect attempt must not flash and erase it; verified companion presence clears it.
 The companion sends a bounded snapshot on the authenticated `/diagnostics` route, outside the
 authority-bearing `/status` response. One pending diagnostic page read is shared; current
 connection/document epochs fence delayed results. The bridge cache is presentation only and
@@ -3235,6 +3577,16 @@ shared-tree change may already have addressed them.
   Recording Off lacks a uniform runtime gate for retained per-chat overrides. Attempt
   invalidation now preserves debt, but these remaining controls still need one durable
   semantic transaction and effective current-setting enforcement.
+- **Startup Usage derivation:** the background warmup is not awaited by the shell, but an invalid
+  cache row still reads and projects that session's complete history immediately after startup.
+  Large migrations can contend with first-turn work. Move rebuild off the startup hot path or
+  maintain the required facts incrementally at the recorder owner; do not add a second polling
+  cache. See `docs/worklog-2026-09-21-performance-follow-up-inventory.md`.
+- **Live-response presentation cost:** alternate-shell evidence scans are bounded for safety,
+  but mutation-driven Fiber scans and Markdown repaint on canonical assistant revisions lack a
+  production performance budget. Measure exact scan/revision/paint cost before changing evidence
+  or recording semantics. Internal Chromium's always-live parked views can multiply this shared
+  work and require a separate liveness-preserving composition design.
 
 Do not restore obsolete claims while investigating: two MCP surfaces, one global prime run,
 three browser command kinds, fixed 60s Unattributed repair, tab-query

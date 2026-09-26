@@ -432,15 +432,17 @@ describe('request correlation ownership', () => {
       });
       await appendEvent(session.id, toolCall('call-old', 'wfr_old_snapshot', 1));
       await flushDurable(); // saved index contains only the old request
-
-      observeRequestCorrelation({
-        requestId: 'wfr_new_history',
-        conversationId,
-        sessionId: session.id,
-        messageId: 'msg-new',
-        tool: 'read',
-        observedAt: 2
+      // Version 5 acknowledged owners before its debounced snapshot was necessarily current.
+      // Preserve that legacy shape so this test exercises the one-time migration scan rather
+      // than version 6's committed browser-ack boundary.
+      await writeDurableNow('request-correlations', {
+        version: 5,
+        entries: [{
+          requestId: 'wfr_old_snapshot', conversationId, sessionId: session.id,
+          messageId: 'msg-old', tool: 'read', observedAt: 1
+        }]
       });
+
       await appendEvent(session.id, toolCall('call-new', 'wfr_new_history', 2));
       // Lose process memory before the debounced index write catches up. Session JSONL is
       // already durable, so restore must merge it into the older valid snapshot.

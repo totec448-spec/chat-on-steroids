@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { BROWSER_LIMITS, type BrowserCommand, type BrowserResult, type BrowserTool } from '../shared/browser-control.js';
 import { wakeBrowserWork } from './browser-wake.js';
+import { COMPANION_BROWSER_SCOPE } from '../shared/browser-routing.js';
 
 interface Pending {
   browserId: string;
@@ -13,6 +14,7 @@ interface Pending {
 }
 const uuid = /^[a-f\d-]{36}$/i;
 const tabHandle = /^([a-f\d-]{36}):(\d+)$/i;
+const browserUseRecovery = 'For Browser Use, call the Core browser tool. If it is absent, refresh the Core connector tool catalog; do not substitute Desktop.';
 
 export class BrowserControlBroker {
   private epoch = randomUUID();
@@ -84,8 +86,12 @@ export class BrowserControlBroker {
     }
     if (!browserId) {
       if (browsers.length !== 1) return tool === 'browser_tabs' && args.action === 'list'
-        ? { value: { browsers, tabs: [], message: browsers.length ? 'Choose browserId to list its tabs.' : 'Open Chrome with the companion extension connected.' } }
-        : { error: 'BROWSER_REQUIRED: list browsers, then specify the returned browserId.' };
+        ? { value: { browsers, tabs: [], surface: 'desktop_companion_browser', message: browsers.length
+          ? 'Choose browserId to list its existing companion-browser tabs.'
+          : `${COMPANION_BROWSER_SCOPE} No companion browser is connected. ${browserUseRecovery} This result says nothing about Browser Use availability.` } }
+        : { error: browsers.length
+          ? 'BROWSER_REQUIRED: this is Desktop companion-browser control. List browsers, then specify the returned browserId.'
+          : `BROWSER_REQUIRED: ${COMPANION_BROWSER_SCOPE} No companion browser is connected. ${browserUseRecovery} This result says nothing about Browser Use availability.` };
       browserId = browsers[0]!.id;
     }
     const client = browsers.find(b => b.id === browserId);

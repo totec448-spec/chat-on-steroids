@@ -1,4 +1,5 @@
-import { ui, uiText, t, initLanguage } from './i18n.js';
+import './icons.css';
+import { ui, uiText, t, initLanguage, currentLanguage } from './i18n.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
@@ -8,7 +9,9 @@ import { initConnectionAdvanced } from './connection-popover.js';
 import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
 import { initPet } from './pet.js';
-import type { AppearanceSettings } from '../shared/appearance.js';
+import { initPets } from './pets.js';
+import { initSkillsLibrary } from './skills-library.js';
+import { defaultAppearance, type AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
@@ -38,7 +41,7 @@ import {
   WRITE_CAPABILITIES
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
-import { $, ago, el, icon, run, shortAgo, toast } from './dom.js';
+import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom.js';
 import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatView } from './chat.js';
 
 declare global {
@@ -49,11 +52,13 @@ declare global {
 
 const api = window.api;
 initLanguage();
-initPet();
+const pet = initPet(api, () => showTab('pets'));
 initSetupGuide();
 // Escape the translucent sidebar's backdrop-filter containing block.
 document.body.append($('connectionPopover'));
-const connectionAdvanced = initConnectionAdvanced();
+const connectionAdvanced = initConnectionAdvanced(() => {
+  if (document.getElementById('connectionPopover')) positionConnectionPopover();
+});
 const appearance = initAppearance(patch => { void save(patch); });
 
 /** Same shape the platform uses; mirrored here only to grey out step 2 until it is valid. */
@@ -82,6 +87,13 @@ const GROUPS: Group[] = [
     icon: 'i-pencil',
     blurb: "Create, edit, move, delete and save ChatGPT files, inside those folders only.",
     caps: ['create', 'edit', 'move', 'deleteFile']
+  },
+  {
+    id: 'browser',
+    title: "Browse the web",
+    icon: 'i-globe',
+    blurb: "Open and interact with websites in the isolated in-app browser.",
+    caps: ['browserUse']
   },
   {
     id: 'desktop',
@@ -126,12 +138,17 @@ let openGroup: string | null = null;
 let showAllSteps: boolean | null = null;
 let setupProfileBusy = false;
 let setupKeySave: Promise<boolean> = Promise.resolve(true);
+let openSkillsLibrary: () => void = () => undefined;
+type ConnectionActionPhase = 'idle' | 'connecting' | 'attention';
+let connectionActionPhase: ConnectionActionPhase = 'idle';
+let connectionActionAttempt = 0;
 
 // ------------------------------------------------------------------- tabs
 
 function showTab(name: string): void {
-  const settings = name !== 'chat' && name !== 'plugins';
-  document.querySelector<HTMLElement>('.app')!.dataset.screen = name === 'plugins' ? 'library' : settings ? 'settings' : 'chat';
+  const library = name === 'plugins' || name === 'skills' || name === 'pets';
+  const settings = name !== 'chat' && !library;
+  document.querySelector<HTMLElement>('.app')!.dataset.screen = library ? 'library' : settings ? 'settings' : 'chat';
   document.querySelector<HTMLElement>('.sidebar-brand')!.hidden = settings;
   $('sidebarPrimary').hidden = settings;
   $('workspaceSettings').hidden = false;
@@ -151,6 +168,7 @@ function showTab(name: string): void {
   for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
     panel.classList.toggle('is-active', panel.dataset.panel === (name === 'settings' ? 'chat' : name));
   }
+  if (name === 'skills') openSkillsLibrary();
   // The Chat panel is the only one that costs anything to keep fresh, so it only
   // reloads while it is on screen.
   chatVisible(name === 'chat' || name === 'settings');
@@ -200,6 +218,8 @@ $('sessionList').addEventListener('click', event => {
 }, { capture: true });
 $('newChat').addEventListener('click', () => showTab('chat'));
 $('sidebarPlugins').addEventListener('click', () => showTab('plugins'));
+$('sidebarSkills').addEventListener('click', () => showTab('skills'));
+$('sidebarPets').addEventListener('click', () => showTab('pets'));
 $('addProject').addEventListener('click', () => showTab('chat'));
 $('composerFolder').addEventListener('click', () => $('addProject').click());
 let zoomFactor = 1;
@@ -207,20 +227,70 @@ let zoomEdited = false;
 void api.getZoom().then(result => {
   if (zoomEdited || !result.ok || typeof result.data !== 'number' || !Number.isFinite(result.data)) return;
   zoomFactor = result.data;
-  $('zoomReset').textContent = `${Math.round(zoomFactor * 100)}%`;
 });
 async function zoom(next: number): Promise<void> {
   zoomEdited = true;
   const result = await run(api.setZoom(Math.min(1.5, Math.max(.75, next))));
-  if (result !== null) { zoomFactor = result; $('zoomReset').textContent = `${Math.round(result * 100)}%`; }
+  if (result !== null) zoomFactor = result;
 }
-$('zoomOut').addEventListener('click', () => void zoom(zoomFactor - .1));
-$('zoomIn').addEventListener('click', () => void zoom(zoomFactor + .1));
-$('zoomActualSize').addEventListener('click', () => void zoom(1));
 document.addEventListener('keydown', (event) => {
   if (!(event.ctrlKey || event.metaKey) || !['+', '=', '-', '0'].includes(event.key)) return;
   event.preventDefault(); void zoom(event.key === '0' ? 1 : zoomFactor + (event.key === '-' ? -.1 : .1));
 });
+
+function initViewMenuControls(sidebarLayout: ReturnType<typeof initSidebarResize>): void {
+  const trigger = $<HTMLButtonElement>('viewMenuToggle');
+  let togglePending = false;
+  ui(trigger, 'aria-label', () => t('View'));
+  ui(trigger, 'title', () => t('View'));
+  const snapshot = () => {
+    const uiPrefs = requestedSettings?.ui ?? state?.config.ui;
+    const theme = uiPrefs?.theme ?? (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+    return {
+      petVisible: pet.isVisible(),
+      petReady: pet.isReady(),
+      sidebarCollapsed: sidebarLayout.isCollapsed(),
+      zoomPercent: Math.round(zoomFactor * 100),
+      theme,
+      appearance: uiPrefs?.appearance ?? defaultAppearance(),
+      language: currentLanguage(),
+      labels: {
+        pet: t('Desktop pets'),
+        sidebar: t('Toggle Sidebar'),
+        zoomIn: t('Zoom In'),
+        zoomOut: t('Zoom Out'),
+        actualSize: t('Actual Size')
+      }
+    };
+  };
+
+  trigger.addEventListener('click', async () => {
+    if (togglePending) return;
+    togglePending = true;
+    trigger.setAttribute('aria-busy', 'true');
+    const rect = trigger.getBoundingClientRect();
+    try {
+      const reply = await api.toggleViewMenu({
+        anchor: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        snapshot: snapshot()
+      });
+      if (!reply.ok) { toast(reply.error); return; }
+      trigger.setAttribute('aria-expanded', String(reply.data.open));
+    } finally {
+      togglePending = false;
+      trigger.removeAttribute('aria-busy');
+    }
+  });
+  api.onViewMenuOpenChanged(open => trigger.setAttribute('aria-expanded', String(open)));
+  api.onViewMenuCommand(command => {
+    trigger.setAttribute('aria-expanded', 'false');
+    if (command === 'pet') { pet.toggle(); return; }
+    if (command === 'sidebar') { sidebarLayout.toggle(); return; }
+    if (command === 'zoom-in') { void zoom(zoomFactor + .1); return; }
+    if (command === 'zoom-out') { void zoom(zoomFactor - .1); return; }
+    if (command === 'zoom-reset') void zoom(1);
+  });
+}
 $('tabs').addEventListener('click', (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-tab]');
   if (button?.dataset.tab) showTab(button.dataset.tab);
@@ -243,7 +313,7 @@ function groupShell(id: string, title: string, iconId: string, box: HTMLInputEle
   main.type = 'button';
   const text = el('span');
   text.append(el('b', '', () => t(title)), el('em', 'group-count'));
-  main.append(icon('i-chev', 'ico chev'), icon(iconId), text);
+  main.append(disclosureChevron('ico chev'), icon(iconId), text);
   main.addEventListener('click', () => {
     openGroup = openGroup === id ? null : id;
     paintGroups();
@@ -313,7 +383,7 @@ function buildGroups(): void {
   // The only multi-agent exposure control there is. Chat settings used to carry a second
   // checkbox for the same flag, which this one had to mirror by hand.
   enabled.addEventListener('change', () => void save());
-  const agents = groupShell('agents', 'Sub-agents', 'i-bolt', enabled);
+  const agents = groupShell('agents', 'Sub-agents', 'i-agent', enabled);
 
   const tools = el('div', 'tools');
   const agentTools: Array<[string, string]> = [
@@ -596,8 +666,19 @@ function isRunning(value: AppState['status']['state']): boolean {
   );
 }
 
+interface SetupConnectionValues {
+  tunnelId: string;
+  hasApiKey: boolean;
+}
+
 /** What still has to happen before connecting can work, in the order of the wizard. */
-function missingStep(next: AppState): { step: string; text: string } | null {
+function missingStep(
+  next: AppState,
+  values: SetupConnectionValues = {
+    tunnelId: next.config.tunnel.tunnelId,
+    hasApiKey: next.hasApiKey
+  }
+): { step: string; text: string } | null {
   const { config } = next;
   // This is the same capability rule as the main-process admission gate. Desktop and
   // clipboard may legitimately be rootless; enabling one must not hide a root still needed
@@ -606,19 +687,32 @@ function missingStep(next: AppState): { step: string; text: string } | null {
     return { step: 'folder', text: t("Choose a folder to share — step 1.") };
   }
   if (config.tunnel.kind === 'openai') {
-    if (!TUNNEL_ID_PATTERN.test(config.tunnel.tunnelId)) {
+    if (!TUNNEL_ID_PATTERN.test(values.tunnelId)) {
       return { step: 'tunnel', text: t("Create a tunnel and paste its ID — step 2.") };
     }
-    if (!(next.secureStorage?.available ?? true) && !next.hasApiKey) {
+    if (!(next.secureStorage?.available ?? true) && !values.hasApiKey) {
       return { step: 'key', text: next.secureStorage?.detail ?? t("Secure credential storage is unavailable.") };
     }
-    if (!next.hasApiKey) {
+    if (!values.hasApiKey) {
       return { step: 'key', text: t("Add a restricted API key — step 3.") };
     }
   } else if (!next.resolvedBinary && config.tunnel.kind === 'cloudflared') {
     return { step: 'connect', text: t("cloudflared was not found on this computer.") };
   }
   return null;
+}
+
+/**
+ * Readiness for a click the user can make now, including credentials still visible in Setup.
+ * Persisted state remains authoritative everywhere else; this projection exists only so a
+ * disabled button cannot prevent the blur/change events that would make valid drafts durable.
+ */
+function currentSetupMissingStep(next: AppState): { step: string; text: string } | null {
+  const key = $<HTMLInputElement>('apiKey');
+  return missingStep(next, {
+    tunnelId: $<HTMLInputElement>('tunnelId').value.trim(),
+    hasApiKey: next.hasApiKey || (next.secureStorage?.available !== false && key.value !== '')
+  });
 }
 
 interface RootRenameState {
@@ -805,7 +899,8 @@ let announced = false;
  * bar is for what the user can act on - a version to fetch by hand, an extension to reload -
  * while the Activity line reports every state, including the good one.
  */
-function updateSummary({ bridge, update, config, status }: AppState): { text: string; tone: UpdateTone; notice: boolean; extensionAction: string | null } | null {
+function updateSummary(next: AppState): { text: string; tone: UpdateTone; notice: boolean; extensionAction: string | null } | null {
+  const { bridge, update, config } = next;
   // Only an extension older than this app is the user's to fix. The other direction is an app
   // that has not caught up yet - normal while an update downloads - and telling that user to
   // load the bundled folder again would talk them into downgrading a working extension. The
@@ -816,7 +911,9 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
       : null;
   // A mismatched companion can fail the protocol gate before it becomes present.
   // Retain its last observed version until a matching companion actually reports in.
-  const missing = !stale && bridge.running && !bridge.present && isRunning(status.state) && browserExtensionRequired(config);
+  // Companion presence is independent of tunnel startup. Once Setup is ready, a failed
+  // connection attempt must not briefly show and then erase a still-valid reminder.
+  const missing = !stale && bridge.running && !bridge.present && !missingStep(next) && browserExtensionRequired(config);
   if (!stale && !missing && !update.latest && update.stage === 'idle' && !update.checkedAt) return null;
 
   const lines: string[] = [];
@@ -969,6 +1066,79 @@ function paintSetupFields(): void {
     input.classList.toggle('is-empty', !stored && input.value.trim() === '');
     input.setAttribute('aria-required', String(!stored));
   }
+  if (state) {
+    paintConnectionAction(state);
+    paintWizardConnectionAction(state);
+  }
+}
+
+/**
+ * The main process owns connection truth; this owns only feedback for the click still in flight.
+ * Keeping that phase beside the button prevents a failed status push from flashing Connect between
+ * Connecting and the error acknowledgement.
+ */
+function paintConnectionAction(next: AppState): void {
+  const { status } = next;
+  const connected = status.state === 'connected';
+  const disconnecting = status.state === 'disconnecting';
+  const statusBusy = disconnecting || status.state === 'starting-server' || status.state === 'connecting-tunnel';
+  const connecting = connectionActionPhase === 'connecting' || statusBusy;
+  const attention = connectionActionPhase === 'attention' && !connected;
+  const missing = currentSetupMissingStep(next);
+  const button = $<HTMLButtonElement>('sidebarConnect');
+  const connectHadFocus = document.activeElement === button;
+
+  button.dataset.collapsed = String(connected);
+  button.disabled = connected || connecting || attention;
+  button.tabIndex = connected ? -1 : 0;
+  button.setAttribute('aria-hidden', String(connected));
+  button.title = attention ? status.detail : !connected && missing ? missing.text : '';
+  button.classList.toggle('is-attention', attention);
+  button.closest('.connection-anchor')?.classList.toggle('is-attention', attention);
+  ui(button, 'textContent', () => attention
+    ? t('Attention!')
+    : disconnecting
+      ? t('Disconnecting…')
+      : connecting
+        ? t('Connecting…')
+        : t('Connect'));
+  if (connected && connectHadFocus) $('sidebarConnection').focus({ preventScroll: true });
+}
+
+function connectionAttemptFailed(next: AppState): boolean {
+  return next.status.state === 'auth-failed' || next.status.state === 'tunnel-unavailable' ||
+    (next.status.state === 'disconnected' && next.status.detail.trim() !== '');
+}
+
+function showConnectionAttention(attempt: number, message: string): void {
+  if (!state || attempt !== connectionActionAttempt) return;
+  connectionActionPhase = 'attention';
+  paintConnectionAction(state);
+  paintWizardConnectionAction(state);
+  toast(message, () => {
+    if (!state || attempt !== connectionActionAttempt || connectionActionPhase !== 'attention') return;
+    connectionActionPhase = 'idle';
+    paintConnectionAction(state);
+    paintWizardConnectionAction(state);
+  });
+}
+
+function paintWizardConnectionAction(next: AppState): void {
+  const { status } = next;
+  const disconnecting = status.state === 'disconnecting';
+  const connecting = connectionActionPhase === 'connecting' || status.state === 'starting-server' || status.state === 'connecting-tunnel';
+  const running = isRunning(status.state);
+  const missing = currentSetupMissingStep(next);
+  const button = $<HTMLButtonElement>('wizConnect');
+  ui(button, 'textContent', () => disconnecting
+    ? t('Disconnecting…')
+    : connecting
+      ? t('Connecting…')
+      : running
+        ? t('Disconnect')
+        : t('Connect'));
+  button.disabled = setupProfileBusy || disconnecting || connecting || (!running && missing !== null);
+  button.title = !running && missing ? missing.text : '';
 }
 
 function apply(next: AppState): void {
@@ -992,14 +1162,7 @@ function apply(next: AppState): void {
   const appearanceUi = requestedSettings?.ui ?? config.ui;
   appearance.apply(appearanceUi);
 
-  const headerConnect = $<HTMLButtonElement>('headerConnect');
-  const wasVisible = !headerConnect.hidden;
-  headerConnect.hidden = connected;
-  headerConnect.disabled = busy;
-  ui(headerConnect, 'textContent', () => disconnecting ? t('Disconnecting…') : busy ? t('Connecting…') : t('Connect'));
-  if (connected && wasVisible && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) $('sidebarConnection').animate([
-    { boxShadow: '0 0 0 0 var(--green)' }, { boxShadow: '0 0 0 12px transparent' }
-  ], { duration: 850, iterations: 2 });
+  paintConnectionAction(next);
 
   // ---- global connection surface
   const connectionTone = connected ? 'is-connected' : offline ? 'is-offline' : busy ? 'is-busy' : failed ? 'is-error' : '';
@@ -1016,10 +1179,9 @@ function apply(next: AppState): void {
         : t("No tunnel yet")
       : (status.publicUrl ?? status.localUrl ?? config.tunnel.kind));
 
-  const connectBtn = $<HTMLButtonElement>('connectionPopoverToggle');
-  ui(connectBtn, 'textContent', () => disconnecting ? t('Disconnecting…') : running ? t("Disconnect") : t("Connect"));
-  connectBtn.disabled = disconnecting || (!running && missing !== null);
-  connectBtn.title = !running && missing ? missing.text : '';
+  const disconnectBtn = $<HTMLButtonElement>('connectionPopoverDisconnect');
+  disconnectBtn.disabled = !connected;
+  ui(disconnectBtn, 'textContent', () => t("Disconnect"));
 
   ui($('connectionPopoverExtension'), 'textContent', () => next.bridge.extensionVersion
     ? `v${next.bridge.extensionVersion}`
@@ -1132,9 +1294,7 @@ function apply(next: AppState): void {
   $('apiKeyState').classList.toggle('is-warn', !secureStorageAvailable);
   $<HTMLButtonElement>('removeApiKey').disabled = !next.hasApiKey || !secureStorageAvailable;
 
-  const wizConnect = $<HTMLButtonElement>('wizConnect');
-  ui(wizConnect, 'textContent', () => disconnecting ? t('Disconnecting…') : running ? t("Disconnect") : t("Connect"));
-  wizConnect.disabled = connectBtn.disabled;
+  paintWizardConnectionAction(next);
   ui($('wizStatus'), 'textContent', () => running || failed || disconnecting ? status.detail || t(STATUS_TEXT[status.state]) : '');
 
   $('chatgptConn').replaceChildren(
@@ -1278,6 +1438,7 @@ function connectorCards(next: AppState, desktopExpanded: boolean): HTMLElement[]
 
     const head = optional ? document.createElement('summary') : el('div');
     head.className = 'connector-head';
+    if (optional) head.append(disclosureChevron('ico connector-chevron'));
     head.append(
       el('h4', '', surface.connectorName),
       el('span', `tag${surface.optional ? ' is-optional' : ''}`, () => t(surface.optional ? 'optional' : 'required')),
@@ -1641,11 +1802,108 @@ async function dropFolders(event: DragEvent): Promise<void> {
   }
 }
 
+function revealMissingSetup(missing: { step: string; text: string }): void {
+  showTab('setup');
+  const target = step(missing.step);
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const focus = missing.step === 'folder'
+    ? $<HTMLButtonElement>('wizAddFolder')
+    : missing.step === 'tunnel'
+      ? $<HTMLInputElement>('tunnelId')
+      : missing.step === 'key'
+        ? $<HTMLInputElement>('apiKey')
+        : $<HTMLButtonElement>('wizConnect');
+  focus.focus({ preventScroll: true });
+}
+
+async function storeSetupApiKeyDraft(): Promise<boolean> {
+  const input = $<HTMLInputElement>('apiKey');
+  const submitted = input.value;
+  if (submitted === '') return true;
+  const owner = state?.config.tunnel.profileId;
+  const request = (async () => {
+    const next = await run(api.setApiKey(submitted, owner));
+    if (!next) return false;
+    // Do not erase a newer value typed while safeStorage/IPC was resolving this one.
+    if (state?.config.tunnel.profileId === owner) {
+      if (input.value === submitted) input.value = '';
+      apply(next);
+    }
+    toast('API key stored');
+    return true;
+  })();
+  setupKeySave = request;
+  return request;
+}
+
+/**
+ * Make the exact Setup values visible to the connection owner before it starts. This is the
+ * transaction boundary the old UI lacked: blur/change are conveniences, not prerequisites for
+ * a Connect click to work.
+ */
+async function persistSetupDraftsForConnection(): Promise<boolean> {
+  if (!state) return false;
+  const initialTunnelId = $<HTMLInputElement>('tunnelId').value.trim();
+  const initialKey = $<HTMLInputElement>('apiKey').value;
+  if (initialTunnelId === state.config.tunnel.tunnelId && initialKey === '' && missingStep(state) === null) {
+    return true;
+  }
+
+  await settingsSaveQueue;
+  if (!state) return false;
+
+  const tunnelId = $<HTMLInputElement>('tunnelId').value.trim();
+  if (tunnelId !== state.config.tunnel.tunnelId) await save();
+  await settingsSaveQueue;
+  if (!state || $<HTMLInputElement>('tunnelId').value.trim() !== state.config.tunnel.tunnelId) return false;
+
+  // A blur immediately before the click may already own this write. Drain it first, then store
+  // any newer draft that deliberately remained in the field.
+  await setupKeySave;
+  if ($<HTMLInputElement>('apiKey').value !== '' && !(await storeSetupApiKeyDraft())) return false;
+  await setupKeySave;
+  return state !== null && missingStep(state) === null;
+}
+
 async function toggleConnection(): Promise<void> {
-  if (!state || state.status.state === 'disconnecting') return;
-  // Mirrors the button label exactly, so a click always does what it says.
-  const next = await run(isRunning(state.status.state) ? api.disconnect() : api.connect());
-  if (next) apply(next);
+  if (!state || state.status.state === 'disconnecting' || setupProfileBusy) return;
+  if (isRunning(state.status.state)) {
+    const next = await run(api.disconnect());
+    if (next) apply(next);
+    return;
+  }
+
+  const missing = currentSetupMissingStep(state);
+  if (missing) {
+    revealMissingSetup(missing);
+    return;
+  }
+
+  const attempt = ++connectionActionAttempt;
+  connectionActionPhase = 'connecting';
+  paintConnectionAction(state);
+  paintWizardConnectionAction(state);
+  if (!(await persistSetupDraftsForConnection())) {
+    if (!state || attempt !== connectionActionAttempt) return;
+    connectionActionPhase = 'idle';
+    paintConnectionAction(state);
+    paintWizardConnectionAction(state);
+    const persistedMissing = missingStep(state);
+    if (persistedMissing) revealMissingSetup(persistedMissing);
+    return;
+  }
+
+  const reply = await api.connect();
+  if (attempt !== connectionActionAttempt) return;
+  if (!reply.ok) {
+    showConnectionAttention(attempt, reply.error);
+    return;
+  }
+  connectionActionPhase = connectionAttemptFailed(reply.data) ? 'attention' : 'idle';
+  apply(reply.data);
+  if (connectionActionPhase === 'attention') {
+    showConnectionAttention(attempt, reply.data.status.detail || t(STATUS_TEXT[reply.data.status.state]));
+  }
 }
 
 /** Runs the main-process self-test and lists a line per link in the chain. */
@@ -1667,11 +1925,8 @@ async function runChecks(): Promise<void> {
               ? 'check is-bad'
               : `check is-${check.status}`
         );
-        const mark = el(
-          'span',
-          'check-mark',
-          check.status === 'pass' ? '✓' : check.status === 'fail' ? '!' : check.status === 'skipped' ? '–' : '…'
-        );
+        const mark = el('span', 'check-mark');
+        mark.append(icon(check.status === 'pass' ? 'i-check' : check.status === 'fail' ? 'i-x' : check.status === 'skipped' ? 'i-minus' : 'i-more'));
         const body = el('div');
         body.append(el('strong', '', check.name), el('p', '', check.detail));
         li.append(mark, body);
@@ -1758,15 +2013,13 @@ function installUpdate(): void {
 
 $('updateInstall').addEventListener('click', installUpdate);
 $('installUpdate').addEventListener('click', installUpdate);
-$('headerConnect').addEventListener('click', async () => {
-  if (!state) return;
-  if (missingStep(state)) { showTab('setup'); return; }
-  if (isRunning(state.status.state)) {
-    const disconnected = await run(api.disconnect()); if (!disconnected) return; apply(disconnected);
-  }
-  const connected = await run(api.connect()); if (connected) apply(connected);
+$('sidebarConnect').addEventListener('click', () => void toggleConnection());
+$('connectionPopoverDisconnect').addEventListener('click', async () => {
+  if (!state || state.status.state !== 'connected') return;
+  setConnectionPopover(false);
+  const disconnected = await run(api.disconnect());
+  if (disconnected) apply(disconnected);
 });
-$('connectionPopoverToggle').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
 
 $('pickBinary').addEventListener('click', async () => {
@@ -1793,25 +2046,7 @@ $('copyLogJson').addEventListener('click', async () => {
 
 // The API key is written on blur so it is not saved keystroke by keystroke.
 for (const id of ['tunnelId', 'apiKey']) $(id).addEventListener('input', paintSetupFields);
-$('apiKey').addEventListener('blur', () => {
-  const input = $<HTMLInputElement>('apiKey');
-  const submitted = input.value;
-  if (submitted === '') return;
-  const owner = state?.config.tunnel.profileId;
-  setupKeySave = (async () => {
-    const next = await run(api.setApiKey(submitted, owner));
-    if (next) {
-    // Do not erase a newer value typed while safeStorage/IPC was still resolving the previous
-    // blur. On failure keep the submitted value too, so the user can retry instead of losing it.
-      if (state?.config.tunnel.profileId === owner) {
-        if (input.value === submitted) input.value = '';
-        apply(next);
-      }
-      toast('API key stored');
-    }
-    return next !== null;
-  })();
-});
+$('apiKey').addEventListener('blur', () => { void storeSetupApiKeyDraft(); });
 
 $('removeApiKey').addEventListener('click', async () => {
   const next = await run(api.setApiKey('', state?.config.tunnel.profileId));
@@ -1858,6 +2093,7 @@ $('updateExtension').addEventListener('click', () => {
 api.onStateChanged(apply);
 api.onLogEntry(addLogLine);
 api.onSwarmChanged(paintAgentFilter);
+api.onPetOverlayOpenOwner(screen => showTab(screen));
 
 async function refresh(): Promise<void> {
   const next = await run(api.getState());
@@ -1865,9 +2101,12 @@ async function refresh(): Promise<void> {
 }
 
 buildGroups();
-initSidebarResize();
+const sidebarLayout = initSidebarResize();
+initViewMenuControls(sidebarLayout);
 initUsage();
 initPlugins(apply);
+initPets(api, pet);
+openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
 initChat({ save: () => save(), state: () => state });
 

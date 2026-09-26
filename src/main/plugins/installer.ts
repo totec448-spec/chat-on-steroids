@@ -145,7 +145,8 @@ export async function runInstaller(command: string, args: string[], cwd: string)
       clearTimeout(timer);
       reject(new Error(`Required runtime ${path.basename(command)} is unavailable; install it and restart CoS`));
     });
-    // Callers can retire the staged runtime only after the process handles close.
+    // `exit` can precede release of the executable/stdio handles on Windows. Installation owns
+    // the child through `close`, so a caller may immediately replace or remove its staged runtime.
     child.once('close', (code) => {
       clearTimeout(timer);
       if (child.pid) installing.delete(child.pid);

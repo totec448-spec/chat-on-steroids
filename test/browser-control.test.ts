@@ -13,6 +13,19 @@ function setup() {
 afterEach(() => { brokers.splice(0).forEach(b => b.reset()); vi.useRealTimers(); });
 
 describe('browser RPC custody', () => {
+  it('does not misreport a missing companion browser as Browser Use being unavailable', async () => {
+    const broker = new BrowserControlBroker(); brokers.push(broker);
+    const list = await broker.execute('browser_tabs', { action: 'list' }, 'A', null, async () => true);
+    expect(list.value).toMatchObject({ surface: 'desktop_companion_browser', browsers: [], tabs: [] });
+    expect((list.value as any).message).toContain('not Browser Use');
+    expect((list.value as any).message).toContain('Core browser tool');
+    expect((list.value as any).message).toContain('refresh the Core connector tool catalog');
+
+    const open = await broker.execute('browser_tabs', { action: 'new', url: 'https://example.com/' }, 'A', null, async () => true);
+    expect(open.error).toContain('not Browser Use');
+    expect(open.error).toContain('Core browser tool');
+    expect(open.error).toContain('do not substitute Desktop');
+  });
   it('hands out one exact browser/principal claim, never a duplicate', async () => {
     const {broker,epoch,wake} = setup();
     const work = broker.execute('browser_action',{tabId:`${browser}:12`,action:'click'},'session:A','chat-A',async () => true);

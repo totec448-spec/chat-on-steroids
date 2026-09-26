@@ -18,6 +18,8 @@ import { pluginManager } from './plugins/manager.js';
 import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
 import { flushSessions, initSessionStore } from './session/store.js';
 import { initSkillsPath } from './skills.js';
+import { initPetLibrary } from './pet-library.js';
+import { shutdownPetOverlay, startPetOverlay } from './pet-overlay.js';
 import { usageOverview } from './session/usage.js';
 import {
   flushRecorder,
@@ -79,6 +81,8 @@ import {
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
+import { attachViewMenuWindow, prewarmViewMenu, shutdownViewMenu } from './view-menu.js';
+import { attachBrowserUseWindow, isBrowserUseSession, shutdownBrowserUse } from './browser-use.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -130,7 +134,9 @@ function createWindow(): void {
     }
   });
 
+  attachBrowserUseWindow(window);
   if (process.platform === 'win32') window.removeMenu();
+  attachViewMenuWindow(window);
 
   // First use discovers the account once. A restored catalog is immediately usable;
   // showing the window again may observe an existing page, never open another browser attempt.
@@ -152,7 +158,12 @@ function createWindow(): void {
 
   // A renderer that fails to load leaves a blank window with no other clue, so
   // record it where the diagnostics panel can show it.
-  window.webContents.on('did-finish-load', () => logInfo('window loaded'));
+  window.webContents.on('did-finish-load', () => {
+    logInfo('window loaded');
+    void prewarmViewMenu().catch(error =>
+      logWarn(`view menu prewarm: ${error instanceof Error ? error.message : String(error)}`)
+    );
+  });
   window.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || input.key !== 'F11' || input.isAutoRepeat) return;
     event.preventDefault();
@@ -192,6 +203,7 @@ function createWindow(): void {
   // corpse. Dropping it is what makes those paths take their existing null branch.
   window.on('closed', () => {
     window = null;
+    if (!quitting && process.platform !== 'darwin' && !getConfig().ui.minimizeToTray) void shutdownPetOverlay();
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -307,6 +319,7 @@ void app.whenReady().then(async () => {
   try { await initSkillsPath(userData); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
+  await initPetLibrary(userData);
   await restoreChatModels();
   if (windowActivation.isDisabled()) return;
   await loadConfig();
@@ -426,6 +439,9 @@ void app.whenReady().then(async () => {
   );
   windowActivation.enable();
   if (!isBackgroundLaunch(process.argv)) windowActivation.request();
+  // Normal launches keep the main BrowserWindow first; background launches can still host pets
+  // without showing the owner. After this point the overlay is independent of owner visibility.
+  await startPetOverlay(() => window, () => windowActivation.request());
   // macOS `activate` can fire on first launch, so do not wire it at module load where it could
   // create a BrowserWindow before Electron is ready. Once the initial window path is established,
   // Dock activation/re-launch can safely recreate or focus it.
@@ -503,7 +519,7 @@ app.on('will-quit', (event) => {
       {
         name: 'process cleanup',
         budgetMs: 15_000,
-        run: () => [unifiedExecManager.terminateAllProcesses(), stopComputerHelper(), pluginManager.close()]
+        run: () => [unifiedExecManager.terminateAllProcesses(), stopComputerHelper(), shutdownBrowserUse(), shutdownPetOverlay(), shutdownViewMenu(), pluginManager.close()]
       },
       // Phase 3: recorder work can enqueue both session projections and named durable state.
       { name: 'recorder flush', budgetMs: 10_000, run: () => [flushRecorder()] },
@@ -536,6 +552,9 @@ app.on('will-quit', (event) => {
 // Belt and braces: no web contents anywhere in this app may open a window or
 // navigate. External links go through the vetted allowlist in ipc.ts instead.
 app.on('web-contents-created', (_event, contents) => {
+  // Browser Use owns one isolated persistent Session for ordinary remote websites. It is not
+  // the app shell and does not inherit ChatGPT transport/recorder authority.
+  if (isBrowserUseSession(contents.session)) return;
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   contents.on('will-navigate', (event) => event.preventDefault());
   contents.on('will-redirect', (event) => event.preventDefault());

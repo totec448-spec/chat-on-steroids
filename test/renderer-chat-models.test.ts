@@ -4,6 +4,35 @@ import type { Config } from '../src/shared/types.js';
 import { readFile } from 'node:fs/promises';
 
 let dom: JSDOM;
+function chooseModel(id: string): void {
+  const button = [...dom.window.document.querySelectorAll<HTMLButtonElement>('#composerModelChoices button')]
+    .find(node => node.dataset.model === id);
+  expect(button).toBeDefined(); button!.click();
+}
+function chooseEffort(index: number): HTMLInputElement {
+  const slider = dom.window.document.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
+  slider.value = String(index); slider.dispatchEvent(new dom.window.Event('input')); return slider;
+}
+it('expands native short names without merging execution models into an effort range', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const models = [
+    { id: 'gpt-5-6-thinking', label: '5.6', efforts: ['medium', 'high'] },
+    { id: 'gpt-5-5-thinking', label: '5.5', efforts: ['medium', 'high'] },
+    { id: 'gpt-6-pro', label: '6 Pro', efforts: ['pro'] }
+  ];
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', models } }) } });
+  const { initChatModels, applyChatModels, confirmedComposerModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  const doc = dom.window.document;
+  expect([...doc.querySelectorAll('#composerModelChoices button span')].map(node => node.textContent)).toEqual(['GPT-5.6 Sol', 'GPT-6 Pro']);
+  chooseEffort(0); chooseEffort(1);
+  expect(confirmedComposerModel()).toEqual({ model: 'gpt-5-6-thinking', reasoningEffort: 'high' });
+  expect(doc.getElementById('composerModelLabel')!.textContent).toBe('GPT-5.6 Sol · High');
+  chooseModel('gpt-6-pro');
+  expect(chooseEffort(0).max).toBe('0');
+  expect(confirmedComposerModel()).toEqual({ model: 'gpt-6-pro', reasoningEffort: 'pro' });
+});
 afterEach(() => { dom?.window.close(); vi.unstubAllGlobals(); vi.resetModules(); });
 it('shows pending reasons and failed refresh separately from usable cached choices', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
@@ -112,10 +141,10 @@ it('excludes GPT-5.5 from the composer slider without excluding future observed 
   const { initChatModels, applyChatModels, confirmedComposerModel } = await import('../src/renderer/chat-models.js');
   initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
   const slider = dom.window.document.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
-  expect(slider.max).toBe('2');
+  expect(slider.max).toBe('1');
   expect([...dom.window.document.querySelectorAll<HTMLOptionElement>('#composerModel option')].map(option => option.value)).toEqual(['sol', 'future']);
   expect([...dom.window.document.querySelectorAll<HTMLOptionElement>('#workerModel option')].some(option => option.value === 'old')).toBe(true);
-  slider.value = '2'; slider.dispatchEvent(new dom.window.Event('input'));
+  chooseModel('future');
   expect(confirmedComposerModel()).toEqual({ model: 'future', reasoningEffort: 'high' });
 });
 
@@ -159,18 +188,17 @@ it('renders the two observed Pro generations separately and sends their exact se
   const config = { multiAgent: {}, goal: {}, sessions: { limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 } } as Config;
   initChatModels(() => paintContextMeter(null, config, confirmedComposerModel()));
   applyChatModels(config); await Promise.resolve();
-  const slider = dom.window.document.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
-  slider.value = '2'; slider.dispatchEvent(new dom.window.Event('input'));
+  chooseModel('gpt-5.6-sol'); chooseEffort(1);
   expect(dom.window.document.getElementById('composerModelLabel')!.textContent).toBe('GPT-5.6 Pro');
   expect(confirmedComposerModel()).toEqual({ model: 'gpt-5.6-sol', reasoningEffort: 'pro' });
   expect(dom.window.document.getElementById('contextMeterInfo')!.textContent).toContain('Auto-compaction off for Pro');
-  slider.value = '0'; slider.dispatchEvent(new dom.window.Event('input'));
+  chooseModel('gpt-6-pro');
   expect(dom.window.document.getElementById('contextMeterInfo')!.textContent).toContain('Auto-compaction off for Pro');
   expect(dom.window.document.getElementById('contextMeterArc')!.getAttribute('stroke-dasharray')).toBe('0 37.7');
   expect(dom.window.document.getElementById('composerModelLabel')!.textContent).toBe('GPT-6 Pro');
-  expect(slider.getAttribute('aria-valuetext')).toBe('GPT-6 Pro');
+  expect(dom.window.document.querySelector('#composerPowerChoices input')!.getAttribute('aria-valuetext')).toBe('GPT-6 Pro');
   expect(confirmedComposerModel()).toEqual({ model: 'gpt-6-pro', reasoningEffort: 'pro' });
-  slider.value = '1'; slider.dispatchEvent(new dom.window.Event('input'));
+  chooseModel('gpt-5.6-sol');
   expect(dom.window.document.getElementById('contextMeterInfo')!.textContent).toMatch(/Auto-compaction at 400[,.]000 tokens/);
 });
 
@@ -239,32 +267,33 @@ it('offers only observed models, prefers supported GPT-6 High, and replaces a re
   expect(select('composerReasoning').value).toBe('high');
   expect(dom.window.document.getElementById('composerModelChoices')!.textContent).not.toContain('default');
   const reload = dom.window.document.getElementById('refreshComposerModels')!;
-  expect(reload.querySelector('svg')).not.toBeNull();
+  expect(reload.querySelector('.ico.ph-arrow-clockwise')).not.toBeNull();
   expect(reload.textContent).toBe('');
   expect(reload.getAttribute('aria-label')).toBe('Reload ChatGPT models');
   const slider = dom.window.document.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
-  expect(slider.max).toBe('2');
+  expect(slider.max).toBe('1');
   expect(slider.getAttribute('aria-valuetext')).toBe('GPT-6 \u00b7 High');
-  slider.value = '0'; slider.dispatchEvent(new dom.window.Event('input'));
+  chooseModel('other');
   expect(select('composerModel').value).toBe('other');
   expect(select('composerReasoning').value).toBe('medium');
-  slider.value = '1'; slider.dispatchEvent(new dom.window.Event('input'));
+  chooseModel('observed-six'); const currentSlider = chooseEffort(0);
   expect(select('composerModel').value).toBe('observed-six');
   expect(select('composerReasoning').value).toBe('medium');
   applyChatModels(config); await Promise.resolve();
-  expect(dom.window.document.querySelector('#composerPowerChoices input')).toBe(slider);
+  expect(dom.window.document.querySelector('#composerPowerChoices input')).toBe(currentSlider);
   models = [{ id: 'actual-pro', label: 'GPT-6 Pro', efforts: ['pro'] }];
   applyChatModels(config); await Promise.resolve();
   expect(confirmedComposerModel()).toBeNull();
-  (dom.window.document.querySelector('#composerPowerChoices input') as HTMLInputElement).dispatchEvent(new dom.window.Event('input'));
+  expect(dom.window.document.querySelector('#composerPowerChoices input')).toBeNull();
+  chooseModel('actual-pro');
   expect(select('composerModel').value).toBe('actual-pro');
   expect(select('composerReasoning').value).toBe('pro');
-  expect(dom.window.document.getElementById('composerPowerModel')!.textContent).toContain('GPT-6 Pro');
+  expect(dom.window.document.getElementById('composerModelChoices')!.textContent).toContain('GPT-6 Pro');
   expect(dom.window.document.getElementById('composerPowerChoices')!.textContent).not.toContain('Other');
   models = [{ id: 'limited-six', label: 'GPT-6', efforts: ['medium'] }];
   applyChatModels(config); await Promise.resolve();
   expect(confirmedComposerModel()).toBeNull();
-  (dom.window.document.querySelector('#composerPowerChoices input') as HTMLInputElement).dispatchEvent(new dom.window.Event('input'));
+  chooseModel('limited-six');
   expect(select('composerModel').value).toBe('limited-six');
   expect(select('composerReasoning').value).toBe('medium');
   expect([...select('composerReasoning').options].some(option => option.value === 'high')).toBe(false);
@@ -283,16 +312,17 @@ it('keeps observed composer choices in provider order except the user-excluded G
   initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
   const doc = dom.window.document;
   const slider = doc.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
-  expect(slider.max).toBe('3');
-  expect(doc.querySelectorAll('.power-dot')).toHaveLength(4);
+  expect(slider.max).toBe('0');
+  expect(doc.querySelectorAll('.power-dot')).toHaveLength(1);
   const header = doc.querySelector('.power-header')!;
   expect(header.querySelector('.power-icon') === null).toBe(true);
-  expect(header.querySelector('#composerPowerTitle')).not.toBeNull();
-  expect(header.querySelector('#composerPowerModel')).not.toBeNull();
+  expect(doc.querySelector('#composerPowerTitle')).not.toBeNull();
+  expect(doc.querySelector('#composerPowerModel')).not.toBeNull();
   expect(header.querySelector('#refreshComposerModels')).not.toBeNull();
-  const expected = [['astra', 'high'], ['sol', 'low'], ['sol', 'medium'], ['sol', 'high']];
+  chooseModel('sol');
+  const expected = [['sol', 'low'], ['sol', 'medium'], ['sol', 'high']];
   for (const [index, [model, reasoningEffort]] of expected.entries()) {
-    slider.value = String(index); slider.dispatchEvent(new dom.window.Event('input'));
+    const slider = chooseEffort(index);
     expect(confirmedComposerModel()).toEqual({ model, reasoningEffort });
     expect(slider.getAttribute('aria-valuetext')).not.toMatch(/Instant|Minimal/);
   }
@@ -313,9 +343,9 @@ it('offers GPT-5.6 Pro and GPT-6 Pro as distinct observed slider choices', async
   const { initChatModels, applyChatModels, confirmedComposerModel } = await import('../src/renderer/chat-models.js');
   initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
   const slider = dom.window.document.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
-  expect(slider.max).toBe('4');
-  for (const [index, model] of [[3, '5.6'], [4, '6']] as const) {
-    slider.value = String(index); slider.dispatchEvent(new dom.window.Event('input'));
+  expect(slider.max).toBe('3');
+  for (const [index, model] of [[3, '5.6'], [0, '6']] as const) {
+    chooseModel(model); const slider = chooseEffort(index);
     expect(confirmedComposerModel()).toEqual({ model, reasoningEffort: 'pro' });
     expect(slider.getAttribute('aria-valuetext')).toBe(`GPT-${model} Pro`);
     expect(dom.window.document.getElementById('composerModelLabel')!.textContent).toBe(`GPT-${model} Pro`);

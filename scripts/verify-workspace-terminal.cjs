@@ -24,11 +24,12 @@ app.whenReady().then(async () => {
   const project = await backend.addProject(workspace);
   const preload = path.join(output, 'preload.cjs');
   fs.writeFileSync(preload, `const {contextBridge,ipcRenderer}=require('electron');
-    const request=payload=>ipcRenderer.invoke('workspaceTerminal:request',payload);
+    const request=payload=>ipcRenderer.invoke('workspaceTerminal:request',payload);let resizeCount=0;
     contextBridge.exposeInMainWorld('api',{
       terminalCreate:(id,projectId,cols,rows)=>request({action:'create',id,projectId,cols,rows}),
       terminalWrite:(id,data)=>request({action:'write',id,data}),
-      terminalResize:(id,cols,rows)=>request({action:'resize',id,cols,rows}),
+      terminalResize:(id,cols,rows)=>{resizeCount++;return request({action:'resize',id,cols,rows})},
+      terminalResizeCount:()=>resizeCount,
       terminalAck:(id,count)=>request({action:'ack',id,count}),terminalClose:id=>request({action:'close',id}),
       onTerminalEvent:listener=>{const fn=(_,value)=>listener(value);ipcRenderer.on('workspaceTerminal:event',fn);return()=>ipcRenderer.removeListener('workspaceTerminal:event',fn)},
       writeClipboard:()=>Promise.resolve({ok:true,data:true})
@@ -75,7 +76,6 @@ app.whenReady().then(async () => {
       await js(`window.applyColor(${JSON.stringify(theme)},${JSON.stringify(color)})`);
       const backgrounds = await js(`Array.from(document.querySelectorAll('.xterm .xterm-scrollable-element'), node=>getComputedStyle(node).backgroundColor)`);
       assert.deepEqual(backgrounds, [rgb, rgb]);
-      assert.equal(await js(`getComputedStyle(document.getElementById('connectionPopover')).backgroundColor`), rgb);
     }
     await js(`window.api.terminalWrite(${JSON.stringify(second)}, "Write-Output ('SECOND_'+(Split-Path (Get-Location) -Leaf)); Start-Sleep -Seconds 30\\r")`);
     await until(`outputs[${JSON.stringify(second)}]?.includes('SECOND_project')`);
@@ -84,6 +84,19 @@ app.whenReady().then(async () => {
     await until(`(outputs[${JSON.stringify(second)}].match(/PS C:/g) || []).length > ${promptsBeforeInterrupt}`);
     await js(`window.api.terminalWrite(${JSON.stringify(second)}, "Write-Output ('INTERRUPT'+'_OK')\\r")`);
     await until(`outputs[${JSON.stringify(second)}]?.includes('INTERRUPT_OK')`);
+    const handle = await js(`(()=>{const r=document.querySelector('.terminal-resize').getBoundingClientRect();return{x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()`);
+    const resizeCount = await js('window.api.terminalResizeCount()');
+    assert.ok(resizeCount <= 2, `panel opening emitted ${resizeCount} intermediate PTY resizes`);
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: handle.x, y: handle.y });
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: handle.x, y: handle.y, button: 'left', clickCount: 1 });
+    for (let step = 1; step <= 24; step++) win.webContents.sendInputEvent({ type: 'mouseMove', x: handle.x, y: handle.y - step * 5, button: 'left' });
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: handle.x, y: handle.y - 120, button: 'left', clickCount: 1 });
+    await until(`window.api.terminalResizeCount()===${resizeCount + 1}`);
+    await new Promise(resolve => setTimeout(resolve, 250));
+    assert.equal(await js('window.api.terminalResizeCount()'), resizeCount + 1);
+    const terminalGeometry = await js(`(()=>{const host=document.querySelector('.terminal-screen:not([hidden])');const term=host.querySelector('.xterm');const a=host.getBoundingClientRect(),b=term.getBoundingClientRect(),s=getComputedStyle(host);return{hostHeight:a.height,termHeight:b.height,contentHeight:a.height-parseFloat(s.paddingTop)-parseFloat(s.paddingBottom),dragging:document.querySelector('.app').classList.contains('is-resizing-terminal')}})()`);
+    assert.ok(Math.abs(terminalGeometry.termHeight - terminalGeometry.contentHeight) <= 1, JSON.stringify(terminalGeometry));
+    assert.equal(terminalGeometry.dragging, false);
     win.setSize(830, 700); await new Promise(resolve => setTimeout(resolve, 300));
     const geometry = await js(`(()=>{const p=document.getElementById('workspaceTerminal').getBoundingClientRect();return {width:p.width,height:p.height,fits:p.right<=innerWidth+1&&p.bottom<=innerHeight+1}})()`);
     assert.ok(geometry.fits, JSON.stringify(geometry));
@@ -92,7 +105,7 @@ app.whenReady().then(async () => {
     await js("document.querySelector('.terminal-tab .btn-icon').click()");
     assert.equal((await js(`window.api.terminalWrite(${JSON.stringify(first)}, 'echo nope\\r')`)).ok, false);
     assert.deepEqual(await js('errors'), []);
-    const result = { actualPty: true, projectCwd: true, persistentEnvironmentAndCd: true, keyboardInput: true, hiddenPanelContinuity: true, multipleTabs: true, ctrlC: true, exitCode: 7, closeRetiresShell: true, geometry };
+    const result = { actualPty: true, projectCwd: true, persistentEnvironmentAndCd: true, keyboardInput: true, hiddenPanelContinuity: true, multipleTabs: true, ctrlC: true, openingResizes: resizeCount, resizeCoalesced: true, terminalGeometry, exitCode: 7, closeRetiresShell: true, geometry };
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
   } finally { win.destroy(); win = null; await server.close(); await backend.flushDurable(); }
   app.exit(0);

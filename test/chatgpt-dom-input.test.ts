@@ -11,7 +11,7 @@ interface DomApi {
   sendButton(): HTMLButtonElement | null;
   temporaryChatReady(): boolean;
   errors(): Array<{ text: string; recoverable: boolean; blocking?: boolean }>;
-  captureComposerDraft(text: string, current?: () => boolean): { current(): boolean; clear(): Promise<boolean>; dispose(): void; attachments(nodes: Element[]): void };
+  captureComposerDraft(text: string, current?: () => boolean): { current(): boolean; clear(): Promise<boolean>; restoreAuthored(text: string): Promise<boolean>; dispose(): void; attachments(nodes: Element[]): void };
   visibleModelSelection(): { model: string; reasoningEffort?: string } | null;
   hasComposerAttachments(): boolean;
   stopGeneration(current: () => boolean): boolean;
@@ -412,9 +412,15 @@ describe('composer-owned controls and Send readiness', () => {
     expect(keys).not.toHaveBeenCalled();
   });
 
-  it.each(['hidden', 'inert', 'transcript', 'other-form'])('does not let a %s Stop control block this composer', async place => {
-    const stale = document.createElement('button'); stale.dataset.testid = 'stop-button';
+  it.each(['hidden', 'inert', 'transcript', 'other-form'].flatMap(place => [false, true].map(shell => ({ place, shell }))))
+  ('does not let a $place Stop control block this composer (shell=$shell)', async ({ place, shell }) => {
+    const stale = document.createElement('button');
+    if (shell) {
+      stale.setAttribute('aria-label', 'Stop');
+      document.querySelector('form')!.setAttribute('data-chatgpt-composer', '');
+    } else stale.dataset.testid = 'stop-button';
     const host = document.createElement(place === 'other-form' ? 'form' : 'section');
+    if (shell && place === 'other-form') host.setAttribute('data-chatgpt-composer', '');
     if (place === 'hidden') host.hidden = true;
     if (place === 'inert') host.setAttribute('inert', '');
     if (place === 'transcript') host.dataset.testid = 'conversation-turn-100';
@@ -467,6 +473,55 @@ function upload() {
   return input;
 }
 describe('native image readiness', () => {
+  it.each(['wrong filename', 'multiple actions', 'outside attachments'])('rejects a shell attachment lookalike: %s', variant => {
+    const holder = document.createElement('div'); holder.setAttribute('data-composer-attachments', '');
+    holder.innerHTML = '<div role="button" aria-label="app.webp"><img alt="app.webp"><button aria-label="Remover app.webp"></button></div>';
+    if (variant === 'wrong filename') holder.querySelector('img')!.alt = 'other.webp';
+    if (variant === 'multiple actions') holder.firstElementChild!.append(document.createElement('button'));
+    if (variant === 'outside attachments') holder.removeAttribute('data-composer-attachments');
+    document.querySelector('form')!.append(holder);
+    expect(api.hasComposerAttachments()).toBe(false);
+  });
+  it('recognizes the shell image tile by filename and its unique localized remove action', async () => {
+    const input = upload(); input.id = '_r_image_';
+    const draft = api.captureComposerDraft('Exact app prompt');
+    document.execCommand = command => { if (command === 'delete') box.replaceChildren(); return true; };
+    input.addEventListener('change', () => {
+      const holder = document.createElement('div'); holder.setAttribute('data-composer-attachments', '');
+      holder.innerHTML = '<div role="button" aria-label="app.webp"><img alt="app.webp"><button aria-label="Remover app.webp"></button></div>';
+      holder.querySelector('button')!.addEventListener('click', () => holder.remove());
+      document.querySelector('form')!.append(holder);
+    });
+    expect(await api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }], () => true, draft)).toBe(true);
+    expect(api.hasComposerAttachments()).toBe(true);
+    expect(await draft.clear()).toBe(true);
+    expect(api.hasComposerAttachments()).toBe(false); draft.dispose();
+  });
+  it.each([false, true])('uses the current composer upload kind with dynamic ids (files=%s)', async files => {
+    const input = upload(); input.id = '_r_photo_';
+    if (files) { input.id = '_r_file_'; input.accept = ''; }
+    const media = document.createElement('input'); media.type = 'file'; media.accept = 'image/*,video/*';
+    input.after(media);
+    const foreign = input.cloneNode() as HTMLInputElement; foreign.id = 'upload-photos';
+    document.body.prepend(foreign);
+    const wrong = vi.fn(); foreign.addEventListener('change', wrong); media.addEventListener('change', wrong);
+    input.addEventListener('change', () => {
+      const tile = document.createElement('button'); tile.setAttribute('aria-label', 'Remove file: app.webp');
+      document.querySelector('form')!.append(tile);
+    });
+    const image = { name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' };
+    const originals = files ? [new dom.window.File(['bytes'], image.name, { type: 'image/webp' })] : [];
+    expect(await api.uploadImages(files ? [] : [image], () => true, undefined, originals)).toBe(true);
+    expect(wrong).not.toHaveBeenCalled();
+  });
+  it.each(['duplicate', 'disabled', 'foreign'])('does not dispatch an upload with %s native ownership', async reason => {
+    const input = upload(); const changed = vi.fn(); input.addEventListener('change', changed);
+    if (reason === 'duplicate') input.after(input.cloneNode());
+    if (reason === 'disabled') input.disabled = true;
+    if (reason === 'foreign') document.body.append(input);
+    expect(await api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }])).toBe(false);
+    expect(changed).not.toHaveBeenCalled();
+  });
   it.each(['rename', 'replacement', 'extra file', 'cancel'])('retains exact image upload nodes across %s while processing', async change => {
     const input = upload();
     const tile = document.createElement('button');
@@ -531,6 +586,37 @@ describe('native image readiness', () => {
     expect(await api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }], () => true, draft)).toBe(true);
     expect(await draft.clear()).toBe(true);
     expect(tile.isConnected).toBe(false); expect(box.textContent).toBe(''); draft.dispose();
+  });
+  it('replaces an exact prepared draft with authored text after ambiguous delivery', async () => {
+    const prepared = '[[COS_CONTEXT:17]]\nInternal guidance\n[[/COS_CONTEXT]]\n\nAuthored request';
+    box.textContent = prepared;
+    const tile = document.createElement('button');
+    tile.type = 'button'; tile.setAttribute('aria-label', 'Remove file 1: evidence.txt');
+    tile.addEventListener('click', () => tile.remove());
+    document.querySelector('form')!.append(tile);
+    document.execCommand = (command, _ui, value) => {
+      if (command !== 'insertHTML') return false;
+      const selection = document.getSelection();
+      if (!selection?.rangeCount) return false;
+      const range = selection.getRangeAt(0); range.deleteContents();
+      const template = document.createElement('template'); template.innerHTML = value || '';
+      range.insertNode(template.content); return true;
+    };
+    const draft = api.captureComposerDraft(prepared);
+    draft.attachments([tile]);
+    expect(await draft.restoreAuthored('Authored request')).toBe(true);
+    expect(box.textContent).toBe('Authored request');
+    expect(tile.isConnected).toBe(false);
+    draft.dispose();
+  });
+  it('does not replace a prepared draft after its exact editor lease is lost', async () => {
+    const draft = api.captureComposerDraft('Exact app prompt');
+    box.textContent = 'User changed this draft';
+    const edit = vi.fn(); document.execCommand = edit;
+    expect(await draft.restoreAuthored('Authored request')).toBe(false);
+    expect(box.textContent).toBe('User changed this draft');
+    expect(edit).not.toHaveBeenCalled();
+    draft.dispose();
   });
   it.each(['edited text', 'extra attachment', 'replacement attachment', 'navigation'])('preserves the entire draft after %s breaks exact ownership', async reason => {
     const input = upload();

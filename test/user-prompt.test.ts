@@ -1,7 +1,62 @@
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { expect, it } from 'vitest';
-import { prependUserPrompt, userPromptText } from '../src/shared/user-prompt.js';
+import { prependUserPrompt, userPromptText, userPromptFrameHint } from '../src/shared/user-prompt.js';
+
+it('conceals escaped reserved headers without parsing frames or rewriting authored text', () => {
+  const page = new JSDOM('', { runScripts: 'outside-only' });
+  try {
+    page.window.eval(readFileSync('extension/chatgpt-dom.js', 'utf8'));
+    const api = (page.window as any).CLF_DOM;
+    const escape = (value: string) => value.replace(/([!-/:-@[-`{-~])/g, '\\$1').replace(/\n/g, '\\\n');
+    for (const identity of ['', '[[CLF-HANDOFF:token_0123456789abcdef]]\n\n', '[[CLF-RESUME:token_0123456789abcdef]]\n\n']) {
+      const value = escape(identity + '[[COS_CONTEXT:999]]\nIncomplete prefix');
+      for (const rendered of [false, true]) {
+        expect(userPromptFrameHint(value, rendered)).toBe(true);
+        expect(api.userPromptFrameHint(value, rendered)).toBe(true);
+      }
+      expect(userPromptText(value)).toBeNull();
+      expect(api.userPromptText(value)).toBeNull();
+      page.window.document.title = value;
+      const nativeTitle = page.window.document.title;
+      expect(api.conversationTitle()).toBe('');
+      expect(page.window.document.title).toBe(nativeTitle);
+    }
+    for (const value of ['Discuss ' + escape('[[COS_CONTEXT:99]]\n'), escape('[[COS_CONTEXT:9999999]]\n'),
+      '\\COS_CONTEXT:99', escape('[[COS_CONTEXT:99]]') + ' ordinary prose']) {
+      expect(userPromptFrameHint(value)).toBe(false);
+      expect(api.userPromptFrameHint(value)).toBe(false);
+    }
+    const authored = 'Keep C:\\_work, \\* and \\[ literally.';
+    const framed = prependUserPrompt(authored, 'Private instructions');
+    expect(userPromptText(framed)).toBe(authored);
+    expect(userPromptText(escape(framed))).toBeNull(); // Exact parser stays exact.
+  } finally { page.window.close(); }
+});
+
+it('conceals transport-shaped titles without changing the native title or accepting them as frames', () => {
+  const page = new JSDOM('', { runScripts: 'outside-only' });
+  try {
+    page.window.eval(readFileSync('extension/chatgpt-dom.js', 'utf8'));
+    const api = (page.window as any).CLF_DOM;
+    for (const value of ['[[COS_CONTEXT:999]]Private setup', '[[COS_CONTEXT:999]]\\\nPrivate setup',
+      '[[CLF-RESUME:token_0123456789abcdef]][[COS_CONTEXT:999]]Private setup']) {
+      page.window.document.title = value;
+      const nativeTitle = page.window.document.title;
+      expect(api.conversationTitle()).toBe('');
+      expect(page.window.document.title).toBe(nativeTitle);
+      expect(userPromptFrameHint(value, true)).toBe(true);
+      expect(api.userPromptFrameHint(value, true)).toBe(true);
+      expect(userPromptText(value)).toBeNull();
+    }
+    page.window.document.title = 'Ordinary conversation - ChatGPT';
+    expect(api.conversationTitle()).toBe('Ordinary conversation');
+    for (const value of ['ordinary', 'Discuss [[COS_CONTEXT:999]] literally', '[[COS_CONTEXT:not-a-length]]']) {
+      expect(userPromptFrameHint(value, true)).toBe(false);
+      expect(api.userPromptFrameHint(value, true)).toBe(false);
+    }
+  } finally { page.window.close(); }
+});
 
 it('preserves the entire Unicode prompt and literal boundary-like user text across both readers', () => {
   const page = new JSDOM('', { runScripts: 'outside-only' });
@@ -117,11 +172,15 @@ it('hides a provider-prefixed blank paragraph using exact source, retaining stri
     expect(api.messages()[0].text).toBe(recorded);
     expect(api.userPromptText(source)).toBeNull();
     expect(userPromptText(source)).toBeNull();
-    for (const invalid of [source.replace('COS_CONTEXT:', 'COS_CONTEXT:9'), source.slice(0, 70), '  Ordinary request\n[[/COS_CONTEXT]]']) {
+    for (const invalid of [source.replace('COS_CONTEXT:', 'COS_CONTEXT:9'), source.slice(0, 70)]) {
       source = invalid;
       api.presentUserPrompts(() => source);
-      expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(false);
-      expect(page.window.document.querySelector('[data-clf-user-text]')).toBeNull();
+      expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(true);
+      expect(page.window.document.querySelector('[data-clf-user-text]')?.textContent).toBe('…');
     }
+    source = '  Ordinary request\n[[/COS_CONTEXT]]';
+    api.presentUserPrompts(() => source);
+    expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(false);
+    expect(page.window.document.querySelector('[data-clf-user-text]')).toBeNull();
   } finally { page.window.close(); }
 });

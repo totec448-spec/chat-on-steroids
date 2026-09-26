@@ -1,6 +1,45 @@
 import { JSDOM } from 'jsdom';
 import { expect, it } from 'vitest';
-import { preserveTimelineViewport } from '../src/renderer/timeline-scroll.js';
+import { preserveTimelineViewport, projectTimelineExtent } from '../src/renderer/timeline-scroll.js';
+
+it('keeps a bounded history window at one scroll extent as pages move in either direction', () => {
+  let extent = projectTimelineExtent(null, {
+    session: 'one', selection: 1, total: 360, resident: 30, before: 330, after: 0, renderedHeight: 5400
+  });
+  expect(extent.before + extent.after + 5400).toBe(36000);
+  for (let first = 300, resident = 60; first >= 0; first -= 30, resident = Math.min(160, resident + 30)) {
+    const renderedHeight = resident * 180;
+    const next = projectTimelineExtent(extent.extent, {
+      session: 'one', selection: 1, total: 360, resident,
+      before: first, after: 360 - first - resident, renderedHeight
+    });
+    expect(next.before + next.after + renderedHeight).toBe(36000);
+    expect(next.before).toBeLessThanOrEqual(extent.before);
+    extent = next;
+  }
+  expect(extent.before).toBe(0);
+  expect(extent.after).toBeGreaterThan(0);
+});
+
+it('retires virtual space when the exact session changes or no history remains', () => {
+  const old = projectTimelineExtent(null, {
+    session: 'one', selection: 1, total: 300, resident: 30, before: 270, after: 0, renderedHeight: 3000
+  });
+  expect(projectTimelineExtent(old.extent, {
+    session: 'two', selection: 2, total: 1, resident: 1, before: 0, after: 0, renderedHeight: 300
+  })).toMatchObject({ before: 0, after: 0 });
+  expect(projectTimelineExtent(old.extent, {
+    session: 'one', selection: 1, total: 300, resident: 300, before: 0, after: 0, renderedHeight: 3000
+  })).toMatchObject({ before: 0, after: 0 });
+});
+
+it('bounds the visual estimate when raw journal revisions outnumber displayed rows', () => {
+  const projected = projectTimelineExtent(null, {
+    session: 'revised', selection: 1, total: 1000, resident: 30,
+    before: 330, after: 640, renderedHeight: 3000
+  });
+  expect(projected.before + projected.after + 3000).toBe(20000);
+});
 
 it('anchors the logical reader row across late growth and replacement, while retaining nested tool scroll', () => {
   const dom = new JSDOM('<div id="pane"><div id="timeline"><div data-timeline-key="reader"><details open><p>Tool result</p></details></div></div></div>');

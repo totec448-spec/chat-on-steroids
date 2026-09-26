@@ -46,20 +46,26 @@ it('rejects oversized or cyclic schemas before projecting them to the isolated w
   (props.actions[0]!.params as any).properties.self = props.actions[0]!.params;
   expect(await api.pluginRefreshView('Chat On Steroids Core')).toBeNull();
 });
-it.each([118, 257])('accepts %s declarations for the Plugins connector including its optional code-mode tool', async (count) => {
+it.each([118, 257])('accepts %s bounded declarations independently of the connector display name', async (count) => {
   const { api, props } = page();
-  props.connector.name = 'Chat On Steroids Plugins';
+  const connectorName = `Renamed connector ${String.fromCodePoint(0x4e80)} ${count}`;
+  props.connector.name = connectorName;
   props.actions = Array.from({ length: count }, (_, i) => ({ name: i === 256 ? 'exec' : `plugin_tool_${i}`, description: `Plugin tool ${i}`, description_model: null,
     params: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } }));
-  const view = await api.pluginRefreshView('Chat On Steroids Plugins');
+  const view = await api.pluginRefreshView(connectorName);
   expect(view?.tools).toHaveLength(count);
 });
-it.each([['Chat On Steroids Plugins', 258], ['Chat On Steroids Core', 17]] as const)('retains the %s observation count guard', async (connector, count) => {
+it('accepts an empty observed catalog independently of the connector display name', async () => {
   const { api, props } = page();
-  props.connector.name = connector;
-  props.actions = Array.from({ length: count }, (_, i) => ({ name: `tool_${i}`, description: `Tool ${i}`, description_model: null,
+  props.connector.name = 'Renamed empty connector'; props.actions = [];
+  expect((await api.pluginRefreshView(props.connector.name))?.tools).toEqual([]);
+});
+it('retains the universal observation count guard independently of the connector display name', async () => {
+  const { api, props } = page();
+  props.connector.name = 'Renamed oversized connector';
+  props.actions = Array.from({ length: 258 }, (_, i) => ({ name: `tool_${i}`, description: `Tool ${i}`, description_model: null,
     params: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } }));
-  expect(await api.pluginRefreshView(connector)).toBeNull();
+  expect(await api.pluginRefreshView(props.connector.name)).toBeNull();
 });
 it('refuses ambiguous native actions and never copies unrelated connector properties', async () => {
   const { api } = page(); const messages: unknown[] = [];

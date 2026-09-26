@@ -24,8 +24,8 @@ it('ships 96 distinct nonempty transparent atlas cells with no cut edge',async()
   for(let axis=0;axis<4;axis++)expect(Math.max(...idleBounds.map(b=>b[axis]!))-Math.min(...idleBounds.map(b=>b[axis]!)),`idle geometry axis ${axis}`).toBeLessThanOrEqual(1);
 });
 
-it('ships local transparent launcher, bat, and bin variants',async()=>{
-  for(const name of ['launcher','bat','bin','bin-open','bin-hit']){
+it('ships the transparent bin variants used by the desktop overlay',async()=>{
+  for(const name of ['bin','bin-open','bin-hit']){
     const meta=await sharp(`src/renderer/pet-assets/${name}.png`).metadata();
     expect(meta.hasAlpha,name).toBe(true);expect(meta.width).toBeLessThanOrEqual(32);expect(meta.height).toBeLessThanOrEqual(49);
   }

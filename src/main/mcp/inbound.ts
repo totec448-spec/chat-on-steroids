@@ -25,6 +25,34 @@ export interface InboundTiming {
 }
 const store = new AsyncLocalStorage<{ requestId: string | null; timing?: InboundTiming; publication?: OutputPublication }>();
 
+/**
+ * Opaque request ids that reached an actual local tool dispatch in this process.
+ *
+ * Browser evidence may name a conversation, but it may not mint local MCP traffic. The exact
+ * id must be observed on both sides before it becomes ownership evidence. Connector display
+ * names are deliberately absent: they are user-chosen presentation, not technical identity.
+ */
+const admittedRequestIds = new Map<string, true>();
+const MAX_ADMITTED_REQUEST_IDS = 50_000;
+
+export function noteInboundToolRequest(requestId: string | null): void {
+  if (!requestId) return;
+  admittedRequestIds.delete(requestId);
+  admittedRequestIds.set(requestId, true);
+  while (admittedRequestIds.size > MAX_ADMITTED_REQUEST_IDS) {
+    admittedRequestIds.delete(admittedRequestIds.keys().next().value!);
+  }
+}
+
+/** Page evidence can confirm only a request the local MCP server actually admitted. */
+export function hasInboundToolRequest(requestId: string): boolean {
+  return admittedRequestIds.has(requestId);
+}
+
+export function resetInboundRequestsForTests(): void {
+  admittedRequestIds.clear();
+}
+
 /** Fixed-size, process-local numbers only: no payload, credential, path or chat identity. */
 export function createInboundTiming(): InboundTiming {
   return { startedAt: performance.now(), dispatchedAt: null, completedAt: null, calls: 0,

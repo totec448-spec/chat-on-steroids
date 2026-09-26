@@ -53,6 +53,7 @@ const {
   companionDiagnostics,
   sessionControlsFor,
   onBridgeChange,
+  onSessionActivityChange,
   compactSession,
   setSessionObjective,
   unattributedRepairEta,
@@ -104,6 +105,7 @@ const { completeProcessCall, createSession, deleteSession, findSessionByConversa
 );
 const sessionStoreModule = await import('../src/main/session/store.js');
 const { closeConversation, liveConversations, noteChatOrigin, recordChatObservations, recordProgress, recordToolCall, REQUEST_ID_GRACE_MS, resetRecorderForTests } = await import('../src/main/session/recorder.js');
+const { noteInboundToolRequest, resetInboundRequestsForTests } = await import('../src/main/mcp/inbound.js');
 const { resetBlockedChatsForTests, setChatBlocked } = await import('../src/main/session/blocked-chats.js');
 const {
   CONTINUATIONS_STATE,
@@ -368,6 +370,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  resetInboundRequestsForTests();
   recoveryBrowserWake.mockClear();
   vi.mocked(safeStorage.isAsyncEncryptionAvailable).mockResolvedValue(true);
   // A test that writes its own config is not allowed to leak it into the next one.
@@ -399,7 +402,8 @@ describe('direct browser control over the paired bridge', () => {
     const browserId = randomUUID(), conversationId = randomUUID(), foreignChat = randomUUID();
     const session = await createSession({ conversationId });
     const requestId = `wfr_browser_owner_${randomUUID()}`, foreignRequest = `wfr_browser_foreign_${randomUUID()}`;
-    for (const [chat, proofId] of [[conversationId, requestId], [foreignChat, foreignRequest]]) {
+    for (const [chat, proofId] of [[conversationId, requestId], [foreignChat, foreignRequest]] as const) {
+      noteInboundToolRequest(proofId);
       const proof = await request('POST', '/correlations', { body: { conversationId: chat, calls: [
         { requestId: proofId, messageId: randomUUID(), tool: 'browser_tabs', order: 0, answered: false }
       ] } });
@@ -1129,10 +1133,11 @@ describe('activity feed', () => {
     expect(liveConversations().some((entry) => entry.conversationId === conversationId)).toBe(true);
   });
 
-  it('atomically registers and verifies a live request id against its chat before the MCP call is filed', async () => {
+  it('atomically registers and verifies a locally admitted request id before its call is filed', async () => {
     await pair();
     const conversationId = '13131313-3535-5757-7979-919191919191';
     const requestId = 'f0f00009-1111-4111-8111-111111111111';
+    noteInboundToolRequest(requestId);
     const mapped = await request('POST', '/correlations', {
       body: {
         conversationId,
@@ -1168,6 +1173,7 @@ describe('activity feed', () => {
       requestId,
       evidence: {
         changes: [],
+        reviews: [],
         assets: [],
         count: null,
         detail: null,
@@ -1203,12 +1209,13 @@ describe('activity feed', () => {
       expect(row).toMatchObject({ id, sessionId: id, opening: true, conversationId: null });
       expect((await request('POST', '/input/claim', { body: {
         id, owner, conversationId: null, requiresAuthorization: true
-      } })).body.input).toMatchObject({ id, owner, opening: true });
+      } })).body.input).toMatchObject({ id, owner, opening: true, draftText: 'Open the exact reserved task' });
       expect((await request('POST', '/input/claim', { body: {
         id, owner, conversationId: null, authorize: true
       } })).body).toEqual({ ok: true });
 
       expect((await request('POST', '/input/bind', { body: { id, owner, conversationId } })).body).toEqual({ ok: true });
+      noteInboundToolRequest(requestId);
       const mapped = await request('POST', '/correlations', { body: { conversationId, calls: [{
         messageId: 'reserved-opening-call', tool: 'read', order: 0, answered: false,
         requestId, createTime: Date.now() / 1000
@@ -1240,6 +1247,7 @@ describe('activity feed', () => {
     // fifteen second evidence window. Requiring a tool name here meant that id was refused
     // while the page could already prove who owned it, and the call was filed under
     // Unattributed activity. The tool name takes no part in the join.
+    noteInboundToolRequest(requestId);
     const mapped = await request('POST', '/correlations', {
       body: {
         conversationId,
@@ -1280,6 +1288,30 @@ describe('activity feed', () => {
     expect(refused.body).toMatchObject({ error: 'bad_request_evidence' });
   });
 
+  it('keeps page-first evidence pending until the exact request reaches local MCP ingress', async () => {
+    await pair();
+    const conversationId = '18181818-4040-6262-8484-969696969696';
+    const requestId = 'wfr-arbitrary-connector-first-call';
+    // usage.js sees the provider's exact request id before an api_tool message exists. The
+    // ownership endpoint must accept that real page-first shape without inventing a tool,
+    // connector label or provider message id.
+    const body = { conversationId, calls: [{ requestId }] };
+
+    const early = await request('POST', '/correlations', { body });
+    expect(early.body).toMatchObject({
+      ok: true, conversationId, confirmed: [], pending: [requestId], conflicts: [], complete: false,
+      sessionId: null
+    });
+    expect(await findSessionByConversation(conversationId, { requireUnique: true })).toBeNull();
+
+    noteInboundToolRequest(requestId);
+    const admitted = await request('POST', '/correlations', { body });
+    expect(admitted.body).toMatchObject({
+      ok: true, conversationId, confirmed: [requestId], pending: [], conflicts: [], complete: true
+    });
+    expect(admitted.body.sessionId).toBeTruthy();
+  });
+
   it('refuses a live handshake that contradicts an already-proven request owner without poisoning the original mapping', async () => {
     await pair();
     const firstConversation = '14141414-3636-5858-8080-929292929292';
@@ -1294,6 +1326,7 @@ describe('activity feed', () => {
       createTime: Date.now() / 1000
     };
 
+    noteInboundToolRequest(requestId);
     const first = await request('POST', '/correlations', {
       body: { conversationId: firstConversation, calls: [call] }
     });
@@ -1315,6 +1348,7 @@ describe('activity feed', () => {
       requestId,
       evidence: {
         changes: [],
+        reviews: [],
         assets: [],
         count: null,
         detail: null,
@@ -1330,8 +1364,8 @@ describe('activity feed', () => {
     expect(firstCalls.some((event) =>
       event.kind === 'tool_call' && event.call.requestId === requestId && event.call.conversationId === firstConversation
     )).toBe(true);
-    const secondCalls = await readEvents(second.body.sessionId, { kinds: ['tool_call'] });
-    expect(secondCalls).toEqual([]);
+    expect(second.body.sessionId).toBeNull();
+    expect(await findSessionByConversation(secondConversation, { requireUnique: true })).toBeNull();
   });
 
   it('preserves complete logical message identities and projects their exact provider aliases', async () => {
@@ -1385,6 +1419,7 @@ describe('activity feed', () => {
       conversationId,
       evidence: {
         changes: [{ path: '/project/src/main.ts', added: 18, removed: 4, approximate: false }],
+        reviews: [],
         assets: [],
         count: null,
         detail: null,
@@ -1599,7 +1634,7 @@ describe('activity feed', () => {
         tool: 'exec_command', args: { command: `fixture-${outcome}` },
         content: [{ type: 'text', text: `result-${outcome}` }], outcome, durationMs: 3,
         startedAt: Date.now(), requestId: `wfr_enum_${outcome}`, conversationId,
-        evidence: { changes: [], assets: [], count: null, detail: null,
+        evidence: { changes: [], reviews: [], assets: [], count: null, detail: null,
           exitCode: outcome === 'process_exit_nonzero' ? 4 : null, timedOut: false,
           durationMs: null, running: null, processSessionId: null }
       });
@@ -1830,6 +1865,60 @@ describe('activity feed', () => {
 describe('automatic compaction', () => {
   const settled = () => new Promise((resolve) => setTimeout(resolve, 25));
 
+  it('returns the idle source question on the exact compaction ticket, without reopening a turn', async () => {
+    await pair();
+    const conversationId = randomUUID();
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'user_message', time: Date.now(), text: 'Existing settled work', messageId: 'settled-question' },
+      { kind: 'turn_start', time: Date.now(), turnId: 'settled-turn' },
+      { kind: 'turn_end', time: Date.now(), turnId: 'settled-turn', outcome: 'completed' }
+    ] } });
+    const activity = await request('GET', `/activity?conversationId=${conversationId}`);
+    expect(activity.body.recordedQuestionId).toBeNull();
+    const ticket = await request('POST', '/compact', { body: { conversationId, ticket: true } });
+    expect(ticket.body).toMatchObject({ sourceQuestionId: 'settled-question', sourceSend: { state: 'not-attempted' } });
+    expect((await getSession(ticket.body.sessionId))?.activeTurnId).toBeNull();
+  });
+
+  it('rejects a compaction ticket cancelled during source-question readback', async () => {
+    await pair();
+    const conversationId = randomUUID();
+    const session = await createSession({ conversationId });
+    const store = await import('../src/main/session/store.js');
+    const read = store.readLatestUserMessage;
+    let entered!: () => void, release!: () => void;
+    const reading = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    const spy = vi.spyOn(store, 'readLatestUserMessage').mockImplementationOnce(async (...args) => {
+      const question = await read(...args); entered(); await resume; return question;
+    });
+    try {
+      const pending = request('POST', '/compact', { body: { conversationId, ticket: true } });
+      await reading;
+      await request('POST', '/compact', { body: { conversationId, cancel: true } });
+      release();
+      expect((await pending).body.error).toBe('compaction_ticket_changed');
+      expect(continuationForSession(session.id)).toBeNull();
+    } finally { release(); spy.mockRestore(); }
+  });
+
+  it.each(['reopened', 'resumed', 'failed'])('does not call initial source preparation a recovery incident (%s)', async action => {
+    await pair();
+    const conversationId = randomUUID();
+    const session = await createSession({ conversationId });
+    await compactSession(session.id);
+    const status = await request('GET', '/status');
+    const repair = status.body.repairs.find((r: { conversationId: string }) => r.conversationId === conversationId);
+    expect(repair).toBeDefined();
+    expect((await request('POST', '/repairs/claim', { body: { token: repair.token } })).body.allowed).toBe(true);
+    await request('GET', `/status?${action === 'failed' ? 'repairFailed' : 'repaired'}=${repair.token}&repairAction=${action === 'failed' ? 'reopened' : action}`);
+    const progress = (await readEvents(session.id)).filter(e => e.kind === 'progress');
+    if (action === 'failed') expect(progress).toEqual(expect.arrayContaining([expect.objectContaining({
+      message: expect.objectContaining({ text: expect.stringContaining('failed') })
+    })]));
+    else expect(progress).toEqual([]);
+  });
+
   it.each([false, true])('hands manual compaction the pending repair only before browser claim (claimed=%s)', async claimed => {
     await pair();
     const conversationId = randomUUID();
@@ -1861,7 +1950,7 @@ describe('automatic compaction', () => {
     const ticket = continuationForSession(session.id)!;
     const status = await request('GET', '/status');
     const repair = status.body.repairs?.find((row: { conversationId: string }) => row.conversationId === conversationId);
-    expect(repair).toMatchObject({ conversationId, reason: 'compaction', requiresClaim: true });
+    expect(repair).toMatchObject({ conversationId, reason: 'compaction', requiresClaim: true, continuationToken: ticket.token });
     if (scenario === 'dispatched') {
       await request('POST', '/compact', { body: { conversationId, token: ticket.token, sourceAttempt: true } });
       await request('POST', '/compact', { body: { conversationId, token: ticket.token, sourceDispatch: true } });
@@ -1886,6 +1975,19 @@ describe('automatic compaction', () => {
     const second = await request('POST', '/compact', { body: { conversationId, ticket: true } });
     expect((await request('POST', '/compact', { body: { conversationId, token: first.body.token, sourceLost: true, sourceError } })).status).toBe(409);
     expect(continuationForSession(session.id)?.token).toBe(second.body.token);
+  });
+
+  it.each([false, true])('does not recreate or replace a cancelled repair ticket (replacement: %s)', async replace => {
+    await pair();
+    const conversationId = randomUUID();
+    const session = await createSession({ conversationId });
+    const first = await request('POST', '/compact', { body: { conversationId, ticket: true } });
+    await request('POST', '/compact', { body: { conversationId, cancel: true } });
+    const next = replace ? await request('POST', '/compact', { body: { conversationId, ticket: true } }) : null;
+    for (const operation of [{ ticket: true }, { resume: true }]) {
+      expect((await request('POST', '/compact', { body: { conversationId, token: first.body.token, ...operation } })).status).toBe(409);
+      expect(continuationForSession(session.id)?.token ?? null).toBe(next?.body.token ?? null);
+    }
   });
 
   it('hands an explicit desktop compaction to startup and fences a cancelled ticket', async () => {
@@ -2110,6 +2212,41 @@ describe('automatic compaction', () => {
           if (scenario === 'blocked') setChatBlocked(conversationId, false);
         }
       });
+    });
+
+  it.each(['image-first', 'end-first', 'missing-proof', 'wrong-image', 'stopped', 'unfinished-image'] as const)(
+    'releases input only for the exact completed native image (%s)', async scenario => {
+      await pair();
+      const conversationId = randomUUID(), messageId = randomUUID();
+      const opened = await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), messageId: randomUUID(), text: 'Generate an image.' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'image-turn' }
+      ] } });
+      const sessionId = opened.body.sessionId;
+      const image = { kind: 'native_image', time: Date.now(), turnId: 'image-turn', messageId,
+        providerAssetId: 'file_1234567890abcdef', providerRole: 'tool', providerChannel: 'final',
+        providerStatus: scenario === 'unfinished-image' ? 'in_progress' : 'finished_successfully', previewStatus: 'pending' };
+      const end = { kind: 'turn_end', time: Date.now(), turnId: 'image-turn',
+        outcome: scenario === 'stopped' ? 'stopped' : 'completed',
+        ...(scenario !== 'missing-proof' ? { providerMessageId: scenario === 'wrong-image' ? randomUUID() : messageId } : {}) };
+      const batch = async (event: unknown) => request('POST', '/events', { body: { conversationId, events: [event] } });
+      await batch(scenario === 'end-first' ? end : image);
+      expect(await sessionStoreModule.readCompletedFinal(sessionId, conversationId)).toBeNull();
+      await batch(scenario === 'end-first' ? image : end);
+      const complete = scenario === 'image-first' || scenario === 'end-first';
+      expect(!!await sessionStoreModule.readCompletedFinal(sessionId, conversationId)).toBe(complete);
+      const { sessionInputActivity } = await import('../src/main/bridge.js');
+      const { sessionInputPolicy } = await import('../src/main/session/input.js');
+      if (complete) {
+        const activity = sessionInputActivity((await getSession(sessionId))!);
+        expect(activity).toMatchObject({ possible: false, exact: false });
+        expect(await sessionInputPolicy(sessionId, activity)).toMatchObject({ browserAllowed: true, settled: true });
+      }
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), messageId: randomUUID(), text: 'New question.' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'new-turn' }
+      ] } });
+      expect(await sessionStoreModule.readCompletedFinal(sessionId, conversationId)).toBeNull();
     });
 
   it.each(['expired', 'clock-back', 'auto-off', 'rebound'] as const)(
@@ -2434,7 +2571,8 @@ describe('automatic compaction', () => {
    * reloads, and a ticket that still has not been sent after them is abandoned: nothing was
    * fenced, and the next working turn opens a fresh one. Every pickup asks for the tab in front.
    */
-  it.each([false, true])('reloads an unsent automatic ticket every 2 minutes with bounded attempts (restored: %s)', async restored => {
+  it.each([false, true].flatMap(restored => ['reloaded', 'resumed'].map(action => ({ restored, action }))))(
+    'recovers an unsent automatic ticket every 2 minutes with bounded attempts (restored: $restored, $action)', async ({ restored, action }) => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -2470,7 +2608,7 @@ describe('automatic compaction', () => {
         await vi.advanceTimersByTimeAsync(attempt === 0 ? 1 : 2 * 60_000);
         const handout = await takeRepair();
         expect(handout).toMatchObject({ conversationId, reason: 'compaction', focus: true });
-        await request('GET', `/status?repaired=${handout!.token}&repairAction=reloaded`);
+        await request('GET', `/status?repaired=${handout!.token}&repairAction=${action}`);
         expect(continuationByToken(token)).toMatchObject({ state: 'awaiting-summary' });
       }
 
@@ -2822,6 +2960,39 @@ describe('delivering a bootstrap', () => {
       expect((await request('GET', `/activity?conversationId=${source}`)).body.bootstrapMessageId).toBeNull();
     }
     expect((await request('GET', `/activity?conversationId=${middle}`)).body.bootstrapMessageId).toBeNull();
+  });
+
+  it('accepts the exact destination marker after the resume command ACK committed first', async () => {
+    await pair();
+    const source = randomUUID(), destination = randomUUID(), foreign = randomUUID();
+    const { sessionId, token } = await compactedSession(source, 'Resume receipt fixture');
+    const command = queueResume(sessionId, token)!;
+    const client = 'resume-receipt-tab';
+    await redeem(command.id, client);
+    expect((await request('POST', '/compact', { body: {
+      token, commandId: command.id, client, destinationAttempt: true
+    } })).body.allowed).toBe(true);
+    expect((await request('POST', '/compact', { body: {
+      token, commandId: command.id, client, destinationDispatch: true
+    } })).body.armed).toBe(true);
+    const ack = { id: command.id, client, status: 'sent', conversationId: destination };
+    expect((await request('POST', '/commands/ack', { body: ack })).body.committed).toBe(true);
+    const marker = { token, conversationId: destination, destinationMessageId: 'resume-opening' };
+    expect((await request('POST', '/compact', { body: { ...marker, conversationId: foreign } })).status).toBe(409);
+    expect((await request('POST', '/compact', { body: marker })).body.committed).toBe(true);
+    expect((await request('POST', '/compact', { body: marker })).body.committed).toBe(true);
+    expect((await request('POST', '/compact', { body: { ...marker, destinationMessageId: 'other-message' } })).status).toBe(409);
+    expect((await request('POST', '/commands/ack', { body: ack })).body.committed).toBe(true);
+    expect((await getSession(sessionId))?.conversationId).toBe(destination);
+    expect(continuationByToken(token)?.destinationSend).toEqual({
+      state: 'sent', conversationId: destination, messageId: 'resume-opening'
+    });
+    const { upsertMessageEvent } = await import('../src/main/session/store.js');
+    const text = `[[CLF-RESUME:${token}]]\n\nResume receipt fixture`;
+    await upsertMessageEvent(sessionId, { source: 'extension', time: Date.now(), kind: 'user_message',
+      messageId: 'resume-opening', message: { text, chars: text.length, truncated: false } });
+    expect((await request('GET', `/activity?conversationId=${destination}`)).body.bootstrapMessageId).toBe('resume-opening');
+    expect((await request('GET', `/activity?conversationId=${source}`)).body.bootstrapMessageId).toBeNull();
   });
 
   it('protects a resume destination before the browser opener can record a shadow session', async () => {
@@ -6897,6 +7068,7 @@ describe('unattributed activity recovery', () => {
       await events(OTHER, [openTurn('another-incident-chat')]);
       await unattributedTurn('eta-other-request');
       expect(unattributedRepairEta(Date.now(), 'eta-known-request')).toBeNull();
+      noteInboundToolRequest('eta-other-request');
       await request('POST', '/correlations', { body: { conversationId: OTHER,
         calls: [{ requestId: 'eta-other-request', messageId: 'eta-resolved', tool: 'read', order: 0, answered: false }] } });
       expect(unattributedRepairEta(Date.now(), 'eta-other-request')).toBeNull();
@@ -6935,8 +7107,11 @@ describe('unattributed activity recovery', () => {
       if (kind === 'completed' || kind === 'stopped') await events(PRIME, [endTurn(`claim-${kind}`, kind)]);
       if (kind === 'new-turn') await events(PRIME, [openTurn('replacement-turn')]);
       if (kind === 'blocked') await setChatBlocked(PRIME, true);
-      if (kind === 'resolved') await request('POST', '/correlations', { body: { conversationId: PRIME,
-        calls: [{ requestId: id, messageId: `claim-proof-${kind}`, tool: 'read', order: 0, answered: false }] } });
+      if (kind === 'resolved') {
+        noteInboundToolRequest(id);
+        await request('POST', '/correlations', { body: { conversationId: PRIME,
+          calls: [{ requestId: id, messageId: `claim-proof-${kind}`, tool: 'read', order: 0, answered: false }] } });
+      }
       expect((await request('POST', '/repairs/claim', { body: { token: first!.token } })).body.allowed).toBe(false);
     } finally { vi.useRealTimers(); }
   });
@@ -6988,6 +7163,7 @@ describe('unattributed activity recovery', () => {
       }
       if (kind === 'resolved') {
         await unattributedTurn(id);
+        noteInboundToolRequest(id);
         await request('POST', '/correlations', { body: { conversationId: PRIME, calls: [{ requestId: id, messageId: 'resolved-message', tool: 'read', order: 0, answered: false }] } });
       }
       await vi.advanceTimersByTimeAsync(openedAt + 300_000 - Date.now());
@@ -9262,37 +9438,42 @@ describe('unattributed activity recovery', () => {
       await tool();
       const sessionId = (await request('GET', `/activity?conversationId=${chat}`)).body.sessionId;
       const { sessionInputActivity, sessionActivityExpiresAt } = await import('../src/main/bridge.js');
+      const activityChanged = vi.fn();
+      const unsubscribeActivity = onSessionActivityChange(activityChanged);
       await vi.advanceTimersByTimeAsync(1000);
-      await events(chat, [{ kind: 'assistant_message', messageId: 'trailing-native-answer', turnId, time: Date.now(),
-        providerMessageId: '11111111-2222-4333-8444-555555555555', text: 'The requested check is complete.',
-        final: true, state: 'final', activeNow: true }, endTurn(turnId, 'completed')]);
-      await vi.advanceTimersByTimeAsync(3000);
-      await tool();
-      const summary = (await getSession(sessionId))!;
-      expect(summary.activeTurnId).toBeNull();
-      expect(sessionActivityExpiresAt(summary)).toBeNull();
-      expect(sessionInputActivity(summary)).toMatchObject({ exact: false, possible: false });
-      expect((await sessionControlsFor(sessionId)).recovery).toEqual([]);
-      const { readCompletedFinal, readEvents } = await import('../src/main/session/store.js');
-      expect(await readCompletedFinal(sessionId, chat)).toMatchObject({ messageId: 'trailing-native-answer' });
-      const { sessionInputPolicy } = await import('../src/main/session/input.js');
-      expect(await sessionInputPolicy(sessionId, sessionInputActivity(summary))).toMatchObject({
-        settled: true, browserAllowed: true, canInject: false
-      });
-      const history = await readEvents(sessionId);
-      const lastCall = history.findLastIndex(event => event.kind === 'tool_call');
-      expect(lastCall).toBeLessThan(history.findIndex(event => event.kind === 'assistant_message'));
-      await vi.advanceTimersByTimeAsync(PRO_ACTIVITY_MS + CHAT_SILENCE_MS);
-      await sweepStaleSwarm(Date.now());
-      expect((await sessionControlsFor(sessionId)).recovery).toEqual([]);
-      expect((await maintenanceBatch()).some(repair => repair.conversationId === chat)).toBe(false);
-      await events(chat, [openTurn('next-native-turn')]);
-      const next = (await getSession(sessionId))!;
-      const nextExpiry = sessionActivityExpiresAt(next);
-      await vi.advanceTimersByTimeAsync(1000);
-      await tool();
-      expect((await getSession(sessionId))?.activeTurnId).toBe('next-native-turn');
-      expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(nextExpiry);
+      try {
+        await events(chat, [{ kind: 'assistant_message', messageId: 'trailing-native-answer', turnId, time: Date.now(),
+          providerMessageId: '11111111-2222-4333-8444-555555555555', text: 'The requested check is complete.',
+          final: true, state: 'final', activeNow: true }, endTurn(turnId, 'completed')]);
+        expect(activityChanged).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(3000);
+        await tool();
+        const summary = (await getSession(sessionId))!;
+        expect(summary.activeTurnId).toBeNull();
+        expect(sessionActivityExpiresAt(summary)).toBeNull();
+        expect(sessionInputActivity(summary)).toMatchObject({ exact: false, possible: false });
+        expect((await sessionControlsFor(sessionId)).recovery).toEqual([]);
+        const { readCompletedFinal, readEvents } = await import('../src/main/session/store.js');
+        expect(await readCompletedFinal(sessionId, chat)).toMatchObject({ messageId: 'trailing-native-answer' });
+        const { sessionInputPolicy } = await import('../src/main/session/input.js');
+        expect(await sessionInputPolicy(sessionId, sessionInputActivity(summary))).toMatchObject({
+          settled: true, browserAllowed: true, canInject: false
+        });
+        const history = await readEvents(sessionId);
+        const lastCall = history.findLastIndex(event => event.kind === 'tool_call');
+        expect(lastCall).toBeLessThan(history.findIndex(event => event.kind === 'assistant_message'));
+        await vi.advanceTimersByTimeAsync(PRO_ACTIVITY_MS + CHAT_SILENCE_MS);
+        await sweepStaleSwarm(Date.now());
+        expect((await sessionControlsFor(sessionId)).recovery).toEqual([]);
+        expect((await maintenanceBatch()).some(repair => repair.conversationId === chat)).toBe(false);
+        await events(chat, [openTurn('next-native-turn')]);
+        const next = (await getSession(sessionId))!;
+        const nextExpiry = sessionActivityExpiresAt(next);
+        await vi.advanceTimersByTimeAsync(1000);
+        await tool();
+        expect((await getSession(sessionId))?.activeTurnId).toBe('next-native-turn');
+        expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(nextExpiry);
+      } finally { unsubscribeActivity(); }
     } finally { vi.useRealTimers(); }
   });
 

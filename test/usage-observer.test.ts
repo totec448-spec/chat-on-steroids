@@ -128,8 +128,8 @@ describe('MAIN-world usage projection', () => {
   it('retires a versioned observer across replacement while preserving provider wrappers and native sockets', async () => {
     const h = harness(), old = h.observer(), socket = h.socket();
     h.replaceFetch(true);
-    h.evaluate(script.replace('const OBSERVER_VERSION = 2;', 'const OBSERVER_VERSION = 3;'));
-    expect(old.current()).toBe(false); expect(h.observer().version).toBe(3);
+    h.evaluate(script.replace('const OBSERVER_VERSION = 3;', 'const OBSERVER_VERSION = 4;'));
+    expect(old.current()).toBe(false); expect(h.observer().version).toBe(4);
     const stream = await h.openSse(); expect(stream.clones).toBe(1); h.hide();
     expect(socket).toBeInstanceOf(h.nativeSocket);
     const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -424,7 +424,61 @@ describe('MAIN-world usage projection', () => {
     expect(h.posts).toHaveLength(16);
   });
 
-  it('does not turn quoted text, tool arguments or cross-event identifiers into ownership', async () => {
+  it.each(['wfr_split', '11111111-2222-4333-8444-555555555555'])('joins only a root stream identity to a native input_message in the same response (%s)', async request_id => {
+    const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const frame = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+    await h.feedSse([
+      frame({ conversation_id, turn_topic_id: 'native-turn' }),
+      ': keepalive\n\n',
+      frame({ type: 'input_message', input_message: { metadata: { request_id }, content: 'PRIVATE_CONTENT' } })
+    ]);
+    expect(h.posts).toEqual([{ type: 'cos-request-origin', conversationId: conversation_id,
+      requestIds: [request_id], observedAt: expect.any(Number) }]);
+    await h.feedSse([frame({ type: 'input_message', input_message: { metadata: { request_id: 'wfr_other_response' } } })]);
+    expect(h.posts).toHaveLength(1);
+  });
+
+  it.each(['nested', 'nested-after-seed', 'invalid-root', 'conflict', 'switch-back', 'malformed', 'done', 'unknown-encoding'])('refuses split identity after %s evidence', async mode => {
+    const h = harness(), a = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', b = '11111111-2222-4333-8444-555555555555';
+    const frame = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+    const seed = mode === 'nested' ? { nested: { conversation_id: a } } : { conversation_id: a };
+    const middle = mode === 'conflict' ? frame({ conversation_id: a, nested: { conversation_id: b } })
+      : mode === 'nested-after-seed' ? frame({ nested: { conversation_id: b } })
+      : mode === 'invalid-root' ? frame({ conversation_id: 'not-an-id' })
+      : mode === 'switch-back' ? frame({ conversation_id: b }) + frame({ conversation_id: a })
+      : mode === 'malformed' ? 'data: {broken\n\n'
+      : mode === 'done' ? 'data: [DONE]\n\n'
+      : mode === 'unknown-encoding' ? 'event: delta_encoding\ndata: "v2"\n\n' : '';
+    await h.feedSse([frame(seed), middle,
+      frame({ type: 'input_message', input_message: { metadata: { request_id: 'wfr_not_owned' } } })]);
+    expect(h.posts).toEqual([]);
+  });
+
+  it('does not infer ownership from arbitrary request metadata following a valid identity', async () => {
+    const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    await h.feedSse([
+      `data: ${JSON.stringify({ conversation_id })}\n\n`,
+      ...[{ metadata: { request_id: 'wfr_bare' } }, { message: { metadata: { request_id: 'wfr_message' } } },
+        { input_message: { metadata: { request_id: 'wfr_untyped' } } }].map(value => `data: ${JSON.stringify(value)}\n\n`)
+    ]);
+    expect(h.posts).toEqual([]);
+  });
+
+  it.each(['linked', 'missing-parent', 'other-turn', 'done', 'contradictory-envelope'])('scopes split socket evidence to its exact chain: %s', mode => {
+    const h = harness(), socket = h.socket(), a = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', b = '11111111-2222-4333-8444-555555555555';
+    const send = (payload: Record<string, unknown>) => socket.receive([{ type: 'message', payload: {
+      type: 'conversation-turn-stream', payload: { type: 'stream-item', conversation_id: a, turn_id: 'one', ...payload }
+    } }]);
+    send({ stream_item_id: 'seed', parent_stream_item_id: null,
+      encoded_item: `data: ${JSON.stringify({ conversation_id: mode === 'contradictory-envelope' ? b : a })}\n\n` });
+    if (mode === 'done') send({ type: 'done' });
+    send({ stream_item_id: 'request', parent_stream_item_id: mode === 'missing-parent' ? 'missing' : 'seed',
+      turn_id: mode === 'other-turn' ? 'two' : 'one', encoded_item:
+        `data: ${JSON.stringify({ type: 'input_message', input_message: { metadata: { request_id: 'wfr_linked' } } })}\n\n` });
+    expect(h.posts.map(row => row.requestIds)).toEqual(mode === 'linked' ? [['wfr_linked']] : []);
+  });
+
+  it('does not turn quoted text, tool arguments or cross-response identifiers into ownership', async () => {
     const h = harness();
     const a = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     for (const event of [

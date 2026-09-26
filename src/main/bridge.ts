@@ -204,6 +204,7 @@ import { APP_VERSION, BRIDGE_PROTOCOL } from './version.js';
 import { conversationHasMcpCallSince } from './session/store.js';
 import { sessionWorkingAt } from '../shared/session-activity.js';
 import { requestCorrelation } from './session/correlation.js';
+import { hasInboundToolRequest } from './mcp/inbound.js';
 import { bindAgentWorkspace } from './workspace.js';
 
 /** Fixed candidates so the extension can find the app without being told a port. */
@@ -524,6 +525,7 @@ const commandWrites = new Map<string, Promise<boolean>>();
 const commandRedeems = new Map<string, Promise<void>>();
 let requestWindow = { start: Date.now(), count: 0 };
 const listeners = new Set<() => void>();
+const sessionActivityListeners = new Set<() => void>();
 let extensionVersion: string | null = null;
 let versionWarned = false;
 let latestCompanionDiagnostics: CompanionDiagnostics | null = null;
@@ -696,6 +698,12 @@ function clearCompanionDiagnostics(): void {
 export function onBridgeChange(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+/** Runtime work grants affect session presentation without mutating durable history. */
+export function onSessionActivityChange(listener: () => void): () => void {
+  sessionActivityListeners.add(listener);
+  return () => sessionActivityListeners.delete(listener);
 }
 
 function changed(): void {
@@ -977,9 +985,19 @@ function parseCallEvidence(input: unknown, untooled = false): PageCallEvidence[]
   for (const raw of input.slice(0, MAX_CALL_EVIDENCE)) {
     if (!raw || typeof raw !== 'object') continue;
     const item = raw as Record<string, unknown>;
+    const requestId =
+      typeof item['requestId'] === 'string' && /^[a-z0-9_-]{1,100}$/i.test(item['requestId'])
+        ? item['requestId']
+        : null;
     const tool = typeof item['tool'] === 'string' && TOOL_NAME.test(item['tool']) ? item['tool'] : '';
-    const messageId = typeof item['messageId'] === 'string' ? item['messageId'].slice(0, 120) : '';
-    const bare = untooled && typeof item['requestId'] === 'string';
+    // The response stream can expose the opaque request id before ChatGPT publishes an
+    // api_tool message. `/correlations` does not use a provider message id or tool name, so
+    // give that exact id a private stable key for deduplication instead of rejecting the
+    // earliest ownership proof. `/events` keeps requiring the real rendered identity.
+    const messageId = typeof item['messageId'] === 'string' && item['messageId']
+      ? item['messageId'].slice(0, 120)
+      : untooled && requestId ? `request:${requestId}` : '';
+    const bare = untooled && requestId !== null;
     if ((!tool && !bare) || !messageId) continue;
     if (seen.has(messageId)) {
       duplicated.add(messageId);
@@ -995,10 +1013,7 @@ function parseCallEvidence(input: unknown, untooled = false): PageCallEvidence[]
       answered: item['answered'] === true,
       // Rebuilt like everything else here — an opaque id checked for shape, and a finite
       // number — so the page cannot smuggle anything through them.
-      requestId:
-        typeof item['requestId'] === 'string' && /^[a-z0-9_-]{1,100}$/i.test(item['requestId'])
-          ? item['requestId']
-          : null,
+      requestId,
       createTime:
         typeof item['createTime'] === 'number' && Number.isFinite(item['createTime']) ? item['createTime'] : null
     });
@@ -1067,7 +1082,7 @@ function parseObservations(input: unknown): ChatObservation[] {
       if (!item['messageId'].length || item['messageId'].length > 190) continue;
       observation.messageId = item['messageId'];
     }
-    if (kind === 'assistant_message' && typeof item['providerMessageId'] === 'string' &&
+    if ((kind === 'assistant_message' || (kind === 'turn_end' && item['outcome'] === 'completed')) && typeof item['providerMessageId'] === 'string' &&
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item['providerMessageId'])) {
       observation.providerMessageId = item['providerMessageId'];
     }
@@ -1914,7 +1929,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const repaired = url.searchParams.get('repaired');
     const repairFailed = url.searchParams.get('repairFailed');
     const repairAction = url.searchParams.get('repairAction');
-    const action = repairAction === 'reloaded' || repairAction === 'reopened' ? repairAction : null;
+    const action = repairAction === 'reloaded' || repairAction === 'reopened' || repairAction === 'resumed' ? repairAction : null;
     if (repaired) {
       await confirmRepair(repaired.slice(0, 64), action);
     } else if (repairFailed) {
@@ -2101,13 +2116,23 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return held !== null && held.conversationId !== id;
     });
     const blocked = new Set(conflicts);
-    const unresolved = calls.filter((call) => call.requestId && !blocked.has(call.requestId) && requestCorrelation(call.requestId) === null);
+    // The connector's display name is user-owned and therefore never participates here.
+    // Instead, require the opaque id to have reached an actual local MCP dispatch. A page
+    // observation that wins the race against first ingress remains pending and is retried by
+    // the extension; it is not a conflict and does not create a local session by itself.
+    const pending = requestIds.filter((requestId) =>
+      !blocked.has(requestId) && requestCorrelation(requestId) === null && !hasInboundToolRequest(requestId));
+    const pendingSet = new Set(pending);
+    const unresolved = calls.filter((call) => call.requestId && !blocked.has(call.requestId) &&
+      !pendingSet.has(call.requestId) && requestCorrelation(call.requestId) === null);
     const observations: ChatObservation[] = unresolved.length > 0
       ? [{ kind: 'tool_evidence', time: Date.now(), calls: unresolved }]
       : [];
     // Even an already-confirmed mapping must ensure/reuse the chat session, matching /events'
     // first-observation semantics and making this one atomic operation from the page's view.
-    const sessionId = await recordRequestEvidence(id, observations);
+    const hasAdmittedEvidence = requestIds.some((requestId) =>
+      !blocked.has(requestId) && !pendingSet.has(requestId));
+    const sessionId = hasAdmittedEvidence ? await recordRequestEvidence(id, observations) : null;
     const confirmed = requestIds.filter((requestId) => requestCorrelation(requestId)?.conversationId === id);
     return json(res, 200, {
       ok: true,
@@ -2115,8 +2140,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       sessionId,
       requestIds,
       confirmed,
+      pending,
       conflicts,
-      complete: conflicts.length === 0 && confirmed.length === requestIds.length
+      complete: conflicts.length === 0 && pending.length === 0 && confirmed.length === requestIds.length
     }, origin);
   }
   if (route === '/events' && req.method === 'POST') {
@@ -3025,12 +3051,23 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (body['ticket'] === true) {
       let ticket: Awaited<ReturnType<typeof fileCompactionTicket>>;
       try {
-        ticket = await fileCompactionTicket(sessionId, id, body['automatic'] === true);
+        if (typeof body['token'] === 'string') {
+          const existing = continuationForSession(sessionId);
+          if (!existing || existing.token !== body['token'] || existing.from !== id || existing.state !== 'awaiting-summary')
+            return json(res, 409, { error: 'compaction_ticket_changed' }, origin);
+          ticket = { opened: existing, started: false };
+        } else ticket = await fileCompactionTicket(sessionId, id, body['automatic'] === true);
       } catch (err) {
         logWarn(`bridge: could not durably file Compact & Resume for ${sessionId} — ${err instanceof Error ? err.message : String(err)}`);
         return json(res, 503, { error: 'continuation_not_durable', retryable: true, sessionId }, origin);
       }
       const { opened, started } = ticket;
+      // Idle source pages have no recorded active turn. Their latest native
+      // question still owns hydration: an empty loading DOM is not a new source.
+      const sourceQuestion = await readLatestUserMessage(sessionId);
+      const sourceSession = await getSession(sessionId);
+      if (sourceSession?.conversationId !== id || continuationForSession(sessionId)?.token !== opened.token)
+        return json(res, 409, { error: 'compaction_ticket_changed' }, origin);
       return json(
         res,
         202,
@@ -3040,6 +3077,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           sessionId,
           token: opened.token,
           sourceSend: opened.sourceSend,
+          sourceQuestionId: sourceQuestion?.messageId ?? null,
           prompt: null,
           job: resumeJobFor(sessionId)
         },
@@ -3167,6 +3205,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return json(res, 409, { error: 'conversation_superseded' }, origin);
     }
     const already = continuationForSession(sessionId);
+    if (typeof body['token'] === 'string' && (!already || already.token !== body['token'] || already.from !== id))
+      return json(res, 409, { error: 'compaction_ticket_changed' }, origin);
     if (already) {
       const prompt =
         already.state === 'awaiting-summary' && sendUnattempted(already.sourceSend)
@@ -6057,13 +6097,17 @@ async function restoreReturnedPageActivity(conversationId: string, sessionId: st
 
 /** A real terminal — stable final answer, explicit stop, worker finish — spends the deadline. */
 function endActivity(conversationId: string): void {
-  activeUntil.delete(conversationId);
+  if (activeUntil.delete(conversationId)) {
+    for (const listener of sessionActivityListeners) listener();
+  }
   armSilenceSweep();
 }
 
 /** Drops a chat out of the activity ledger entirely, once nothing is waiting on it. */
 function forgetActivity(conversationId: string): void {
-  activeUntil.delete(conversationId);
+  if (activeUntil.delete(conversationId)) {
+    for (const listener of sessionActivityListeners) listener();
+  }
   armSilenceSweep();
 }
 
@@ -6705,8 +6749,8 @@ async function noteRecoveryObservations(
   // A replacement page can first reveal the exact final after a completed end
   // control. That history backfill is not fresh activity, but its canonical
   // final still consumes the current work grant immediately.
-  const observedFinal = observations.some(item => item.kind === 'assistant_message' &&
-    (item.state === 'final' || item.final === true));
+  const observedFinal = observations.some(item => (item.kind === 'assistant_message' &&
+    (item.state === 'final' || item.final === true)) || item.kind === 'native_image');
   const completedFinal = (activity.terminal || observedFinal) && sessionId &&
     await readCompletedFinal(sessionId, conversationId, finalTurn);
   // A short native generation can start and end in one accepted batch. That is
@@ -7873,6 +7917,7 @@ async function takePendingRepairs(
     /** Raise the tab (or open the chat in front) before acting: a background tab is throttled. */
     focus: boolean;
     requiresClaim?: boolean;
+    continuationToken?: string;
   }> = [];
   for (const [conversationId, repair] of repairsInFlight) {
     const unclaimed = repair.reason !== 'unattributed' && repairNeedsClaim(repair) && repair.state === 'handed' && !repair.claimed;
@@ -7881,7 +7926,8 @@ async function takePendingRepairs(
     if (!unclaimed) {
       repair.state = 'handed';
       repair.token = randomBytes(9).toString('base64url');
-      await updateRepairProgress(conversationId, repair, `Trying to reload chat to recover ${repairReason(repair)}…`);
+      if (!(repair.reason === 'compaction' && repair.episode.endsWith(':manual') && !repair.progress))
+        await updateRepairProgress(conversationId, repair, `Trying to reload chat to recover ${repairReason(repair)}…`);
     }
     // A missed pre-action claim may retry the same offer. Once claimed, ambiguous
     // acknowledgement keeps custody and cannot authorize a second browser action.
@@ -7900,6 +7946,7 @@ async function takePendingRepairs(
         !stopRequestedFor(conversationId))
       {
         ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction',
+          ...(repair.reason === 'compaction' ? { continuationToken: continuationForSession(repair.sessionId)!.token } : {}),
           ...(repairNeedsClaim(repair) ? { requiresClaim: true } : {}) });
       }
   }
@@ -7944,16 +7991,19 @@ function attributionRepairCurrent(repair: Repair, session: SessionSummary | null
  * this app is no longer waiting on - an older turn's, or one already re-queued - matches
  * nothing and closes nothing, which is the only safe reading of it.
  */
-async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | null): Promise<void> {
+async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'resumed' | null): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state === 'handed' && repair.token === token) {
+      if (action === 'resumed' && repair.reason !== 'compaction') return;
       if (!compactionRepairCurrent(conversationId, repair)) { repairsInFlight.delete(conversationId); return; }
       logInfo(`bridge: the browser confirmed ${repair.reason} recovery for ${conversationId} (${action ?? 'action unspecified'})`);
       repair.state = 'done';
       if (repair.attribution && repair.attribution.incident.firstAttemptAt === null)
         repair.attribution.incident.firstAttemptAt = Date.now();
-      lastBrowserRecoveryAt.set(conversationId, Date.now());
-      awaitingReturn.add(conversationId);
+      if (action !== 'resumed') {
+        lastBrowserRecoveryAt.set(conversationId, Date.now());
+        awaitingReturn.add(conversationId);
+      }
       if (repair.reason === 'silence') {
         const failedGrant = activeUntil.get(conversationId);
         if (failedGrant) failedGrant.until = Date.now() + recoveryBusyMs(failedGrant.model === 'pro');
@@ -7979,10 +8029,12 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | nu
         if (repair.assistantSource) turnRepairSpent.set(conversationId,
           { sessionId: repair.sessionId, turnKey: repair.assistantSource.key, token: repair.token });
       }
-      await updateRepairProgress(
+      // Reaching the source for the initial desktop request is normal setup,
+      // not proof of a failure/recovery or of native composer readiness.
+      if (!(repair.reason === 'compaction' && repair.episode.endsWith(':manual') && !repair.progress)) await updateRepairProgress(
         conversationId,
         repair,
-        `${action === 'reopened' ? 'Reopened' : 'Reloaded'} chat to recover ${repairReason(repair)}.`
+        `${action === 'resumed' ? 'Resumed' : action === 'reopened' ? 'Reopened' : 'Reloaded'} chat to recover ${repairReason(repair)}.`
       );
       return;
     }
@@ -7990,7 +8042,7 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | nu
 }
 
 /** An exact browser action failed; keep the episode queued and replace its one debug row. */
-async function failRepairAttempt(token: string, action: 'reloaded' | 'reopened' | null): Promise<void> {
+async function failRepairAttempt(token: string, action: 'reloaded' | 'reopened' | 'resumed' | null): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state !== 'handed' || repair.token !== token) continue;
     logWarn(`bridge: the browser reported failed ${repair.reason} recovery for ${conversationId} (${action ?? 'action unspecified'})`);

@@ -24,7 +24,7 @@
  * landed in Unattributed activity. First proof wins, and it keeps winning.
  */
 
-import { readDurable, writeDurableSnapshotSoon } from '../durable.js';
+import { readDurable, writeDurableNow, writeDurableSnapshotSoon } from '../durable.js';
 import { logWarn } from '../logger.js';
 import { indexedSessions, readRecentEvents } from './store.js';
 import { attachRequestPlan, reconcileRequestPlans } from './request-plans.js';
@@ -43,14 +43,15 @@ export interface RequestCorrelation {
 const MAX_CORRELATIONS = 50_000;
 const CORRELATIONS_STATE = 'request-correlations';
 /**
- * 5 stores owners and nothing else, because an owner is now the only verdict there is.
+ * 5 stores owners and nothing else; 6 also records that browser acknowledgements wait for
+ * the snapshot, allowing startup to trust it without replaying canonical history.
  *
  * Versions 3 and 4 wrapped each row in a sticky `conflicted` flag, so a row could exist purely
  * to record that its id was unusable. Those rows say nothing this registry can act on any more:
  * read the owner out of the wrapper when one is there, and let a forgotten id be proved again
  * by exact evidence or by the recorded history reconciled below.
  */
-const CORRELATIONS_STATE_VERSION = 5;
+const CORRELATIONS_STATE_VERSION = 6;
 
 const byRequest = new Map<string, RequestCorrelation>();
 const waiters = new Map<string, Set<() => void>>();
@@ -69,6 +70,8 @@ let restoring: Promise<void> | null = null;
 
 interface PersistedCorrelations {
   version: number;
+  /** Version 6 snapshots crossed the browser acknowledgement durability barrier. */
+  complete?: boolean;
   entries: RequestCorrelation[];
 }
 
@@ -91,6 +94,7 @@ function trim(): void {
 function snapshot(): PersistedCorrelations {
   return {
     version: CORRELATIONS_STATE_VERSION,
+    complete: true,
     entries: [...byRequest.values()].map((owner) => ({ ...owner }))
   };
 }
@@ -206,6 +210,8 @@ async function restoreRequestCorrelationsOnce(): Promise<void> {
 
   const saved = await readDurable<PersistedCorrelations>(CORRELATIONS_STATE);
   let loaded = false;
+  const complete = saved?.version === CORRELATIONS_STATE_VERSION && saved.complete === true &&
+    Array.isArray(saved.entries) && saved.entries.every((raw) => storedOwner(raw) !== null);
   if (saved && saved.version >= 3 && saved.version <= CORRELATIONS_STATE_VERSION && Array.isArray(saved.entries)) {
     for (const raw of saved.entries.slice(-MAX_CORRELATIONS)) {
       const owner = storedOwner(raw);
@@ -215,6 +221,11 @@ async function restoreRequestCorrelationsOnce(): Promise<void> {
     }
     trim();
   }
+
+  // Version 6 is committed before the browser receives correlation confirmation. It is the
+  // complete owner ledger, so replaying every canonical message shard would add no evidence.
+  // Older snapshots were debounced and require one migration scan to close their crash window.
+  if (complete) return;
 
   // The durable index is a debounced snapshot, while attributed tool-call JSONL is appended
   // independently. A crash can therefore leave a perfectly valid *nonempty* snapshot that is
@@ -260,7 +271,20 @@ async function restoreRequestCorrelationsOnce(): Promise<void> {
   // Also when the snapshot on disk is an older version that held nothing usable: rewriting it
   // is what actually removes its conflict rows, and leaving them there would make every
   // later launch re-read a verdict this registry no longer has.
-  if (byRequest.size > 0 || loaded || (saved?.version ?? CORRELATIONS_STATE_VERSION) !== CORRELATIONS_STATE_VERSION) persist();
+  // Publish the migration boundary before startup admits browser/MCP traffic. Every later new
+  // owner crosses the same barrier in commitRequestCorrelations().
+  await writeDurableNow(CORRELATIONS_STATE, snapshot());
+}
+
+/**
+ * Durable browser-ack boundary for newly proved request owners.
+ *
+ * The synchronous registry remains immediately readable by in-flight MCP calls, while the
+ * browser waits for this exact snapshot before retiring its correlation evidence. This removes
+ * the crash window that previously forced every startup to rescan canonical session history.
+ */
+export async function commitRequestCorrelations(): Promise<void> {
+  await writeDurableNow(CORRELATIONS_STATE, snapshot());
 }
 
 /**

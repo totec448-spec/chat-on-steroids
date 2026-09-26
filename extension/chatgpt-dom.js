@@ -40,7 +40,8 @@ var CLF_DOM = (() => {
   const CONNECTOR = '[data-clf-fiber]';
   const STOP =
     'button[data-testid="stop-button"], button[data-testid="composer-stop-button"], ' +
-    'button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop answering"]';
+    'button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop answering"], ' +
+    'form[data-chatgpt-composer] button[aria-label="Stop"]';
   const SEND = 'button[data-testid="send-button"], form button[aria-label^="Send" i], form[data-chatgpt-composer] button[type="submit"]';
   /** The composer's own trailing controls, where the send and dictation buttons live. */
   const TRAILING =
@@ -73,6 +74,25 @@ var CLF_DOM = (() => {
     const boundary = '\n[[/COS_CONTEXT]]\n\n';
     return value.startsWith(boundary, end) ? identity + value.slice(end + boundary.length) : null;
   }
+  // Presentation fails closed on the reserved transport header. Native Markdown can consume
+  // bytes inside the private prefix before Fiber exposes the exact message source, making its
+  // length-delimited frame temporarily unparsable. Conceal that row without treating it as a
+  // receipt; only an exact complete source may reveal the authored suffix.
+  function userPromptFrameHint(value, rendered = false) {
+    if (typeof value !== 'string') return false;
+    // Inspect only the reserved header's neighbourhood, including provider
+    // punctuation/hard-break escapes. This is concealment, never receipt proof
+    // or authority to rewrite the authored suffix. Matches shared/user-prompt.ts.
+    const normalized = value.replace(/\r\n?/g, '\n').trimStart().slice(0, 400)
+      .replace(/\\\n/g, '\n').replace(/\\([!-/:-@[-`{-~])/g, '$1');
+    // DOM textContent omits native BR/paragraph boundaries. While exact source
+    // is unavailable, its leading reserved marker can conceal, never publish.
+    const identity = rendered
+      ? /^\[\[CLF-(?:HANDOFF|RESUME):[A-Za-z0-9_-]{16,64}\]\](?:\\?\s)*/.exec(normalized)?.[0] ?? ''
+      : promptContinuation(normalized);
+    const header = /^\[\[COS_CONTEXT:\d{1,6}\]\]/.exec(normalized.slice(identity.length));
+    return Boolean(header && (rendered || /^(?:\n|$)/.test(normalized.slice(identity.length + header[0].length))));
+  }
   function presentUserPrompts(readUserText) {
     return safe(() => {
       for (const raw of document.querySelectorAll(`[data-message-author-role="user"] :is(.whitespace-pre-wrap, .markdown):not([data-clf-user-text]), ${SHELL_TURN} [data-content-search-unit-key$=":user"] [data-user-message-bubble] .whitespace-pre-wrap:not([data-clf-user-text])`)) {
@@ -80,14 +100,20 @@ var CLF_DOM = (() => {
         // exact-id source used by receipts/recording, never reconstructed HTML.
         const classic = raw.closest('[data-message-author-role="user"]');
         const holder = classic || raw.closest(SHELL_UNIT), id = messageIdOf(holder);
+        const rendered = messageText(holder, 'user');
         const source = !classic && (!id || !readUserText) ? null : readUserText ? readUserText({ role: 'user', id,
-          node: classic ? raw.closest(TURN) : holder, text: messageText(holder, 'user') }) : raw.textContent;
+          node: classic ? raw.closest(TURN) : holder, text: rendered }) : raw.textContent;
         // The native editor can prepend a blank paragraph to the exact provider
         // source. Ignore that outer whitespace only for display; the frame's
         // internal length/boundary and all receipt/recording bytes stay exact.
         const authored = typeof source === 'string' ? userPromptText(source.trimStart()) : null;
+        // An available exact source is authoritative for the current message.
+        // Rendered text can only conceal while Fiber has not supplied one.
+        const privateFrame = authored !== null || (typeof source === 'string'
+          ? userPromptFrameHint(source)
+          : userPromptFrameHint(rendered, true));
         let display = raw.nextElementSibling?.matches('[data-clf-user-text]') ? raw.nextElementSibling : null;
-        if (authored === null) {
+        if (!privateFrame) {
           raw.removeAttribute('data-clf-prompt-hidden'); display?.remove(); continue;
         }
         if (!display) {
@@ -97,7 +123,13 @@ var CLF_DOM = (() => {
           display.dir = 'auto';
           raw.after(display);
         }
-        if (display.textContent !== authored) display.textContent = authored;
+        // A hint protects private bytes but cannot identify the boundary after native Markdown
+        // has changed their length. Keep a neutral placeholder until the exact source arrives.
+        const visible = authored ?? '…';
+        display.toggleAttribute('data-clf-prompt-pending', authored === null);
+        if (authored === null) display.setAttribute('aria-label', 'Request is loading');
+        else display.removeAttribute('aria-label');
+        if (display.textContent !== visible) display.textContent = visible;
         if (!raw.hasAttribute('data-clf-prompt-hidden')) raw.setAttribute('data-clf-prompt-hidden', '');
       }
     });
@@ -347,6 +379,9 @@ var CLF_DOM = (() => {
     return safe(() => {
       let value = (document.title || '').trim();
       if (!value) return '';
+      // The new shell briefly uses the submitted prompt as its provisional title.
+      // This is transport context, not a provider-authored conversation name.
+      if (userPromptFrameHint(value, true)) return '';
       value = value.replace(/\s*(?:[-|·]\s*)ChatGPT\s*$/i, '').trim();
       if (!value || /^(?:ChatGPT|New chat)$/i.test(value)) return '';
       return value.slice(0, 200);
@@ -656,27 +691,37 @@ var CLF_DOM = (() => {
       return current.length === files.length && current.every(node => files.includes(node)) &&
         !host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]');
     };
+    const removeAttachments = async () => {
+      if (!ownsAttachments() || !host) return false;
+      const current = [...host.querySelectorAll('button[aria-label]')].filter(node => composerFileName(node));
+      if (current.length !== files.length || current.some(node => !files.includes(node)) ||
+          host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]')) return false;
+      for (const node of current) {
+        if (!same() || !node.isConnected) return false;
+        node.click();
+      }
+      if (current.length) await new Promise(resolve => {
+        let observer, timer;
+        const finish = () => { observer?.disconnect(); clearTimeout(timer); resolve(); };
+        const check = () => { if (!same() || !hasComposerAttachments()) finish(); };
+        observer = new MutationObserver(check);
+        observer.observe(host, { childList: true, subtree: true, attributes: true });
+        timer = setTimeout(finish, 1500); check();
+      });
+      return same() && !hasComposerAttachments();
+    };
     return {
       attachments(nodes) { if (same()) files = [...nodes]; },
       current: ownsAttachments,
       async clear() {
-        if (!ownsAttachments() || !host) return false;
-        const current = [...host.querySelectorAll('button[aria-label]')].filter(node => composerFileName(node));
-        if (current.length !== files.length || current.some(node => !files.includes(node)) ||
-            host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]')) return false;
-        for (const node of current) {
-          if (!same() || !node.isConnected) return false;
-          node.click();
-        }
-        if (current.length) await new Promise(resolve => {
-          let observer, timer;
-          const finish = () => { observer?.disconnect(); clearTimeout(timer); resolve(); };
-          const check = () => { if (!same() || !hasComposerAttachments()) finish(); };
-          observer = new MutationObserver(check);
-          observer.observe(host, { childList: true, subtree: true, attributes: true });
-          timer = setTimeout(finish, 1500); check();
-        });
-        return same() && !hasComposerAttachments() && clearPromptExact(value);
+        return await removeAttachments() && clearPromptExact(value);
+      },
+      async restoreAuthored(next) {
+        if (typeof next !== 'string' || !await removeAttachments() || !same()) return false;
+        // Authority was proved against the original exact text/editor immediately
+        // before this one native replacement. insertPrompt rechecks the editor,
+        // focus and selection; a user edit or React remount therefore wins.
+        return insertPrompt(next, true);
       },
       dispose() { for (const name of events) host?.removeEventListener(name, changed, true); }
     };
@@ -701,7 +746,7 @@ var CLF_DOM = (() => {
   /** Stop is a busy hint only; the exact provider terminal still owns turn completion. */
   function generating() {
     return safe(() => {
-      if (nativeComposerControls(STOP).length > 0) return true;
+      if (stopControls().length > 0) return true;
       // Historical interrupted exchanges can retain in_progress forever. Only the
       // latest native response can describe this composer's current generation.
       const latest = [...document.querySelectorAll(SHELL_TURN)].filter(node =>
@@ -710,9 +755,26 @@ var CLF_DOM = (() => {
     }, false);
   }
 
+  // The current shell localizes Stop and omits test ids. Its primary composer
+  // button uses this exact square, unlike Send's arrow and Voice's four paths.
+  // Observed live 2026-09-25; adapted from #405. Keep explicit selectors first
+  // and fail closed if the unlabelled structure changes, rather than guess.
+  const STOP_SQUARE_PATH = 'M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z';
+  function stopControls() {
+    const labelled = nativeComposerControls(STOP);
+    if (labelled.length) return labelled;
+    const form = composer()?.closest('form');
+    if (!form) return [];
+    return [...form.querySelectorAll('button[type="button"].size-token-button-composer.bg-composer-primary')].filter(button => {
+      if (!renderedComposerNode(button) || button.closest('form') !== form || button.hasAttribute('data-state')) return false;
+      const paths = button.querySelectorAll('svg path');
+      return paths.length === 1 && paths[0].getAttribute('d') === STOP_SQUARE_PATH;
+    });
+  }
+
   function stopButton() {
     return safe(() => {
-      const buttons = nativeComposerControls(STOP);
+      const buttons = stopControls();
       return buttons.length === 1 ? buttons[0] : null;
     }, null);
   }
@@ -2066,8 +2128,15 @@ var CLF_DOM = (() => {
     }
   }
 
-  /** Native ChatGPT photo input, observed as #upload-photos. Sending waits for every tile. */
+  /** Native attachment identity from the composer's exact tile/remove control. */
   function composerFileName(button) {
+    const tile = button.closest('[data-composer-attachments] [role="button"][aria-label]');
+    if (tile && tile !== button) {
+      const name = tile.getAttribute('aria-label');
+      const actions = [...tile.querySelectorAll('button')];
+      if (name && actions.length === 1 && actions[0] === button &&
+          [...tile.querySelectorAll('img[alt]')].some(image => image.getAttribute('alt') === name)) return name;
+    }
     const group = button.closest('[role="group"][aria-label]');
     if (group?.querySelector('[data-default-action="true"] button')) {
       const actions = [...group.querySelectorAll('button')].filter(node => !node.closest('[data-default-action="true"]'));
@@ -2086,7 +2155,6 @@ var CLF_DOM = (() => {
   }
   /** Observed ChatGPT Plugins settings surface. Missing/ambiguous structure is not proof. */
   async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
-    const externalPlugins = connectorName === 'Chat On Steroids Plugins';
     const snapshot = await new Promise(resolve => {
       const nonce = crypto.randomUUID();
       const finish = value => { clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); };
@@ -2099,7 +2167,7 @@ var CLF_DOM = (() => {
     });
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash);
     if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : snapshot.connectorName !== connectorName) ||
-        !Array.isArray(snapshot.tools) || (snapshot.tools.length < 1 && !externalPlugins) || snapshot.tools.length > (externalPlugins ? 257 : 16) || JSON.stringify(snapshot.tools).length > 300000 ||
+        !Array.isArray(snapshot.tools) || snapshot.tools.length > 257 || JSON.stringify(snapshot.tools).length > 300000 ||
         snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
         new Set(snapshot.tools.map(tool => tool.name)).size !== snapshot.tools.length) return null;
     const buttons = [...document.querySelectorAll('button[data-clf-plugin-refresh]')].filter(button => button.getAttribute('data-clf-plugin-refresh') === snapshot.appId && button.getClientRects().length > 0);
@@ -2126,7 +2194,12 @@ var CLF_DOM = (() => {
     if (files.length) images = [...(images || []), ...files];
     if (!images?.length) return true;
     if (!Array.isArray(images) || images.length > 20 || !stillCurrent() || hasComposerAttachments()) return false;
-    const input = document.querySelector(files.length ? 'input#upload-files[type="file"]' : 'input#upload-photos[type="file"][accept="image/*"]');
+    // The current shell uses React-generated ids. Elect by the native upload kind
+    // inside this exact composer's form; a second matching input is ambiguous.
+    const host = composerBox();
+    const candidates = [...(host?.querySelectorAll('input[type="file"]') || [])].filter(node =>
+      !node.disabled && (files.length ? !node.accept : node.accept === 'image/*'));
+    const input = candidates.length === 1 ? candidates[0] : null;
     if (!input) return false;
     const priorTiles = new Set((composerBox() || composerActions()?.host)?.querySelectorAll('button[aria-label]') || []);
     const transfer = new DataTransfer();
@@ -2535,6 +2608,7 @@ var CLF_DOM = (() => {
     turnIdOf,
     messageIdOf,
     userPromptText,
+    userPromptFrameHint,
     userMessageReaction,
     presentUserPrompts,
     composerVisible,

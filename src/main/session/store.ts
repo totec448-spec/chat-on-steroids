@@ -36,7 +36,8 @@ import type {
   SessionEvent,
   SessionOrigin,
   SessionSummary,
-  StoredText
+  StoredText,
+  ToolEditReview
 } from '../../shared/session.js';
 import { continuationMarkerOf, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
 import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline,
@@ -74,6 +75,8 @@ const MAX_LISTED_SESSIONS = 200;
 const MAX_SCANNED_SESSIONS = 5_000;
 /** Keep the uncapped authoritative scan fast without opening thousands of files at once. */
 const ATTACHMENT_CATALOG_READ_CONCURRENCY = 64;
+/** Small shard reads are latency-bound on Windows; keep parallelism bounded to avoid I/O bursts. */
+const CANONICAL_SHARD_READ_CONCURRENCY = 8;
 
 let root = '';
 /**
@@ -177,6 +180,8 @@ interface OpenSession {
   activityHydrated: boolean;
   /** Serialises appends so two events can never interleave inside one line. */
   queue: Promise<void>;
+  /** An append failed and its durable outcome could not yet be read. */
+  recoveryRequired?: boolean;
   /** Canonical messages and background calls, replaced by stable message/call identity. */
   messages: Map<string, CanonicalEvent>;
   metaDirty: boolean;
@@ -376,8 +381,30 @@ async function writeMeta(entry: OpenSession): Promise<void> {
   entry.metaDirty = false;
 }
 
+/** Runs only inside the existing per-session queue, before another mutation can use nextSeq. */
+async function reconcileSessionEntry(entry: OpenSession): Promise<void> {
+  if (!entry.recoveryRequired) return;
+  const id = entry.summary.id;
+  await sealTornTail(id);
+  const snapshot = await readDurableSnapshot(id);
+  if (!snapshot) throw new Error(`Session ${id} has no recoverable metadata or history`);
+  entry.summary = snapshot.summary;
+  entry.messages = snapshot.messages;
+  entry.historySeq = snapshot.historySeq;
+  entry.nextSeq = snapshot.historySeq + 1;
+  entry.tail = [];
+  entry.tailFrom = entry.nextSeq;
+  entry.activityHydrated = false;
+  entry.metaDirty = false;
+  entry.recoveryRequired = false;
+  publishCachedSummary(entry.summary, false);
+}
+
 function enqueueSessionOperation<T>(entry: OpenSession, label: string, operation: () => Promise<T>): Promise<T> {
-  const work = entry.queue.then(operation);
+  const work = entry.queue.then(async () => {
+    await reconcileSessionEntry(entry);
+    return operation();
+  });
   entry.queue = work.then(
     () => undefined,
     (err: Error) => logError(`session ${label} failed: ${err.message}`)
@@ -501,35 +528,40 @@ export async function createSession(options: {
 
 /** Reads the highest seq already on disk, so a restart never reuses a number. */
 async function lastSeqOnDisk(id: string): Promise<number> {
+  const file = path.join(sessionDir(id), 'events.jsonl');
+  const stat = await fs.stat(file).catch(error => {
+    if (missingSessionFile(error)) return null;
+    throw error;
+  });
+  if (!stat) return 0;
+  // One valid event line may be almost MAX_LINE_BYTES and a crash can leave another
+  // almost-full torn line after it. Read enough for both, otherwise the only parseable
+  // predecessor can sit outside the tail window and restart would reuse sequence 1.
+  const from = Math.max(0, stat.size - (MAX_LINE_BYTES * 2 + 2));
+  const handle = await fs.open(file, 'r');
   try {
-    const file = path.join(sessionDir(id), 'events.jsonl');
-    const stat = await fs.stat(file);
-    // One valid event line may be almost MAX_LINE_BYTES and a crash can leave another
-    // almost-full torn line after it. Read enough for both, otherwise the only parseable
-    // predecessor can sit outside the tail window and restart would reuse sequence 1.
-    const from = Math.max(0, stat.size - (MAX_LINE_BYTES * 2 + 2));
-    const handle = await fs.open(file, 'r');
-    try {
-      const buffer = Buffer.alloc(stat.size - from);
-      await handle.read(buffer, 0, buffer.length, from);
-      const lines = buffer.toString('utf8').split('\n');
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i]?.trim();
-        if (!line) continue;
-        try {
-          const parsed = JSON.parse(line) as SessionEvent;
-          if (typeof parsed.seq === 'number') return parsed.seq;
-        } catch {
-          // A torn final line is expected after a crash; keep looking backwards.
-        }
+    const buffer = Buffer.alloc(stat.size - from);
+    await handle.read(buffer, 0, buffer.length, from);
+    const lines = buffer.toString('utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]?.trim();
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line) as SessionEvent;
+        if (typeof parsed.seq === 'number') return parsed.seq;
+      } catch {
+        // A torn final line is expected after a crash; keep looking backwards.
       }
-    } finally {
-      await handle.close();
     }
-  } catch {
-    // No file yet, or unreadable: start from zero and let the append recreate it.
+  } finally {
+    await handle.close();
   }
   return 0;
+}
+
+function missingSessionFile(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
 /**
@@ -554,8 +586,8 @@ async function sealTornTail(id: string): Promise<void> {
     }
     await fs.appendFile(file, '\n', 'utf8');
     logWarn(`session ${id}: sealed an unterminated final line before appending`);
-  } catch {
-    // No file yet, or unreadable: the append will recreate it.
+  } catch (error) {
+    if (!missingSessionFile(error)) throw error;
   }
 }
 
@@ -575,33 +607,39 @@ async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void):
       out.set(key, event);
     }
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      logWarn(`session ${id}: canonical message file unreadable; legacy event log remains available`);
-    }
+    if (!missingSessionFile(err) && !(err instanceof SyntaxError)) throw err;
+    if (err instanceof SyntaxError) logWarn(`session ${id}: canonical message file damaged; legacy event log remains available`);
   }
   // Incremental shards overlay the legacy whole-map snapshot. This makes migration lazy:
   // the first post-upgrade revision writes only its own logical message, while untouched
   // history remains readable from messages.json.
   const shards = path.join(sessionDir(id), 'messages');
-  try {
-    const names = await fs.readdir(shards);
-    for (const name of names) {
-      if (!/^[0-9a-f]{64}\.json$/.test(name)) continue;
+  const names = (await fs.readdir(shards).catch(error => {
+    if (missingSessionFile(error)) return [];
+    throw error;
+  })).filter(name => /^[0-9a-f]{64}\.json$/.test(name));
+  // Reading thousands of tiny shards serially made the one-time correlation migration spend
+  // tens of seconds in Windows filesystem latency. Eight bounded reads overlap that latency
+  // without opening every shard file at once or changing validation/publication order.
+  for (let offset = 0; offset < names.length; offset += CANONICAL_SHARD_READ_CONCURRENCY) {
+    const batch = await Promise.all(names.slice(offset, offset + CANONICAL_SHARD_READ_CONCURRENCY).map(async name => {
+      // Enumerated history must be readable before publishing a reconstructed checkpoint.
+      const raw = await fs.readFile(path.join(shards, name), 'utf8');
       try {
-        const raw = await fs.readFile(path.join(shards, name), 'utf8');
-        if (Buffer.byteLength(raw, 'utf8') > MAX_CANONICAL_MESSAGE_BYTES) continue;
+        if (Buffer.byteLength(raw, 'utf8') > MAX_CANONICAL_MESSAGE_BYTES) return null;
         const event = JSON.parse(raw) as CanonicalEvent;
         const key = messageKey(event);
-        if (!key) continue;
+        if (!key) return null;
         const expectedName = `${createHash('sha256').update(key).digest('hex')}.json`;
-        if (expectedName !== name) continue;
-        out.set(key, event);
+        return expectedName === name ? [key, event] as const : null;
       } catch {
-        logWarn(`session ${id}: ignored unreadable canonical message shard ${name}`);
+        logWarn(`session ${id}: ignored damaged canonical message shard ${name}`);
+        return null;
       }
+    }));
+    for (const entry of batch) {
+      if (entry) out.set(entry[0], entry[1]);
     }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') logWarn(`session ${id}: canonical message shards unreadable`);
   }
   // Older builds persisted reload timestamp aliases as separate shards. Project
   // those exact provider UUIDs as one message without deleting forensic history.
@@ -684,7 +722,10 @@ async function rebuildSummaryFromHistory(
         conversationId: event.call.conversationId, attribution: event.call.attribution } } : {}) });
   };
   let carry = Buffer.alloc(0);
-  const handle = await fs.open(path.join(sessionDir(id), 'events.jsonl'), 'r').catch(() => null);
+  const handle = await fs.open(path.join(sessionDir(id), 'events.jsonl'), 'r').catch(error => {
+    if (missingSessionFile(error)) return null;
+    throw error;
+  });
   const accept = (line: Buffer): void => {
     if (line.length === 0 || line.length > MAX_LINE_BYTES) return;
     try {
@@ -871,7 +912,10 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
 
 async function readAuthoritativeSummary(id: string): Promise<SessionSummary | null> {
   const live = open.get(id);
-  if (live) return live.summary;
+  if (live) {
+    if (live.recoveryRequired) await enqueueSessionOperation(live, 'recovery', async () => undefined);
+    return live.summary;
+  }
   const becomingLive = opening.get(id);
   if (becomingLive) return (await becomingLive).summary;
   const snapshot = await readDurableSnapshot(id);
@@ -1066,6 +1110,7 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
     // Keep the append-only journal authoritative: nothing in memory advances until the line
     // is on disk.
     const write = entry.queue.then(async () => {
+      await reconcileSessionEntry(entry);
       let admitted = event;
       if (event.kind === 'tool_call') {
         const denied = deniedAssetIds(sessionId, event.call.assets);
@@ -1094,8 +1139,17 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
         // reached disk before the promise rejected. Reconcile the authoritative tail before
         // another queued writer is admitted. A complete line is treated as committed; a torn
         // line is sealed and the normal browser/MCP retry may safely reuse that absent seq.
-        await sealTornTail(sessionId);
-        const durableSeq = await lastSeqOnDisk(sessionId);
+        entry.recoveryRequired = true;
+        let durableSeq: number;
+        try {
+          await sealTornTail(sessionId);
+          durableSeq = await lastSeqOnDisk(sessionId);
+        } catch {
+          // Preserve the original write error. The existing queue must reconcile the
+          // durable snapshot before any later writer can reuse this uncertain sequence.
+          throw error;
+        }
+        entry.recoveryRequired = false;
         if (durableSeq < full.seq) {
           entry.nextSeq = Math.max(entry.nextSeq, durableSeq + 1);
           throw error;
@@ -1139,6 +1193,7 @@ export function upsertMessageEvent(
   if (!directKey) throw new Error('Canonical message update requires ChatGPT messageId');
   return ensureOpen(sessionId).then((entry) => {
     const write = entry.queue.then(async () => {
+      await reconcileSessionEntry(entry);
       // Provider create_time can change after a tab reload while the actual message
       // UUID stays identical. Preserve the first canonical anchor on that exact
       // evidence; never collapse distinct authored segments by working-turn tuple
@@ -1352,6 +1407,7 @@ export function upsertNativeImageEvent(
   if (!key) throw new Error('Canonical native image requires provider message and asset ids');
   return ensureOpen(sessionId).then((entry) => {
     const write = entry.queue.then(async () => {
+      await reconcileSessionEntry(entry);
       const candidate = entry.messages.get(key);
       const previous = candidate?.kind === 'native_image' ? candidate : undefined;
       if (candidate && !previous) throw new Error('Canonical native image identity collision');
@@ -1662,20 +1718,29 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   const revision = entry.nextSeq;
   if (entry.summary.conversationId !== conversationId) return null;
   const [recent, questions] = await Promise.all([
-    readRecentEventsFromDisk(sessionId, 256, { kinds: ['turn_start', 'turn_end', 'user_message', 'assistant_message', 'tool_call', 'page_tool'] }),
+    readRecentEventsFromDisk(sessionId, 256, { kinds: ['turn_start', 'turn_end', 'user_message', 'assistant_message', 'native_image', 'tool_call', 'page_tool'] }),
     readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true,
       before: Infinity, acceptEvent: event => !injectedUserMessage(event, entry.summary.timelineTurns) })
   ]);
   if (entry.nextSeq !== revision || entry.summary.conversationId !== conversationId) return null;
   const sameTurn = (left: string | null | undefined, right: string | null | undefined) => !!left && !!right &&
     responseTurnId(entry.summary.timelineTurns, left) === responseTurnId(entry.summary.timelineTurns, right);
-  const final = recent.findLast(event => event.kind === 'assistant_message' && event.final === true &&
+  // Pixels/media alone are not completion. Require the provider's exact terminal
+  // message on a completed lifecycle boundary and its matching recorded image.
+  // These facts may arrive in either batch; never manufacture assistant prose.
+  const imageEnd = (event: SessionEvent) => event.kind === 'turn_end' && event.outcome === 'completed' &&
+    !!event.providerMessageId && !!event.turnId && (!turnId || sameTurn(event.turnId, turnId)) &&
+    recent.some(image => image.kind === 'native_image' && image.messageId === event.providerMessageId &&
+      image.providerStatus === 'finished_successfully' && sameTurn(image.turnId, event.turnId));
+  const final = recent.findLast(event => imageEnd(event) || (event.kind === 'assistant_message' && event.final === true &&
     (!!event.message.text.trim() || !!event.providerMessageId) && !!event.messageId && (!turnId || event.turnId === turnId ||
       (!!event.providerMessageId && sameTurn(event.turnId, turnId)) ||
-      (turnId.startsWith('reply:') && event.messageId === turnId.slice(6))));
-  if (!final || final.kind !== 'assistant_message' || !final.messageId) return null;
-  const seq = final.finalContentSeq ?? positionOf(final);
-  const completedAt = final.finalObservedAt ?? final.time;
+      (turnId.startsWith('reply:') && event.messageId === turnId.slice(6)))));
+  if (!final || (final.kind !== 'assistant_message' && final.kind !== 'turn_end')) return null;
+  const messageId = final.kind === 'turn_end' ? final.providerMessageId : final.messageId;
+  if (!messageId) return null;
+  const seq = final.kind === 'turn_end' ? positionOf(final) : final.finalContentSeq ?? positionOf(final);
+  const completedAt = final.kind === 'turn_end' ? final.time : final.finalObservedAt ?? final.time;
   const question = questions[0];
   const correction = (event: SessionEvent) => isTurnCorrection(event, final.turnId, entry.summary.timelineTurns) && positionOf(event) < seq;
   if (question && positionOf(question) >= positionOf(final) && !correction(question)) return null;
@@ -1695,7 +1760,7 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
       // request or conflicting generation is fresh work, not a trailing result.
       const owner = event.source === 'mcp' && event.call.attribution === 'request_id'
         ? recordedRequestTurn(entry.summary.requestTurns, event.call.requestId, conversationId) : undefined;
-      return !(final.providerMessageId && final.state === 'final' && owner && owner.origin < seq &&
+      return !(final.providerMessageId && (final.kind === 'turn_end' || final.state === 'final') && owner && owner.origin < seq &&
         sameTurn(owner.turnId, final.turnId) && event.call.conversationId === conversationId &&
         (!event.turnId || sameTurn(event.turnId, final.turnId)));
     }
@@ -1704,7 +1769,8 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
     if (event.kind === 'user_message') return !correction(event);
     return event.kind === 'assistant_message' || event.kind === 'page_tool';
   })) return null;
-  return { messageId: final.messageId, turnId: final.turnId ?? null, completedAt, contentSeq: seq, text: final.message.text };
+  return { messageId, turnId: final.turnId ?? null, completedAt, contentSeq: seq,
+    text: final.kind === 'turn_end' ? '' : final.message.text };
 }
 
 /** Recorded local execution, not a native tool label or a request-id sighting alone. */
@@ -1945,6 +2011,28 @@ export async function readHydratedActivityCall(
   });
 }
 
+/** Retrieves one immutable, bounded edit artifact by its durable session/call/index identity. */
+export async function readToolEditReview(sessionId: string, callId: string, changeIndex: number): Promise<ToolEditReview | null> {
+  assertSessionId(sessionId);
+  if (!/^[0-9a-f-]{36}$/i.test(callId) || !Number.isSafeInteger(changeIndex) || changeIndex < 0 || changeIndex >= 64) return null;
+  await flushSession(sessionId);
+  const [event] = await readRecentEventsFromDisk(sessionId, 1, {
+    kinds: ['tool_call'], before: Number.POSITIVE_INFINITY,
+    acceptEvent: value => value.kind === 'tool_call' && value.call.callId === callId
+  });
+  if (event?.kind !== 'tool_call' || event.call.callId !== callId) return null;
+  const change = event.call.changes?.[changeIndex];
+  if (!change?.reviewAssetId) return null;
+  const data = await readAsset(sessionId, change.reviewAssetId, 512 * 1024);
+  if (!data) return null;
+  try {
+    const parsed = JSON.parse(data.toString('utf8')) as { before?: unknown; after?: unknown };
+    if (typeof parsed.before !== 'string' || typeof parsed.after !== 'string') return null;
+    return { callId, changeIndex, path: change.path, added: change.added, removed: change.removed,
+      baseText: parsed.before, currentText: parsed.after };
+  } catch { return null; }
+}
+
 /**
  * Atomically keeps only the supplied tool calls in an Unattributed activity session.
  *
@@ -1963,6 +2051,7 @@ export async function rewriteUnattributedToolCalls(
   assertSessionId(sessionId);
   const entry = await ensureOpen(sessionId);
   const rewrite = entry.queue.then(async () => {
+    await reconcileSessionEntry(entry);
     if (entry.summary.conversationId !== null || entry.summary.title !== 'Unattributed activity') {
       throw new Error(`Session ${sessionId} is not an Unattributed activity bucket`);
     }
@@ -2160,20 +2249,22 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
 
 async function readMetaCheckpoint(id: string): Promise<MetaCheckpoint | null> {
   const dir = sessionDir(id);
-  try {
-    const primary = normalizeSummary(id, await fs.readFile(path.join(dir, 'meta.json'), 'utf8'));
-    if (primary) return primary;
-  } catch {
-    // Try the last validated checkpoint below.
-  }
-  try {
-    const backup = normalizeSummary(id, await fs.readFile(path.join(dir, 'meta.backup.json'), 'utf8'));
-    if (backup) {
-      logWarn(`session ${id}: primary meta.json unreadable; using the last validated checkpoint`);
-      return backup;
+  const read = async (name: string): Promise<MetaCheckpoint | null> => {
+    try {
+      return normalizeSummary(id, await fs.readFile(path.join(dir, name), 'utf8'));
+    } catch (error) {
+      // Missing/damaged bytes can use the validated backup. An I/O failure cannot:
+      // it may hide a newer rebind which the backup predates.
+      if (missingSessionFile(error)) return null;
+      throw error;
     }
-  } catch {
-    // No recovery checkpoint.
+  };
+  const primary = await read('meta.json');
+  if (primary) return primary;
+  const backup = await read('meta.backup.json');
+  if (backup) {
+    logWarn(`session ${id}: primary meta.json missing or damaged; using the last validated checkpoint`);
+    return backup;
   }
   logWarn(`session ${id}: no valid metadata projection; refusing to treat it as an empty session`);
   return null;
@@ -2206,7 +2297,9 @@ async function readCatalogSummary(id: string): Promise<SessionSummary | null> {
       }));
       if (metadata.mtimeMs > 0 && mutations.every(at => at < metadata.mtimeMs)) return checkpoint.summary;
     }
-  } catch { /* Existing full reconstruction owns missing/corrupt/uncertain checkpoints. */ }
+  } catch (error) {
+    if (!missingSessionFile(error)) throw error;
+  }
   return (await readDurableSnapshot(id))?.summary ?? null;
 }
 
@@ -2326,7 +2419,9 @@ async function ensureAttachmentCatalog(): Promise<AttachmentCatalog> {
         const summaries = await Promise.all(
           candidates.slice(offset, offset + ATTACHMENT_CATALOG_READ_CONCURRENCY).map(async (name) => {
             const live = open.get(name);
-            return live?.summary ?? await readCatalogSummary(name).catch(() => null);
+            // A partial index cannot prove absence or uniqueness of a conversation owner.
+            // Reject this pass; its existing single-flight is released for the next caller.
+            return live?.summary ?? await readCatalogSummary(name);
           })
         );
         for (const summary of summaries) if (summary) indexSummary(catalog, summary);
@@ -2519,7 +2614,7 @@ export async function findSessionByConversation(
   }
   const current = (
     await Promise.all(
-      [...currentIds].map((id) => getSession(id).catch(() => null))
+      [...currentIds].map((id) => getSession(id))
     )
   )
     .filter((summary): summary is SessionSummary => summary?.conversationId === conversationId)
@@ -2545,7 +2640,7 @@ export async function findSessionByConversation(
   }
   const historical = (
     await Promise.all(
-      [...historicalIds].map((id) => getSession(id).catch(() => null))
+      [...historicalIds].map((id) => getSession(id))
     )
   )
     .filter((summary): summary is SessionSummary => summary?.chatIds.includes(conversationId) === true)

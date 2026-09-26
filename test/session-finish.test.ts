@@ -310,7 +310,7 @@ describe('session finish turn identity', () => {
     const progress = await readRecentEvents(sessionId, 100, { kinds: ['progress'] });
     const release = progress.find(event => event.kind === 'progress' && event.progressId === 'finish-release:turn-one');
     expect(release).toMatchObject({ message: { text: expect.stringContaining('Stop requested.') } });
-    expect(release).toMatchObject({ message: { text: expect.stringContaining('has not yet confirmed') } });
+    expect(release).toMatchObject({ message: { text: 'Stop requested. The finish hold was released.' } });
     expect(JSON.stringify(release)).not.toContain('write its final answer');
     expect((await getSession(sessionId))?.activeTurnId).toBe('turn-one');
     expect(await sessionFinishHeld(sessionId, 'turn-one', hooks.caller.conversationId)).toBe(false);

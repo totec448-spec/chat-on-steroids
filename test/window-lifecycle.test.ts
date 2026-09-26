@@ -15,7 +15,7 @@ import {
 describe('native window activation', () => {
   it.each(['darwin', 'win32', 'linux'])('keeps native fullscreen available on macOS (%s)', (platform) => {
     const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
-    const constructor = source.slice(source.indexOf('  window = new BrowserWindow({'), source.indexOf("  if (process.platform === 'win32') window.removeMenu();"))
+    const constructor = source.slice(source.indexOf('  window = new BrowserWindow({'), source.indexOf('  attachBrowserUseWindow(window);'))
       .replace(' as const', '');
     let options: Record<string, unknown> | undefined;
     vm.runInNewContext(constructor, {

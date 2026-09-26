@@ -26,7 +26,12 @@ type Options = {
   saveDraft: (authored: string) => void;
   list: (scope: SkillsDraftScope) => Promise<Reply<SkillLibrary>>;
   command?: (name: string) => void;
+  commandAvailable?: (name: string) => boolean;
+  deferCommand?: (name: string) => boolean;
 };
+
+/** Marks a textarea projection that consumed a composer control, not authored text. */
+export const COMPOSER_COMMAND_PROJECTION = Symbol('composer-command-projection');
 
 function split(text: string): ReturnType<typeof skillDirectives> {
   try { return skillDirectives(text); }
@@ -67,10 +72,12 @@ export function initSkills(options: Options) {
     selectedHost.hidden = !ids.length;
     const catalog = cache.get(scopeKey());
     for (const id of ids) {
-      const skill = catalog?.skills.find(row => row.id === id);
-      const name = skill ? title(skill) : id;
+      const command = id === 'compact';
+      const skill = command ? undefined : catalog?.skills.find(row => row.id === id);
+      const name = command ? t('Compact') : skill ? title(skill) : id;
       const chip = el('div', 'composer-selected-skill'); chip.dataset.skillId = id;
-      chip.title = skill?.path ?? `/${id}`;
+      if (command) chip.dataset.command = id;
+      chip.title = command ? t('Compact this chat and resume it in a fresh conversation.') : skill?.path ?? `/${id}`;
       const remove = control('Remove', 'composer-selected-skill-remove'); remove.replaceChildren(icon('i-x'));
       ui(remove, 'aria-label', () => t('Remove {0}', [name]));
       const owner = options.owner();
@@ -80,7 +87,7 @@ export function initSkills(options: Options) {
         project(`${retained.map(value => `/${value}\n`).join('')}${input.value}`);
         input.focus();
       });
-      chip.append(icon('i-skill', 'ico composer-selected-skill-icon'), el('span', 'composer-selected-skill-title', name), remove);
+      chip.append(icon(command ? 'i-copy' : 'i-skill', 'ico composer-selected-skill-icon'), el('span', 'composer-selected-skill-title', name), remove);
       selectedHost.append(chip);
     }
   };
@@ -90,11 +97,14 @@ export function initSkills(options: Options) {
     displayedPrefix = draft.prefix; prefixOwner = options.owner(); input.value = draft.body;
     renderSelected();
   };
-  const project = (authored: string): void => {
+  const project = (authored: string, source: 'authored' | 'command' = 'authored'): void => {
     options.saveDraft(authored);
     const draft = split(authored); displayedPrefix = draft.prefix; prefixOwner = options.owner(); input.value = draft.body;
     renderSelected(); input.setSelectionRange(input.value.length, input.value.length);
-    input.dispatchEvent(new input.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+    const view = input.ownerDocument.defaultView!;
+    input.dispatchEvent(source === 'command'
+      ? new view.CustomEvent('input', { bubbles: true, detail: COMPOSER_COMMAND_PROJECTION })
+      : new view.Event('input', { bubbles: true }));
   };
   const choose = (skill: typeof choices[number]): void => {
     if ('command' in skill) {
@@ -102,7 +112,13 @@ export function initSkills(options: Options) {
       if (!current() || !range || painted !== selectionKey() || composing) { close(); return; }
       const text = range ? input.value.slice(0, range.start) + input.value.slice(range.end) : input.value;
       const authored = (prefixOwner === options.owner() ? displayedPrefix : '') + text;
-      close(); project(authored); options.command?.(skill.command); input.focus(); return;
+      if (options.deferCommand?.(skill.command)) {
+        const draft = split(authored);
+        const prefix = draft.ids.includes(skill.command) ? draft.prefix
+          : `${draft.prefix}${draft.prefix && !/\s$/.test(draft.prefix) ? '\n' : ''}/${skill.command}\n`;
+        close(); project(prefix + draft.body); input.focus(); return;
+      }
+      close(); project(authored, 'command'); options.command?.(skill.command); input.focus(); return;
     }
     if (!current() || composing) { close(); return; }
     const range = fragment();
@@ -127,9 +143,20 @@ export function initSkills(options: Options) {
       { command: 'goal', name: 'Goal', description: 'Pursue a saved objective and stop when it is complete.', glyph: 'i-target' },
       { command: 'loop', name: 'Loop', description: 'Keep continuing toward the saved objective.', glyph: 'i-loop' },
       { command: 'compact', name: 'Compact', description: 'Compact this chat and resume it in a fresh conversation.', glyph: 'i-copy' }
-    ].filter(row => row.command.includes(query)) : [];
-    choices = [...commands, ...(loading && !library ? [] : filtered(query).slice(0, 64))];
+    ].filter(row => row.command.includes(query) && (options.commandAvailable?.(row.command) ?? true)) : [];
+    const matchingSkills = loading && !library ? [] : filtered(query).slice(0, 64);
+    choices = [...commands, ...matchingSkills];
     selected = Math.min(selected, Math.max(0, choices.length - 1)); painted = selectionKey();
+    const exact = query && !loading && !commands.some(row => row.command === query)
+      ? library?.skills.find(skill => skill.id.toLocaleLowerCase() === query)
+      : undefined;
+    const hasLongerId = exact && library?.skills.some(skill => {
+      const id = skill.id.toLocaleLowerCase();
+      return id !== query && id.startsWith(query);
+    });
+    // An unambiguous, fully typed /id has the same meaning as choosing that
+    // row. Project it immediately so consecutive directives become chips.
+    if (exact && !hasLongerId) { choose(exact); return; }
     const renderEpoch = epoch, renderOwner = options.owner(), renderSelection = selectionKey();
     const chooseCurrent = (choice: typeof choices[number]): void => {
       if (epoch === renderEpoch && options.owner() === renderOwner && selectionKey() === renderSelection) choose(choice);
@@ -147,7 +174,12 @@ export function initSkills(options: Options) {
       row.append(icon(command ? skill.glyph : 'i-skill', 'ico slash-menu-icon'), copy, el('span', 'slash-menu-meta', () => command ? '' : scopeLabel(skill)));
       row.addEventListener('pointerdown', event => event.preventDefault()); row.addEventListener('click', () => chooseCurrent(skill)); host.append(row);
     }
-    if (error) host.append(el('p', 'slash-menu-empty', error));
+    const stateMessage = error ? error : loading && !library ? t('Loading skills…')
+      : !choices.length ? (query ? t('No matches for “{0}”.', [`/${query}`]) : t('No skills available.')) : '';
+    if (stateMessage) {
+      const state = el('p', 'slash-menu-empty', stateMessage);
+      state.setAttribute('role', error ? 'alert' : 'status'); host.append(state);
+    }
     if (choices.length) { input.setAttribute('aria-activedescendant', `skill-option-${selected}`); host.querySelector(`#skill-option-${selected}`)?.scrollIntoView?.({ block: 'nearest' }); }
     else input.removeAttribute('aria-activedescendant');
   };
@@ -200,7 +232,13 @@ export function initSkills(options: Options) {
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !event.isComposing && !host.hidden) { hideInline(); input.focus(); }
   });
-  return { close, restore, authoredText, keydown: (event: KeyboardEvent): boolean => {
+  const hasCommand = (name: string): boolean => split(prefixOwner === options.owner() ? displayedPrefix : '').ids.includes(name);
+  const removeCommand = (name: string): void => {
+    if (prefixOwner !== options.owner()) return;
+    const retained = split(displayedPrefix).ids.filter(value => value !== name);
+    project(`${retained.map(value => `/${value}\n`).join('')}${input.value}`);
+  };
+  return { close, restore, authoredText, hasCommand, removeCommand, keydown: (event: KeyboardEvent): boolean => {
     if (host.hidden || !current() || composing || event.isComposing) return false;
     if (!fragment() || painted !== selectionKey()) { hideInline(); return false; }
     if (event.key === 'Escape') { hideInline(); event.preventDefault(); return true; }

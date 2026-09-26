@@ -6,6 +6,8 @@ const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const output = process.argv[2] ? path.resolve(root, process.argv[2]) : path.join(root, '.tmp/message-send-20260918/ui');
 app.setPath('userData', path.join(output, 'runtime'));
+// This fixture owns geometry and input custody; focused renderer tests own reveal pacing.
+app.commandLine.appendSwitch('force-prefers-reduced-motion');
 
 app.whenReady().then(async () => {
   const { createServer } = await import('vite');
@@ -60,7 +62,7 @@ app.whenReady().then(async () => {
   let win;
   try {
     fs.mkdirSync(output, { recursive: true }); await server.listen();
-    win = new BrowserWindow({ show: false, width: 1100, height: 800, webPreferences: { sandbox: true, backgroundThrottling: false } });
+    win = new BrowserWindow({ show: false, width: 1028, height: 546, webPreferences: { sandbox: true, backgroundThrottling: false } });
     await win.loadURL(server.resolvedUrls.local[0] + 'fixture.html');
     const js = code => win.webContents.executeJavaScript(code);
     const wait = async condition => {
@@ -68,13 +70,58 @@ app.whenReady().then(async () => {
         if (await js(condition)) return;
         await new Promise(resolve => setTimeout(resolve, 25));
       }
-      throw new Error('Renderer condition timed out: ' + condition + ' ' + JSON.stringify(await js('({ready:!!window.fixtureReady,error:window.fixtureError,keys:window.fixtureKeys,focused:document.activeElement?.id,stops:window.queueFixture?.stops})')));
+      throw new Error('Renderer condition timed out: ' + condition + ' ' + JSON.stringify(await js('({ready:!!window.fixtureReady,error:window.fixtureError,keys:window.fixtureKeys,focused:document.activeElement?.id,stops:window.queueFixture?.stops,timeline:document.getElementById("timeline")?.innerText,events:window.queueFixture?.events?.length})')));
     };
     const click = selector => js(`document.querySelector(${JSON.stringify(selector)}).click()`);
     const checks = [];
     await wait('window.fixtureReady && !!document.querySelector("#sessionList [data-id]")');
     await click('#sessionList [data-id]');
     await wait('document.getElementById("chatSend").dataset.action === "stop"');
+    await js(`(()=>{const value=Array.from({length:8},(_,index)=>'Previous answer line '+(index+1)+' stays anchored during delivery.').join('\\n');
+      queueFixture.events=[{seq:1,time:Date.now()-1000,source:'extension',kind:'assistant_message',messageId:'previous-answer',
+        message:{text:value,chars:value.length,truncated:false},state:'final',final:true}];queueFixture.notify()})()`);
+    await wait('(document.querySelector("#timeline .assistant-message-content")?.getBoundingClientRect().height??0)>80');
+    await js(`document.getElementById('chatInput').value='Keep this message still';document.getElementById('composer').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))`);
+    await wait('!!document.querySelector("#inputQueue .pending-message") && !!document.querySelector("#inputQueue .assistant-thinking.is-reserved")');
+    await js(`document.getElementById('timelineContent').style.setProperty('--timeline-scroll-reserve','28px');const pane=document.getElementById('chatBody');pane.scrollTop=pane.scrollHeight;new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+    const feedbackGeometry = () => js(`(() => {
+      const bubble=document.querySelector('#inputQueue .pending-message-text, #timeline .user-message-text'),thinking=document.querySelector('#inputQueue .assistant-thinking');
+      const previous=document.querySelector('#timeline .ev-assistant_message .assistant-message-content');
+      const status=document.querySelector('#inputQueue .pending-message-status'),cancel=document.querySelector('#inputQueue [aria-label="Cancel delivery"]');
+      const rect=node=>{const value=node?.getBoundingClientRect();return value?{top:value.top,bottom:value.bottom,width:value.width,height:value.height}:null};
+      return {bubble:rect(bubble),previous:rect(previous),thinking:rect(thinking),status:rect(status),statusIcon:rect(status?.querySelector('.ico')),
+        cancel:rect(cancel),cancelIcon:rect(cancel?.querySelector('.ico')),reserved:thinking.classList.contains('is-reserved'),
+        visibility:getComputedStyle(thinking).visibility,scrollTop:document.getElementById('chatBody').scrollTop,error:window.fixtureError||null};
+    })()`);
+    const queuedFeedback = await feedbackGeometry();
+    assert.equal(queuedFeedback.reserved,true); assert.equal(queuedFeedback.visibility,'hidden'); assert.equal(queuedFeedback.error,null);
+    const dimensionsMatch = (value,width,height) => value && Math.abs(value.width-width)<.1 && Math.abs(value.height-height)<.1;
+    assert.ok(dimensionsMatch(queuedFeedback.status,22,22),JSON.stringify(queuedFeedback));
+    assert.ok(dimensionsMatch(queuedFeedback.cancel,22,22),JSON.stringify(queuedFeedback));
+    assert.ok(dimensionsMatch(queuedFeedback.statusIcon,15,15),JSON.stringify(queuedFeedback));
+    assert.ok(dimensionsMatch(queuedFeedback.cancelIcon,15,15),JSON.stringify(queuedFeedback));
+    await js(`(() => {const row=queueFixture.inputs[0];row.state='sent';row.messageId='input:'+row.id;row.deliveredAt=Date.now();queueFixture.notify()})()`);
+    await wait('!!document.querySelector("#inputQueue .pending-message.is-delivered") && !!document.querySelector("#inputQueue .assistant-thinking:not(.is-reserved)")');
+    const deliveredFeedback = await feedbackGeometry();
+    assert.equal(deliveredFeedback.reserved,false); assert.equal(deliveredFeedback.visibility,'visible'); assert.equal(deliveredFeedback.error,null);
+    assert.ok(Math.abs(deliveredFeedback.bubble.top-queuedFeedback.bubble.top)<1,JSON.stringify({queuedFeedback,deliveredFeedback}));
+    assert.ok(Math.abs(deliveredFeedback.previous.top-queuedFeedback.previous.top)<1,JSON.stringify({queuedFeedback,deliveredFeedback}));
+    assert.ok(Math.abs(deliveredFeedback.thinking.top-queuedFeedback.thinking.top)<1,JSON.stringify({queuedFeedback,deliveredFeedback}));
+    assert.ok(Math.abs(deliveredFeedback.scrollTop-queuedFeedback.scrollTop)<1,JSON.stringify({queuedFeedback,deliveredFeedback}));
+    await js(`(() => {const row=queueFixture.inputs[0],time=row.deliveredAt;queueFixture.events.push({seq:2,time,source:'extension',kind:'user_message',
+      inputId:row.id,inputDelivery:'confirmed',messageId:row.messageId,message:{text:row.text,chars:row.text.length,truncated:false}});queueFixture.notify()})()`);
+    await wait('!!document.querySelector("#timeline .user-message-text") && !document.querySelector("#inputQueue .pending-message")');
+    const confirmedFeedback = await feedbackGeometry();
+    assert.ok(Math.abs(confirmedFeedback.bubble.top-queuedFeedback.bubble.top)<1,JSON.stringify({queuedFeedback,deliveredFeedback,confirmedFeedback}));
+    assert.ok(Math.abs(confirmedFeedback.previous.top-queuedFeedback.previous.top)<1,JSON.stringify({queuedFeedback,deliveredFeedback,confirmedFeedback}));
+    assert.ok(Math.abs(confirmedFeedback.thinking.top-queuedFeedback.thinking.top)<1,JSON.stringify({queuedFeedback,deliveredFeedback,confirmedFeedback}));
+    assert.ok(Math.abs(confirmedFeedback.scrollTop-queuedFeedback.scrollTop)<1,JSON.stringify({queuedFeedback,deliveredFeedback,confirmedFeedback}));
+    fs.writeFileSync(path.join(output,'message-feedback-stability.png'),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
+    checks.push({messageFeedback:{queued:queuedFeedback,confirmed:confirmedFeedback}});
+    await js(`queueFixture.events.push({seq:3,time:Date.now()+1,source:'extension',kind:'assistant_message',messageId:'answer',message:{text:'Done',chars:4,truncated:false},final:true});queueFixture.notify()`);
+    await wait('!document.querySelector("#inputQueue .assistant-thinking")');
+    await js(`queueFixture.inputs=[];queueFixture.sent=[];queueFixture.events=[];queueFixture.notify()`);
+    await wait('!document.querySelector("#inputQueue .pending-message")');
     await js('document.getElementById("composer").requestSubmit()');
     await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
     assert.equal(await js('queueFixture.stops.length'), 0);

@@ -14,7 +14,7 @@ import * as browserStartup from '../src/main/browser-startup.js';
 type Handler = (event: unknown, payload: unknown) => Promise<any>;
 const handlers = new Map<string, Handler>();
 vi.mock('electron', () => ({
-  ipcMain: { handle: (name: string, handler: Handler) => handlers.set(name, handler), removeHandler: (name: string) => handlers.delete(name) },
+  ipcMain: { handle: (name: string, handler: Handler) => handlers.set(name, handler), removeHandler: (name: string) => handlers.delete(name), on: vi.fn() },
   BrowserWindow: class {}, clipboard: {}, dialog: {}, shell: {}, nativeTheme: { themeSource: 'system' },
   app: { on: vi.fn(), getPath: () => '', getVersion: () => '0.0.0', getAppPath: () => process.cwd(), isPackaged: false },
   safeStorage: {
@@ -1339,6 +1339,7 @@ it('freezes the complete current prompt for each new chat and leaves the authore
   const canonical = await currentCoreInstructions();
   const claim = await input.claimBrowserInput(first.id, 'exact-document', null, true);
   expect(claim?.text).toBe(prependUserPrompt('First request', canonical));
+  expect(claim?.draftText).toBe('First request');
   expect(claim?.text).toContain(standing);
   expect((await input.listInputs()).find(row => row.id === first.id)?.text).toBe('First request');
   await saveConfig({ ...config, mcp: { ...config.mcp, instructions: 'Updated standing guidance' } });
@@ -1347,6 +1348,7 @@ it('freezes the complete current prompt for each new chat and leaves the authore
   const second = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'Second request' });
   const next = await input.claimBrowserInput(second.id, 'next-document', null, true);
   expect(next?.text).toBe(prependUserPrompt('Second request', await currentCoreInstructions()));
+  expect(next?.draftText).toBe('Second request');
   expect(userPromptText(next!.text)).toBe('Second request');
 });
 
@@ -1842,6 +1844,56 @@ describe('native progress silence authority', () => {
     if (repair.requiresClaim) expect((await post('/repairs/claim', { conversationId, token: repair.token })).body.allowed).toBe(true);
     await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
   }
+
+  it.each([false, true])('refiles an automatically withdrawn unsent rescue once, including after restore (%s)', async restored => {
+    const source = await open('gpt-5.6-sol');
+    const file = () => input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true);
+    expect(await file()).toBe(true);
+    const first = (await input.listInputs()).find(row => row.recovery)!;
+    // Real progress withdraws the old rescue without granting Send.
+    await attributedMcp(source.conversationId);
+    expect((await input.listInputs()).find(row => row.id === first.id)).toMatchObject({ state: 'cancelled' });
+    if (restored) input.resetInputForTests();
+    expect(await Promise.all([file(), file()])).toEqual([true, false]);
+    const live = (await input.listInputs()).filter(row => row.recovery && row.state === 'queued');
+    expect(live).toHaveLength(1);
+    expect(live[0]!.id).not.toBe(first.id);
+    expect(await input.claimBrowserInput(first.id, 'late-old-document', source.conversationId, true)).toBeNull();
+  });
+
+  it.each(['queued', 'claimed', 'user-cancelled', 'authorized-cancelled'] as const)(
+    'does not refile a rescue with retained authority or user cancellation (%s)', async state => {
+      const source = await open('gpt-5.6-sol');
+      const file = (episode?: string) => input.fileRecoveryInput(source.session.id, source.conversationId,
+        source.turnId, false, () => true, Date.now() + source.window, episode);
+      expect(await file()).toBe(true);
+      const first = (await input.listInputs()).find(row => row.recovery)!;
+      if (state === 'claimed' || state === 'authorized-cancelled') {
+        expect(await input.claimBrowserInput(first.id, 'rescue-document', source.conversationId, true)).not.toBeNull();
+      }
+      if (state === 'authorized-cancelled') {
+        expect(await input.authorizeBrowserInput(first.id, 'rescue-document', source.conversationId)).toBe(true);
+      }
+      if (state.endsWith('cancelled')) expect(await input.cancelInput(first.id)).toBe(true);
+      input.resetInputForTests();
+      expect(await file()).toBe(false);
+      if (state === 'authorized-cancelled') expect(await file('another-episode')).toBe(false);
+    });
+
+  it.each(['owner-lost', 'rebound', 'authored-queue'] as const)(
+    'revalidates current ownership and authored work after automatic withdrawal (%s)', async guard => {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const first = (await input.listInputs()).find(row => row.recovery)!;
+      await attributedMcp(source.conversationId);
+      expect((await input.listInputs()).find(row => row.id === first.id)?.state).toBe('cancelled');
+      if (guard === 'rebound') expect(await rebindSession(source.session.id, source.conversationId, randomUUID())).toBe(true);
+      if (guard === 'authored-queue') await input.enqueueInput({ ...message(source.session.id, 'off'),
+        mode: 'after-turn', text: 'Preserve this user instruction.' });
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId,
+        false, () => guard !== 'owner-lost')).toBe(false);
+      expect((await input.listInputs()).filter(row => row.recovery && row.state === 'queued')).toEqual([]);
+    });
 
   it('keeps authored queued work ahead of automatic Continue after a committed handoff', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);

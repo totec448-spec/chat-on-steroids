@@ -1,19 +1,20 @@
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { ui, t } from './i18n.js';
-import { initSkills } from './skills.js';
+import { COMPOSER_COMMAND_PROJECTION, initSkills } from './skills.js';
 import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, ensureComposerModel } from './chat-models.js';
 import { marked, Marked } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
 import { createAgentPanel } from './agent-panel.js';
 import { createFilePanel } from './file-panel.js';
+import { createBrowserPanel } from './browser-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { messageReaction, withoutMessageReaction } from '../shared/message-reaction.js';
 import { goalErrorMessage } from '../shared/goal-errors.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
 import { renderGoalReasoning } from './goal-reasoning.js';
-import { preserveTimelineViewport } from './timeline-scroll.js';
+import { preserveTimelineViewport, projectTimelineExtent, type TimelineExtent } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { toolResultText } from './tool-result.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
@@ -21,6 +22,7 @@ import { renderRecoveryCountdowns } from './recovery.js';
 import type { RecoveryCountdown } from '../shared/recovery.js';
 import { communicationTitle, foldAgentCommunication } from './agent-communication.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
+import { installComposerHeightMotion } from './composer-motion.js';
 import { isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
@@ -28,6 +30,7 @@ import { injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shar
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
 import type { TaskProgress } from '../shared/task-progress.js';
+import type { BrowserUseDesignContext } from '../shared/browser-use.js';
 /**
  * Desktop chat workspace: recorded prose/tool truth, exact-session controls and a composer.
  * The extension remains the ChatGPT transport; main owns permissions, delivery, Goal and
@@ -63,7 +66,7 @@ import {
   MAX_GOAL_SYSTEM_PROMPT_CHARS
 } from '../shared/goal.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
-import { $, ago, clockTime, compactNumber, el, filterSettingsSections, icon, run, toast } from './dom.js';
+import { $, ago, clockTime, compactNumber, disclosureChevron, el, filterSettingsSections, icon, run, toast } from './dom.js';
 
 const api = window.api;
 
@@ -82,8 +85,8 @@ const KIND_ICON: Record<ActivitySummary['kind'], string> = {
   input: 'i-monitor',
   clipboard: 'i-copy',
   session: 'i-steps',
-  agent: 'i-bolt',
-  other: 'i-bolt'
+  agent: 'i-agent',
+  other: 'i-agent'
 };
 
 /**
@@ -132,6 +135,9 @@ let activeId: string | null = null;
 let selectedId: string | null = null;
 let newChatSelected = true;
 let selectedProjectId: string | null = null;
+/** Presentation intent for the live tail. Sending/selecting follows it; an explicit
+ * upward reader gesture releases it until the user returns to the bottom. */
+let timelineFollowBottom = true;
 let projects: LocalProject[] = [];
 /** Window-local disclosure intent. Project groups start closed until the user or selection opens one. */
 const expandedProjects = new Set<string>();
@@ -169,12 +175,18 @@ function ownsComposerDraft(owner: ComposerDraftOwner): boolean {
 function replaceComposerDraft(): void { composerDraftGeneration++; skillPicker?.close(); }
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
+let selectedSwarm: { sessionId: string; state: SwarmState } | null = null;
+let selectedSwarmGeneration = 0;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
+let browserPanel: ReturnType<typeof createBrowserPanel> | null = null;
 const expandedWorkers = new Set<string>();
 const inputDrafts = new Map<string, string>();
 const newChatTasks = new Map<string, { objective: string; automation: string; loopDelivery: string }>();
 const imageDrafts = new Map<string, Array<InputImage | InputAttachment>>();
 const startingInputs = new Map<string, InputEntry>();
+const THINKING_FEEDBACK_TIMEOUT_MS = 120_000;
+type ThinkingFeedback = { inputId: string; sessionId: string | null; afterSeq: number; confirmed: boolean; timeout: number | null };
+const thinkingFeedback = new Map<string, ThinkingFeedback>();
 const visibleInputIds = new Set<string>();
 // Window-local presentation only: a new incident or changed status is visible again.
 const dismissedRecoveryNotices = new Map<string, string>();
@@ -222,7 +234,7 @@ function paintComposerImages(): void {
   images.forEach((image, index) => {
     const tile = 'dataUrl' in image ? el('div', 'composer-image') : attachmentCard(image, true);
     if ('dataUrl' in image) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; tile.append(preview); }
-    const remove = el('button', 'image-remove', '×'); remove.setAttribute('type', 'button'); ui(remove, 'aria-label', () => t("Remove {0}", [image.name]));
+    const remove = el('button', 'image-remove'); remove.append(icon('i-x')); remove.setAttribute('type', 'button'); ui(remove, 'aria-label', () => t("Remove {0}", [image.name]));
     remove.addEventListener('click', () => { imageDrafts.set(key, images.filter((_entry, at) => at !== index)); paintComposerImages(); });
     tile.append(remove); box.append(tile);
   });
@@ -235,14 +247,7 @@ function attachmentCard(file: InputAttachment, inComposer = false): HTMLElement 
     const tile = el('div', 'composer-image'); tile.append(image); return tile;
   }
   const tile = el('div', 'attachment-card'); tile.title = file.name;
-  const glyph = el('span', 'attachment-icon');
-  glyph.setAttribute('aria-hidden', 'true');
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('width', '24'); svg.setAttribute('height', '24');
-  const lines = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  lines.setAttribute('d', 'M7 3h10a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Zm1 6h8M8 13h8M8 17h5');
-  lines.setAttribute('fill', 'none'); lines.setAttribute('stroke', 'currentColor'); lines.setAttribute('stroke-width', '1.6'); lines.setAttribute('stroke-linecap', 'round');
-  svg.append(lines); glyph.append(svg);
+  const glyph = el('span', 'attachment-icon'); glyph.append(icon('i-file-text'));
   const details = el('div', 'attachment-details');
   details.append(el('div', 'attachment-name', file.name), el('div', 'attachment-kind', () => file.mimeType.startsWith('image/') ? t("Image") : t("File")));
   tile.append(glyph, details); return tile;
@@ -250,6 +255,7 @@ function attachmentCard(file: InputAttachment, inComposer = false): HTMLElement 
 
 let events: SessionEvent[] = [];
 let totalEvents = 0;
+let timelineExtent: TimelineExtent | null = null;
 /** The session whose `events`/cursor pair belongs together. */
 let detailFor: string | null = null;
 let detailCursor: number | null = null;
@@ -645,7 +651,7 @@ function paintSessions(): void {
   const diagnostics: SessionSummary[] = [];
   const group = (key: string, workers: SessionSummary[], parentRow?: HTMLElement, target = rows): void => {
     const button = el('button', 'worker-toggle');
-    button.append(icon('i-chev'));
+    button.append(disclosureChevron());
     ui(button, 'title', () => t("{0} sub-agents · {1} active", [workers.length, workers.filter(sessionWorking).length]));
     ui(button, 'aria-label', () => t("{0} {1} sub-agents", [expandedWorkers.has(key) ? t("Collapse") : t("Expand"), workers.length]));
     button.setAttribute('type', 'button'); button.setAttribute('aria-expanded', String(expandedWorkers.has(key)));
@@ -675,7 +681,9 @@ function paintSessions(): void {
   if (otherWorkers.length) {
     const history = document.createElement('details'); history.className = 'session-diagnostics';
     history.open = expandedWorkers.has('other-workers');
-    history.append(el('summary', '', () => t("Sub-agent history · {0}", [otherWorkers.length])));
+    const historySummary = el('summary');
+    historySummary.append(disclosureChevron('details-chevron'), el('span', '', () => t("Sub-agent history · {0}", [otherWorkers.length])));
+    history.append(historySummary);
     history.append(...otherWorkers.map(sessionRow));
     history.addEventListener('toggle', () => { if (history.isConnected) history.open ? expandedWorkers.add('other-workers') : expandedWorkers.delete('other-workers'); });
     rows.push(history);
@@ -759,7 +767,9 @@ function paintSessions(): void {
     const disclosure = document.createElement('details');
     disclosure.className = 'session-diagnostics';
     disclosure.open = diagnosticsExpanded;
-    disclosure.append(el('summary', '', () => t("Unattributed activity · {0}", [diagnostics.length])));
+    const diagnosticsSummary = el('summary');
+    diagnosticsSummary.append(disclosureChevron('details-chevron'), el('span', '', () => t("Unattributed activity · {0}", [diagnostics.length])));
+    disclosure.append(diagnosticsSummary);
     disclosure.append(...diagnostics.map(sessionRow));
     disclosure.addEventListener('toggle', () => { diagnosticsExpanded = disclosure.open; });
     rows.push(disclosure);
@@ -769,7 +779,7 @@ function paintSessions(): void {
   chatList.replaceChildren(...rows);
   if (focusedProject) projectSections.find(section => section.dataset.projectId === focusedProject)
     ?.querySelector<HTMLElement>('.project-heading')?.focus({ preventScroll: true });
-  agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
+  updateAgentPanel();
   filePanel?.update(selectedLocalProject());
   workspaceTerminal?.update(selectedLocalProject());
   badgeKey = badgeSignature();
@@ -777,6 +787,29 @@ function paintSessions(): void {
   $('sessionsEmpty').hidden = rows.length > 0;
 
   scheduleToolActivityExpiry();
+}
+
+function updateAgentPanel(): void {
+  agentPanel?.update(
+    selectedId,
+    sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null),
+    selectedId && selectedSwarm?.sessionId === selectedId ? selectedSwarm.state : null
+  );
+}
+
+/** One broker read per selection or broker transition; no polling and no session-derived state. */
+async function refreshSelectedSwarm(): Promise<void> {
+  const sessionId = selectedId;
+  const generation = ++selectedSwarmGeneration;
+  if (!sessionId) {
+    selectedSwarm = null;
+    updateAgentPanel();
+    return;
+  }
+  const state = await run(api.getSessionSwarm(sessionId));
+  if (!state || generation !== selectedSwarmGeneration || selectedId !== sessionId) return;
+  selectedSwarm = { sessionId, state };
+  updateAgentPanel();
 }
 
 /** Repaint once at the nearest activity-window boundary; no polling clock is needed. */
@@ -936,22 +969,32 @@ function paintDeliveryControls(): void {
   if (canInject && explicitInjection && $<HTMLSelectElement>('sendMode').value === 'auto') $<HTMLSelectElement>('sendMode').value = 'tool';
   if (!canInject && !canSendDirectly && !queueAtFinish) $<HTMLSelectElement>('sendMode').value = 'auto';
   const pending = pendingComposerInput();
-  const stop = (working || !!pending) && !currentPreparedPlan() && !authoredComposerText().trim() && !(imageDrafts.get(draftKey())?.length);
+  const stop = (working || !!pending) && !currentPreparedPlan() &&
+    !authoredComposerText().trim() && !(imageDrafts.get(draftKey())?.length);
   // Hover selects delivery for the next message. Clicking the empty-composer
   // Stop still acts immediately; there is no second Stop action in the menu.
   $('sendOptions').hidden = !canInject && !canSendDirectly && !queueAtFinish;
   const send = $<HTMLButtonElement>('chatSend');
   const planMode = taskPlans.has(draftKey()), preparedPlan = currentPreparedPlan();
-  send.disabled = !!preparedPlan && (preparedPlan.sending || preparedPlan.stages.some(stage => !stage.trim()));
+  const compactMode = skillPicker?.hasCommand('compact') === true;
+  const hasDraft = !!authoredComposerText().trim() || files.length > 0;
+  send.disabled = !stop && (preparedPlan
+    ? !compactMode && (preparedPlan.sending || preparedPlan.stages.some(stage => !stage.trim()))
+    : !hasDraft);
   send.dataset.action = stop ? 'stop' : 'send';
-  ui(send, 'aria-label', () => stop ? (controlledStopPending ? t("Stop requested") : t("Stop turn")) : t("Send message"));
+  ui(send, 'aria-label', () => stop ? (controlledStopPending ? t("Stop requested") : t("Stop turn")) : compactMode ? t("Compact & resume") : t("Send message"));
   if (stop && !working && pending) ui(send, 'aria-label', () => t("Cancel delivery"));
   const planAction = selectedId ? t("Queue plan at Session finish") : t("Start full plan");
   if (preparedPlan && !stop) send.setAttribute('aria-label', planAction);
   else if (planMode && !stop) ui(send, 'aria-label', () => t("Generate plan"));
-  send.classList.toggle('is-plan-ready', !!preparedPlan && !stop);
-  ui(send, 'title', () => stop && !working && pending ? t("Cancel delivery") : preparedPlan && !stop ? planAction : planMode && !stop ? t("Click to generate plan") : '');
+  send.classList.toggle('is-plan-ready', !!preparedPlan && !compactMode && !stop);
+  ui(send, 'title', () => stop && !working && pending ? t("Cancel delivery") : compactMode && !stop ? t("Compact & resume") : preparedPlan && !stop ? planAction : planMode && !stop ? t("Click to generate plan") : '');
   send.classList.toggle('is-stop', stop);
+  const sendIcon = send.querySelector<HTMLElement>('.send-icon')!;
+  sendIcon.classList.toggle('ph', !stop);
+  sendIcon.classList.toggle('ph-fill', stop);
+  sendIcon.classList.toggle('ph-arrow-up', !stop);
+  sendIcon.classList.toggle('ph-stop', stop);
   for (const button of $('sendOptions').querySelectorAll<HTMLElement>('[data-delivery]')) {
     button.setAttribute('aria-checked', String(button.dataset.delivery === (nativeFiles && working && $<HTMLSelectElement>('sendMode').value !== 'tool' ? 'after-turn' : $<HTMLSelectElement>('sendMode').value)));
   }
@@ -1142,6 +1185,7 @@ function paintTaskActions(): void {
     ui(button.querySelector('span')!, 'textContent', () => planMode ? t("Cancel plan") : t("Create plan"));
     ui(button, 'title', () => planMode ? t("Return to a normal message; keep your draft") : text ? t("Split your message into editable stages") : t("Write a message in the composer first"));
   }
+  paintComposerMode();
 }
 function paintLoopDelivery(): void {
   const model = confirmedComposerModel();
@@ -1150,6 +1194,48 @@ function paintLoopDelivery(): void {
 }
 function openingLoopDelivery(): boolean | undefined {
   return selectedId === null ? $<HTMLSelectElement>('loopDelivery').value === 'after-turn' : undefined;
+}
+function paintComposerMode(): void {
+  const automationSelect = $<HTMLSelectElement>('chatAutomation');
+  const automation = automationSelect.value;
+  const planDraft = taskPlans.get(draftKey());
+  const plan = !!planDraft;
+  const state = automation === 'goal'
+    ? plan
+      ? { label: 'Goal + Plan', description: 'Chat options: Goal and Plan selected', icon: 'target' }
+      : { label: 'Goal', description: 'Chat options: Goal selected', icon: 'target' }
+    : automation === 'loop'
+      ? plan
+        ? { label: 'Loop + Plan', description: 'Chat options: Loop and Plan selected', icon: 'arrows-clockwise' }
+        : { label: 'Loop', description: 'Chat options: Loop selected', icon: 'arrows-clockwise' }
+      : plan
+        ? { label: 'Plan', description: 'Chat options: Plan selected', icon: 'list-checks' }
+        : null;
+  const summary = $('composerSettingsSummary');
+  const label = $('composerModeLabel');
+  const modeIcon = $('composerModeIcon');
+  const control = $('composerModeControl');
+  const clear = $<HTMLButtonElement>('clearComposerMode');
+  summary.toggleAttribute('data-mode-active', !!state);
+  control.toggleAttribute('data-mode-active', !!state);
+  modeIcon.className = `ico ph ph-${state?.icon ?? 'gear-six'}`;
+  if (state) {
+    ui(label, 'textContent', () => t(state.label));
+    ui(summary, 'aria-label', () => t(state.description));
+    ui(summary, 'title', () => t(state.description));
+    ui(clear, 'aria-label', () => t('Clear {0}', [state.label]));
+    ui(clear, 'title', () => t('Clear {0}', [state.label]));
+    label.hidden = false;
+    clear.hidden = false;
+    clear.disabled = planDraft?.sending === true || (automation !== 'off' && automationSelect.disabled);
+  } else {
+    label.hidden = true;
+    clear.hidden = true;
+    clear.disabled = false;
+    ui(label, 'textContent', () => '');
+    ui(summary, 'aria-label', () => t('Chat options'));
+    ui(summary, 'title', () => t('Chat options'));
+  }
 }
 function paintAutomationSwitch(): void {
   paintLoopDelivery();
@@ -1205,6 +1291,7 @@ async function refreshSessionControls(): Promise<void> {
   controlledSessionId = id;
   controlledSelection = selectionGeneration;
   controlledTurnId = controls?.activeTurnId ?? null;
+  repaintAssistantCopies();
   goalDraftView = controls?.goalDraft ?? null;
   goalWaitView = controls?.goalWait ?? null;
   finishGoalDraftView = controls?.finishGoalDraft ?? null;
@@ -1237,6 +1324,20 @@ async function refreshSessionControls(): Promise<void> {
   $<HTMLButtonElement>('compactSession').disabled = !!controls.blocked || !!controls.job?.busy;
   $('cancelCompaction').hidden = !controls.job?.busy;
   ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.") : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
+}
+
+async function changeSessionCompaction(cancel: boolean): Promise<boolean> {
+  const id = selectedId;
+  if (!id) return false;
+  const button = $<HTMLButtonElement>(cancel ? 'cancelCompaction' : 'compactSession');
+  if (button.disabled) return false;
+  button.disabled = true;
+  try {
+    return await run(cancel ? api.cancelSessionCompaction(id) : api.compactSession(id)) !== null;
+  } finally {
+    button.disabled = false;
+    if (selectedId === id) void refreshSessionControls();
+  }
 }
 
 async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: number): Promise<boolean> {
@@ -1279,6 +1380,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   }
   // An empty older page is not navigation. Keep the live cursor and viewport intact.
   if (prepend && !detail.events.length) return true;
+  clearSettledThinkingFeedback(wanted, detail.events);
   // User/assistant prose is canonical in messages.json, while structured page activity stays
   // append-only by design: ChatGPT can grow one commentary caption or rewrite one activity
   // label several times. `foldProgress` turns those snapshots back into the one logical row
@@ -1307,10 +1409,10 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
       : detail.events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), incremental ? detailCursor! : 0));
   totalEvents = detail.total;
   if (opening) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
-  paintDetail(!prepend && newerFrom === undefined);
+  paintDetail(!prepend && newerFrom === undefined, incremental);
   // A selection opens at the latest message; the previous chat's viewport is not
   // a reading position in this one. Apply only after the current load has rendered.
-  if (opening) $('chatBody').scrollTop = $('chatBody').scrollHeight;
+  if (opening && timelineOwnsSharedScroll()) $('chatBody').scrollTop = $('chatBody').scrollHeight;
   if (opening) requestHistory(-1, true);
   void loadHandoff();
   // A burst can contain more than one renderer-sized page between coalesced notifications.
@@ -1374,6 +1476,120 @@ function safeRenderedHref(value: string): string | null {
 
 const PROVIDER_CITATION = /^\uE200(?:cite|filecite)\uE202[^\uE200\uE201]*\uE201/;
 const PROVIDER_URL = /^\uE200url\uE202([^\uE200-\uE202]*)\uE202([^\uE200-\uE202]*)\uE201/;
+const WRITING_OPEN = ':::writing{';
+const WRITING_PLACEHOLDER = (index: number) => `\uE300cos-writing-${index}\uE301`;
+
+interface WritingBlock {
+  body: string;
+  id: string | null;
+  title: string;
+  variant: string;
+}
+
+function writingAttributes(source: string): Map<string, string> | null {
+  const values = new Map<string, string>();
+  const attribute = /\s*([A-Za-z][A-Za-z0-9_-]*)\s*=\s*"((?:\\.|[^"\\])*)"/gy;
+  let offset = 0;
+  while (offset < source.length) {
+    if (!source.slice(offset).trim()) break;
+    attribute.lastIndex = offset;
+    const match = attribute.exec(source);
+    if (!match || values.has(match[1]!)) return null;
+    values.set(match[1]!, match[2]!.replace(/\\(["\\])/g, '$1'));
+    offset = attribute.lastIndex;
+  }
+  return source.slice(offset).trim() ? null : values;
+}
+
+/** Finds the header's real closing brace without treating one inside a quoted title as syntax. */
+function writingHeader(source: string, start: number): { end: number; values: Map<string, string> } | null {
+  let quoted = false, escaped = false;
+  for (let index = start + WRITING_OPEN.length; index < source.length; index++) {
+    const char = source[index]!;
+    if (escaped) { escaped = false; continue; }
+    if (quoted && char === '\\') { escaped = true; continue; }
+    if (char === '"') { quoted = !quoted; continue; }
+    if (!quoted && (char === '\n' || char === '\r')) return null;
+    if (!quoted && char === '}') {
+      const values = writingAttributes(source.slice(start + WRITING_OPEN.length, index));
+      return values ? { end: index + 1, values } : null;
+    }
+  }
+  return null;
+}
+
+function insideMarkdownFence(source: string, offset: number): boolean {
+  let fence: { char: string; length: number } | null = null;
+  for (const line of source.slice(0, offset).split(/\r?\n/)) {
+    const marker = line.match(/^[\t ]{0,3}(`{3,}|~{3,})/)?.[1];
+    if (!marker) continue;
+    if (!fence) fence = { char: marker[0]!, length: marker.length };
+    else if (marker[0] === fence.char && marker.length >= fence.length) fence = null;
+  }
+  return fence !== null;
+}
+
+/**
+ * Extracts ChatGPT's writing directive before Markdown parsing. An open block is useful while
+ * the answer is still streaming, so the end of the current revision is a temporary close.
+ */
+function writingBlocks(source: string): { markdown: string; blocks: WritingBlock[] } {
+  const blocks: WritingBlock[] = [];
+  const opening = /(^|\n)[\t ]{0,3}:::writing\{/g;
+  const closing = /[\t ]*:::[\t ]*(?=\r?\n|$)/g;
+  let markdown = '', cursor = 0;
+  for (let match = opening.exec(source); match; match = opening.exec(source)) {
+    const lineStart = match.index + match[1]!.length;
+    const start = match.index + match[0].length - WRITING_OPEN.length;
+    if (insideMarkdownFence(source, lineStart)) continue;
+    const header = writingHeader(source, start);
+    if (!header) continue;
+    const rawVariant = header.values.get('variant')?.trim() || 'document';
+    const variant = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(rawVariant) ? rawVariant : 'writing';
+    const title = (header.values.get('title')?.trim() || (variant === 'document' ? 'Document' : 'Writing')).slice(0, 500);
+    closing.lastIndex = header.end;
+    const end = closing.exec(source);
+    let bodyStart = header.end;
+    if (source.startsWith('\r\n', bodyStart)) bodyStart += 2;
+    else if (source[bodyStart] === '\n') bodyStart += 1;
+    else if (source[bodyStart] === ' ' || source[bodyStart] === '\t') bodyStart += 1;
+    const bodyEnd = end?.index ?? source.length;
+    markdown += `${source.slice(cursor, lineStart)}\n\n${WRITING_PLACEHOLDER(blocks.length)}\n\n`;
+    blocks.push({ body: source.slice(bodyStart, bodyEnd), id: header.values.get('id')?.trim().slice(0, 200) || null, title, variant });
+    cursor = end ? end.index + end[0].length : source.length;
+    opening.lastIndex = cursor;
+    if (!end) break;
+  }
+  return { markdown: blocks.length ? markdown + source.slice(cursor) : source, blocks };
+}
+
+function writingBlock(block: WritingBlock): HTMLElement {
+  const section = el('section', 'writing-block');
+  section.setAttribute('dir', 'auto');
+  section.setAttribute('aria-label', block.title);
+  if (block.id) section.dataset.writingId = block.id;
+  section.dataset.variant = block.variant;
+  const glyph = el('i', 'ico ph ph-file-text');
+  glyph.setAttribute('aria-hidden', 'true');
+  const title = el('strong', 'writing-block-title', block.title);
+  ui(title, 'title', () => block.title);
+  const head = el('header', 'writing-block-head');
+  head.append(glyph, title);
+  const body = el('div', 'writing-block-body');
+  body.append(renderedMarkdown(block.body));
+  section.append(head, body);
+  return section;
+}
+
+function hydrateWritingBlocks(root: HTMLElement, blocks: readonly WritingBlock[]): void {
+  if (!blocks.length) return;
+  const indexes = new Map(blocks.map((_, index) => [WRITING_PLACEHOLDER(index), index]));
+  for (const paragraph of root.querySelectorAll('p')) {
+    const index = indexes.get(paragraph.textContent ?? '');
+    if (index !== undefined) paragraph.replaceWith(writingBlock(blocks[index]!));
+  }
+}
+
 /** Native citation labels and URLs may arrive before the DOM paints the rest of a canonical
  * revision. Use only exact source ranges with matching preceding prose, never substitute
  * the whole captured HTML or guess a destination from an opaque provider reference id. */
@@ -1458,6 +1674,7 @@ export function renderedMarkdown(source: string, capture?: StoredText): HTMLElem
   // never evidence that it contains the current message revision.
   const text = withoutMessageReaction(source).slice(0, MAX_RENDERED_HTML_CHARS);
   const citations = text.includes('\uE200') ? citationLabels(text, capture) : new Map<string, string>();
+  const writing = writingBlocks(text);
   // An inline tokenizer leaves literal citation examples inside code spans/fences intact.
   const parser = new Marked({ gfm: true, extensions: [{
     name: 'providerReference', level: 'inline',
@@ -1475,8 +1692,10 @@ export function renderedMarkdown(source: string, capture?: StoredText): HTMLElem
       return citations.get(token.raw) ?? (token.raw.startsWith('\uE200filecite\uE202') ? '' : '<span title="The recording does not include this source URL">[source link unavailable]</span>');
     }
   }] });
-  const html = parser.parse(text, { async: false });
-  return renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
+  const html = parser.parse(writing.markdown, { async: false });
+  const rendered = renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
+  hydrateWritingBlocks(rendered, writing.blocks);
+  return rendered;
 }
 
 export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
@@ -1574,6 +1793,156 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
   return box;
 }
 
+interface AssistantProjection {
+  content: HTMLElement;
+  source: string;
+}
+
+const assistantProjections = new WeakMap<HTMLElement, AssistantProjection>();
+const MAX_ASSISTANT_CHUNK_FADE_CHARS = 2_048;
+
+/** Fade only newly appended visible text; the complete canonical revision is already on screen. */
+function fadeAssistantAppend(previous: HTMLElement, next: HTMLElement): void {
+  // Marked adds layout newlines after block tags; they are not part of the visible tail.
+  const before = (previous.textContent ?? '').trimEnd();
+  const after = (next.textContent ?? '').trimEnd();
+  const added = after.length - before.length;
+  if (added <= 0 || added > MAX_ASSISTANT_CHUNK_FADE_CHARS || !after.startsWith(before)) return;
+  const walker = document.createTreeWalker(next, document.defaultView!.NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node as Text);
+  let unchanged = before.length;
+  for (const node of nodes) {
+    if (unchanged >= node.length) { unchanged -= node.length; continue; }
+    if (node.parentElement === next && !node.data.trim()) continue;
+    const fresh = unchanged ? node.splitText(unchanged) : node;
+    const span = document.createElement('span');
+    span.className = 'assistant-new-chunk';
+    fresh.replaceWith(span);
+    span.append(fresh);
+    unchanged = 0;
+  }
+}
+
+function sameRecordedTurn(left: SessionEvent, right: SessionEvent): boolean {
+  if (typeof left.turnOrigin === 'number' && typeof right.turnOrigin === 'number')
+    return left.turnOrigin === right.turnOrigin;
+  return !!left.turnId && left.turnId === right.turnId;
+}
+
+/** A final message can precede late tools or a reopened turn; only its recorded end releases Copy. */
+function assistantCopyReady(message: Extract<SessionEvent, { kind: 'assistant_message' }>, history: readonly SessionEvent[], sessionId: string | null): boolean {
+  if (!message.final || (!message.turnId && typeof message.turnOrigin !== 'number')) return false;
+  let boundary: SessionEvent | undefined;
+  let final: SessionEvent | undefined;
+  for (const event of history) {
+    if (!sameRecordedTurn(message, event)) continue;
+    if (event.kind === 'turn_start' || event.kind === 'turn_end') {
+      if (!boundary || event.seq > boundary.seq) boundary = event;
+    } else if (event.kind === 'assistant_message' && event.final &&
+      (!final || positionOf(event) > positionOf(final) ||
+        (positionOf(event) === positionOf(final) && event.seq > final.seq))) final = event;
+  }
+  if (boundary?.kind !== 'turn_end' || final !== message) return false;
+  return !(sessionId === controlledSessionId && controlledSelection === selectionGeneration &&
+    controlledTurnId && message.turnId === controlledTurnId);
+}
+
+function paintAssistantCopy(box: HTMLElement, message: Extract<SessionEvent, { kind: 'assistant_message' }>, history: readonly SessionEvent[], sessionId: string | null): void {
+  const actions = box.querySelector<HTMLElement>(':scope > .assistant-message-actions');
+  if (actions) actions.hidden = !assistantCopyReady(message, history, sessionId);
+}
+
+/** A control-only update may close or reopen a turn without changing any timeline row signature. */
+function repaintAssistantCopies(): void {
+  if (detailFor !== selectedId) return;
+  for (const event of events) {
+    if (event.kind !== 'assistant_message') continue;
+    const row = rowCache.get(itemKey({ kind: 'event', event }))?.row;
+    const box = row?.querySelector<HTMLElement>('.assistant-response');
+    if (box?.isConnected) paintAssistantCopy(box, event, events, selectedId);
+  }
+}
+
+function paintAssistantContent(box: HTMLElement, state: AssistantProjection, source: string, animate: boolean, capture?: StoredText): void {
+  const pane = box.isConnected && timelineOwnsSharedScroll() ? $('chatBody') : null;
+  const paneTop = pane?.getBoundingClientRect().top ?? 0;
+  const before = pane ? box.getBoundingClientRect() : null;
+  const content = renderedMarkdown(source, capture);
+  content.classList.add('assistant-message-content');
+  if (animate && box.isConnected && source.length > state.source.length && source.startsWith(state.source) &&
+      !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) fadeAssistantAppend(state.content, content);
+  state.content.replaceWith(content);
+  state.content = content;
+  state.source = source;
+  if (pane && before && before.bottom <= paneTop) pane.scrollTop += box.getBoundingClientRect().height - before.height;
+}
+
+function updateAssistantBox(
+  box: HTMLElement,
+  event: Extract<SessionEvent, { kind: 'assistant_message' }>,
+  animate: boolean,
+  history: readonly SessionEvent[],
+  sessionId: string | null
+): void {
+  const source = withoutMessageReaction(event.message.text).slice(0, MAX_RENDERED_HTML_CHARS);
+  let state = assistantProjections.get(box);
+  if (!state) {
+    const content = renderedMarkdown(source, event.renderedHtml);
+    content.classList.add('assistant-message-content');
+    state = { content, source };
+    assistantProjections.set(box, state);
+    box.append(content);
+  } else {
+    box.classList.remove('is-entering');
+    paintAssistantContent(box, state, source, animate, event.renderedHtml);
+  }
+  if (animate && source.trim()) clearPresentedThinkingFeedback();
+  const final = event.final === true;
+  box.classList.toggle('is-streaming', !final);
+  const label = box.querySelector<HTMLElement>(':scope > b');
+  if (label) ui(label, 'textContent', () => final ? 'ChatGPT' : t("ChatGPT (partial)"));
+  paintAssistantCopy(box, event, history, sessionId);
+}
+
+function assistantBox(event: Extract<SessionEvent, { kind: 'assistant_message' }>, animate: boolean, history: readonly SessionEvent[], sessionId: string | null): HTMLElement {
+  const box = el('div', `said assistant-response${animate ? ' is-entering' : ''}`);
+  box.append(el('b'));
+  updateAssistantBox(box, event, animate, history, sessionId);
+  const actions = el('div', 'assistant-message-actions');
+  actions.hidden = !assistantCopyReady(event, history, sessionId);
+  const copy = el('button', 'assistant-copy') as HTMLButtonElement;
+  copy.type = 'button';
+  ui(copy, 'aria-label', () => t('Copy'));
+  ui(copy, 'title', () => t('Copy'));
+  copy.append(icon('i-copy'));
+  copy.addEventListener('click', async () => {
+    const value = assistantProjections.get(box)?.source ?? '';
+    if (!value || !await run(api.writeClipboard(value))) return;
+    toast(t('Copied'));
+  });
+  actions.append(copy);
+  box.append(actions);
+  return box;
+}
+
+function patchAssistantRow(
+  row: HTMLElement,
+  event: Extract<SessionEvent, { kind: 'assistant_message' }>,
+  animate: boolean
+): boolean {
+  const box = row.querySelector<HTMLElement>('.assistant-response');
+  if (!box) return false;
+  updateAssistantBox(box, event, animate, events, selectedId);
+  row.hidden = !withoutMessageReaction(event.message.text).trim();
+  const time = row.querySelector('time');
+  if (time) {
+    time.textContent = clockTime(event.time);
+    time.title = new Date(event.time).toLocaleString();
+  }
+  return true;
+}
+
 /**
  * Tool calls the user has opened, by their durable call id.
  *
@@ -1604,6 +1973,22 @@ function forgetTimelineRows(): void {
   rowCache.clear();
 }
 
+function toolMetric(value: string): HTMLElement {
+  const metric = el('span', 'metric');
+  const delta = /^(~?)(\+\d+)?(?:\s+)?([−-]\d+)?$/.exec(value);
+  if (!delta || (!delta[2] && !delta[3])) {
+    metric.textContent = value;
+    return metric;
+  }
+  if (delta[1]) metric.append(delta[1]);
+  if (delta[2]) metric.append(el('span', 'metric-added', delta[2]));
+  if (delta[3]) {
+    if (delta[2]) metric.append(' ');
+    metric.append(el('span', 'metric-removed', delta[3]));
+  }
+  return metric;
+}
+
 function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?: { id: string; current: () => boolean }): HTMLElement {
   const { call } = event;
   const summary = toolCallSummary(call);
@@ -1619,7 +2004,25 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
   head.append(icon(KIND_ICON[call.summary.kind] ?? 'i-bolt', 'ico tool-ico'));
   head.append(el('b', '', call.summary.title));
   if (call.summary.detail) head.append(el('em', '', call.summary.detail));
-  if (summary.metric) head.append(el('span', 'metric', summary.metric));
+  if (summary.metric) head.append(toolMetric(summary.metric));
+  const project = context ? null : selectedLocalProject();
+  const sessionId = context ? null : selectedId;
+  const reviewIndices = call.outcome === 'ok' ? (call.changes ?? []).flatMap((change, index) =>
+    change.reviewAssetId ? [index] : []).slice(0, 8) : [];
+  if (project && sessionId && reviewIndices.length) {
+    const review = el('button', 'tool-open-diff') as HTMLButtonElement;
+    review.type = 'button'; review.append(icon('i-git-diff'));
+    ui(review, 'title', () => t('Review this edit'));
+    ui(review, 'aria-label', () => t('Review this edit'));
+    review.addEventListener('click', click => {
+      click.preventDefault(); click.stopPropagation();
+      if (selectedId !== sessionId || selectedLocalProject()?.id !== project.id) return;
+      void filePanel?.openReview(project.id, sessionId, call.callId, reviewIndices).then(opened => {
+        if (!opened) toast(t('Recorded edit is unavailable.'));
+      });
+    });
+    head.append(review);
+  }
   box.append(head);
 
   // Collapsed calls only need their headline. Large recorded results must not
@@ -1650,17 +2053,36 @@ async function fillTimelineHistory(): Promise<void> {
   try {
     while (historyDemand) {
       const demand = historyDemand;
+      if (!timelineOwnsSharedScroll()) {
+        historyDemand = null;
+        break;
+      }
       if (demand.sessionId !== selectedId || demand.selection !== selectionGeneration || detailFor !== selectedId) {
         historyDemand = null;
         break;
       }
-      const pane = $('chatBody'), timeline = $('timelineContent');
+      const pane = $('chatBody'), timeline = $('timelineContent'), rows = $('timeline');
       const buffer = Math.min(480, Math.max(160, pane.clientHeight / 2));
       const reserve = Number.parseFloat(timeline.style.getPropertyValue('--timeline-scroll-reserve')) || 0;
+      const viewport = pane.getBoundingClientRect();
+      const edgeRow = (first: boolean): DOMRect | null => {
+        for (let child = first ? rows.firstElementChild : rows.lastElementChild; child;
+          child = first ? child.nextElementSibling : child.previousElementSibling) {
+          const rect = child.getBoundingClientRect();
+          if (rect.height > 0) return rect;
+        }
+        return null;
+      };
+      const firstRow = edgeRow(true), lastRow = edgeRow(false);
+      const rowHeight = rows.getBoundingClientRect().height;
+      const virtualTop = Number.parseFloat(rows.style.getPropertyValue('--timeline-virtual-before')) || 0;
+      const virtualBottom = Number.parseFloat(rows.style.getPropertyValue('--timeline-virtual-after')) || 0;
+      const contentHeight = timeline.getBoundingClientRect().height - virtualTop - virtualBottom - reserve;
       const nearEdge = demand.opening
-        ? timeline.getBoundingClientRect().height - reserve < pane.clientHeight + buffer
-        : demand.direction < 0 ? pane.scrollTop <= buffer
-          : pane.scrollHeight - reserve - pane.clientHeight - pane.scrollTop <= buffer;
+        ? contentHeight < pane.clientHeight + buffer
+        : demand.direction < 0 ? (rowHeight > 0 && firstRow ? firstRow.top >= viewport.top - buffer : pane.scrollTop <= buffer)
+          : (rowHeight > 0 && lastRow ? lastRow.bottom <= viewport.top + pane.clientHeight + buffer
+            : pane.scrollHeight - reserve - pane.clientHeight - pane.scrollTop <= buffer);
       if (pane.clientHeight <= 0 || !nearEdge || (demand.direction > 0 && historyBefore === null)) {
         historyDemand = null;
         break;
@@ -1687,7 +2109,10 @@ async function fillTimelineHistory(): Promise<void> {
         filledOpening = true;
       }
       if (next === cursor) {
-        if (demand.direction < 0) historyStart = cursor;
+        if (demand.direction < 0) {
+          historyStart = cursor;
+          paintDetail(false);
+        }
         if (demand === historyDemand) historyDemand = null;
       }
       await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
@@ -1714,8 +2139,9 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
     for (const change of call.changes) {
       const li = el('li');
       li.append(el('code', '', change.path));
-      const counts = `+${change.added} −${change.removed}${change.approximate ? t(" (approx.)") : ''}`;
-      li.append(el('span', 'metric', counts));
+      const counts = toolMetric(`+${change.added} −${change.removed}`);
+      if (change.approximate) counts.append(t(" (approx.)"));
+      li.append(counts);
       changes.append(li);
     }
     raw.append(changes);
@@ -1770,7 +2196,12 @@ function paintInputReceipt(row: HTMLElement, item: ReturnType<typeof timelineIte
   if (item.kind !== 'event' || item.event.kind !== 'user_message') return;
   const receipt = row.querySelector<HTMLElement>('.input-receipt');
   if (!receipt) return;
-  receipt.hidden = hasLaterModelActivity(item.event.time);
+  if (item.event.inputId) receipt.dataset.inputId = item.event.inputId;
+  // A confirmed receipt is durable message history, not transient thinking UI. Keep the
+  // check visible after the response starts; only the provisional "offered" clock may retire
+  // once later model activity proves that the turn moved on.
+  receipt.hidden = item.event.inputDelivery === 'offered' && hasLaterModelActivity(item.event.time);
+  if (!receipt.hidden && item.event.inputDelivery === 'confirmed' && item.event.inputId) confirmThinkingFeedback(item.event.inputId);
   receipt.parentElement?.classList.toggle('has-input-receipt', !receipt.hidden);
 }
 
@@ -1799,7 +2230,7 @@ function paintMessageReaction(box: HTMLElement, value: unknown): void {
   if (!existing) box.append(badge);
 }
 
-function eventBody(event: SessionEvent, context?: { id: string; current: () => boolean; history: readonly SessionEvent[] }): HTMLElement {
+function eventBody(event: SessionEvent, context?: { id: string; current: () => boolean; history: readonly SessionEvent[] }, animateAssistant = false): HTMLElement {
   switch (event.kind) {
     case 'session_start':
       return el('p', 'meta', () => t("Session started — {0}", [event.title]));
@@ -1862,10 +2293,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       return box;
     }
     case 'assistant_message': {
-      const box = el('div', 'said');
-      box.append(el('b', '', () => event.final ? 'ChatGPT' : t("ChatGPT (partial)")));
-      box.append(renderedMarkdown(event.message.text, event.renderedHtml));
-      return box;
+      return assistantBox(event, animateAssistant, context?.history ?? events, context?.id ?? selectedId);
     }
     case 'native_image': {
       const box = el('div', 'said native-image');
@@ -1959,7 +2387,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
           : t("Received by {0}; recorded when it acknowledged delivery", [event.to]));
       const summary = el('summary');
       const worker = event.from === 'prime' ? event.to : event.from;
-      const avatar = el('span', 'agent-avatar', worker.replace(/^worker-/, ''));
+      const avatar = el('span', 'agent-avatar'); avatar.append(icon('i-agent', 'ph-agent-avatar'));
       avatar.dataset.color = String([...worker].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6);
       avatar.setAttribute('aria-hidden', 'true');
       summary.append(avatar, el('span', '', () => communicationTitle(event)));
@@ -1991,7 +2419,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
   }
 }
 
-function eventRow(event: SessionEvent): HTMLElement {
+function eventRow(event: SessionEvent, animateAssistant = false): HTMLElement {
   const row = el('div', `ev ev-${event.kind}`);
   if (event.kind === 'assistant_message' && !withoutMessageReaction(event.message.text).trim()) row.hidden = true;
   tagImageRow(row, event);
@@ -2003,7 +2431,7 @@ function eventRow(event: SessionEvent): HTMLElement {
   if (event.agent && event.agent !== 'prime' && !(currentWorker?.kind === 'worker' && currentWorker.agentId === event.agent)) {
     body.append(el('span', 'chip', event.agent));
   }
-  body.append(eventBody(event));
+  body.append(eventBody(event, undefined, animateAssistant));
   // A refused call from a chat Compact & Resume already replaced is not a placement failure:
   // its request id proved exactly which chat it came from, and that chat's stopped turn simply
   // kept calling from OpenAI's side. Say so beside the row, or a full Unattributed bucket of
@@ -2069,6 +2497,36 @@ function visibleEvents(): SessionEvent[] {
   if (agentFilter === null) return events;
   if (agentFilter === UNATTRIBUTED) return events.filter((event) => !event.agent);
   return events.filter((event) => event.agent === agentFilter);
+}
+
+function syncTimelineExtent(): void {
+  const timeline = $('timeline');
+  if (!selectedId || agentFilter !== null || events.length === 0 || totalEvents <= events.length) {
+    timelineExtent = null;
+    timeline.style.removeProperty('--timeline-virtual-before');
+    timeline.style.removeProperty('--timeline-virtual-after');
+    return;
+  }
+  const top = Number.parseFloat(timeline.style.getPropertyValue('--timeline-virtual-before')) || 0;
+  const bottom = Number.parseFloat(timeline.style.getPropertyValue('--timeline-virtual-after')) || 0;
+  const renderedHeight = Math.max(0, timeline.getBoundingClientRect().height - top - bottom);
+  if (renderedHeight <= 0) {
+    timelineExtent = null;
+    timeline.style.removeProperty('--timeline-virtual-before');
+    timeline.style.removeProperty('--timeline-virtual-after');
+    return;
+  }
+  const first = Math.min(...events.map(positionOf));
+  const last = Math.max(...events.map(positionOf));
+  const before = historyStart === first ? 0 : Math.max(0, first - 1);
+  const after = historyBefore === null ? 0 : Math.max(0, totalEvents - last);
+  const projected = projectTimelineExtent(timelineExtent, {
+    session: selectedId, selection: selectionGeneration, total: totalEvents,
+    resident: events.length, before, after, renderedHeight
+  });
+  timelineExtent = projected.extent;
+  if (top !== projected.before) timeline.style.setProperty('--timeline-virtual-before', `${projected.before}px`);
+  if (bottom !== projected.after) timeline.style.setProperty('--timeline-virtual-after', `${projected.after}px`);
 }
 
 /** Eviction follows the measured reader viewport, not an arbitrary half-page.
@@ -2463,7 +2921,7 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
       group = document.createElement('details'); group.className = 'tool-group';
       group.dataset.timelineKey = key;
       const summary = document.createElement('summary');
-      summary.append(el('span', 'activity-symbol'), el('span', 'activity-title'), icon('i-chev', 'ico activity-chevron'));
+      summary.append(el('span', 'activity-symbol'), el('span', 'activity-title'), disclosureChevron('ico activity-chevron'));
       group.append(summary, el('div', 'tool-group-body'));
       group.addEventListener('toggle', () => { if (group!.open) openTools.add(key); else openTools.delete(key); });
       group.open = openTools.has(key) || rows.slice(i, end).some((row) => row.querySelector('details[open]')); groups.set(key, group);
@@ -2473,7 +2931,7 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     const label = latestHead?.querySelector('b, span:not(.agent-avatar)')?.textContent || t("Activity");
     group.querySelector('.activity-title')!.textContent = label;
     ui(group.querySelector('summary')!, 'title', () => t("{0} actions · {1}", [end - i, label]));
-    const symbol = latestHead?.querySelector('svg, .agent-avatar');
+    const symbol = latestHead?.querySelector('.tool-ico, .thinking-ico, .agent-avatar');
     group.querySelector('.activity-symbol')!.replaceChildren(...(symbol ? [symbol.cloneNode(true)] : []));
     reconcileChildren(group.lastElementChild!, rows.slice(i, end));
     grouped.push(group); i = end;
@@ -2518,8 +2976,7 @@ function composerSessionSelection(summary: SessionSummary | null | undefined) {
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === summary?.id && ['queued', 'browser'].includes(row.state));
   return opening?.model ? { model: opening.model, reasoningEffort: opening.reasoningEffort ?? undefined, observedAt: opening.createdAt } : null;
 }
-function paintDetail(followBottom = historyBefore === null): void {
-  paintStateLine();
+function paintDetail(followBottom = historyBefore === null, animateAssistant = false): void {
   const summary = sessions.find((s) => s.id === selectedId) ?? null;
   applyComposerSessionModel(selectedId ? `${selectedId}:${selectionGeneration}` : null, composerSessionSelection(summary) ?? null);
   const config = deps.state()?.config;
@@ -2529,12 +2986,13 @@ function paintDetail(followBottom = historyBefore === null): void {
   $('chatProjectName').textContent = project?.name ?? '';
   ui($('chatTitle'), 'textContent', () => summary ? summary.title || t("Untitled session") : t("New chat"));
 
-  paintDeliveryControls();
   paintAgentFilter();
   // Selection retires data/control ownership immediately, but the last painted rows
   // remain inert until the destination arrives. Queue/status repaints must not turn
   // this short loading interval into the New Chat welcome screen.
   if (selectedId !== null && detailFor !== selectedId) {
+    paintDeliveryControls();
+    paintStateLine();
     $('inputQueue').setAttribute('inert', '');
     $('timelineEmpty').hidden = true;
     $('chatFoot').hidden = true;
@@ -2551,9 +3009,12 @@ function paintDetail(followBottom = historyBefore === null): void {
   // Preserve the visible logical row when late transcript revisions change the
   // height above it; retaining absolute scrollTop would move the reader's content.
   const pane = $('chatBody');
-  const restoreViewport = preserveTimelineViewport(pane, $('timelineContent'), followBottom);
+  const restoreViewport = timelineOwnsSharedScroll()
+    ? preserveTimelineViewport(pane, $('timelineContent'), followBottom && timelineFollowBottom)
+    : () => {};
   const timelineRows: HTMLElement[] = [];
   const keep = new Set<string>();
+  let patchedAssistantContent = false;
   let activityBoundary = '';
   paintRecoveryStatus();
   const oldest = shown.length ? Math.min(...shown.map(event => event.time)) : 0;
@@ -2598,11 +3059,20 @@ function paintDetail(followBottom = historyBefore === null): void {
       if (item.kind === 'event' && item.event.kind === 'user_message') {
         paintMessageReaction(cached.row.querySelector<HTMLElement>('.said.is-user')!, item.event.reaction);
       }
+      if (item.kind === 'event' && item.event.kind === 'assistant_message') {
+        const box = cached.row.querySelector<HTMLElement>('.assistant-response');
+        if (box) paintAssistantCopy(box, item.event, events, selectedId);
+      }
       paintInputReceipt(cached.row, item);
       timelineRows.push(cached.row);
       continue;
     }
-    const row = item.kind === 'compaction' ? compactionRow(item.block, cached?.row) : eventRow(item.event);
+    const patchedAssistant = item.kind === 'event' && item.event.kind === 'assistant_message' && cached
+      ? patchAssistantRow(cached.row, item.event, animateAssistant)
+      : false;
+    if (patchedAssistant) patchedAssistantContent = true;
+    const row = patchedAssistant ? cached!.row
+      : item.kind === 'compaction' ? compactionRow(item.block, cached?.row) : eventRow(item.event, animateAssistant);
     row.dataset.timelineKey = key;
     row.dataset.activityBoundary = activityBoundary;
     paintInputReceipt(row, item);
@@ -2613,8 +3083,17 @@ function paintDetail(followBottom = historyBefore === null): void {
   for (const key of rowCache.keys()) if (!keep.has(key)) rowCache.delete(key);
   reconcileChildren($('timeline'), groupImageRows(groupToolRows(timelineRows)));
   paintPendingInputs();
+  syncTimelineExtent();
   $('timelineEmpty').hidden = selectedId !== null || timelineRows.length > 0 || $('inputQueue').childElementCount > 0;
+  paintDeliveryControls();
+  paintStateLine();
   restoreViewport();
+  // Direct canonical revisions now render inside this paint. Restore the elected live tail
+  // after viewport reconciliation, which otherwise rewinds the just-grown answer.
+  if (patchedAssistantContent && timelineFollowBottom && timelineOwnsSharedScroll()) {
+    $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
+    pane.scrollTop = pane.scrollHeight;
+  }
 
   const facts: string[] = [];
   if (summary) {
@@ -2639,6 +3118,16 @@ function paintDetail(followBottom = historyBefore === null): void {
   $('chatFoot').textContent = facts.join(' · ');
   $('chatFoot').hidden = !deps.state()?.config.ui.developerMode;
   $('chatFoot').classList.toggle('is-warn', pressureOf(selectedId ?? '')?.level === 'huge');
+}
+
+/** A newly authored input elects the live tail before any asynchronous queue read. */
+function revealNewestInput(): void {
+  timelineFollowBottom = true;
+  paintDetail(true);
+  if (timelineOwnsSharedScroll()) {
+    const pane = $('chatBody');
+    pane.scrollTop = pane.scrollHeight;
+  }
 }
 
 // -------------------------------------------------------------------- handoff
@@ -2698,16 +3187,22 @@ function paintRecoveryStatus(): boolean {
   return false;
 }
 
-/** One line under the header saying what is happening right now. */
+/** One compact rail above the composer saying what the selected turn is doing. */
 function paintStateLine(): void {
   window.clearTimeout(durationTimer);
   durationTimer = undefined;
   const note = $('chatState');
-  const { tone, working, ticking } = stateLine();
+  const rail = $('turnStatus');
+  const indicator = $('turnStatusIcon');
+  const snake = indicator.querySelector<SVGElement>('.turn-status-snake')!;
+  const check = indicator.querySelector<HTMLElement>('.turn-status-check')!;
+  const { tone, phase, ticking } = stateLine();
   ui(note, 'textContent', () => stateLine().text);
-  note.className = `subhead-note${tone ? ` ${tone}` : ''}`;
-  // Running state and timer ownership cannot depend on a translated label.
-  note.classList.toggle('is-working', working === true);
+  rail.hidden = note.textContent === '';
+  rail.className = `turn-status-rail${tone ? ` ${tone}` : ''}${phase ? ` is-${phase}` : ''}`;
+  indicator.hidden = phase === undefined;
+  snake.toggleAttribute('hidden', phase !== 'working');
+  check.toggleAttribute('hidden', phase !== 'complete');
   const recovering = paintRecoveryStatus();
   const goalWaiting = controlledSessionId === selectedId && controlledSelection === selectionGeneration && !!goalWaitView;
   if (goalWaiting) paintGoalProgress();
@@ -2732,7 +3227,35 @@ function badgeSignature(): string {
   return sessions.map((entry) => sessionBadges(entry).map((badge) => badge.text).join(',')).join('|');
 }
 
-function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?: boolean; ticking?: boolean } {
+const TURN_WORK_WORDS = [
+  'Pumping tokens',
+  'Juicing context',
+  'Bulking output',
+  'Repping prompts',
+  'Spotting agents',
+  'Loading creatine',
+  'Chasing gains',
+  'Flexing neurons',
+  'TRT mode',
+  'Testosterone boost',
+  'Tren thoughts',
+  'Deca stack',
+  'Anavar cutting',
+  'Dianabol bulking',
+  'Winstrol drying',
+  'Primobolan polishing',
+  'Pissing OpenAI off a little more',
+  'Clauding deez nuts'
+] as const;
+
+/** Stable per turn, then advances slowly enough to feel authored rather than jittery. */
+function turnWorkWord(turnId: string, elapsedSeconds: number): string {
+  let seed = 0;
+  for (const character of turnId) seed = (seed * 31 + character.charCodeAt(0)) >>> 0;
+  return TURN_WORK_WORDS[(seed + Math.floor(elapsedSeconds / 5)) % TURN_WORK_WORDS.length]!;
+}
+
+function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; phase?: 'working' | 'complete'; ticking?: boolean } {
   if (!deps.state()?.config.ui.developerMode) {
     const summary = sessions.find(entry => entry.id === selectedId);
     if (!summary || detailFor !== selectedId) return { text: '', tone: '' };
@@ -2743,10 +3266,12 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
     const startedAt = summary.finishTurn?.turnId === turnId ? summary.finishTurn.startedAt
       : events.find(event => event.kind === 'turn_start' && event.turnId === turnId)?.time;
     const endedAt = events.find(event => event.kind === 'turn_end' && event.turnId === turnId)?.time;
-    if (startedAt === undefined) return { text: active ? t("Working…") : '', tone: '', working: !!active };
+    if (startedAt === undefined) return { text: active ? `${t(turnWorkWord(turnId, 0))}…` : '', tone: '', phase: active ? 'working' : undefined };
     if (!active && endedAt === undefined) return { text: '', tone: '' };
-    const seconds = Math.max(0, Math.floor(((active ? Date.now() : endedAt!) - startedAt) / 1000));
-    return { text: t("{0} for {1}{2}s", [active ? t("Working") : t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };
+    const working = !!active;
+    const seconds = Math.max(0, Math.floor(((working ? Date.now() : endedAt!) - startedAt) / 1000));
+    const action = working ? t(turnWorkWord(turnId, seconds)) : t("Worked");
+    return { text: t("{0} for {1}{2}s", [action, seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', phase: working ? 'working' : 'complete', ticking: working };
   }
   // Recording follows the conversation the browser can see. A tool call arrives over the
   // connector carrying nothing that identifies its caller, so work driven from the phone,
@@ -2814,6 +3339,7 @@ function paintSwarm(state: SwarmState): void {
   // Session rows borrow their live badge from the swarm, so a worker that just went to sleep
   // must not keep saying "active" until some unrelated session update repaints the list.
   paintSessions();
+  void refreshSelectedSwarm();
   const list = $('swarmList');
   if (state.agents.length === 0) {
     list.replaceChildren(
@@ -3366,6 +3892,7 @@ export function chatVisible(next: boolean): void {
   visible = next;
   if (next) void refreshAll();
   else {
+    void browserPanel?.hide();
     window.clearTimeout(toolActivityTimer);
     window.clearTimeout(durationTimer);
     toolActivityTimer = undefined;
@@ -3399,6 +3926,78 @@ function historicalAutomaticInput(entry: InputEntry): boolean {
     entry.state === 'cancelled' && !!entry.error;
 }
 
+/** Ephemeral renderer feedback only. Delivery and turn state remain owned by the outbox/history. */
+function clearThinkingFeedback(inputId: string, repaint = true): void {
+  const feedback = thinkingFeedback.get(inputId);
+  if (!feedback) return;
+  if (feedback.timeout !== null) window.clearTimeout(feedback.timeout);
+  thinkingFeedback.delete(inputId);
+  if (repaint) paintPendingInputs();
+}
+
+function armThinkingFeedback(inputId: string, sessionId: string | null): void {
+  clearThinkingFeedback(inputId, false);
+  const afterSeq = detailCursor ?? events.reduce((next, event) => Math.max(next, event.seq + 1), 0);
+  thinkingFeedback.set(inputId, { inputId, sessionId, afterSeq, confirmed: false, timeout: null });
+}
+
+function confirmThinkingFeedback(inputId: string): void {
+  const feedback = thinkingFeedback.get(inputId);
+  if (!feedback || feedback.confirmed) return;
+  feedback.confirmed = true;
+  feedback.timeout = window.setTimeout(() => clearThinkingFeedback(inputId), THINKING_FEEDBACK_TIMEOUT_MS);
+}
+
+function adoptThinkingFeedback(inputId: string, sessionId: string): void {
+  const feedback = thinkingFeedback.get(inputId);
+  if (feedback) feedback.sessionId = sessionId;
+}
+
+function clearSettledThinkingFeedback(sessionId: string, incoming: readonly SessionEvent[]): void {
+  for (const feedback of thinkingFeedback.values()) {
+    if (feedback.sessionId !== sessionId) continue;
+    const relevant = incoming.filter(event => event.seq >= feedback.afterSeq);
+    const immediate = relevant.some(event => event.kind === 'chat_error' || event.kind === 'native_image' || event.kind === 'tool_call' || event.kind === 'page_tool' || event.kind === 'agent_message');
+    const assistant = relevant.some(event => event.kind === 'assistant_message' && !!withoutMessageReaction(event.message.text).trim());
+    const confirmation = relevant.some(event => event.kind === 'user_message' && event.inputId === feedback.inputId && event.inputDelivery === 'confirmed');
+    if (!immediate && (!assistant || feedback.confirmed || confirmation)) continue;
+    clearThinkingFeedback(feedback.inputId, false);
+  }
+}
+
+function currentThinkingFeedback(): ThinkingFeedback | null {
+  if (selectedId) return [...thinkingFeedback.values()].reverse().find(feedback => feedback.sessionId === selectedId) ?? null;
+  const pending = pendingNewInput?.generation === selectionGeneration ? pendingNewInput.id : null;
+  return pending ? thinkingFeedback.get(pending) ?? null : null;
+}
+
+function thinkingFeedbackRow(feedback: ThinkingFeedback, existing?: HTMLElement | null): HTMLElement {
+  const row = existing?.dataset.inputId === feedback.inputId ? existing : el('div', 'assistant-thinking');
+  if (!row.childElementCount) row.append(...[0, 1, 2].map(() => el('span', 'assistant-thinking-dot')));
+  row.dataset.inputId = feedback.inputId;
+  row.classList.toggle('is-reserved', !feedback.confirmed);
+  if (feedback.confirmed) {
+    row.setAttribute('role', 'status');
+    row.setAttribute('aria-live', 'polite');
+    ui(row, 'aria-label', () => t('ChatGPT is thinking'));
+    ui(row, 'title', () => t('ChatGPT is thinking'));
+  } else {
+    row.removeAttribute('role');
+    row.removeAttribute('aria-live');
+    row.removeAttribute('aria-label');
+    row.removeAttribute('title');
+  }
+  return row;
+}
+
+/** A real assistant revision retires visual waiting; no local reveal delays it. */
+function clearPresentedThinkingFeedback(): void {
+  const feedback = currentThinkingFeedback();
+  if (!feedback?.confirmed) return;
+  clearThinkingFeedback(feedback.inputId, false);
+  paintPendingInputs();
+}
+
 function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   const row = el('div', 'pending-message');
   row.classList.toggle('is-delivered', !entry.error && ['sent', 'tool'].includes(entry.state));
@@ -3425,6 +4024,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   }
   else receipt.append(icon(['sent', 'tool'].includes(entry.state) ? 'i-check' : 'i-clock'));
   receipt.hidden = !entry.error && ['sent', 'tool'].includes(entry.state) && hasLaterModelActivity(entry.deliveredAt ?? entry.offeredAt ?? entry.createdAt);
+  if (!receipt.hidden && !entry.error && ['sent', 'tool'].includes(entry.state)) confirmThinkingFeedback(entry.id);
   row.append(receipt);
   if (notice) {
     const dismiss = dockAction(() => t("Dismiss delivery notice"), 'i-x', () => {});
@@ -3458,7 +4058,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
     cancel.onclick = async () => {
       cancel.disabled = true;
       const result = await run(api.cancelInput(entry.id));
-      if (result) dismissInputNotice(entry.id);
+      if (result) { clearThinkingFeedback(entry.id, false); dismissInputNotice(entry.id); }
       void refreshInputQueue();
     };
     row.append(cancel);
@@ -3481,6 +4081,7 @@ async function adoptAcceptedOpening(entry: InputEntry): Promise<boolean> {
   if (!summary) summary = (await run(api.getSession(id, { limit: 1 })))?.summary ?? undefined;
   if (!summary || pendingNewInput !== pending || pending.generation !== selectionGeneration || selectedId !== null) return false;
   pendingNewInput = null;
+  adoptThinkingFeedback(entry.id, id);
   mergeSessionRows([summary]);
   const from = draftKey();
   inputDrafts.set(summary.id, authoredComposerText());
@@ -3523,8 +4124,10 @@ function paintPendingInputs(): void {
     if (old?.dataset.inputSignature === sig) return old;
     const row = inputMessageRow(entry, notice(entry)); row.dataset.inputSignature = sig; return row;
   });
+  const feedback = currentThinkingFeedback();
+  const thinking = feedback ? thinkingFeedbackRow(feedback, host.querySelector<HTMLElement>(':scope > .assistant-thinking')) : null;
   // Helper controls have their own owner and are refreshed by the queue read below.
-  reconcileChildren(host, [...next, ...host.querySelectorAll<HTMLElement>(':scope > .queued-input')]);
+  reconcileChildren(host, [...next, ...(thinking ? [thinking] : []), ...host.querySelectorAll<HTMLElement>(':scope > .queued-input')]);
 }
 async function refreshInputQueue(): Promise<void> {
   const request = ++inputQueueGeneration;
@@ -3532,6 +4135,7 @@ async function refreshInputQueue(): Promise<void> {
   const [all, pausedHelpers] = await Promise.all([run(api.listInputs()), run(api.listPausedHelpers())]);
   if (!all || selection !== selectionGeneration || request !== inputQueueGeneration) return;
   pendingComposerInputs = all;
+  for (const entry of all) if (entry.error || ['failed', 'cancelled'].includes(entry.state) || queuedFollowup(entry)) clearThinkingFeedback(entry.id, false);
   for (const id of dismissedInputNotices) if (!all.some(entry => entry.id === id)) dismissedInputNotices.delete(id);
   paintDeliveryControls();
   const accepted = pendingNewInput && all.find(entry => entry.id === pendingNewInput!.id);
@@ -3672,7 +4276,10 @@ async function refreshInputQueue(): Promise<void> {
     }
     return card;
   }));
-  paintDetail(false);
+  // Queue snapshots also project retired automatic inputs into the transcript, so this
+  // remains a full repaint. Preserve the reader's actual live-tail policy: forcing false
+  // here moved the viewport until the coalesced history reload corrected it 400 ms later.
+  paintDetail(timelineFollowBottom);
   for (const node of $('inputQueue').querySelectorAll(':scope > .queued-input')) node.remove();
   for (const helper of pausedHelpers ?? []) {
     if (helper.sourceSessionId !== selectedId) continue;
@@ -3711,7 +4318,7 @@ async function retryPlannedInput(entry: InputEntry): Promise<void> {
     }
     startingInputs.set(args.id, { ...args, state: 'queued', owner: null, createdAt: args.dueAt, conversationId: null });
     if (sessionId === null) pendingNewInput = { id: args.id, generation };
-    paintDeliveryControls(); void refreshInputQueue();
+    paintDeliveryControls(); revealNewestInput(); void refreshInputQueue();
     const result = await run(api.sendInput(args));
     if (cancelledStarts.has(args.id)) return;
     if (!result) return;
@@ -3732,7 +4339,10 @@ async function stopCurrentTurn(): Promise<void> {
   if (!id || controlledSessionId !== id || controlledSelection !== generation || !turnId || controlledStopPending) return;
   controlledStopPending = true; paintDeliveryControls();
   try { await run(api.stopSessionTurn(id, turnId)); }
-  finally { if (selectedId === id && selectionGeneration === generation) { controlledStopPending = false; void refreshSessionControls(); } }
+  finally {
+    for (const feedback of thinkingFeedback.values()) if (feedback.sessionId === id) clearThinkingFeedback(feedback.inputId, false);
+    if (selectedId === id && selectionGeneration === generation) { controlledStopPending = false; paintPendingInputs(); void refreshSessionControls(); }
+  }
 }
 let composerDiscoveryGeneration = 0;
 async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?: string, controlAction = false): Promise<boolean | void> {
@@ -3740,8 +4350,15 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
   const key = draftKey();
   const projectId = selectedId ? sessions.find(row => row.id === selectedId)?.projectId ?? null : selectedProjectId;
   const images = imageDrafts.get(key) ?? [];
+  // The button's disabled state is a projection for pointer/keyboard affordance.
+  // Submission still validates the owning draft and controls here so a stale paint,
+  // assistive submit or programmatic form request cannot become execution authority.
+  if (skillPicker?.hasCommand('compact')) {
+    const compacted = await changeSessionCompaction(false);
+    if (compacted) skillPicker.removeCommand('compact');
+    return compacted;
+  }
   const text = plan?.[0] ?? (authoredComposerText().trim() || (images.length ? 'Please look at the attached files.' : ''));
-  if ($<HTMLButtonElement>('chatSend').disabled) return;
   if (!text) {
     // An empty/repeated form submission is not a Stop gesture. Only activation
     // of the button while it actually displays Stop/Cancel owns this branch.
@@ -3761,6 +4378,7 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
       if (wasStarting) cancelledStarts.add(pending.id);
       const cancelled = await run(api.cancelInput(pending.id));
       if (cancelled) {
+        clearThinkingFeedback(pending.id, false);
         startingInputs.delete(pending.id);
         pendingComposerInputs = pendingComposerInputs.filter(row => row.id !== pending.id);
         dismissInputNotice(pending.id);
@@ -3802,6 +4420,8 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
   skillPicker?.restore();
   imageDrafts.delete(key); paintComposerImages();
   if (sessionId === null) pendingNewInput = { id, generation };
+  if (mode === 'auto') armThinkingFeedback(id, sessionId);
+  revealNewestInput();
   void refreshInputQueue();
   paintDeliveryControls();
   try {
@@ -3812,6 +4432,7 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
       // queue/error visible rather than restoring a second copy into the composer.
       const retained = (await run(api.listInputs()))?.find(row => row.id === id);
       if (retained) {
+        if (retained.error || ['failed', 'cancelled'].includes(retained.state) || queuedFollowup(retained)) clearThinkingFeedback(id, false);
         pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== id), retained];
         await adoptAcceptedOpening(retained);
         return true;
@@ -3823,12 +4444,14 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
       if (images.length) imageDrafts.set(key, [...images, ...(imageDrafts.get(key) ?? [])]);
       if (draftKey() === key) paintComposerImages();
       if (pendingNewInput?.id === id) pendingNewInput = null;
+      clearThinkingFeedback(id);
       return;
     }
     // The accepted IPC result is newer than any queue read started before it. Keep
     // that durable row visible while the next listing crosses the process boundary.
     inputQueueGeneration++;
     pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== result.id), result];
+    if (result.error || ['failed', 'cancelled'].includes(result.state) || queuedFollowup(result)) clearThinkingFeedback(id, false);
     if (sessionId === null && selectionGeneration === generation && pendingNewInput?.id === id && result.automation &&
         ($<HTMLSelectElement>('chatAutomation').value !== result.automation || openingLoopDelivery() !== result.loopAfterTurn))
       await run(api.setInputAutomation(result.id, $<HTMLSelectElement>('chatAutomation').value as InputAutomation, openingLoopDelivery()));
@@ -3856,7 +4479,18 @@ export function openChatView(name: string): void {
   showView(name);
 }
 
+let currentChatView = 'timeline';
+const chatViewScroll = new Map<string, number>();
+
+/** Timeline data can repaint while Settings is open, but only the visible view owns the shared scroller. */
+function timelineOwnsSharedScroll(): boolean {
+  return currentChatView === 'timeline';
+}
+
 function showView(name: string): void {
+  if (name === 'settings') void browserPanel?.hide();
+  const body = $('chatBody');
+  chatViewScroll.set(currentChatView, body.scrollTop);
   $('composer').hidden = name === 'settings';
   $('composerDock').hidden = name === 'settings';
   $('inputQueue').hidden = name !== 'timeline';
@@ -3866,6 +4500,11 @@ function showView(name: string): void {
   for (const view of document.querySelectorAll<HTMLElement>('#chatBody > .view')) {
     view.hidden = view.dataset.view !== name;
   }
+  currentChatView = name;
+  // Settings is a destination, not another point in the conversation's scroll range.
+  // Every sidebar navigation opens it at its heading; returning to chat restores the
+  // conversation position that was visible before the gear was pressed.
+  body.scrollTop = name === 'settings' ? 0 : (chatViewScroll.get(name) ?? 0);
   $('chatSettingsBtn').classList.toggle('is-on', name === 'settings');
 }
 
@@ -3877,6 +4516,7 @@ function selectSession(id: string): void {
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = false;
   selectedId = id;
+  if (ownerChanged) selectedSwarm = null;
   const selected = sessions.find(row => row.id === id);
   applyComposerSessionModel(`${id}:${selectionGeneration}`, composerSessionSelection(selected) ?? null);
   const parent = selected?.origin?.kind === 'worker' ? selected.origin.fromSessionId : null;
@@ -3886,6 +4526,7 @@ function selectSession(id: string): void {
   ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => t("Ask anything…"));
   restoreDraft();
   if (ownerChanged) {
+    timelineFollowBottom = true;
     // Retire the prior owner now; retain only its inert painted transcript until the
     // selected detail arrives. Existing async image/load generation fences still apply.
     events = [];
@@ -3901,6 +4542,7 @@ function selectSession(id: string): void {
     handoffLoadGeneration++;
   }
   paintSessions();
+  if (ownerChanged) void refreshSelectedSwarm();
   if (ownerChanged) {
     paintDetail(false);
     paintHandoff();
@@ -3911,9 +4553,10 @@ function selectSession(id: string): void {
 
 function selectNewChat(projectId: string | null = null): void {
   rememberDraft(); selectionGeneration++; replaceComposerDraft(); pendingNewInput = null;
+  timelineFollowBottom = true;
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
-  newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  newChatSelected = true; selectedId = null; selectedSwarm = null; selectedSwarmGeneration++; selectedProjectId = projectId; detailFor = null; detailCursor = null;
   if (projectId) expandedProjects.add(projectId);
   applyComposerSessionModel(null, null);
   // New Chat selects its existing draft, just like a session. Navigation is not
@@ -3934,19 +4577,26 @@ export function initChat(next: Deps): void {
       .map(entry => ({ id: entry.id, scope: projectGroup(entry.projectId) ?? '' }))
   ], paintSessions);
   deps = next;
+  const stopComposerHeightMotion = installComposerHeightMotion($('composer'));
+  window.addEventListener('beforeunload', stopComposerHeightMotion, { once: true });
   const fileToggle = el('button', 'btn file-panel-toggle') as HTMLButtonElement;
   fileToggle.id = 'filePanelToggle'; fileToggle.type = 'button'; fileToggle.hidden = true;
   fileToggle.append(icon('i-folder'));
   ui(fileToggle, 'aria-label', () => t('Toggle Files side panel')); fileToggle.setAttribute('aria-expanded', 'false');
-  const agentToggle = el('button', 'btn btn-icon', '◫') as HTMLButtonElement;
+  const agentToggle = el('button', 'btn btn-icon') as HTMLButtonElement;
+  agentToggle.append(icon('i-agent'));
   agentToggle.id = 'agentPanelToggle'; agentToggle.type = 'button'; agentToggle.hidden = true;
   ui(agentToggle, 'aria-label', () => t("Toggle sub-agent side panel")); agentToggle.setAttribute('aria-expanded', 'false');
-  $('headerConnect').after(fileToggle, agentToggle);
+  const browserToggle = el('button', 'btn btn-icon') as HTMLButtonElement;
+  browserToggle.id = 'browserUseToggle'; browserToggle.type = 'button';
+  browserToggle.append(icon('i-globe'));
+  ui(browserToggle, 'aria-label', () => t('Toggle Browser side panel')); browserToggle.setAttribute('aria-expanded', 'false');
+  $('headerActions').prepend(fileToggle, browserToggle, agentToggle);
   const agentToolGroups = new Map<string, HTMLDetailsElement>();
   agentPanel = createAgentPanel({
     host: document.querySelector<HTMLElement>('[data-panel="chat"]')!, toggle: agentToggle,
-    onShow: () => filePanel?.hide(),
-    load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
+    onShow: () => { filePanel?.hide(true); void browserPanel?.hide(); },
+    load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession,
     render: (source, id, current) => {
       let boundary = '';
       const rows = foldAgentCommunication(source).flatMap(event => {
@@ -3984,6 +4634,18 @@ export function initChat(next: Deps): void {
     const select = $<HTMLSelectElement>('chatAutomation');
     select.value = button.dataset.mode!;
     select.dispatchEvent(new Event('change'));
+  });
+  $('clearComposerMode').addEventListener('click', () => {
+    const automation = $<HTMLSelectElement>('chatAutomation');
+    const plan = taskPlans.get(draftKey());
+    if (plan?.sending || (automation.value !== 'off' && automation.disabled)) return;
+    if (plan) cancelTaskPlan();
+    if (automation.value !== 'off') {
+      automation.value = 'off';
+      automation.dispatchEvent(new Event('change'));
+    }
+    $<HTMLDetailsElement>('composerSettings').open = false;
+    $<HTMLTextAreaElement>('chatInput').focus();
   });
   $('chatAutomation').addEventListener('change', async () => {
     goalIntentGeneration++;
@@ -4068,7 +4730,7 @@ export function initChat(next: Deps): void {
             loopAfterTurn: openingLoopDelivery(),
             mode: 'auto', dueAt, model, reasoningEffort, state: 'queued', owner: null, createdAt: dueAt, conversationId: null };
           startingInputs.set(inputId, entry); pendingNewInput = { id: inputId, generation: selection };
-          goalProgress = { requestId, selection, inputId, phase: 'queued', text: '' }; paintDeliveryControls();
+          goalProgress = { requestId, selection, inputId, phase: 'queued', text: '' }; paintDeliveryControls(); revealNewestInput();
           try {
             const accepted = await run(api.sendInput(entry));
             if (accepted) { inputQueueGeneration++; pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== inputId), accepted];
@@ -4104,13 +4766,10 @@ export function initChat(next: Deps): void {
   }
   for (const [buttonId, cancel] of [['compactSession', false], ['cancelCompaction', true]] as const) {
     $(buttonId).addEventListener('click', async () => {
-      const id = selectedId; if (!id) return;
-      const button = $<HTMLButtonElement>(buttonId); button.disabled = true;
-      try { await run(cancel ? api.cancelSessionCompaction(id) : api.compactSession(id)); }
-      finally { button.disabled = false; if (selectedId === id) void refreshSessionControls(); }
+      await changeSessionCompaction(cancel);
     });
   }
-  const appendImages = (owner: ComposerDraftOwner, chosen: InputAttachment[] | null | undefined): boolean => {
+  const appendImages = (owner: ComposerDraftOwner, chosen: Array<InputImage | InputAttachment> | null | undefined): boolean => {
     if (!chosen?.length) return false;
     if (!ownsComposerDraft(owner)) { toast(t("Files were not added because the draft changed.")); return false; }
     const combined = [...(imageDrafts.get(owner.key) ?? []), ...chosen];
@@ -4118,12 +4777,72 @@ export function initChat(next: Deps): void {
     imageDrafts.set(owner.key, combined); paintComposerImages();
     return true;
   };
+  const appendComposerRequest = (owner: ComposerDraftOwner, request: string): boolean => {
+    if (!ownsComposerDraft(owner)) return false;
+    const input = $<HTMLTextAreaElement>('chatInput');
+    const authored = authoredComposerText();
+    if (!authored.endsWith(request)) {
+      const separator = !authored || authored.endsWith('\n\n') ? '' : authored.endsWith('\n') ? '\n' : '\n\n';
+      const draft = `${authored}${separator}${request}`;
+      inputDrafts.set(owner.key, draft);
+      if (skillPicker) skillPicker.restore();
+      else input.value = draft;
+      input.dispatchEvent(new input.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+    }
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    return true;
+  };
+  const browserDesignRequest = (context: BrowserUseDesignContext): string => {
+    const selection = context.selection;
+    const classes = selection.classes.length ? selection.classes.map(name => `.${name}`).join(' ') : 'none';
+    const styles = selection.styles.map(style => `${style.property}: ${style.value || '—'}`).join('; ');
+    const identity = [selection.role, selection.name].filter(Boolean).join(' · ') || 'unnamed element';
+    const sources = selection.sources.map(source => {
+      const position = source.line === null ? '' : `:${source.line}${source.column === null ? '' : `:${source.column}`}`;
+      return `${source.framework}${source.label ? ` ${source.label}` : ''}: ${source.url}${position}`;
+    }).join('; ');
+    return [
+      t('I selected this interface element in Browser Use. Use the attached screenshot and runtime details to locate the corresponding source before changing it.'),
+      '',
+      `Page: ${context.title.slice(0, 200) || 'Untitled'} — ${context.url.slice(0, 2048)}`,
+      `Element: <${selection.tag || 'element'}> · ${identity}`,
+      `Selector: ${selection.selector || 'unavailable'}`,
+      `Classes: ${classes}`,
+      `Element size: ${selection.width} × ${selection.height} · viewport ${context.viewport.width} × ${context.viewport.height}`,
+      `Box model: margin ${selection.boxModel.margin.join(' ')} · border ${selection.boxModel.border.join(' ')} · padding ${selection.boxModel.padding.join(' ')} · content ${selection.boxModel.contentWidth} × ${selection.boxModel.contentHeight}`,
+      `Relevant computed styles: ${styles || 'none'}`,
+      `Probabilistic source candidates (verify before editing): ${sources || 'none'}`,
+      '',
+      t('Requested change: ')
+    ].join('\n');
+  };
   filePanel = createFilePanel({
     host: document.querySelector<HTMLElement>('[data-panel="chat"]')!, toggle: fileToggle,
-    onShow: () => agentPanel?.hide(),
+    onShow: () => { agentPanel?.hide(true); void browserPanel?.hide(); },
+    onRequestGitReview: projectId => {
+      if (selectedLocalProject()?.id !== projectId) return;
+      const request = t('Review the Git changes in this project, including untracked files. Stage only related changes and leave unrelated work untouched. Run relevant checks, commit with a clear message, then push the current branch to its configured remote without force. If scope, checks, or remote are uncertain, stop and ask me.');
+      appendComposerRequest(composerDraftOwner(), request);
+    },
     captureAttachment: () => {
       const owner = composerDraftOwner();
       return attachment => appendImages(owner, [attachment]);
+    }
+  });
+  browserPanel = createBrowserPanel({
+    host: document.querySelector<HTMLElement>('[data-panel="chat"]')!,
+    toggle: browserToggle,
+    onShow: () => { agentPanel?.hide(true); filePanel?.hide(true); },
+    captureAskAgent: () => {
+      const owner = composerDraftOwner();
+      return context => {
+        if (!ownsComposerDraft(owner)) return false;
+        if (!appendImages(owner, [{ name: context.screenshot.name, dataUrl: context.screenshot.dataUrl }])) return false;
+        if (!appendComposerRequest(owner, browserDesignRequest(context))) return false;
+        toast(t('Selection added to the composer.'));
+        return true;
+      };
     }
   });
   filePanel.update(selectedLocalProject());
@@ -4140,10 +4859,10 @@ export function initChat(next: Deps): void {
     draft: () => inputDrafts.get(draftKey()), saveDraft: text => inputDrafts.set(draftKey(), text),
     list: scope => api.skillLibrary(scope), command: name => {
       if (name === 'plan') { $('createPlan').click(); return; }
-      if (name === 'compact') { $('compactSession').click(); return; }
       const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = name;
       automation.dispatchEvent(new Event('change', { bubbles: true }));
-    } });
+    }, commandAvailable: name => name !== 'compact' || selectedId !== null,
+    deferCommand: name => name === 'compact' });
   skillPicker.restore();
   $('generateFinishGoal').addEventListener('click', async () => {
     const button = $<HTMLButtonElement>('generateFinishGoal'), id = selectedId, turnId = controlledTurnId;
@@ -4214,10 +4933,13 @@ export function initChat(next: Deps): void {
     for (const menu of composerMenus) if (!menu.contains(event.target as Node) || ((event.target as HTMLElement).closest('button') && !(event.target as HTMLElement).closest('[data-keep-menu]'))) menu.open = false;
   });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') for (const menu of composerMenus) menu.open = false; });
-  $('chatInput').addEventListener('input', () => {
+  $('chatInput').addEventListener('input', event => {
+    const commandProjection = (event as unknown as { detail?: unknown }).detail === COMPOSER_COMMAND_PROJECTION;
     const hasText = !!authoredComposerText().trim();
     const plan = taskPlans.get(draftKey());
-    if (plan && !plan.stages && (plan.requestId || !hasText)) {
+    // Consuming /goal or /loop changes control state, not the authored Plan task.
+    // Real edits retain the existing cancellation contract, including an explicit clear.
+    if (!commandProjection && plan && !plan.stages && (plan.requestId || !hasText)) {
       cancelTaskPlan();
       if (hasText) taskPlans.set(draftKey(), { text: '', requestId: null, stages: null, sending: false, progress: null, error: null });
     }
@@ -4233,7 +4955,8 @@ export function initChat(next: Deps): void {
   $('composer').addEventListener('submit', (event) => {
     event.preventDefault();
     const controlAction = event.submitter === $('chatSend') && $('chatSend').dataset.action === 'stop';
-    if (currentPreparedPlan()) void sendPreparedPlan();
+    if (skillPicker?.hasCommand('compact')) void sendComposer(undefined, undefined, undefined, controlAction);
+    else if (currentPreparedPlan()) void sendPreparedPlan();
     else if (taskPlans.has(draftKey())) {
       if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt');
     } else void sendComposer(undefined, undefined, undefined, controlAction);
@@ -4251,26 +4974,38 @@ export function initChat(next: Deps): void {
   const historyPane = $('chatBody');
   let pendingScrollDirection = 0;
   historyPane.addEventListener('wheel', event => {
+    if (!timelineOwnsSharedScroll()) return;
     pendingScrollDirection = Math.sign(event.deltaY);
+    if (pendingScrollDirection < 0) timelineFollowBottom = false;
     requestHistory(pendingScrollDirection);
   }, { passive: true });
   let pointerScrollTop: number | null = null;
-  historyPane.addEventListener('pointerdown', () => { pointerScrollTop = historyPane.scrollTop; });
+  historyPane.addEventListener('pointerdown', () => {
+    pointerScrollTop = timelineOwnsSharedScroll() ? historyPane.scrollTop : null;
+  });
   window.addEventListener('pointerup', () => { pointerScrollTop = null; });
   historyPane.addEventListener('keydown', event => {
+    if (!timelineOwnsSharedScroll()) return;
     pendingScrollDirection = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) ? -1 : ['ArrowDown', 'PageDown', 'End'].includes(event.key) ? 1 : 0;
+    if (pendingScrollDirection < 0) timelineFollowBottom = false;
     requestHistory(pendingScrollDirection);
   });
   historyPane.addEventListener('scroll', () => {
+    if (!timelineOwnsSharedScroll()) return;
+    let userDirection = 0;
     if (pointerScrollTop !== null) {
       const direction = Math.sign(historyPane.scrollTop - pointerScrollTop);
       pointerScrollTop = historyPane.scrollTop;
+      userDirection = direction;
       requestHistory(direction);
     } else if (pendingScrollDirection) {
       const direction = pendingScrollDirection;
       pendingScrollDirection = 0;
+      userDirection = direction;
       requestHistory(direction);
     }
+    if (userDirection < 0) timelineFollowBottom = false;
+    else if (userDirection > 0 && historyPane.scrollTop + historyPane.clientHeight >= historyPane.scrollHeight - 40) timelineFollowBottom = true;
     if (historyDemand) void fillTimelineHistory();
   }, { passive: true });
   $('timeline').addEventListener('click', event => {
@@ -4278,6 +5013,12 @@ export function initChat(next: Deps): void {
     // earlier reconciliation is not part of the collapsed headline's height.
     if ((event.target as Element).closest('summary')) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
   });
+  $('timeline').addEventListener('toggle', () => {
+    // Expanded output changes the measured page, so its old visual estimate is no
+    // longer a valid scroll range for the collapsed or expanded layout.
+    timelineExtent = null;
+    syncTimelineExtent();
+  }, true);
 
   $('chatView').addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-view]');

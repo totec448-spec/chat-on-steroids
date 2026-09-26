@@ -108,7 +108,7 @@ describe('extension release metadata', () => {
     expect(js).not.toMatch(/type: 'pair'[^}]*code/);
   });
 
-  it('ships Overwrite on by default and exposes one persistent toggle that refreshes immediately', async () => {
+  it('ships Overwrite off by default and exposes one persistent toggle that refreshes immediately', async () => {
     const dir = path.join(process.cwd(), 'extension');
     const [content, html, js] = await Promise.all([
       fs.readFile(path.join(dir, 'content.js'), 'utf8'),
@@ -117,8 +117,9 @@ describe('extension release metadata', () => {
     ]);
     expect(content).toContain("const RENDER_STREAM_KEY = 'renderStreamEnabled';");
     expect(content).toContain("const SHOW_TIMES_KEY = 'showStreamTimes';");
-    expect(content).toContain('let RENDER_STREAM = TEST_MODE ? false : true;');
+    expect(content).toContain('let RENDER_STREAM = false;');
     expect(html).toContain('id="overwriteToggle"');
+    expect(html).not.toContain('id="overwriteToggle" type="checkbox" checked');
     expect(html).toContain('id="timeToggle"');
     expect(html).toContain('type="checkbox"');
     expect(html).not.toContain('id="overwriteBtn"');
@@ -990,7 +991,8 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
   });
 
   it.each(['unattributed', 'assistant-error', 'silence', 'no-tab', 'goal', 'compaction'].flatMap(reason =>
-    ['unresolved', 'resolved-during-scan', 'claim-unavailable', 'navigated-during-claim'].map(mode => ({ reason, mode }))))(
+    ['unresolved', 'responsive', 'resolved-during-scan', 'claim-unavailable', 'navigated-during-claim',
+      ...(reason === 'compaction' ? ['responsive-refused', 'navigated-during-resume'] : [])].map(mode => ({ reason, mode }))))(
     'claims $reason recovery after the tab scan: $mode', async ({ reason, mode }) => {
       let armed = false;
       let handed = false;
@@ -1012,7 +1014,8 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
           if (armed && !handed) {
             handed = true;
             trace.push('handout');
-            return response(200, { repairs: [{ conversationId: CHAT, token: 'attribution-attempt', reason, requiresClaim: true }] });
+            return response(200, { repairs: [{ conversationId: CHAT, token: 'attribution-attempt', reason,
+              continuationToken: 'exact-ticket', requiresClaim: true }] });
           }
           return response(200, { repairs: [] });
         }
@@ -1021,7 +1024,13 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
         tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${navigated ? OTHER : CHAT}` }),
         tabsSendMessage: async (_id, message) => message.type === 'clf-repair-check'
-          ? { safe: true, revision: 1, turnId: 'source', questionId: 'question' } : { ok: true },
+          ? { safe: true, revision: 1, turnId: 'source', questionId: 'question' }
+          : message.type === 'clf-resume-compaction' ? (() => {
+            expect(message.continuationToken).toBe('exact-ticket');
+            if (mode === 'responsive-refused') return { accepted: false, reason: 'wrong-document' };
+            if (mode === 'navigated-during-resume') navigated = true;
+            return mode === 'responsive' ? { accepted: true } : null;
+          })() : { ok: true },
         tabsQuery: async () => {
           if (handed) {
             trace.push('scan');
@@ -1036,8 +1045,9 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       await worker.fireAlarm();
       expect(trace.indexOf('scan')).toBeGreaterThan(trace.indexOf('handout'));
       expect(trace.indexOf('claim')).toBeGreaterThan(trace.indexOf('scan'));
-      if (mode === 'unresolved') {
-        expect(worker.tabsReload).toHaveBeenCalledExactlyOnceWith(21);
+      if (mode === 'unresolved' || mode === 'responsive') {
+        if (reason === 'compaction' && mode === 'responsive') expect(worker.tabsReload).not.toHaveBeenCalled();
+        else expect(worker.tabsReload).toHaveBeenCalledExactlyOnceWith(21);
         expect(trace).toContain('repaired');
       } else {
         expect(worker.tabsReload).not.toHaveBeenCalled();
@@ -1648,6 +1658,8 @@ describe('worker settings authority', () => {
     const token = '0123456789abcdef0123456789abcdef';
 
     await worker.send({ type: 'compact', conversationId: CHAT, ticket: true, automatic: true }, 44);
+    await worker.send({ type: 'compact', conversationId: CHAT, ticket: true, token }, 44);
+    await worker.send({ type: 'compact', conversationId: CHAT, resume: true, token }, 44);
     const sourceError = 'The browser could not insert the handoff request (native_edit_rejected).';
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceLost: true, sourceError }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDispatch: true }, 44);
@@ -1655,6 +1667,8 @@ describe('worker settings authority', () => {
 
     expect(posted).toEqual([
       expect.objectContaining({ conversationId: CHAT, ticket: true, automatic: true }),
+      expect.objectContaining({ conversationId: CHAT, ticket: true, token }),
+      expect.objectContaining({ conversationId: CHAT, resume: true, token }),
       expect.objectContaining({ conversationId: CHAT, token, sourceLost: true, sourceError }),
       expect.objectContaining({ conversationId: CHAT, token, sourceDispatch: true }),
       expect.objectContaining({ conversationId: CHAT, token, destinationDispatch: true })

@@ -29,6 +29,7 @@ app.whenReady().then(async () => {
       vite.middlewares.use('/setup-preview.html', async (_request, response) => {
         const source = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
           .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace('</head>', '<link rel="stylesheet" href="/icons.css" /></head>')
           .replace('</body>', `<script type="module">
             import { initSetupGuide } from '/setup-guide.ts';
             import { initLanguage, setLanguage, t } from '/i18n.ts';
@@ -37,6 +38,9 @@ app.whenReady().then(async () => {
             for (const p of document.querySelectorAll('.panel')) p.classList.toggle('is-active', p.dataset.panel === 'setup');
             document.getElementById('tabs').hidden = false;
             document.getElementById('desktopTunnelField').hidden = false;
+            // Representative visual states only; the production state owner is main.ts.
+            document.querySelector('[data-step="folder"]').classList.add('is-done');
+            document.querySelector('[data-step="tunnel"]').classList.add('is-current');
             window.fixtureReady = true;
           </script></body>`);
         response.setHeader('Content-Type', 'text/html');
@@ -51,9 +55,10 @@ app.whenReady().then(async () => {
     await win.loadURL(server.resolvedUrls.local[0] + 'setup-preview.html');
     const ready = await win.webContents.executeJavaScript('window.fixtureReady');
     assert.equal(ready, true);
+    await win.webContents.executeJavaScript('document.fonts.ready.then(() => true)');
     const results = [];
     for (const [width, height, zoom, language, theme] of [
-      [1100, 900, 1, 'en', 'dark'], [800, 650, 1, 'en', 'dark'],
+      [1400, 900, 1, 'en', 'dark'], [1100, 900, 1, 'en', 'dark'], [800, 650, 1, 'en', 'dark'],
       [1100, 900, 1.5, 'zh-CN', 'light'], [640, 720, 1, 'zh-CN', 'dark'],
       [800, 650, 1, 'es', 'dark'], [800, 650, 1, 'zh-TW', 'light'],
       [1100, 900, 1, 'ja', 'dark'], [1100, 900, 1.5, 'ja', 'light'], [640, 720, 1, 'ja', 'dark'],
@@ -64,10 +69,43 @@ app.whenReady().then(async () => {
       win.webContents.setZoomFactor(zoom);
       await win.webContents.executeJavaScript(`window.setLanguage('${language}')`);
       await win.webContents.executeJavaScript(`document.documentElement.dataset.theme = '${theme}'`);
+      const page = await win.webContents.executeJavaScript(`(() => {
+        const panel = document.querySelector('[data-panel="setup"]');
+        panel.scrollTop = 0;
+        const header = panel.querySelector('.setup-heading').getBoundingClientRect();
+        const wizard = panel.querySelector('.wizard').getBoundingClientRect();
+        const languages = panel.querySelector('.language-tabs').getBoundingClientRect();
+        const steps = [...panel.querySelectorAll('.wizard > .step')];
+        const first = steps[0].getBoundingClientRect();
+        const second = steps[1].getBoundingClientRect();
+        const doneMark = steps[0].querySelector('.step-mark');
+        const panelStyle = getComputedStyle(panel);
+        const available = panel.clientWidth - parseFloat(panelStyle.paddingLeft) - parseFloat(panelStyle.paddingRight);
+        return {
+          overflow: panel.scrollWidth > panel.clientWidth,
+          aligned: Math.abs(header.left - wizard.left) < 1 && Math.abs(header.right - wizard.right) < 1,
+          canvasWidth: Math.round(wizard.width),
+          canvasWidthMatches: Math.abs(wizard.width - Math.min(940, available)) < 1.5,
+          languagesFit: languages.left >= header.left - 1 && languages.right <= header.right + 1,
+          separateCards: getComputedStyle(panel.querySelector('.wizard')).borderTopWidth === '0px'
+            && steps.every(step => parseFloat(getComputedStyle(step).borderTopWidth) > 0
+              && getComputedStyle(step).borderTopLeftRadius !== '0px')
+            && second.top - first.bottom >= 8,
+          doneCheck: getComputedStyle(doneMark.querySelector('.tick')).display !== 'none'
+            && getComputedStyle(doneMark.querySelector('.tick'), '::before').content !== 'none'
+            && getComputedStyle(doneMark, '::before').display === 'none'
+            && getComputedStyle(doneMark).color !== getComputedStyle(steps[0]).color,
+          numbered: [...panel.querySelectorAll('.step-mark')].every(mark => getComputedStyle(mark, '::before').content === 'counter(setup-step)')
+        };
+      })()`);
+      assert.deepEqual(page, { overflow: false, aligned: true,
+        canvasWidth: width === 1400 && zoom === 1 ? 940 : page.canvasWidth,
+        canvasWidthMatches: true, languagesFit: true, separateCards: true, doneCheck: true, numbered: true },
+        JSON.stringify({ width, zoom, language, page }));
       const header = await win.webContents.executeJavaScript(`(async () => {
         const panel = document.querySelector('[data-panel="setup"]'); panel.scrollTop = 0;
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        const tabs = panel.querySelector('.language-tabs'), title = panel.querySelector('.settings-heading');
+        const tabs = panel.querySelector('.language-tabs'), title = panel.querySelector('.setup-heading > div:first-child');
         const bounds = tabs.getBoundingClientRect(), heading = title.getBoundingClientRect();
         const buttons = [...tabs.querySelectorAll('button')];
         return {
@@ -88,7 +126,7 @@ app.whenReady().then(async () => {
       results.push({ kind:'header', width, zoom, language, theme, ...header });
       // Let the offscreen compositor publish the scrolled header before capturing it.
       await new Promise(resolve => setTimeout(resolve, 100));
-      fs.writeFileSync(path.join(output, `${language}-${width}-${zoom}-header.png`), (await win.webContents.capturePage()).toPNG());
+      fs.writeFileSync(path.join(output, `${language}-${width}-${zoom}-top.png`), (await win.webContents.capturePage()).toPNG());
       const emptyFields = await win.webContents.executeJavaScript(`(() => {
         return [...document.querySelectorAll('.setup-required')].every(input => {
           const empty = getComputedStyle(input).backgroundColor;

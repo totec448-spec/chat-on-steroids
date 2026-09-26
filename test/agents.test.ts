@@ -87,6 +87,7 @@ const {
   spawn,
   swarmRunning,
   swarmState,
+  swarmStateForPrimeConversations,
   swarmStateForCaller,
   statusForCaller,
   workerConversationGone,
@@ -800,6 +801,21 @@ describe('a worker whose chat never opened', () => {
     startSwarm(1);
     expect(failAgent(PRIME_ID, 'whatever')).toBeNull();
     expect(swarmRunning()).toBe(true);
+  });
+
+  it('keeps its terminal state visible to the owning session after the run parks', () => {
+    startSwarm(1);
+    failAgent('worker-1', 'the opened chat never reported back');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const owner = swarmStateForPrimeConversations([PRIME_CHAT]);
+    expect(owner).toMatchObject({ running: false, retainedHistory: true });
+    expect(owner.agents.find(agent => agent.id === 'worker-1')).toMatchObject({
+      state: 'failed',
+      conversationId: null,
+      result: 'the opened chat never reported back'
+    });
+    expect(swarmStateForPrimeConversations(['c-unrelated']).agents).toEqual([]);
   });
 });
 

@@ -43,11 +43,12 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({ show: false, width: 1040, height: 850, webPreferences: { sandbox: true, backgroundThrottling: false } });
     const js = source => win.webContents.executeJavaScript(source);
     await win.loadURL(server.resolvedUrls.local[0] + 'fixture.html');
+    win.webContents.setZoomFactor(1);
     for (let i = 0; i < 100 && !await js('!!window.fixtureReady'); i++) await new Promise(resolve => setTimeout(resolve, 25));
     assert.equal(await js('!!window.fixtureReady'), true, 'Fixture loads the production Usage module');
     assert.deepEqual(await js(`[document.getElementById('usageMessages56').textContent,document.getElementById('usageMessages6').textContent]`), ['35', '16']);
-    assert.equal(await js(`document.querySelector('.settings-heading').nextElementSibling.id`), 'usageSummary', 'Usage opens directly with the summary');
-    assert.equal(await js(`document.querySelector('.usage-panel').lastElementChild.contains(document.getElementById('usageMessageCounts'))`), true, 'Message counts belong to the bottom section');
+    assert.equal(await js(`!!document.querySelector('.usage-content > #usageSummary')`), true, 'Usage opens directly with the summary');
+    assert.equal(await js(`document.querySelector('.usage-sections').lastElementChild.contains(document.getElementById('usageMessageCounts'))`), true, 'Message counts belong to the bottom section');
     assert.equal(await js(`document.getElementById('usageStatus').getBoundingClientRect().height`), 0, 'Successful loading leaves no status gap');
     const capture = async (name, bottom = true) => {
       await js(bottom ? `document.querySelector('.usage-messages').scrollIntoView({block:'end'})` : `document.querySelector('.usage-panel').scrollTop=0`);
@@ -72,9 +73,13 @@ app.whenReady().then(async () => {
     await js(`document.getElementById('usageWeekStart').focus()`);
     win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Space' });
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Space' });
+    for (let i = 0; i < 40 && await js(`localStorage.getItem('cos.usage.weekStart')`) !== '0'; i++) {
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
     assert.equal(await js(`document.getElementById('usageMessages6').textContent`), '4', 'Native keyboard activation selects Sunday');
     assert.equal(await js(`localStorage.getItem('cos.usage.weekStart')`), '0');
     win.setSize(560, 850); win.webContents.setZoomFactor(1.25);
+    await new Promise(resolve => setTimeout(resolve, 100));
     await js(`window.setFixtureLanguage('ja'); document.documentElement.dataset.theme='light'`);
     await capture('narrow-japanese-light');
     console.log('Usage week: bottom placement, compact rows, exact counts, native keyboard, persistence and two layouts passed.');

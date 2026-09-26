@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'" />
+  <link rel="stylesheet" href="./pet-overlay.css" />
+  <title>Pets</title>
+</head>
+<body>
+  <div id="petStage" aria-label="Desktop pets"></div>
+  <section class="pet-tray" id="petTray" aria-label="Task activity" hidden>
+    <div class="pet-tray-head">
+      <strong>Tasks</strong>
+      <span id="petTrayCount"></span>
+      <button id="petTrayClose" type="button" aria-label="Hide task activity"><i class="ph ph-x" aria-hidden="true"></i></button>
+    </div>
+    <div class="pet-cards" id="petCards"></div>
+  </section>
+  <script type="module" src="./pet-overlay.ts"></script>
+</body>
+</html>

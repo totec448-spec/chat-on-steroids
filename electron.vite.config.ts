@@ -13,13 +13,25 @@ export default defineConfig({
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
-      rollupOptions: { input: resolve(__dirname, 'src/preload/index.ts') }
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/preload/index.ts'),
+          'pet-overlay': resolve(__dirname, 'src/preload/pet-overlay.ts'),
+          'view-menu': resolve(__dirname, 'src/preload/view-menu.ts')
+        }
+      }
     }
   },
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
     build: {
-      rollupOptions: { input: resolve(__dirname, 'src/renderer/index.html') }
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/renderer/index.html'),
+          'pet-overlay': resolve(__dirname, 'src/renderer/pet-overlay.html'),
+          'view-menu': resolve(__dirname, 'src/renderer/view-menu.html')
+        }
+      }
     }
   }
 });

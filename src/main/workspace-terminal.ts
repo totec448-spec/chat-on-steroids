@@ -5,7 +5,15 @@ import { projectWorkspace } from './projects.js';
 import { getConfig, effectiveCapabilities } from './config.js';
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
 
-type Entry = { projectId: string; cwd: string; pty: IPty; unacked: number; paused: boolean };
+type Entry = {
+  projectId: string;
+  cwd: string;
+  pty: IPty;
+  cols: number;
+  rows: number;
+  unacked: number;
+  paused: boolean;
+};
 /** Human-operated shells belong to one renderer lifetime, never an MCP caller or its output queue. */
 export class WorkspaceTerminals {
   private entries = new Map<string, Entry>();
@@ -30,7 +38,7 @@ export class WorkspaceTerminals {
       const pty = spawn(shell.shellPath, shell.shellType === 'powershell' ? ['-NoLogo'] : [], {
         name: 'xterm-256color', cols, rows, cwd, env, useConpty: true
       });
-      const entry: Entry = { projectId, cwd, pty, unacked: 0, paused: false };
+      const entry: Entry = { projectId, cwd, pty, cols, rows, unacked: 0, paused: false };
       this.entries.set(id, entry);
       pty.onData(data => {
         if (this.entries.get(id) !== entry) return;
@@ -57,7 +65,13 @@ export class WorkspaceTerminals {
     if (this.entries.get(id) !== entry || current.real !== entry.cwd) throw new Error('Terminal project changed');
     entry.pty.write(data);
   }
-  resize(id: string, cols: number, rows: number): void { this.entries.get(id)?.pty.resize(cols, rows); }
+  resize(id: string, cols: number, rows: number): void {
+    const entry = this.entries.get(id);
+    if (!entry || (entry.cols === cols && entry.rows === rows)) return;
+    entry.pty.resize(cols, rows);
+    entry.cols = cols;
+    entry.rows = rows;
+  }
   acknowledge(id: string, count: number): void {
     const entry = this.entries.get(id); if (!entry) return;
     entry.unacked = Math.max(0, entry.unacked - count);

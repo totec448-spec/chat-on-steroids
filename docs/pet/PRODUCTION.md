@@ -151,13 +151,16 @@ action recordings, including the independent text and bin. Rebuild these with
 The live GIFs use the recording's average capture interval (about 8 fps). The app
 keeps the manifest's authored frame durations. Stationary frames sleep until the
 next frame, phase or autonomous decision; travel and interpolated props use
-requestAnimationFrame. The context menu and hidden document stop that clock.
+`requestAnimationFrame`. The overlay shares one earliest-deadline scheduler across
+all enabled pets. Hidden documents and static reduced-motion poses park the clock.
 Interactions retire any previous wake before scheduling from the new state.
-Unchanged DOM values, including hit/target visibility, do not get rewritten.
 
-Run `node scripts/verify-pet-performance.cjs <label> --check` to build the current
-production pet and CSS into an isolated Electron fixture. It records process CPU
-time normalized across logical processors, renderer task/style/layout work and
-actual animation callbacks. A CPU counter reset invalidates that sample instead
-of counting it as a saving. The idle/menu checks are independent of machine speed;
-CPU percentages are measurements of the fixture, not an installed-app guarantee.
+Run `node scripts/verify-pet-performance.cjs <label> --full-host --check` to build
+the current production overlay renderer and CSS into an isolated Electron fixture.
+Full-host mode uses the primary work area, transparent always-on-top host, platform
+pointer transport, and an underlying owner window. It records process CPU time
+normalized across logical processors, pointer samples, renderer task/style/layout
+work and actual animation callbacks. A CPU counter reset invalidates that sample
+instead of counting it as a saving. The idle/static checks are independent of
+machine speed; CPU percentages are fixture measurements, not an installed-app
+guarantee.

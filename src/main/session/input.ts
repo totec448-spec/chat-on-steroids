@@ -98,6 +98,9 @@ const entrySchema = inputArgs.extend({
   queueOrder: z.number().int().nonnegative().optional()
 });
 export type InputEntry = z.infer<typeof entrySchema>;
+/** Browser-only projection. `draftText` is the safe authored text to retain if a
+ * dispatched native send remains ambiguous; it is never persisted as delivery state. */
+export type BrowserInputClaim = InputEntry & { draftText: string };
 const STATE = 'session-input';
 const TOOL_INPUT_TEXT_BYTES = 128000;
 export const TOOL_INPUT_HEADER = '\n--- New instructions from the user ---\n';
@@ -1066,8 +1069,14 @@ export function fileRecoveryInput(sessionId: string, conversationId: string, tur
     const question = await readLatestUserMessage(sessionId, turnId);
     const [work] = await readRecentEvents(sessionId, 1, { kinds: RECOVERY_WORK_KINDS });
     if (!question?.messageId || !work || !currentOwner()) return false;
+    // Automatic withdrawal before Send did not answer the turn. It may be filed
+    // again under fresh source proof; manual cancellation and failed/live rows
+    // keep their existing veto. Any authorization or receipt is spent even when
+    // the row later becomes cancelled, including across recovery episodes.
     if (current.some(row => row.sessionId === sessionId && row.recovery && row.silenceBoundary?.turnId === turnId &&
-        (!row.recovery.episode || row.recovery.episode === episode || row.sendAuthorizedAt !== undefined))) return false;
+        (row.sendAuthorizedAt !== undefined || row.deliveredAt !== undefined || row.messageId ||
+          ((!row.recovery.episode || row.recovery.episode === episode) &&
+            (row.state !== 'cancelled' || row.cancelledByUser))))) return false;
     const now = Date.now();
     const row: InputEntry = { id: randomUUID(), sessionId, conversationId, owner: null, state: 'queued',
       mode: 'after-turn', dueAt: now, createdAt: now, model: null, reasoningEffort: null,
@@ -1225,7 +1234,7 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
     return result;
   });
 }
-export function claimBrowserInput(id: string, owner: string, conversationId: string | null, requiresAuthorization = false): Promise<InputEntry | null> {
+export function claimBrowserInput(id: string, owner: string, conversationId: string | null, requiresAuthorization = false): Promise<BrowserInputClaim | null> {
   return serial(async () => {
     const current = await load();
     const entry = current.find((row) => row.id === id);
@@ -1296,7 +1305,15 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     if (!requiresAuthorization && completedTurnId && entry.sessionId && conversationId)
       await consumeGoalReplyForInputNow(conversationId, entry.sessionId, completedTurnId);
     logInfo(`input ${id}: browser claimed after ${Math.max(0, Date.now() - entry.createdAt)} ms`);
-    return { ...combinedInput(claimed, companion), ...selection, text: claimed.deliveryText ?? claimed.text };
+    return {
+      ...combinedInput(claimed, companion),
+      ...selection,
+      text: claimed.deliveryText ?? claimed.text,
+      // The extension must never retain the prepared transport frame in ChatGPT's
+      // user-editable composer after an ambiguous click. Only a human-authored
+      // immediate input has a draft worth restoring.
+      draftText: manualInput(entry) ? entry.text : ''
+    };
   });
 }
 /** Initial provider binding uses the same reserved session as local admission. */

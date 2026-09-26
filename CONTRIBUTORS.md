@@ -14,7 +14,7 @@ Listed alphabetically by GitHub handle. "Adapted" means the implementation chang
 | [@AndersonBY](https://github.com/AndersonBY) | Preserving the writing deadline and restart retention for manual Pro compaction: merged [#265](https://github.com/totec448-spec/chat-on-steroids/pull/265). Suspended/discarded browser-tab recovery from [#267](https://github.com/totec448-spec/chat-on-steroids/pull/267), adapted with fresh tab/document checks before reload. |
 | [@0Elias71](https://github.com/0Elias71) / [@eliasx45](https://github.com/eliasx45) | Recovered interruption presentation from [#234](https://github.com/totec448-spec/chat-on-steroids/pull/234), authored by Elias (@0Elias71) and submitted by @eliasx45. Adapted only the recovered title/color using existing completion evidence; no duplicate recovery logic. |
 | [@becoolmin](https://github.com/becoolmin) | Preserving window size on reopen: [#122](https://github.com/totec448-spec/chat-on-steroids/pull/122), adapted into [#134](https://github.com/totec448-spec/chat-on-steroids/pull/134). Removing unused macOS media privacy declarations before bundle sealing: [#232](https://github.com/totec448-spec/chat-on-steroids/pull/232), adapted with strict plist readback and failure coverage. |
-| [@Bemirror99](https://github.com/Bemirror99) | Resume-shadow recovery and stale Fiber attribution fixes: merged [#19](https://github.com/totec448-spec/chat-on-steroids/pull/19) and [#20](https://github.com/totec448-spec/chat-on-steroids/pull/20). |
+| [@Bemirror99](https://github.com/Bemirror99) | Resume-shadow recovery and stale Fiber attribution fixes: merged [#19](https://github.com/totec448-spec/chat-on-steroids/pull/19) and [#20](https://github.com/totec448-spec/chat-on-steroids/pull/20). Targeted adaptation of [#389](https://github.com/totec448-spec/chat-on-steroids/pull/389) / [#391](https://github.com/totec448-spec/chat-on-steroids/pull/391): bounded Continue reader repair and in-place compaction recovery, including regression tests. Other changes in those PRs are not implied. |
 | [@devrajmahar](https://github.com/devrajmahar) | Conversation-scoped generation reset, extracted with an independent SPA recovery regression from [#163](https://github.com/totec448-spec/chat-on-steroids/pull/163). The renderer rewrite and other feature changes were not incorporated. |
 | [@ehkogh](https://github.com/ehkogh) | Alternate ChatGPT shell editor/picker anchors, typed turn structure, local/server identity observation, literal-paste editor preservation and workflow-stream formats from [#318](https://github.com/totec448-spec/chat-on-steroids/pull/318). The native cache observation is adapted to exact selected-message request metadata only. Code and fixtures use the existing recorder and picker contracts, with independent cancellation, branch, duplicate-id, successive-send and worker-bootstrap regressions. The cache-history walker, inferred tool receipts and alternate activity/upload changes are not incorporated. |
 | [@Firefulcar](https://github.com/Firefulcar) | Claimed Compact & Resume leases: merged [#33](https://github.com/totec448-spec/chat-on-steroids/pull/33). Selected-browser startup routing: [#100](https://github.com/totec448-spec/chat-on-steroids/pull/100), adapted into [#91](https://github.com/totec448-spec/chat-on-steroids/pull/91). |
@@ -119,6 +119,39 @@ translation from [#369](https://github.com/totec448-spec/chat-on-steroids/pull/3
 added independently. Integration preserves Turkish and the existing language controls,
 drafts and preference storage. Validation is recorded in
 [the follow-up worklog](docs/worklog-2026-09-22-french-locale.md).
+
+The September 25 recovery hardening adapts [@Maximapple](https://github.com/Maximapple)'s
+unfinished-response requeue diagnosis from [#397](https://github.com/totec448-spec/chat-on-steroids/pull/397).
+Only automatically withdrawn, unsent rescues may be refiled under fresh ownership proof.
+Manual cancellation, failed/live attempts and authorized or receipted sends retain their
+existing fences; this does not incorporate the broader terminal-row allowance unchanged.
+The same block adapts their localized Stop diagnosis and structural targeting from
+[#405](https://github.com/totec448-spec/chat-on-steroids/pull/405), checked against a
+signed-in page and tightened to the exact observed SVG path and non-submit button.
+Regression coverage retains explicit selectors, rejects foreign/hidden/ambiguous
+controls and preserves the action-owner checks.
+Their escaped-frame diagnosis in [#401](https://github.com/totec448-spec/chat-on-steroids/pull/401)
+is adapted at the existing historical prefix reader and concealment hint only. The
+whole-message unescape proposal is not used: authored suffixes and the exact shared
+frame parser remain unchanged. An independent regression rejects length compensation
+by hard-break escapes in damaged frames.
+
+The September 25 send-listener cleanup adapts [@Gokuencinar](https://github.com/Gokuencinar)'s
+recorder-lifetime slice from [#392](https://github.com/totec448-spec/chat-on-steroids/pull/392):
+native click/submit/Enter capture uses the existing listener cleanup and refuses work after
+recorder retirement. The PR's Goal, bridge, packaging and other changes are not included.
+
+The September 25 unreadable-session hardening adapts
+[@Maximapple](https://github.com/Maximapple)'s [#399](https://github.com/totec448-spec/chat-on-steroids/pull/399).
+This adaptation rejects incomplete identity catalogs rather than deriving ownership from their
+readable subset, preserves metadata-only rebinding authority, and reconciles uncertain appends
+through the existing session queue before allocating another sequence.
+
+The September 26 stream-evidence hardening adapts
+[@Maximapple](https://github.com/Maximapple)'s split-event diagnosis and metadata path from
+[#414](https://github.com/totec448-spec/chat-on-steroids/pull/414). Identity inheritance is limited
+to native input-message events in one HTTP response or linked socket chain, with permanent
+invalidation on contradictory evidence. The existing bridge ingress proof is unchanged.
 
 ## Reports, review and proposed work
 

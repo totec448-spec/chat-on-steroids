@@ -60,26 +60,26 @@ app.whenReady().then(async () => {
     for(let i=0;i<100 && !(await js('!!window.fixtureReady'));i++) await new Promise(resolve=>setTimeout(resolve,25));
     assert.equal(await js('!!window.fixtureReady'),true);
     await js(`document.getElementById('sidebarConnection').click()`);
-    const point=await js(`(() => {const r=document.getElementById('connectionPopoverToggle').getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};})()`);
+    const point=await js(`(() => {const r=document.getElementById('connectionPopoverDisconnect').getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};})()`);
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...point});
     win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...point});
     for(let i=0;i<100 && !(await js('!!window.releaseDisconnect'));i++) await new Promise(resolve=>setTimeout(resolve,25));
-    assert.deepEqual(await js(`(() => {const b=document.getElementById('connectionPopoverToggle');for(let i=0;i<100;i++) b.click();return {text:b.textContent,disabled:b.disabled,calls:window.disconnectCalls,title:document.getElementById('connectionPopoverTitle').textContent};})()`),
-      {text:'Disconnecting…',disabled:true,calls:1,title:'Disconnecting'});
+    assert.deepEqual(await js(`(() => {const b=document.getElementById('sidebarConnect');for(let i=0;i<100;i++) b.click();return {text:b.textContent,disabled:b.disabled,calls:window.disconnectCalls,popoverHidden:document.getElementById('connectionPopover').hidden,title:document.getElementById('connectionPopoverTitle').textContent};})()`),
+      {text:'Disconnecting…',disabled:true,calls:1,popoverHidden:true,title:'Disconnecting'});
     assert.equal(await js(`document.getElementById('connectionPopoverVerified').textContent`),'Closing connection…');
     assert.equal(await js(`document.getElementById('wizConnect').textContent`),'Disconnecting…');
     assert.equal(await js(`document.getElementById('wizConnect').disabled`),true);
     fs.mkdirSync(output,{recursive:true});
-    assert.equal(await js(`document.getElementById('connectionPopover').checkVisibility()`),true);
+    assert.equal(await js(`document.getElementById('connectionPopover').checkVisibility()`),false);
     await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});
     await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
     fs.writeFileSync(path.join(output,'disconnecting.png'),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
     await js('window.releaseDisconnect()');
     await js('new Promise(resolve=>setTimeout(resolve,0))');
-    assert.deepEqual(await js(`(() => {const b=document.getElementById('connectionPopoverToggle');return {text:b.textContent,disabled:b.disabled};})()`),{text:'Connect',disabled:false});
-    await js(`document.getElementById('connectionPopoverToggle').click()`);
+    assert.deepEqual(await js(`(() => {const b=document.getElementById('sidebarConnect');return {text:b.textContent,disabled:b.disabled};})()`),{text:'Connect',disabled:false});
+    await js(`document.getElementById('sidebarConnect').click()`);
     assert.equal(await js(`document.getElementById('connectionPopoverTitle').textContent`),'Connected');
-    console.log('Disconnect renderer passed: native click, visible pending state, 100 ignored duplicate clicks, completion and reconnect.');
+    console.log('Disconnect renderer passed: native click closes diagnostics, footer owns pending state, duplicate clicks are ignored, completion and reconnect work.');
   } finally {
     win?.destroy();await server.close();
   }

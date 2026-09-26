@@ -390,6 +390,33 @@ function build(
       return { kind: 'input', tone: 'neutral', title: 'Typed in a window' };
     case 'scroll':
       return { kind: 'input', tone: 'neutral', title: 'Scrolled in a window' };
+    case 'browser': {
+      const action = str(args['action']) ?? 'state';
+      const titles: Record<string, string> = {
+        list: 'Listed Browser Use tabs',
+        open: 'Opened a Browser Use tab',
+        close: 'Closed a Browser Use tab',
+        select: 'Selected a Browser Use tab',
+        navigate: 'Navigated in Browser Use',
+        back: 'Went back in Browser Use',
+        forward: 'Went forward in Browser Use',
+        reload: 'Reloaded a Browser Use tab',
+        state: 'Observed a Browser Use tab',
+        click: 'Clicked in Browser Use',
+        double_click: 'Double-clicked in Browser Use',
+        hover: 'Hovered in Browser Use',
+        move: 'Moved the Browser Use pointer',
+        drag: 'Dragged in Browser Use',
+        swipe: 'Swiped in Browser Use',
+        long_press: 'Pressed and held in Browser Use',
+        type: 'Typed in Browser Use',
+        key: 'Pressed a key in Browser Use',
+        scroll: 'Scrolled in Browser Use',
+        wait: 'Waited in Browser Use',
+        done: 'Finished the Browser Use mission'
+      };
+      return { kind: 'input', tone: 'neutral', title: titles[action] ?? 'Used Browser Use' };
+    }
     case 'set_value':
       return { kind: 'input', tone: 'neutral', title: 'Replaced a field value' };
     case 'drag':

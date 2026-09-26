@@ -138,7 +138,8 @@ function paintCost(): void {
   head.append(el('th', '', () => t("Day")), el('th', '', () => t("Estimated tokens")), el('th', '', () => t("Cached × {0}", [formula.multiplier]))); table.append(head);
   for (const day of [...daily].reverse()) { const row = el('tr'); row.append(el('td', '', day.date), el('td', '', Math.round(day.tokens).toLocaleString()), el('td', '', costText(day))); table.append(row); }
   if (!snapshot.days.length) { const row = el('tr'); const cell = el('td', 'muted', () => t("No recorded tool calls yet.")); cell.setAttribute('colspan', '3'); row.append(cell); table.append(row); }
-  $('usageDays').replaceChildren(modelTable, table);
+  $('usageModels').replaceChildren(modelTable);
+  $('usageDays').replaceChildren(table);
 }
 export function initUsage(): void {
   try {
@@ -162,5 +163,11 @@ export function initUsage(): void {
     const input = $<HTMLInputElement>(id); input.value = String(formula[key]);
     input.addEventListener('input', () => { if (input.value !== '' && input.validity.valid && Number.isFinite(input.valueAsNumber)) { formula[key] = input.valueAsNumber; saveFormula(); paintCost(); } });
   }
+  const formulaToggle = $<HTMLButtonElement>('usageFormulaToggle');
+  const formulaDetails = $('usageFormulaDetails');
+  formulaToggle.addEventListener('click', () => {
+    formulaDetails.hidden = !formulaDetails.hidden;
+    formulaToggle.setAttribute('aria-expanded', String(!formulaDetails.hidden));
+  });
   $('refreshUsage').addEventListener('click', () => void refreshUsage());
 }

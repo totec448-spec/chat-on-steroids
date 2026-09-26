@@ -6,17 +6,82 @@ import { currentLanguage, t, ui } from './i18n.js';
  * built from text, so a session title or a tool argument can never become markup.
  */
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
+const ICON_NAMES: Readonly<Record<string, string>> = {
+  'i-ban': 'prohibit',
+  'i-agent': 'robot',
+  'i-attach': 'paperclip',
+  'i-back': 'arrow-left',
+  'i-bolt': 'lightning',
+  'i-chat': 'chat-circle',
+  'i-check': 'check',
+  'i-chev': 'caret-right',
+  'i-clock': 'clock',
+  'i-copy': 'copy',
+  'i-eye': 'eye',
+  'i-file': 'file',
+  'i-file-add': 'file-plus',
+  'i-file-text': 'file-text',
+  'i-files': 'tree-structure',
+  'i-fit': 'arrows-out-line-horizontal',
+  'i-folder': 'folder',
+  'i-folder-add': 'folder-plus',
+  'i-folder-open': 'folder-open',
+  'i-gear': 'gear-six',
+  'i-globe': 'globe-hemisphere-west',
+  'i-home': 'house',
+  'i-image': 'image',
+  'i-inspect': 'corners-out',
+  'i-key': 'key',
+  'i-lock': 'lock-key',
+  'i-loop': 'arrows-clockwise',
+  'i-monitor': 'monitor',
+  'i-minus': 'minus',
+  'i-more': 'dots-three',
+  'i-out': 'arrow-square-out',
+  'i-paw': 'paw-print',
+  'i-pencil': 'pencil-simple',
+  'i-play': 'play',
+  'i-plus': 'plus',
+  'i-power': 'power',
+  'i-pulse': 'activity',
+  'i-retry': 'arrow-clockwise',
+  'i-save': 'floppy-disk',
+  'i-search': 'magnifying-glass',
+  'i-skill': 'cube',
+  'i-star': 'star',
+  'i-steps': 'list-checks',
+  'i-sun': 'sun',
+  'i-target': 'target',
+  'i-terminal': 'terminal-window',
+  'i-trash': 'trash',
+  'i-x': 'x'
+};
 
-/** One icon from the sprite in index.html. */
-export function icon(name: string, className = 'ico'): SVGElement {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('class', className);
-  svg.setAttribute('viewBox', '0 0 24 24');
-  const use = document.createElementNS(SVG_NS, 'use');
-  use.setAttribute('href', `#${name}`);
-  svg.append(use);
-  return svg;
+/** One Phosphor icon with the app's shared optical size. */
+export function icon(name: string, className = 'ico'): HTMLElement {
+  const node = document.createElement('i');
+  node.className = `${className} ph ph-${ICON_NAMES[name] ?? name.replace(/^i-/, '')}`;
+  node.setAttribute('aria-hidden', 'true');
+  return node;
+}
+
+/**
+ * A disclosure indicator with geometry that rotates around its actual visual center.
+ *
+ * Font carets sit on a text baseline, so their ink appears to jump while rotating even
+ * when the element's box stays put. Keep every animated disclosure on this authored SVG;
+ * directional action icons continue to use the regular Phosphor icon helper.
+ */
+export function disclosureChevron(className = ''): SVGSVGElement {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  node.setAttribute('class', `disclosure-chevron${className ? ` ${className}` : ''}`);
+  node.setAttribute('viewBox', '0 0 16 16');
+  node.setAttribute('aria-hidden', 'true');
+  node.setAttribute('focusable', 'false');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M6 3.5 10.5 8 6 12.5');
+  node.append(path);
+  return node;
 }
 
 export function el(tag: string, className = '', text: string | (() => string) = ''): HTMLElement {
@@ -29,12 +94,32 @@ export function el(tag: string, className = '', text: string | (() => string) = 
 
 export const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
+const cardMenuDocuments = new WeakSet<Document>();
+
+/** Card action menus share one outside-click and Escape boundary across Pets and Plugins. */
+export function initCardMenuDismissal(doc: Document = document): void {
+  if (cardMenuDocuments.has(doc)) return;
+  cardMenuDocuments.add(doc);
+  doc.addEventListener('click', (event) => {
+    const target = event.target as Element | null;
+    const menu = typeof target?.closest === 'function' ? target.closest('.plugin-menu') : null;
+    const action = typeof target?.closest === 'function' ? target.closest('.plugin-menu-actions') : null;
+    for (const open of doc.querySelectorAll<HTMLDetailsElement>('.plugin-menu[open]')) {
+      if (open !== menu || action) open.open = false;
+    }
+  });
+  doc.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    for (const open of doc.querySelectorAll<HTMLDetailsElement>('.plugin-menu[open]')) open.open = false;
+  });
+}
+
 /** Filter complete settings sections so headings, controls and their context stay together. */
 export function filterSettingsSections(view: HTMLElement, search: string): void {
   const fold = (text: string) => text.toLocaleLowerCase(currentLanguage());
   const query = fold(search.trim());
   let matches = 0;
-  for (const heading of view.querySelectorAll<HTMLElement>('.settings-section-title')) {
+  for (const heading of view.querySelectorAll<HTMLElement>('.automation-section-head')) {
     const pane = heading.nextElementSibling as HTMLElement | null;
     if (!pane?.classList.contains('pane')) continue;
     const visible = !query || fold(`${heading.textContent} ${pane.textContent}`).includes(query);
@@ -46,13 +131,23 @@ export function filterSettingsSections(view: HTMLElement, search: string): void 
 }
 
 let toastTimer: number | undefined;
+let toastDismiss: (() => void) | undefined;
 
-export function toast(message: string): void {
+function dismissToast(): void {
   document.querySelector('.toast')?.remove();
+  window.clearTimeout(toastTimer);
+  toastTimer = undefined;
+  const dismiss = toastDismiss;
+  toastDismiss = undefined;
+  dismiss?.();
+}
+
+export function toast(message: string, onDismiss?: () => void): void {
+  dismissToast();
   const node = el('div', 'toast', message);
   document.body.append(node);
-  window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => node.remove(), 3200);
+  toastDismiss = onDismiss;
+  toastTimer = window.setTimeout(dismissToast, 3200);
 }
 
 /** Unwraps IPC replies, translating known app errors and preserving unknown error text. */

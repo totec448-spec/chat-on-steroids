@@ -1,92 +1,61 @@
-# Tur Tur Sahur pet — implementation and acceptance
+# Desktop Pets — implementation and acceptance
 
-Implemented 2026-09-17 in the existing Electron/TypeScript/DOM app. No additional
-runtime dependencies, provider calls, React, game engine or live AI generation.
-The installed release has not been replaced; validation launches the actual built
-main/preload/renderer with isolated local userData.
+Desktop Pets run in a transparent always-on-top Electron overlay, independently
+from the main CoS window. The overlay keeps each character as one 160×160 CSS
+surface backed by its native-size spritesheet; it does not use a canvas or scale
+the full atlas into a preview.
 
-## Behavior
+## Package contract
 
-- Composer pet button, floating local sprite, left-pointer dragging and landing,
-  click reaction, repeated-click anger, keyboard support and right-click menu.
-- Hide/reset, validated local visibility/position persistence, viewport clamping,
-  light/dark appearance and reduced-motion support. Hidden pets stop their RAF.
-- One state owner cancels actions and removes props on hide, drag or resize.
-- Idle/look/walk scheduling with alternating specials after a 45-second cooldown.
-  Both specials can also be started directly from the context menu.
-- Three bat strikes and a heavier hit turn plain `OpenAI` into `ClosedAI`;
-  `Anthropic` attaches to the hands, is carried and thrown into a reacting bin.
-- Text has a white outline/shadow, no rectangular background, and lower stacking
-  than the character. Measured hand anchors and a continuous release trajectory
-  prevent face overlap and discontinuous throw attachment.
-- Corrected idle registration and removed action-start teleportation after live
-  feedback. Click/poke reaction slowed from 570 to 870 ms at the user's request;
-  special-action attack timing remains unchanged.
+Imported packages contain `pet.json`, `atlas.png`, and `animations.json`.
+The atlas is a transparent 1280×1920 PNG arranged as 8 columns × 12 rows of
+160×160 cells. All 96 frame slots and the declared animation ranges are required.
+Frames 69–84 carry validated hand anchors for grab/carry/throw choreography.
 
-## Files
+`src/main/pet-library.ts` validates and installs packages, and owns enabled and
+favorite membership. `src/renderer/pet-machine.ts` uses the imported manifest as
+the timing and frame authority; imported pets never inherit Tur Tur's timings.
 
-Runtime: `src/renderer/pet.ts`, `pet-machine.ts`, `pet-choreography.ts`, `pet.css`,
-and `pet-assets/*`. Shell integration adds the import and initialization in
-`src/renderer/main.ts`; seven strings are added to the existing es/zh-CN/zh-TW
-locale catalogs. `AGENTS.md` describes the feature owner.
+## Runtime behavior
 
-Tests: `test/pet.test.ts`, `pet-dom.test.ts`, `pet-atlas.test.ts`, and
-`pet-choreography.test.ts`. Existing renderer state/timeline fixtures isolate the
-new component with the same mock pattern as the terminal, while the dedicated
-DOM and real Electron tests exercise the actual component.
+- Multiple enabled pets remain visible when the main window is hidden or minimized.
+- A click pokes a pet and restores/focuses CoS without changing the current screen.
+  Dragging moves the pet without raising CoS and persists its overlay position.
+- Context actions retain OpenAI → ClosedAI and Anthropic → trash choreography.
+  Hide pet temporarily dismisses only the selected pet; its library Active state
+  remains unchanged. Turning View > Desktop pets on restores all active pets.
+- The favorite enabled pet anchors the compact task badge and bounded task tray.
+  Task transitions trigger spawn/look/angry/celebrate without replacing ordinary
+  idle, walk, poke, drag, carry, throw, and autonomous behavior.
+- The overlay uses one scheduler for every active pet. Authored frames and
+  autonomous decisions use a timer; only travel and interpolated props request
+  display frames. Hidden and reduced-motion static states have no running RAF.
+- Main owns library membership and task/activity snapshots. The overlay renderer
+  owns only visual position, animation, pointer interaction, and presentation.
+- macOS forwards ignored mouse movement to drive renderer proximity. Windows and
+  Linux use one bounded native cursor poll; Windows must not forward ignored mouse
+  movement because two Chromium cursor owners visibly flicker over the main app.
+  Pet position uses compositor transforms and props do not allocate another
+  desktop-sized layout box.
 
-Production: `scripts/pet-plan.mjs`, `ingest-pet-batch.mjs`, `build-pet-atlas.mjs`,
-`build-pet-props.mjs`, `build-pet-live-previews.mjs`, `verify-pet-electron.cjs`.
-See `PRODUCTION.md` for exact export/regeneration commands and animation allocation.
+## Evidence
 
-## Assets
+- Unit and renderer coverage: `test/pet.test.ts`,
+  `test/pet-overlay-renderer.test.ts`, `test/pet-controller.test.ts`,
+  `test/pet-library.test.ts`, `test/pets-renderer.test.ts`, and
+  `test/pet-activity.test.ts`.
+- `scripts/verify-pet-overlay-electron.cjs` exercises the built main, preload, and
+  renderer with isolated userData. It checks native 160×160 mapping, visible alpha
+  bounds, task UI, pointer drag, owner restoration, independent overlay visibility,
+  and restart position persistence.
+- `scripts/verify-pet-performance.cjs <label> --full-host --check` builds the
+  production overlay renderer in an isolated Electron fixture and adds the real
+  desktop-sized transparent host plus an underlying owner window. It records
+  process CPU, pointer samples, renderer work, and actual animation callbacks.
+  Its checks require no macOS polling loop, the bounded Windows polling rate with
+  unchanged-pointer IPC suppression, low idle wake frequency, and
+  zero RAF activity for hidden and reduced-motion static states.
 
-`src/renderer/pet-assets/atlas.png` contains exactly 96 unique transparent frames
-in 160-pixel cells. `animations.json` gives durations, loops and hand anchors.
-The atlas is about 225 KiB. Launcher, separate early-frame bat and bin variants
-are local original PNGs. No OpenAI or Anthropic logos or brand styling were used.
-ImageGen produced the artwork in sequential six-pose 3×2 batches. No native
-Codex hatch tool was available in this session, and none is claimed as used.
-
-`contact-sheet.png`, `atlas-validation.json`, approved base, original batches,
-individual crops and repaired idle source remain here. `previews/` contains all
-animation clips plus `openai-live.gif` and `anthropic-live.gif` from real app
-recordings. The live GIFs are capture-rate previews; runtime is RAF-driven.
-
-## Verification
-
-- `npm run verify`: **passed**, 5,007 tests plus the six isolated shutdown tests;
-  44 intentionally skipped. Includes typecheck, privacy and notices checks.
-  Two timing-sensitive non-pet failures in an earlier run passed their targeted
-  rerun (306 tests); the final full run then passed cleanly.
-- `npm test -- --run test/pet.test.ts test/pet-dom.test.ts test/pet-atlas.test.ts test/pet-choreography.test.ts`:
-  **20 passed**, repeated after the final poke-duration change.
-- `npm run typecheck` and `npm run build`: passed after final runtime changes.
-- `node scripts/build-pet-atlas.mjs`: 96/96 unique nonempty frames. Tests inspect
-  decoded atlas bounds, transparent cell margins, timing allocation and idle
-  bounds differing by at most one pixel.
-- `node_modules/.bin/electron scripts/verify-pet-electron.cjs --fresh`:
-  full production main/preload/renderer, real Chromium mouse input, both specials,
-  click/anger/drag/landing, hide-during-action cleanup, reset, light/dark, zoom
-  80/100/125/150%, resize and reduced-motion emulation. No renderer console errors.
-- `--restart`: saved visibility and position restored exactly when within bounds,
-  otherwise clamped to the current viewport. The app restores its own UI zoom,
-  which can differ from the smoke test's temporary Chromium zoom. No errors.
-- Native Windows inspection independently confirmed the launcher/menu, dragging,
-  landing and corrected Anthropic carry/text layering. Captured real-app frames
-  were visually inspected for both action contacts and theme presentation.
-  The complete interaction matrix is automated Electron evidence, not a claim
-  that every case was separately repeated by hand.
-
-Logs/screenshots/recordings are under ignored `outputs/tur-tur-pet/`, including
-`verify-completion.log`, `build.log`, `electron/result.json`,
-`electron/restart-result.json`, and final-check captures.
-
-## Shared-tree preservation
-
-Before edits, 57 existing modified/untracked files were copied and hashed under
-`outputs/tur-tur-pet/baseline*`. Final comparison found 50 byte-identical files and
-all original lines retained in all 57. Six changed files contain pet additions;
-`test/input-delivery-integration.test.ts` gained a separate concurrent test block
-which this task did not edit. No reset, clean, checkout, commit or broad reformat
-was performed. `outputs/tur-tur-pet/preservation.json` records the comparison.
+Source tests and isolated Electron runs do not establish packaged or installed-app
+behavior. Packaging, installer, click-through over unrelated desktop applications,
+and real session/swarm task projection remain separate acceptance gates.

@@ -86,6 +86,23 @@ app.whenReady().then(async () => {
     };
     await js(`document.querySelector('[data-tab="appearance"]').click()`);
     assert.equal(await js(`document.getElementById('appearancePanel').classList.contains('is-active')`),true);
+    const sections = await js(`[...document.querySelectorAll('.appearance-section')].map(section => ({heading:section.querySelector('h2')?.textContent, description:section.querySelector('.settings-section-head p')?.textContent.trim()}))`);
+    assert.deepEqual(sections.map(section => section.heading),['Preview','Colors','Typography','Preferences']);
+    assert.ok(sections.every(section => section.description));
+    assert.equal(await js(`!!document.getElementById('appearanceReset').closest('.appearance-page-head')`),true);
+    await js(`(() => { const panel=document.getElementById('appearancePanel'); panel.scrollTop=panel.scrollHeight; document.getElementById('setupProfile').click(); })()`);
+    const profileMenu = await js(`(() => {
+      const box=node=>{const rect=node.getBoundingClientRect();return {left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom};};
+      const menu=document.getElementById('setupProfileMenu');
+      return {open:menu.matches(':popover-open'),menu:box(menu),trigger:box(document.getElementById('setupProfile')),
+        language:box(document.getElementById('uiLanguage').closest('.setting'))};
+    })()`);
+    assert.equal(profileMenu.open,true,JSON.stringify(profileMenu));
+    assert.ok(profileMenu.menu.top>=profileMenu.trigger.bottom,JSON.stringify(profileMenu));
+    assert.ok(Math.abs(profileMenu.menu.right-profileMenu.trigger.right)<2,JSON.stringify(profileMenu));
+    assert.ok(profileMenu.menu.top>=profileMenu.language.bottom,JSON.stringify(profileMenu));
+    await screenshot('setup-profile-menu.png');
+    await js(`document.getElementById('setupProfileMenu').hidePopover();document.getElementById('appearancePanel').scrollTop=0`);
     await screenshot('default-dark.png');
     await change('appearance-accent-hex','#a855f7');
     await change('appearance-sidebar-hex','#35234c');
@@ -131,12 +148,21 @@ app.whenReady().then(async () => {
     await change('appearanceSize','18');
     assert.equal(await js(`Math.round(parseFloat(getComputedStyle(document.body).fontSize))`),18);
     const layout=[];
-    for(const [width,zoom] of [[1100,1],[800,1.17],[1100,1.5],[640,1]]) {
+    for(const [width,zoom] of [[1400,1],[1100,1],[800,1.17],[1100,1.5],[640,1]]) {
       win.setSize(width,900); win.webContents.setZoomFactor(zoom);
       await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-      const geometry=await js(`(() => {const panel=document.getElementById('appearancePanel');return {viewport:innerWidth,scroll:panel.scrollWidth,width:panel.clientWidth,body:document.documentElement.scrollWidth};})()`);
+      const geometry=await js(`(() => {
+        const panel=document.getElementById('appearancePanel'), content=panel.querySelector('.appearance-content');
+        const rect=node=>{const box=node.getBoundingClientRect();return {left:box.left,right:box.right,width:box.width};};
+        const canvas=rect(content), cards=[...panel.querySelectorAll('.appearance-section')].map(section=>rect(section.querySelector('.appearance-preview, .appearance-settings-card')));
+        return {viewport:innerWidth,scroll:panel.scrollWidth,width:panel.clientWidth,body:document.documentElement.scrollWidth,canvas,cards,
+          resetRight:rect(document.getElementById('appearanceReset')).right,headRight:rect(panel.querySelector('.appearance-page-head')).right};
+      })()`);
       assert.ok(geometry.scroll<=geometry.width+1,JSON.stringify({width,zoom,geometry}));
       assert.ok(geometry.body<=geometry.viewport+1,JSON.stringify(geometry));
+      assert.ok(geometry.canvas.width<=941,JSON.stringify(geometry));
+      assert.ok(geometry.cards.every(card=>Math.abs(card.left-geometry.canvas.left)<1 && Math.abs(card.right-geometry.canvas.right)<1),JSON.stringify(geometry));
+      if(width===1400) assert.ok(Math.abs(geometry.resetRight-geometry.headRight)<1,JSON.stringify(geometry));
       layout.push({windowWidth:width,zoom,...geometry});
     }
     await screenshot('large-text-narrow.png');

@@ -34,6 +34,7 @@ interface Descriptor {
   app: string | null;
   resource: string | null;
   messageId: string | null;
+  requestId: string | null;
   turnId: string | null;
   conversationId: string | null;
   createTime: number | null;
@@ -461,7 +462,7 @@ describe('reading a row out of the page', () => {
       const messages = [asked, result, ...(mode === 'multiple-results' ? [{ ...result, id: 'second-result' }] : [])];
       const props = { ...group(messages), ...(mode === 'unknown-state' ? {} : { isCompletionRequestInProgress: mode === 'running' }) };
       const { rows, turns } = await scan([chain(props, LIVE_DEPTH, turnNode(messages))], [{ id: 'detached-turn', messages }]);
-      const accepted = mode === 'settled';
+      const accepted = mode === 'settled' || mode === 'foreign-app';
       expect(rows[0]).toMatchObject({ messageId: accepted ? result.id : asked.id, tool: 'read', answered: accepted });
       expect(turns[0]!.calls.find(call => call.messageId === asked.id)?.answered).toBe(false);
       if (accepted) expect(turns[0]!.calls.find(call => call.messageId === result.id)?.answered).toBe(true);
@@ -480,8 +481,9 @@ describe('reading a row out of the page', () => {
       answered: true, requestId: 'wfr_01a009', createTime: 1786873669.5 }]);
   });
 
-  it.each(['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins', 'Chat On Steroids Backup', 'Gmail'])(
-    'keeps result-only metadata scoped to the exact supported connector %s', async app => {
+  it.each(Array.from({ length: 16 }, (_, index) =>
+    `${String.fromCodePoint(0x500 + index)}-${index}-${String.fromCodePoint(0x1f680 + index)}`))(
+    'keeps an arbitrary connector display name as an untrusted result candidate (%s)', async app => {
       const result = answer('result-scope', 'unused', 'read', app);
       result.author.name = 'api_tool.call_tool';
       delete result.metadata!.parent_id;
@@ -489,7 +491,7 @@ describe('reading a row out of the page', () => {
       // Duplicate provider objects are ambiguous, including result-only shapes.
       expect(turns[0]!.calls).toEqual([]);
       const single = await scan([], [{ id: 'result-scope-turn', messages: [result] }]);
-      expect(single.turns[0]!.calls).toHaveLength(['Chat On Steroids Backup', 'Gmail'].includes(app) ? 0 : 1);
+      expect(single.turns[0]!.calls).toHaveLength(1);
     });
 
   /**
@@ -525,7 +527,7 @@ describe('reading a row out of the page', () => {
     expect(version).toBe(21);
     expect(rows[0]!.v).toBe(21);
   });
-  it('counts only TobisComputer requests in the complete turn, not api_tool metadata calls', async () => {
+  it('counts connector request candidates in the complete turn, not api_tool metadata calls', async () => {
     const mine1 = request('req-1', 'read_file');
     const mine2 = request('req-2', 'search_files');
     const meta: Message = {
@@ -550,7 +552,7 @@ describe('reading a row out of the page', () => {
     ];
     const { rows } = await scan([rowInTurn([mine2, answer('res-2', 'req-2', 'search_files')], turnMessages, 4)]);
 
-    expect(rows[0]).toMatchObject({ tool: 'search_files', hidden: 4, localCount: 2 });
+    expect(rows[0]).toMatchObject({ tool: 'search_files', hidden: 4, localCount: 3 });
   });
 });
 
@@ -590,13 +592,7 @@ describe('the calls a turn says it made', () => {
       expect(turns[0]!.codeModeCalls).toEqual([{ messageId: root.id, requestId: 'wfr_01a009', answered: mode === 'complete' }]);
     });
 
-  /**
-   * The live regression: 1.7.1 renamed the connector and split it in two, and this test
-   * spelled only the old name. Every request on every page stopped being recognised as
-   * ours, so no turn produced evidence and one chat's whole run of calls was filed under
-   * `Unattributed activity`. Both current connectors and the old name must read.
-   */
-  it('recognises both 1.7.1 connectors and the pre-1.7.1 name', async () => {
+  it('reads connector candidates independently of their user-chosen display names', async () => {
     const messages = [
       request('req-core', 'read'),
       answer('res-core', 'req-core', 'read'),
@@ -614,13 +610,7 @@ describe('the calls a turn says it made', () => {
     ]);
   });
 
-  /**
-   * A name is not a prefix game. `Chat On Steroids Backup` shares every character of the
-   * brand and is still a different integration; matching on the brand rather than on the
-   * exact connector names would make this app vouch for its calls and file a stranger's
-   * traffic into this chat's session.
-   */
-  it('refuses a connector whose name merely starts with this app’s brand', async () => {
+  it('does not use a connector display name to decide candidate ownership', async () => {
     const messages = [
       request('req-fake', 'read', { app: 'Chat On Steroids Backup' }),
       answer('res-fake', 'req-fake', 'read', 'Chat On Steroids Backup'),
@@ -628,7 +618,7 @@ describe('the calls a turn says it made', () => {
     ];
     const { turns } = await scan([], [{ id: 'turn-lookalike', messages }]);
 
-    expect(turns[0]!.calls.map((call) => call.messageId)).toEqual(['req-mine']);
+    expect(turns[0]!.calls.map((call) => call.messageId)).toEqual(['req-fake', 'req-mine']);
   });
 
   it('names every request in the turn, in order, with its result state', async () => {
@@ -665,7 +655,7 @@ describe('the calls a turn says it made', () => {
     expect(turns[0]!.calls.map((call) => call.tool)).toEqual(['read_files', 'screenshot']);
   });
 
-  it('refuses to vouch for another connector’s traffic', async () => {
+  it('keeps foreign-looking tool rows as untrusted candidates until main confirms the request id', async () => {
     const gmail: Message = {
       id: 'gmail-1',
       author: { role: 'assistant' },
@@ -681,7 +671,10 @@ describe('the calls a turn says it made', () => {
     const messages = [gmail, meta, request('req-mine', 'read_file'), answer('res-mine', 'req-mine', 'read_file')];
     const { turns } = await scan([], [{ id: 'turn-mixed', messages }]);
 
-    expect(turns[0]!.calls).toEqual([{ messageId: 'req-mine', tool: 'read_file', order: 0, answered: true, requestId: 'wfr_01a009', createTime: 1786873658.125 }]);
+    expect(turns[0]!.calls).toEqual([
+      { messageId: 'gmail-1', tool: 'search', order: 0, answered: false, requestId: null, createTime: null },
+      { messageId: 'req-mine', tool: 'read_file', order: 1, answered: true, requestId: 'wfr_01a009', createTime: 1786873658.125 }
+    ]);
   });
 
   it('drops a message id the turn reports twice rather than spending it on two records', async () => {
@@ -1516,6 +1509,7 @@ describe('what may leave the page', () => {
         'localCount',
         'messageId',
         'path',
+        'requestId',
         'resource',
         'tool',
         'turnId',

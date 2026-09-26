@@ -31,6 +31,17 @@ it('renders server text safely and does not claim Ready before tool discovery', 
   expect(document.querySelector('.plugin-card .pill')!.textContent).toBe('Ready');
 });
 
+it('closes an open card actions menu when clicking outside or pressing Escape', async () => {
+  initPlugins(); await tick();
+  const menu = document.querySelector<HTMLDetailsElement>('.plugin-card .plugin-menu')!;
+  menu.open = true;
+  document.body.click();
+  expect(menu.open).toBe(false);
+  menu.open = true;
+  document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(menu.open).toBe(false);
+});
+
 it('keeps credential edits private and stable while status updates arrive', async () => {
   initPlugins(); await tick();
   [...document.querySelectorAll('button')].find((node) => node.textContent === 'Configure')!.click();

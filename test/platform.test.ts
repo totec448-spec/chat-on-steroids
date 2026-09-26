@@ -24,7 +24,8 @@ const allCapabilities = (): Capabilities => ({
   screen: true,
   control: true,
   clipboardRead: true,
-  clipboardWrite: true
+  clipboardWrite: true,
+  browserUse: true
 });
 
 describe('cross-platform product surface', () => {

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>View</title>
+    <link rel="stylesheet" href="./view-menu.css" />
+  </head>
+  <body>
+    <main class="view-menu-surface" aria-label="View">
+      <button data-command="pet" id="viewPet" type="button">
+        <i class="ico ph ph-paw-print" aria-hidden="true"></i>
+        <span></span>
+        <i class="menu-check ph ph-check" aria-hidden="true"></i>
+      </button>
+      <hr />
+      <button data-command="sidebar" id="viewSidebar" type="button">
+        <i class="ico ph ph-sidebar-simple" aria-hidden="true"></i>
+        <span></span><kbd>Ctrl+B</kbd>
+        <i class="menu-check ph ph-check" aria-hidden="true"></i>
+      </button>
+      <hr />
+      <button data-command="zoom-in" id="viewZoomIn" type="button">
+        <i class="ico ph ph-magnifying-glass-plus" aria-hidden="true"></i>
+        <span></span><kbd>Ctrl++</kbd>
+      </button>
+      <button data-command="zoom-out" id="viewZoomOut" type="button">
+        <i class="ico ph ph-magnifying-glass-minus" aria-hidden="true"></i>
+        <span></span><kbd>Ctrl+−</kbd>
+      </button>
+      <button data-command="zoom-reset" id="viewActualSize" type="button">
+        <i class="ico ph ph-corners-out" aria-hidden="true"></i>
+        <span></span><em id="viewZoomValue">100%</em><kbd>Ctrl+0</kbd>
+      </button>
+    </main>
+    <script type="module" src="./view-menu.ts"></script>
+  </body>
+</html>

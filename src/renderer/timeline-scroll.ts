@@ -1,3 +1,36 @@
+// The 160-row resident window plus one incoming 30-row stage and a small margin.
+// Cap raw journal counts here: streaming revisions are not separate visible rows.
+const VIRTUAL_WINDOW_RECORDS = 200;
+
+export interface TimelineExtent {
+  session: string;
+  selection: number;
+  average: number;
+  height: number;
+}
+
+/** Keep the scroll range stable while bounded history pages replace one another.
+ * The estimate is visual only: it never decides which event to fetch or retain. */
+export function projectTimelineExtent(
+  previous: TimelineExtent | null,
+  input: { session: string; selection: number; total: number; resident: number;
+    before: number; after: number; renderedHeight: number }
+): { extent: TimelineExtent; before: number; after: number } {
+  const renderedHeight = Math.max(0, input.renderedHeight);
+  const total = Math.max(0, input.total);
+  const same = previous?.session === input.session && previous.selection === input.selection;
+  const average = same ? previous.average : Math.max(24, Math.min(180, renderedHeight / Math.max(1, input.resident)));
+  const height = Math.max(renderedHeight,
+    same ? previous.height : Math.min(total, VIRTUAL_WINDOW_RECORDS) * average);
+  const extent = { session: input.session, selection: input.selection, average, height };
+  const before = Math.max(0, input.before), after = Math.max(0, input.after);
+  const missing = before + after;
+  if (!missing) return { extent, before: 0, after: 0 };
+  const reserve = Math.max(0, height - renderedHeight);
+  const top = Math.round(reserve * before / missing);
+  return { extent, before: top, after: reserve - top };
+}
+
 /** Capture the visible logical row for one synchronous reconciliation. No retained
  * state: selection changes and user scrolling naturally get a fresh anchor. */
 export function preserveTimelineViewport(pane: HTMLElement, timeline: HTMLElement, followBottom = true): () => void {

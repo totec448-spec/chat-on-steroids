@@ -333,6 +333,8 @@ describe('cross-platform packaging targets', () => {
     expect(theme).toBeGreaterThan(loadConfig);
     expect(enableActivation).toBeGreaterThan(theme);
     expect(firstWindowRequest).toBeGreaterThan(enableActivation);
+    // ChatGPT's remote load event cannot hold the local first window indefinitely.
+    expect(main.slice(theme, enableActivation)).not.toContain('await prewarmInternalBrowser()');
 
     const ipc = readFileSync(path.join(root, 'src', 'main', 'ipc.ts'), 'utf8');
     const save = ipc.indexOf("handle('settings:save', async (payload) => {");

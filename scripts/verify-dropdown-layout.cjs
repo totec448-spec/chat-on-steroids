@@ -43,30 +43,46 @@ app.whenReady().then(async () => {
     const measured = await win.webContents.executeJavaScript(`(() => {
       const select = document.getElementById('loopDelivery'), label = document.getElementById('loopDeliveryRow');
       const rect = select.getBoundingClientRect(), parent = label.getBoundingClientRect();
+      const indicator = getComputedStyle(select, '::picker-icon');
       return { supported: CSS.supports('appearance', 'base-select'), appearance: getComputedStyle(select).appearance,
         width: rect.width, height: rect.height, fits: rect.left >= parent.left && rect.right <= parent.right,
-        overflow: select.scrollWidth > select.clientWidth, viewport: innerWidth };
+        overflow: select.scrollWidth > select.clientWidth, viewport: innerWidth,
+        indicator: { width: indicator.width, height: indicator.height, alignSelf: indicator.alignSelf,
+          transform: indicator.transform, maskImage: indicator.maskImage } };
     })()`);
     assert.equal(measured.supported, true);
     assert.equal(measured.appearance, 'base-select');
     assert.equal(measured.fits, true);
     assert.equal(measured.overflow, false);
+    assert.ok(Math.abs(parseFloat(measured.indicator.width) - 14) < .05);
+    assert.ok(Math.abs(parseFloat(measured.indicator.height) - 14) < .05);
+    assert.equal(measured.indicator.alignSelf, 'center');
+    assert.equal(measured.indicator.transform, 'matrix(0, 1, -1, 0, 0, 0)');
+    assert.notEqual(measured.indicator.maskImage, 'none');
     results.push({ theme, zoom, ...measured });
     for (const id of ['loopDelivery', 'goalBackend']) {
       await win.webContents.executeJavaScript(`document.getElementById('${id}').showPicker(); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, true);
+      await new Promise(resolve => setTimeout(resolve, 180));
       const options = await win.webContents.executeJavaScript(`(() => {
         const select = document.getElementById('${id}');
         const field = select.getBoundingClientRect();
+        const indicator = getComputedStyle(select, '::picker-icon');
         const first = select.options[0].getBoundingClientRect(), last = select.options[select.options.length - 1].getBoundingClientRect();
         // The picker has 5px padding and a 1px border; its outside edge touches
         // the field even when Chromium flips it above to stay inside the viewport.
-        return { open: select.matches(':open'), gap: Math.min(Math.abs(first.top - 6 - field.bottom), Math.abs(last.bottom + 6 - field.top)),
+        return { open: select.matches(':open'), indicator: { width: indicator.width, height: indicator.height,
+          alignSelf: indicator.alignSelf, transform: indicator.transform },
+          gap: Math.min(Math.abs(first.top - 6 - field.bottom), Math.abs(last.bottom + 6 - field.top)),
           widthDifference: Math.abs(first.width + 12 - field.width), options: [...select.options].map(option => {
           const rect = option.getBoundingClientRect();
           return { width: rect.width, height: rect.height, fits: rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight };
         }) };
       })()`);
       assert.equal(options.open, true, JSON.stringify({ id, theme, zoom, options }));
+      assert.ok(Math.abs(parseFloat(options.indicator.width) - 14) < .05);
+      assert.ok(Math.abs(parseFloat(options.indicator.height) - 14) < .05);
+      assert.equal(options.indicator.alignSelf, 'center');
+      assert.equal(options.indicator.transform, 'matrix(0, -1, 1, 0, 0, 0)');
       assert.ok(options.gap <= 1 && options.widthDifference <= 1, 'Picker must touch and match its field: ' + JSON.stringify(options));
       assert.ok(options.options.every(option => option.width > 0 && option.height >= 30 && option.fits));
       await new Promise(resolve => setTimeout(resolve, 100));

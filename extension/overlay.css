@@ -1516,3 +1516,4 @@
 /* Presentation only: native message bytes remain available to recorder and send receipts. */
 [data-clf-prompt-hidden] { display: none !important; }
 [data-clf-user-text] { white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; text-align: start; }
+[data-clf-user-text][data-clf-prompt-pending] { opacity: .58; }

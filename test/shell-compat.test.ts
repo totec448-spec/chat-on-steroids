@@ -203,6 +203,91 @@ it('reports an explicit per-call completion without a synthetic result message',
   const turn = (await f.ask()).turns[0]; expect(turn.calls[0].answered).toBe(true);
   expect(turn.messages).toHaveLength(2); expect(turn.endMessageId).toBeNull();
 });
+
+function generatedAnswer(f: ReturnType<typeof fixture>) {
+  const image = { type: 'generated-image', id: `${ANSWER}:image-asset:0`, chatGptMessageId: ANSWER,
+    src: 'sediment://file_1234567890abcdef', status: 'completed', isPreview: false, width: 1448, height: 1086 };
+  f.entry.turn.status = 'complete'; f.entry.turn.messageIds = [USER, ANSWER];
+  f.entry.turn.items = [f.entry.turn.items[0], image];
+  f.doc.querySelector('[data-content-search-unit-key$=":assistant"]')!.remove();
+  const group = f.doc.createElement('div'); group.className = 'group/generated-image-preview';
+  const node = f.doc.createElement('img'); node.src = 'blob:https://chatgpt.com/selected-image'; group.append(node);
+  f.doc.querySelector('[data-turn-key]')!.append(group);
+  const owner = f.chain({ item: image }, f.row);
+  (node as any).__reactFiber$fixture = f.chain({ imageId: image.id, isComplete: true, isPreview: false }, owner);
+  return { image, node, owner };
+}
+
+it.each(['complete', 'running turn', 'running image', 'preview', 'foreign message', 'invalid asset', 'retry'])(
+  'recognizes only a selected completed image answer (%s)', async scenario => {
+    const f = fixture(); const { image } = generatedAnswer(f);
+    if (scenario === 'running turn') f.entry.turn.status = 'in_progress';
+    if (scenario === 'running image') image.status = 'in_progress';
+    if (scenario === 'preview') image.isPreview = true;
+    if (scenario === 'foreign message') image.chatGptMessageId = OTHER;
+    if (scenario === 'invalid asset') image.src = 'https://example.com/private-url';
+    if (scenario === 'retry') f.entry.turn.items.push({ ...image, id: `${OTHER}:image-asset:0`,
+      chatGptMessageId: OTHER, status: 'in_progress' });
+    const turn = (await f.ask()).turns[0];
+    expect(turn.endMessageId).toBe(scenario === 'complete' ? ANSWER : null);
+    expect(turn.messages.every((message: any) => message.role === 'user')).toBe(true);
+    if (scenario === 'complete') expect(turn.images).toEqual([expect.objectContaining({ messageId: ANSWER,
+      assetId: 'file_1234567890abcdef', providerRole: 'tool', providerStatus: 'finished_successfully' })]);
+  });
+
+it('stamps blob pixels only for the exact mounted image item and retires replaced ownership', async () => {
+  const f = fixture(); const { image, node, owner } = generatedAnswer(f);
+  await f.ask();
+  expect(node.getAttribute('data-clf-fiber-image')).toContain(encodeURIComponent(ANSWER));
+  expect(node.getAttribute('data-clf-fiber-image-source')).toBe(node.src);
+  owner.memoizedProps.item = { ...image }; // Same-looking stale Fiber object is not this mounted item.
+  await f.ask();
+  expect(node.hasAttribute('data-clf-fiber-image')).toBe(false);
+  expect(node.hasAttribute('data-clf-fiber-image-source')).toBe(false);
+});
+
+it('rejects an image borrowing the authored user message identity', async () => {
+  const f = fixture(); const { image } = generatedAnswer(f);
+  image.chatGptMessageId = USER;
+  const turn = (await f.ask()).turns[0];
+  expect(turn?.endMessageId ?? null).toBeNull();
+  expect(turn?.images ?? []).toEqual([]);
+});
+
+it('closes a tracked image-only shell turn and releases its page generation state', async () => {
+  const f = fixture(), edit = editing(f);
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  let input = { id: OTHER, owner: 'image-request', text: 'Create an image', model: 'gpt-5-6-thinking',
+    reasoningEffort: 'high', purpose: 'user', images: [] };
+  let latest: ReturnType<typeof addExchange>;
+  let sends = 0;
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); latest = addExchange(f, ++sends, edit.serialize()); edit.box.replaceChildren();
+    latest.entry.turn.items = [latest.entry.turn.items[0]!, { type: 'generated-image',
+      chatGptMessageId: latest.answerId, id: `${latest.answerId}:image-asset:0`,
+      src: 'sediment://file_1234567890abcdef', status: 'in_progress', isPreview: false } as any];
+  });
+  const r = await recorder(f, { desktop_input: m => ({ ok: true,
+    data: m.authorize || m.ack || m.fail ? { ok: true } : { input } }) });
+  const sent = r.runtime({ type: 'clf-desktop-input', id: input.id, conversationId: THREAD });
+  await vi.waitFor(() => expect(latest).toBeTruthy());
+  await r.hook.refreshFiber(); r.hook.observe(); expect(await sent).toEqual({ ok: true });
+  await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+  expect((await r.runtime({ type: 'clf-page-status' })).generating).toBe(true);
+  (latest!.entry.turn.items[1] as any).status = 'completed'; latest!.entry.turn.status = 'complete';
+  await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+  expect(r.events().filter((event: any) => event.kind === 'turn_end')).toEqual([
+    expect.objectContaining({ outcome: 'completed', providerMessageId: latest!.answerId })
+  ]);
+  expect((await r.runtime({ type: 'clf-page-status' })).generating).toBe(false);
+  input = { ...input, id: CALL, owner: 'follow-up', text: 'Continue after the image' };
+  const followup = r.runtime({ type: 'clf-desktop-input', id: input.id, conversationId: THREAD });
+  await vi.waitFor(() => expect(sends).toBe(2));
+  await r.hook.refreshFiber(); r.hook.observe();
+  expect(await followup).toEqual({ ok: true });
+  expect(r.sent.filter(message => message.type === 'desktop_input' && message.ack && message.id === CALL)).toHaveLength(1);
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+});
 it('reads request metadata only for the mounted shell message ids in the exact native cache', async () => {
   const f = fixture();
   const message = { id: CALL, author: { role: 'assistant' }, recipient: 'api_tool.call_tool',
@@ -271,6 +356,38 @@ it.each([false, true])('captures live shell request metadata and public activity
     conversationId: THREAD, calls: expect.arrayContaining([expect.objectContaining({ requestId: OTHER })]) })));
   expect(r.events()).toContainEqual(expect.objectContaining({ kind: 'page_tool', messageId: thought, text: 'Inspecting the project' }));
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+});
+
+it('captures request identity from the shell direct mapping snapshot', async () => {
+  const f = fixture(), { mapping, owner } = liveShellMapping(f);
+  // The current provider shell publishes the mapping itself as hook state. It no longer
+  // wraps that mapping in renderedConversation/renderedTurns.
+  owner.memoizedState = { memoizedState: mapping, next: null };
+  const turn = (await f.ask()).turns[0];
+  expect(f.queries).toEqual([]);
+  expect(turn.requests).toContainEqual(expect.objectContaining({ requestId: OTHER, messageId: CALL }));
+  expect(turn.calls[0]).toMatchObject({ messageId: CALL, requestId: OTHER, answered: false });
+  expect(JSON.stringify(turn)).not.toMatch(/PRIVATE_REASONING_CONTENT|DO_NOT_COPY/);
+  const r = await recorder(f);
+  await vi.waitFor(() => expect(r.sent).toContainEqual(expect.objectContaining({ type: 'correlate',
+    conversationId: THREAD, calls: expect.arrayContaining([expect.objectContaining({ requestId: OTHER })]) })));
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+});
+
+it.each(['foreign-owner', 'missing-user', 'wrong-user', 'two-mappings', 'getter'])
+('does not borrow a direct shell mapping from %s', async kind => {
+  const f = fixture(), { mapping, owner } = liveShellMapping(f);
+  owner.memoizedState = { memoizedState: mapping, next: null };
+  if (kind === 'foreign-owner') owner.memoizedProps.conversationId = OTHER;
+  if (kind === 'missing-user') delete mapping[USER];
+  if (kind === 'wrong-user') mapping[USER].message.id = OTHER;
+  if (kind === 'two-mappings') owner.memoizedState.next = { memoizedState: {
+    ...mapping, [CALL]: { id: CALL, message: { ...mapping[CALL].message,
+      metadata: { request_id: 'wfr_direct_conflict' } } }
+  }, next: null };
+  if (kind === 'getter') Object.defineProperty(mapping, USER, { get() { throw Error('not a published value'); } });
+  const turn = (await f.ask()).turns[0];
+  expect(turn).toBeDefined(); expect(turn.requests).toEqual([]); expect(turn.activities).toEqual([]);
 });
 
 // React keeps the host's original Fiber pointer across commits. The current root
@@ -564,11 +681,20 @@ it.each(['duplicate-cache', 'conflicting-conversation', 'duplicate-id', 'unavail
   const turn = (await f.ask()).turns[0];
   expect(turn.requests).toEqual([]); expect(turn.messages).toHaveLength(2); expect(turn.endMessageId).toBeNull();
 });
-it('recognizes the shell recipient spelling without admitting similarly named connectors', async () => {
+it('treats every bounded connector display name as a candidate, never as ownership', async () => {
   const f = fixture(), step = f.entry.turn.items[1].items[1];
-  step.invocation.server = 'Chat_On_Steroids_Core'; step.invocation.tool = 'read';
-  expect((await f.ask()).turns[0].calls).toHaveLength(1);
-  step.invocation.server = 'Chat_On_Steroids_Core_Backup';
+  const generated = Array.from({ length: 64 }, (_, index) =>
+    `${String.fromCodePoint(0x400 + index)} ${index}-${String.fromCodePoint(0x1f300 + index)} ${'x'.repeat(index % 23)}`);
+  for (const server of generated) {
+    step.invocation.server = server; step.invocation.tool = 'read';
+    expect((await f.ask()).turns[0].calls, server).toHaveLength(1);
+  }
+  expect(fiberSource).not.toMatch(/OUR_APPS|OUR_CONNECTORS/);
+});
+
+it.each(['', 'x'.repeat(201)])('rejects an invalid connector display value (%s)', async server => {
+  const f = fixture(), step = f.entry.turn.items[1].items[1];
+  step.invocation.server = server;
   expect((await f.ask()).turns[0].calls).toEqual([]);
 });
 it('retires shell busy evidence when its owner becomes unreadable or another question is mounted', async () => {
@@ -607,6 +733,54 @@ it('uses typed running state rather than a translated Stop caption', async () =>
   await f.ask(); expect(f.api.generating()).toBe(true); expect(f.api.composerSubmitReady()).toBe(false);
   expect(f.api.stopButton()).toBeNull(); // No guessed action target.
 });
+
+// Observed on the signed-in shell (2026-09-25); localized-control diagnosis from #405.
+const stopSquare = 'M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z';
+function translatedStop(f: ReturnType<typeof fixture>) {
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  form.insertAdjacentHTML('beforeend', '<button type="button" class="size-token-button-composer bg-composer-primary" aria-label="Durdur">' +
+    `<svg viewBox="0 0 20 20"><path d="${stopSquare}"></path></svg></button>`);
+  return form.lastElementChild as HTMLButtonElement;
+}
+it('recognizes a translated Stop without changing the exact action-owner check', () => {
+  const f = fixture(), button = translatedStop(f), clicked = vi.fn();
+  button.addEventListener('click', clicked);
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.stopButton()).toBe(button);
+  expect(f.api.stopGeneration(() => false)).toBe(false);
+  button.disabled = true;
+  expect(f.api.stopGeneration(() => true)).toBe(false);
+  button.disabled = false;
+  let checks = 0;
+  expect(f.api.stopGeneration(() => ++checks === 1)).toBe(false);
+  expect(clicked).not.toHaveBeenCalled();
+  expect(f.api.stopGeneration(() => true)).toBe(true);
+  expect(clicked).toHaveBeenCalledTimes(1);
+});
+it.each(['send', 'voice', 'unknown-icon', 'hidden', 'inert', 'history', 'foreign-form', 'missing-slot'])(
+  'does not mistake a non-Stop control for a localized Stop: %s', reason => {
+    const f = fixture(), button = translatedStop(f);
+    if (reason === 'send') { button.type = 'submit'; button.querySelector('path')!.setAttribute('d', 'M9.33467 16.6663V4.93978L4.6374 9.63704'); }
+    if (reason === 'voice') { button.dataset.state = 'closed'; button.querySelector('svg')!.insertAdjacentHTML('beforeend', '<path d="M10 2.5v6"></path>'); }
+    if (reason === 'unknown-icon') button.querySelector('path')!.setAttribute('d', stopSquare + ' M0 0L20 20');
+    if (reason === 'hidden') button.style.display = 'none';
+    if (reason === 'inert') button.setAttribute('inert', '');
+    if (reason === 'history') f.doc.querySelector('[data-turn-key]')!.append(button);
+    if (reason === 'foreign-form') { const form = f.doc.createElement('form'); f.doc.body.append(form); form.append(button); }
+    if (reason === 'missing-slot') button.className = 'some-other-action';
+    expect(f.api.stopButton()).toBeNull();
+    expect(f.api.generating()).toBe(false);
+    expect(f.api.stopGeneration(() => true)).toBe(false);
+  });
+it('refuses ambiguous translated controls and preserves explicit Stop priority', () => {
+  const f = fixture(), first = translatedStop(f);
+  translatedStop(f);
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.stopButton()).toBeNull();
+  first.dataset.testid = 'stop-button';
+  expect(f.api.stopButton()).toBe(first);
+});
+
 it('preserves prepared multiline text through the shell editor serializer', () => {
   const f = fixture(), edit = editing(f);
   const value = '[[COS_CONTEXT:42]]\n# Worker instructions\n- Keep **literal** text, C:\\work and `<tag>`.\n[[/COS_CONTEXT]]\n\nContinue the task.';
@@ -615,23 +789,90 @@ it('preserves prepared multiline text through the shell editor serializer', () =
   expect(f.doc.execCommand).toHaveBeenCalledOnce();
   expect(edit.box.querySelector('tag')).toBeNull();
 });
-it('hides only a verified shell prompt frame and restores a recycled user bubble', async () => {
+it.each([false, true])('conceals a pending shell frame and restores a recycled user bubble (native breaks: %s)', async nativeBreaks => {
   const f = fixture(), unit = f.doc.querySelector('[data-content-search-unit-key$=":user"]')!;
   const raw = unit.querySelector('.whitespace-pre-wrap')!;
   const full = '[[COS_CONTEXT:13]]\nPrivate setup\n[[/COS_CONTEXT]]\n\nAuthored request';
   f.entry.turn.items[0].message = full; raw.textContent = full;
+  if (nativeBreaks) raw.replaceChildren(...full.split('\n').flatMap((line, index) =>
+    index ? [f.doc.createElement('br'), f.doc.createTextNode(line)] : [f.doc.createTextNode(line)]));
   f.api.presentUserPrompts();
-  expect(unit.querySelector('[data-clf-user-text]')).toBeNull(); // A layout key cannot authorize rewriting.
+  expect(unit.querySelector('[data-clf-user-text]')?.textContent).toBe('…'); // A layout key can conceal, never reconstruct.
+  expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(true);
   await f.ask();
   f.api.presentUserPrompts((message: { id: string }) => message.id === USER ? full : null);
   expect(unit.querySelector('[data-clf-user-text]')?.textContent).toBe('Authored request');
   expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(true);
-  expect(f.api.messages().find((message: any) => message.id === USER)?.text).toBe(full);
+  expect(f.api.messages().find((message: any) => message.id === USER)?.text).toBe(nativeBreaks ? full.replaceAll('\n', '') : full);
+  // A newer MAIN scan stamp can precede its reply. Loss of exact source must
+  // quarantine the same native Markdown bubble, never expose the hidden prefix.
+  f.api.presentUserPrompts(() => null);
+  expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(true);
+  expect(unit.querySelector('[data-clf-user-text]')?.textContent).toBe('…');
   f.entry.turn.items[0].message = 'A new question'; raw.textContent = 'A new question';
   f.api.presentUserPrompts(() => 'A new question');
   expect(unit.querySelector('[data-clf-user-text]')).toBeNull();
   expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(false);
 });
+it.each(['', 'HANDOFF', 'RESUME'])('reads escaped historical shell frames without cached Send proof (%s)', async kind => {
+  const f = fixture(), unit = f.doc.querySelector('[data-content-search-unit-key$=":user"]')!;
+  const raw = unit.querySelector('.whitespace-pre-wrap')!;
+  const identity = kind ? `[[CLF-${kind}:token_0123456789abcdef]]\n\n` : '';
+  const suffix = 'Keep C:\\_work, literal \\* and **source**.\n[[/COS_CONTEXT]]';
+  const prefix = identity + '[[COS_CONTEXT:13]]\nPrivate setup\n[[/COS_CONTEXT]]\n\n';
+  const value = prefix.replace(/([!-/:-@[-`{-~])/g, '\\$1').replace(/\n/g, '\\\n') + suffix;
+  f.entry.turn.items[0].message = value; raw.textContent = value;
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  const r = await recorder(f, { compact: () => ({ ok: false, error: 'Unknown continuation token' }) });
+  try {
+    expect(unit.querySelector('[data-clf-user-text]')?.textContent).toBe(identity + suffix);
+    expect(raw.textContent).toBe(value);
+    expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(true);
+    expect(r.sent.some(m => m.type === 'desktop_input' && m.ack)).toBe(false);
+    expect(r.events().filter((e: any) => e.kind === 'turn_start')).toEqual([]);
+  } finally { (f.win as any).__CLF_CONTENT_RECORDER__.stop(); }
+});
+
+it('keeps a new shell turn live through historical repaint and allows Stop before prose', async () => {
+  const f = fixture(), edit = editing(f);
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  const historical = f.doc.querySelector('[data-markdown-text-style]')!;
+  let next: ReturnType<typeof addExchange>, owner: string;
+  let assistant: Element, marker: Element, item: any;
+  const stop = f.doc.createElement('button'); stop.setAttribute('aria-label', 'Stop');
+  const clicks = vi.fn(); stop.addEventListener('click', clicks);
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); next = addExchange(f, 8, edit.serialize()); edit.box.replaceChildren();
+    const node = f.doc.querySelector(`[data-turn-key="${next.userId}"]`)!;
+    assistant = node.querySelector('[data-content-search-unit-key$=":assistant"]')!;
+    marker = node.querySelector('[data-chatgpt-agent-turn-start]')!;
+    assistant.remove(); marker.remove(); item = next.entry.turn.items.pop();
+    next.entry.turn.messageIds = [next.userId];
+    f.doc.querySelector('form')!.append(stop);
+  });
+  const r = await recorder(f, { stop_redeem: () => ({ ok: true, command: {
+    type: 'stop', conversationId: THREAD, turnId: owner, userMessageId: next.userId
+  } }) });
+  edit.box.textContent = 'Work on the new task'; f.doc.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+  await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+  owner = r.events().find((e: any) => e.kind === 'turn_start').turnId;
+  historical.textContent += ' Repainted history';
+  await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+  expect(r.events().filter((e: any) => e.kind === 'turn_end')).toEqual([]);
+  expect(await r.runtime({ type: 'clf-stop-turn', id: '1111111111111111', conversationId: THREAD, turnId: owner })).toEqual({ ok: true });
+  expect(clicks).toHaveBeenCalledTimes(1);
+  expect(r.events().filter((e: any) => e.kind === 'turn_end')).toEqual([]);
+  // A clicked control is not completion. Only the current native final settles it.
+  const node = f.doc.querySelector(`[data-turn-key="${next!.userId}"] > div`)!;
+  node.append(marker!, assistant!); next!.entry.turn.items.push(item!);
+  next!.entry.turn.messageIds.push(next!.answerId); next!.finish(); stop.remove();
+  await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+  expect(r.events().filter((e: any) => e.kind === 'turn_end')).toEqual([
+    expect.objectContaining({ turnId: owner, outcome: 'completed' })
+  ]);
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+});
+
 it('delivers three successive shell inputs with exact receipts and completed answers', async () => {
   const f = fixture(), edit = editing(f);
   f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
@@ -789,7 +1030,7 @@ it('correlates an early shell stream request through the real observer and recor
   expect(JSON.stringify(r.sent)).not.toContain('NEVER_COPY_STREAM_TEXT');
   win.__CLF_CONTENT_RECORDER__.stop();
 });
-it('sends a marked shell handoff once and captures its exact completed brief instead of the preceding answer', async () => {
+it.each([false, true])('sends a marked shell handoff once and captures its exact completed brief (busy=%s)', async busy => {
   const f = fixture(), edit = editing(f), token = '0123456789abcdef0123456789abcdef';
   f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
   const prompt = `[[CLF-HANDOFF:${token}]]\n\nWrite the brief. Keep **Markdown** and C:\\work intact.`;
@@ -807,9 +1048,13 @@ it('sends a marked shell handoff once and captures its exact completed brief ins
     return { ok: true, data: { token, ...(m.ticket ? {} : { prompt }), sourceSend: { state },
       job: { stage: 'handoff-pending', busy: true, automatic: false, sourceSend: { state } } } };
   } });
+  const stop = f.doc.createElement('button'); stop.setAttribute('aria-label', 'Stop');
+  const stopped = vi.fn(() => stop.remove()); stop.addEventListener('click', stopped);
+  if (busy) f.doc.querySelector('form')!.append(stop);
   const pending = r.hook.startCompact();
   await vi.waitFor(() => expect(submitted).toEqual([prompt]), { timeout: 3000 });
   await r.hook.refreshFiber(); r.hook.observe(); await pending;
+  expect(stopped).toHaveBeenCalledTimes(busy ? 1 : 0);
   expect(summaries).toEqual([]);
   source!.finish(); source!.entry.turn.items[1]!.content = brief;
   await r.hook.refreshFiber(); r.hook.observe();
@@ -924,9 +1169,20 @@ it.each(['duplicate-version', 'duplicate-bucket', 'contradictory-selection', 'un
   expect(mode === 'disabled' ? picker?.choices.some((c: any) => c.available) : picker).toBe(mode === 'disabled' ? false : null);
   expect(f.actions).not.toHaveBeenCalled();
 });
-it('records a native shell conversation and UUID tool origin through the real isolated recorder', async () => {
+it('records and presents a native shell turn with an arbitrary connector display name', async () => {
   const f = fixture(), win = f.win as any, sent: any[] = [];
   f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  const displayName = `${String.fromCodePoint(0x4e80)} ${String.fromCodePoint(0x1f9ea)} connector`;
+  f.entry.turn.items[1].items[1].invocation.server = displayName;
+  const fullPrompt = '[[COS_CONTEXT:13]]\nPrivate setup\n[[/COS_CONTEXT]]\n\nAuthored request';
+  f.entry.turn.items[0].message = fullPrompt;
+  f.doc.querySelector('[data-user-message-bubble] .whitespace-pre-wrap')!.textContent = fullPrompt;
+  const call = { id: CALL, author: { role: 'assistant' }, recipient: 'api_tool.call_tool',
+    metadata: { request_id: OTHER }, create_time: 1700000000,
+    content: { content_type: 'code', text: JSON.stringify({ path: `/${displayName}/link_x/read`, args: {} }) } };
+  f.queries.push({ queryKey: ['chatgpt-conversation', THREAD], state: { data: { mapping: {
+    [CALL]: { id: CALL, message: call }
+  } } } });
   let hook: any, runtime: any;
   win.CLF_TEST_HOOK = (value: any) => { hook = value; };
   win.setInterval = () => 0;
@@ -943,10 +1199,12 @@ it('records a native shell conversation and UUID tool origin through the real is
   await hook.refreshFiber(); await hook.pullActivity(); hook.observe(); await hook.flush();
   const events = () => sent.filter(m => m.type === 'events').flatMap(m => m.entries.map((entry: any) => entry.event));
   await vi.waitFor(() => {
-    expect(events()).toContainEqual(expect.objectContaining({ kind: 'user_message', messageId: USER, text: 'hello' }));
+    expect(events()).toContainEqual(expect.objectContaining({ kind: 'user_message', messageId: USER, text: fullPrompt }));
     expect(events()).toContainEqual(expect.objectContaining({ kind: 'assistant_message', providerMessageId: ANSWER, text: 'Answer', final: true }));
     expect(events()).toContainEqual(expect.objectContaining({ kind: 'tool_evidence', calls: expect.arrayContaining([expect.objectContaining({ messageId: CALL, tool: 'read', answered: false })]) }));
   });
+  expect(f.doc.querySelector('[data-clf-user-text]')?.textContent).toBe('Authored request');
+  expect(f.doc.querySelector('[data-user-message-bubble] .whitespace-pre-wrap')!.hasAttribute('data-clf-prompt-hidden')).toBe(true);
   win.postMessage({ type: 'cos-request-origin', conversationId: THREAD, requestIds: [OTHER], observedAt: Date.now() }, win.location.origin);
   await vi.waitFor(() => expect(sent.some(m => m.type === 'correlate' && JSON.stringify(m).includes(OTHER))).toBe(true));
   const catalog = await new Promise(resolve => runtime({ type: 'clf-model-catalog', nonce: OTHER, expiresAt: Date.now() + 10000 }, {}, resolve));

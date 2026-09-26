@@ -11,10 +11,13 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); dom.window.close(); });
 
-it('covers the current catalogs and preserves every numbered argument', () => {
-  const keys = new Set(['es', 'zh-CN', 'zh-TW', 'ja'].flatMap(locale =>
-    Object.keys(JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')))));
-  expect([...keys].filter(source => !Object.hasOwn(tr, source))).toEqual([]);
+it('covers every current catalog key and preserves numbered arguments in Turkish', () => {
+  const keys = new Set(
+    ['es', 'zh-CN', 'zh-TW', 'ja', 'fr'].flatMap((locale) =>
+      Object.keys(JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8'))),
+    ),
+  );
+  expect([...keys].filter((source) => !Object.hasOwn(tr, source))).toEqual([]);
   const args = (value: string) => (value.match(/\{\d+\}/g) ?? []).sort();
   for (const [source, value] of Object.entries(tr)) {
     expect(value.trim(), source).not.toBe('');
@@ -55,7 +58,7 @@ it('matches both Turkish I pairs when filtering complete settings sections', asy
   window.localStorage.setItem('cos.ui.language', 'tr');
   const { filterSettingsSections } = await import('../src/renderer/dom.js');
   const view = document.createElement('section');
-  view.innerHTML = '<h2 class="settings-section-title">İzinler</h2><div class="pane">IŞIK</div><p id="settingsSearchEmpty"></p>';
+  view.innerHTML = '<h2 class="automation-section-head">İzinler</h2><div class="pane">IŞIK</div><p id="settingsSearchEmpty"></p>';
   for (const query of ['izinler', 'İZİNLER', 'ışık', 'IŞIK']) {
     filterSettingsSections(view, query);
     expect(view.querySelector<HTMLElement>('.pane')!.hidden).toBe(false);

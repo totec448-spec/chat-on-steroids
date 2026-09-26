@@ -22,9 +22,9 @@ vi.mock('../src/main/codex/view-image.js',()=>({validateImageBytes:state.image})
 import { registerBrowserTools } from '../src/main/mcp/tools-browser.js';
 
 function registrar() {
-  const tools = new Map<string,{schema:z.ZodType;annotations:Record<string,unknown>;handler:(input:unknown)=>Promise<any>}>();
+  const tools = new Map<string,{schema:z.ZodType;description:string;annotations:Record<string,unknown>;handler:(input:unknown)=>Promise<any>}>();
   registerBrowserTools({exposedCaps:{screen:true,control:true} as Capabilities,
-    register:(name:string,definition:any,handler:any)=>{tools.set(name,{schema:definition.inputSchema,annotations:definition.annotations,handler});},
+    register:(name:string,definition:any,handler:any)=>{tools.set(name,{schema:definition.inputSchema,description:definition.description,annotations:definition.annotations,handler});},
     guarded:async(cap:'screen'|'control',_name:string,fn:()=>Promise<unknown>)=>state.caps[cap]?fn():{isError:true,content:[{type:'text',text:'TOOL_DISABLED'}]}
   } as unknown as SurfaceRegistrar);
   return {tools,call:(name:string,input:unknown)=>{const tool=tools.get(name)!;return tool.handler(tool.schema.parse(input));}};
@@ -38,6 +38,14 @@ beforeEach(()=>{
 });
 
 describe('Desktop browser invocation boundary',()=>{
+  it('identifies every Desktop browser tool as companion-browser control, not Browser Use',()=>{
+    const tools=registrar().tools;
+    for(const name of ['browser_tabs','browser_snapshot','browser_screenshot','browser_navigate','browser_action','browser_evaluate','browser_console','browser_network']){
+      expect(tools.get(name)!.description,name).toContain('DESKTOP COMPANION BROWSER');
+      expect(tools.get(name)!.description,name).toContain('not Browser Use');
+    }
+    expect(tools.get('browser_tabs')!.description).toContain('Route Browser Use/Browser panel to Core browser');
+  });
   it('admits bounded DOM detail inspection with screen permission alone',async()=>{
     const reg=registrar();state.caps.control=false;
     expect((await reg.call('browser_snapshot',{tabId,mode:'inspect',format:'dom',selector:'main',maxNodes:30,maxChars:4000})).isError).not.toBe(true);

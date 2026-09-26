@@ -28,7 +28,7 @@ app.whenReady().then(async () => {
       popup.classList.add('is-connected');
       popup.style.left = '100px';
       $('connectionPopoverTitle').textContent = 'Connected';
-      $('connectionPopoverToggle').textContent = 'Disconnect';
+      $('connectionPopoverDisconnect').hidden = false;
       $('connectionPopoverConnector').textContent = 'waiting';
       $('connectionPopoverBrowser').textContent = 'Connected';
       for (const row of document.querySelectorAll('.connection-popover-row')) row.dataset.tone = 'ok';
@@ -50,7 +50,7 @@ app.whenReady().then(async () => {
           pipelineHidden: !document.getElementById('connectionPipeline').checkVisibility(),
           x: rect.x, y: rect.y };
       })()`);
-      assert.equal(result.width, 160);
+      assert.equal(result.width, open ? 340 : 160);
       assert.ok(result.height <= (open ? 580 : 220), JSON.stringify(result));
       assert.deepEqual(result.clipped, []);
       assert.equal(result.summaryHit, true);
@@ -73,7 +73,7 @@ app.whenReady().then(async () => {
         const same = actual.background === expected.background && actual.backdropFilter === expected.backdropFilter;
         return { same, width: popup.getBoundingClientRect().width, overflow: popup.scrollWidth > popup.clientWidth };
       })()`);
-      assert.deepEqual(themed, { same: true, width: 160, overflow: false });
+      assert.deepEqual(themed, { same: true, width: 340, overflow: false });
     }
     fs.mkdirSync(output, { recursive: true });
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));
@@ -81,4 +81,3 @@ app.whenReady().then(async () => {
   } finally { win.destroy(); }
   app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });
-

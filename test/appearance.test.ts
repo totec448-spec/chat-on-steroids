@@ -23,6 +23,7 @@ describe('custom appearance', () => {
         expect(contrastRatio(tokens['--soft']!, tokens['--card']!)).toBeGreaterThanOrEqual(4.5);
         expect(contrastRatio(tokens['--faint']!, tokens['--card']!)).toBeGreaterThanOrEqual(4.5);
         expect(contrastRatio(tokens['--blue']!, background)).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(tokens['--orange']!, tokens['--card']!)).toBeGreaterThanOrEqual(4.5);
         expect(contrastRatio(tokens['--on-accent']!, background)).toBeGreaterThanOrEqual(4.5);
         expect(tokens['--accent-fill']).toBe(background);
       }

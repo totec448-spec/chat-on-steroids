@@ -1,0 +1,95 @@
+@font-face {
+  font-family: 'CoS Phosphor';
+  src: url('@phosphor-icons/web/regular/Phosphor.woff2') format('woff2');
+  font-display: block;
+  font-style: normal;
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'CoS Phosphor Fill';
+  src: url('@phosphor-icons/web/fill/Phosphor-Fill.woff2') format('woff2');
+  font-display: block;
+  font-style: normal;
+  font-weight: 400;
+}
+
+.ph,
+.ph-fill {
+  display: inline-block;
+  speak: never;
+  font-style: normal;
+  font-variant: normal;
+  font-weight: 400;
+  line-height: 1;
+  text-transform: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.ph { font-family: 'CoS Phosphor' !important; }
+.ph-fill { font-family: 'CoS Phosphor Fill' !important; }
+
+.ph.ph-activity::before { content: '\e000'; }
+.ph.ph-arrow-clockwise::before { content: '\e036'; }
+.ph.ph-arrow-left::before { content: '\e058'; }
+.ph.ph-arrow-square-out::before { content: '\e5de'; }
+.ph.ph-arrow-up::before { content: '\e08e'; }
+.ph.ph-arrows-clockwise::before { content: '\e094'; }
+.ph.ph-arrows-out-line-horizontal::before { content: '\e534'; }
+.ph.ph-browser::before { content: '\e0f4'; }
+.ph.ph-caret-down::before { content: '\e136'; }
+.ph.ph-caret-left::before { content: '\e138'; }
+.ph.ph-caret-right::before { content: '\e13a'; }
+.ph.ph-chart-line::before { content: '\e154'; }
+.ph.ph-chat-circle::before { content: '\e168'; }
+.ph.ph-check::before { content: '\e182'; }
+.ph.ph-clock::before { content: '\e19a'; }
+.ph.ph-copy::before { content: '\e1ca'; }
+.ph.ph-corners-out::before { content: '\e1d0'; }
+.ph.ph-cube::before { content: '\e1da'; }
+.ph.ph-dots-three::before { content: '\e1fe'; }
+.ph.ph-eye::before { content: '\e220'; }
+.ph.ph-file::before { content: '\e230'; }
+.ph.ph-file-plus::before { content: '\e236'; }
+.ph.ph-file-text::before { content: '\e23a'; }
+.ph.ph-floppy-disk::before { content: '\e248'; }
+.ph.ph-folder::before { content: '\e24a'; }
+.ph.ph-folder-open::before { content: '\e256'; }
+.ph.ph-folder-plus::before { content: '\e258'; }
+.ph.ph-gear-six::before { content: '\e272'; }
+.ph.ph-git-diff::before { content: '\e27c'; }
+.ph.ph-globe-hemisphere-west::before { content: '\e28c'; }
+.ph.ph-house::before { content: '\e2c2'; }
+.ph.ph-image::before { content: '\e2ca'; }
+.ph.ph-info::before { content: '\e2ce'; }
+.ph.ph-key::before { content: '\e2d6'; }
+.ph.ph-lightning::before { content: '\e2de'; }
+.ph.ph-list-checks::before { content: '\eadc'; }
+.ph.ph-lock-key::before { content: '\e2fe'; }
+.ph.ph-magnifying-glass::before { content: '\e30c'; }
+.ph.ph-magnifying-glass-minus::before { content: '\e30e'; }
+.ph.ph-magnifying-glass-plus::before { content: '\e310'; }
+.ph.ph-monitor::before { content: '\e32e'; }
+.ph.ph-minus::before { content: '\e32a'; }
+.ph.ph-paperclip::before { content: '\e39a'; }
+.ph.ph-paw-print::before { content: '\e648'; }
+.ph.ph-pencil-simple::before { content: '\e3b4'; }
+.ph.ph-play::before { content: '\e3d0'; }
+.ph.ph-plus::before { content: '\e3d4'; }
+.ph.ph-power::before { content: '\e3da'; }
+.ph.ph-prohibit::before { content: '\e3de'; }
+.ph.ph-puzzle-piece::before { content: '\e596'; }
+.ph.ph-robot::before { content: '\e762'; }
+.ph.ph-sidebar-simple::before { content: '\ec24'; }
+.ph.ph-sliders-horizontal::before { content: '\e434'; }
+.ph.ph-star::before,
+.ph-fill.ph-star::before { content: '\e46a'; }
+.ph.ph-stop::before,
+.ph-fill.ph-stop::before { content: '\e46c'; }
+.ph.ph-sun::before { content: '\e472'; }
+.ph.ph-target::before { content: '\e47c'; }
+.ph.ph-terminal-window::before { content: '\eae8'; }
+.ph.ph-tree-structure::before { content: '\e67c'; }
+.ph.ph-trash::before { content: '\e4a6'; }
+.ph.ph-x::before { content: '\e4f6'; }

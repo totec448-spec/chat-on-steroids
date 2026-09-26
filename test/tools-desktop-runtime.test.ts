@@ -45,6 +45,7 @@ function caps(over: Partial<Capabilities>): Capabilities {
     control: false,
     clipboardRead: false,
     clipboardWrite: false,
+    browserUse: false,
     ...over
   };
 }

@@ -2,7 +2,7 @@ import { ui, t } from './i18n.js';
 import type { AppState } from '../shared/types.js';
 import type { SettingsPatch } from '../preload/index.js';
 import type { PluginSnapshot, PluginView, PluginCatalogEntry, PluginSource } from '../shared/plugins.js';
-import { $, el, run, toast } from './dom.js';
+import { $, disclosureChevron, el, icon, initCardMenuDismissal, run, toast } from './dom.js';
 
 let snapshot: PluginSnapshot = { plugins: [], catalog: [], schemaRevision: 0 };
 let epoch = 0;
@@ -137,7 +137,7 @@ function renderInstalled(): void {
     foot.append(el('span', 'plugin-tool-count', () => t(count === 1 ? '{0} tool enabled' : '{0} tools enabled', [count])));
     title.append(foot); open.append(art(recipe?.icon ?? plugin.catalogId ?? 'custom'), title);
     const menu = document.createElement('details'); menu.className = 'plugin-menu';
-    const summary = el('summary', '', '•••'); ui(summary, 'aria-label', () => t("Actions for {0}", [plugin.name]));
+    const summary = el('summary'); summary.append(icon('i-more')); ui(summary, 'aria-label', () => t("Actions for {0}", [plugin.name]));
     const actions = el('div', 'plugin-menu-actions');
     actions.append(button(() => plugin.enabled ? t("Disable") : t("Enable"), async () => { await mutate(window.api.pluginsSetEnabled(plugin.id, !plugin.enabled)); }), button(() => t("Configure"), () => showConfigure(plugin)), button(() => t("Restart"), async () => { await mutate(window.api.pluginsRestart(plugin.id)); }), button(() => t("Update"), async () => { await mutate(window.api.pluginsUpdate(plugin.id)); }));
     const uninstall = button(() => t("Uninstall"), () => showUninstall(plugin)); uninstall.classList.add('plugin-destructive'); actions.append(uninstall);
@@ -204,7 +204,8 @@ function showPlugin(plugin: PluginView): void {
   intro.append(el('p', '', () => recipe ? t(recipe.description) : t("Your own MCP server, available in your conversations.")), configure);
   hero.append(art(recipe?.icon ?? plugin.catalogId ?? 'custom'), intro); body.append(hero);
   const tools = el('section', 'plugin-detail-tools'); tools.dataset.pluginDetail = plugin.id; renderPluginTools(tools, plugin); body.append(tools);
-  const about = document.createElement('details'); about.className = 'plugin-about'; about.append(el('summary', '', () => t("About this plugin")));
+  const about = document.createElement('details'); about.className = 'plugin-about';
+  const aboutSummary = el('summary'); aboutSummary.append(disclosureChevron('details-chevron'), el('span', '', () => t("About this plugin"))); about.append(aboutSummary);
   about.append(el('p', 'plugin-source', plugin.source.url ?? plugin.source.package ?? plugin.source.command ?? plugin.source.kind), el('p', 'muted', () => `${plugin.version || t("Custom version")} · ${plugin.license || t("License not supplied")}`), el('p', '', () => t("Runs while installed and enabled, including after reopening the app. Disable or uninstall it to stop its connection. Restart reconnects and refreshes its tools.")));
   if (plugin.homepage ?? recipe?.homepage) about.append(button(() => t("Open upstream project"), async () => { await run(window.api.openLink((plugin.homepage ?? recipe!.homepage)!)); }));
   body.append(about);
@@ -248,7 +249,8 @@ function showRecipe(recipe: PluginCatalogEntry): void {
     const tools = el('ul', 'plugin-tool-preview'); for (const name of recipe.tools) tools.append(el('li', '', () => t(name)));
     body.append(el('h3', 'plugin-preview-title', () => t("Tool preview")), tools);
   }
-  const setup = document.createElement('details'); setup.className = 'plugin-about'; setup.append(el('summary', '', () => t("Setup requirements")));
+  const setup = document.createElement('details'); setup.className = 'plugin-about';
+  const setupSummary = el('summary'); setupSummary.append(disclosureChevron('details-chevron'), el('span', '', () => t("Setup requirements"))); setup.append(setupSummary);
   const steps = el('ol', 'plugin-steps'); for (const step of recipe.instructions) steps.append(el('li', '', () => t(step))); setup.append(steps, button(() => t("Open project & setup guide"), async () => { await run(window.api.openLink(recipe.homepage)); })); body.append(setup);
   const values = new Map<string, HTMLInputElement>();
   for (const item of recipe.fields) { const input = field(body, item.label, '', item.secret, item.placeholder); input.required = !!item.required; values.set(item.key, input); }
@@ -283,6 +285,7 @@ function showCustom(kind: PluginSource['kind'], path = ''): void {
   }, true));
 }
 export function initPlugins(onState: (next: AppState) => void = () => {}): void {
+  initCardMenuDismissal();
   applyAppState = onState;
   $('pluginsAdd').addEventListener('click', showCatalog); $('pluginsRefresh').addEventListener('click', () => void refreshPlugins());
   $('pluginsSearch').addEventListener('input', renderInstalled);
