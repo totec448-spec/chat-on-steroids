@@ -2686,6 +2686,7 @@ function paintRecoveryStatus(): boolean {
       (event.kind === 'user_message' && event.source === 'extension')));
   host.hidden = !recovery || !!advanced || Date.now() - recovery.time > 120000 || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision);
   host.replaceChildren();
+  if (host.hidden) return paintRecoveryVerdict(host, sessionId);
   if (!host.hidden && recovery?.kind === 'progress') {
     const row = el('div', 'recovery-notice');
     row.append(icon('i-pulse'), el('span', 'queue-label', recovery.message.text),
@@ -2695,6 +2696,33 @@ function paintRecoveryStatus(): boolean {
       }));
     host.append(row);
   }
+  return false;
+}
+
+/**
+ * The app's latest verdict about this chat, kept in view until the chat works again.
+ *
+ * A stopped chat used to be explained only by a note in its timeline — "this chat stopped",
+ * "stopped reloading", "could not restart it automatically: …" — which scrolls away, while the
+ * repair line above disappears after two minutes. On 2026-09-26 a prime sat stopped for hours
+ * with every reason written somewhere nobody was looking. The newest app note (never a handoff
+ * note) stays here until a newer question or turn supersedes it, or it is dismissed.
+ */
+function paintRecoveryVerdict(host: HTMLElement, sessionId: string | null): boolean {
+  const verdict = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'note' && !event.continuation) : undefined;
+  if (verdict?.kind !== 'note') return false;
+  const revision = JSON.stringify(['note', verdict.time, verdict.message.text]);
+  const superseded = events.some(event => positionOf(event) > positionOf(verdict) &&
+    (event.kind === 'turn_start' || (event.kind === 'user_message' && event.source === 'extension')));
+  if (superseded || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision)) return false;
+  const row = el('div', 'recovery-notice');
+  row.append(icon('i-pulse'), el('span', 'queue-label', verdict.message.text),
+    dockAction(() => t('Dismiss recovery notice'), 'i-x', () => {
+      if (sessionId) dismissedRecoveryNotices.set(sessionId, revision);
+      host.hidden = true; host.replaceChildren();
+    }));
+  host.append(row);
+  host.hidden = false;
   return false;
 }
 
