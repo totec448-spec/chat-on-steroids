@@ -2710,6 +2710,13 @@ membership before saving. Off-page order survives partial list refreshes.
 Whole project groups use the same bounded order owner in a separate scope. Dragging a
 project summary or pressing Alt+Up/Down moves the group without changing any chat's project;
 the summary handle keeps focus and disclosure state. Group order survives reload.
+`renderer/sidebar-completion.ts` owns only device-local read state for completed chat rows.
+Existing session completion evidence remains authoritative: active chats keep the per-chat spinner,
+a completed background chat gets a static accent marker until selected, and a selected chat's
+completion is acknowledged locally without writing session metadata. The receipt advances only after
+the current selection/load generation has successfully rendered that conversation at the live tail;
+failed or stale selection loads leave it unseen. A first-run baseline prevents historical completions
+from appearing unread after an update, and the stored receipts stay bounded.
 The chat keeps the current input queue/plan visible alongside a
 paged transcript. Main owns durable mutation acknowledgements; renderer optimism is not a
 receipt. Native edit context menus respect the focused editable control and selection.
