@@ -625,6 +625,14 @@ it('renders companion diagnostics in the native Advanced connection drawer', asy
   expect(doc.getElementById('connectionPipelineOwner')!.classList.contains('is-done')).toBe(true);
   expect(doc.getElementById('connectionAdvancedGrid')!.textContent).toContain('companion browser');
   expect(doc.getElementById('connectionAdvancedGrid')!.textContent).toContain('fiber v13 · run run-live');
+  const trace = doc.querySelector<HTMLElement>('.connection-pipeline-call')!;
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('tr');
+  expect(doc.getElementById('connectionAdvancedGrid')!.textContent).toContain('yardımcı tarayıcı');
+  expect(trace.title).toContain('doğrulandı');
+  setLanguage('fr');
+  expect(doc.getElementById('connectionAdvancedGrid')!.textContent).toContain('navigateur compagnon');
+  expect(trace.title).toContain('confirmé');
 });
 
 it('uses Internal Chromium as the host source when the optional #237 API is present', async () => {

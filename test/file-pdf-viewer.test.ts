@@ -127,6 +127,15 @@ it('supports zoom and returning to fit-to-width without leaving the PDF surface'
   parent.querySelector<HTMLButtonElement>('[aria-label="Fit to width"]')!.click();
   await Promise.resolve(); await Promise.resolve();
   expect(parent.querySelector<HTMLButtonElement>('[aria-label="Fit to width"]')?.classList.contains('is-active')).toBe(true);
+  const fit = parent.querySelector<HTMLButtonElement>('.file-pdf-control.is-active')!;
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('tr');
+  expect(fit.textContent).toBe('Sığdır');
+  expect(fit.getAttribute('aria-label')).toBe('Genişliğe sığdır');
+  setLanguage('fr');
+  expect(fit.textContent).toBe('Ajuster');
+  expect(fit.getAttribute('aria-label')).toBe('Ajuster à la largeur');
+  setLanguage('en');
   viewer.destroy();
 });
 
