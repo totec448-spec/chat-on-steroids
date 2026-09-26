@@ -84,6 +84,8 @@
    * which nothing downstream reads as anything but the turn having taken that much longer.
    */
   const TURN_SETTLE_MS = 4000;
+  /** How long a settled question's generation must hold, cleanly, before it counts as a regeneration. */
+  const SETTLED_REGENERATION_MS = 20_000;
   // While ChatGPT is generating, keep the app-owned transcript close enough to feel like a
   // stream rather than a two-second slideshow. This does not create duplicate rows: /activity
   // is cursor-based, streamBySeq is keyed by canonical seq, and assistant messages additionally
@@ -1439,7 +1441,14 @@
     // recovery reload ChatGPT can show Stop for seconds over a turn it has lost, and claiming it
     // minted a turn with no work that stalled, earned another reload and hid the dead turn from
     // the automatic Continue (measured 2026-09-26, three rounds in 41 minutes).
-    if (!newest || newest === openedUserMessageId || newest === appSettledQuestionId) {
+    //
+    // A genuine regeneration of that same question — ChatGPT's own Retry after a lost stream —
+    // is different: its Stop stays, with no failure banner, for as long as it writes. That
+    // is how a Compact & Resume brief is rewritten after "Resume stream unavailable", and
+    // refusing it left the rewritten brief unrecorded. So the settled question needs a clean
+    // page and a much longer settle than an unrecorded question does.
+    const settled = newest === appSettledQuestionId;
+    if (!newest || newest === openedUserMessageId || (settled && CLF_DOM.errors().length > 0)) {
       unrecordedGeneratingSince = 0;
       return null;
     }
@@ -1447,7 +1456,7 @@
       unrecordedGeneratingSince = Date.now();
       return null;
     }
-    return Date.now() - unrecordedGeneratingSince >= TURN_SETTLE_MS ? newest : null;
+    return Date.now() - unrecordedGeneratingSince >= (settled ? SETTLED_REGENERATION_MS : TURN_SETTLE_MS) ? newest : null;
   }
 
   function adoptOpenTurn(open, questionId = null) {
