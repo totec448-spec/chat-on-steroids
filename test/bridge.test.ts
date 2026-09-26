@@ -5054,6 +5054,41 @@ describe('delivering a bootstrap', () => {
     expect(pendingWorkerRevivals()[0]?.text).toContain('inspect the parser');
   });
 
+  it('does not hand a slept worker its dead turn, nor count its replayed native rows as work', async () => {
+    // Measured 2026-09-26 (worker-8): a turn left open the day before was adopted by the reopened
+    // tab, which refused the wake as "generating" until a ten-minute stall, and its native rows —
+    // keyed `thought-<id>-0` by the old renderer, `<id>` by the new shell — replayed as new output.
+    await pair();
+    spawn({ workers: [{ task: 'survive the renderer switch' }], caller: { conversationId: PRIME_CHAT } });
+    const workerConversation = 'cafe0926-0000-4000-8000-000000000926';
+    expect(bindConversation('worker-1', workerConversation)).toBe(true);
+    const start = Date.now();
+    await recordChatObservations(workerConversation, [
+      { kind: 'turn_start', time: start, turnId: 'g-dead-turn' },
+      { kind: 'page_tool', time: start + 1, turnId: 'g-dead-turn', messageId: 'thought-259c5310-0',
+        text: 'Audited Startpage configuration', activeNow: true }
+    ], 'worker-1');
+    expect(workerConversationGone(workerConversation)).toBe(true);
+    const worker = () => swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((agent) => agent.id === 'worker-1')!;
+    const lastWorkAt = Math.max(worker().activatedAt ?? 0, worker().lastSeenAt ?? 0);
+    stageMessages({ conversationId: PRIME_CHAT }, [{ to: 'worker-1', text: 'continue the consolidation' }]).commit();
+    expect(await sweepStaleSwarm(lastWorkAt + WORKER_SILENCE_MS + 1_000)).toBe(true);
+    expect(worker().state).toBe('waking');
+    const sleptAt = worker().sleptAt!;
+
+    const activity = (await request('GET', `/activity?conversationId=${workerConversation}`)).body;
+    expect(activity.activeTurnId).toBeNull();
+    expect(activity.recordedTurnId).toBeNull();
+
+    expect((await request('POST', '/events', { body: { conversationId: workerConversation, events: [
+      { kind: 'page_tool', time: sleptAt + 5_000, turnId: 'g-dead-turn', messageId: '259c5310',
+        text: 'Audited Startpage configuration', activeNow: true }
+    ] } })).status).toBe(200);
+    // Still waiting for the wake to be typed, not "revived" by its own history.
+    expect(worker().state).toBe('waking');
+    expect(pendingWorkerRevivals()[0]?.text).toContain('continue the consolidation');
+  });
+
   it('still releases worker capacity when the durable prime turn remains open', async () => {
     spawn({ workers: [{ task: 'open turn veto' }], caller: { conversationId: PRIME_CHAT } });
     const workerConversation = 'stale-worker-open-prime';
