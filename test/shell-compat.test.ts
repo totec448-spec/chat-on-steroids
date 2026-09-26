@@ -632,6 +632,26 @@ it('hides only a verified shell prompt frame and restores a recycled user bubble
   expect(unit.querySelector('[data-clf-user-text]')).toBeNull();
   expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(false);
 });
+/**
+ * The same frame, as the composer gives it back.
+ *
+ * Reported as #374: the internal instructions stayed visible in the page and in ChatGPT's own
+ * conversation title. The editor escapes what it is handed — a backslash before ASCII
+ * punctuation, and one before a newline — so the frame this reader looks for matched nothing and
+ * the whole thing was left on screen as if the user had typed it.
+ */
+it('hides a prompt frame the composer escaped on readback', async () => {
+  const f = fixture(), unit = f.doc.querySelector('[data-content-search-unit-key$=":user"]')!;
+  const raw = unit.querySelector('.whitespace-pre-wrap')!;
+  const full = '[[COS_CONTEXT:13]]\nPrivate setup\n[[/COS_CONTEXT]]\n\nAuthored request';
+  const escaped = full.replace(/([!-/:-@[-`{-~])/g, '\\$1').replace(/\n/g, '\\\n');
+  f.entry.turn.items[0].message = escaped; raw.textContent = escaped;
+  await f.ask();
+  f.api.presentUserPrompts((message: { id: string }) => message.id === USER ? escaped : null);
+  expect(unit.querySelector('[data-clf-user-text]')?.textContent).toBe('Authored request');
+  expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(true);
+});
+
 it('delivers three successive shell inputs with exact receipts and completed answers', async () => {
   const f = fixture(), edit = editing(f);
   f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
