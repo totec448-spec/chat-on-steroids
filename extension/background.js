@@ -2709,7 +2709,7 @@ async function performBrowserRepairs(repairs, policy) {
           continue;
         }
       }
-      if (target && reason === 'unattributed') {
+      if (target && (reason === 'unattributed' || reason === 'blind')) {
         // An attribution refresh exists to make a live page report again, not to rescue a
         // broken one, and a reload in the middle of a stream ends that stream: ChatGPT answers
         // it with "Resume stream unavailable" or "could not be loaded", and the turn is lost.

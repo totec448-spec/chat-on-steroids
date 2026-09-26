@@ -4471,6 +4471,8 @@ it.each([
   ['unattributed', { ok: true, draft: false, streaming: true }, 0],
   ['unattributed', { ok: true, draft: false, streaming: false }, 1],
   ['unattributed', null, 1],
+  ['blind', { ok: true, draft: false, streaming: true }, 0],
+  ['blind', { ok: true, draft: false, streaming: false }, 1],
   ['silence', { ok: true, draft: false, streaming: true }, 1]
 ])('for reason %s and page status %j reloads %i time(s)', async (reason, status, reloads) => {
   const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
