@@ -14,7 +14,7 @@ import { getSession, findSessionByConversation, createSession, deleteSession, re
 import { assignSessionProject, projectWorkspace, getSessionProject } from '../projects.js';
 import { isChatBlocked } from './blocked-chats.js';
 import { wakeBrowserWork } from '../browser-wake.js';
-import { logInfo } from '../logger.js';
+import { logInfo, logWarn } from '../logger.js';
 import { noteChatOrigin } from './recorder.js';
 import { isAstraModel, isProModel } from '../../shared/chat-models.js';
 import { inFlightToolCalls } from '../mcp/call-context.js';
@@ -201,6 +201,9 @@ async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
     (entry.mode === 'auto' && !entry.finishOwner && entry.purpose !== 'decision' && entry.state === 'queued' &&
       entry.owner === null && entry.offeredAt === undefined && policy.settled));
 }
+/** The last release reason said out loud per ticket, so a loop is visible without being noisy. */
+const recoveryReleaseTold = new Map<string, string>();
+
 const inputListeners = new Set<() => void>();
 export function onInputChange(listener: () => void): () => void {
   inputListeners.add(listener);
@@ -1015,8 +1018,22 @@ export function finishNeedsBrowserInput(sessionId: string): Promise<boolean> {
 // Control-only turn_end observations (including our own Stop) are not renewed work.
 const RECOVERY_WORK_KINDS: import('../../shared/session.js').SessionEvent['kind'][] =
   ['user_message', 'assistant_message', 'tool_call', 'page_tool', 'turn_start'];
-function releaseRecoveryClaim(row: InputEntry): InputEntry {
+/**
+ * Hands a recovery ticket back to the queue, keeping the reason it came back.
+ *
+ * The ticket surviving is the point — a Continue that was never authorized is still owed, and its
+ * pickup budget is deliberately retained. What was lost with it was the explanation: the page tells
+ * the app exactly why it could not send, `failBrowserInput` carried that string, and this dropped it
+ * on the floor while every other branch there keeps it. So a row could be claimed and released over
+ * and over with nothing written down anywhere.
+ *
+ * Measured on 2026-09-26: one recovery row claimed twelve times in three minutes, back to `queued`
+ * each time, no `error` on the receipt and not one line in the log. The loop was only visible at all
+ * because the claims themselves are logged.
+ */
+function releaseRecoveryClaim(row: InputEntry, error?: string): InputEntry {
   return { ...row, state: 'queued', owner: null, offeredAt: undefined, completedTurnId: undefined,
+    ...(error ? { error: error.slice(0, 200) } : {}),
     recovery: { ...row.recovery!, phase: row.recovery!.phase === 'ready' ? 'ready' : 'resumed' } };
 }
 async function recoveryCurrent(row: InputEntry): Promise<boolean> {
@@ -1494,7 +1511,14 @@ export function failBrowserInput(id: string, owner: string, error: string): Prom
     const entry = current.find((row) => row.id === id && row.owner === owner && row.state === 'browser');
     if (!entry || companionOf(current, entry)) return false;
     if (entry.recovery && entry.requiresAuthorization === true && entry.sendAuthorizedAt === undefined) {
-      await commit(current.map(row => row === entry ? releaseRecoveryClaim(row) : row));
+      // Said once per reason, not once per attempt: the pickup schedule can hand the same ticket to
+      // the same page every few seconds, and an unbounded log is its own kind of silence.
+      if (recoveryReleaseTold.get(entry.id) !== error) {
+        recoveryReleaseTold.set(entry.id, error);
+        if (recoveryReleaseTold.size > 200) for (const old of [...recoveryReleaseTold.keys()].slice(0, 50)) recoveryReleaseTold.delete(old);
+        logWarn(`input ${entry.id}: the browser could not send this recovery message — ${error.slice(0, 160)}`);
+      }
+      await commit(current.map(row => row === entry ? releaseRecoveryClaim(row, error) : row));
       return true;
     }
     // The document reports this only while its native Send has never been attempted.
