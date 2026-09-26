@@ -2103,17 +2103,24 @@
     const machine = node.getAttribute('data-selected-reasoning-effort');
     // The reported alternate trigger exposes a locale-independent selected effort.
     // Unknown explicit values invalidate proof rather than falling back to its caption.
-    const effort = machine !== null ? (['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(machine) ? machine : null)
-      : ({ instant: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high',
-        'extra high': 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[String(node.textContent || '').trim().toLowerCase()];
-    if (!effort) return null;
-    let model = null;
+    const captionEffort = ({ instant: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high',
+      'extra high': 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[String(node.textContent || '').trim().toLowerCase()];
+    let model = null, lane = null;
     for (let fiber = fiberOf(node), up = 0; fiber && up < MAX_CLIMB; up++, fiber = fiber.return) {
+      // The shell picker's selected lane carries the visible effort name: the machine
+      // attribute reports its transport value (medium/max) for Pro/Extra High lanes.
+      const sel = fiber.memoizedProps?.selectedPowerSelection ?? fiber.memoizedProps?.selectedLabelCandidate;
+      if (lane === null && sel) lane = { model: sel.model,
+        effort: ({ instant:'none', minimal:'minimal', low:'low', medium:'medium', high:'high',
+          'extra high':'xhigh', max:'max', ultra:'ultra', pro:'pro' })[String(sel.labels?.effort ?? sel.sliderLabel ?? '').trim().toLowerCase()] ?? null };
       const current = fiber.memoizedProps?.currentModelId;
       if (current === undefined) continue;
       if (typeof current !== 'string' || !/^[a-zA-Z0-9._-]{1,80}$/.test(current) || (model && model !== current)) return null;
       model = current;
     }
+    const effort = (lane && lane.model === model && lane.effort) ||
+      (machine !== null ? (['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(machine) ? machine : null) : captionEffort);
+    if (!effort) return null;
     return model ? { id: model, effort } : null;
   }
   function readPickerSnapshot(node) {
@@ -2169,19 +2176,23 @@
       const id = value => typeof value === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(value) ? value : null;
       const group = value => typeof value === 'string' && /^[\p{L}\p{N}._ -]{1,80}$/u.test(value) && value.trim() === value ? value : null;
       const label = value => typeof value === 'string' && value.trim() && value.length <= 80 ? value.trim() : null;
-      const effort = value => ({ none:'none', instant:'none', minimal:'minimal', min:'low', low:'low', standard:'medium', medium:'medium', extended:'high', high:'high', xhigh:'xhigh', max:'max', ultra:'ultra', pro:'pro' })[value] || null;
+      const effort = value => ({ none:'none', instant:'none', minimal:'minimal', min:'low', low:'low', standard:'medium', medium:'medium', extended:'high', high:'high', xhigh:'xhigh', 'extra high':'xhigh', max:'max', ultra:'ultra', pro:'pro' })[value] || null;
+      // The machine reasoningEffort is a lane's transport setting, not its identity: the
+      // Pro and Extra High lanes still report medium/max. The lane's visible label is what
+      // the picker offers, matching readPickerSnapshot's modelLane/thinkingEffort mapping.
+      const laneEffort = c => effort(String(c?.labels?.effort ?? c?.sliderLabel ?? '').trim().toLowerCase()) ?? effort(c?.reasoningEffort);
       const current = options.filter(o => o?.selected === true);
       if (current.length !== 1) return null;
       const version = group(current[0].id);
       const versions = options.filter(o => o && o.disabled !== true).map(o => ({ id: group(o.id), label: label(o.label) }));
       const choices = p.powerSelections.map(c => ({ bucket: c?.powerSettingIndex, id: id(c?.model),
-        label: label(c?.modelLabel), familyId: id(c?.model), familyLabel: label(c?.modelLabel), effort: effort(c?.reasoningEffort),
+        label: label(c?.modelLabel), familyId: id(c?.model), familyLabel: label(c?.modelLabel), effort: laneEffort(c),
         available: p.modelSelectionDisabled !== true && c?.disabled !== true &&
           (!c?.availability || c.availability.status === 'available') && !p.modelSwitcherDenialsBySlug?.[c?.model] }));
       if (!version || !versions.length || versions.some(v => !v.id || !v.label) || !choices.length ||
           choices.some(c => !Number.isInteger(c.bucket) || !c.id || !c.label || !c.effort) ||
           new Set(versions.map(v => v.id)).size !== versions.length || new Set(choices.map(c => c.bucket)).size !== choices.length || !versions.some(v => v.id === version)) return null;
-      const matches = choices.filter(c => c.id === id(selected.model) && c.effort === effort(selected.reasoningEffort));
+      const matches = choices.filter(c => c.id === id(selected.model) && c.effort === laneEffort(selected));
       if (matches.length !== 1 || (selected.powerSettingIndex !== undefined && selected.powerSettingIndex !== matches[0].bucket)) return null;
       return { version, currentBucket: matches[0].bucket, versions, choices };
     }

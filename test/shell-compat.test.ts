@@ -1077,6 +1077,18 @@ it('discovers both native versions, selects exact worker lanes and restores the 
   expect(f.doc.querySelector('[data-model-picker-view]')).toBeNull();
   expect(f.api.visibleModelSelection()).toEqual({ model: 'future-pro', reasoningEffort: 'pro' });
 });
+it('maps native lane labels over transport effort values (Pro/Extra High lanes)', async () => {
+  const f = fixture();
+  // The live Pro and Extra High lanes report medium/max as transport reasoningEffort;
+  // the picker's own lane label is the offered effort identity.
+  Object.assign(f.selections[0]![0]!, { reasoningEffort: 'medium', sliderLabel: 'Pro', labels: { effort: 'Pro' } });
+  Object.assign(f.selections[0]![1]!, { reasoningEffort: 'max', sliderLabel: 'Extra High', labels: { effort: 'Extra High' } });
+  const models = await f.api.inspectModelSettings();
+  expect(models.find((m: any) => m.id === 'gpt-5-6-thinking')?.efforts).toEqual(['pro', 'xhigh']);
+  expect(models.find((m: any) => m.id === 'future-pro')?.efforts).toEqual(['pro']);
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'xhigh')).toBe(true);
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh' });
+});
 it.each([false, true])('rechecks the cold shell picker owner when its account state hydrates (cancelled=%s)', async cancelled => {
   const f = fixture(), options = f.props.modelListConfig;
   f.props.modelListConfig = null;
