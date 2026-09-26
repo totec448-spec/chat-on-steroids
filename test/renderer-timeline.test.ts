@@ -3564,3 +3564,23 @@ it('keeps a cancelled automatic draft at its creation time as later messages arr
   expect(timeline.textContent).not.toContain('Unused automatic instruction');
   expect(live.sent).toHaveLength(0);
 });
+
+it('keeps the latest recovery verdict in view until the chat works again', async () => {
+  // 2026-09-26: a stopped prime was explained only by timeline notes that scrolled away.
+  const verdict = 'Could not restart this chat automatically: the browser chat was closed. Send a message here to continue it.';
+  const app = await boot([
+    { seq: 1, time: T0 + 1000, source: 'extension', kind: 'turn_start', turnId: 'stalled' },
+    { seq: 2, time: T0 + 2000, source: 'extension', kind: 'turn_end', turnId: 'stalled', outcome: 'stalled' },
+    { seq: 3, time: T0 + 3000, source: 'app', kind: 'note', message: text(verdict) }
+  ] as SessionEvent[]);
+  const host = app.w.document.getElementById('recoveryStatus')!;
+  expect(host.hidden).toBe(false);
+  expect(host.textContent).toContain('Could not restart this chat automatically');
+  await app.append([{ seq: 4, time: T0 + 4000, source: 'extension', kind: 'turn_start', turnId: 'resumed' } as SessionEvent]);
+  expect(host.hidden).toBe(true);
+});
+
+it('does not show a handoff note as a recovery verdict', async () => {
+  const app = await boot([{ seq: 1, time: T0 + 1000, source: 'app', kind: 'note', continuation: TOKEN, message: text('Compact & Resume abandoned') }] as SessionEvent[]);
+  expect(app.w.document.getElementById('recoveryStatus')!.hidden).toBe(true);
+});
