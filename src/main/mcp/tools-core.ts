@@ -903,7 +903,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               // becoming an invented shell failure. With incomplete framing, abstain.
               ...(isBatch
                 ? nonZeroSections.flatMap((section) =>
-                    execRecoveryHints(rawCommands[section.index - 1] ?? '', section.text, shell.shellType)
+                    execRecoveryHints(rawCommands[section.index - 1] ?? '', section.text, shell.shellType, section.parseFailed === true)
                       .map((hint) => `Command ${section.index}: ${hint}`)
                   )
                 : output.exitCode !== null && output.exitCode !== 0

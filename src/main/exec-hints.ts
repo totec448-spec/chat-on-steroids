@@ -1437,7 +1437,9 @@ function rebuild(text: string, seps: readonly string[], map: (part: string) => s
 export function execRecoveryHints(
   command: string,
   outputText: string,
-  shellType: ShellType = 'powershell'
+  shellType: ShellType = 'powershell',
+  /** Batch framing supplies a parse result; absent means legacy single-command output. */
+  parseFailed?: boolean
 ): string[] {
   const hints: string[] = [];
   const powershell = shellType === 'powershell';
@@ -1519,7 +1521,7 @@ export function execRecoveryHints(
     );
   }
 
-  if (powershell && command.includes('\\"') && /The string (?:is missing the terminator|starting:)/i.test(outputText)) {
+  if (powershell && parseFailed !== false && command.includes('\\"') && /The string (?:is missing the terminator|starting:)/i.test(outputText)) {
     hints.push(
       'PowerShell refused that line at a quote and ran none of it, including any earlier ' +
         'statement on the same line. A backslash is not an escape character in PowerShell, so ' +
@@ -1535,7 +1537,7 @@ export function execRecoveryHints(
   // faithful translation is mechanical enough to hand over, and cheap enough to let the model
   // make. This fires on the shell's own refusal, so it can never misfire on PowerShell 7,
   // where the operators work and no such error exists.
-  const invalidOperator = /The token '(&&|\|\|)' is not a valid statement separator/i.exec(outputText)?.[1];
+  const invalidOperator = parseFailed === false ? undefined : /The token '(&&|\|\|)' is not a valid statement separator/i.exec(outputText)?.[1];
   if (powershell && invalidOperator && command.includes(invalidOperator)) {
     hints.push(
       'Windows PowerShell 5.1 has no `&&` or `||`, so it refused the whole line and ran nothing. ' +
@@ -1545,15 +1547,15 @@ export function execRecoveryHints(
     );
   }
 
-  const bashQuoteFailure = command.includes('\\"') && /The string (?:is missing the terminator|starting:)/i.test(outputText);
-  const parserFailure =
+  const bashQuoteFailure = parseFailed !== false && command.includes('\\"') && /The string (?:is missing the terminator|starting:)/i.test(outputText);
+  const parserFailure = parseFailed ?? (
     /\bParserError\b/i.test(outputText) ||
     // The batch runner parses each item with ScriptBlock.Create; PowerShell wraps its
     // parser diagnostic in this exception instead of emitting FullyQualifiedErrorId.
     /Exception calling "Create" with "1" argument\(s\): "At line:\d+ char:\d+/i.test(outputText) ||
     /FullyQualifiedErrorId\s*:\s*(?:TerminatorExpectedAtEndOfString|MissingArgument|MissingExpressionAfterToken|MissingFileSpecification|RedirectionNotSupported|UnexpectedToken|EmptyPipeElement)/i.test(
       outputText
-    );
+    ));
   if (powershell && parserFailure && !invalidOperator && !bashQuoteFailure) {
     const correction = /TerminatorExpectedAtEndOfString|missing the terminator/i.test(outputText)
       ? 'Balance the quoted argument; for literal regexes and paths, prefer one single-quoted PowerShell argument.'
