@@ -2418,23 +2418,55 @@ var CLF_DOM = (() => {
     try {
       // Exact provider slug is preferred. Existing saved display slugs may resolve
       // only to an actually observed, available pair; never to an account default.
-      const name = normalizeModelLabel(model), candidates = [];
+      const name = normalizeModelLabel(model);
+      const modelRank = choice => !model || choice.familyId === model || choice.id === model ? 2
+        : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
+      // Every available choice of the requested model, read once across versions, so the effort
+      // can be resolved against what the account actually offers before anything is moved.
+      const offered = [];
       for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
         const state = await ui.version(version.id); if (!state) return false;
         for (const choice of state.choices) {
-          if (!choice.available || (effort && choice.effort !== effort)) continue;
-          const rank = !model || choice.familyId === model || choice.id === model ? 2
-            : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
-          if (rank) candidates.push({ version: version.id, choice, rank });
+          const rank = choice.available ? modelRank(choice) : 0;
+          if (rank) offered.push({ version: version.id, choice, rank });
         }
       }
+      /*
+       * An effort the account no longer offers resolves to the nearest one it does.
+       *
+       * ChatGPT's newer model picker replaced its effort ladder: measured on 2026-09-26, the thinking
+       * models offer `medium`, `high` and `max`, and the step the UI now labels "Sehr hoch" is `max`.
+       * `xhigh` is simply gone. A saved `multiAgent.defaultReasoning = xhigh` therefore matched no
+       * choice at all, and every worker spawn failed outright with "The requested model or reasoning
+       * is unavailable" — worker-11, -12 and -13 in one homelab run, each one work the prime then had
+       * to do itself or abandon.
+       *
+       * Nearest by position in the shared vocabulary, ties upward: the request asked for at least
+       * this much reasoning, so the step above honours it better than the step below. Only within the
+       * requested model — a missing model still refuses, because picking a different model is not a
+       * rounding decision.
+       */
+      let wantedEffort = effort;
+      if (effort && offered.length && !offered.some(entry => entry.choice.effort === effort)) {
+        const ladder = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+        const target = ladder.indexOf(effort);
+        const efforts = [...new Set(offered.map(entry => entry.choice.effort))].filter(value => ladder.includes(value));
+        if (target >= 0 && efforts.length) {
+          efforts.sort((a, b) => {
+            const da = Math.abs(ladder.indexOf(a) - target), db = Math.abs(ladder.indexOf(b) - target);
+            return da - db || ladder.indexOf(b) - ladder.indexOf(a);
+          });
+          wantedEffort = efforts[0];
+        }
+      }
+      const candidates = offered.filter(entry => !wantedEffort || entry.choice.effort === wantedEffort);
       // An earlier version's display name cannot shadow a later exact execution id.
       // Captions such as High are effort labels, never model-name aliases. Repeated
       // Latest/version entries may describe the same pair; distinct families may not.
       const rank = Math.max(0, ...candidates.map(candidate => candidate.rank));
       const matches = candidates.filter(candidate => candidate.rank === rank);
       if (!matches.length || (model && new Set(matches.map(candidate => candidate.choice.familyId)).size !== 1) ||
-          (model && effort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1)) return false;
+          (model && wantedEffort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1)) return false;
       const wanted = matches.find(candidate => candidate.version === original.version && candidate.choice.bucket === original.currentBucket) || matches[0];
       const state = await ui.version(wanted.version), choice = wanted.choice;
       // Versions can change while traversing the UI. Revalidate before moving its slider.
