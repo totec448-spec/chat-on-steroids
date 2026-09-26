@@ -2432,6 +2432,13 @@ A worker proving it never stopped clears its obsolete result while retaining the
 
 After a worker reaches its own 400k estimated-context ceiling, its next stop becomes terminal
 and it is no longer reusable. Do not interrupt its current useful work merely for that ceiling.
+Open-turn silence is not itself such a stop: after the bounded recovery attempt, a ceiling worker
+with an unresolved turn may park with its slot free but no new-task wake authority. When durable
+request/turn identity was already known before parking, only activity proven against that retained
+response may reclaim the slot; a new turn in the same chat cannot. Without that exact identity the
+worker stays parked until terminal evidence arrives. A finish proven to belong to that retained
+response, a current canonical final, user block/clear/disable, or other durable terminal lifecycle
+evidence still ends it normally.
 Status/message remeasure sleepers before revival. A terminal worker can be replaced deliberately;
 raising the user's worker cap is not a substitute for lifecycle correctness.
 
@@ -2450,7 +2457,9 @@ restore another family's state. Disable parks families; Clear deliberately disca
 broker's retained history/fences. Dormant families are bounded (16 / seven days). Retirement
 and browser close are separate: a sleeping worker becomes eligible for page reuse after two
 quiet minutes and page closure after five (§14), while remaining available for revival by its
-exact conversation id. Compact & Resume transfers every active and parked fleet of that prime
+exact conversation id. A context-limited sleeper retaining an unresolved current turn is not a
+reuse/close candidate until that turn resolves. Compact & Resume transfers every active and parked
+fleet of that prime
 in the same transaction. A newly attributed fleet joins an already-open handoff, including the
 commit publication gap. Old source requests retain their historical proof and cannot reacquire
 prime authority in the successor. Distinct fleets remain distinct; process custody stays with

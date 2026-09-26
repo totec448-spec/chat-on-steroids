@@ -457,9 +457,15 @@ tools, so a repair that can be erased by activity is a repair that is never hand
 One action receipt spends that failure/inactivity episode. A second action for the same
 conversation cannot happen for at least three minutes, even for a different trigger. New meaningful
 page/tool activity is required to create a new silence episode. At four minutes of uninterrupted
-open-turn silence, a joined worker uses the existing stop decision: below 400k context tokens it
-becomes sleeping/revivable; at or above 400k it becomes finished. The setting **Recover inactive
-agent tabs** disables error, silence, and missing-tab browser recovery without changing the worker's
+open-turn silence, a joined worker below 400k uses the existing stop decision and becomes
+sleeping/revivable. At or above 400k, unresolved silence instead parks the worker as
+context-limited: its slot is free, it cannot be assigned/woken for new work, and the browser does
+not treat its chat as reusable/closable. If durable request/turn provenance was already known before
+parking, only that retained response may resume it; otherwise it remains parked until terminal
+evidence arrives. Silence or a missing `activeTurnId` alone is not terminal evidence; canonical
+completion/turn-end handling, a finish proven to belong to the retained response, and user
+block/clear/disable keep their existing terminal authority. The setting **Recover inactive agent
+tabs** disables error, silence, and missing-tab browser recovery without changing the worker's
 underlying lifecycle state.
 
 ### Post-reload final answers and attributed activity

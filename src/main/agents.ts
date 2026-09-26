@@ -195,6 +195,16 @@ function canStop(state: AgentState): boolean {
   return !hasStopped(state) && state !== 'waking';
 }
 
+/** A silence-parked ceiling worker may only move through the staged terminal barrier. */
+function canStageFinish(agent: Agent): boolean {
+  return canStop(agent.info.state) || (
+    agent.info.state === 'sleeping' &&
+    !agent.info.revivable &&
+    agent.info.silenceParked === true &&
+    ceilingCrossed(agent.info)
+  );
+}
+
 interface Agent {
   info: AgentInfo;
   queue: AgentMessage[];
@@ -839,6 +849,171 @@ export function reactivateDormantRunForConversation(conversationId: string | nul
   return reactivateDormantRun(found.owner) !== null;
 }
 
+/** Turn identity retained after a ceiling-crossed worker is parked by ambiguous silence. */
+export function silentCeilingRecoveryTurn(conversationId: string | null | undefined): string | null {
+  if (!conversationId) return null;
+  const agent = boundAgent(conversationId) ?? dormantAgentForConversation(conversationId)?.agent ?? null;
+  return agent?.info.role === 'worker' && agent.info.state === 'sleeping' && !agent.info.revivable && agent.info.silenceParked
+    ? agent.info.silenceRecoveryTurnId ?? null
+    : null;
+}
+
+/** Pre-silence request/turn authority required before an MCP call may reclaim the worker slot. */
+export function silentCeilingRecoveryAuthority(
+  conversationId: string | null | undefined
+): { turnId: string; requestOriginMax: number } | null {
+  if (!conversationId) return null;
+  const agent = boundAgent(conversationId) ?? dormantAgentForConversation(conversationId)?.agent ?? null;
+  const turnId = agent?.info.silenceRecoveryTurnId ?? null;
+  const requestOriginMax = agent?.info.silenceRecoveryRequestOriginMax;
+  if (
+    !agent ||
+    agent.info.role !== 'worker' ||
+    agent.info.state !== 'sleeping' ||
+    agent.info.revivable ||
+    !agent.info.silenceParked ||
+    !turnId ||
+    !Number.isFinite(requestOriginMax)
+  ) {
+    return null;
+  }
+  return { turnId, requestOriginMax: requestOriginMax! };
+}
+
+/**
+ * Refusal for a context-limited worker whose old turn was parked by silence but whose arriving
+ * call did not prove ownership of that exact turn. The marker is recovery eligibility, never
+ * execution authority: a new turn in the same conversation must not inherit the old turn's tools.
+ */
+export function silentCeilingWorkerNotice(conversationId: string | null | undefined): string | null {
+  if (!conversationId) return null;
+  const agent = boundAgent(conversationId) ?? dormantAgentForConversation(conversationId)?.agent ?? null;
+  if (
+    !agent ||
+    agent.info.role !== 'worker' ||
+    agent.info.state !== 'sleeping' ||
+    agent.info.revivable ||
+    !agent.info.silenceParked
+  ) {
+    return null;
+  }
+  const recovery = silentCeilingRecoveryAuthority(conversationId);
+  return (
+    `WORKER_CONTEXT_LIMITED: ${agent.info.id} is parked because its previous turn went silent after reaching the context limit. ` +
+    (recovery
+      ? 'Nothing was run. New work is not allowed in this chat. Only a provenance-matched call from that exact unresolved turn may resume it; otherwise stop and return to the prime conversation.'
+      : 'Nothing was run. New work is not allowed in this chat. No complete pre-park request/turn recovery proof was retained, so wait for durable terminal evidence and return to the prime conversation.')
+  );
+}
+
+/**
+ * Reclaims a ceiling-crossed worker only after the caller independently proved that the
+ * arriving request belongs to the exact unresolved turn retained above.
+ */
+export function recoverSilentCeilingWorker(
+  conversationId: string,
+  turnId: string,
+  announce = true
+): AliveResult | null {
+  let run = runForConversation(conversationId);
+  let agent = boundAgent(conversationId);
+  if (!agent) {
+    const dormant = dormantAgentForConversation(conversationId);
+    if (!dormant || !dormant.agent.info.silenceParked || dormant.agent.info.silenceRecoveryTurnId !== turnId) return null;
+    run = reactivateDormantRun(dormant.owner);
+    agent = run ? boundAgent(conversationId) : null;
+  }
+  if (
+    !run ||
+    !agent ||
+    agent.info.role !== 'worker' ||
+    agent.info.state !== 'sleeping' ||
+    agent.info.revivable ||
+    !agent.info.silenceParked ||
+    agent.info.silenceRecoveryTurnId !== turnId
+  ) {
+    return null;
+  }
+  agent.info.state = 'active';
+  agent.info.sleptAt = null;
+  agent.info.finishedAt = null;
+  agent.info.detachedAt = null;
+  agent.info.silenceParked = false;
+  agent.info.silenceRecoveryTurnId = null;
+  agent.info.silenceRecoveryRequestOriginMax = null;
+  agent.info.lastSeenAt = Date.now();
+  const report = announce
+    ? newMessage(
+        agent.info.id,
+        PRIME_ID,
+        `[${agent.info.id} is still working] Its context-limited chat was parked after silence, but an exact call from the same unresolved turn arrived. It holds its worker slot again. Do not assign new work to this chat; wait for this turn to finish.`
+      )
+    : null;
+  if (report) {
+    const prime = primeAgent(run);
+    prime.queue.push(report);
+    recount(prime);
+  }
+  logInfo(`multi-agent: ${agent.info.id} resumed its exact ceiling-silenced turn ${turnId}`);
+  changed('critical');
+  return { agentId: agent.info.id, revived: true, report };
+}
+
+/**
+ * Makes a parked owner's map available to the existing staged-finish barrier without granting
+ * the worker execution authority. The row itself stays sleeping/context-fenced until commit.
+ * Callers must independently hold terminal evidence.
+ */
+export function reactivateSilentCeilingRunForTerminal(
+  conversationId: string | null | undefined
+): boolean {
+  if (!conversationId) return false;
+  let agent = boundAgent(conversationId);
+  if (agent) {
+    return agent.info.role === 'worker' && agent.info.state === 'sleeping' &&
+      !agent.info.revivable && agent.info.silenceParked === true && ceilingCrossed(agent.info);
+  }
+  const dormant = dormantAgentForConversation(conversationId);
+  if (
+    !dormant ||
+    dormant.agent.info.role !== 'worker' ||
+    dormant.agent.info.state !== 'sleeping' ||
+    dormant.agent.info.revivable ||
+    !dormant.agent.info.silenceParked ||
+    !ceilingCrossed(dormant.agent.info)
+  ) {
+    return false;
+  }
+  if (!reactivateDormantRun(dormant.owner)) return false;
+  agent = boundAgent(conversationId);
+  return Boolean(agent && agent.info.state === 'sleeping' && agent.info.silenceParked);
+}
+
+/** Explicitly ends a ceiling-silenced worker, including while its family is parked. */
+export function finishSilentCeilingWorker(
+  conversationId: string | null | undefined,
+  reason: string
+): FinishResult | null {
+  if (!conversationId) return null;
+  const agent = boundAgent(conversationId) ?? dormantAgentForConversation(conversationId)?.agent ?? null;
+  if (
+    !agent ||
+    agent.info.role !== 'worker' ||
+    agent.info.state !== 'sleeping' ||
+    !agent.info.silenceParked ||
+    !ceilingCrossed(agent.info)
+  ) {
+    return null;
+  }
+  const report = finishStoppedWorkerAtCeiling(
+    agent,
+    reason,
+    agent.info.sleptAt ?? Date.now()
+  );
+  changed('critical');
+  return { info: { ...agent.info }, report: { ...report }, repeat: false };
+}
+
 /**
  * Caller-scoped history state. Unlike the renderer's global `swarmState()`, this never exposes
  * another prime's workers merely because that other prime currently owns the execution slot.
@@ -1015,6 +1190,9 @@ function makeWorker(id: string, label: string, task: string, model: string | nul
       detachedAt: null,
       lastSeenAt: null,
       revivable: false,
+      silenceParked: false,
+      silenceRecoveryTurnId: null,
+      silenceRecoveryRequestOriginMax: null,
       sleptAt: null,
       contextTokens: 0
     },
@@ -1043,6 +1221,9 @@ function makePrime(conversationId: string | null): Agent {
       detachedAt: null,
       lastSeenAt: Date.now(),
       revivable: false,
+      silenceParked: false,
+      silenceRecoveryTurnId: null,
+      silenceRecoveryRequestOriginMax: null,
       sleptAt: null,
       contextTokens: 0
     },
@@ -1877,6 +2058,11 @@ function stageMessagesActive(
       );
     }
     if (to.info.state === 'sleeping') {
+      if (to.info.silenceParked && !to.info.revivable) {
+        throw new AgentError(
+          `${toId} is context-limited and its previous turn is still unresolved${where}. Nothing was sent. Spawn a new worker for new work.`
+        );
+      }
       if (!to.info.conversationId) {
         throw new AgentError(
           `${toId} is asleep but this app never learned which chat it is in, so it cannot be woken${where}.`
@@ -2252,7 +2438,10 @@ function planFinish(agent: Agent, result: string): { info: AgentInfo; report: Ag
     sleptAt: now,
     detachedAt: null,
     result: result.slice(0, MAX_MESSAGE_CHARS),
-    revivable: !terminal
+    revivable: !terminal,
+    silenceParked: false,
+    silenceRecoveryTurnId: null,
+    silenceRecoveryRequestOriginMax: null
   };
   const caveat =
     unconfirmed.length > 0
@@ -2339,6 +2528,9 @@ function publishFinish(agent: Agent, info: AgentInfo, report: AgentMessage, dura
   agent.info.detachedAt = null;
   agent.info.result = info.result;
   agent.info.revivable = info.revivable;
+  agent.info.silenceParked = false;
+  agent.info.silenceRecoveryTurnId = null;
+  agent.info.silenceRecoveryRequestOriginMax = null;
   // The conversation is kept either way, and for two reasons now: a retried finish from that
   // same chat is recognised as the retry it is, and — while the worker is only sleeping — that
   // id is the whole of what a later revival needs to reopen the chat and type into it.
@@ -2360,7 +2552,7 @@ function runProjectionStillOwned(owner: Run): boolean {
 
 function stageFinish(agent: Agent, result: string, acknowledgedMessageIds: readonly string[] = []): StagedFinish {
   const run = runForAgent(agent);
-  if (!canStop(agent.info.state)) {
+  if (!canStageFinish(agent)) {
     logInfo(`multi-agent: ${agent.info.id} called finish again after it had already stopped (${agent.info.state})`);
     return {
       info: { ...agent.info },
@@ -2480,7 +2672,7 @@ export function stageWorkerConversationFinish(conversationId: string, result: st
   const run = runForConversation(conversationId);
   if (!run || !conversationId) return null;
   const agent = agentForConversationId(conversationId);
-  if (!agent || agent.info.role !== 'worker' || !canStop(agent.info.state)) return null;
+  if (!agent || agent.info.role !== 'worker' || !canStageFinish(agent)) return null;
   // A settled browser answer is evidence the worker got past the preceding ordinary tool
   // result. Those are exactly the rows the next authenticated MCP call would retire. There is
   // no such next call when the worker simply answers and stops, so stage their retirement with
@@ -2521,6 +2713,9 @@ export function failAgent(
   // otherwise. A tab that never opened, a worker a person cleared, and a bootstrap that ran
   // out of retries are all verdicts about the work; a chat that was closed is not.
   agent.info.revivable = options.revivable === true;
+  agent.info.silenceParked = false;
+  agent.info.silenceRecoveryTurnId = null;
+  agent.info.silenceRecoveryRequestOriginMax = null;
   // A revivable failure keeps whatever the prime said to it. If the worker comes back, those
   // messages are still the instructions it never acknowledged; throwing them away here and
   // then reviving the worker would silently drop them.
@@ -2554,9 +2749,10 @@ export function failAgent(
  * queue all survive, because the next thing that happens to this worker is most likely the
  * prime waking it up in that same chat.
  *
- * The context ceiling is the one thing that makes a stop final, and it is read here rather
- * than enforced anywhere earlier: a worker that crossed it mid-task was never interrupted, it
- * simply has no room left for another task once this one ends.
+ * The context ceiling makes a proven stop final, and it is read here rather than enforced
+ * anywhere earlier: a worker that crossed it mid-task was never interrupted, it simply has no
+ * room left for another task once this one ends. Ambiguous silence with a durably open turn is
+ * parked before this helper, because silence alone does not prove that current task ended.
  */
 function sleepAgent(agent: Agent, reason: string): FinishResult | null {
   const run = runForAgent(agent);
@@ -2779,7 +2975,10 @@ function planRevivalText(agent: Agent): { text: string; messageIds: string[] } {
   return { text, messageIds: waiting.map((message) => message.id) };
 }
 
-type WorkerAssignment = Pick<AgentInfo, 'label' | 'task' | 'result'>;
+type WorkerAssignment = Pick<
+  AgentInfo,
+  'label' | 'task' | 'result' | 'silenceParked' | 'silenceRecoveryTurnId' | 'silenceRecoveryRequestOriginMax'
+>;
 
 /**
  * Reserves a slot for a sleeping worker and asks the browser to wake it, or refuses.
@@ -2790,7 +2989,14 @@ type WorkerAssignment = Pick<AgentInfo, 'label' | 'task' | 'result'>;
  * synchronously, before anything touches the browser.
  */
 function beginRevival(agent: Agent): WorkerAssignment {
-  const previous = { label: agent.info.label, task: agent.info.task, result: agent.info.result };
+  const previous = {
+    label: agent.info.label,
+    task: agent.info.task,
+    result: agent.info.result,
+    silenceParked: agent.info.silenceParked,
+    silenceRecoveryTurnId: agent.info.silenceRecoveryTurnId,
+    silenceRecoveryRequestOriginMax: agent.info.silenceRecoveryRequestOriginMax
+  };
   // The accepted inbox owns this assignment. A spawn label is not a label for later work,
   // and an old report must not masquerade as the result of the waking assignment. Keep that
   // report in the prime's existing inbox/history; status carries only a bounded task preview.
@@ -2808,6 +3014,12 @@ function beginRevival(agent: Agent): WorkerAssignment {
   // old server-side turn never stopped and take the worker active; `/commands/redeem` flips this
   // false durably before it returns any payload, after which the browser owns the wake instead.
   agent.info.revivable = true;
+  // A prime-authorized new task supersedes the ambiguous old-turn parking authority. Rollback
+  // restores this field from `previous`; once the wake is accepted, only the normal wake proof
+  // may take the worker active.
+  agent.info.silenceParked = false;
+  agent.info.silenceRecoveryTurnId = null;
+  agent.info.silenceRecoveryRequestOriginMax = null;
   agent.info.lastRevivalCommandId = null;
   logInfo(`multi-agent: ${agent.info.id} is being woken in conversation ${agent.info.conversationId}`);
   return previous;
@@ -2965,6 +3177,9 @@ function finishStoppedWorkerAtCeiling(agent: Agent, reason: string, sleptAt = Da
   agent.info.finishedAt = now;
   agent.info.detachedAt = null;
   agent.info.revivable = false;
+  agent.info.silenceParked = false;
+  agent.info.silenceRecoveryTurnId = null;
+  agent.info.silenceRecoveryRequestOriginMax = null;
   recount(agent);
 
   const missed =
@@ -3096,7 +3311,7 @@ export function noteAgentContextTokens(conversationId: string | null | undefined
   // which is only decided the next time it stops.
   if (crossed && agent.info.role === 'worker') {
     const staged = upgradeStagedFinishAtCeiling(agent);
-    if (!staged && agent.info.state === 'sleeping') {
+    if (!staged && agent.info.state === 'sleeping' && !agent.info.silenceParked) {
       finishStoppedWorkerAtCeiling(
         agent,
         'A late measurement crossed the context ceiling after this worker had already stopped.'
@@ -3359,6 +3574,9 @@ export function noteAgentAlive(
   agent.info.finishedAt = null;
   agent.info.sleptAt = null;
   agent.info.revivable = false;
+  agent.info.silenceParked = false;
+  agent.info.silenceRecoveryTurnId = null;
+  agent.info.silenceRecoveryRequestOriginMax = null;
   agent.info.lastSeenAt = workAt;
   agent.info.result = null;
   if (!agent.info.activatedAt) agent.info.activatedAt = now;
@@ -3427,18 +3645,83 @@ export function endedWorkerNotice(conversationId: string | null | undefined): st
 
 /** Sleep an inactive bound worker in its existing chat, independent of attachment.
  * Running tools protect only their exact worker. Invites/wakes retain their delivery deadline. */
-export function sleepSilentWorkers(now = Date.now(), runId?: string, isWorking: (conversationId: string) => boolean = () => false): FinishResult[] {
+export function sleepSilentWorkers(
+  now = Date.now(),
+  runId?: string,
+  isWorking: (conversationId: string) => boolean = () => false,
+  unresolvedTurn?: (conversationId: string) => string | null | undefined,
+  requestOriginMax?: (conversationId: string) => number | null | undefined
+): FinishResult[] {
   const out: FinishResult[] = [];
   for (const agent of [...runs.values()].filter(run => runId === undefined || run.runId === runId).flatMap(run => [...run.agents.values()])) {
     if (agent.info.role !== 'worker' || !['active', 'detached'].includes(agent.info.state) || !agent.info.conversationId) continue;
     if (isWorking(agent.info.conversationId)) continue;
     const since = Math.max(agent.info.activatedAt ?? 0, agent.info.lastSeenAt ?? 0, livenessFloor);
     if (now - since < WORKER_SILENCE_MS) continue;
+    const observedRecoveryTurn = unresolvedTurn?.(agent.info.conversationId);
+    const observedRequestOriginMax = requestOriginMax?.(agent.info.conversationId);
+    // A caller-scoped sweep may know nothing about another worker's durable turn. Unknown is not
+    // evidence for discarding that worker's exact continuation authority; leave it active until
+    // the bridge's owner-wide sweep can read its session. A known open turn also needs a durable
+    // pre-park request boundary before it can be parked recoverably.
+    if (
+      ceilingCrossed(agent.info) &&
+      ((unresolvedTurn && observedRecoveryTurn === undefined) ||
+        (observedRecoveryTurn && requestOriginMax && !Number.isFinite(observedRequestOriginMax)))
+    ) {
+      continue;
+    }
+    const recoveryTurnId = observedRecoveryTurn ?? null;
+    const recoveryRequestOriginMax = Number.isFinite(observedRequestOriginMax)
+      ? observedRequestOriginMax!
+      : null;
+    if (ceilingCrossed(agent.info)) {
+      agent.info.state = 'sleeping';
+      agent.info.sleptAt = Date.now();
+      agent.info.finishedAt = null;
+      agent.info.detachedAt = null;
+      agent.info.revivable = false;
+      agent.info.silenceParked = true;
+      agent.info.silenceRecoveryTurnId = recoveryTurnId;
+      agent.info.silenceRecoveryRequestOriginMax = recoveryRequestOriginMax;
+      recount(agent);
+      const report = newMessage(
+        agent.info.id,
+        PRIME_ID,
+        `[${agent.info.id} paused at context limit] No new activity was observed for three minutes, but its current turn has not durably finished. Its slot is free and no new work may be assigned to this chat. ` +
+          (recoveryTurnId && recoveryRequestOriginMax !== null
+            ? 'An exact late call already proven to belong to that same turn may resume it.'
+            : 'No exact turn continuation can be proven here; wait for durable terminal evidence.')
+      );
+      const run = runForAgent(agent);
+      if (!run) continue;
+      const prime = primeAgent(run);
+      prime.queue.push(report);
+      recount(prime);
+      changed('critical');
+      out.push({ info: { ...agent.info }, report: { ...report }, repeat: false });
+      continue;
+    }
     const outcome = sleepAgent(
       agent,
       'No new assistant output, native work or tool activity was observed for three minutes. Its chat is preserved and can be resumed.'
     );
-    if (outcome) out.push(outcome);
+    if (outcome) {
+      if (outcome.info.state === 'sleeping') {
+        // Remember that this stop came only from silence, independently of whether recorder state
+        // currently names the response. The optional exact turn id is latent provenance below the
+        // ceiling; if delayed token accounting later crosses 400k, silenceParked prevents the
+        // accounting edge from turning this ambiguous stop into a terminal verdict.
+        agent.info.silenceParked = true;
+        agent.info.silenceRecoveryTurnId = recoveryTurnId;
+        agent.info.silenceRecoveryRequestOriginMax = recoveryRequestOriginMax;
+        outcome.info.silenceParked = true;
+        outcome.info.silenceRecoveryTurnId = recoveryTurnId;
+        outcome.info.silenceRecoveryRequestOriginMax = recoveryRequestOriginMax;
+        changed('critical');
+      }
+      out.push(outcome);
+    }
   }
   return out;
 }
@@ -3586,6 +3869,7 @@ export function closableWorkerConversations(keep: number): string[] {
     for (const agent of agents.values()) {
       const info = agent.info;
       if (info.role !== 'worker' || !info.conversationId || unpublishedAgents.has(agent)) continue;
+      if (info.state === 'sleeping' && info.silenceParked && !info.revivable) continue;
       if (info.state !== 'sleeping' && info.state !== 'finished' && info.state !== 'failed') continue;
       stopped.push({
         conversationId: info.conversationId,
@@ -3882,22 +4166,24 @@ export function resetSwarm(): void {
  */
 export function pauseSwarmForDisable(reason = 'multi-agent mode was turned off'): boolean {
   for (const stage of [...activeSpawnStages.values()]) settleSpawnStage(stage, false);
-  if (runs.size === 0) {
-    changed();
-    return false;
-  }
-
   const now = Date.now();
   let parked = false;
+  let terminalizedDormant = false;
   for (const run of [...runs.values()]) {
   for (const agent of run.agents.values()) {
-    if (agent.info.role !== 'worker' || hasStopped(agent.info.state)) continue;
+    if (agent.info.role !== 'worker') continue;
+    const unresolvedCeilingTurn =
+      agent.info.state === 'sleeping' && agent.info.silenceParked === true;
+    if (hasStopped(agent.info.state) && !unresolvedCeilingTurn) continue;
     if (!agent.info.conversationId) {
       agent.info.state = 'failed';
       agent.info.finishedAt = now;
       agent.info.sleptAt = null;
       agent.info.detachedAt = null;
       agent.info.revivable = false;
+      agent.info.silenceParked = false;
+      agent.info.silenceRecoveryTurnId = null;
+      agent.info.silenceRecoveryRequestOriginMax = null;
       agent.info.result = reason.slice(0, MAX_MESSAGE_CHARS);
       agent.queue = [];
       recount(agent);
@@ -3910,12 +4196,38 @@ export function pauseSwarmForDisable(reason = 'multi-agent mode was turned off')
     agent.info.finishedAt = terminal ? now : null;
     agent.info.detachedAt = null;
     agent.info.revivable = !terminal;
+    agent.info.silenceParked = false;
+    agent.info.silenceRecoveryTurnId = null;
+    agent.info.silenceRecoveryRequestOriginMax = null;
     recount(agent);
   }
 
   parked = parkRun(run, reason) || parked;
   }
-  return parked;
+  for (const dormant of dormantRuns.values()) {
+    for (const agent of dormant.agents.values()) {
+      if (
+        agent.info.role !== 'worker' ||
+        agent.info.state !== 'sleeping' ||
+        !agent.info.silenceParked ||
+        !ceilingCrossed(agent.info)
+      ) {
+        continue;
+      }
+      agent.info.state = 'finished';
+      agent.info.sleptAt ??= now;
+      agent.info.finishedAt = now;
+      agent.info.detachedAt = null;
+      agent.info.revivable = false;
+      agent.info.silenceParked = false;
+      agent.info.silenceRecoveryTurnId = null;
+      agent.info.silenceRecoveryRequestOriginMax = null;
+      recount(agent);
+      terminalizedDormant = true;
+    }
+  }
+  if (terminalizedDormant || runs.size === 0) changed();
+  return parked || terminalizedDormant;
 }
 
 /** What a clear actually did, so the UI can say it rather than guess. */
@@ -4093,7 +4405,10 @@ function serializeAgents(agents: Map<string, Agent>, includeUnpublished: boolean
               finishedAt: finish.info.finishedAt,
               sleptAt: finish.info.sleptAt,
               result: finish.info.result,
-              revivable: finish.info.revivable
+              revivable: finish.info.revivable,
+              silenceParked: finish.info.silenceParked,
+              silenceRecoveryTurnId: finish.info.silenceRecoveryTurnId,
+              silenceRecoveryRequestOriginMax: finish.info.silenceRecoveryRequestOriginMax
             }
           : { ...agent.info };
       const finishAcknowledged =
@@ -4323,7 +4638,17 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
         lastRevivalCommandId:
           typeof entry.info.lastRevivalCommandId === 'string' && entry.info.lastRevivalCommandId
             ? entry.info.lastRevivalCommandId
-            : null
+            : null,
+        silenceRecoveryTurnId:
+          typeof entry.info.silenceRecoveryTurnId === 'string' && entry.info.silenceRecoveryTurnId
+            ? entry.info.silenceRecoveryTurnId
+            : null,
+        silenceRecoveryRequestOriginMax:
+          typeof entry.info.silenceRecoveryRequestOriginMax === 'number' &&
+          Number.isFinite(entry.info.silenceRecoveryRequestOriginMax)
+            ? entry.info.silenceRecoveryRequestOriginMax
+            : null,
+        silenceParked: entry.info.silenceParked === true
       },
       queue: (Array.isArray(entry.queue) ? entry.queue : []).map((message) => ({
         ...message,
@@ -4354,7 +4679,10 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
         repaired = true;
         logWarn(`multi-agent: restored ${agent.info.id} out of waking; it has no chat to be woken in`);
       }
-      if (agent.info.state === 'sleeping' && (!agent.info.revivable || !agent.info.conversationId)) {
+      if (
+        agent.info.state === 'sleeping' &&
+        ((!agent.info.revivable && !agent.info.silenceParked) || !agent.info.conversationId)
+      ) {
         agent.info.state = 'finished';
         agent.info.finishedAt ??= agent.info.sleptAt ?? (savedAt || Date.now());
         agent.info.revivable = false;

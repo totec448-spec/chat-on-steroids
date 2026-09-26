@@ -10811,7 +10811,7 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  it('finishes a worker that outlived its activity grant and already crossed the context ceiling', async () => {
+  it('parks but does not terminalize an unresolved worker turn that crossed the context ceiling', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -10833,10 +10833,162 @@ describe('unattributed activity recovery', () => {
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+        state: 'sleeping',
+        revivable: false,
+        silenceRecoveryTurnId: 'turn-worker-ceiling'
+      });
+
+      // Freeing the worker slot must not make an unresolved server turn disposable. Five minutes
+      // later it is still neither a reusable chat nor a browser-tab close candidate.
+      vi.setSystemTime(Date.now() + 300_001);
+      const budget = (await request('GET', '/status')).body;
+      expect(budget.reusableConversations).not.toContain(WORKER);
+      expect(budget.closableConversations).not.toContain(WORKER);
+
+      await recordFinalForTest(WORKER, 'turn-worker-ceiling');
+      expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
         state: 'finished',
-        revivable: false
+        revivable: false,
+        silenceRecoveryTurnId: null
       });
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['turn_end', 'canonical_final'] as const)(
+    'does not reuse a prior turn outcome when newer exact tool work has no recorded turn start (%s)',
+    async terminalEvidence => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'keep current unstarted response alive' }], caller: { conversationId: PRIME } });
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', {
+        body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+      });
+      const now = Date.now();
+      await events(WORKER, [openTurn('turn-prior-completed'), endTurn('turn-prior-completed', 'completed')]);
+      // The next server response is observable only through its exact MCP request. No new
+      // turn_start arrived, so activeTurnId remains null while lastTurnOutcome is still the prior
+      // completed turn. That stale outcome must not become terminal authority for this work.
+      await attributed(WORKER, false, now + 1);
+      noteAgentContextTokens(WORKER, WORKER_CONTEXT_CEILING_TOKENS);
+
+      await sweepStaleSwarm(now + STALE_SWARM_MS + 1);
+      expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+        state: 'active',
+        revivable: false,
+        silenceParked: false
+      });
+
+      await sweepStaleSwarm(now + WORKER_SILENCE_MS + 10_000);
+      expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+        state: 'sleeping',
+        revivable: false,
+        silenceParked: true,
+        silenceRecoveryTurnId: null
+      });
+
+      vi.setSystemTime(Date.now() + 300_001);
+      const budget = (await request('GET', '/status')).body;
+      expect(budget.reusableConversations).not.toContain(WORKER);
+      expect(budget.closableConversations).not.toContain(WORKER);
+
+      if (terminalEvidence === 'turn_end') {
+        await events(WORKER, [endTurn('turn-current-without-start', 'stopped')]);
+      } else {
+        await recordFinalForTest(WORKER, 'turn-current-without-start-final');
+      }
+      expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+        state: 'finished',
+        revivable: false,
+        silenceParked: false,
+        silenceRecoveryTurnId: null
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('terminalizes a parked ceiling worker from an exact durable turn end without a final row', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'finish on native turn boundary' }], caller: { conversationId: PRIME } });
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', {
+        body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+      });
+      await events(WORKER, [
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
+        openTurn('turn-worker-ceiling-ended')
+      ]);
+      await attributed(WORKER);
+      noteAgentContextTokens(WORKER, WORKER_CONTEXT_CEILING_TOKENS);
+
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      const reload = await maintenance();
+      expect(chatOf(reload)).toBe(WORKER);
+      expect(await maintenance(reload!.token)).toBeNull();
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+        state: 'sleeping',
+        revivable: false,
+        silenceRecoveryTurnId: 'turn-worker-ceiling-ended'
+      });
+
+      await events(WORKER, [endTurn('turn-worker-ceiling-ended', 'stopped')]);
+      expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+        state: 'finished',
+        revivable: false,
+        silenceRecoveryTurnId: null
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('terminalizes a parked ceiling-silenced worker when the user blocks that chat', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'audit until explicitly blocked' }], caller: { conversationId: PRIME } });
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', {
+        body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+      });
+      await events(WORKER, [
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
+        openTurn('turn-worker-ceiling-blocked')
+      ]);
+      await attributed(WORKER);
+      noteAgentContextTokens(WORKER, WORKER_CONTEXT_CEILING_TOKENS);
+
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      const reload = await maintenance();
+      expect(chatOf(reload)).toBe(WORKER);
+      expect(await maintenance(reload!.token)).toBeNull();
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+        state: 'sleeping',
+        revivable: false,
+        silenceRecoveryTurnId: 'turn-worker-ceiling-blocked'
+      });
+
+      setChatBlocked(WORKER, true);
+      await sweepStaleSwarm(Date.now());
+      expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+        state: 'finished',
+        revivable: false,
+        silenceRecoveryTurnId: null
+      });
+    } finally {
+      setChatBlocked(WORKER, false);
       vi.useRealTimers();
     }
   });
