@@ -16,6 +16,7 @@ import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
 import { pluginManager } from './plugins/manager.js';
 import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
+import { setStuckNotifier } from './stuck-notice.js';
 import { flushSessions, initSessionStore } from './session/store.js';
 import { initSkillsPath } from './skills.js';
 import { usageOverview } from './session/usage.js';
@@ -235,6 +236,22 @@ setFinishNotifier((title, body, sessionId, turnId) => {
   notice.show();
   return true;
 });
+setStuckNotifier((title, body, sessionId) => {
+  // A person looking at the app already has the timeline note this accompanies; interrupting
+  // them with the same sentence is noise, exactly as the finish notice treats a focused window.
+  if (window?.isFocused() || !Notification.isSupported()) return false;
+  const notice = new Notification({ title, body });
+  notice.on('click', () => {
+    showWindow();
+    if (!window) return;
+    const target = window.webContents;
+    const open = (): void => { if (!target.isDestroyed()) target.send('session:write', sessionId); };
+    if (target.isLoadingMainFrame()) target.once('did-finish-load', open); else open();
+  });
+  notice.show();
+  return true;
+});
+
 setBrowserWorkArea(() => screen.getPrimaryDisplay().workArea);
 
 // Electron promises `second-instance` only after its own `ready`, not after our async startup.

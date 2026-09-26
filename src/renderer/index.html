@@ -805,6 +805,14 @@
                     <input id="recoverAgentTabs" type="checkbox" />
                   </label>
 
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Wait for sub-agents</b>
+                      <em>Before Goal or Loop takes its next step, wait until this chat's own workers have finished. Their reports arrive here, so deciding earlier reads a context that is about to change. Messages you type or queue are sent as usual.</em>
+                    </span>
+                    <input id="waitForSubAgents" type="checkbox" />
+                  </label>
+
                   <div id="swarmList"></div>
                   <div class="step-actions">
                     <button class="btn" id="swarmReset" type="button">Clear swarm</button>

@@ -109,6 +109,11 @@ import {
 import { tokenPressure } from '../shared/session.js';
 import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
+import {
+  MAX_COMMAND_ALLOWLIST_RULES,
+  MAX_COMMAND_ALLOWLIST_RULE_CHARS,
+  validateCommandAllowlistRule
+} from '../shared/command-allowlist.js';
 import { openInPreferredBrowser } from './browser.js';
 import { markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
 import {
@@ -133,6 +138,14 @@ const capabilityPatch = z.object(
 const settingsPatch = z.object({
   capabilities: capabilityPatch,
   readOnly: z.boolean(),
+  commandAllowlist: z.object({
+    enabled: z.boolean(),
+    mode: z.enum(['allow', 'deny']).optional().default('allow'),
+    rules: z.array(z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHARS).superRefine((rule, ctx) => {
+      const message = validateCommandAllowlistRule(rule);
+      if (message) ctx.addIssue({ code: 'custom', message });
+    })).max(MAX_COMMAND_ALLOWLIST_RULES)
+  }),
   tunnel: z.object({
     profileId: z.string().max(64).optional(),
     profileEpoch: z.number().int().nonnegative().optional(),
@@ -189,7 +202,8 @@ const settingsPatch = z.object({
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
     maxWorkers: z.number().int().min(1).max(8),
     allowUnattributedCalls: z.boolean(),
-    recoverAgentTabs: z.boolean()
+    recoverAgentTabs: z.boolean(),
+    waitForSubAgents: z.boolean().optional()
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS) }).strict().optional(),
   goal: z.object({
@@ -255,6 +269,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     throw new Error('Setup profile changed. Edit the tunnel ID in the selected profile again.');
   }
   const pick = <T>(live: T, before: T, next: T): T => (Object.is(before, next) ? live : next);
+  const pickRules = (live: string[], before: string[], next: string[]): string[] =>
+    before.length === next.length && before.every((rule, index) => rule === next[index]) ? live : next;
   const capabilities = Object.fromEntries(
     CAPABILITIES.map((capability) => [
       capability,
@@ -265,6 +281,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     mcp: wanted.mcp ? { instructions: pick(current.mcp.instructions, base.mcp?.instructions ?? '', wanted.mcp.instructions) } : current.mcp,
     capabilities,
     readOnly: pick(current.readOnly, base.readOnly, wanted.readOnly),
+    commandAllowlist: {
+      enabled: pick(current.commandAllowlist.enabled, base.commandAllowlist.enabled, wanted.commandAllowlist.enabled),
+      mode: pick(current.commandAllowlist.mode, base.commandAllowlist.mode, wanted.commandAllowlist.mode),
+      rules: pickRules(current.commandAllowlist.rules, base.commandAllowlist.rules, wanted.commandAllowlist.rules)
+    },
     tunnel: {
       ...current.tunnel,
         pluginsTunnelId: wanted.tunnel.pluginsTunnelId === undefined ? current.tunnel.pluginsTunnelId ?? ''
@@ -336,6 +357,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.multiAgent.recoverAgentTabs,
         base.multiAgent.recoverAgentTabs,
         wanted.multiAgent.recoverAgentTabs
+      ),
+      waitForSubAgents: pick(
+        current.multiAgent.waitForSubAgents,
+        base.multiAgent.waitForSubAgents,
+        wanted.multiAgent.waitForSubAgents
       )
     },
     goal: {
