@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const wake = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: wake }));
 import { initDurableStore, resetDurableForTests, readDurable, writeDurableNow } from '../src/main/durable.js';
-import { claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
+import { PLUGIN_REFRESH_FAILURE_LIMIT, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { buildServer } from '../src/main/mcp/tools.js';
 import { defaultConfig } from '../src/main/config.js';
@@ -274,4 +274,21 @@ it('captures actual registered object schemas without executing handlers', async
   expect(observed.every(tool => tool.inputSchema.type === 'object')).toBe(true);
   expect(observed.some(tool => tool.name === 'computer')).toBe(false);
   await server.close();
+});
+it('parks a schema whose page keeps failing before any claim, until Restart', async () => {
+  // Measured 2026-09-26: on the newer ChatGPT shell every pre-claim attempt fails the same way,
+  // and an unbounded retry kept reopening the settings page for one request all day.
+  publishPlugins(tools);
+  let request = (await pendingPluginRefreshes())[0]!;
+  for (let attempt = 1; attempt < PLUGIN_REFRESH_FAILURE_LIMIT; attempt++) {
+    await failPluginRefresh({ id: request.id, error: 'The connector settings card could not be read' });
+    expect(await pendingPluginRefreshes()).toHaveLength(1);
+  }
+  await failPluginRefresh({ id: request.id, error: 'The connector settings card could not be read' });
+  expect(await pendingPluginRefreshes()).toEqual([]);
+  expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ parked: true, error: 'The connector settings card could not be read' });
+  expect(await rearmPluginRefresh('plugins')).toBe(true);
+  request = (await pendingPluginRefreshes())[0]!;
+  expect(request).toBeDefined();
+  expect((await readDurable('plugin-refresh') as any[])[0].failures).toBeUndefined();
 });

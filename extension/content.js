@@ -84,6 +84,8 @@
    * which nothing downstream reads as anything but the turn having taken that much longer.
    */
   const TURN_SETTLE_MS = 4000;
+  /** How long a settled question's generation must hold, cleanly, before it counts as a regeneration. */
+  const SETTLED_REGENERATION_MS = 20_000;
   // While ChatGPT is generating, keep the app-owned transcript close enough to feel like a
   // stream rather than a two-second slideshow. This does not create duplicate rows: /activity
   // is cursor-based, streamBySeq is keyed by canonical seq, and assistant messages additionally
@@ -455,6 +457,8 @@
    * it observes anything.
    */
   let appActiveTurnId = null;
+  /** The question of the app's newest turn once it has ended — see claimUnrecordedGeneration. */
+  let appSettledQuestionId = null;
   /**
    * When this document first saw ChatGPT generating a turn that nobody has recorded.
    *
@@ -711,7 +715,11 @@
   const pageViewChecks = new Set(); // Existing readiness waits also observe accepted MAIN-world snapshots.
   const sendText = (value) => String(value || '').replace(/\s+/g, '');
   /** Undo page-readback punctuation escapes only; never rewrite authored Send text. */
-  const unescapeMarkdown = (value) => String(value || '').replace(/\\([!-\/:-@\[-`{-~])/g, '$1');
+  // Two escapes, both measured: ASCII punctuation (2026-09-11), and a backslash before a line
+  // break — ChatGPT stores the composer's hard breaks as Markdown `\<newline>`. The second made a
+  // worker's 20k-character bootstrap unrecognisable to its own receipt (2026-09-26, #426): every
+  // hard break kept its backslash, so the page never bound the worker until its turn had ended.
+  const unescapeMarkdown = (value) => String(value || '').replace(/\\\r?\n/g, '\n').replace(/\\([!-\/:-@\[-`{-~])/g, '$1');
   /** The leading continuation marker, as typed or as the composer escaped it. */
   const markedAs = (value) => {
     const text = String(value || '');
@@ -770,6 +778,20 @@
     if (actualMarker && expectedMarker && actualMarker[1] === expectedMarker[1] && actualMarker[2] === expectedMarker[2] &&
         sendText(source.text.slice(actualMarker[0].length)) === sendText(expected.slice(expectedMarker[0].length))) return true;
     return sendText(unescapeMarkdown(source.text)) === sendText(expected);
+  }
+  /** Temporary-planner-only fallback for an accepted user row left on the immediately older Fiber scan. */
+  function acceptedTemporaryDecisionUser(message, decision) {
+    if (!decision?.temporary || !decision.onTarget() || !message || message.role !== 'user' ||
+        message.id !== decision.messageId || !message.node?.isConnected || isStale(message.node) ||
+        retiredMessages.has(message.id) || epoch !== decision.epoch) return false;
+    const stampedNode = sectionOf(message.node) || message.node;
+    const stamp = stampedNode.getAttribute?.('data-clf-fiber-turn') || '';
+    const split = stamp.lastIndexOf(':');
+    // Missing/current scan evidence still fails closed. This exception is only for a syntactically
+    // valid older scan whose native Send receipt already froze the exact message id.
+    if (split <= 0 || !/^\d+$/.test(stamp.slice(split + 1)) || stamp.slice(0, split) === fiberScanToken) return false;
+    return sendText(message.text) === sendText(decision.text) ||
+      sendText(unescapeMarkdown(message.text)) === sendText(decision.text);
   }
   // A first fresh route may await authored evidence. A second route (including an
   // observed return to New Chat) revokes this send; text proof is not its lifetime.
@@ -1433,7 +1455,18 @@
     for (const message of CLF_DOM.messages()) {
       if (message.role === 'user' && message.id && message.text) newest = message.id;
     }
-    if (!newest || newest === openedUserMessageId) {
+    // A question whose turn the app has already ended is not a turn nobody recorded. After a
+    // recovery reload ChatGPT can show Stop for seconds over a turn it has lost, and claiming it
+    // minted a turn with no work that stalled, earned another reload and hid the dead turn from
+    // the automatic Continue (measured 2026-09-26, three rounds in 41 minutes).
+    //
+    // A genuine regeneration of that same question — ChatGPT's own Retry after a lost stream —
+    // is different: its Stop stays, with no failure banner, for as long as it writes. That
+    // is how a Compact & Resume brief is rewritten after "Resume stream unavailable", and
+    // refusing it left the rewritten brief unrecorded. So the settled question needs a clean
+    // page and a much longer settle than an unrecorded question does.
+    const settled = newest === appSettledQuestionId;
+    if (!newest || newest === openedUserMessageId || (settled && CLF_DOM.errors().length > 0)) {
       unrecordedGeneratingSince = 0;
       return null;
     }
@@ -1441,7 +1474,7 @@
       unrecordedGeneratingSince = Date.now();
       return null;
     }
-    return Date.now() - unrecordedGeneratingSince >= TURN_SETTLE_MS ? newest : null;
+    return Date.now() - unrecordedGeneratingSince >= (settled ? SETTLED_REGENERATION_MS : TURN_SETTLE_MS) ? newest : null;
   }
 
   function adoptOpenTurn(open, questionId = null) {
@@ -1688,7 +1721,10 @@
     nativeImageCaptureActiveTasks.clear();
     callsReported.clear();
     requestOwnersConfirmed.clear();
-    pendingStreamOrigins.clear();
+    // Except ids that already name the conversation being entered: see flushStreamRequestOrigins.
+    for (const [requestId, pending] of pendingStreamOrigins) {
+      if (pending.conversationId !== conversationId) pendingStreamOrigins.delete(requestId);
+    }
     requestOwnersPending.clear();
     requestOwnerRetryAt.clear();
     requestOwnerAttempts.clear();
@@ -2098,7 +2134,7 @@
         // Rendered inline code can remove Markdown bytes even inside a pre-wrap
         // bubble. Do not publish a broken transport frame while its exact source
         // is pending. A canonical user-authored marker remains literal text.
-        if (!source.canonical && /^\[\[COS_CONTEXT:\d{1,6}\]\]/.test(source.text) && CLF_DOM.userPromptText(source.text) === null) continue;
+        if (!source.canonical && /^\\?\[\\?\[COS\\?_CONTEXT\\?:\d{1,6}\\?\]\\?\]/.test(source.text) && CLF_DOM.userPromptText(source.text) === null) continue;
         const text = source.text;
         const key = occurrenceKey(message.id, text);
         const reaction = CLF_DOM.userMessageReaction(message);
@@ -2577,7 +2613,17 @@
       });
     }
 
-    if (generating && turn) {
+    // `turnId` and not `turn`: the report below is about the *absence* of output, and requiring a
+    // mounted assistant section to say so kept it silent in the one state where it is the only
+    // thing left. A turn adopted after a reload frequently has no section of its own — see
+    // seedResumeBaseline, where a page that came back showing only the question deliberately
+    // leaves the adopted turn with no evidence on screen — and the outcome verdict below is
+    // locked behind the Stop control going away. Measured on 2026-09-25: a turn whose generation
+    // died at 19:14 had both paths closed, so nothing was ever said about it; the app reloaded
+    // that chat twelve times over two and a half hours, each reload re-arming this clock and
+    // mounting no section, and the turn was still open three hours later. Nothing in the body
+    // ever read `turn`.
+    if (generating && turnId) {
       // Stay on the generation we opened. ChatGPT can reorder/replace assistant sections
       // while a turn is running; re-reading the newest DOM turn here has reproduced
       // progress from request -7 being filed under the older request -5.
@@ -3746,6 +3792,17 @@
       for (const call of batch) requestOwnersPending.delete(`${ownerConversation}\u0000${call.requestId}`);
     }
   }
+  async function repairFiberReader() {
+    const now = Date.now();
+    if (!fiberRepairing && now - fiberRepairAt >= 5000) {
+      fiberRepairAt = now;
+      fiberRepairing = ask({ type: 'repair_fiber' }).finally(() => {
+        fiberRepairing = null;
+      });
+    }
+    return fiberRepairing ? await fiberRepairing : null;
+  }
+
   async function refreshFiber(settled = null, presentationOnly = false) {
     // A bound chat can briefly lose its /c/<id> route during React/router churn, and a real
     // navigation to a fresh composer has the exact same pathname until ChatGPT assigns the
@@ -3774,14 +3831,7 @@
       // completed repair attempt that still cannot round-trip (or an explicit repair failure)
       // downgrades health; otherwise a transient timeout would flicker Overwrite and could
       // falsely complete interim prose through the degraded DOM fallback.
-      const now = Date.now();
-      if (!fiberRepairing && now - fiberRepairAt >= 5000) {
-        fiberRepairAt = now;
-        fiberRepairing = ask({ type: 'repair_fiber' }).finally(() => {
-          fiberRepairing = null;
-        });
-      }
-      const repair = fiberRepairing ? await fiberRepairing : null;
+      const repair = await repairFiberReader();
       if (repair && repair.ok === true) answer = await askFiber();
       if (answer === null) {
         if (!alive || epoch !== askedEpoch || conversationId !== askedConversation ||
@@ -6292,6 +6342,7 @@
       // reply. Until this document has owned a turn, exact question proof may
       // still restore it through this same feed, even after native completion.
       appActiveTurnId = typeof data.activeTurnId === 'string' && data.activeTurnId ? data.activeTurnId : null;
+      appSettledQuestionId = typeof data.settledQuestionId === 'string' && data.settledQuestionId ? data.settledQuestionId : null;
       if (!generating && pendingTools > 0 && appActiveTurnId === turnId && fiberSettled?.reason === 'thinking_failed') noteTurnProgress();
       const recordedQuestionId = typeof data.recordedQuestionId === 'string' ? data.recordedQuestionId : null;
       if (resumedStoppedTurn && !generating && appActiveTurnId === turnId) adoptOpenTurn(turnId, recordedQuestionId);
@@ -8151,7 +8202,7 @@
       const seconds = wait?.until ? Math.max(0, Math.ceil((wait.until - Date.now()) / 1000)) : 0;
       const detail = seconds ? `Checking again in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '';
       const stage = wait?.reason === 'native-busy' ? 'ChatGPT resumed work · waiting before retry' : wait?.reason === 'silence' ? 'Waiting before recovery reload' : wait?.reason === 'quiet' ? 'Waiting for tool inactivity' :
-        wait?.reason === 'tools' ? 'Waiting for running tools' : wait?.reason === 'listening' ? 'Waiting for activity after recovery' : 'Checking the answer is finished';
+        wait?.reason === 'workers' ? 'Waiting for this chat’s sub-agents' : wait?.reason === 'tools' ? 'Waiting for running tools' : wait?.reason === 'listening' ? 'Waiting for activity after recovery' : 'Checking the answer is finished';
       return { stage, detail, body: '', kind: 'goal', ...bar(0) };
     }
     if (goal.phase === 'sending' && draft && draft.reply) {
@@ -10265,13 +10316,33 @@
     // From here onward a competing fresh wake must not supersede this attempt: the bridge may
     // persist this document as owner before the response gets back to us.
     if (attempt) attempt.phase = 'redeeming';
-    const reply = await ask({
+    const redeemEpoch = epoch;
+    const redeemRequest = {
       type: 'redeem',
       id,
       client: RUN_ID,
       ...(fromUrl && OPENED_PROJECT_ENTRY ? { projectEntry: true } : {}),
       ...(openedConversation ? { conversationId: openedConversation } : {})
+    };
+    const redeemStillCurrent = () => alive && epoch === redeemEpoch && !attempt?.cancelled &&
+      (!attempt || commandAttempt === attempt) &&
+      (!fromUrl || markerId() === id) &&
+      (openedConversation ? CLF_DOM.conversationId() === openedConversation : !CLF_DOM.conversationId());
+    const redeemOnce = () => new Promise(resolve => {
+      let done = false;
+      const finish = value => { if (done) return; done = true; clearTimeout(timer); resolve(value); };
+      // The app may have durably assigned this RUN_ID as owner even if the MV3 reply disappears.
+      // Keep retry bounded to the pre-Send handshake; destinationAttempt has its own no-replay fence.
+      const timer = setTimeout(() => finish(null), 30_000);
+      void ask(redeemRequest).then(finish, () => finish(null));
     });
+    let reply = await redeemOnce();
+    for (let retry = 0; retry < 2 && (!reply || (reply.ok !== true && reply.retryable === true)); retry++) {
+      if (!redeemStillCurrent()) break;
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      if (!redeemStillCurrent()) break;
+      reply = await redeemOnce();
+    }
     if (!reply || reply.ok !== true) {
       // The app could not be reached at all, so there is nothing to acknowledge and nothing
       // to acknowledge it to. Its own deadline ends the command; this page stops here.
@@ -10594,6 +10665,44 @@
     later(tick, ms);
   }
 
+  /**
+   * Presses ChatGPT's own Retry when a conversation route shows its "could not be loaded"
+   * surface instead of the chat. Seen live after a reload that landed mid-turn: the model went
+   * on calling tools server-side while this page showed nothing, so the turn could never be
+   * seen to end. The surface must hold for LOAD_FAILURE_SETTLE_MS first — the shell passes
+   * through empty states while it mounts — and later presses back off to once a minute, and stay
+   * there: measured the same day, presses in the first half-minute after a reload could fail while
+   * a press a minute later restored the chat, so a schedule that gave up after a few minutes left
+   * the tab dead. One press of the page's own Retry a minute costs one request.
+   */
+  const LOAD_FAILURE_SETTLE_MS = 5_000;
+  const LOAD_FAILURE_BACKOFF_MS = [0, 15_000, 30_000, 60_000];
+  let loadFailureSince = 0;
+  let loadFailureRetries = 0;
+  let loadFailureRoute = null;
+  function recoverConversationLoad(now = Date.now()) {
+    const route = CLF_DOM.conversationId();
+    if (route !== loadFailureRoute) {
+      loadFailureRoute = route;
+      loadFailureSince = 0;
+      loadFailureRetries = 0;
+    }
+    const retry = CLF_DOM.conversationLoadFailure ? CLF_DOM.conversationLoadFailure() : null;
+    if (!retry) {
+      loadFailureSince = 0;
+      if (CLF_DOM.turns().length) loadFailureRetries = 0;
+      return false;
+    }
+    if (!loadFailureSince) loadFailureSince = now;
+    const wait = LOAD_FAILURE_SETTLE_MS +
+      LOAD_FAILURE_BACKOFF_MS[Math.min(loadFailureRetries, LOAD_FAILURE_BACKOFF_MS.length - 1)];
+    if (now - loadFailureSince < wait) return false;
+    loadFailureRetries++;
+    loadFailureSince = now;
+    retry.click();
+    return true;
+  }
+
   let activityTimer = null;
   function activityPullDelay(input = {}) {
     const hidden = input.hidden === true;
@@ -10713,7 +10822,12 @@
     const route = CLF_DOM.conversationId();
     const pendingEpoch = epoch, calls = [];
     for (const [requestId, pending] of pendingStreamOrigins) {
-      if (!alive || pending.epoch !== epoch || Date.now() >= pending.deadline || (route && route !== pending.conversationId)) {
+      // Retired by its exact conversation, not by the document epoch. A new chat started from a
+      // tab that showed another chat publishes its request id before it has a /c/ route, and the
+      // move from that chat to the new one advances the epoch — which discarded an id naming the
+      // new chat exactly and left page-started chats Unattributed (#393, 2026-09-26). A route to
+      // any other conversation still retires it, and so does its deadline.
+      if (!alive || Date.now() >= pending.deadline || (route && route !== pending.conversationId)) {
         pendingStreamOrigins.delete(requestId);
         continue;
       }
@@ -10799,9 +10913,11 @@
       const userTurn = CLF_DOM.turns().find(candidate => candidate.role === 'user' &&
         (candidate.nodes || [candidate.node]).some(node => node?.contains(messages[userIndex].node)));
       const user = stampedFiberTurn(userTurn, [...fiberTurns.values()], fiberScanToken);
-      if (!user || user.conversationConflict || user.conversationId !== turn.conversationId ||
-          !(user.messages || []).some(message => message.role === 'user' &&
-            (message.rawMessageId === decision.messageId || message.messageId === decision.messageId))) return;
+      if (user) {
+        if (user.conversationConflict || user.conversationId !== turn.conversationId ||
+            !(user.messages || []).some(message => message.role === 'user' &&
+              (message.rawMessageId === decision.messageId || message.messageId === decision.messageId))) return;
+      } else if (!acceptedTemporaryDecisionUser(messages[userIndex], decision)) return;
     } else if (turn.conversationId !== decision.conversationId) return;
     const terminal = (turn.messages || []).filter(message => message.role === 'assistant' &&
       (message.rawMessageId === turn.endMessageId || message.messageId === turn.endMessageId));
@@ -10854,9 +10970,21 @@
     const latest = CLF_DOM.turns().at(-1);
     if (latest?.role === 'assistant') {
       if (!await refreshFiber({ pageTurnId: latest.id, pageTurn: latest.node || latest.nodes?.[0] }) || !safe()) return false;
-      const current = CLF_DOM.turns().at(-1);
-      const native = current?.role === 'assistant' ? fiberTurnFor(current) : null;
-      if (!native) return false;
+      let current = CLF_DOM.turns().at(-1);
+      let native = current?.role === 'assistant' ? fiberTurnFor(current) : null;
+      // A successful page-model scan can still omit the latest React turn while a
+      // reloaded document is hydrating. Repair that reader join once, then require
+      // fresh exact native evidence before allowing either Stop or Send.
+      if (!native) {
+        const repair = await repairFiberReader();
+        if (repair?.ok !== true || !safe()) return false;
+        current = CLF_DOM.turns().at(-1);
+        if (current?.role !== 'assistant' ||
+            !await refreshFiber({ pageTurnId: current.id, pageTurn: current.node || current.nodes?.[0] }) || !safe()) return false;
+        current = CLF_DOM.turns().at(-1);
+        native = current?.role === 'assistant' ? fiberTurnFor(current) : null;
+        if (!native) return false;
+      }
       // A known native final vetoes Continue even while delivery to the app is pending.
       if (native?.endMessageId) { await flush(); return false; }
     }
@@ -10983,7 +11111,24 @@
       // This exact claimed bootstrap owns replacement text; existing chats and
       // attachment drafts remain protected. Re-evaluate after model selection,
       // since React can hydrate that autosaved text while the picker is open.
-      if ((!ownsFreshPage() && (composer.textContent || '').trim()) || CLF_DOM.hasComposerAttachments()) return fail('ChatGPT already contains an unsent draft. Send or clear that draft in Chrome before trying again.');
+      /*
+       * The one draft this may overwrite is its own.
+       *
+       * Refusing to clobber typing is right, but the guard could not tell the user's draft from the
+       * residue of a previous attempt by this same delivery: insert the text, fail to press Send,
+       * release the claim — and from then on the composer holds exactly what the next attempt would
+       * type, so every attempt refuses. Measured on 2026-09-26: a recovery ticket claimed 181 times
+       * against its own 352 characters, alternating `After-turn pickup was withdrawn before Send.`
+       * and this refusal, for thirteen hours. Its original Send failed because the send control was
+       * unfindable on the new composer shell; the deadlock outlived that cause by a whole day.
+       *
+       * Byte-identical text is not a draft to protect — inserting would produce it again. Compared
+       * with the same `sendText` normaliser the pre-Send check below uses, so the two agree on what
+       * "the same message" means. Attachments still block regardless: an attachment draft is not
+       * something this delivery could have produced.
+       */
+      const ownResidue = sendText(composer.textContent) === sendText(input.text);
+      if ((!ownsFreshPage() && (composer.textContent || '').trim() && !ownResidue) || CLF_DOM.hasComposerAttachments()) return fail('ChatGPT already contains an unsent draft. Send or clear that draft in Chrome before trying again.');
       if (message.directTurn) {
         // The offer only wakes this document. The just-committed outbox claim
         // authorizes interrupting this exact tool-free turn, like handoff's Stop
@@ -11000,9 +11145,12 @@
         if (!onTarget()) return fail('The chat changed before direct delivery.');
       }
       const temporary = input.lifetime === 'temporary-planner';
-      if (temporary && temporaryPlannerPage() && !CLF_DOM.temporaryChatReady()) {
+      // On the newer shell an empty temporary chat is proven only by the page-model stamp, and
+      // nothing else scans a document with no conversation yet: ask for one before judging.
+      const temporaryProven = async () => { await askFiber(); return CLF_DOM.temporaryChatReady(); };
+      if (temporary && temporaryPlannerPage() && !(await temporaryProven())) {
         CLF_DOM.confirmTemporaryChatIntroduction();
-        await waitPageView(() => CLF_DOM.temporaryChatReady(), onTarget, 3000);
+        await waitPageView(temporaryProven, onTarget, 3000);
       }
       if (temporary && (!temporaryPlannerPage() || !CLF_DOM.temporaryChatReady())) return fail('Temporary Chat was not confirmed. Open the helper tab and complete its Temporary Chat introduction.');
       const providerLimitation = () => CLF_DOM.errors().find(error => error.blocking === true)?.text;
@@ -11012,7 +11160,13 @@
       // Native picker closure can precede re-enabling the same editor. Wait before
       // its one insertion; a disabled editing host is not a rejected helper prompt.
       if (!await waitPageView(writableComposer, () => onTarget() && !CLF_DOM.generating(), 15000)) return fail('The ChatGPT editor did not become writable before sending.');
-      if (!onTarget() || CLF_DOM.generating() || (!ownsFreshPage() && (CLF_DOM.composer()?.textContent || '').trim()) || CLF_DOM.hasComposerAttachments()) return fail('The ChatGPT composer changed before sending');
+      // Same allowance as the draft check above, for the same reason: text this delivery itself left
+      // behind is not a composer that "changed". Re-read rather than reusing `ownResidue`, because
+      // model selection and the writability wait sit between the two and can replace the editor.
+      if (!onTarget() || CLF_DOM.generating() ||
+          (!ownsFreshPage() && (CLF_DOM.composer()?.textContent || '').trim() &&
+            sendText(CLF_DOM.composer()?.textContent) !== sendText(input.text)) ||
+          CLF_DOM.hasComposerAttachments()) return fail('The ChatGPT composer changed before sending');
       let insertionFailure = '';
       if (!CLF_DOM.insertPrompt(input.text, ownsFreshPage(), reason => { insertionFailure = reason; }))
         return fail(`ChatGPT did not accept the text${insertionFailure ? ` (${insertionFailure})` : ''}`);
@@ -11045,6 +11199,12 @@
       // The legacy wire field also binds unfiled reserved openings before recorder evidence.
       if (input.opening || input.projectId) desktopProjectInput = { id: input.id, owner: input.owner };
       let receipt = null;
+      // This text was inserted by the app, and the newer shell stores inserted text
+      // Markdown-escaped — hard breaks as `\<newline>`. Measured 2026-09-26 on a chat started
+      // from the app: its first row read back `[[COS_CONTEXT:19956]]\ You are…`, the raw
+      // comparison never matched, and that first turn got no ACK, no turn start and no turn end
+      // for Goal or Loop to act on. The bootstrap comparison is exact either way (raw, then one
+      // unescape); a person's own sends keep the raw comparison in matchesUserSendReceipt.
       if (!(await sendSubmittedText(sendingTarget, false, async sendCurrent => {
         // Preserve the outbox's revocable claim until the actual native Send is ready.
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current())) return false;
@@ -11056,12 +11216,12 @@
       }, (user, conversation) => {
         if ((!conversation && !temporary) || (target && !onTarget())) return false;
         const users = CLF_DOM.messages().filter(row => row.role === 'user');
-        if ((!target && users.length !== 1) || users.at(-1)?.id !== user.id || user.id === previousUserId || !matchesSubmittedUser(user, submittedText)) return false;
+        if ((!target && users.length !== 1) || users.at(-1)?.id !== user.id || user.id === previousUserId || !matchesSubmittedBootstrap(user, submittedText)) return false;
         // Freeze only identity while native Send still holds the proven row. React
         // may replace it before this async operation resumes; do not rediscover it.
         receipt = { conversation, user: { id: user.id } };
         return true;
-      }))) return false;
+      }, matchesSubmittedBootstrap))) return false;
       if (!receipt || !sendingTarget()) return false;
       // Native Send listeners refresh the receipt; pin only that witnessed object.
       const witnessedSendReceipt = userSendReceipt;
@@ -11071,7 +11231,22 @@
         decision.messageId = receipt.user.id;
         decision.conversationId = deliveredConversation;
         decision.epoch = epoch;
-        decision.onTarget = () => alive && epoch === decision.epoch && CLF_DOM.conversationId() === deliveredConversation;
+        // The newer shell gives a temporary chat a real /c/<id> route shortly after Send
+        // (measured 2026-09-26: `/c/6ab7e420…?temporary-chat=true`). A decision pinned to the
+        // route-less page it was sent from then counted as off target for good, so the plan
+        // ChatGPT wrote was never collected and the planner timed out. A temporary decision binds
+        // once to the first concrete route after its own Send; any later move still leaves it.
+        let boundConversation = deliveredConversation;
+        decision.onTarget = () => {
+          if (!alive || epoch !== decision.epoch) return false;
+          const route = CLF_DOM.conversationId();
+          if (temporary && boundConversation === null && route) {
+            boundConversation = route;
+            decision.conversationId = route;
+            if (desktopDecisionSession?.temporary) desktopDecisionSession.conversationId = route;
+          }
+          return route === boundConversation;
+        };
         desktopDecisionSession = { conversationId: deliveredConversation, temporary };
         completeDesktopDecision();
       }
@@ -11112,8 +11287,11 @@
   let pluginRefreshBusy = false;
   function ownsPluginRefreshPage(id) {
     const url = new URL(location.href);
-    return alive && !generating && !CLF_DOM.generating() && url.pathname === '/' &&
-      /^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash) && url.searchParams.get('cos-plugin-refresh') === id;
+    // Either settings route (see background.js pluginSettingsRoute). The newer path-routed page
+    // is owned so that its unreadable card is reported, not left as a silent, reopened request.
+    const route = (url.pathname === '/' && /^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash)) ||
+      /^\/(?:settings\/plugins-settings(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?|plugins\/plugin_asdk_app_[a-zA-Z0-9_-]+)$/.test(url.pathname);
+    return alive && !generating && !CLF_DOM.generating() && route && url.searchParams.get('cos-plugin-refresh') === id;
   }
   function waitPageView(read, current, milliseconds) {
     return new Promise(resolve => {
@@ -11175,7 +11353,22 @@
         const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(new URL(location.href).hash);
         return route && next?.appId === route[1] && Array.isArray(next.tools) && next.tools.length > 0 ? next : null;
       }, current, 8000);
-      if (!view) return false;
+      if (!view) {
+        // Say so. `pluginSnapshot()` refuses for two different reasons — the page has not
+        // rendered the card yet, and the page renders a card this build cannot read — and
+        // returning false told the app neither. On 2026-09-11 that cost thirty hours: the
+        // durable row carried no `error` at all, so nothing anywhere named a cause while the
+        // request was retried. Reporting is not terminal — `failPluginRefresh` records the
+        // reason and leaves maintenance free to reobserve — so the only thing silence bought
+        // was the absence of a diagnosis.
+        //
+        // Gated on still owning the page. `waitPageView` also yields null when it stops
+        // because this document is no longer the one the request belongs to, and a navigation
+        // is not the page failing to render a card — blaming it for one would put a false
+        // cause in the durable row, which is the opposite of the point.
+        if (current()) await fail('The connector settings card could not be read on the page this request owns');
+        return false;
+      }
       if (!current()) return false;
       if (request.appId && view.appId !== request.appId) { await fail('Exact connector settings could not be verified'); return false; }
       const ownedEpoch = epoch, appId = view.appId;
@@ -11360,6 +11553,9 @@
       if (message.type === 'clf-page-status') {
         sendResponse({
           ok: true,
+          // ChatGPT's own account that a response is streaming right now, as opposed to the
+          // recorder's `generating`, which also holds while a turn waits on a local tool.
+          streaming: CLF_DOM.generating(),
           recorderVersion: RECORDER_VERSION,
           runId: RUN_ID,
           conversationId,
@@ -11510,6 +11706,7 @@
   watchTranscript();
 
   every(OBSERVE_MS, () => {
+    recoverConversationLoad();
     observe();
     syncTheme();
     injectControl();

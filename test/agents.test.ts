@@ -92,6 +92,7 @@ const {
   swarmState,
   swarmStateForCaller,
   statusForCaller,
+  waitingForSubAgents,
   workerConversationGone,
   workerRevivalClaimed
 } = await import('../src/main/agents.js');
@@ -3804,6 +3805,97 @@ describe('through the MCP endpoint', () => {
     expect(structured.run_id).toBeTypeOf('string');
     const worker = (structured.agents as Array<Record<string, unknown>>).find((agent) => agent.id === 'worker-1');
     expect(worker).toMatchObject({ id: 'worker-1', role: 'worker', state: 'active' });
+  });
+});
+
+/**
+ * The worker wait a Goal/Loop chat opts into, as the one module that owns worker state.
+ *
+ * A prime that delegated half its task is not finished with it: its workers report back into
+ * the same conversation, so deciding the next step while they run reads a context that is about
+ * to change. The predicate is the whole rule — the bridge's pickup tree and the finish tool both
+ * ask this same function — so what is asserted here is the boundary itself: opt-in, per family,
+ * and fail-open on every state that is not "this chat's workers are working".
+ */
+describe('waiting for a chat own sub-agents', () => {
+  /** The production shape: the setting saved beside the rest of the multi-agent config. */
+  async function setWaitForSubAgents(on: boolean, maxWorkers = 3): Promise<void> {
+    const base = defaultConfig();
+    await saveConfig({
+      ...base,
+      multiAgent: { ...base.multiAgent, enabled: true, maxWorkers, waitForSubAgents: on }
+    });
+  }
+
+  afterEach(async () => { await setEnabled(true); });
+
+  it('holds only while a worker of this chat is occupying a slot, and releases on its report', async () => {
+    await setWaitForSubAgents(true);
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(false);
+    startSwarm(1);
+    // Invited and bound alike: a spawn in progress is work this chat started.
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(true);
+    const worker = startWorker('worker-1');
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(true);
+    finishAgent(worker.caller, 'the piece I was given is done');
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(false);
+    // A sleeping worker is revivable, which is not the same as working.
+    expect(freeWorkerSlots()).toBe(3);
+  });
+
+  it('is opt-in: a busy worker holds nothing while the setting is off', async () => {
+    await setWaitForSubAgents(false);
+    startSwarm(1);
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(false);
+    await setWaitForSubAgents(true);
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(true);
+  });
+
+  it.each([
+    ['an unknown conversation', 'c-never-seen'],
+    ['no conversation at all', null],
+    ['an empty conversation id', '']
+  ] as const)('fails open for %s', async (_label, conversationId) => {
+    await setWaitForSubAgents(true);
+    startSwarm(1);
+    expect(waitingForSubAgents(conversationId)).toBe(false);
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(true);
+  });
+
+  it('fails open for a chat with a run but no workers left', async () => {
+    await setWaitForSubAgents(true);
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'done');
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(false);
+    // A chat that owns nothing and merely shares this app's single run: the run's workers are
+    // the prime's, and this chat is not the prime.
+    expect(waitingForSubAgents('c-a-bystander')).toBe(false);
+  });
+
+  it('holds each prime for its own workers and never for another family', async () => {
+    await setWaitForSubAgents(true);
+    const primeB: Caller = { conversationId: 'wait-prime-b' };
+    const a = spawn({ caller: prime, workers: [{ task: 'A work' }] });
+    const b = spawn({ caller: primeB, workers: [{ task: 'B work' }] });
+    expect(a.runId).not.toBe(b.runId);
+    expect(bindConversation('worker-1', 'wait-worker-a', a.runId)).toBe(true);
+    expect(bindConversation('worker-1', 'wait-worker-b', b.runId)).toBe(true);
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(true);
+    expect(waitingForSubAgents(primeB.conversationId!)).toBe(true);
+    finishAgent({ conversationId: 'wait-worker-a' }, 'A done');
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(false);
+    expect(waitingForSubAgents(primeB.conversationId!)).toBe(true);
+  });
+
+  it('does not hold a chat the workers belong to an ended run', async () => {
+    await setWaitForSubAgents(true);
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'done');
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(false);
+    expect(waitingForSubAgents('c-worker-1')).toBe(false);
   });
 });
 

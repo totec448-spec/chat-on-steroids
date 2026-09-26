@@ -1254,6 +1254,37 @@ export function freeWorkerSlots(runId?: string): number {
   return Math.max(0, getConfig().multiAgent.maxWorkers - workingWorkers(run).length);
 }
 
+/**
+ * Whether the family owning this conversation still has workers holding a slot.
+ *
+ * A prime that delegated work is not finished with it: the next step it asks for would be
+ * decided and typed into the same chat while its own workers are still running. This is the
+ * same accounting `freeWorkerSlots` and `parkRun` already use, including a worker that is
+ * mid-spawn and about to be real — a reservation is work. A conversation with no family
+ * resolves no run and is never busy: unknown ownership must not be able to block a chat
+ * that has no workers to wait for.
+ */
+function familyWorkersBusy(conversationId: string | null | undefined): boolean {
+  return workingWorkers(runForConversation(conversationId)).length > 0;
+}
+
+/**
+ * Whether this chat's automatic next step is deliberately waiting for its own workers.
+ *
+ * A prime that delegated half its task is not finished with it. Its workers report back into
+ * this same conversation, so asking for the next Goal/Loop step while they run decides it from
+ * a context that is about to change and then types the instruction into a chat that is still
+ * being worked on. Off by default: a chat with no run, and a run with no workers, behave
+ * exactly as they did before.
+ *
+ * This is the one rule, owned here because worker state lives here. The page asks it over
+ * `/goal/draft`, the pickup tree asks it through `owedPickups`, and both describe the wait to
+ * the user through the same `goalWaitFor` reason.
+ */
+export function waitingForSubAgents(conversationId: string | null | undefined): boolean {
+  return getConfig().multiAgent.waitForSubAgents === true && familyWorkersBusy(conversationId);
+}
+
 function recount(agent: Agent): void {
   const live = agent.queue.filter((message) => message.ackedAt === null && !unpublishedMessages.has(message));
   agent.info.pending = live.length;
