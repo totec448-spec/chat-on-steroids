@@ -32,7 +32,7 @@ vi.mock('electron', () => ({
 }));
 
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
-vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd() }));
+vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd(), shippedExtensionBuild: () => null }));
 vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: vi.fn(async () => 'chrome.exe') }));
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
