@@ -1,6 +1,8 @@
 import type { ReasoningEffort } from './session.js';
 import { WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_INPUT_METHODS } from './windows-computer.js';
 import { BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from './browser-control.js';
+import type { CommandAllowlistSettings } from './command-allowlist.js';
+export type { CommandAllowlistSettings } from './command-allowlist.js';
 /** Types shared between the main process and the renderer. No runtime logic here. */
 
 /**
@@ -328,6 +330,7 @@ export interface Config {
   sessions: SessionSettings;
   compaction: CompactionSettings;
   multiAgent: MultiAgentSettings;
+  commandAllowlist: CommandAllowlistSettings;
   goal: GoalSettings;
   mcp: McpSettings;
 }

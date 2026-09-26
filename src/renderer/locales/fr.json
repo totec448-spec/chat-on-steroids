@@ -1457,5 +1457,15 @@
   "A little wooden companion with a baseball bat.": "Un petit compagnon en bois avec une batte de baseball.",
   "A crocodile bomber with tiny propellers and a big personality.": "Un crocodile bombardier avec de petites hélices et une forte personnalité.",
   "Auto-connect": "Connexion automatique",
-  "{0}: drag, click, or open the context menu": "{0} : glisser, cliquer ou ouvrir le menu contextuel"
+  "{0}: drag, click, or open the context menu": "{0} : glisser, cliquer ou ouvrir le menu contextuel",
+  "Limit command launches": "Limiter le lancement des commandes",
+  "Command policy mode": "Mode de politique des commandes",
+  "Allowlist": "Liste d’autorisation",
+  "Denylist": "Liste de blocage",
+  "Only commands matching one of these rules may start.": "Seules les commandes correspondant à l’une de ces règles peuvent démarrer.",
+  "Commands matching any of these rules may not start.": "Les commandes correspondant à l’une de ces règles ne peuvent pas démarrer.",
+  "Allowed commands (one rule per line)": "Commandes autorisées (une règle par ligne)",
+  "Blocked commands (one rule per line)": "Commandes bloquées (une règle par ligne)",
+  "Use an exact command or a trailing standalone * for additional arguments. Compound shell syntax is rejected. Allowed programs and their child processes remain trusted; this is not an OS sandbox.": "Utilisez une commande exacte ou un * final indépendant pour les arguments supplémentaires. La syntaxe shell composée est refusée. Les programmes autorisés et leurs processus enfants restent approuvés ; ceci n’est pas un bac à sable du système.",
+  "Line {0}: {1}": "Ligne {0} : {1}"
 }

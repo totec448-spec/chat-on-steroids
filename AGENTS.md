@@ -198,6 +198,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-5.6-sol` High. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
 | Desktop | Windows on; macOS retains its off default and separate native OS consent; Linux supports extension browser control. | Existing screen/control grants also govern browser tools; unsupported native clipboard remains masked. No new per-tab permission dialog. |
 | Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
+| Command policy | Off, in Allowlist mode, with no rules. | Missing legacy settings stay Off; a missing mode defaults to Allowlist. Rules and mode persist while Off. An enabled empty Allowlist rejects every launch; an enabled empty Denylist permits simple supported commands. |
 | Plugin auto-refresh | Off. | Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
 | Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
@@ -727,6 +728,17 @@ The launch's classification also governs later polls, completion revisions and s
 a proven benign non-zero exit stays non-error while preserving the raw exit code. Incomplete
 or omitted classification evidence fails closed. Batch summaries name `cmds`; polling retains
 the “Waited on session” title with its numeric id and measured exit status.
+An optional application-wide command launch policy is owned by validated config and enforced once
+in the shared Core `exec_command` handler used by direct and code-mode calls. Disabled preserves
+existing behavior. Enabled preflights every user-authored batch item before normalization,
+apply-patch interception, process-id allocation or launch. Rules match literal executable and
+argument boundaries: exact argv, or a final standalone `*` for zero or more extra arguments.
+Allowlist mode permits matches and rejects non-matches; Denylist mode rejects matches and permits
+non-matches. Unsupported shell syntax and malformed policy fail closed with `COMMAND_NOT_ALLOWED`;
+a permitted command never overrides live
+capability, Read-only, cwd, caller or process-ownership checks. `write_stdin` is unchanged.
+Programs permitted to start, their stdin/children/project code and shell environment remain trusted; this
+is not an OS sandbox and does not govern the human workspace terminal.
 The shell's virtual-path diagnostic excludes an exact approved native POSIX spelling, even
 when `/Users` collides with a `users` alias. This classification never rewrites command text
 or grants filesystem permission; genuine virtual paths retain their native-path guidance.
