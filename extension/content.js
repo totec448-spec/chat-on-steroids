@@ -11115,7 +11115,7 @@
     // Either settings route (see background.js pluginSettingsRoute). The newer path-routed page
     // is owned so that its unreadable card is reported, not left as a silent, reopened request.
     const route = (url.pathname === '/' && /^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash)) ||
-      /^\/settings\/plugins-settings(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.pathname);
+      /^\/(?:settings\/plugins-settings(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?|plugins\/plugin_asdk_app_[a-zA-Z0-9_-]+)$/.test(url.pathname);
     return alive && !generating && !CLF_DOM.generating() && route && url.searchParams.get('cos-plugin-refresh') === id;
   }
   function waitPageView(read, current, milliseconds) {

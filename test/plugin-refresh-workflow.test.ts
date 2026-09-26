@@ -192,6 +192,18 @@ it('reuses and retires helper tabs on the path-routed settings page too', async 
   await run();
   expect(remove).toHaveBeenCalledExactlyOnceWith(7);
 });
+it.each([
+  [`https://chatgpt.com/plugins/plugin_asdk_app_synthetic?cos-plugin-refresh=${id}`, true],
+  ['https://chatgpt.com/plugins/plugin_asdk_app_synthetic', false],
+  [`https://chatgpt.com/plugins?cos-plugin-refresh=${id}`, false]
+])('recognises %s as its own helper page: %s', async (url, own) => {
+  // English reloads land on /plugins/plugin_<app>; the bare catalog is the user's page, never ours.
+  const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
+  const code = background.slice(background.indexOf('let pluginRefreshFlight = null;'), background.indexOf('async function catalogProbe('));
+  const context = vm.createContext({ URL });
+  vm.runInContext(`${code}\nglobalThis.marker = pluginRefreshMarker;`, context);
+  expect((context.marker as Function)({ url })).toBe(own ? id : null);
+});
 it('owns the path-routed settings page, so an unreadable card is reported rather than silent', async () => {
   const ask = vi.fn(async (_message: { action: string; error?: string }) => ({ data: { ok: true } }));
   const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask,
