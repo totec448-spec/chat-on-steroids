@@ -10594,6 +10594,42 @@
     later(tick, ms);
   }
 
+  /**
+   * Presses ChatGPT's own Retry when a conversation route shows its "could not be loaded"
+   * surface instead of the chat. Seen live after a reload that landed mid-turn: the model went
+   * on calling tools server-side while this page showed nothing, so the turn could never be
+   * seen to end. The surface must hold for LOAD_FAILURE_SETTLE_MS first — the shell passes
+   * through empty states while it mounts — and later presses back off, so a conversation that
+   * genuinely cannot load is asked a few times, not hammered.
+   */
+  const LOAD_FAILURE_SETTLE_MS = 5_000;
+  const LOAD_FAILURE_BACKOFF_MS = [0, 15_000, 60_000, 5 * 60_000];
+  let loadFailureSince = 0;
+  let loadFailureRetries = 0;
+  let loadFailureRoute = null;
+  function recoverConversationLoad(now = Date.now()) {
+    const route = CLF_DOM.conversationId();
+    if (route !== loadFailureRoute) {
+      loadFailureRoute = route;
+      loadFailureSince = 0;
+      loadFailureRetries = 0;
+    }
+    const retry = CLF_DOM.conversationLoadFailure ? CLF_DOM.conversationLoadFailure() : null;
+    if (!retry) {
+      loadFailureSince = 0;
+      if (CLF_DOM.turns().length) loadFailureRetries = 0;
+      return false;
+    }
+    if (!loadFailureSince) loadFailureSince = now;
+    const wait = LOAD_FAILURE_SETTLE_MS +
+      LOAD_FAILURE_BACKOFF_MS[Math.min(loadFailureRetries, LOAD_FAILURE_BACKOFF_MS.length - 1)];
+    if (now - loadFailureSince < wait) return false;
+    loadFailureRetries++;
+    loadFailureSince = now;
+    retry.click();
+    return true;
+  }
+
   let activityTimer = null;
   function activityPullDelay(input = {}) {
     const hidden = input.hidden === true;
@@ -11510,6 +11546,7 @@
   watchTranscript();
 
   every(OBSERVE_MS, () => {
+    recoverConversationLoad();
     observe();
     syncTheme();
     injectControl();
