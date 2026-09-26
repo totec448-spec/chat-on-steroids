@@ -476,9 +476,24 @@ var CLF_DOM = (() => {
   }
 
   const shellRole = node => /:(user|assistant)$/.exec(node?.getAttribute?.('data-content-search-unit-key') || '')?.[1] || '';
+  /**
+   * A shell exchange's identity, preferring the key that is one.
+   *
+   * `data-content-search-turn-key` is the search index's key, and on the current shell it has
+   * degraded to a position: measured on the live page on 2026-09-26, three consecutive exchanges
+   * carried `fallback-turn-0`, `fallback-turn-1` and `fallback-turn-2` while their own
+   * `data-turn-key` held real UUIDs — the same UUIDs `messages()` reports for those turns' user
+   * items. A position is not an identity: it renumbers when history virtualizes or an exchange is
+   * inserted, so every join keyed on it silently moves to a different turn.
+   *
+   * `data-turn-key` is read first for that reason, and the search key stays as the fallback so a
+   * shell that supplies a real one there keeps working unchanged.
+   */
   function turnIdOf(section) {
-    return section?.matches?.(SHELL_TURN) ? section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key') || null
-      : section?.getAttribute?.('data-turn-id') || null;
+    if (!section?.matches?.(SHELL_TURN)) return section?.getAttribute?.('data-turn-id') || null;
+    const key = section.getAttribute('data-turn-key');
+    if (key && !/^fallback-turn-\d+$/.test(key)) return key;
+    return section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key') || null;
   }
   function messageIdOf(node) {
     const explicit = node?.getAttribute?.('data-message-id');
@@ -701,18 +716,129 @@ var CLF_DOM = (() => {
   /** Stop is a busy hint only; the exact provider terminal still owns turn completion. */
   function generating() {
     return safe(() => {
-      if (nativeComposerControls(STOP).length > 0) return true;
+      if (stopControls().length > 0) return true;
       // Historical interrupted exchanges can retain in_progress forever. Only the
       // latest native response can describe this composer's current generation.
       const latest = [...document.querySelectorAll(SHELL_TURN)].filter(node =>
         !node.closest(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`)).at(-1);
-      return latest?.getAttribute('data-clf-shell-running') === location.pathname;
+      if (latest?.getAttribute('data-clf-shell-running') !== location.pathname) return false;
+      /*
+       * The stamp alone is not enough, and the comment above understates why: `in_progress` is
+       * React's own word, it outlives an interrupted exchange, and the "latest turn only" guard
+       * does not help when the latest turn *is* the interrupted one.
+       *
+       * Measured on the live page on 2026-09-26, in the chat this was found in: all three shell
+       * turns carried `data-clf-shell-running` for the current pathname at once, hours after the
+       * generation had died. Three turns cannot be running. `generating()` therefore answered yes
+       * for the rest of the chat's life, `nowGenerating` never went false, and the observer's whole
+       * outcome branch — the only path that can end a turn — was unreachable. The turn stayed open
+       * for nine hours, and with it the compaction handoff and every queued follow-up behind it.
+       *
+       * The composer settles it without a label or a clock: voice, send and stop are one button in
+       * one slot on this shell, so a slot occupied by anything that is not the stop square is a
+       * page that is not generating, whatever React still says. An empty slot proves nothing and is
+       * left to the stamp.
+       */
+      const primary = primarySlotControls();
+      if (primary.length > 0 && !primary.some(isStopSquare)) return false;
+      return true;
     }, false);
+  }
+
+  /**
+   * The stop control on a composer whose buttons carry nothing but a translated label.
+   *
+   * `STOP` is a list of English labels and two test ids. ChatGPT's newer composer has neither:
+   * voice, send and stop are the same `type="button"` in the same slot, and only the label and
+   * the icon change. On a localised install the label is translated — `aria-label="Durdur"`
+   * measured on a Turkish page on 2026-09-25 — so stop was never found, `generating()` never
+   * said yes, and nothing could end a turn through the page.
+   *
+   * What is not translated is the icon. Stop is a rounded square: one `path`, its `d` beginning
+   * `M4.5 5.75`. The dictation control in the same slot draws four paths and carries
+   * `data-state`; send draws an arrow. Matching the square is therefore both locale-free and
+   * narrow, and narrow is what matters here: a send button mistaken for stop would report a
+   * generation that never ends.
+   *
+   * Tried second, never first. Where the labels do match they stay authoritative.
+   */
+  const STOP_SQUARE = /^\s*M4\.5 5\.75/;
+  /**
+   * The composer's primary-action slot: the one button that is voice, send or stop by turn.
+   *
+   * Named separately because who occupies it is evidence in its own right — see `generating`.
+   */
+  function primarySlotControls() {
+    const form = composer()?.closest('form');
+    if (!form) return [];
+    return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
+      .filter(button => renderedComposerNode(button) && button.closest('form') === form);
+  }
+
+  /** The rounded square, which is the one thing about stop that nobody translates. */
+  function isStopSquare(button) {
+    // The dictation control keeps a popover state on itself; stop never does.
+    if (!button || button.hasAttribute('data-state')) return false;
+    const paths = button.querySelectorAll('svg path');
+    return paths.length === 1 && STOP_SQUARE.test(paths[0].getAttribute('d') || '');
+  }
+
+  function localeFreeStopControls() {
+    return primarySlotControls().filter(isStopSquare);
+  }
+
+  function stopControls() {
+    const labelled = nativeComposerControls(STOP);
+    return labelled.length > 0 ? labelled : localeFreeStopControls();
+  }
+
+  /**
+   * Send, found without a label, for the same composer and the same reason as the square above.
+   *
+   * All three of `SEND`'s strategies fail on ChatGPT's newer composer: the `data-testid` is gone,
+   * `aria-label^="Send"` is translated, and nothing in that slot is `type="submit"` any more —
+   * voice, send and stop are one `type="button"`. Measured on a Turkish page on 2026-09-25 and
+   * reported in #415 on an English one: a new chat opened, the prompt was typed, and nothing was
+   * ever submitted, because `submitDraft` waits on `sendButton()` and deliberately has no Enter
+   * fallback ("neither a guessed Enter nor an unrelated Stop/composer-clear is evidence that this
+   * draft was submitted").
+   *
+   * Send has no icon signature of its own worth trusting — an arrow's path data is not a contract
+   * — so this identifies it by the state it is the only occupant of. Every caller consults this
+   * with our exact text standing in the composer and `generating()` false, and in that state the
+   * primary-action slot cannot be stop (which exists only while generating) and cannot be voice
+   * (which the composer replaces as soon as it holds text, and which carries `data-state`
+   * regardless). Both are excluded explicitly all the same, and one candidate is still required,
+   * so an unexpected third control refuses rather than being clicked.
+   */
+  function localeFreeSendControls() {
+    const box = composer();
+    const form = box?.closest('form');
+    if (!form) return [];
+    // Read the editor here rather than reusing the submitter's own `draftText`, which is a local
+    // closure over its captured box. Only "the composer holds something" is needed, not equality.
+    const drafted = (typeof box.innerText === 'string' ? box.innerText : box.textContent || '').trim();
+    if (drafted === '' || generating()) return [];
+    return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
+      .filter(button => {
+        if (!renderedComposerNode(button) || button.closest('form') !== form) return false;
+        // Dictation keeps a popover state on itself; send never does.
+        if (button.hasAttribute('data-state')) return false;
+        const paths = button.querySelectorAll('svg path');
+        // Not the stop square, and not the four-path microphone.
+        if (paths.length === 1 && STOP_SQUARE.test(paths[0].getAttribute('d') || '')) return false;
+        return paths.length >= 1 && paths.length <= 2;
+      });
+  }
+
+  function sendControls() {
+    const labelled = nativeComposerControls(SEND);
+    return labelled.length > 0 ? labelled : localeFreeSendControls();
   }
 
   function stopButton() {
     return safe(() => {
-      const buttons = nativeComposerControls(STOP);
+      const buttons = stopControls();
       return buttons.length === 1 ? buttons[0] : null;
     }, null);
   }
@@ -732,7 +858,7 @@ var CLF_DOM = (() => {
   /** The page-owned Send control, exposed so content.js can witness an actual submission. */
   function sendButton() {
     return safe(() => {
-      const buttons = nativeComposerControls(SEND);
+      const buttons = sendControls();
       return buttons.length === 1 ? buttons[0] : null;
     }, null);
   }
