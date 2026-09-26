@@ -125,6 +125,33 @@ it('projects Python execution status by its stable native id without reading cod
   expect(next.turns[0].activities).toContainEqual({ messageId: `native-python:${OTHER}`, label: 'Analyzed' });
   expect(JSON.stringify(next)).not.toMatch(/PRIVATE_CODE|PRIVATE_OUTPUT/);
 });
+it('streams the public active headline without inventing a provider message or reporting work', async () => {
+  const f = fixture(); liveShellMapping(f, true);
+  const group = f.entry.turn.items[1];
+  group.activeReasoning = { type: 'reasoning', presentation: 'thought', completed: false, content: 'Fetching project metadata' };
+  let echoedCaption: string | null | undefined;
+  const r = await recorder(f, { activity: () => ({ ok: true, data: { entries: [], stream: [], pendingTools: 0,
+    activeTurnId: TURN, recordedTurnId: TURN, recordedQuestionId: USER,
+    ...(echoedCaption !== undefined ? { activityCaption: echoedCaption } : {}) } }) });
+  await r.hook.refreshFiber(); await r.hook.flush();
+  const status = r.events().findLast((e: any) => e.kind === 'activity_status');
+  expect(status).toMatchObject({ text: 'Fetching project metadata', turnId: TURN, fiberConversationId: THREAD });
+  expect(status.messageId).toBeUndefined(); expect(status.activeNow).toBeUndefined();
+  echoedCaption = null; // New desktop process has no ephemeral caption yet.
+  const before = r.events().filter((e: any) => e.kind === 'activity_status').length;
+  await r.hook.pullActivity(); await r.hook.flush();
+  expect(r.events().filter((e: any) => e.kind === 'activity_status')).toHaveLength(before + 1);
+  group.activeReasoning.content = 'Analyzing the result';
+  await r.hook.refreshFiber(); await r.hook.flush();
+  expect(r.events().findLast((e: any) => e.kind === 'activity_status').text).toBe('Analyzing the result');
+  group.activeReasoning = undefined;
+  await r.hook.refreshFiber(); await r.hook.flush();
+  expect(r.events().findLast((e: any) => e.kind === 'activity_status').text).toBe('');
+  group.activeReasoning = { type: 'reasoning', presentation: 'private', completed: false, content: 'PRIVATE_REASONING_CONTENT' };
+  expect((await f.ask()).turns[0].liveActivity).toBeNull();
+  expect(JSON.stringify(r.events())).not.toContain('PRIVATE_REASONING_CONTENT');
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+});
 
 it('never turns an unknown typed assistant phase into public commentary', async () => {
   const f = fixture(); f.entry.turn.items[2].phase = 'analysis'; f.entry.turn.items[2].content = 'PRIVATE_REASONING';
@@ -242,6 +269,26 @@ it('reads literal shell user text only through the current exact message stamp',
   expect(f.api.userMessageReadback(user)).toBeNull();
 });
 
+it('keeps exact exchange ownership while a positional fallback turn index changes after history mounts', async () => {
+  const f = fixture();
+  const source = f.doc.querySelector('[data-turn-key]')!;
+  const remap = (key: string) => {
+    f.entry.id = key;
+    source.querySelector('[data-content-search-turn-key]')!.setAttribute('data-content-search-turn-key', key);
+    source.querySelector('[data-content-search-unit-key$=":user"]')!.setAttribute('data-content-search-unit-key', `${key}:0:user`);
+    source.querySelector('[data-content-search-unit-key$=":assistant"]')!.setAttribute('data-content-search-unit-key', `${key}:2:assistant`);
+  };
+  remap('fallback-turn-4');
+  expect((await f.ask()).turns[0]).toMatchObject({ turnId: USER, conversationId: THREAD });
+  expect(f.api.turns().map((t: any) => t.id)).toEqual([USER, USER]);
+  expect(f.api.messages().map((m: any) => m.id)).toEqual([USER, ANSWER]);
+  remap('fallback-turn-9');
+  expect((await f.ask()).turns[0].turnId).toBe(USER);
+  expect(f.api.turns().map((t: any) => t.id)).toEqual([USER, USER]);
+  source.setAttribute('data-turn-key', OTHER);
+  expect((await f.ask()).turns).toEqual([]); // A different user id cannot relabel this typed exchange.
+});
+
 it.each(['in_progress', 'cancelled', 'complete', 'unknown', undefined])('does not invent a tool receipt from turn status %s', async status => {
   const f = fixture(); (f.entry.turn as any).status = status;
   const turn = (await f.ask()).turns[0];
@@ -330,6 +377,31 @@ it.each([false, true])('captures live shell request metadata and public activity
     conversationId: THREAD, calls: expect.arrayContaining([expect.objectContaining({ requestId: OTHER })]) })));
   expect(r.events()).toContainEqual(expect.objectContaining({ kind: 'page_tool', messageId: thought, text: 'Inspecting the project' }));
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+});
+
+// React keeps the host's original Fiber pointer across commits. The current root
+it('reads the current shell snapshot when the compiler publishes more than 32 bounded memo rows', async () => {
+  const f = fixture(), { owner, snapshot, thought } = liveShellMapping(f, true);
+  // Live September 26: 42 rows, with the exact current snapshot at cell 89 of
+  // a 471-cell first row. Array capacity is not evidence that this owner is stale.
+  owner.updateQueue.memoCache.data = [
+    [...Array(89).fill(null), snapshot, ...Array(381).fill(null)],
+    ...Array.from({ length: 41 }, () => [null])
+  ];
+  const turn = (await f.ask()).turns[0];
+  expect(turn.calls[0]).toMatchObject({ requestId: OTHER, messageId: CALL });
+  expect(turn.activities).toContainEqual({ messageId: thought, label: 'Inspecting the project', order: 1 });
+  expect(JSON.stringify(turn)).not.toMatch(/PRIVATE_REASONING_CONTENT|DO_NOT_COPY/);
+});
+
+it('rejects a conflicting later compiler row and a scan exceeding its total work budget', async () => {
+  const f = fixture(), { owner, snapshot } = liveShellMapping(f, true);
+  const conflicting = { renderedConversation: { mapping: { ...snapshot.renderedConversation.mapping }, current_node: CALL },
+    renderedTurns: snapshot.renderedTurns };
+  owner.updateQueue.memoCache.data = [snapshot, ...Array(40).fill(null), conflicting].map(value => [value]);
+  expect((await f.ask()).turns[0].requests).toEqual([]);
+  owner.updateQueue.memoCache.data = [[snapshot], ...Array.from({ length: 2050 }, () => [null])];
+  expect((await f.ask()).turns[0].requests).toEqual([]);
 });
 
 // React keeps the host's original Fiber pointer across commits. The current root
@@ -517,11 +589,29 @@ it.each(['hidden', 'raw-cot', 'unknown-presentation', 'hidden-group', 'different
   const f = fixture(), { mapping, thought } = liveShellMapping(f);
   const group = f.entry.turn.items[1], message = mapping[thought].message;
   if (kind === 'hidden') message.metadata.is_visually_hidden_from_conversation = true;
-  if (kind === 'raw-cot') message.metadata.summary_type = 'raw_cot';
+  if (kind === 'raw-cot') { message.metadata.summary_type = 'raw_cot'; group.items[0].content = 'PRIVATE_REASONING_CONTENT'; }
   if (kind === 'unknown-presentation') group.items[0].presentation = 'private';
   if (kind === 'hidden-group') group.reasoningRecap = { type: 'hide_all' };
   if (kind === 'different-public-label') group.items[0].content = 'A different summary';
   expect((await f.ask()).turns[0].activities).toEqual([]);
+});
+it('updates a public transient thought caption under its exact native identity without exporting its raw reasoning', async () => {
+  const f = fixture(), { mapping, thought } = liveShellMapping(f, true);
+  const item = f.entry.turn.items[1].items[0];
+  item.isTransient = true;
+  mapping[thought].message.metadata.summary_type = 'raw_cot';
+  const r = await recorder(f);
+  expect(r.events()).toContainEqual(expect.objectContaining({ kind: 'page_tool', messageId: thought, text: 'Inspecting the project' }));
+  item.content = 'Checking the next file';
+  mapping[thought].message.content.thoughts[0].summary = item.content;
+  await r.hook.refreshFiber(); await r.hook.flush();
+  const rows = r.events().filter((e: any) => e.kind === 'page_tool' && e.messageId === thought);
+  expect(rows.at(-1).text).toBe('Checking the next file');
+  expect(new Set(rows.map((e: any) => e.messageId)).size).toBe(1);
+  expect(JSON.stringify(r.events())).not.toMatch(/PRIVATE_REASONING_CONTENT|DO_NOT_COPY/);
+  item.content = 'PRIVATE_REASONING_CONTENT';
+  expect((await f.ask()).turns[0].activities).toEqual([]);
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 });
 it('keeps a public preamble under the existing stable source identity when its raw streaming id rotates', async () => {
   const f = fixture(), { mapping, preamble } = liveShellMapping(f, true);

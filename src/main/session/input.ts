@@ -126,18 +126,27 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
   const session = await getSession(sessionId);
   if (!session?.conversationId || isChatBlocked(session.conversationId)) return { queueAtFinish: false, canInject: false, injectionTurnId: null, directTurn: null, browserAllowed: false, settled: false };
   const activity = observedActivity ?? deliveryHooks?.activity?.(session) ?? { possible: !!session.activeTurnId, exact: !!session.activeTurnId };
-  const stopped = session.finishTurn?.released === true;
+  // Finish release is a local hold transition, not provider Stop confirmation.
+  // Keep it as an interruption fence while that exact active turn has not been
+  // observed stopped. If later exact activity reopens the same stopped turn,
+  // the old release must not strand new input behind a terminal view that the
+  // current activity has already disproved.
+  const releasedActiveFinish = !!session.activeTurnId && session.finishTurn?.released === true &&
+    session.finishTurn.turnId === session.activeTurnId && session.finishTurn.conversationId === session.conversationId;
+  const resumedStoppedTurn = releasedActiveFinish && activity.exact && activity.turnId === session.activeTurnId &&
+    end?.kind === 'turn_end' && end.turnId === session.activeTurnId && end.outcome === 'stopped';
+  const releaseFence = releasedActiveFinish && !resumedStoppedTurn;
   const selection = session.selectedModel?.conversationId === session.conversationId ? session.selectedModel : null;
   // A previous turn's MCP history must not disable ordinary-chat steering. The
   // existing start and tool timestamps cover committed work; in-flight custody
   // also covers the first call before its durable recording has landed.
-  const directTurn = !stopped && activity.exact && end?.kind === 'turn_start' &&
+  const directTurn = !releaseFence && activity.exact && end?.kind === 'turn_start' &&
     !!end.turnId && end.turnId === session.activeTurnId && !!selection?.model &&
     activity.model !== 'pro' && activity.model !== 'unknown' &&
     !isProModel(selection.model, selection.reasoningEffort) &&
     (session.lastToolCallAt ?? -1) < end.time && inFlightToolCalls(session.conversationId) === 0
     ? { id: end.turnId, startedAt: end.time } : null;
-  const canInject = !stopped && activity.exact && !directTurn;
+  const canInject = !releaseFence && activity.exact && !directTurn;
   // The bridge's retained exact MCP grant can outlive a native UI end. Project
   // that same turn for image custody, never invent an active recorder turn.
   const injectionTurnId = canInject ? session.activeTurnId ?? (activity.turnId === end?.turnId ? activity.turnId ?? null : null) : null;

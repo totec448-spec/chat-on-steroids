@@ -36,7 +36,7 @@
   // before touching the shared DOM. Otherwise old and new composer observers can continually
   // remove and reinsert each other's controls, starving transport/timers and freezing the tab.
   // A healthy incumbent in this context still wins the static/recovery injection race.
-  const RECORDER_VERSION = 21;
+  const RECORDER_VERSION = 22;
   const recorderHandle = {
     version: RECORDER_VERSION,
     healthy: () => false,
@@ -3052,7 +3052,7 @@
   // 11: adds exact typed thought-notification ids and ephemeral DOM stamps for selective
   //     presentation suppression. Caption text and per-call adjacency remain non-authority.
   // 12: adds exact provider-message/sediment generated-image descriptors and DOM pixel stamps.
-  const FIBER_VERSION = 21;
+  const FIBER_VERSION = 22;
   const FIBER_TIMEOUT_MS = 1500;
   const FIBER_MAX_ROWS = 400;
   /** Assistant turns whose per-call evidence is accepted from one scan. */
@@ -3065,6 +3065,9 @@
   const TOOL_NAME = /^[a-z0-9_.-]{1,64}$/i;
   const FIBER_BUSY_CAPTIONS = new Set(['thinking', 'thinking about it', 'reasoning', 'working', 'loading', 'done', 'called tool']);
   const FIBER_TIMER_CAPTION = /^(?:worked|thought|reasoned|thinking)\s+for\s+[\d.,]+\s*(?:s|m|h|sec|secs|seconds?|min|mins|minutes?|hours?)\b/;
+  // One ephemeral headline per exact local turn. This is not a canonical message
+  // identity or a work lease, and can never acknowledge a tool or a Send.
+  let reportedLiveActivity = null;
 
   /** Descriptors from the last successful scan, keyed by the stamp on their row. */
   let fiberRows = new Map();
@@ -3389,7 +3392,9 @@
       codeIds.add(messageId);
       codeModeCalls.push({ messageId, tool: 'functions.exec', requestId: cap(entry.requestId, 100), answered: entry.answered === true });
     }
-    if (codeModeCalls.length === 0 && kept.length === 0 && requests.length === 0 && keptMessages.length === 0 && keptActivities.length === 0 &&
+    const liveActivity = raw.liveActivity === null ? null : typeof raw.liveActivity === 'string' && raw.liveActivity.length <= 300
+      ? raw.liveActivity.replace(/[\r\n\t]+/g, ' ').trim() || null : undefined;
+    if (codeModeCalls.length === 0 && kept.length === 0 && requests.length === 0 && keptMessages.length === 0 && keptActivities.length === 0 && !liveActivity &&
         keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId) {
       return null;
     }
@@ -3405,6 +3410,7 @@
       requests,
       messages: keptMessages,
       activities: keptActivities,
+      ...(liveActivity !== undefined ? { liveActivity } : {}),
       thoughtNotifications: keptThoughtNotifications,
       images: keptImages
     };
@@ -4056,6 +4062,16 @@
     if (!generating && settled?.terminalProbe && ownedPageTurn) {
       if (ownedPageTurn.endMessageId !== settled.terminalProbe) {
         fiberTerminalMessageId = null;
+      }
+    }
+    const liveCaptionTurn = answer.turns[activeTurnIndex];
+    if (generating && activeLocalTurnId && liveCaptionTurn && !liveCaptionTurn.conversationConflict &&
+        concreteConversation(liveCaptionTurn.conversationId) === askedConversation && liveCaptionTurn.liveActivity !== undefined) {
+      const text = liveCaptionTurn.liveActivity || '';
+      const signature = `${askedConversation}\u0000${activeLocalTurnId}\u0000${text}`;
+      if (signature !== reportedLiveActivity) {
+        reportedLiveActivity = signature;
+        emit({ kind: 'activity_status', turnId: activeLocalTurnId, fiberConversationId: askedConversation, text });
       }
     }
     for (let index = 0; index < answer.turns.length; index++) {
@@ -6334,6 +6350,13 @@
       // reply. Until this document has owned a turn, exact question proof may
       // still restore it through this same feed, even after native completion.
       appActiveTurnId = typeof data.activeTurnId === 'string' && data.activeTurnId ? data.activeTurnId : null;
+      // Reconcile the ephemeral headline through the existing activity reply.
+      // A desktop restart may lose presentation without changing public text;
+      // retire only this caption's dedup, never replay transcript/tool/Send data.
+      if (typeof data.recordedTurnId === 'string' && Object.hasOwn(data, 'activityCaption') &&
+          reportedLiveActivity?.startsWith(`${forId}\u0000${data.recordedTurnId}\u0000`) &&
+          reportedLiveActivity !== `${forId}\u0000${data.recordedTurnId}\u0000${data.activityCaption || ''}`)
+        reportedLiveActivity = null;
       if (!generating && pendingTools > 0 && appActiveTurnId === turnId && fiberSettled?.reason === 'thinking_failed') noteTurnProgress();
       const recordedQuestionId = typeof data.recordedQuestionId === 'string' ? data.recordedQuestionId : null;
       if (resumedStoppedTurn && !generating && appActiveTurnId === turnId) adoptOpenTurn(turnId, recordedQuestionId);

@@ -34,7 +34,7 @@ vi.mock('../src/main/session/store.js', () => ({
   rebindSession: vi.fn(async (id: string, from: string | null, to: string) => { const row = openings.get(id); if (!row || row.conversationId !== from) return false; row.conversationId = to; return true; }),
   getSession: vi.fn(async (id: string) => openings.get(id) ?? ({ id, conversationId: id === 'session-two' ? 'conversation-b' : binding.conversationId, activeTurnId: binding.activeTurnId,
     origin: { kind: binding.origin }, lastToolCallAt: binding.lastToolCallAt,
-    finishTurn: { turnId: binding.activeTurnId, released: binding.finishReleased },
+    finishTurn: { turnId: binding.activeTurnId, conversationId: id === 'session-two' ? 'conversation-b' : binding.conversationId, released: binding.finishReleased },
     selectedModel: { conversationId: id === 'session-two' ? 'conversation-b' : binding.conversationId, model: binding.model } })),
   findSessionByConversation: vi.fn(async (id: string) => [...openings.values()].find(row => row.conversationId === id) ?? (binding.recorded && id === binding.conversationId ? { id: 'session-one', conversationId: id } : null))
 }));
@@ -175,6 +175,26 @@ describe('durable user input ownership', () => {
     binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'original-turn';
     binding.end = { kind: 'turn_start', outcome: '', turnId: 'original-turn', time: 900 };
     expect(await sessionInputPolicy(sessionId, { exact: true, possible: true, model })).toMatchObject({ canInject: true, directTurn: null });
+  });
+
+  it('reopens exact same-turn input after confirmed Stop receives newer activity', async () => {
+    binding.model = 'gpt-6-astra'; binding.activeTurnId = 'stopped-turn'; binding.finishReleased = true;
+    binding.end = { kind: 'turn_end', outcome: 'stopped', turnId: 'stopped-turn', time: 900 };
+    configureInputDelivery({ applyAutomation: automate, changed,
+      activity: () => ({ exact: true, possible: true, model: 'pro', turnId: 'stopped-turn' }) });
+    expect(await sessionInputPolicy(sessionId)).toMatchObject({ canInject: true, directTurn: null });
+    const row = await enqueueInput(input());
+    expect(row).toMatchObject({
+      state: 'queued', transportIntent: 'tool', queuedTurn: { conversationId: binding.conversationId, turnId: 'stopped-turn' }
+    });
+    expect(await offerToolInput(sessionId, binding.conversationId, 'reopened-call', now + 1)).toEqual([{ text: row.text, images: [] }]);
+  });
+
+  it('keeps a released active turn fenced until provider Stop is confirmed', async () => {
+    binding.model = 'gpt-6-astra'; binding.activeTurnId = 'stopping-turn'; binding.finishReleased = true;
+    binding.end = { kind: 'turn_start', outcome: '', turnId: 'stopping-turn', time: 900 };
+    expect(await sessionInputPolicy(sessionId, { exact: true, possible: true, model: 'pro', turnId: 'stopping-turn' }))
+      .toMatchObject({ canInject: false, directTurn: null });
   });
 
   it.each(['tool', 'turn', 'rebind', 'blocked'])('revokes an unsubmitted direct correction after %s changes', async change => {

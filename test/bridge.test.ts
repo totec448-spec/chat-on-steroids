@@ -1268,6 +1268,35 @@ describe('activity feed', () => {
     });
   });
 
+  it.each([null, undefined, ''])('accepts exact stream request origins before a native message exists (%s)', async messageId => {
+    await pair();
+    const conversationId = '18181818-3939-4161-8383-959595959595';
+    const first = randomUUID(), second = randomUUID();
+    const mapped = await request('POST', '/correlations', { body: { conversationId,
+      calls: [{ requestId: first, messageId }, { requestId: second, messageId }] } });
+    expect(mapped.status).toBe(200);
+    expect(mapped.body).toMatchObject({ confirmed: [first, second], complete: true });
+    await recordToolCall({ tool: 'read', args: { paths: ['/project/stream-test.ts'] },
+      content: [{ type: 'text', text: 'ok' }], outcome: 'ok', durationMs: 1, startedAt: Date.now(), requestId: first });
+    const calls = await readEvents(mapped.body.sessionId, { kinds: ['tool_call'] });
+    expect(calls.some(event => event.kind === 'tool_call' && event.call.requestId === first && event.call.attribution === 'request_id')).toBe(true);
+    const foreign = await request('POST', '/correlations', { body: { conversationId: '19191919-3939-4161-8383-959595959595', calls: [{ requestId: first, messageId }] } });
+    expect(foreign.body).toMatchObject({ confirmed: [], conflicts: [first], complete: false });
+  });
+
+  it('keeps request-only origin dedup separate from native message identity and rejects malformed origins', async () => {
+    await pair();
+    const conversationId = '20202020-3939-4161-8383-959595959595';
+    const first = randomUUID(), second = randomUUID();
+    const mapped = await request('POST', '/correlations', { body: { conversationId,
+      calls: [{ requestId: first, messageId: null }, { requestId: second, messageId: first }] } });
+    expect(mapped.body).toMatchObject({ confirmed: [first, second], complete: true });
+    for (const requestId of ['', 'not a request id', 'x'.repeat(101), null]) {
+      expect((await request('POST', '/correlations', { body: { conversationId,
+        calls: [{ requestId, messageId: null }] } })).status).toBe(400);
+    }
+  });
+
   it('still refuses correlation evidence that names no request id at all', async () => {
     await pair();
     const refused = await request('POST', '/correlations', {
@@ -12460,7 +12489,9 @@ describe('app requests to stop one exact active turn', () => {
       expect(redeemed.body.command.userMessageId).toBe('original-question');
       await vi.advanceTimersByTimeAsync(STOP_COMMAND_TIMEOUT_MS - 30_001);
       expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
-      expect((await request('GET', `/activity?conversationId=${conversationId}`)).body.activeTurnId).toBeNull();
+      // The command's deadline expires its dispatch authority, not the prior
+      // native work lease. A missing Stop receipt cannot fabricate cancellation.
+      expect((await request('GET', `/activity?conversationId=${conversationId}`)).body.activeTurnId).toBe('original-turn');
       expect((await getSession(sessionId))?.activeTurnId).toBe('original-turn');
     } finally { vi.useRealTimers(); }
   });
@@ -12535,6 +12566,14 @@ describe('app requests to stop one exact active turn', () => {
     expect(ack.status).toBe(200);
     expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
     expect((await getSession(sessionId))?.activeTurnId).toBe('stop-turn-one');
+    // The click receipt is not a provider completion. Both frontends still show
+    // the exact running turn, and automation remains paused until native proof.
+    expect((await sessionControlsFor(sessionId))).toMatchObject({ activeTurnId: 'stop-turn-one', stopPending: true });
+    expect((await request('GET', `/activity?conversationId=${conversationId}`)).body.activeTurnId).toBe('stop-turn-one');
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_end', time: Date.now(), turnId: 'stop-turn-one', outcome: 'stopped' }
+    ] } });
+    expect((await sessionControlsFor(sessionId))).toMatchObject({ activeTurnId: null, stopPending: false });
   });
   it('refuses stale turn controls and an old request after the next turn starts', async () => {
     const { stopSessionTurn } = await import('../src/main/bridge.js');
@@ -12551,6 +12590,53 @@ describe('app requests to stop one exact active turn', () => {
     expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
     expect((await getSession(sessionId))?.activeTurnId).toBe('stop-turn-two');
     expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
+  });
+  it('does not dispatch another Stop after its click was acknowledged but cancellation is still unconfirmed', async () => {
+    const { stopSessionTurn } = await import('../src/main/bridge.js');
+    const conversationId = 'e9999999-aaaa-4bbb-8ccc-111111111111';
+    const sessionId = await active(conversationId);
+    await stopSessionTurn(sessionId, 'stop-turn-one');
+    const command = (await request('GET', '/status')).body.stopTurns[0];
+    expect((await request('POST', '/commands/redeem', { body: { id: command.id, client: 'stop-once', conversationId } })).status).toBe(200);
+    expect((await request('POST', '/commands/ack', { body: { id: command.id, client: 'stop-once', conversationId, turnId: 'stop-turn-one', status: 'sent' } })).status).toBe(200);
+    const wakeCount = recoveryBrowserWake.mock.calls.length;
+    expect(await stopSessionTurn(sessionId, 'stop-turn-one')).toMatchObject({ activeTurnId: 'stop-turn-one', stopPending: true });
+    expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
+    expect(recoveryBrowserWake).toHaveBeenCalledTimes(wakeCount);
+  });
+  it('pushes the acknowledged Stop deadline without polling or manufacturing provider cancellation', async () => {
+    const { stopSessionTurn, STOP_COMMAND_TIMEOUT_MS } = await import('../src/main/bridge.js');
+    vi.useFakeTimers();
+    let unsubscribe = () => {};
+    try {
+      const conversationId = 'eaaaaaaa-aaaa-4bbb-8ccc-111111111111';
+      const sessionId = await active(conversationId);
+      await stopSessionTurn(sessionId, 'stop-turn-one');
+      const command = (await request('GET', '/status')).body.stopTurns[0];
+      await request('POST', '/commands/redeem', { body: { id: command.id, client: 'deadline-page', conversationId } });
+      await request('POST', '/commands/ack', { body: { id: command.id, client: 'deadline-page', conversationId, turnId: 'stop-turn-one', status: 'sent' } });
+      await vi.advanceTimersByTimeAsync(STOP_COMMAND_TIMEOUT_MS - 1);
+      expect(await sessionControlsFor(sessionId)).toMatchObject({ activeTurnId: 'stop-turn-one', stopPending: true });
+      const notified = vi.fn(); unsubscribe = onBridgeChange(notified);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(notified).toHaveBeenCalled();
+      expect(await sessionControlsFor(sessionId)).toMatchObject({ activeTurnId: 'stop-turn-one', stopPending: false });
+      expect((await getSession(sessionId))?.activeTurnId).toBe('stop-turn-one');
+      // A deliberate retry after expiry owns a new deadline; expiry never clicks Stop.
+      expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
+      await expect(stopSessionTurn(sessionId, 'stop-turn-one')).rejects.toThrow('active_turn_changed');
+      // Expired liveness alone cannot authorize retry; the native page reports
+      // fresh work from the same turn before the user tries again.
+      const renewed = await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'assistant_message', time: Date.now(), turnId: 'stop-turn-one', messageId: 'still-running-response',
+          text: 'Still writing the test response', state: 'streaming', final: false, activeNow: true }
+      ] } });
+      expect(renewed.status).toBe(200);
+      await stopSessionTurn(sessionId, 'stop-turn-one');
+      const retry = (await request('GET', '/status')).body.stopTurns[0];
+      expect(retry.id).not.toBe(command.id);
+      expect(retry.expiresAt).toBe(Date.now() + STOP_COMMAND_TIMEOUT_MS);
+    } finally { unsubscribe(); vi.useRealTimers(); }
   });
 });
 

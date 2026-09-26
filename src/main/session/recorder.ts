@@ -114,6 +114,8 @@ interface LiveConversation {
   endedTurn: { turnId: string; startedAt: number | null; endedAt: number; requestIds: Set<string> } | null;
   /** Visible ChatGPT-native activity rows, updated by the page's stable row identity. */
   pageTools: Map<string, ProgressRecord>;
+  /** Public native headline without message identity; presentation only, never persisted as work. */
+  liveActivity?: { turnId: string; text: string; at: number };
 }
 
 interface ProgressRecord {
@@ -650,6 +652,7 @@ export function liveConversations(): Array<{
   endedTurns: number;
   /** Newest durable turn verdict; null when this chat has never reported an end. */
   lastTurnOutcome: TurnOutcome | null;
+  activityCaption?: string;
 }> {
   return [...conversations.values()].map((entry) => ({
     conversationId: entry.conversationId,
@@ -657,7 +660,9 @@ export function liveConversations(): Array<{
     generating: entry.turnStartedAt !== null,
     activeTurnId: entry.turnStartedAt !== null ? entry.turnId : null,
     endedTurns: entry.knownTurnEnds.size,
-    lastTurnOutcome: entry.lastTurnOutcome
+    lastTurnOutcome: entry.lastTurnOutcome,
+    ...(entry.turnStartedAt !== null && entry.liveActivity?.turnId === entry.turnId && entry.liveActivity.text
+      ? { activityCaption: entry.liveActivity.text } : {})
   }));
 }
 
@@ -1691,6 +1696,7 @@ export interface ChatObservation {
     | 'assistant_message'
     | 'native_image'
     | 'page_tool'
+    | 'activity_status'
     | 'turn_start'
     | 'turn_end'
     | 'chat_error'
@@ -1755,7 +1761,7 @@ export interface ChatObservation {
  * nothing here carries an argument value, result body, or other hidden request payload.
  */
 export interface PageCallEvidence {
-  /** ChatGPT's message id for the request, which is what makes this idempotent. */
+  /** Native message identity, or empty for request-only /correlations origins. */
   messageId: string;
   tool: string;
   /** Position within the turn, recorded only for diagnostics/presentation. */
@@ -2059,6 +2065,9 @@ async function recordChatObservationsNow(
 }> {
   const activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; startedAt?: number; endedTurnId?: string } = { meaningful: false, working: false, terminal: false };
   if (!recordingEnabled()) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
+  // A status-only packet must not create a session or resurrect a cold turn.
+  if (observations.length && observations.every(item => item.kind === 'activity_status') && !conversations.has(conversationId))
+    return { sessionId: null, stored: 0, activity, goalCandidates: [] };
   if (!conversations.has(conversationId)) {
     const lineage = await supersededLineage(conversationId);
     if (lineage) {
@@ -2100,6 +2109,7 @@ async function recordChatObservationsNow(
   const recoverableTurns = new Set(live?.openTurns);
   let recoveredFinal: { turnId: string; time: number; seq: number; origin: number; native: boolean } | undefined;
   let terminalFinalAt: number | undefined;
+  let presentationChanged = false;
 
   for (const item of observations) {
     const base = {
@@ -2253,6 +2263,17 @@ async function recordChatObservationsNow(
         stored += await recordNativeImage(sessionId, item, base);
         continue;
       }
+      case 'activity_status': {
+        if (!live?.turnId || live.turnId !== item.turnId || live.turnStartedAt === null ||
+            item.fiberConversationId !== conversationId || !live.openTurns.has(live.turnId) ||
+            (live.liveActivity?.turnId === item.turnId && item.time < live.liveActivity.at)) continue;
+        const text = (item.text ?? '').slice(0, 300).replace(/[\r\n\t]+/g, ' ').trim();
+        const captionChanged = live.liveActivity?.turnId !== live.turnId || live.liveActivity.text !== text;
+        live.liveActivity = { turnId: live.turnId, text, at: item.time };
+        // No event, work clock, Goal debt or tool permission is derived from a headline.
+        presentationChanged ||= captionChanged;
+        continue;
+      }
       case 'page_tool': {
         const newlyObserved = !!live && !!item.messageId && !live.pageTools.has(item.messageId);
         const written = await recordPageTool(sessionId, live, item, base);
@@ -2319,6 +2340,7 @@ async function recordChatObservationsNow(
           // for MCP ownership, so a replayed journal timestamp cannot misattribute a call.
           live.turnStartedAt = item.time;
           live.turnId = item.turnId;
+          delete live.liveActivity;
           live.openTurns.add(item.turnId);
           // A page-authored start is a new send; whatever end came before it is settled.
           live.turnRequestIds = new Set<string>();
@@ -2377,6 +2399,7 @@ async function recordChatObservationsNow(
           if (live.turnId === item.turnId) {
             live.turnStartedAt = null;
             live.turnId = null;
+            delete live.liveActivity;
           }
         }
         if (item.outcome !== 'unknown') {
@@ -2419,6 +2442,7 @@ async function recordChatObservationsNow(
     live.turnRequestIds = new Set<string>();
     live.turnStartedAt = null;
     live.turnId = null;
+    delete live.liveActivity;
     activity.meaningful = true;
     activity.at = Math.max(activity.at ?? 0, time);
     activity.terminal = true;
@@ -2426,7 +2450,7 @@ async function recordChatObservationsNow(
     stored++;
   }
   if (recoveredGoalSeen && live) live.lastTurnOutcome = 'completed';
-  notifyChanged();
+  if (presentationChanged || observations.some(item => item.kind !== 'activity_status')) notifyChanged();
   return { sessionId, stored, activity, goalCandidates };
 }
 

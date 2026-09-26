@@ -2108,6 +2108,24 @@ it('shows elapsed work for the exact recorded turn without exposing lifecycle ro
   expect(w.document.getElementById('chatState')!.textContent).toBe('Worked for 1m 5s');
 });
 
+it('updates native work captions without timeline duplication and keeps Stop pending until its native verdict', async () => {
+  const { w, append } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  const controls = { sessionId: summary([]).id, conversationId: 'chat-a', automation: 'off', activeTurnId: 'held-turn' as string | null,
+    finishHeld: false, stopPending: false, activityCaption: 'Searching documentation', blocked: '', job: null };
+  (w as any).api.getSessionControls = async () => ({ ok: true, data: controls });
+  await append([]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe('Searching documentation');
+  controls.activityCaption = 'Analyzing results'; await append([]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe('Analyzing results');
+  expect(w.document.querySelector('#timeline')!.textContent).not.toContain('Searching documentation');
+  controls.stopPending = true; await append([]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe('Stop requested · waiting for ChatGPT');
+  controls.activeTurnId = null; controls.stopPending = false;
+  await append([{ seq: 2, time: T0 + 4000, source: 'extension', kind: 'turn_end', turnId: 'held-turn', outcome: 'stopped' }]);
+  expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Stopped/);
+  expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Send message');
+});
+
 
 it('stops directly from the empty composer without a second Stop menu action', async () => {
   const { w } = await boot([]);

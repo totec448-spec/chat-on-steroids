@@ -441,6 +441,8 @@ interface CommandReceipt {
   committed: boolean;
   error: string | null;
   completedAt: number;
+  /** Dispatch receipt only; retain the original Stop deadline, never a terminal verdict. */
+  stop?: { sessionId: string; turnId: string; expiresAt: number };
 }
 
 interface DurableCommandRecord {
@@ -932,6 +934,7 @@ const OBSERVATION_KINDS = new Set([
   'assistant_message',
   'native_image',
   'page_tool',
+  'activity_status',
   'turn_start',
   'turn_end',
   'chat_error',
@@ -979,13 +982,20 @@ function parseCallEvidence(input: unknown, untooled = false): PageCallEvidence[]
     const item = raw as Record<string, unknown>;
     const tool = typeof item['tool'] === 'string' && TOOL_NAME.test(item['tool']) ? item['tool'] : '';
     const messageId = typeof item['messageId'] === 'string' ? item['messageId'].slice(0, 120) : '';
-    const bare = untooled && typeof item['requestId'] === 'string';
-    if ((!tool && !bare) || !messageId) continue;
-    if (seen.has(messageId)) {
-      duplicated.add(messageId);
+    const requestId = typeof item['requestId'] === 'string' && /^[a-z0-9_-]{1,100}$/i.test(item['requestId'])
+      ? item['requestId'] : null;
+    // Stream origins precede mounted messages. Only /correlations accepts them;
+    // never turn an absent message into a fabricated native transcript identity.
+    // Adapted from @Maximapple's split-request diagnosis in #414.
+    const bare = untooled && requestId !== null;
+    if ((!tool && !bare) || (!messageId && !bare) ||
+        (item['messageId'] != null && typeof item['messageId'] !== 'string')) continue;
+    const key = messageId ? `message:${messageId}` : `request:${requestId}`;
+    if (seen.has(key)) {
+      duplicated.add(key);
       continue;
     }
-    seen.add(messageId);
+    seen.add(key);
     out.push({
       messageId,
       tool,
@@ -995,15 +1005,12 @@ function parseCallEvidence(input: unknown, untooled = false): PageCallEvidence[]
       answered: item['answered'] === true,
       // Rebuilt like everything else here — an opaque id checked for shape, and a finite
       // number — so the page cannot smuggle anything through them.
-      requestId:
-        typeof item['requestId'] === 'string' && /^[a-z0-9_-]{1,100}$/i.test(item['requestId'])
-          ? item['requestId']
-          : null,
+      requestId,
       createTime:
         typeof item['createTime'] === 'number' && Number.isFinite(item['createTime']) ? item['createTime'] : null
     });
   }
-  return out.filter((call) => !duplicated.has(call.messageId));
+  return out.filter(call => !duplicated.has(call.messageId ? `message:${call.messageId}` : `request:${call.requestId}`));
 }
 
 /**
@@ -1048,6 +1055,8 @@ function parseObservations(input: unknown): ChatObservation[] {
     // with the page-side assistant bound so the bridge does not silently become the next
     // truncation point after Fiber/content.js accepted the whole message.
     if (typeof item['text'] === 'string') observation.text = item['text'].slice(0, 256_000);
+    if (kind === 'activity_status' && (typeof item['text'] !== 'string' || item['text'].length > 300 ||
+        typeof item['turnId'] !== 'string' || !item['turnId'] || typeof item['fiberConversationId'] !== 'string')) continue;
     if (kind === 'user_message' && typeof item['messageId'] === 'string') {
       if (item['reaction'] === null) observation.reaction = null;
       else {
@@ -1392,6 +1401,8 @@ export type SessionControlsView = {
   canSendDirectly?: boolean;
   finishWaiting?: boolean;
   stopPending?: boolean;
+  /** Current native public headline; no transcript or execution authority. */
+  activityCaption?: string;
   goalDraft?: Pick<import('./goal.js').GoalDraftView, 'stage' | 'model' | 'text' | 'error'> | null;
   goalWait?: import('../shared/goal.js').GoalWait | null;
   finishGoalDraft?: Pick<import('./goal.js').GoalDraftView, 'stage' | 'model' | 'text' | 'error'> | null;
@@ -1419,7 +1430,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
   // tool) so opening old recordings after restart cannot resurrect Stop/Working.
   const live = liveConversations().find(entry => entry.conversationId === id && entry.sessionId === sessionId);
   const activityExpiry = sessionActivityExpiresAt(session);
-  const stopping = commands.some(c => c.spec.type === 'stop' && c.spec.sessionId === sessionId && c.spec.turnId === session.activeTurnId);
+  const stopping = !!session.activeTurnId && stopRequestedFor(id, session.activeTurnId);
   const activeTurnId = session.browserRecoveryDismissedAt === undefined && session.activeTurnId &&
     (stopping || runningToolCalls(id) > 0 || (activityExpiry !== undefined ? activityExpiry !== null && activityExpiry > Date.now() :
       live?.activeTurnId === session.activeTurnId)) ? session.activeTurnId : null;
@@ -1430,6 +1441,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
   const finishWaiting = await sessionFinishWaiting(sessionId, activeTurnId, id);
   const recovery = await sessionRecoveryCountdowns(sessionId, id);
   return { sessionId, plan, conversationId: id, activeTurnId, finishHeld,
+    ...(activeTurnId && live?.activeTurnId === activeTurnId && live.activityCaption ? { activityCaption: live.activityCaption } : {}),
     recovery,
     queueAtFinish: !blocked && inputPolicy.queueAtFinish, canInject: !blocked && inputPolicy.canInject,
     canSendDirectly: !blocked && !!inputPolicy.directTurn,
@@ -1437,7 +1449,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     finishWaiting,
     goalDraft: draft ? { stage: draft.stage, model: draft.model, text: draft.text.slice(-8000), error: draft.error } : null,
     goalWait: !blocked && !draft && goalActiveFor(id) ? await goalWaitFor(id, sessionId) : null,
-    stopPending: commands.some(c => c.spec.type === 'stop' && c.spec.sessionId === sessionId && c.spec.turnId === activeTurnId),
+    stopPending: !!activeTurnId && stopRequestedFor(id, activeTurnId),
     objective: goalObjectiveFor(id),
     loopAfterTurn: control.afterTurn,
     proLoopDelivery: control.enabled && getConfig().ui.finishTool === true && session.selectedModel?.conversationId === id &&
@@ -1473,6 +1485,10 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string)
   if (continuationForSession(sessionId)) { await cancelResumeNow(sessionId); await assertCurrent(); }
   const userMessageId = await stopUserAnchor(sessionId, expectedTurnId);
   await assertCurrent();
+  // A committed ACK retires transport, not the exact cancellation deadline.
+  // Pending commands still join their durable lease below; they cannot return
+  // an acceptance projection while the first caller's write is unresolved.
+  if (stopReceiptPendingFor(id, expectedTurnId)) return sessionControlsFor(sessionId);
   const alreadyQueued = commands.some(entry => entry.spec.type === 'stop' && entry.spec.sessionId === sessionId && entry.spec.turnId === expectedTurnId);
   const command = queue({ type: 'stop', sessionId, conversationId: id, turnId: expectedTurnId, ...(userMessageId ? { userMessageId } : {}) });
   try {
@@ -1487,7 +1503,8 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string)
   } catch (error) { retire(command, 'stop request could not be saved or its turn changed'); throw error; }
   armDeadline(command);
   await revokeSilenceInputs(sessionId);
-  endActivity(id);
+  // Pausing automation and releasing finish do not stop the provider. Keep its
+  // existing work projection until the native terminal observation arrives.
   repairsInFlight.delete(id);
   if (!alreadyQueued) logInfo(`bridge: desktop Stop requested for session ${sessionId}, conversation ${id}, turn ${expectedTurnId}, command ${command.id}; native cancellation is unconfirmed`);
   wakeBrowserWork();
@@ -1511,7 +1528,12 @@ async function stopCommandCurrent(spec: Extract<CommandSpec, { type: 'stop' }>):
 }
 function stopRequestedFor(conversationId: string, turnId = liveConversations().find(row => row.conversationId === conversationId)?.activeTurnId): boolean {
   return commands.some(command => command.spec.type === 'stop' && command.spec.conversationId === conversationId &&
-    (!turnId || command.spec.turnId === turnId) && Date.now() - command.createdAt < STOP_COMMAND_TIMEOUT_MS);
+    (!turnId || command.spec.turnId === turnId) && Date.now() - command.createdAt < STOP_COMMAND_TIMEOUT_MS) ||
+    stopReceiptPendingFor(conversationId, turnId);
+}
+function stopReceiptPendingFor(conversationId: string, turnId?: string | null): boolean {
+  return commandReceipts.some(receipt => receipt.committed && receipt.stop && receipt.conversationId === conversationId &&
+    (!turnId || receipt.stop.turnId === turnId) && Date.now() < receipt.stop.expiresAt);
 }
 async function pendingStopCommands(): Promise<Array<{ id: string; conversationId: string; turnId: string; expiresAt: number }>> {
   const pending = [];
@@ -2740,6 +2762,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // Durable answer identity survives a quiet deadline and app/extension restart.
         // Boot adoption must not mint a replacement turn merely because liveness expired.
         recordedTurnId: live.activeTurnId ?? null,
+        activityCaption: live.activityCaption ?? null,
         recordedQuestionId: live.activeTurnId ? summary?.timelineTurns?.[live.activeTurnId]?.questionId ?? null : null,
         ...(pendingStop?.spec.type === 'stop' ? { stopTurn: { turnId: pendingStop.spec.turnId, userMessageId: pendingStop.spec.userMessageId ?? null } } : {}),
         // A revival names an existing worker conversation. The extension, which alone can
@@ -3927,7 +3950,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (!client || conversation !== ownedCommand.spec.conversationId || body.turnId !== ownedCommand.spec.turnId)
         return json(res, 409, { error: 'stop_identity_changed' }, origin);
       const receipt: CommandReceipt = { id, client, conversationId: conversation, outcome: status === 'sent' ? 'committed' : 'terminal-failure',
-        committed: status === 'sent', error: status === 'sent' ? null : error || 'native_stop_unavailable', completedAt: Date.now() };
+        committed: status === 'sent', error: status === 'sent' ? null : error || 'native_stop_unavailable', completedAt: Date.now(),
+        stop: { sessionId: ownedCommand.spec.sessionId, turnId: ownedCommand.spec.turnId, expiresAt: ownedCommand.createdAt + STOP_COMMAND_TIMEOUT_MS } };
       if (!await finalizeCommand(ownedCommand, receipt)) return json(res, 503, { error: 'command_receipt_not_durable' }, origin);
       changed();
       return json(res, 200, receiptReply(receipt), origin);
@@ -5076,6 +5100,7 @@ async function finalizeCommand(command: Command, receipt: CommandReceipt): Promi
     command.timer = null;
     commands = commands.filter((entry) => entry !== command);
     commandReceipts = [...commandReceipts.filter((entry) => entry.id !== receipt.id), receipt].slice(-MAX_COMMAND_RECEIPTS);
+    if (receipt.stop) armSilenceSweep();
     changed();
     return true;
   });
@@ -6089,6 +6114,15 @@ function forgetActivity(conversationId: string): void {
  */
 function armSilenceSweep(now = Date.now()): void {
   let earliest = Number.POSITIVE_INFINITY;
+  // Reuse this one deadline scheduler for Stop presentation too. The command
+  // timer ends on ACK; its receipt still owes the UI an expiry notification.
+  // This wake-up grants neither another Stop nor a fabricated terminal event.
+  let stopExpiry = Number.POSITIVE_INFINITY;
+  for (const receipt of commandReceipts) {
+    if (receipt.committed && receipt.stop && receipt.stop.expiresAt > now)
+      stopExpiry = Math.min(stopExpiry, receipt.stop.expiresAt);
+  }
+  earliest = Math.min(earliest, stopExpiry);
   for (const grant of activeUntil.values()) {
     if (grant.until > now) earliest = Math.min(earliest, grant.until);
     const visibleUntil = activityDeadline(grant);
@@ -6108,6 +6142,7 @@ function armSilenceSweep(now = Date.now()): void {
   silenceTimer = setTimeout(
     () => {
       silenceTimer = null;
+      if (Number.isFinite(stopExpiry) && Date.now() >= stopExpiry) changed();
       // Deliberately the ledger pass alone, not runStaleSwarmSweep(). The maintenance sweep is
       // async and de-duplicated against itself, so a tick that lands while an earlier one is still
       // reading durable state is dropped — and the punctual wake-up would be exactly the tick to
@@ -8273,6 +8308,7 @@ function rearmRetainedCommandDeadlines(): void {
     else expired.push(command);
   }
   for (const command of expired) expire(command);
+  armSilenceSweep(now);
 }
 
 /**
@@ -8732,7 +8768,13 @@ function restoredReceipt(raw: Partial<CommandReceipt>, now: number): CommandRece
     outcome: raw.outcome,
     committed: raw.committed,
     error: typeof raw.error === 'string' ? raw.error.slice(0, 200) : null,
-    completedAt: Number(raw.completedAt)
+    completedAt: Number(raw.completedAt),
+    ...(raw.stop && typeof raw.stop.sessionId === 'string' && /^[a-z0-9-]{8,64}$/i.test(raw.stop.sessionId) &&
+      typeof raw.stop.turnId === 'string' && raw.stop.turnId.length > 0 && raw.stop.turnId.length <= 256 &&
+      Number.isFinite(raw.stop.expiresAt) && raw.stop.expiresAt > now &&
+      raw.stop.expiresAt <= Number(raw.completedAt) + STOP_COMMAND_TIMEOUT_MS ? { stop: {
+        sessionId: raw.stop.sessionId, turnId: raw.stop.turnId, expiresAt: raw.stop.expiresAt
+      } } : {})
   };
 }
 
@@ -9051,6 +9093,8 @@ export async function restoreCommands(): Promise<void> {
 export function resetBridgeForTests(): void {
   clearCompanionDiagnostics();
   for (const command of commands) if (command.timer) clearTimeout(command.timer);
+  if (silenceTimer) clearTimeout(silenceTimer);
+  silenceTimer = null;
   if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
   browserPresenceTimer = null;
   commands = [];

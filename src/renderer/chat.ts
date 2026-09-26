@@ -839,6 +839,7 @@ let controlledSessionId: string | null = null;
 let controlledTurnId: string | null = null;
 let controlledSelection = -1;
 let controlledStopPending = false;
+let controlledActivityCaption = '';
 let controlledFinishWaiting = false;
 let controlledQueueAtFinish = false;
 let controlledCanInject = false;
@@ -1189,7 +1190,7 @@ async function refreshSessionControls(): Promise<void> {
   if (!sessions.find(row => row.id === id)?.conversationId) {
     controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null;
     controlledCanInject = false; controlledCanSendDirectly = false; controlledQueueAtFinish = false;
-    controlledStopPending = false; controlledFinishWaiting = false;
+    controlledStopPending = false; controlledActivityCaption = ''; controlledFinishWaiting = false;
     menu.hidden = false;
     goalDraftView = null; goalWaitView = null; finishGoalDraftView = null; controlledRecovery = [];
     $<HTMLSelectElement>('chatAutomation').value = opening?.automation ?? 'off';
@@ -1211,6 +1212,7 @@ async function refreshSessionControls(): Promise<void> {
   goalWaitView = controls?.goalWait ?? null;
   finishGoalDraftView = controls?.finishGoalDraft ?? null;
   controlledStopPending = controls?.stopPending === true;
+  controlledActivityCaption = typeof controls?.activityCaption === 'string' ? controls.activityCaption.slice(0, 300) : '';
   controlledFinishWaiting = controls?.finishWaiting === true;
   controlledQueueAtFinish = controls?.queueAtFinish === true;
   controlledCanInject = controls?.canInject ?? controlledTurnId !== null;
@@ -2784,6 +2786,8 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
     const summary = sessions.find(entry => entry.id === selectedId);
     if (!summary || detailFor !== selectedId) return { text: '', tone: '' };
     const active = controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledTurnId : null;
+    if (active && controlledStopPending) return { text: t('Stop requested · waiting for ChatGPT'), tone: 'is-live', working: true };
+    if (active && controlledActivityCaption) return { text: controlledActivityCaption, tone: 'is-live', working: true };
     const lastBoundary = [...events].reverse().find(event => event.kind === 'turn_start' || event.kind === 'turn_end');
     const turnId = active ?? lastBoundary?.turnId;
     if (!turnId) return { text: '', tone: '' };
@@ -2793,7 +2797,11 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
     if (startedAt === undefined) return { text: active ? t("Working…") : '', tone: '', working: !!active };
     if (!active && endedAt === undefined) return { text: '', tone: '' };
     const seconds = Math.max(0, Math.floor(((active ? Date.now() : endedAt!) - startedAt) / 1000));
-    return { text: t("{0} for {1}{2}s", [active ? t("Working") : t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };
+    const terminal = !active ? events.findLast(event => event.kind === 'turn_end' && event.turnId === turnId) : null;
+    const outcome = terminal?.kind === 'turn_end' ? terminal.outcome : null;
+    const label = active ? t('Working') : outcome === 'stopped' ? t('Stopped') : outcome === 'failed' ? t('Failed')
+      : outcome === 'interrupted' || outcome === 'stalled' ? t('Interrupted') : t('Worked');
+    return { text: t("{0} for {1}{2}s", [label, seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };
   }
   // Recording follows the conversation the browser can see. A tool call arrives over the
   // connector carrying nothing that identifies its caller, so work driven from the phone,
@@ -3779,7 +3787,7 @@ async function stopCurrentTurn(): Promise<void> {
   if (!id || controlledSessionId !== id || controlledSelection !== generation || !turnId || controlledStopPending) return;
   controlledStopPending = true; paintDeliveryControls();
   try { await run(api.stopSessionTurn(id, turnId)); }
-  finally { if (selectedId === id && selectionGeneration === generation) { controlledStopPending = false; void refreshSessionControls(); } }
+  finally { if (selectedId === id && selectionGeneration === generation) await refreshSessionControls(); }
 }
 let composerDiscoveryGeneration = 0;
 async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?: string, controlAction = false): Promise<boolean | void> {

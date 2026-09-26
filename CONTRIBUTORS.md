@@ -209,6 +209,19 @@ This is a growing attribution record, not a complete list of everyone who has he
 
 ## Preserving credit
 
+The September 26 synchronization follow-up selectively adapts
+[@Maximapple](https://github.com/Maximapple)'s split request-id observation
+([#414](https://github.com/totec448-spec/chat-on-steroids/pull/414)), localized
+native composer controls ([#405](https://github.com/totec448-spec/chat-on-steroids/pull/405),
+[#418](https://github.com/totec448-spec/chat-on-steroids/pull/418),
+[#422](https://github.com/totec448-spec/chat-on-steroids/pull/422)), and stable
+shell turn identity ([#423](https://github.com/totec448-spec/chat-on-steroids/pull/423)).
+It acknowledges [@Haz4rdovisk](https://github.com/Haz4rdovisk)'s stream-framing and
+contradiction review and [@moderntanri](https://github.com/moderntanri)'s upstream
+native-page reproduction. The exact adaptation, independent tests and remaining
+live-validation limits are recorded in
+[the synchronization worklog](docs/worklog-live-synchronization-20260926.md).
+
 Keep original authorship when merging a contribution. When adapting or consolidating contributed work, name the original author and PR, and preserve appropriate `Co-authored-by` trailers using the contributor's public GitHub noreply identity. Reports and review deserve explicit acknowledgment without inventing code authorship. See [CONTRIBUTING.md](CONTRIBUTING.md#credit-and-attribution).
 
 The September 2026 attribution correction adds a new public record and retroactive co-author credit for incorporated work. It does not rewrite released commits or imply that contributors authored the correction's prose. GitHub's automatic contributor displays are separate from this maintained record.

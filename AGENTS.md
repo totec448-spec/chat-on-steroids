@@ -1676,6 +1676,17 @@ flight/dirty guard but adds no second delay after the main-process durable-chang
 
 ### Account-evaluated model selection
 
+The September 26 synchronization repair uses the same recorder and control owners
+([worklog](docs/worklog-live-synchronization-20260926.md)). Compiler memo rows/cells
+share a bounded total scan rather than a hard row-count version guess. Positional
+`fallback-turn-N` keys never own lifecycle when a verified typed user/turn UUID exists.
+Only public matched thought summaries enter recorded activity; id-less public
+headlines use `activity_status`, an ephemeral exact-turn field with no work/Goal
+authority. `/activity` reconciles its presentation after restart. Request-only
+stream origins may use an empty message id on `/correlations`, never as a canonical
+message. Stop dispatch receipts retain their original deadline and do not prove
+native cancellation; a newer turn cannot inherit an earlier finish-release fence.
+
 `chat-models.ts` owns the app catalog and selection validation. The existing MAIN bridge reads
 bounded account-evaluated metadata, then the native picker confirms the actual model/effort for
 Send. A visible option, an English label, a remembered release name or “Upgrade required” is not
@@ -1720,7 +1731,7 @@ version options normalize into the same bounded picker snapshot. Mixed-version p
 their execution ids rather than merging unrelated models into a synthetic Latest family.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
-The matched recorder/MAIN helper version is 21. Shell exchanges are read only under the native
+The matched recorder/MAIN helper version is 22. Shell exchanges are read only under the native
 main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
