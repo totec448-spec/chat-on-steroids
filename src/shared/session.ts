@@ -298,6 +298,8 @@ export type SessionEvent =
       inputDelivery?: 'offered' | 'confirmed';
       /** Original app-authored text, excluding transport-only control instructions. */
       authoredText?: string;
+      /** Estimated token weight of the complete native payload actually sent to ChatGPT. */
+      wireTokenEstimate?: number;
       /** Native badge on this exact user message. Missing means unobserved; null means absent. */
       reaction?: string | null;
       attachments?: import('./input.js').InputAttachment[];
@@ -943,6 +945,10 @@ export const MAX_TOOL_RESULT_TOKENS = 10_000;
 export function eventTokens(event: SessionEvent): number {
   switch (event.kind) {
     case 'user_message':
+      return Math.max(
+        storedTextTokens(event.message),
+        Number.isFinite(event.wireTokenEstimate) ? Math.max(0, Math.floor(event.wireTokenEstimate!)) : 0
+      );
     case 'assistant_message':
     case 'chat_error':
     case 'note':
