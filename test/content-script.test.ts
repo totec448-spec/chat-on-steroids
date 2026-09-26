@@ -9294,6 +9294,20 @@ describe('how a turn is recorded as having ended', () => {
     expect(terminal).toContainEqual(expect.objectContaining({ turnId: started.turnId, outcome: 'failed' }));
   });
 
+  it('treats ChatGPT stream recovery polling timeout as a recoverable transport failure', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'stream-recovery-timeout', []);
+    live.hook.observe(); await settle();
+    alertBanner(live.document, 'ChatGPT stream recovery polling timed out');
+    live.hook.observe(); await settle();
+    const [failure] = emitted(live.sent, 'chat_error').map((entry) => entry.event);
+    const [started] = emitted(live.sent, 'turn_start').map((entry) => entry.event);
+    expect(failure).toMatchObject({
+      text: 'ChatGPT stream recovery polling timed out', recoverable: true, turnId: started.turnId
+    });
+  });
+
   /**
    * Live 2026-09-03 shape: the red full-width card contained the complete help-center
    * message and a Retry button, but had neither role=alert nor assistant markdown. The
