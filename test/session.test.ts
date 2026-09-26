@@ -2972,6 +2972,29 @@ describe('naming the chats this app opened', () => {
     expect(JSON.parse(await fs.readFile(metaPath, 'utf8')).titleSource).toBe('fallback');
   });
 
+  it('keeps the complete sent prompt weight when the page later projects only authored user text', async () => {
+    const session = await createSession({ conversationId: 'wire-context-weight', title: 'Wire context weight' });
+    const authored = 'Inspect the project.';
+    const instructions = 'Internal executor guidance. '.repeat(500);
+    const wire = `[[COS_CONTEXT:${instructions.length}]]\n${instructions}\n[[/COS_CONTEXT]]\n\n${authored}`;
+    const wireTokens = estimateTokens(wire);
+    await upsertMessageEvent(session.id, {
+      kind: 'user_message', source: 'app', time: 100, messageId: 'wire-user', authoredText: authored,
+      wireTokenEstimate: wireTokens, message: { text: wire, chars: wire.length, truncated: false }
+    });
+    const before = (await getSession(session.id))!.contextTokens;
+    await upsertMessageEvent(session.id, {
+      kind: 'user_message', source: 'extension', time: 101, messageId: 'wire-user',
+      message: { text: authored, chars: authored.length, truncated: false }
+    });
+    const after = (await getSession(session.id))!.contextTokens;
+    const [stored] = await readEvents(session.id, { kinds: ['user_message'] });
+    expect(after).toBe(before);
+    expect(stored).toMatchObject({ kind: 'user_message', authoredText: authored, wireTokenEstimate: wireTokens,
+      message: { text: authored } });
+    expect(stored && eventTokens(stored)).toBeGreaterThan(estimateTokens(authored));
+  });
+
   it('does not persist native file credentials in recorded artifact arguments', async () => {
     const conversationId = 'conv-artifact-privacy';
     const requestId = 'wfr_artifact_privacy';
