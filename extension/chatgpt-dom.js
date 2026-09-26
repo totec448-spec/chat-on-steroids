@@ -476,9 +476,24 @@ var CLF_DOM = (() => {
   }
 
   const shellRole = node => /:(user|assistant)$/.exec(node?.getAttribute?.('data-content-search-unit-key') || '')?.[1] || '';
+  /**
+   * A shell exchange's identity, preferring the key that is one.
+   *
+   * `data-content-search-turn-key` is the search index's key, and on the current shell it has
+   * degraded to a position: measured on the live page on 2026-09-26, three consecutive exchanges
+   * carried `fallback-turn-0`, `fallback-turn-1` and `fallback-turn-2` while their own
+   * `data-turn-key` held real UUIDs — the same UUIDs `messages()` reports for those turns' user
+   * items. A position is not an identity: it renumbers when history virtualizes or an exchange is
+   * inserted, so every join keyed on it silently moves to a different turn.
+   *
+   * `data-turn-key` is read first for that reason, and the search key stays as the fallback so a
+   * shell that supplies a real one there keeps working unchanged.
+   */
   function turnIdOf(section) {
-    return section?.matches?.(SHELL_TURN) ? section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key') || null
-      : section?.getAttribute?.('data-turn-id') || null;
+    if (!section?.matches?.(SHELL_TURN)) return section?.getAttribute?.('data-turn-id') || null;
+    const key = section.getAttribute('data-turn-key');
+    if (key && !/^fallback-turn-\d+$/.test(key)) return key;
+    return section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key') || null;
   }
   function messageIdOf(node) {
     const explicit = node?.getAttribute?.('data-message-id');
