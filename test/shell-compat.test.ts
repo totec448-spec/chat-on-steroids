@@ -607,6 +607,37 @@ it('uses typed running state rather than a translated Stop caption', async () =>
   await f.ask(); expect(f.api.generating()).toBe(true); expect(f.api.composerSubmitReady()).toBe(false);
   expect(f.api.stopButton()).toBeNull(); // No guessed action target.
 });
+/**
+ * Stop, on a composer that says it in another language.
+ *
+ * The newer composer puts voice, send and stop in one slot as the same `type="button"`; only the
+ * label and the icon change, and the label is translated. Captured from a Turkish page on
+ * 2026-09-25: `aria-label="Durdur"` while streaming, `aria-label="Sesli iletisimi baslat"` when
+ * idle. With only an English label list to go on, stop was never found — so `generating()` said
+ * no while a reply was streaming, and nothing could end the turn through the page.
+ *
+ * The square is the part nobody translates. The dictation control in the same slot draws four
+ * paths and carries `data-state`; this asserts both directions, because a send or voice button
+ * mistaken for stop would report a generation that never ends.
+ */
+it('finds the stop control by its square when the label is translated', () => {
+  const f = fixture();
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot} relative" aria-label="Sesli iletisimi baslat" data-state="closed">` +
+    '<svg aria-hidden="true" class="icon-primary-action"><path d="M10 2.5v6"></path><path d="M6 6v2"></path>' +
+    '<path d="M14 6v2"></path><path d="M10 12v5"></path></svg></button>');
+  expect(f.api.generating(), 'the dictation control was read as stop').toBe(false);
+  expect(f.api.stopButton()).toBeNull();
+
+  form.querySelector('button[aria-label="Sesli iletisimi baslat"]')!.outerHTML =
+    `<button type="button" class="${slot}" aria-label="Durdur">` +
+    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
+  expect(f.api.generating(), 'a translated stop button was not recognised').toBe(true);
+  expect(f.api.stopButton()?.getAttribute('aria-label')).toBe('Durdur');
+});
+
 it('preserves prepared multiline text through the shell editor serializer', () => {
   const f = fixture(), edit = editing(f);
   const value = '[[COS_CONTEXT:42]]\n# Worker instructions\n- Keep **literal** text, C:\\work and `<tag>`.\n[[/COS_CONTEXT]]\n\nContinue the task.';
