@@ -779,6 +779,20 @@
         sendText(source.text.slice(actualMarker[0].length)) === sendText(expected.slice(expectedMarker[0].length))) return true;
     return sendText(unescapeMarkdown(source.text)) === sendText(expected);
   }
+  /** Temporary-planner-only fallback for an accepted user row left on the immediately older Fiber scan. */
+  function acceptedTemporaryDecisionUser(message, decision) {
+    if (!decision?.temporary || !decision.onTarget() || !message || message.role !== 'user' ||
+        message.id !== decision.messageId || !message.node?.isConnected || isStale(message.node) ||
+        retiredMessages.has(message.id) || epoch !== decision.epoch) return false;
+    const stampedNode = sectionOf(message.node) || message.node;
+    const stamp = stampedNode.getAttribute?.('data-clf-fiber-turn') || '';
+    const split = stamp.lastIndexOf(':');
+    // Missing/current scan evidence still fails closed. This exception is only for a syntactically
+    // valid older scan whose native Send receipt already froze the exact message id.
+    if (split <= 0 || !/^\d+$/.test(stamp.slice(split + 1)) || stamp.slice(0, split) === fiberScanToken) return false;
+    return sendText(message.text) === sendText(decision.text) ||
+      sendText(unescapeMarkdown(message.text)) === sendText(decision.text);
+  }
   // A first fresh route may await authored evidence. A second route (including an
   // observed return to New Chat) revokes this send; text proof is not its lifetime.
   function submittedSendLifetime(target, startedEpoch = epoch) {
@@ -10895,9 +10909,11 @@
       const userTurn = CLF_DOM.turns().find(candidate => candidate.role === 'user' &&
         (candidate.nodes || [candidate.node]).some(node => node?.contains(messages[userIndex].node)));
       const user = stampedFiberTurn(userTurn, [...fiberTurns.values()], fiberScanToken);
-      if (!user || user.conversationConflict || user.conversationId !== turn.conversationId ||
-          !(user.messages || []).some(message => message.role === 'user' &&
-            (message.rawMessageId === decision.messageId || message.messageId === decision.messageId))) return;
+      if (user) {
+        if (user.conversationConflict || user.conversationId !== turn.conversationId ||
+            !(user.messages || []).some(message => message.role === 'user' &&
+              (message.rawMessageId === decision.messageId || message.messageId === decision.messageId))) return;
+      } else if (!acceptedTemporaryDecisionUser(messages[userIndex], decision)) return;
     } else if (turn.conversationId !== decision.conversationId) return;
     const terminal = (turn.messages || []).filter(message => message.role === 'assistant' &&
       (message.rawMessageId === turn.endMessageId || message.messageId === turn.endMessageId));
