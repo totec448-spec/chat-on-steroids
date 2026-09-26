@@ -654,6 +654,29 @@ describe('rendered temporary-chat state independent of language', () => {
     toggle(label, true);
     expect(api.temporaryChatReady()).toBe(true);
   });
+  /**
+   * The same answer from the page's own state, for a layout that no longer draws the glyph.
+   *
+   * Measured on 2026-09-25 across both kinds of chat: React holds `entry.isTemporaryChat`, true
+   * on `/c/<id>?temporary-chat=true` and false on an ordinary chat. `fiber.js` stamps that onto
+   * the turn with the pathname it was observed on, so a stamp left behind by another route
+   * cannot answer for this one — the same rule the running hint beside it follows.
+   */
+  it('accepts the state a mounted turn published, and only for this route', () => {
+    const shell = document.createElement('main');
+    shell.setAttribute('data-app-shell-main-surface', '');
+    shell.innerHTML = '<div data-thread-find-target="conversation"><div data-turn-key="t-1"></div></div>';
+    document.body.append(shell);
+    const turn = shell.querySelector('[data-turn-key]')!;
+    expect(api.temporaryChatReady(), 'an unstamped turn claimed the mode').toBe(false);
+
+    turn.setAttribute('data-clf-temporary-chat', '/c/somewhere-else');
+    expect(api.temporaryChatReady(), 'a stamp from another route answered for this one').toBe(false);
+
+    turn.setAttribute('data-clf-temporary-chat', dom.window.location.pathname);
+    expect(api.temporaryChatReady()).toBe(true);
+  });
+
   it('does not mistake a hidden checked glyph, English wording or URL intent for active mode', () => {
     dom.reconfigure({ url: 'https://chatgpt.com/?temporary-chat=true' });
     toggle('Turn off temporary chat', false);

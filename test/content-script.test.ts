@@ -836,6 +836,32 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.ack)).toHaveLength(1);
   });
 
+  it('confirms an empty temporary helper chat from the page-model stamp alone', async () => {
+    // 2026-09-26: the newer shell draws the temporary toggle without the `#chat-temp-checked`
+    // sprite, so only fiber.js can prove the mode — and nothing scanned a page with no
+    // conversation yet. The helper must ask for that scan instead of refusing the plan.
+    live = await harness(`https://chatgpt.com/?temporary-chat=true&cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail
+        ? { ok: true } : { input: claimed({ purpose: 'decision', lifetime: 'temporary-planner' }) } })
+    });
+    const window = live.window as any;
+    // Real timers, as replyFiber uses: the scan's give-up timer must not beat jsdom's delivery.
+    window.setTimeout = (fn: () => void, ms: number) => globalThis.setTimeout(fn, ms);
+    window.addEventListener('message', (event: any) => {
+      if (event.data?.source !== 'clf-fiber-ask') return;
+      live!.document.documentElement.setAttribute('data-clf-temporary-page', window.location.pathname);
+      window.postMessage({ source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 1, scanOk: true, rows: [], turns: [] }, window.location.origin);
+    });
+    const box = live.document.querySelector('#prompt-textarea')!;
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'temp-helper-user', text);
+      box.textContent = '';
+    });
+    const result = await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null });
+    expect(live.sent.filter(message => message.fail)).toEqual([]);
+    expect(result).toEqual({ ok: true });
+  });
+
   it('retains the insertion predicate when the helper editor rejects native editing', async () => {
     live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
       desktop_input: message => ({ ok: true, data: message.fail ? { ok: true } : { input: claimed({ purpose: 'decision' }) } })
