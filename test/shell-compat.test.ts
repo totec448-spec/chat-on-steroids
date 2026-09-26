@@ -638,6 +638,56 @@ it('finds the stop control by its square when the label is translated', () => {
   expect(f.api.stopButton()?.getAttribute('aria-label')).toBe('Durdur');
 });
 
+/**
+ * Send, on the same composer, in another language.
+ *
+ * All three `SEND` strategies fail on the newer composer: the `data-testid` is gone, nothing in
+ * that slot is `type="submit"` any more, and `aria-label^="Send"` is translated. `submitDraft`
+ * waits on `sendButton()` and deliberately has no Enter fallback, so when it finds nothing the
+ * prompt simply stands in the composer for ever. Reported in #415 on an English install — "opens
+ * a new GPT web tab and doesnt send any messages" — and captured on a Turkish page in #393.
+ *
+ * Send has no icon signature worth trusting, so it is identified by the state it is the only
+ * occupant of: text in the composer and nothing generating. Both other tenants of the slot are
+ * asserted here to stay out of it, because a dictation button clicked as send starts a recording
+ * and a stop square clicked as send ends somebody's turn.
+ */
+it('finds the send control by its slot when the label is translated', () => {
+  const f = fixture(), edit = editing(f);
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  // The newer composer has none of the three things SEND looks for.
+  f.doc.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.sendButton(), 'a composer with no send control offered one anyway').toBeNull();
+
+  // Empty composer: this slot is dictation, and it is not a send target.
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot} relative" aria-label="Sesli iletisimi baslat" data-state="closed">` +
+    '<svg aria-hidden="true" class="icon-primary-action"><path d="M10 2.5v6"></path><path d="M6 6v2"></path>' +
+    '<path d="M14 6v2"></path><path d="M10 12v5"></path></svg></button>');
+  expect(f.api.sendButton(), 'the dictation control was read as send').toBeNull();
+
+  // Text typed, and the slot now holds send with a translated label and an arrow.
+  form.querySelector('button[data-state="closed"]')!.remove();
+  expect(f.api.insertPrompt('Devam et', true)).toBe(true);
+  expect(edit.box.innerText).toContain('Devam et');
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot}" aria-label="Gönder">` +
+    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>');
+  expect(f.api.sendButton()?.getAttribute('aria-label'), 'a translated send button was not recognised').toBe('Gönder');
+
+  // The stop square in that same slot is never a send target.
+  form.querySelector('button[aria-label="Gönder"]')!.outerHTML =
+    `<button type="button" class="${slot}" aria-label="Durdur">` +
+    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
+  expect(f.api.sendButton(), 'the stop square was read as send').toBeNull();
+
+  // And an English label still wins outright, without consulting the slot at all.
+  form.querySelector('button[aria-label="Durdur"]')!.outerHTML =
+    '<button type="button" aria-label="Send prompt">send</button>';
+  expect(f.api.sendButton()?.getAttribute('aria-label')).toBe('Send prompt');
+});
+
 it('preserves prepared multiline text through the shell editor serializer', () => {
   const f = fixture(), edit = editing(f);
   const value = '[[COS_CONTEXT:42]]\n# Worker instructions\n- Keep **literal** text, C:\\work and `<tag>`.\n[[/COS_CONTEXT]]\n\nContinue the task.';
