@@ -16,6 +16,7 @@ export function paintContextMeter(session: SessionSummary | null, config: Config
   const observed = session?.selectedModel;
   const selection = composer ?? (observed?.conversationId === session?.conversationId ? observed : null);
   const pro = isProModel(selection?.model, selection?.reasoningEffort);
+  const worker = session?.origin?.kind === 'worker' || session?.origin?.kind === 'helper';
   const limit = config.sessions.limitTokens;
   const percent = limit > 0 ? Math.min(100, Math.round(used / limit * 100)) : 0;
   arc.setAttribute('stroke-dasharray', `${pro ? 0 : percent * 0.377} 37.7`);
@@ -23,11 +24,15 @@ export function paintContextMeter(session: SessionSummary | null, config: Config
   const description = () => [t('Session context · estimated'), pro
     ? t('{0} tokens used', [tokens])
     : t('{0} / {1} tokens · {2}% of configured limit', [tokens, new Intl.NumberFormat().format(limit), percent]),
-    pro ? t('Auto-compaction off for Pro') : config.compaction.auto
+    worker ? t('Automatic compaction is unavailable for worker and helper chats') : pro ? t('Auto-compaction off for Pro') : config.compaction.auto
       ? t('Auto-compaction at {0} tokens', [new Intl.NumberFormat().format(config.compaction.autoTokens)])
       : t('Auto-compaction off')].join('\n');
   ui(panel, 'textContent', description);
   ui(button, 'aria-label', () => description().replaceAll('\n', '. '));
+  const explain = document.getElementById('contextMeterPolicy');
+  if (explain) ui(explain, 'textContent', () => pro || worker
+    ? t('The global automatic setting does not override this restriction. Manual Compact & resume remains a separate action.')
+    : t('Automatic compaction watches active eligible chats, saves a handoff, and continues in a fresh conversation. The token count is a local estimate.'));
 }
 
 export function initContextMeter(): void {
@@ -37,5 +42,11 @@ export function initContextMeter(): void {
   const close = () => { root.classList.remove('pinned'); button.setAttribute('aria-expanded', 'false'); };
   button.addEventListener('click', () => { const open = root.classList.toggle('pinned'); button.setAttribute('aria-expanded', String(open)); });
   document.addEventListener('click', event => { if (event.target instanceof Node && !root.contains(event.target)) close(); });
-  button.addEventListener('keydown', event => { if (event.key === 'Escape') { close(); button.blur(); } });
+  // Capture descendants as well as the trigger without relying on bubbling.
+  // A closed panel must not consume Escape or steal focus from another control.
+  root.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && root.classList.contains('pinned')) {
+      event.preventDefault(); event.stopPropagation(); close(); button.focus();
+    }
+  }, true);
 }

@@ -21,7 +21,7 @@ import { inFlightToolCalls } from '../mcp/call-context.js';
 import { automaticFinishEnabled, goalDrivingMode, consumeGoalReplyForInputNow } from '../goal.js';
 import { finishInstruction } from '../../shared/finish.js';
 import { attachmentSchema, validateInputAttachments, normalizeInputAttachments } from './input-attachments.js';
-import { MAX_CHATGPT_MESSAGE_CHARS } from '../../shared/user-prompt.js';
+import { MAX_CHATGPT_MESSAGE_CHARS, normalizeUserPromptFrame } from '../../shared/user-prompt.js';
 import type { PromptLimits } from './prompt.js';
 import { recoveryMessage, recoveryBusyMs } from '../../shared/recovery.js';
 
@@ -126,18 +126,27 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
   const session = await getSession(sessionId);
   if (!session?.conversationId || isChatBlocked(session.conversationId)) return { queueAtFinish: false, canInject: false, injectionTurnId: null, directTurn: null, browserAllowed: false, settled: false };
   const activity = observedActivity ?? deliveryHooks?.activity?.(session) ?? { possible: !!session.activeTurnId, exact: !!session.activeTurnId };
-  const stopped = session.finishTurn?.released === true;
+  // Finish release is a local hold transition, not provider Stop confirmation.
+  // Keep it as an interruption fence while that exact active turn has not been
+  // observed stopped. If later exact activity reopens the same stopped turn,
+  // the old release must not strand new input behind a terminal view that the
+  // current activity has already disproved.
+  const releasedActiveFinish = !!session.activeTurnId && session.finishTurn?.released === true &&
+    session.finishTurn.turnId === session.activeTurnId && session.finishTurn.conversationId === session.conversationId;
+  const resumedStoppedTurn = releasedActiveFinish && activity.exact && activity.turnId === session.activeTurnId &&
+    end?.kind === 'turn_end' && end.turnId === session.activeTurnId && end.outcome === 'stopped';
+  const releaseFence = releasedActiveFinish && !resumedStoppedTurn;
   const selection = session.selectedModel?.conversationId === session.conversationId ? session.selectedModel : null;
   // A previous turn's MCP history must not disable ordinary-chat steering. The
   // existing start and tool timestamps cover committed work; in-flight custody
   // also covers the first call before its durable recording has landed.
-  const directTurn = !stopped && activity.exact && end?.kind === 'turn_start' &&
+  const directTurn = !releaseFence && activity.exact && end?.kind === 'turn_start' &&
     !!end.turnId && end.turnId === session.activeTurnId && !!selection?.model &&
     activity.model !== 'pro' && activity.model !== 'unknown' &&
     !isProModel(selection.model, selection.reasoningEffort) &&
     (session.lastToolCallAt ?? -1) < end.time && inFlightToolCalls(session.conversationId) === 0
     ? { id: end.turnId, startedAt: end.time } : null;
-  const canInject = !stopped && activity.exact && !directTurn;
+  const canInject = !releaseFence && activity.exact && !directTurn;
   // The bridge's retained exact MCP grant can outlive a native UI end. Project
   // that same turn for image custody, never invent an active recorder turn.
   const injectionTurnId = canInject ? session.activeTurnId ?? (activity.turnId === end?.turnId ? activity.turnId ?? null : null) : null;
@@ -491,17 +500,23 @@ async function transition(current: InputEntry[], next: InputEntry[], automated: 
   }
   await commit(next);
 }
-/** Freeze the exact transport bytes with its durable claim, never the authored enqueue payload. */
-async function prepare(entry: InputEntry, suffix = ''): Promise<InputEntry> {
-  if (entry.purpose === 'decision') return entry;
+/** The generated plan's first entry carries the captured task; later checkpoints stay literal. */
+function executorInputText(entry: InputEntry): string {
   // Generated openings and plans cannot replace the user's complete request.
-  // Keep the authored text intact; freeze the complete objective in the same
-  // delivery claim so retries cannot reconstruct a different opening message.
-  const text = entry.stages !== undefined && entry.mode !== 'finish'
-    ? `Original user request:\n${entry.objective || entry.text}\n\nComplete workflow:\n${[entry.text, ...entry.stages].map((stage, index) => `${index + 1}. ${stage}`).join('\n\n')}\n\nBegin the complete implementation now. Later queued messages are verification checkpoints; do not wait for them to learn or implement requirements. Carry out and verify each received checkpoint before asking for the next one with session_finish; never call it repeatedly just to collect the queue.`
+  // Explicit queue edits make text human-authored again. Objective metadata on
+  // ordinary messages must not turn them into generated-plan carriers.
+  // Finish timing belongs to the Astra-only delivery reminder, not this shared workflow.
+  return entry.stages !== undefined && (entry.mode !== 'finish' ||
+    (entry.authoredSource === 'objective' && !!entry.objective))
+    ? `Original user request:\n${entry.objective || entry.text}\n\nComplete workflow:\n${[entry.text, ...entry.stages].map((stage, index) => `${index + 1}. ${stage}`).join('\n\n')}\n\nBegin the complete implementation now. Later queued messages are verification checkpoints; do not wait for them to learn or implement requirements. Complete and verify each received checkpoint before proceeding to the next.`
     : entry.objective && (entry.opening || !entry.sessionId)
       ? `Original user request:\n${entry.objective}\n\nOpening instruction:\n${entry.text}\n\nFollow the complete original request, including all constraints, throughout this task.`
       : entry.text;
+}
+/** Freeze the exact transport bytes with its durable claim, never the authored enqueue payload. */
+async function prepare(entry: InputEntry, suffix = ''): Promise<InputEntry> {
+  if (entry.purpose === 'decision') return entry;
+  const text = executorInputText(entry);
   const mandatoryOverhead = `${TOOL_INPUT_HEADER}\n\n${finishInstruction(getConfig().ui.finishLeadMinutes)}`;
   const deliveryText = entry.deliveryText ?? await deliveryHooks?.prepareText?.({ ...entry, text: text + suffix }, {
     maxChars: MAX_CHATGPT_MESSAGE_CHARS, maxBytes: TOOL_INPUT_TEXT_BYTES - Buffer.byteLength(mandatoryOverhead)
@@ -1271,7 +1286,9 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
       ? finishInstruction(settings.finishLeadMinutes) : '';
     const suffix = instruction && !entry.text.includes(instruction) ? '\n\n' + instruction : '';
     let claimed: InputEntry;
-    const prepareClaim = (checkpoint?: InputEntry) => prepare({ ...combinedInput(entry, checkpoint), ...(checkpoint ? { companionInputId: checkpoint.id } : {}), ...(completedTurnId ? { completedTurnId } : {}),
+    // A plan accompanying a correction needs the same complete executor text.
+    // The durable claim and history below retain both original authored rows.
+    const prepareClaim = (checkpoint?: InputEntry) => prepare({ ...combinedInput(entry, checkpoint ? { ...checkpoint, text: executorInputText(checkpoint) } : undefined), ...(checkpoint ? { companionInputId: checkpoint.id } : {}), ...(completedTurnId ? { completedTurnId } : {}),
       ...(entry.transportIntent === 'tool' ? { transportIntent: 'browser' } : {}),
       state: 'browser', owner, conversationId, offeredAt: entry.offeredAt ?? Date.now(), requiresAuthorization }, suffix);
     try {
@@ -1600,6 +1617,27 @@ export function completeBrowserDecision(id: string, owner: string, response: str
     waiter?.resolve(response);
     return !!waiter;
   });
+}
+
+/** Recover only a previously authorized, exactly bound opening whose native user
+ * record now proves receipt. An ambiguous or later user message cannot spend it. */
+export async function collectRecordedBrowserOpening(conversationId: string): Promise<void> {
+  const pending = (await listInputs()).filter(row => row.state === 'browser' && row.opening === true && row.purpose !== 'decision' &&
+    row.conversationId === conversationId && row.sessionId && row.owner && row.requiresAuthorization === true &&
+    Number.isFinite(row.sendAuthorizedAt) && typeof row.deliveryText === 'string');
+  if (pending.length !== 1 || isChatBlocked(conversationId) || await conversationWasSuperseded(conversationId)) return;
+  const row = pending[0]!;
+  const session = await findSessionByConversation(conversationId, { requireUnique: true });
+  if (!session || session.id !== row.sessionId) return;
+  const users = await readRecentEvents(session.id, 2, { kinds: ['user_message'], maxBytes: 1_048_576 });
+  if (users.length !== 1) return;
+  const user = users[0];
+  if (user?.kind !== 'user_message' || user.source !== 'extension' || !user.messageId || user.messageId.startsWith('input:') || user.message.truncated) return;
+  const compact = (value: string) => normalizeUserPromptFrame(value).replace(/\s+/g, '');
+  if (compact(user.message.text) !== compact(row.deliveryText!)) return;
+  // The original authorized, already-bound opening owns this late receipt.
+  // No new claim, tab adoption or repeat Send is permitted by this recovery.
+  await acknowledgeBrowserInput(row.id, row.owner!, conversationId, user.messageId);
 }
 
 /** The outbox's exact native-send receipt survives losing the helper document.

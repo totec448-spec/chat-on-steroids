@@ -13,7 +13,7 @@ import type { Handoff } from '../../shared/session.js';
 import { continuationMarkerOf, unescapeMarkdown } from '../../shared/session.js';
 import { logInfo } from '../logger.js';
 import { getSession, readSessionPlan, saveHandoff } from './store.js';
-import { destinationContinuationMarker } from './handoff-prompt.js';
+import { destinationContinuationMarker, nativeHandoffPrompt } from './handoff-prompt.js';
 import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../../shared/user-prompt.js';
 import type { AgentPlan } from '../../shared/agent-plan.js';
 
@@ -56,18 +56,18 @@ export function resumeBootstrapText(summary: string, token = ''): string {
   );
 }
 
-/** Keep TASK and NEXT / DO NOT when a brief exceeds the replacement message budget. */
-function boundBrief(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-  const marker = '\n\n[… the middle of this brief was longer than the app carries across and was left out …]\n\n';
-  const room = maxChars - marker.length;
-  const headRoom = Math.floor(room * 0.4);
-  const head = text.slice(0, headRoom);
-  const tail = text.slice(text.length - (room - headRoom));
-  const headBreak = head.lastIndexOf('\n');
-  const tailBreak = tail.indexOf('\n');
-  return (headBreak > headRoom - 400 ? head.slice(0, headBreak) : head) + marker +
-    (tailBreak >= 0 && tailBreak < 400 ? tail.slice(tailBreak + 1) : tail);
+/** Ask the source writer to fit the real remaining budget, leaving ordinary safety margin. */
+export async function sessionHandoffPrompt(sessionId: string, token: string, includeToolCalls: boolean): Promise<string> {
+  const plan = handoffPlanNotice(await readSessionPlan(sessionId));
+  const allowance = Math.min(80_000, MAX_CHATGPT_MESSAGE_CHARS - resumeBootstrapText('', token).length - plan.length);
+  return nativeHandoffPrompt(token, includeToolCalls, allowance);
+}
+
+/** The bridge durably refuses an oversized capture instead of retrying it indefinitely. */
+export async function briefOverflow(sessionId: string, text: string, token: string): Promise<string | null> {
+  const plan = handoffPlanNotice(await readSessionPlan(sessionId));
+  const allowance = MAX_CHATGPT_MESSAGE_CHARS - resumeBootstrapText('', token).length - plan.length;
+  return text.length > allowance ? `The handoff has ${text.length} characters but only ${allowance} fit with the saved plan. No content was removed. Request a shorter brief before retrying Compact & Resume.` : null;
 }
 
 /**
@@ -100,8 +100,7 @@ export function resumeBootstrapMatches(recorded: string, summary: string): boole
 /**
  * The shortest a brief may be before it is refused, for any session at all.
  *
- * Far below what the brief rules ask for — they target 10,000-30,000 tokens — because this
- * is not a quality bar. It is the line under which a document cannot be a handoff of
+ * This is not a quality bar. It is the line under which a document cannot be a handoff of
  * anything, whatever the session held.
  */
 const MIN_BRIEF_CHARS = 200;
@@ -161,7 +160,8 @@ export async function prepareHandoff(input: PrepareHandoffInput): Promise<Handof
   // tool cannot supply it to the replacement model. Budget this same snapshot once.
   const planNotice = handoffPlanNotice(await readSessionPlan(input.sessionId));
   const overhead = resumeBootstrapText('', input.continuationToken).length + planNotice.length;
-  text = boundBrief(text, MAX_CHATGPT_MESSAGE_CHARS - overhead);
+  const allowance = MAX_CHATGPT_MESSAGE_CHARS - overhead;
+  if (text.length > allowance) throw new Error(`The handoff brief is ${text.length} characters; at most ${allowance} fit with the saved plan. No content was removed. Keep the original conversation and request a shorter brief before retrying Compact & Resume.`);
   // Checked again here, and not only at the bridge route that can word the refusal well,
   // because this is the one function that writes a handoff to disk. A stub that reaches the
   // store is indistinguishable from a real brief for the rest of its life.

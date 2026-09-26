@@ -1007,6 +1007,10 @@ export async function bindContinuationDestinationMessageNow(
   return withCheckpointLock(token, async () => {
     const entry = byToken.get(token);
     if (!entry || !entry.handoffId || conversationId === entry.from) return false;
+    // Adapted from Haz4rdovisk's #345 ACK-first compaction repair: once the
+    // WAL names B, a late marker may complete only B's already-dispatched
+    // receipt. It cannot retarget a committed transaction or reopen delivery.
+    if (entry.to !== null && entry.to !== conversationId) return false;
     // Exact destination identity remains a proof after the transaction commits. A content
     // script can reload after B was durably attached but before it correlated the first tool
     // request; making `isOpen()` the first gate turned that harmless reload into an identity
@@ -1018,7 +1022,11 @@ export async function bindContinuationDestinationMessageNow(
         entry.destinationSend.messageId === messageId
       );
     }
-    if (!isOpen(entry)) return false;
+    // A destination command ACK can commit B before the marked user row reaches
+    // this owner. That later row completes the existing dispatch checkpoint; it
+    // is not a second continuation or another Send. Aborted and never-dispatched
+    // records stay closed, and the committed WAL must already name this exact B.
+    if (!isOpen(entry) && !(entry.state === 'committed' && entry.to === conversationId)) return false;
     if (entry.destinationSend.state !== 'dispatched-unresolved') return false;
     await transitionNow(entry, (current) => ({
       ...current,
@@ -1391,6 +1399,12 @@ async function commitContinuationUnlocked(
 ): Promise<ContinuationCommitResult> {
   if (!toConversationId || toConversationId === entry.from) {
     return { status: 'rejected', reason: 'the replacement chat is not a distinct conversation' };
+  }
+  // The marked native user row is stronger destination proof than a later
+  // transport ACK. A contradictory ACK must not move the same local session to
+  // another chat after the browser already bound the exact bootstrap to B.
+  if (entry.destinationSend.state === 'sent' && entry.destinationSend.conversationId !== toConversationId) {
+    return { status: 'rejected', reason: 'the destination message belongs to a different chat' };
   }
   if (entry.state === 'committed') {
     if (entry.to && entry.to !== toConversationId) {

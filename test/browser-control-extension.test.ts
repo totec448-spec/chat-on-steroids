@@ -4,7 +4,7 @@ import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const source = readFileSync('extension/browser-control.js','utf8')
-  .replace(/^import .*\n/, '').replace('export function ', 'function ');
+  .replace(/^import .*\n/gm, '').replace('export function ', 'function ');
 
 async function fixture(owner = 'A', protectedPage = true) {
   const saved = {browserId:randomUUID(),epoch:'epoch',receipt:null,tabs:[{tabId:17,owner,lease:'lease'}]};
@@ -15,7 +15,7 @@ async function fixture(owner = 'A', protectedPage = true) {
     scripting:{executeScript:vi.fn(async(_args:unknown)=>[{frameId:0,documentId:String(randomUUID()),result:{text:'Visible update',refs:[],elements:0}}])},
     debugger:{attach:vi.fn(async()=>{}),detach:vi.fn(async()=>{}),sendCommand:vi.fn(async()=>({}))}
   };
-  const create = runInNewContext(`${source};createBrowserControl`, {browserPage:()=>{},crypto:{randomUUID},navigator:{userAgent:'Chrome'},setTimeout,clearTimeout,TextEncoder,URL});
+  const create = runInNewContext(`${source};createBrowserControl`, {browserPage:()=>{},openRecordedReferencePage:()=>{},crypto:{randomUUID},navigator:{userAgent:'Chrome'},setTimeout,clearTimeout,TextEncoder,URL});
   const transport = vi.fn(async()=>({ok:true,data:{allowed:true,epoch:'epoch',policy:{read:true,write:true},requests:[]}}));
   const control = create(chrome,transport,()=>protectedPage);
   await control.pump();
@@ -25,6 +25,27 @@ async function fixture(owner = 'A', protectedPage = true) {
 afterEach(()=>vi.useRealTimers());
 
 describe('browser extension release custody',()=>{
+  it.each([false, true])('rechecks a UI-owned file preview after readiness without taking the debugger (revoked=%s)', async revoked => {
+    const {chrome, control, command, transport} = await fixture();
+    const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const tab = { id: 18, windowId: 1, url: `https://chatgpt.com/c/${conversationId}` };
+    Object.assign(chrome.tabs, { query: vi.fn(async () => [tab]), update: vi.fn(async () => tab), create: vi.fn() });
+    Object.assign(chrome, { windows: { get: vi.fn(async () => ({ state: 'minimized' })), update: vi.fn(async () => ({})) } });
+    chrome.scripting.executeScript.mockImplementationOnce(async () => {
+      if (revoked) transport.mockResolvedValue({ok:true,data:{allowed:false,epoch:'epoch',policy:{read:true,write:true},requests:[]}});
+      return [{ frameId: 0, documentId: 'native-document', result: { ready: true } }] as any;
+    }).mockResolvedValueOnce([{ frameId: 0, documentId: 'native-document', result: { requested: true } }] as any);
+    const input = { ...command('list', 'ui-reference:session'), conversationId, tool: 'open_recorded_reference',
+      args: { conversationId, messageId: '11111111-2222-4333-8444-555555555555', reference: { index: 0, type: 'file', name: 'report.py',
+        path: '/mnt/data/report.py', sourceMessageId: '11111111-2222-4333-8444-555555555555' } } };
+    if (revoked) { await expect(control.execute(input)).rejects.toThrow('PERMISSION_REVOKED'); expect(chrome.scripting.executeScript).toHaveBeenCalledTimes(1); }
+    else {
+      expect(await control.execute(input)).toMatchObject({ value: { requested: true } });
+      expect(chrome.scripting.executeScript.mock.calls[1]?.[0]).toMatchObject({ target: { tabId: 18, documentIds: ['native-document'] }, args: [expect.objectContaining({ openNow: true })] });
+    }
+    expect(chrome.debugger.attach).not.toHaveBeenCalled(); expect(chrome.debugger.detach).not.toHaveBeenCalled();
+  });
+
   it('reads an unclaimed protected tab without attaching, detaching or taking input ownership',async()=>{
     const {chrome,control,command}=await fixture();
     const inspect={...command('list'),tool:'browser_snapshot',args:{tabId:18,selector:'main',maxNodes:30,maxChars:2000}};

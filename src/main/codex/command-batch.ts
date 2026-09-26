@@ -32,12 +32,22 @@ function powershellBatch(commands: readonly string[], marker: string): string {
     'for ($__cos_batch_index = 0; $__cos_batch_index -lt $__cos_batch_commands.Count; $__cos_batch_index++) {',
     `  [Console]::Out.WriteLine(("--- command {0}/{1} --- [clf-batch:${marker}]" -f ($__cos_batch_index + 1), $__cos_batch_commands.Count))`,
     '  $global:LASTEXITCODE = 0',
+    '  $__cos_batch_parsed = $false',
     '  try {',
     '    $__cos_batch_text = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($__cos_batch_commands[$__cos_batch_index]))',
-    '    . ([ScriptBlock]::Create($__cos_batch_text))',
+    '    $__cos_batch_script = [ScriptBlock]::Create($__cos_batch_text)',
+    '    $__cos_batch_parsed = $true',
+    '    . $__cos_batch_script',
     '    $__cos_batch_succeeded = $?',
     '    $__cos_batch_code = if ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } elseif ($__cos_batch_succeeded) { 0 } else { 1 }',
     '  } catch {',
+    // The exception message is localized. Report only a real pre-execution parse
+    // failure, not a nested parser exception thrown after a command mutated state.
+    '    if (-not $__cos_batch_parsed) {',
+    '      $__cos_batch_exception = $_.Exception',
+    '      while ($null -ne $__cos_batch_exception -and -not ($__cos_batch_exception -is [System.Management.Automation.ParseException])) { $__cos_batch_exception = $__cos_batch_exception.InnerException }',
+    `      if ($null -ne $__cos_batch_exception) { [Console]::Out.WriteLine('--- PowerShell parse failed --- [clf-batch:${marker}]') }`,
+    '    }',
     '    [Console]::Error.WriteLine($_.ToString())',
     '    $__cos_batch_code = 1',
     '  }',
@@ -136,6 +146,8 @@ export interface CommandBatchSection {
   exitCode: number;
   /** Output between this command's banner and its exit-code marker. */
   text: string;
+  /** Proven by the wrapper before execution, independent of diagnostic language. */
+  parseFailed?: true;
 }
 
 /**
@@ -163,7 +175,8 @@ export function parseCommandBatchSections(output: string, marker: string): Comma
   const count = Number(first[1]);
   const pattern = new RegExp(`^--- command (\\d+)\\/${count} --- \\[clf-batch:${marker}\\]$`);
   const exitPattern = new RegExp(`^--- exit code (-?\\d+) --- \\[clf-batch:${marker}\\]$`);
-  let open: { index: number; body: string[] } | null = null;
+  const parseFailure = `--- PowerShell parse failed --- [clf-batch:${marker}]`;
+  let open: { index: number; body: string[]; parseFailed?: true } | null = null;
   for (const line of lines.slice(firstIndex)) {
     const banner = pattern.exec(line);
     if (banner) {
@@ -171,9 +184,11 @@ export function parseCommandBatchSections(output: string, marker: string): Comma
       continue;
     }
     if (!open) continue;
+    if (line === parseFailure) { open.parseFailed = true; continue; }
     const exit = exitPattern.exec(line);
     if (exit) {
-      sections.push({ index: open.index, exitCode: Number(exit[1]), text: open.body.join('\n') });
+      sections.push({ index: open.index, exitCode: Number(exit[1]), text: open.body.join('\n'),
+        ...(open.parseFailed && Number(exit[1]) !== 0 ? { parseFailed: true as const } : {}) });
       open = null;
       continue;
     }

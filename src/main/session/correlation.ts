@@ -35,6 +35,7 @@ export interface RequestCorrelation {
   conversationId: string;
   /** Durable local session epoch that owned this request when the page first proved it. */
   sessionId: string;
+  /** Empty for an exact stream origin observed before a native message exists. */
   messageId: string;
   tool: string;
   observedAt: number;
@@ -123,7 +124,7 @@ function validCorrelation(value: unknown): value is RequestCorrelation {
     typeof item.requestId === 'string' && item.requestId.length > 0 && item.requestId.length <= 200 &&
     typeof item.conversationId === 'string' && item.conversationId.length > 0 && item.conversationId.length <= 200 &&
     typeof item.sessionId === 'string' && /^[0-9a-z-]{8,64}$/i.test(item.sessionId) &&
-    typeof item.messageId === 'string' && item.messageId.length > 0 && item.messageId.length <= 300 &&
+    typeof item.messageId === 'string' && item.messageId.length <= 300 &&
     typeof item.tool === 'string' && item.tool.length <= 100 &&
     typeof item.observedAt === 'number' && Number.isFinite(item.observedAt)
   );

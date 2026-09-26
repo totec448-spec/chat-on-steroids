@@ -360,6 +360,41 @@ it('keeps a reaction on the native question across 100 interim messages, tool ca
   expect(w.document.getElementById('timeline')!.textContent).not.toContain('message_reaction');
 });
 
+it('coalesces durable change notifications without a second 400ms streaming delay', async () => {
+  const app = await boot([]);
+  const api = (app.w as any).api, list = api.listSessions;
+  api.listSessions = vi.fn(list);
+  try {
+    vi.useFakeTimers();
+    app.live.events.push({ seq: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'stream-live',
+      state: 'streaming', final: false, message: text('A live revision') });
+    app.notifySession(); app.notifySession(); app.notifySession();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(app.w.document.getElementById('timeline')?.textContent).toContain('A live revision');
+    expect(api.listSessions.mock.calls.length).toBeLessThanOrEqual(2);
+  } finally { vi.useRealTimers(); }
+});
+
+it('renders native writing, references and file cards through the real sanitized timeline', async () => {
+  const id = '11111111-2222-4333-8444-555555555555';
+  const event: SessionEvent = { seq: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: id, providerMessageId: id,
+    message: text(':::writing{variant="document" title="A fresh start"}\nA **formatted** paragraph.\n:::\n\nSource :chatgpt-content-reference{index="0"}.\n\n:chatgpt-content-reference{index="1"}[Download `report.py`](sandbox:/mnt/data/report.py)'),
+    state: 'final', final: true, presentation: { conversationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', references: [
+      { index: 0, type: 'web', sources: [{ title: 'Research', url: 'https://example.com/research' }] },
+      { index: 1, type: 'file', name: 'report.py', path: '/mnt/data/report.py', sourceMessageId: id }
+    ] } };
+  const { w } = await boot([event]);
+  const api = (w as any).api; api.openSessionReference = vi.fn(async () => ({ ok: true, data: true }));
+  const timeline = w.document.getElementById('timeline')!;
+  expect(timeline.textContent).not.toMatch(/:::writing|chatgpt-content-reference/);
+  expect(timeline.querySelector('.writing-card-title')?.textContent).toContain('A fresh start');
+  expect(timeline.querySelector('.writing-card-body strong')?.textContent).toBe('formatted');
+  expect(timeline.querySelector('a[href="https://example.com/research"]')).not.toBeNull();
+  (timeline.querySelector('.returned-file') as HTMLButtonElement).click(); await settle();
+  expect(api.openSessionReference).toHaveBeenCalledExactlyOnceWith(summary([]).id, id, 1);
+  expect(timeline.querySelector('a[href^="sandbox:"]')).toBeNull();
+});
+
 it.each(['compaction', 'blocked', 'worker'])('retires %s control status when leaving its session, including late IPC and locale refresh', async kind => {
   const { w, append } = await boot([]);
   const api = (w as any).api;
@@ -1904,6 +1939,31 @@ it('keeps a streaming message anchor and its following tool group across canonic
   expect(group.open).toBe(true);
 });
 
+it('lazily integrates recorded patch details and preserves raw evidence and disclosure across updates', async () => {
+  const event = toolCall(1, 'recorded-patch') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  const patch = '*** Begin Patch\n*** Update File: src/example.ts\n@@\n-oldValue\n+newValue\n*** End Patch';
+  event.call = { ...event.call, tool: 'apply_patch', args: text(JSON.stringify({ patch })),
+    result: text('One recorded patch was applied.'), summary: { kind: 'other', title: 'Updated example.ts', tone: 'good' } };
+  const { w, append, live } = await boot([event]);
+  const timeline = w.document.getElementById('timeline')!;
+  const row = timeline.querySelector<HTMLDetailsElement>('.ev-tool_call details.tool')!;
+  expect(row.querySelector('.action-details')).toBeNull();
+  row.open = true; row.dispatchEvent(new w.Event('toggle'));
+  expect(row.querySelector('.action-details-title')?.textContent).toBe('Applied patch');
+  expect(row.querySelector('.action-details-line-added')?.textContent).toBe('+newValue\n');
+  expect(row.querySelector('.action-details-line-removed')?.textContent).toBe('-oldValue\n');
+  const original = row.querySelector<HTMLDetailsElement>('.action-original')!;
+  expect(original.open).toBe(false);
+  expect(original.textContent).toContain(event.call.args.text);
+  expect(original.textContent).toContain(event.call.result.text);
+  original.open = true;
+  await append([toolCall(2, 'subsequent-read')]);
+  expect(timeline.querySelector('.ev-tool_call details.tool')).toBe(row);
+  expect(row.querySelector('.action-original')).toBe(original);
+  expect(original.open).toBe(true);
+  expect(live.sent).toEqual([]);
+});
+
 it('keeps an unfolded tool row as the same open node while the chat keeps appending', async () => {
   const { w, append } = await boot([
     { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },
@@ -2071,6 +2131,24 @@ it('shows elapsed work for the exact recorded turn without exposing lifecycle ro
   (w as any).api.getSessionControls = (id: string) => Promise.resolve({ ok: true, data: { sessionId: id, automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
   await append([{ seq: 2, time: T0 + 65_000, source: 'extension', kind: 'turn_end', turnId: 'held-turn', outcome: 'completed' }]);
   expect(w.document.getElementById('chatState')!.textContent).toBe('Worked for 1m 5s');
+});
+
+it('updates native work captions without timeline duplication and keeps Stop pending until its native verdict', async () => {
+  const { w, append } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  const controls = { sessionId: summary([]).id, conversationId: 'chat-a', automation: 'off', activeTurnId: 'held-turn' as string | null,
+    finishHeld: false, stopPending: false, activityCaption: 'Searching documentation', blocked: '', job: null };
+  (w as any).api.getSessionControls = async () => ({ ok: true, data: controls });
+  await append([]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe('Searching documentation');
+  controls.activityCaption = 'Analyzing results'; await append([]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe('Analyzing results');
+  expect(w.document.querySelector('#timeline')!.textContent).not.toContain('Searching documentation');
+  controls.stopPending = true; await append([]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe('Stop requested · waiting for ChatGPT');
+  controls.activeTurnId = null; controls.stopPending = false;
+  await append([{ seq: 2, time: T0 + 4000, source: 'extension', kind: 'turn_end', turnId: 'held-turn', outcome: 'stopped' }]);
+  expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Stopped/);
+  expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Send message');
 });
 
 
@@ -2817,13 +2895,14 @@ it('follows the accepted New Chat receipt while preserving a typed follow-up', a
   expect(composer.value).toBe('Follow-up while delivery is pending');
 });
 
-it('shows Pro Loop delivery before sending and freezes changes made while the opening is being accepted', async () => {
-  const { w, live } = await boot([], false, [], [], { pro: true });
+it('shows Astra Loop delivery before sending and freezes changes made while the opening is being accepted', async () => {
+  const { w, live } = await boot([], false, [], [], { astra: true });
   (await (w as any).api.getState()).data.config.ui.finishTool = true;
   const row = w.document.getElementById('loopDeliveryRow')!;
   const effort = w.document.getElementById('composerReasoning') as HTMLSelectElement;
+  const model = w.document.getElementById('composerModel') as HTMLSelectElement;
   const delivery = w.document.getElementById('loopDelivery') as HTMLSelectElement;
-  const choose = (value: string) => { effort.value = value; effort.dispatchEvent(new w.Event('change')); };
+  const choose = (value: string) => { model.value = value === 'pro' ? 'gpt-6-pro' : 'gpt-5.6-sol'; model.dispatchEvent(new w.Event('change')); effort.value = value; effort.dispatchEvent(new w.Event('change')); };
   w.document.querySelector<HTMLButtonElement>('#automationSwitch [data-mode="loop"]')!.click();
   expect(row.hidden).toBe(true);
   choose('pro'); expect(row.hidden).toBe(false);
@@ -2837,7 +2916,7 @@ it('shows Pro Loop delivery before sending and freezes changes made while the op
   let accept!: () => void;
   api.sendInput = vi.fn((input: InputArgs) => new Promise(resolve => { accept = () => resolve(originalSend(input)); }));
   api.setInputAutomation = vi.fn(async () => ({ ok: true, data: true }));
-  (w.document.getElementById('chatInput') as HTMLTextAreaElement).value = 'First Pro Loop message';
+  (w.document.getElementById('chatInput') as HTMLTextAreaElement).value = 'First Astra Loop message';
   w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
   await settle();
   expect(api.sendInput.mock.calls[0][0]).toMatchObject({ sessionId: null, automation: 'loop', loopAfterTurn: true });
@@ -2845,9 +2924,19 @@ it('shows Pro Loop delivery before sending and freezes changes made while the op
   accept(); await settle();
   expect(api.setInputAutomation).toHaveBeenLastCalledWith(live.sent[0]!.id, 'loop', false);
   w.document.querySelector<HTMLButtonElement>('#automationSwitch [data-mode="goal"]')!.click();
-  expect(row.hidden).toBe(true);
+  expect(row.hidden).toBe(false);
   w.document.getElementById('newChat')!.click();
   expect(delivery.value).toBe('finish');
+});
+
+it('never offers an unavailable Astra finish boundary for an older Pro Loop', async () => {
+  const { w } = await boot([], false, [], [], { pro: true });
+  (await (w as any).api.getState()).data.config.ui.finishTool = true;
+  const effort = w.document.getElementById('composerReasoning') as HTMLSelectElement;
+  effort.value = 'pro'; effort.dispatchEvent(new w.Event('change'));
+  w.document.querySelector<HTMLButtonElement>('#automationSwitch [data-mode="loop"]')!.click();
+  expect(w.document.getElementById('loopDeliveryRow')!.hidden).toBe(true);
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('loop');
 });
 
 it.each(['goal', 'loop'] as const)('keeps Astra %s selected when changing delivery and hides finish choices when finish is disabled', async mode => {

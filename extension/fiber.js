@@ -41,7 +41,7 @@
   'use strict';
 
   /** Bumped when the descriptor shape changes, so a stale pair cannot half-understand. */
-  const VERSION = 21;
+  const VERSION = 22;
   // The MAIN world survives an extension reload because the ChatGPT document survives it.
   // Recovery may therefore execute this file again in a page that still has an older helper
   // listener. Retire it across versions too: picker/plugin replies use their own v1
@@ -1548,9 +1548,15 @@
         inspect(state); if (Array.isArray(state)) inspect(state[0]);
       }
       const data = at.updateQueue?.memoCache?.data;
-      if (!Array.isArray(data) || data.length > 32) continue;
+      if (!Array.isArray(data)) continue;
+      // React compiler row count is not a version contract. The live shell uses
+      // 42 rows; discarding the entire owner above 32 hid its current mapping and
+      // forced every activity/request read back onto stale history. Count rows
+      // and cells against the existing total budget instead; partial scans still
+      // fail closed so an unseen conflicting candidate cannot become authority.
       for (const row of data) {
-        if (!Array.isArray(row) || row.length > 1024) continue;
+        if (--remaining < 0) break;
+        if (!Array.isArray(row)) continue;
         for (const item of row) { if (--remaining < 0) break; inspect(item); }
       }
     }
@@ -1647,11 +1653,14 @@
       if (node?.id !== id || message?.id !== id) continue;
       const request = str(message.metadata?.request_id), cached = data?.mapping?.[id]?.message;
       if (live && cached?.id === id && request && cached.metadata?.request_id && cached.metadata.request_id !== request) return [];
-      const publicMessage = selected.has(id) && message.author?.role === 'assistant' && !hiddenMessage(message) &&
-        message.metadata?.is_visually_hidden_reasoning_group !== true && message.metadata?.summary_type !== 'raw_cot';
-      const thought = publicMessage && thoughtMessage(message) && Array.isArray(message.content.thoughts)
+      const visibleSource = selected.has(id) && message.author?.role === 'assistant' && !hiddenMessage(message) &&
+        message.metadata?.is_visually_hidden_reasoning_group !== true;
+      // Read only the summary header, never thoughts[].content/chunks. A source
+      // marked raw_cot can still own a short public transient header. Export is
+      // allowed only after the exact unique typed public item matches it below.
+      const thought = visibleSource && thoughtMessage(message) && Array.isArray(message.content.thoughts)
         ? message.content.thoughts.at(-1)?.summary : null;
-      const preamble = publicMessage && channelOf(message) === 'commentary' &&
+      const preamble = visibleSource && message.metadata?.summary_type !== 'raw_cot' && channelOf(message) === 'commentary' &&
         (!message.recipient || message.recipient === 'all') ? authoredText(message) : null;
       out.push({ id, create_time: num(message.create_time), metadata: { request_id: request },
         ...(typeof thought === 'string' ? { thought: budgetedText(thought, publicBudget, MAX_RENDERED_TEXT) } : {}),
@@ -1667,7 +1676,7 @@
   function shellPublicActivity(shell, metadata, rendered, budget, section, exactAnchors) {
     const publicItems = shell.entry.turn.items.flatMap(item => item?.type === 'chatgpt-reasoning-group' &&
       Array.isArray(item.items) && item.reasoningRecap?.type !== 'hide_all' ? item.items : []).filter(item => item?.type === 'reasoning' &&
-        item.isTransient !== true && ['thought', 'preamble'].includes(item.presentation) && typeof item.content === 'string');
+        ['thought', 'preamble'].includes(item.presentation) && typeof item.content === 'string');
     const ids = shell.entry.turn.messageIds;
     const order = new Map(Array.isArray(ids) && ids.length <= MAX_ROWS ? ids.map((id, index) => [id, index]) : []);
     for (const message of rendered) if (order.has(message.rawMessageId)) message.order = order.get(message.rawMessageId);
@@ -1702,17 +1711,85 @@
         if (nodes.length === 1) exactAnchors.set(nodes[0], source.id);
       }
     }
+    // Python's public execution card has its own stable id and status. Its code,
+    // output and images are not required to show Analyzing/Analyzed activity.
+    const executions = shell.entry.turn.items.flatMap(item => item?.type === 'chatgpt-reasoning-group' &&
+      Array.isArray(item.items) && item.reasoningRecap?.type !== 'hide_all' ? item.items : [item])
+      .filter(item => item?.type === 'chatgpt-python-execution').slice(0, MAX_CALLS);
+    for (const item of executions) {
+      const id = str(item.id);
+      if (!id || executions.filter(other => other.id === id).length !== 1) continue;
+      const label = item.status === 'completed' ? 'Analyzed' : item.status === 'failed' || item.status === 'error' ? 'Analysis failed' :
+        ['running', 'in_progress'].includes(item.status) ? 'Analyzing' : null;
+      if (label) events.push({ messageId: `native-python:${id}`, label, order: order.get(id) });
+    }
     rendered.sort((a, b) => a.order - b.order);
-    return { events, notifications: [] };
+    // The current native headline can be public before it owns a message id.
+    // Keep it a turn-scoped presentation field, never fabricate a message/call.
+    const active = shell.entry.turn.status === 'in_progress' ? shell.entry.turn.items
+      .filter(group => group?.type === 'chatgpt-reasoning-group' && group.reasoningRecap?.type !== 'hide_all')
+      .map(group => group.activeReasoning).filter(item => item?.type === 'reasoning' &&
+        item.presentation === 'thought' && item.completed === false && typeof item.content === 'string') : [];
+    const liveActivity = active.length === 1 ? visibleText(active[0].content).slice(0, 300).trim() : '';
+    return { events, notifications: [], liveActivity: liveActivity || null };
   }
+  /** Bounded public reference metadata, kept separate from canonical message text.
+   * Opaque file ids never become guessed URLs; files are opened through their native control. */
+  function shellMessagePresentation(item, conversationId) {
+    if (!/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(conversationId || '') ||
+        !Array.isArray(item.contentReferences) || item.contentReferences.length > 64) return undefined;
+    const references = [];
+    const label = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+    const webSource = source => {
+      if (!label(source?.url, 2048)) return null;
+      try {
+        const url = new URL(source.url);
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+        return { title: label(source.title, 300) ? source.title : url.hostname, url: source.url };
+      } catch { return null; }
+    };
+    for (const [index, ref] of item.contentReferences.entries()) {
+      if (ref?.type === 'file' && label(ref.file_name || ref.name, 300) && label(ref.sandbox_path, 1024) &&
+          ref.sandbox_path.startsWith('/mnt/data/') && !/[\\?#]/.test(ref.sandbox_path) &&
+          ref.sandbox_path.split('/').every(part => part !== '..' && part !== '.') &&
+          /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(ref.message_id || '')) {
+        references.push({ index, type: 'file', name: ref.file_name || ref.name, path: ref.sandbox_path, sourceMessageId: ref.message_id });
+      } else if (['webpage', 'grouped_webpages'].includes(ref?.type)) {
+        const entries = ref.type === 'webpage' ? [ref] : Array.isArray(ref.items) ? ref.items.slice(0, 8) : [];
+        const sources = entries.map(webSource).filter(Boolean);
+        if (sources.length) references.push({ index, type: 'web', sources });
+      }
+    }
+    const result = { conversationId, references };
+    // Bound only the allowlisted strings; never serialize a provider object.
+    const chars = references.reduce((total, ref) => total + 128 + (ref.type === 'file'
+      ? ref.name.length + ref.path.length + ref.sourceMessageId.length
+      : ref.sources.reduce((size, source) => size + 64 + source.title.length + source.url.length, 0)), 64);
+    return chars <= 16000 ? result : undefined;
+  }
+
   /** Translate only publicly identified items in the mounted exchange. Missing item ids
    * stay missing; a stopped turn does not manufacture replies to its tool calls. */
+  function shellExchangeId(section) {
+    const layout = str(section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key'));
+    // Maximapple #423: fallback-turn-N is a virtualization position, not identity.
+    // Keep legacy exact search ids; positional shells use their stable user key,
+    // cross-checked against the current typed source in shellTurnSource below.
+    if (!/^fallback-turn-\d+$/.test(layout || '')) return layout;
+    const key = section.getAttribute('data-turn-key');
+    return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(key || '') ? key : null;
+  }
   function shellTurnSource(fiber, section, turnId) {
     let entry = null;
     for (let at = fiber, up = 0; at && up < 16; up++, at = at.return) {
       if (Array.isArray(at.memoizedProps?.entry?.turn?.items)) { entry = at.memoizedProps.entry; break; }
     }
-    if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_ROWS) return null;
+    const layout = str(section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key'));
+    if (!entry || !turnId || entry.id !== layout || shellExchangeId(section) !== turnId || entry.turn.items.length > MAX_ROWS) return null;
+    if (/^fallback-turn-\d+$/.test(layout || '')) {
+      const user = entry.turn.items.filter(item => item?.type === 'user-message');
+      if (user.length !== 1 || (str(user[0].messageId) || str(user[0].serverMessageId)) !== turnId) return null;
+    }
     const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [];
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
     let work = 0;
@@ -1720,6 +1797,7 @@
       if (++work > MAX_ROWS) return null;
       if (item?.type === 'user-message' || item?.type === 'assistant-message') {
         const user = item.type === 'user-message', id = str(item.messageId) || (user ? str(item.serverMessageId) : null);
+        if (!user && !['final_answer', 'commentary'].includes(item.phase)) continue;
         if (!id) continue;
         if (!remember(id) || (user && item.serverMessageId && item.messageId && item.serverMessageId !== item.messageId)) return null;
         const role = user ? 'user' : 'assistant', text = user ? item.message : item.content;
@@ -1728,7 +1806,7 @@
         messages.push({ id, author: { role }, content: { content_type: 'text', parts: [typeof text === 'string' ? text : ''] },
           channel: user ? null : final ? 'final' : 'commentary', end_turn: completed,
           status: completed ? 'finished_successfully' : 'in_progress', metadata: {} });
-        const key = `${turnId}:${index}:${role}`;
+        const key = `${entry.id}:${index}:${role}`;
         const nodes = [...section.querySelectorAll('[data-content-search-unit-key]')].filter(node =>
           node.closest('[data-turn-key]') === section && node.getAttribute('data-content-search-unit-key') === key);
         if (nodes.length === 1) slots.push({ node: nodes[0], id });
@@ -1775,7 +1853,7 @@
     const groups = [];
     for (let at = 0; at < sections.length; at++) {
       const section = sections[at];
-      const id = section.matches?.(SHELL_TURN) ? str(section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key')) : str(section.getAttribute('data-turn-id'));
+      const id = section.matches?.(SHELL_TURN) ? shellExchangeId(section) : str(section.getAttribute('data-turn-id'));
       const previous = groups[groups.length - 1];
       if (id && previous && previous.turnId === id) previous.sections.push(section);
       else groups.push({ turnId: id, sections: [section] });
@@ -1835,6 +1913,10 @@
         const turnBudget = { remaining: Math.min(MAX_TURN_TEXT, responseBudget.remaining) };
         const before = turnBudget.remaining;
         const renderedMessages = renderedMessagesOf(group.sections, messages, turnBudget, exactAnchors, conversation.conversationId);
+        if (shell && !conversation.conflict) for (const message of renderedMessages) {
+          const items = shell.entry.turn.items.filter(item => item?.type === 'assistant-message' && item.messageId === message.rawMessageId);
+          if (items.length === 1) message.presentation = shellMessagePresentation(items[0], conversation.conversationId);
+        }
         const nativeActivities = shell ? shellPublicActivity(shell, metadata, renderedMessages, turnBudget, section, exactAnchors) : nativeActivitiesOf(group.sections, messages, exactThoughtRows);
         responseBudget.remaining -= before - turnBudget.remaining;
         const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes);
@@ -1851,7 +1933,7 @@
           codeModeCalls.length === 0 && calls.length === 0 &&
           requests.length === 0 &&
           renderedMessages.length === 0 &&
-          activities.length === 0 && nativeActivities.notifications.length === 0 && generatedImages.length === 0 && !endMessageId
+          activities.length === 0 && !nativeActivities.liveActivity && nativeActivities.notifications.length === 0 && generatedImages.length === 0 && !endMessageId
         ) continue;
         const index = out.length;
         entry = {
@@ -1866,6 +1948,7 @@
           requests,
           messages: renderedMessages,
           activities,
+          ...(shell ? { liveActivity: conversation.conflict ? null : nativeActivities.liveActivity } : {}),
           thoughtNotifications: nativeActivities.notifications,
           images: generatedImages
         };
@@ -2127,6 +2210,7 @@
       const versions = options.filter(o => o && o.disabled !== true).map(o => ({ id: group(o.id), label: label(o.label) }));
       const choices = p.powerSelections.map(c => ({ bucket: c?.powerSettingIndex, id: id(c?.model),
         label: label(c?.modelLabel), familyId: id(c?.model), familyLabel: label(c?.modelLabel), effort: effort(c?.reasoningEffort),
+        ...(label(c?.sliderLabel) ? { effortLabel: label(c.sliderLabel) } : {}),
         available: p.modelSelectionDisabled !== true && c?.disabled !== true &&
           (!c?.availability || c.availability.status === 'available') && !p.modelSwitcherDenialsBySlug?.[c?.model] }));
       if (!version || !versions.length || versions.some(v => !v.id || !v.label) || !choices.length ||

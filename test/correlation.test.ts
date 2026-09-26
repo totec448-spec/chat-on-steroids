@@ -262,7 +262,7 @@ describe('request correlation ownership', () => {
    * launch by a validity check stricter than the registry's own answer, taking the proven owner
    * of a workflow whose calls could still be arriving.
    */
-  it('restores an owner proved by a request id ChatGPT had not yet given a tool name', async () => {
+  it.each(['f0f00013-1111-4111-8111-111111111111', ''])('restores an early owner without inventing tool/message identity (%s)', async messageId => {
     const dir = await mkdtemp(path.join(tmpdir(), 'clf-correlation-untooled-'));
     try {
       resetDurableForTests();
@@ -272,7 +272,7 @@ describe('request correlation ownership', () => {
         requestId,
         conversationId: 'conv-bare-request-id',
         sessionId: '2026-01-01-00000028',
-        messageId: 'f0f00013-1111-4111-8111-111111111111',
+        messageId,
         tool: '',
         observedAt: 1_788_276_631_192
       });
@@ -283,6 +283,7 @@ describe('request correlation ownership', () => {
 
       expect(requestCorrelation(requestId)?.conversationId).toBe('conv-bare-request-id');
       expect(requestCorrelation(requestId)?.sessionId).toBe('2026-01-01-00000028');
+      expect(requestCorrelation(requestId)?.messageId).toBe(messageId);
     } finally {
       resetCorrelationRegistryForTests();
       resetDurableForTests();

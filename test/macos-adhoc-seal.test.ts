@@ -36,19 +36,25 @@ it.each(['win32', 'linux'])('does not run macOS signing on %s', async platform =
   await seal({ ...context, electronPlatformName: platform });
   expect(ports.spawn).not.toHaveBeenCalled();
 });
-it('removes Electron media privacy declarations before sealing the bundle', async () => {
+it('retains explicit dictation permission while removing unused camera/system-audio declarations', async () => {
   presentMediaKeys.add('NSScreenCaptureUsageDescription');
   await expect(seal(context)).resolves.toBeUndefined();
-  expect(presentMediaKeys).toEqual(new Set(['NSScreenCaptureUsageDescription']));
+  expect(presentMediaKeys).toEqual(new Set(['NSScreenCaptureUsageDescription', 'NSMicrophoneUsageDescription']));
   expect(ports.spawn.mock.calls.filter(call => call[0] === 'plutil' && call[1][0] === '-remove').map(call => call[1][1]))
-    .toEqual(mediaKeys);
+    .toEqual(mediaKeys.filter(key => key !== 'NSMicrophoneUsageDescription'));
   const firstSignature = ports.spawn.mock.calls.findIndex(call => call[0] === 'codesign');
   expect(ports.spawn.mock.calls.slice(firstSignature).every(call => call[0] === 'codesign')).toBe(true);
 });
 it('accepts bundles with the unused declarations already absent', async () => {
   presentMediaKeys.clear();
+  presentMediaKeys.add('NSMicrophoneUsageDescription');
   await expect(seal(context)).resolves.toBeUndefined();
   expect(ports.spawn.mock.calls.some(call => call[1][0] === '-remove')).toBe(false);
+});
+it('refuses a dictation build without its microphone declaration', async () => {
+  presentMediaKeys.delete('NSMicrophoneUsageDescription');
+  await expect(seal(context)).rejects.toThrow('microphone usage description');
+  expect(ports.spawn.mock.calls.some(call => call[0] === 'codesign')).toBe(false);
 });
 it.each(['read', 'remove', 'unchanged'])('refuses to seal when plist cleanup fails: %s', async failure => {
   ports.spawn.mockImplementation((command: string, args: string[]) => {

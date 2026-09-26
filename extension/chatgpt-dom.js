@@ -477,8 +477,12 @@ var CLF_DOM = (() => {
 
   const shellRole = node => /:(user|assistant)$/.exec(node?.getAttribute?.('data-content-search-unit-key') || '')?.[1] || '';
   function turnIdOf(section) {
-    return section?.matches?.(SHELL_TURN) ? section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key') || null
-      : section?.getAttribute?.('data-turn-id') || null;
+    if (!section?.matches?.(SHELL_TURN)) return section?.getAttribute?.('data-turn-id') || null;
+    const layout = section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key') || null;
+    if (!/^fallback-turn-\d+$/.test(layout || '')) return layout;
+    // Mirror MAIN's exact exchange projection, never reuse a shifting layout index.
+    const key = section.getAttribute('data-turn-key');
+    return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(key || '') ? key : null;
   }
   function messageIdOf(node) {
     const explicit = node?.getAttribute?.('data-message-id');
@@ -489,6 +493,14 @@ var CLF_DOM = (() => {
     const stamp = node?.getAttribute?.('data-clf-fiber-message');
     if (!turn || node.getAttribute('data-clf-fiber-turn') !== turn || !stamp?.startsWith(`${turn}:`)) return null;
     try { return decodeURIComponent(stamp.slice(turn.length + 1)) || null; } catch { return null; }
+  }
+  /** A current exact shell user slot may expose literal display text while its
+   * provider object contains Markdown serialization escapes. This is a readback,
+   * never a new message identity or permission to decode an arbitrary prompt. */
+  function userMessageReadback(message) {
+    return safe(() => message?.role === 'user' && message.node?.isConnected &&
+      message.node.matches(SHELL_UNIT) && shellRole(message.node) === 'user' &&
+      messageIdOf(message.node) === message.id ? messageText(message.node, 'user') : null, null);
   }
   function turns() {
     return safe(() => {
@@ -698,10 +710,101 @@ var CLF_DOM = (() => {
       renderedComposerNode(button) && (!form || button.closest('form') === form));
   }
 
+  /**
+   * Locale-free composer-state evidence adapted from Maximapple's public PRs
+   * #405, #418 and #422. Those measurements identified the newer composer's
+   * single primary-action slot (voice/send/stop) and the untranslated Stop
+   * square. This tree keeps the same evidence but is deliberately stricter:
+   * only one rendered primary control may authorize a state transition.
+   */
+  const STOP_SQUARE = /^\s*M4\.5 5\.75/;
+  function primarySlotControls() {
+    const form = composer()?.closest('form');
+    if (!form) return [];
+    return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
+      .filter(button => renderedComposerNode(button) && button.closest('form') === form);
+  }
+
+  function isStopSquare(button) {
+    if (!button || button.hasAttribute('data-state')) return false;
+    const paths = button.querySelectorAll('svg path');
+    return paths.length === 1 && STOP_SQUARE.test(paths[0].getAttribute('d') || '');
+  }
+
+  function composerActionAmbiguous() {
+    const primary = primarySlotControls();
+    const stops = nativeComposerControls(STOP);
+    const sends = nativeComposerControls(SEND);
+    if (primary.length > 1 || stops.length > 1 || sends.length > 1) return true;
+    if (stops.length === 1 && sends.length === 1 && stops[0] !== sends[0]) return true;
+    if (primary.length === 1 &&
+        ((stops.length === 1 && stops[0] !== primary[0]) || (sends.length === 1 && sends[0] !== primary[0]))) return true;
+    return false;
+  }
+
+  function localeFreeStopControls() {
+    const primary = primarySlotControls();
+    return primary.length === 1 && isStopSquare(primary[0]) ? primary : [];
+  }
+
+  function stopControls() {
+    const labelled = nativeComposerControls(STOP);
+    // The classic composer retains Send while mounting its exact Stop button.
+    // That is not two competing Stop targets: preserve the established Stop
+    // precedence, while modern shared-slot contradictions remain non-actionable.
+    if (primarySlotControls().length === 0) return labelled.length === 1 ? labelled : [];
+    if (composerActionAmbiguous()) return [];
+    return labelled.length > 0 ? labelled : localeFreeStopControls();
+  }
+
+  function localeFreeSendCandidate(button) {
+    const box = composer();
+    if (!button || !box || button.hasAttribute('data-state') || isStopSquare(button)) return false;
+    const drafted = (typeof box.innerText === 'string' ? box.innerText : box.textContent || '').trim();
+    if (!drafted) return false;
+    const paths = button.querySelectorAll('svg path');
+    return paths.length >= 1 && paths.length <= 2;
+  }
+
+  function localeFreeSendControls() {
+    const primary = primarySlotControls();
+    return primary.length === 1 && localeFreeSendCandidate(primary[0]) ? primary : [];
+  }
+
+  function sendControls() {
+    if (composerActionAmbiguous()) return [];
+    const labelled = nativeComposerControls(SEND);
+    return labelled.length > 0 ? labelled : localeFreeSendControls();
+  }
+
+  /**
+   * Current native composer state. `idle` is positive evidence, not the absence
+   * of Stop: a unique visible Send or dictation control must own the primary
+   * slot. Unknown/remounting/duplicate controls fail closed.
+   */
+  function nativeComposerState() {
+    const stops = stopControls();
+    if (stops.length === 1) return 'stop';
+    if (stops.length > 1) return 'unknown';
+    const sends = sendControls();
+    if (sends.length === 1) return 'idle';
+    if (sends.length > 1) return 'unknown';
+    const primary = primarySlotControls();
+    if (primary.length !== 1) return 'unknown';
+    return primary[0].hasAttribute('data-state') && primary[0].querySelectorAll('svg path').length === 4 ? 'idle' : 'unknown';
+  }
+
   /** Stop is a busy hint only; the exact provider terminal still owns turn completion. */
   function generating() {
     return safe(() => {
-      if (nativeComposerControls(STOP).length > 0) return true;
+      // Ambiguity can refuse a click; it cannot make a visible native Stop look idle.
+      if (nativeComposerControls(STOP).length > 0 || localeFreeStopControls().length > 0) return true;
+      const native = nativeComposerState();
+      if (native === 'stop') return true;
+      if (native === 'idle' && primarySlotControls().length === 1) return false;
+      // Unknown/remounting controls authorize neither Stop nor Send. Keep the
+      // existing typed shell fact as the conservative generation fallback while
+      // an in-flight send operation waits for the same slot to become unique.
       // Historical interrupted exchanges can retain in_progress forever. Only the
       // latest native response can describe this composer's current generation.
       const latest = [...document.querySelectorAll(SHELL_TURN)].filter(node =>
@@ -712,7 +815,7 @@ var CLF_DOM = (() => {
 
   function stopButton() {
     return safe(() => {
-      const buttons = nativeComposerControls(STOP);
+      const buttons = stopControls();
       return buttons.length === 1 ? buttons[0] : null;
     }, null);
   }
@@ -732,7 +835,7 @@ var CLF_DOM = (() => {
   /** The page-owned Send control, exposed so content.js can witness an actual submission. */
   function sendButton() {
     return safe(() => {
-      const buttons = nativeComposerControls(SEND);
+      const buttons = sendControls();
       return buttons.length === 1 ? buttons[0] : null;
     }, null);
   }
@@ -1459,7 +1562,7 @@ var CLF_DOM = (() => {
     return safe(() => {
       const box = composer();
       if (!composerWritable()) return false;
-      if (generating() || stopButton()) return false;
+      if (composerActionAmbiguous() || (primarySlotControls().length > 0 && nativeComposerState() !== 'idle') || generating() || stopButton()) return false;
       if ((box.textContent || '').trim() !== '') return false;
       return true;
     }, false);
@@ -2197,7 +2300,8 @@ var CLF_DOM = (() => {
           Array.isArray(state.choices) && state.choices.length > 0 && state.choices.length <= 12 &&
           state.choices.every(c => Number.isInteger(c.bucket) && typeof c.id === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(c.id) && typeof c.label === 'string' && c.label.length > 0 && c.label.length <= 80 &&
             groupId(c.familyId) && typeof c.familyLabel === 'string' && c.familyLabel.length > 0 && c.familyLabel.length <= 80 &&
-            ['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(c.effort) && typeof c.available === 'boolean') &&
+            ['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(c.effort) && typeof c.available === 'boolean' &&
+            (c.effortLabel === undefined || typeof c.effortLabel === 'string' && c.effortLabel.trim().length > 0 && c.effortLabel.length <= 80)) &&
           new Set(state.versions.map(v => v.id)).size === state.versions.length && new Set(state.choices.map(c => c.bucket)).size === state.choices.length &&
           state.versions.some(v => v.id === state.version) && state.choices.some(c => c.bucket === state.currentBucket);
         finish(valid ? state : null);
@@ -2380,6 +2484,7 @@ var CLF_DOM = (() => {
       const entry = result.get(choice.familyId) || { id: choice.familyId, label: choice.familyLabel, efforts: [], aliases: [] };
       if (!entry.efforts.includes(choice.effort)) entry.efforts.push(choice.effort);
       if (!entry.aliases.includes(choice.id)) entry.aliases.push(choice.id);
+      if (choice.effortLabel) (entry.effortLabels ||= {})[choice.effort] = choice.effortLabel;
       result.set(choice.familyId, entry);
     }
   }
@@ -2578,6 +2683,7 @@ var CLF_DOM = (() => {
     turns,
     presentationTurns,
     messages,
+    userMessageReadback,
     messagesIn,
     sectionSignature,
     generating,

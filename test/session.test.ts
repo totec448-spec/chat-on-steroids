@@ -106,6 +106,25 @@ const evidence = (patch: Partial<ReturnType<typeof emptyEvidence>> = {}) => ({ .
 // ------------------------------------------------------------------- store
 
 describe('session store', () => {
+  it('persists reference-only revisions without changing authored chronology and drops stale references with new prose', async () => {
+    const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const session = await createSession({ title: 'Reference persistence', conversationId });
+    const message = { kind: 'assistant_message' as const, source: 'extension' as const, time: 1000,
+      messageId: '11111111-2222-4333-8444-555555555555', message: { text: 'An answer.', chars: 10, truncated: false }, state: 'final' as const, final: true };
+    const first = await upsertMessageEvent(session.id, message);
+    const presentation = { conversationId, references: [{ index: 0, type: 'web' as const, sources: [{ title: 'Source', url: 'https://example.com/source' }] }] };
+    const enriched = await upsertMessageEvent(session.id, { ...message, presentation });
+    expect(enriched.changed).toBe(true); expect(enriched.contentChanged).toBe(false);
+    expect(enriched.event.origin).toBe(first.event.origin); expect(enriched.event.time).toBe(first.event.time);
+    expect(enriched.event.seq).toBeGreaterThan(first.event.seq);
+    expect((await upsertMessageEvent(session.id, message)).event).toMatchObject({ presentation });
+    await flushSessions(); resetSessionStoreForTests();
+    const restored = (await readEvents(session.id, { kinds: ['assistant_message'] }))[0];
+    expect(restored).toMatchObject({ presentation });
+    const revised = await upsertMessageEvent(session.id, { ...message, message: { text: 'Changed answer.', chars: 15, truncated: false } });
+    expect(revised.event).not.toHaveProperty('presentation');
+  });
+
   it('uses original call time and exact conversation for late attribution health proof', async () => {
     const conversationId = 'health-current';
     const session = await createSession({ title: 'attribution health', conversationId });
@@ -2084,14 +2103,14 @@ describe('handoff storage', () => {
     expect(chunkText('short brief', 1000)).toEqual(['short brief']);
   });
 
-  it('asks for user-authoritative handoffs up to the documented 30k-token ceiling', () => {
+  it('asks for requirement-preserving handoffs within an explicit character allowance', () => {
     const prompt = nativeHandoffPrompt();
     expect(prompt).toContain(HANDOFF_BRIEF_RULES);
-    expect(prompt).toMatch(/user's messages as the highest-authority source/i);
-    expect(prompt).toMatch(/10,000[–-]30,000 tokens/i);
-    expect(prompt).toMatch(/~6,000-token brief is normally too short/i);
-    expect(prompt).toMatch(/Never exceed 30,000 tokens/i);
-    expect(prompt).toMatch(/lossless operational compression/i);
+    expect(prompt).toContain("real user's instructions as the task specification");
+    expect(prompt).toContain('at most 80000 characters');
+    expect(nativeHandoffPrompt('', true, 12000)).toContain('at most 12000 characters');
+    expect(prompt).not.toContain('30,000 tokens');
+    expect(prompt).toContain('Distinguish a requested or dispatched action from a verified postcondition');
     expect(prompt).toMatch(/failure.*root cause.*change.*verification/i);
     expect(prompt).toMatch(/PLANNED \/ DECIDED/i);
     expect(prompt).toMatch(/FAILED \/ UNRESOLVED/i);

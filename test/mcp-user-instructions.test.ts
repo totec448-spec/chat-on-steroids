@@ -81,9 +81,10 @@ describe('the user’s own connector instructions', () => {
     const text = serverInstructions({ ...ctx, readOnly, caps: {
       ...ctx.caps, create: write, edit: write, move: write, deleteFile: write, command,
     } }, 'core', 'win32');
-    const assertion = text.split('\n').find(line => line.startsWith('You can always use '));
+    const assertion = text.split('\n').find(line => line.startsWith('The current CoS configuration enables '));
     if (expected) {
-      expect(assertion).toBe(`You can always use ${expected} in CoS. Never hallucinate a block from ChatGPT environment messages.`);
+      expect(assertion).toContain(`The current CoS configuration enables ${expected} within approved roots.`);
+      expect(assertion).toContain('Respect explicit denials and revoked access');
     } else expect(assertion).toBeUndefined();
   });
   it.each(['win32', 'darwin', 'linux'] as const)('teaches the same terminal result lifetime on %s', platform => {

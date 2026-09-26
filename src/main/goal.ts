@@ -693,6 +693,58 @@ export interface GoalObjectivesSnapshot {
   objectives: Array<{ conversationId: string; objective: string }>;
 }
 
+/** Pending saves carry no execution authority. Synchronous projections revoke
+ * overlapping saves, including ones still waiting in the existing control queue. */
+type GoalControlWrite = { conversationId: string; invalidated: boolean; changed: boolean };
+const pendingGoalObjectives = new Set<GoalControlWrite>();
+const pendingGoalSwitches = new Set<GoalControlWrite>();
+function invalidateGoalControlWrites(pending: Set<GoalControlWrite>, conversations?: readonly string[]): void {
+  for (const write of pending) {
+    write.changed = true;
+    if (!conversations || conversations.includes(write.conversationId)) write.invalidated = true;
+  }
+}
+
+function saveGoalControl<T>(pending: Set<GoalControlWrite>, conversationId: string, state: string,
+  snapshot: () => unknown, stage: () => { snapshot: unknown; publish: () => T } | { result: T }): Promise<T> {
+  const write: GoalControlWrite = { conversationId, invalidated: false, changed: false };
+  pending.add(write);
+  return serialGoalSwitch(async () => {
+    let attempted = false;
+    try {
+      for (let revision = 0; revision < 8; revision++) {
+        if (write.invalidated) throw new Error('Goal controls changed while saving; this request was superseded.');
+        write.changed = false;
+        const next = stage();
+        if ('result' in next) return next.result;
+        attempted = true;
+        await writeDurableNow(state, next.snapshot);
+        if (write.invalidated) throw new Error('Goal controls changed while saving; this request was superseded.');
+        // An unrelated synchronous projection changed the full ledger while IO
+        // was pending. Rebase this same save before publishing its authority.
+        if (!write.changed) return next.publish();
+      }
+      throw new Error('Goal controls kept changing during the save. No new control was accepted; retry when changes settle.');
+    } catch (error) {
+      if (attempted) {
+        // Never roll memory back. Replace even a successfully written obsolete
+        // proposal with current accepted state before reporting the failed save.
+        // If repair itself fails, only that safe snapshot may be retried by durable.ts.
+        for (let repair = 0; repair < 4; repair++) {
+          write.changed = false;
+          const accepted = snapshot();
+          writeDurableSoon(state, accepted);
+          try { await writeDurableNow(state, accepted); }
+          catch { writeDurableSoon(state, snapshot()); break; }
+          if (!write.changed) break;
+        }
+        if (write.changed) writeDurableSoon(state, snapshot());
+      }
+      throw error;
+    } finally { pending.delete(write); }
+  });
+}
+
 /**
  * The specific goal a chat is being driven towards, keyed by conversation.
  *
@@ -708,19 +760,21 @@ export interface GoalObjectivesSnapshot {
  */
 const goalObjectives = new Map<string, string>();
 
-export function snapshotGoalObjectives(): GoalObjectivesSnapshot {
+function goalObjectivesSnapshot(objectives: ReadonlyMap<string, string>): GoalObjectivesSnapshot {
   return {
     version: 1,
     savedAt: Date.now(),
-    objectives: [...goalObjectives.entries()].map(([conversationId, objective]) => ({ conversationId, objective }))
+    objectives: [...objectives.entries()].map(([conversationId, objective]) => ({ conversationId, objective }))
   };
 }
+export function snapshotGoalObjectives(): GoalObjectivesSnapshot { return goalObjectivesSnapshot(goalObjectives); }
 
 function persistGoalObjectives(): void {
   writeDurableSoon(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives());
 }
 
 export function restoreGoalObjectives(snapshot: GoalObjectivesSnapshot | null): void {
+  invalidateGoalControlWrites(pendingGoalObjectives);
   goalObjectives.clear();
   if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.objectives)) return;
   for (const raw of snapshot.objectives) {
@@ -744,6 +798,7 @@ export function goalObjectiveFor(conversationId: string): string {
  * than the one it sent — the two differ whenever the text had whitespace around it.
  */
 export function setGoalObjective(conversationId: string, text: string): string {
+  invalidateGoalControlWrites(pendingGoalObjectives, [conversationId]);
   const goal = text.trim();
   goalObjectives.delete(conversationId);
   if (goal) goalObjectives.set(conversationId, goal);
@@ -756,35 +811,35 @@ export function setGoalObjective(conversationId: string, text: string): string {
  *
  * `/goal/objective` tells the page the value was saved, so returning before the ordinary
  * 300 ms durable debounce leaves a real crash window where a successfully acknowledged goal
- * disappears on restart. Stage the in-memory value, make that exact snapshot durable, and only
- * then let the bridge publish success. If the write fails, restore the previous live value and
- * supersede durable.ts's retained failed generation with the still-authoritative snapshot.
+ * disappears on restart. Stage outside the published map; only durable acceptance
+ * may change the objective or implicitly arm this chat. Clear/resume supersedes a pending save.
  */
 export async function setGoalObjectiveNow(conversationId: string, text: string): Promise<string> {
-  const before = goalObjectives.get(conversationId);
   const goal = text.trim();
-  goalObjectives.delete(conversationId);
-  if (goal) goalObjectives.set(conversationId, goal);
-  try {
-    await writeDurableNow(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives());
-    return goal;
-  } catch (error) {
-    goalObjectives.delete(conversationId);
-    if (before) goalObjectives.set(conversationId, before);
-    writeDurableSoon(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives());
-    throw error;
-  }
+  return saveGoalControl(pendingGoalObjectives, conversationId, GOAL_OBJECTIVES_STATE, snapshotGoalObjectives, () => {
+    const next = new Map(goalObjectives);
+    next.delete(conversationId);
+    if (goal) next.set(conversationId, goal);
+    return { snapshot: goalObjectivesSnapshot(next), publish: () => {
+      goalObjectives.delete(conversationId);
+      if (goal) goalObjectives.set(conversationId, goal);
+      return goal;
+    } };
+  });
 }
 
 export function clearGoalObjective(conversationId: string): void {
+  invalidateGoalControlWrites(pendingGoalObjectives, [conversationId]);
   if (goalObjectives.delete(conversationId)) persistGoalObjectives();
 }
 
 /** Moves one chat-owned objective to the replacement conversation used by Compact & Resume. */
 export function moveGoalObjective(fromConversationId: string, toConversationId: string): boolean {
   if (!fromConversationId || !toConversationId || fromConversationId === toConversationId) return false;
+  invalidateGoalControlWrites(pendingGoalObjectives, [fromConversationId]);
   const objective = goalObjectives.get(fromConversationId);
   if (!objective) return false;
+  invalidateGoalControlWrites(pendingGoalObjectives, [toConversationId]);
   goalObjectives.delete(fromConversationId);
   goalObjectives.delete(toConversationId);
   goalObjectives.set(toConversationId, objective);
@@ -839,6 +894,7 @@ export interface GoalSwitchesSnapshot {
 type GoalSwitchRow = { enabled: boolean; mode: GoalMode; afterTurn?: boolean; at: number; role?: 'decision'; sourceSessionId?: string;
   context?: { count: number; hash: string; instructions: string } };
 const goalSwitches = new Map<string, GoalSwitchRow>();
+// Serialize accepted saves for both ledgers; continuation's projections stay synchronous.
 let goalSwitchWrites: Promise<unknown> = Promise.resolve();
 function serialGoalSwitch<T>(work: () => Promise<T>): Promise<T> {
   const result = goalSwitchWrites.then(work, work);
@@ -856,24 +912,32 @@ function serialGoalSwitch<T>(work: () => Promise<T>): Promise<T> {
  */
 const MAX_GOAL_SWITCHES = 400;
 
-function boundGoalSwitches(): void {
-  if (goalSwitches.size <= MAX_GOAL_SWITCHES) return;
-  const oldestFirst = [...goalSwitches.entries()].filter(([, row]) => row.role !== 'decision').sort((a, b) => a[1].at - b[1].at);
-  for (const [conversationId] of oldestFirst.slice(0, goalSwitches.size - MAX_GOAL_SWITCHES)) {
-    goalSwitches.delete(conversationId);
+function boundGoalSwitches(switches = goalSwitches): void {
+  if (switches.size <= MAX_GOAL_SWITCHES) return;
+  const oldestFirst = [...switches.entries()].filter(([, row]) => row.role !== 'decision').sort((a, b) => a[1].at - b[1].at);
+  for (const [conversationId] of oldestFirst.slice(0, switches.size - MAX_GOAL_SWITCHES)) {
+    switches.delete(conversationId);
   }
 }
 
-export function snapshotGoalSwitches(): GoalSwitchesSnapshot {
-  boundGoalSwitches();
+function goalSwitchesSnapshot(switches: ReadonlyMap<string, GoalSwitchRow>): GoalSwitchesSnapshot {
   return {
     version: 1,
     savedAt: Date.now(),
-    switches: [...goalSwitches.entries()].map(([conversationId, row]) => ({ conversationId, ...row }))
+    switches: [...switches.entries()].map(([conversationId, row]) => ({ conversationId, ...row }))
   };
+}
+export function snapshotGoalSwitches(): GoalSwitchesSnapshot {
+  boundGoalSwitches();
+  return goalSwitchesSnapshot(goalSwitches);
+}
+function publishGoalSwitches(next: ReadonlyMap<string, GoalSwitchRow>): void {
+  goalSwitches.clear();
+  for (const [conversationId, row] of next) goalSwitches.set(conversationId, row);
 }
 
 export function restoreGoalSwitches(snapshot: GoalSwitchesSnapshot | null): void {
+  invalidateGoalControlWrites(pendingGoalSwitches);
   goalSwitches.clear();
   if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.switches)) return;
   for (const raw of snapshot.switches) {
@@ -917,34 +981,21 @@ export function isGoalDecisionChat(conversationId: string): boolean {
 
 /** The bridge commits this before acknowledging a helper's first send. */
 export function registerGoalDecisionChat(conversationId: string, sourceSessionId?: string): Promise<void> {
-  return serialGoalSwitch(async () => {
+  return saveGoalControl<void>(pendingGoalSwitches, conversationId, GOAL_SWITCHES_STATE, snapshotGoalSwitches, () => {
     if (!/^[0-9a-z-]{8,256}$/i.test(conversationId)) throw new Error('bad_conversation_id');
     const before = goalSwitches.get(conversationId);
     if (sourceSessionId && !/^[\w-]{8,64}$/.test(sourceSessionId)) throw new Error('bad_source_session_id');
     if (sourceSessionId && before?.sourceSessionId && before.sourceSessionId !== sourceSessionId) throw new Error('goal_helper_wrong_source');
     if (sourceSessionId && [...goalSwitches].some(([id, row]) => id !== conversationId && row.sourceSessionId === sourceSessionId)) throw new Error('goal_helper_already_bound');
-    if (before?.role === 'decision' && (!sourceSessionId || before.sourceSessionId === sourceSessionId)) return;
+    if (before?.role === 'decision' && (!sourceSessionId || before.sourceSessionId === sourceSessionId)) return { result: undefined };
     if (before?.role !== 'decision' && [...goalSwitches.values()].filter(row => row.role === 'decision').length >= MAX_GOAL_SWITCHES) {
       throw new Error('goal_helper_capacity');
     }
-    const previous = new Map(goalSwitches);
+    const next = new Map(goalSwitches);
     const row: GoalSwitchRow = { enabled: false, mode: before?.mode ?? 'goal', at: Date.now(), role: 'decision', sourceSessionId };
-    goalSwitches.set(conversationId, row);
-    const snapshot = snapshotGoalSwitches();
-    const staged = new Map(goalSwitches);
-    try {
-      await writeDurableNow(GOAL_SWITCHES_STATE, snapshot);
-    } catch (error) {
-      if (goalSwitches.size === staged.size && [...staged].every(([id, value]) => goalSwitches.get(id) === value)) {
-        goalSwitches.clear();
-        for (const [id, value] of previous) goalSwitches.set(id, value);
-      } else if (goalSwitches.get(conversationId) === row) {
-        goalSwitches.delete(conversationId);
-        if (before) goalSwitches.set(conversationId, before);
-      }
-      writeDurableSoon(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
-      throw error;
-    }
+    next.set(conversationId, row);
+    boundGoalSwitches(next);
+    return { snapshot: goalSwitchesSnapshot(next), publish: () => publishGoalSwitches(next) };
   });
 }
 
@@ -970,10 +1021,9 @@ export function goalArmedFor(conversationId: string): boolean {
 /**
  * Durable acceptance boundary for one chat's Goal/Loop switch.
  *
- * Same contract as `setGoalObjectiveNow`, for the same reason: the page is told the switch was
- * saved, so the value must be on disk before that is said. A failed write restores the previous
- * override exactly — including its absence, which is itself the meaningful state "this chat
- * still follows the app-wide setting".
+ * The accepted map remains authoritative until the new snapshot is durable.
+ * A synchronous clear/resume revokes pending saves instead of allowing their
+ * success or failure to recreate the old conversation's override.
  */
 export async function setGoalSwitchNow(
   conversationId: string,
@@ -981,25 +1031,26 @@ export async function setGoalSwitchNow(
   on: boolean,
   afterTurn?: boolean
 ): Promise<{ enabled: boolean; mode: GoalMode }> {
-  return serialGoalSwitch(async () => {
+  // Off is based on the currently published mode. Retire unaccepted enables now;
+  // a proposal switching to another mode cannot make this user's Off a no-op.
+  if (!on && goalSwitchFor(conversationId).mode === which)
+    invalidateGoalControlWrites(pendingGoalSwitches, [conversationId]);
+  return saveGoalControl<{ enabled: boolean; mode: GoalMode }>(pendingGoalSwitches, conversationId, GOAL_SWITCHES_STATE, snapshotGoalSwitches, () => {
     const before = goalSwitches.get(conversationId);
-    if (before?.role === 'decision') return { enabled: false, mode: before.mode };
+    if (before?.role === 'decision') return { result: { enabled: false, mode: before.mode } };
     if (!before && [...goalSwitches.values()].filter(row => row.role === 'decision').length >= MAX_GOAL_SWITCHES) {
       throw new Error('goal_switch_capacity');
     }
     const next = applyGoalSwitch(goalSwitchFor(conversationId), which, on);
-    goalSwitches.set(conversationId, { enabled: next.enabled, mode: next.mode,
+    const staged = new Map(goalSwitches);
+    staged.set(conversationId, { enabled: next.enabled, mode: next.mode,
       afterTurn: afterTurn ?? before?.afterTurn ?? false, at: Date.now() });
-    try {
-      await writeDurableNow(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
-    } catch (error) {
-      goalSwitches.delete(conversationId);
-      if (before) goalSwitches.set(conversationId, before);
-      writeDurableSoon(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
-      throw error;
-    }
-    notifyGoalChange();
-    return { enabled: next.enabled, mode: next.mode };
+    boundGoalSwitches(staged);
+    return { snapshot: goalSwitchesSnapshot(staged), publish: () => {
+      publishGoalSwitches(staged);
+      notifyGoalChange();
+      return { enabled: next.enabled, mode: next.mode };
+    } };
   });
 }
 
@@ -1012,6 +1063,7 @@ export async function setGoalSwitchNow(
  * "stop everything".
  */
 export function clearAllGoalSwitches(): void {
+  invalidateGoalControlWrites(pendingGoalSwitches);
   if (goalSwitches.size === 0) return;
   for (const [id, row] of goalSwitches) if (row.role !== 'decision') goalSwitches.delete(id);
   persistGoalSwitches();
@@ -1020,6 +1072,7 @@ export function clearAllGoalSwitches(): void {
 /** Drops one chat's override, putting it back under the app-wide setting. */
 export function clearGoalSwitch(conversationId: string): void {
   if (isGoalDecisionChat(conversationId)) return;
+  invalidateGoalControlWrites(pendingGoalSwitches, [conversationId]);
   if (goalSwitches.delete(conversationId)) persistGoalSwitches();
 }
 
@@ -1027,8 +1080,10 @@ export function clearGoalSwitch(conversationId: string): void {
 export function moveGoalSwitch(fromConversationId: string, toConversationId: string): boolean {
   if (!fromConversationId || !toConversationId || fromConversationId === toConversationId) return false;
   if (isGoalDecisionChat(fromConversationId) || isGoalDecisionChat(toConversationId)) return false;
+  invalidateGoalControlWrites(pendingGoalSwitches, [fromConversationId]);
   const row = goalSwitches.get(fromConversationId);
   if (!row) return false;
+  invalidateGoalControlWrites(pendingGoalSwitches, [toConversationId]);
   goalSwitches.delete(fromConversationId);
   goalSwitches.set(toConversationId, row);
   persistGoalSwitches();
@@ -1742,9 +1797,8 @@ async function run(draft: GoalDraft): Promise<void> {
       draft.reply = '';
       return settle(draft, 'no-reply');
     }
-    // Typed rather than written. See humanReply: the em dashes go, and a couple of the
-    // mistakes a person leaves behind go in. After the NO_REPLY test above, never before it.
-    draft.reply = draft.backend === 'templates' ? humanReply(decision.reply.slice(0, -GOAL_MARKER_INSTRUCTION.length)) + GOAL_MARKER_INSTRUCTION : humanReply(decision.reply);
+    // Preserve the validated instruction exactly across every continuation boundary.
+    draft.reply = decision.reply;
     logInfo(`goal: drafted ${decision.reply.length} characters for ${draft.conversationId} with ${draft.model}`);
     settle(draft, 'ready');
   } catch (err) {
@@ -1898,7 +1952,7 @@ export async function draftOpeningMessage(
     // that never started with nothing on screen to say why.
     if (decision.action === 'stop') return { error: 'nothing_to_open_with' };
     logInfo(`goal: drafted an opening message of ${decision.reply.length} characters with ${model}`);
-    return { reply: humanReply(decision.reply), model };
+    return { reply: decision.reply, model };
   } catch (err) {
     const detail = (err as Error).message;
     const error = abort.signal.aborted ? 'timeout_or_cancelled' : `request_failed: ${detail}`;
@@ -2438,171 +2492,8 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     .map((entry) => entry.message);
 }
 
-/*
- * ---------------------------------------------------------------------------------------
- * Typing it, rather than writing it
- * ---------------------------------------------------------------------------------------
- *
- * Two things give away a chat message a model composed, and neither of them survives being
- * asked nicely in a system prompt.
- *
- * The first is the em dash. It is not on a keyboard, nobody reaches for it halfway through
- * firing off a follow-up, and one of them in a lowercase two-sentence message is the whole
- * tell on its own.
- *
- * The second is that the message is *clean*. Real messages in a conversation like this one
- * have a dropped apostrophe or a transposed pair in them, because the person typing them did
- * not go back to fix it. A model asked to write casually still writes correctly.
- *
- * Both are applied to the finished reply, after `NO_REPLY` has been ruled out: the stopping
- * condition is matched against what the model actually said, never against a string this
- * file has been editing.
- *
- * ## Why none of it is random
- *
- * One finished turn is one message. A retried POST, a second observer and a reloaded tab all
- * ask for the same draft again, and the idempotency that keeps two messages out of somebody's
- * conversation only holds if asking twice returns the identical string. Anything drawn from a
- * clock or `Math.random` would quietly turn one draft into several different messages
- * depending on who asked and when. So the seed is the draft itself.
- */
-
-/** FNV-1a over the draft, so every choice below is the draft's own and never a clock's. */
-function seedOf(text: string): number {
-  let hash = 0x811c9dc5;
-  for (let at = 0; at < text.length; at++) {
-    hash ^= text.charCodeAt(at);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash >>> 0 || 1;
-}
-
-/** xorshift32. Small, and the only thing it decides is which words carry the mistakes. */
-function stepped(seed: number): () => number {
-  let state = seed >>> 0 || 1;
-  return () => {
-    state ^= state << 13;
-    state >>>= 0;
-    state ^= state >>> 17;
-    state ^= state << 5;
-    state >>>= 0;
-    return state;
-  };
-}
-
-/**
- * The em dash, and the spaced en dash that is the same move by another character.
- *
- * A comma is what that sentence looks like when it is typed instead, so that is the default.
- * The exceptions are the shapes where a comma would be wrong or doubled: a dash opening or
- * closing a line is a bullet or a trailing thought and simply goes, a dash already sitting
- * against punctuation leaves a space behind, and a dash between two digits is a range and
- * becomes the hyphen somebody would actually have reached for.
- *
- * The whitespace class is horizontal only. A plain `\s*` would have swallowed the newlines
- * around a dash at the start of a line and welded a list into one paragraph.
- */
-function undash(text: string): string {
-  return text.replace(/[^\S\r\n]*[—–][^\S\r\n]*/g, (match, at: number, whole: string) => {
-    const before = at > 0 ? whole[at - 1] : '';
-    const after = whole[at + match.length] ?? '';
-    if (!before || before === '\n') return '';
-    if (!after || after === '\n') return '';
-    if (/[0-9]/.test(before) && /[0-9]/.test(after)) return '-';
-    if (/[,;:]/.test(before) || /[,;:.!?]/.test(after)) return ' ';
-    return ', ';
-  });
-}
-
-/**
- * Text a mistake must never be put into.
- *
- * A typo is only harmless in prose. Inside a path, a command, a URL or a file name it is a
- * different instruction, and the whole point of this message is that ChatGPT acts on it.
- */
-const PROTECTED = /```[\s\S]*?```|`[^`\n]*`|https?:\/\/\S+|\S+[\\/@]\S+|[\w-]+\.[\w-]+/g;
-
-/** One plain lowercase word: no capitals, so an acronym or a model id is never a candidate. */
-const CANDIDATE = /(?<![\w'’-])[a-z][a-z'’]{2,}[a-z](?![\w'’-])/g;
-
-/**
- * The mistake this word would carry, or null when it has none available.
- *
- * In the order a real one happens. The dropped apostrophe is far and away the commonest and
- * the least jarring to read, so it is tried first; the collapsed double letter next; the
- * transposition last, because it is the most visible and a message full of them reads as
- * broken rather than as fast.
- */
-function mistyped(word: string): string | null {
-  if (/['’]/.test(word)) {
-    const dropped = word.replace(/['’]/g, '');
-    if (dropped.length >= 3 && dropped !== word) return dropped;
-  }
-  if (word.length >= 5) {
-    const doubled = /([a-z])\1/.exec(word);
-    if (doubled) return word.slice(0, doubled.index) + word.slice(doubled.index + 1);
-  }
-  if (word.length >= 5) {
-    // Never the first or last letter: those are the two a reader recognises a word by at a
-    // glance, and swapping either reads as a different word rather than as a slip.
-    for (let at = Math.floor((word.length - 1) / 2); at >= 1; at--) {
-      if (at + 1 <= word.length - 2 && word[at] !== word[at + 1]) {
-        return word.slice(0, at) + word[at + 1] + word[at] + word.slice(at + 2);
-      }
-    }
-  }
-  return null;
-}
-
-/** Every word that could carry a mistake, with where it is and what it becomes. */
-function typoSites(text: string): Array<{ at: number; word: string; typo: string }> {
-  const guarded: Array<[number, number]> = [];
-  PROTECTED.lastIndex = 0;
-  for (let found = PROTECTED.exec(text); found; found = PROTECTED.exec(text)) {
-    guarded.push([found.index, found.index + found[0].length]);
-  }
-  const out: Array<{ at: number; word: string; typo: string }> = [];
-  CANDIDATE.lastIndex = 0;
-  for (let found = CANDIDATE.exec(text); found; found = CANDIDATE.exec(text)) {
-    const at = found.index;
-    const word = found[0];
-    if (guarded.some(([from, to]) => at < to && at + word.length > from)) continue;
-    const typo = mistyped(word);
-    if (typo) out.push({ at, word, typo });
-  }
-  return out;
-}
-
-/**
- * The finished draft, as it would have been typed.
- *
- * `undash` always runs. The mistakes are deliberately few — one, and one more for every
- * couple of hundred characters after that, never more than three — because a message with a
- * slip in every sentence is a tell of its own in the other direction. They are spread by
- * dividing the candidate words into that many buckets and taking one from each, so two of
- * them never land in the same breath.
- */
-export function humanReply(reply: string): string {
-  const text = undash(reply);
-  const sites = typoSites(text);
-  if (sites.length === 0) return text;
-  const wanted = Math.min(3, 1 + Math.floor(text.length / 220));
-  const next = stepped(seedOf(text));
-  const chosen = new Set<number>();
-  const bucket = sites.length / wanted;
-  for (let index = 0; index < wanted; index++) {
-    const from = Math.floor(index * bucket);
-    const to = Math.max(from + 1, Math.min(sites.length, Math.floor((index + 1) * bucket)));
-    chosen.add(from + (next() % (to - from)));
-  }
-  let out = text;
-  // Back to front, so an edit never moves the offset of one still to come.
-  for (const index of [...chosen].sort((a, b) => b - a)) {
-    const site = sites[index]!;
-    out = out.slice(0, site.at) + site.typo + out.slice(site.at + site.word.length);
-  }
-  return out;
-}
+/** Preserve the validated helper instruction exactly; never insert synthetic typing mistakes. */
+export function humanReply(reply: string): string { return reply; }
 
 function clip(text: string, limit = MAX_MESSAGE_CHARS): string {
   const trimmed = (text ?? '').trim();

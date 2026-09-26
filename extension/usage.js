@@ -9,7 +9,7 @@
  */
 (() => {
   'use strict';
-  const OBSERVER_VERSION = 2;
+  const OBSERVER_VERSION = 3;
   const prior = window.__cosUsageObserver;
   if (prior?.version === OBSERVER_VERSION && typeof prior.refresh === 'function' && prior.refresh() === true) return;
   // A legacy boolean has no listener/reader disposal handle. A fresh document is
@@ -22,9 +22,13 @@
   let latest = null;
   let requestOrder = 0, latestOrder = 0;
   const CONVERSATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const CONVERSATION_PATH = /(?:^|\/)conversation_id(?:\/|$)/;
   // @ehkogh/#318: the alternate shell also uses bare UUID workflow ids.
   const REQUEST = /^(?:wfr_[a-zA-Z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i;
-  const CONVERSATION_FIELD = /(?:^|[,{\s])\"conversation_id\"\s*:\s*\"([0-9a-f-]{36})\"/gi;
+  // Scan whole JSON string tokens so quoted message content cannot introduce keys.
+  // Unlike JSON.parse alone, this also retains contradictory duplicate/escaped keys.
+  const JSON_STRING_FIELD = /("(?:[^"\\]|\\.)*")\s*(:)?/g;
+  const JSON_STRING_VALUE = /\s*("(?:[^"\\]|\\.)*")/y;
   // Passive evidence only: no polling, and no full response survives a scan. Retain a
   // small replay window for document_start -> content-script readiness and deduplicate
   // repeated provider observations across responses as well as inside one stream.
@@ -99,60 +103,104 @@
   }
   /**
    * Reads bounded complete SSE events from a clone without changing the page's response.
-   * Only a conversation id and server request metadata from the same event are projected.
+   * @Maximapple/#414 identified the split handoff -> input_message request metadata.
+   * Only that typed message may reuse an owner from this response or linked socket stream.
    */
+  function retireOriginStream(stream) {
+    stream.invalid = true;
+    stream.conversationId = null;
+    stream.header = null;
+  }
+  function frameConversation(data) {
+    let conversationId;
+    JSON_STRING_FIELD.lastIndex = 0;
+    for (let field; (field = JSON_STRING_FIELD.exec(data));) {
+      if (!field[2] || (field[1] !== '"conversation_id"' &&
+          (!field[1].includes('\\') || JSON.parse(field[1]) !== 'conversation_id'))) continue;
+      JSON_STRING_VALUE.lastIndex = JSON_STRING_FIELD.lastIndex;
+      const value = JSON_STRING_VALUE.exec(data);
+      if (!value) return null;
+      const id = JSON.parse(value[1]);
+      if (!CONVERSATION.test(id) || (conversationId && conversationId !== id)) return null;
+      conversationId = id;
+    }
+    return conversationId;
+  }
   function readOrigin(frame, stream = {}) {
-      if (!frame || frame.length > 512 * 1024) { stream.header = null; return; }
+      if (stream.invalid || !frame) return;
+      if (frame.length > 512 * 1024) { retireOriginStream(stream); return; }
       const lines = frame.split(/\r?\n/);
       const type = lines.filter(line => line.startsWith('event:')).at(-1)?.slice(6).trim() || 'message';
-      let event;
+      const dataLines = lines.filter(line => line.startsWith('data:'));
+      if (!dataLines.length) return; // SSE comments and control-only heartbeats carry no value.
+      const data = dataLines.map(line => line.slice(5).trimStart()).join('\n');
+      let event, explicitConversation;
       try {
-        event = JSON.parse(lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n'));
+        event = JSON.parse(data);
+        explicitConversation = frameConversation(data);
       } catch {
-        if (type === 'delta' || type === 'delta_encoding') stream.header = null;
-        if (type === 'delta_encoding') stream.encoding = false;
+        retireOriginStream(stream);
         return;
+      }
+      // Even a handoff without a request can contradict the pinned response or socket.
+      // A contradiction retires that scope; a later value cannot silently replace its owner.
+      if (explicitConversation === null || (explicitConversation &&
+          ((stream.conversationId && stream.conversationId !== explicitConversation) ||
+           (stream.socketConversationId && stream.socketConversationId !== explicitConversation)))) {
+        retireOriginStream(stream); return;
       }
       if (type === 'delta_encoding') {
         stream.encoding = event === 'v1';
         stream.header = stream.encoding ? { c: 0, p: '', o: 'add' } : null;
+        if (!stream.encoding) retireOriginStream(stream);
         return;
       }
       let body;
       if (type === 'delta' && stream.encoding === false) return;
-      if (type === 'delta' && !stream.header && event?.p === '' && event?.o === 'add') {
-        // A handoff may omit the prologue. Preserve the existing self-contained
-        // root-add reader, without granting header inheritance to later values.
-        body = event.v;
-      } else if (type === 'delta') {
+      if (type === 'delta') {
         // Native v1 omits repeated headers, including on complete root messages.
-        // Keep only format state in this stream, never prior message values.
-        if (!stream.header || !event || typeof event !== 'object' || Array.isArray(event)) { stream.header = null; return; }
-        const field = key => Object.prototype.hasOwnProperty.call(event, key) ? event[key] : stream.header[key];
+        // Keep format fields and the exact owner only, never prior message values.
+        if (!event || typeof event !== 'object' || Array.isArray(event)) { retireOriginStream(stream); return; }
+        const own = key => Object.prototype.hasOwnProperty.call(event, key);
+        const operations = ['add', 'replace', 'append', 'patch', 'remove', 'truncate'];
+        if ((own('c') && (!Number.isInteger(event.c) || event.c < 0 || event.c > 1023)) ||
+            (own('p') && (typeof event.p !== 'string' || event.p.length > 1024)) ||
+            (own('o') && !operations.includes(event.o))) { retireOriginStream(stream); return; }
+        // A handoff may omit the prologue. An explicit root-add remains readable,
+        // but cannot grant inherited format fields to subsequent deltas.
+        if (!stream.header && !(event.p === '' && event.o === 'add')) { retireOriginStream(stream); return; }
+        const field = key => own(key) ? event[key] : stream.header?.[key] ?? (key === 'c' ? 0 : undefined);
         const c = field('c'), p = field('p'), o = field('o');
-        if (!Number.isInteger(c) || c < 0 || c > 1023 || typeof p !== 'string' || p.length > 1024 ||
-            !['add', 'replace', 'append', 'patch', 'remove', 'truncate'].includes(o)) { stream.header = null; return; }
-        stream.header = { c, p, o };
+        if (stream.header) stream.header = { c, p, o };
+        // Do not keep an owner across an identity mutation or an uninterpreted
+        // compound patch. Reconstructing partial values is outside this observer.
+        if (CONVERSATION_PATH.test(p) || o === 'patch' || (p === '' && o !== 'add' && o !== 'replace')) {
+          retireOriginStream(stream); return;
+        }
         if (p !== '' || (o !== 'add' && o !== 'replace')) return;
         body = event.v;
-      } else {
-        body = event?.o === 'add' && (event.p === '' || event.p === undefined) &&
-          event.v && typeof event.v === 'object' && !Array.isArray(event.v) ? event.v : event;
-      }
-      const conversations = new Set();
-      CONVERSATION_FIELD.lastIndex = 0;
-      for (let match; (match = CONVERSATION_FIELD.exec(frame));) {
-        if (CONVERSATION.test(match[1])) conversations.add(match[1]);
-      }
-      // One complete server event must carry both sides of the join. Retaining an id from a
-      // prior frame would turn response order into authority; a contradictory frame abstains.
-      if (conversations.size !== 1) return;
-      const conversationId = conversations.values().next().value;
-      // Only server metadata in a complete JSON event owns a request id. A key in
-      // quoted model text, tool arguments or an unrelated nested object is not proof.
-      if (body?.conversation_id !== conversationId) return;
-      const requestIds = new Set([body.metadata?.request_id, body.message?.metadata?.request_id]
-        .filter(id => typeof id === 'string' && REQUEST.test(id)));
+      } else if (type === 'message') {
+        if (event && typeof event === 'object' && ('p' in event || 'o' in event)) {
+          if ((typeof event.p === 'string' && CONVERSATION_PATH.test(event.p)) || event.o === 'patch' ||
+              ((event.p === '' || event.p === undefined) && event.o !== 'add')) {
+            retireOriginStream(stream); return;
+          }
+          if (event.o !== 'add' || (event.p !== '' && event.p !== undefined)) return;
+          if ('c' in event && (!Number.isInteger(event.c) || event.c < 0 || event.c > 1023)) {
+            retireOriginStream(stream); return;
+          }
+          body = event.v;
+        } else body = event;
+      } else return;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return;
+      // Nested/partial conversation fields can veto ownership, but never supply it.
+      if (explicitConversation && body.conversation_id !== explicitConversation) return;
+      if (explicitConversation) stream.conversationId = explicitConversation;
+      const conversationId = explicitConversation || stream.conversationId;
+      if (!conversationId) return;
+      const candidates = explicitConversation ? [body.metadata?.request_id, body.message?.metadata?.request_id] : [];
+      if (body.type === 'input_message') candidates.push(body.input_message?.metadata?.request_id);
+      const requestIds = new Set(candidates.filter(id => typeof id === 'string' && REQUEST.test(id)));
       return requestIds.size ? { conversationId, requestIds: [...requestIds] } : null;
   }
   async function inspectRequestOrigins(response, observedAt) {
@@ -191,7 +239,7 @@
           if (split < 0) break;
           const width = buffer.startsWith('\r\n\r\n', split) ? 4 : 2;
           scan(buffer.slice(0, split));
-          if (emitted.size >= 16) return;
+          if (emitted.size >= 16 || stream.invalid) return;
           buffer = buffer.slice(split + width);
         }
         if (buffer.length > 512 * 1024) return;
@@ -232,13 +280,16 @@
           retained = { at: now, header: null, last: null, seen: new Set() }; streams.set(key, retained);
         }
         if (retained.seen.has(payload.stream_item_id)) continue;
-        // Only the exact preceding item can supply omitted format headers.
-        if (payload.parent_stream_item_id !== retained.last) retained.header = null;
+        // Only the exact preceding item can supply format fields or a split owner.
+        if (payload.parent_stream_item_id !== retained.last) {
+          retained.header = null; retained.conversationId = null; retained.encoding = undefined;
+        }
         retained.last = payload.stream_item_id;
         if (retained.seen.size >= 128) retained.seen.delete(retained.seen.values().next().value);
         retained.seen.add(payload.stream_item_id);
         stream = retained;
       } else if (key) streams.delete(key);
+      stream.socketConversationId = payload.conversation_id;
       for (const frame of frames) {
         if (!frame.trim()) continue;
         const origin = readOrigin(frame, stream);

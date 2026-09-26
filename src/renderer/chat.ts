@@ -4,6 +4,8 @@ import { initSkills } from './skills.js';
 import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, ensureComposerModel } from './chat-models.js';
 import { marked, Marked } from 'marked';
+import { providerMarkdown, nativeFileHref } from './provider-markdown.js';
+import { messagePresentation, type MessagePresentation } from '../shared/message-presentation.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { createAgentPanel } from './agent-panel.js';
 import { createFilePanel } from './file-panel.js';
@@ -16,11 +18,13 @@ import { renderGoalReasoning } from './goal-reasoning.js';
 import { preserveTimelineViewport } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { toolResultText } from './tool-result.js';
+import { renderActionDetails } from './action-details.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
 import type { RecoveryCountdown } from '../shared/recovery.js';
 import { communicationTitle, foldAgentCommunication } from './agent-communication.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
+import { initDictation } from './dictation.js';
 import { isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
@@ -166,7 +170,8 @@ function composerDraftOwner(): ComposerDraftOwner { return { key: draftKey(), ge
 function ownsComposerDraft(owner: ComposerDraftOwner): boolean {
   return owner.key === draftKey() && owner.generation === composerDraftGeneration;
 }
-function replaceComposerDraft(): void { composerDraftGeneration++; skillPicker?.close(); }
+let dictation: ReturnType<typeof initDictation> | undefined;
+function replaceComposerDraft(): void { composerDraftGeneration++; skillPicker?.close(); dictation?.cancel(); }
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
@@ -837,6 +842,7 @@ let controlledSessionId: string | null = null;
 let controlledTurnId: string | null = null;
 let controlledSelection = -1;
 let controlledStopPending = false;
+let controlledActivityCaption = '';
 let controlledFinishWaiting = false;
 let controlledQueueAtFinish = false;
 let controlledCanInject = false;
@@ -1187,7 +1193,7 @@ async function refreshSessionControls(): Promise<void> {
   if (!sessions.find(row => row.id === id)?.conversationId) {
     controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null;
     controlledCanInject = false; controlledCanSendDirectly = false; controlledQueueAtFinish = false;
-    controlledStopPending = false; controlledFinishWaiting = false;
+    controlledStopPending = false; controlledActivityCaption = ''; controlledFinishWaiting = false;
     menu.hidden = false;
     goalDraftView = null; goalWaitView = null; finishGoalDraftView = null; controlledRecovery = [];
     $<HTMLSelectElement>('chatAutomation').value = opening?.automation ?? 'off';
@@ -1209,6 +1215,7 @@ async function refreshSessionControls(): Promise<void> {
   goalWaitView = controls?.goalWait ?? null;
   finishGoalDraftView = controls?.finishGoalDraft ?? null;
   controlledStopPending = controls?.stopPending === true;
+  controlledActivityCaption = typeof controls?.activityCaption === 'string' ? controls.activityCaption.slice(0, 300) : '';
   controlledFinishWaiting = controls?.finishWaiting === true;
   controlledQueueAtFinish = controls?.queueAtFinish === true;
   controlledCanInject = controls?.canInject ?? controlledTurnId !== null;
@@ -1452,7 +1459,8 @@ function citationLabels(source: string, capture?: StoredText): Map<string, strin
  * heading and list item is a newline, so it keeps `msg`'s pre-wrap — flowing it would run a
  * whole brief together into one paragraph.
  */
-export function renderedMarkdown(source: string, capture?: StoredText): HTMLElement {
+export function renderedMarkdown(source: string, capture?: StoredText, presentation?: MessagePresentation,
+  openReference?: (index: number) => Promise<unknown>): HTMLElement {
   // Fiber's canonical text can be complete while a background provider tab still
   // paints its first words. Render this revision directly; captured DOM HTML is
   // never evidence that it contains the current message revision.
@@ -1475,8 +1483,45 @@ export function renderedMarkdown(source: string, capture?: StoredText): HTMLElem
       return citations.get(token.raw) ?? (token.raw.startsWith('\uE200filecite\uE202') ? '' : '<span title="The recording does not include this source URL">[source link unavailable]</span>');
     }
   }] });
+  parser.use(providerMarkdown(presentation));
   const html = parser.parse(text, { async: false });
-  return renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
+  const box = renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
+  for (const block of box.querySelectorAll<HTMLElement>('[data-cos-writing-block]')) {
+    block.classList.add('writing-card');
+    const title = block.querySelector<HTMLElement>('[data-cos-writing-title]');
+    const body = block.querySelector<HTMLElement>('[data-cos-writing-body]');
+    title?.classList.add('writing-card-title'); body?.classList.add('writing-card-body');
+    if (title && body) {
+      const copy = el('button', 'btn writing-copy', () => t('Copy')) as HTMLButtonElement;
+      copy.type = 'button';
+      copy.addEventListener('click', () => void run(api.writeClipboard(body.innerText || body.textContent || '')));
+      title.append(copy);
+    }
+  }
+  const files = messagePresentation(presentation)?.references.filter(ref => ref.type === 'file') ?? [];
+  if (files.length) {
+    const cards = el('div', 'returned-files');
+    for (const file of files) {
+      const card = el('button', 'returned-file') as HTMLButtonElement;
+      card.type = 'button'; card.disabled = !openReference;
+      card.append(el('strong', 'returned-file-name', file.name), el('span', 'meta', () => t('Open in ChatGPT')));
+      ui(card, 'aria-label', () => t('Open {0} in ChatGPT', [file.name]));
+      const open = () => {
+        if (!openReference || card.disabled) return;
+        card.disabled = true;
+        void Promise.resolve(openReference(file.index)).finally(() => { card.disabled = false; });
+      };
+      card.addEventListener('click', open);
+      for (const link of box.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+        if (link.getAttribute('href') !== nativeFileHref(file.index)) continue;
+        link.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); open(); });
+        link.addEventListener('auxclick', event => { event.preventDefault(); event.stopPropagation(); if (event.button === 1) open(); });
+      }
+      cards.append(card);
+    }
+    box.append(cards);
+  }
+  return box;
 }
 
 export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
@@ -1528,7 +1573,9 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
       const start = tagName === 'OL' ? element.getAttribute('start') : null;
       const colSpan = tagName === 'TD' || tagName === 'TH' ? element.getAttribute('colspan') : null;
       const rowSpan = tagName === 'TD' || tagName === 'TH' ? element.getAttribute('rowspan') : null;
+      const writing = tagName === 'DIV' ? ['data-cos-writing-block', 'data-cos-writing-title', 'data-cos-writing-body'].filter(name => element.getAttribute(name) === 'true') : [];
       for (const attribute of [...element.attributes]) element.removeAttribute(attribute.name);
+      for (const name of writing) element.setAttribute(name, 'true');
       if (resolvedDir) element.setAttribute('dir', resolvedDir);
       if (href) {
         element.setAttribute('href', href);
@@ -1708,6 +1755,8 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
   ui(facts, 'textContent', () => `${call.tool} · ${call.outcome} · ${Math.round(call.durationMs)} ms · ` +
     t("placed by {0}", [ATTRIBUTION_LABELS[call.attribution] ?? call.attribution]));
   raw.append(facts);
+  const actionDetails = renderActionDetails(call);
+  if (actionDetails) raw.append(actionDetails);
 
   if (call.changes && call.changes.length > 0) {
     const changes = el('ul', 'changes');
@@ -1721,12 +1770,17 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
     raw.append(changes);
   }
 
-  raw.append(el('h4', '', () => t("Arguments")));
-  raw.append(textBlock('pre', call.args.text, call.args.truncated, call.args.chars));
-  raw.append(el('h4', '', () => t("Result")));
+  const original = actionDetails ? document.createElement('details') : raw;
+  if (original !== raw) {
+    original.className = 'action-original';
+    original.append(el('summary', '', () => t('Original arguments and result'))); raw.append(original);
+  }
+  original.append(el('h4', '', () => t("Arguments")));
+  original.append(textBlock('pre', call.args.text, call.args.truncated, call.args.chars));
+  original.append(el('h4', '', () => t("Result")));
   const images = call.assets?.filter(asset => ['image/png', 'image/jpeg', 'image/webp'].includes(asset.mimeType)) ?? [];
   const readable = toolResultText(call.result.text, call.result.truncated, images.length > 0);
-  if (readable) raw.append(textBlock('pre', readable, call.result.truncated && images.length === 0, call.result.chars));
+  if (readable) original.append(textBlock('pre', readable, call.result.truncated && images.length === 0, call.result.chars));
   // Older recordings did not retain the reason an image asset was omitted. Explain
   // the missing local preview without inferring a historical provider receipt.
   if (call.tool === 'view_image' && call.outcome === 'ok' && images.length === 0) {
@@ -1864,7 +1918,12 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
     case 'assistant_message': {
       const box = el('div', 'said');
       box.append(el('b', '', () => event.final ? 'ChatGPT' : t("ChatGPT (partial)")));
-      box.append(renderedMarkdown(event.message.text, event.renderedHtml));
+      const sessionId = context?.id ?? selectedId;
+      box.append(renderedMarkdown(event.message.text, event.renderedHtml, event.presentation,
+        sessionId && event.messageId ? async index => {
+          if (context && !context.current()) return;
+          await run(api.openSessionReference(sessionId, event.messageId!, index));
+        } : undefined));
       return box;
     }
     case 'native_image': {
@@ -2737,6 +2796,8 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
     const summary = sessions.find(entry => entry.id === selectedId);
     if (!summary || detailFor !== selectedId) return { text: '', tone: '' };
     const active = controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledTurnId : null;
+    if (active && controlledStopPending) return { text: t('Stop requested · waiting for ChatGPT'), tone: 'is-live', working: true };
+    if (active && controlledActivityCaption) return { text: controlledActivityCaption, tone: 'is-live', working: true };
     const lastBoundary = [...events].reverse().find(event => event.kind === 'turn_start' || event.kind === 'turn_end');
     const turnId = active ?? lastBoundary?.turnId;
     if (!turnId) return { text: '', tone: '' };
@@ -2746,7 +2807,11 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
     if (startedAt === undefined) return { text: active ? t("Working…") : '', tone: '', working: !!active };
     if (!active && endedAt === undefined) return { text: '', tone: '' };
     const seconds = Math.max(0, Math.floor(((active ? Date.now() : endedAt!) - startedAt) / 1000));
-    return { text: t("{0} for {1}{2}s", [active ? t("Working") : t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };
+    const terminal = !active ? events.findLast(event => event.kind === 'turn_end' && event.turnId === turnId) : null;
+    const outcome = terminal?.kind === 'turn_end' ? terminal.outcome : null;
+    const label = active ? t('Working') : outcome === 'stopped' ? t('Stopped') : outcome === 'failed' ? t('Failed')
+      : outcome === 'interrupted' || outcome === 'stalled' ? t('Interrupted') : t('Worked');
+    return { text: t("{0} for {1}{2}s", [label, seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };
   }
   // Recording follows the conversation the browser can see. A tool call arrives over the
   // connector carrying nothing that identifies its caller, so work driven from the phone,
@@ -3390,7 +3455,7 @@ function scheduleReload(): void {
       listTimer = undefined;
       if (listRefreshDirty) scheduleReload();
     });
-  }, 400);
+  }, 0);
 }
 
 /** Retired automatic drafts belong to their creation time, never the live composer queue. */
@@ -3732,7 +3797,7 @@ async function stopCurrentTurn(): Promise<void> {
   if (!id || controlledSessionId !== id || controlledSelection !== generation || !turnId || controlledStopPending) return;
   controlledStopPending = true; paintDeliveryControls();
   try { await run(api.stopSessionTurn(id, turnId)); }
-  finally { if (selectedId === id && selectionGeneration === generation) { controlledStopPending = false; void refreshSessionControls(); } }
+  finally { if (selectedId === id && selectionGeneration === generation) await refreshSessionControls(); }
 }
 let composerDiscoveryGeneration = 0;
 async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?: string, controlAction = false): Promise<boolean | void> {
@@ -4229,6 +4294,19 @@ export function initChat(next: Deps): void {
   });
   $('composerSettings').addEventListener('toggle', paintTaskActions);
   initContextMeter();
+  document.getElementById('contextMeterConfigure')?.addEventListener('click', () => {
+    $('contextMeter').classList.remove('pinned'); $('contextMeterButton').setAttribute('aria-expanded', 'false');
+    $<HTMLInputElement>('settingsSearch').value = '';
+    filterSettingsSections(document.querySelector<HTMLElement>('[data-view="settings"]')!, '');
+    showView('settings');
+    const control = $<HTMLInputElement>('autoCompact');
+    control.closest('.setting')?.scrollIntoView({ block: 'center' }); control.focus();
+  });
+  if (typeof (api as Partial<typeof api>).dictationStatus === 'function' && document.getElementById('dictationButton')) dictation = initDictation({
+    input: $<HTMLTextAreaElement>('chatInput'), button: $<HTMLButtonElement>('dictationButton'),
+    owner: () => `${draftKey()}:${composerDraftGeneration}`, api,
+    copy: async text => { const copied = await api.writeClipboard(text); if (!copied.ok || !copied.data) throw new Error('Copy failed'); }
+  });
   $('createPlan').addEventListener('click', () => { if (taskPlans.has(draftKey())) cancelTaskPlan(); else void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); });
   $('composer').addEventListener('submit', (event) => {
     event.preventDefault();

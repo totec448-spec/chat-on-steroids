@@ -10,6 +10,7 @@ import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme,
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { connect, disconnect, getStatus, onStatusChange, shutdownConnection } from './connection.js';
 import { registerIpc } from './ipc.js';
+import { registerDictationIpc } from './dictation-ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
@@ -409,8 +410,8 @@ void app.whenReady().then(async () => {
     });
   });
 
-  // Deny every permission request; the UI needs none of them.
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  // Deny permissions except an explicitly approved, current main-frame audio recording.
+  registerDictationIpc(() => window);
 
   // From here on a second launch may safely focus/recreate the window: renderer security policy
   // is installed and the renderer's fixed IPC methods already have handlers before it can load.
@@ -448,7 +449,9 @@ void app.whenReady().then(async () => {
   if (browserExtensionRequired(getConfig())) {
     void startBridge();
   }
-  if (getConfig().ui.autoConnect) void connect();
+  // An explicit launch request may reconnect after a manual update without
+  // changing the user's saved auto-connect preference.
+  if (getConfig().ui.autoConnect || process.argv.includes('--connect')) void connect();
 
   // Never awaited: an unreachable GitHub, a slow download or a broken release must not delay a
   // window that is already on screen. Everything it learns arrives through the ordinary state

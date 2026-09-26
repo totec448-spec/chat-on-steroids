@@ -1647,13 +1647,58 @@ bounded page observer owns both waits; insertion failures retain their bounded p
 Goal preparation/rollback reuses the existing exact composer draft lease; identical text in a
 replacement editor or a user's intervening edit never grants cleanup authority.
 
+### Native rich-content presentation
+
+Native serialized user text and literal bubble text may differ. A Send comparison
+can consult the current exact shell message stamp's literal readback, but not an
+unrelated bubble, a guessed id or a punctuation-stripped prompt. Late opening
+receipt recovery requires the original durable authorization and binding, one
+recorded native user message and matching length-validated context framing.
+It reuses the acknowledgement transaction and never creates a new send claim.
+
+`shared/message-presentation.ts` bounds public message references separately from canonical
+authored Markdown. Shell observation copies only exact web-source URLs or native file
+name/path/message identity. Every process boundary revalidates the projection. A reference-only
+revision advances the publication cursor without moving authored chronology or creating work;
+a changed body must not inherit stale references. The original source conversation survives
+Compact & Resume and is checked against the recording's lineage before a file action.
+
+`renderer/provider-markdown.ts` tokenizes native content references and writing blocks through
+Marked, so fenced/inline code stays literal. Output still passes the existing HTML sanitizer.
+Writing cards and file controls are attached as local UI, never executed from captured HTML.
+`sessions:openReference` accepts only a recorded session/message/index. The existing short-lived
+browser RPC performs a fixed native file-preview action, not a new general browser tool: wait
+for exact provider identity, recheck permission, then click once in the same document. Never
+reinterpret `sandbox:` as a local path, invent a download endpoint, cache a signed download URL,
+or retry an unconfirmed click. Public Python activity uses the native execution id/status,
+without copying code, output or private reasoning. Desktop reload coalescing retains its single
+flight/dirty guard but adds no second delay after the main-process durable-change notification.
+
 ### Account-evaluated model selection
+
+The September 26 synchronization repair uses the same recorder and control owners
+([worklog](docs/worklog-live-synchronization-20260926.md)). Compiler memo rows/cells
+share a bounded total scan rather than a hard row-count version guess. Positional
+`fallback-turn-N` keys never own lifecycle when a verified typed user/turn UUID exists.
+Only public matched thought summaries enter recorded activity; id-less public
+headlines use `activity_status`, an ephemeral exact-turn field with no work/Goal
+authority. `/activity` reconciles its presentation after restart. Request-only
+stream origins may use an empty message id on `/correlations`, never as a canonical
+message. Stop dispatch receipts retain their original deadline and do not prove
+native cancellation; a newer turn cannot inherit an earlier finish-release fence.
 
 `chat-models.ts` owns the app catalog and selection validation. The existing MAIN bridge reads
 bounded account-evaluated metadata, then the native picker confirms the actual model/effort for
 Send. A visible option, an English label, a remembered release name or “Upgrade required” is not
 entitlement. Do not enumerate every model × effort or create helper tabs to compensate for an
 uncertain catalog. Exact family rules live in `shared/chat-models.ts`.
+
+The composer exposes every observed lane, including Instant and older generations, in a model
+radio group and a separate reasoning group. Hidden native selects remain the requested-selection
+authority. Numeric provider captions are disambiguated for display; optional `effortLabels`
+carry native captions (for example `max` to Extra High, Pro's native `medium` to Pro) without
+rewriting execution values. Keyboard focus, the requested selection and unsent text survive
+unrelated catalog pushes. Unknown pairs never become sendable by display matching.
 
 Model names and recovery policy checked against native picker metadata on **2026-09-17**:
 
@@ -1686,7 +1731,7 @@ version options normalize into the same bounded picker snapshot. Mixed-version p
 their execution ids rather than merging unrelated models into a synthetic Latest family.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
-The matched recorder/MAIN helper version is 21. Shell exchanges are read only under the native
+The matched recorder/MAIN helper version is 22. Shell exchanges are read only under the native
 main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
@@ -2467,6 +2512,13 @@ its pending attempt. Objective text survives Off/completion for later reuse. Rep
 → On → Off must operate on current durable authority, not an old callback's enabled snapshot.
 Master Off clears ordinary chat overrides while keeping internal helper-role records.
 
+User-facing objective/switch saves stage outside the accepted maps. The existing serialized
+control queue publishes only after durable acceptance. Synchronous clear, restore and resume
+movement invalidate overlapping pending saves; failures repair disk from current accepted state,
+never roll memory back over a newer operation. A new Off retires an unaccepted mode switch when
+it targets the published mode. Rebase and repair attempts are bounded. These guarantees do not
+make separate configuration, objective, switch and reply ledgers one atomic transaction.
+
 Deliberate On files/rearms an obligation **only when the chat is idle**: a proven eligible final
 or an exhausted model-specific silence/failure window with no current work. Generating chats,
 running MCP calls and an unexpired ten-/two-minute window do not file a ticket merely because
@@ -2479,9 +2531,10 @@ a handled source record. This creates no pending ticket or draft. Later explicit
 that exact exhausted source, including an unreconciled open recorder turn, only while no newer
 question/work exists and the current model's continuation setting permits it.
 
-Ordinary non-Pro Goal/Loop considers verified **completed final answers**, not interrupted
-turns or generic composer idleness. With the finish tool enabled, both Astra Goal and Loop,
-and older Pro Loop, default to **Only finish** and may opt into **After this turn + finish**.
+Non-Astra Goal/Loop considers verified **completed final answers**, not interrupted
+turns or generic composer idleness. With the finish tool enabled, both Astra Goal and Loop
+default to **Only finish** and may opt into **After this turn + finish**. Older Pro models do
+not support the Astra-only finish tool and cannot wait for that unavailable signal.
 `shared/finish.ts::supportsFinishAutomation()` supplies the same model/mode eligibility to main
 and renderer. Disabling the finish tool makes after-turn effective for both modes and hides
 the unavailable timing choice in desktop and extension, without changing the saved preference.
@@ -3157,6 +3210,31 @@ diagnostics, not restart authority; secrets must never be printed to investigate
 
 ## 20. Build, installation, updater and release
 
+### Optional dictation and recorded-action presentation
+
+`dictation-ipc.ts` owns explicit microphone admission and one transcription operation in the
+main-window document. Both Electron permission handlers deny all other media, frames and pages.
+The separate encrypted `dictationApiKey` never comes from the tunnel/Goal credentials and never
+returns to the renderer. Audio remains in memory, is uploaded only after Finish to the fixed
+OpenAI transcription endpoint, and is bounded to five minutes / 8 MiB. SSE is limited to 512 KiB
+and 24,000 transcript characters; partial text is preview-only and no automatic retry is made.
+`renderer/dictation.ts` owns media tracks and an exact original draft generation/value/selection.
+Pause mutes recording, cancellation retires tracks/late replies, and Insert never calls Send.
+Close cleanup happens synchronously; a queued close event must not steal focus or cancel a new
+recording. Detach a recording's chunks before Blob conversion yields. Fake-device Chromium
+checks prove IPC/media/UI plumbing, not real microphone recognition or paid-provider behavior.
+
+`action-details.ts` projects exact stored tool arguments/results inside the existing lazy
+disclosure. Requested and recorded values stay separate; failed/unknown edits remain proposed.
+Original details, images and truncation notices remain available. No current Git/filesystem
+read, historical preimage reconstruction, URL click authority or tool replay is added. The
+context popup links to canonical automatic-compaction settings rather than cloning the switch.
+
+The compaction owner accepts a late native destination marker after an ACK-first commit only
+for its already-dispatched exact destination. A marker-first destination rejects a contradictory
+ACK. A refused chat with no page turn can refile only when the bridge revalidates current exact
+work; cold state defaults to no such permission, and a known refused turn remains fenced.
+
 Source, bundle, package, installed bytes and live behavior are separate gates (§3). The app id
 is `com.chatonsteroids.app`. Native release targets are Windows x64/arm64 NSIS, macOS x64/arm64
 DMG+ZIP and Linux x64/arm64 AppImage+DEB. Windows is per-user-capable and `asInvoker`; replacing
@@ -3166,8 +3244,9 @@ the package preserves userData. Synchronize package/main/extension versions deli
 a bundler. `electron-builder.yml` puts executable tunnel/rg, extension and required native
 payloads outside asar. `extension-path.ts` transactionally mirrors the packaged extension to
 stable `userData/extension`, never an ephemeral AppImage mount.
-The macOS afterPack hook removes Electron's unused camera, microphone and audio-capture
-privacy descriptions before sealing, retaining Screen Recording. Strict plist readback and
+The macOS afterPack hook removes Electron's unused camera and system-audio-capture
+privacy descriptions before sealing, retaining Screen Recording and the explicit dictation
+microphone description. Strict plist readback and
 bundle smoke checks reject failed cleanup. This does not establish publisher signing,
 notarization or permission continuity across updates.
 

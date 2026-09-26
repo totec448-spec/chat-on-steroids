@@ -4,7 +4,7 @@ import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const source = readFileSync('extension/browser-control.js', 'utf8')
-  .replace(/^import .*\n/, '').replace('export function ', 'function ');
+  .replace(/^import .*\n/gm, '').replace('export function ', 'function ');
 type Tab = {id:number;url:string;pendingUrl?:string;status:string;title?:string;active?:boolean};
 function event() {
   const listeners = new Set<(...args:any[])=>void>();

@@ -443,7 +443,7 @@ describe('a brief longer than the app can type', () => {
    * fresh chat acts on. Cutting the tail off would hand chat B pages of history with the
    * instructions for what to do about them deleted — and nothing in the text saying so.
    */
-  it('keeps both ends of an over-long brief, and says where the middle went', async () => {
+  it('refuses an over-long brief without deleting its middle or creating a replacement', async () => {
     await connect();
     await record();
     const { token: continuation } = await press();
@@ -455,17 +455,10 @@ describe('a brief longer than the app can type', () => {
     expect(huge.length).toBeGreaterThan(256_000);
 
     const stored = await capture(continuation, huge);
-    expect(stored.status).toBe(200);
-    const commandId = stored.body.commandId as string;
-    const text = (await redeem(commandId, 'page-1')).body.command.text as string;
-
-    expect(text).toContain('TASK — finish the bridge rewrite.');
-    expect(text).toContain('NEXT — run the full suite.');
-    expect(text).toContain('DO NOT — rebuild or reload anything.');
-    // And the cut is in the brief where the model reading it will see it, not silent.
-    expect(text).toMatch(/left out/);
-    expect(text.length).toBeLessThan(huge.length);
-    expect(text.length).toBeLessThanOrEqual(MAX_CHATGPT_MESSAGE_CHARS);
+    expect(stored.status).toBe(409);
+    expect(stored.body.message).toContain('No content was removed');
+    expect(stored.body.message).toContain('Nothing was compacted');
+    expect(stored.body.commandId).toBeUndefined();
   });
 
   it('carries a large near-budget handoff without a hidden character-budget truncation', async () => {
@@ -497,12 +490,13 @@ describe('a brief longer than the app can type', () => {
     ] };
     await updateSessionPlan(sessionId, CHAT_A, plan, Date.now());
     const { token: continuation } = await press();
-    const brief = 'TASK: finish the original work.\n' + 'verified detail '.repeat(8_000) + '\nNEXT: inspect the retained build result.';
+    const brief = 'TASK: finish the original work.\n' + 'verified detail '.repeat(4_000) + '\nREQUIRED: preserve the middle constraint.\nNEXT: inspect the retained build result.';
     const stored = await capture(continuation, brief);
     expect(stored.status).toBe(200);
     const text = (await redeem(stored.body.commandId, 'page-plan')).body.command.text as string;
     expect(text).toContain(`[[CLF-RESUME:${continuation}]]`);
     expect(text).toContain('TASK: finish the original work.');
+    expect(text).toContain('REQUIRED: preserve the middle constraint.');
     expect(text).toContain('NEXT: inspect the retained build result.');
     expect(text).toContain(plan.explanation);
     for (const step of plan.plan) {

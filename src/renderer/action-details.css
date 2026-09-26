@@ -1,0 +1,110 @@
+/* Recorded action previews. The chat remains the only vertical scrolling owner. */
+.action-details {
+  min-width: 0;
+  max-width: 100%;
+  display: grid;
+  gap: 8px;
+  padding: 4px 0 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.action-details .action-details-title {
+  margin: 0;
+  font-size: calc(13px * var(--text-scale, 1));
+  font-weight: 600;
+}
+
+.action-details .action-details-fields {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+}
+
+.action-details .action-details-field {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+  gap: 4px 12px;
+  font-size: calc(11px * var(--text-scale, 1));
+  line-height: 1.5;
+}
+
+.action-details .action-details-field dt {
+  color: var(--faint);
+  overflow-wrap: anywhere;
+}
+
+.action-details .action-details-field dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--soft);
+  font-family: var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  unicode-bidi: plaintext;
+}
+
+.action-details .action-details-label {
+  margin: 4px 0 0;
+  color: var(--faint);
+  font-size: calc(10px * var(--text-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.action-details .action-details-code {
+  min-width: 0;
+  max-width: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: visible;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--sunk);
+  color: var(--soft);
+  font-family: var(--mono);
+  font-size: calc(11px * var(--text-scale, 1));
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+}
+
+.action-details .action-details-line {
+  white-space: inherit;
+  overflow-wrap: inherit;
+}
+
+.action-details .action-details-line-added {
+  color: var(--green);
+  background: var(--green-wash);
+}
+
+.action-details .action-details-line-removed {
+  color: var(--red);
+  background: var(--red-wash);
+}
+
+.action-details .action-details-line-file {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.action-details .action-details-line-hunk {
+  color: var(--faint);
+}
+
+.action-details .action-details-note {
+  margin: 0;
+  color: var(--faint);
+  font-size: calc(11px * var(--text-scale, 1));
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .action-details .action-details-field { grid-template-columns: minmax(0, 1fr); }
+}

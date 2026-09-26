@@ -36,7 +36,7 @@
   // before touching the shared DOM. Otherwise old and new composer observers can continually
   // remove and reinsert each other's controls, starving transport/timers and freezing the tab.
   // A healthy incumbent in this context still wins the static/recovery injection race.
-  const RECORDER_VERSION = 21;
+  const RECORDER_VERSION = 22;
   const recorderHandle = {
     version: RECORDER_VERSION,
     healthy: () => false,
@@ -756,7 +756,10 @@
   function matchesSubmittedUser(message, expected) {
     if (typeof expected !== 'string' || expected.length > 240000) return false;
     const source = userMessageSource(message);
-    return source !== null && sendText(source.text) === sendText(expected);
+    if (!source) return false;
+    if (sendText(source.text) === sendText(expected)) return true;
+    const readback = source.canonical ? CLF_DOM.userMessageReadback?.(message) : null;
+    return typeof readback === 'string' && sendText(readback) === sendText(expected);
   }
   /** An app-owned bootstrap may return escaped. Ordinary input authorization keeps
    * matchesSubmittedUser; native message identity and document lifetime still own the receipt. */
@@ -1175,6 +1178,11 @@
     // prose and rendered HTML; otherwise a single 413 can never be halved and blocks every
     // later observation for this conversation.
     let wireBudget = 400 * 1024;
+    if (bounded.presentation) {
+      const bytes = utf8Bytes(JSON.stringify(bounded.presentation));
+      if (bytes > 48 * 1024) delete bounded.presentation;
+      else wireBudget -= bytes;
+    }
     const takeUtf8 = (value, budget) => {
       if (typeof value !== 'string') return value;
       if (utf8Bytes(value) <= budget) return value;
@@ -3044,7 +3052,7 @@
   // 11: adds exact typed thought-notification ids and ephemeral DOM stamps for selective
   //     presentation suppression. Caption text and per-call adjacency remain non-authority.
   // 12: adds exact provider-message/sediment generated-image descriptors and DOM pixel stamps.
-  const FIBER_VERSION = 21;
+  const FIBER_VERSION = 22;
   const FIBER_TIMEOUT_MS = 1500;
   const FIBER_MAX_ROWS = 400;
   /** Assistant turns whose per-call evidence is accepted from one scan. */
@@ -3057,6 +3065,9 @@
   const TOOL_NAME = /^[a-z0-9_.-]{1,64}$/i;
   const FIBER_BUSY_CAPTIONS = new Set(['thinking', 'thinking about it', 'reasoning', 'working', 'loading', 'done', 'called tool']);
   const FIBER_TIMER_CAPTION = /^(?:worked|thought|reasoned|thinking)\s+for\s+[\d.,]+\s*(?:s|m|h|sec|secs|seconds?|min|mins|minutes?|hours?)\b/;
+  // One ephemeral headline per exact local turn. This is not a canonical message
+  // identity or a work lease, and can never acknowledge a tool or a Send.
+  let reportedLiveActivity = null;
 
   /** Descriptors from the last successful scan, keyed by the stamp on their row. */
   let fiberRows = new Map();
@@ -3155,6 +3166,36 @@
    * this app already ran belongs to. It never writes an event, never names an agent, and
    * carries no argument value.
    */
+  /** MAIN is untrusted. Copy only bounded public reference fields, never arbitrary metadata. */
+  function readMessagePresentation(raw, conversation) {
+    if (!raw || raw.conversationId !== conversation || !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(conversation || '') ||
+        !Array.isArray(raw.references) || raw.references.length > 64) return undefined;
+    const references = [], seen = new Set();
+    const text = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+    for (const ref of raw.references) {
+      if (!ref || !Number.isSafeInteger(ref.index) || ref.index < 0 || ref.index >= 64 || seen.has(ref.index)) return undefined;
+      seen.add(ref.index);
+      if (ref.type === 'file' && text(ref.name, 300) && text(ref.path, 1024) && ref.path.startsWith('/mnt/data/') &&
+          !/[\\?#]/.test(ref.path) && ref.path.split('/').every(part => part !== '..' && part !== '.') &&
+          /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(ref.sourceMessageId || '')) {
+        references.push({ index: ref.index, type: 'file', name: ref.name, path: ref.path, sourceMessageId: ref.sourceMessageId });
+      } else if (ref.type === 'web' && Array.isArray(ref.sources) && ref.sources.length <= 8) {
+        const sources = [];
+        for (const source of ref.sources) {
+          if (!text(source?.url, 2048)) continue;
+          try {
+            const url = new URL(source.url);
+            if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) continue;
+            sources.push({ title: text(source.title, 300) ? source.title : url.hostname, url: source.url });
+          } catch { /* An unknown destination is not a link. */ }
+        }
+        if (sources.length) references.push({ index: ref.index, type: 'web', sources });
+      }
+    }
+    const result = { conversationId: conversation, references };
+    return JSON.stringify(result).length <= 16000 ? result : undefined;
+  }
+
   function readTurnCalls(raw) {
     if (!raw || typeof raw !== 'object') return null;
     const index = Number.isInteger(raw.index) && raw.index >= 0 && raw.index < FIBER_MAX_TURNS ? raw.index : null;
@@ -3225,6 +3266,7 @@
       // Whole markup or none, for the same reason the wire bound above drops it.
       const renderedHtml =
         typeof entry.renderedHtml === 'string' && entry.renderedHtml.length <= 120_000 ? entry.renderedHtml : '';
+      const presentation = readMessagePresentation(entry.presentation, raw.conversationId);
       if (!rawText && !renderedHtml && !attachments.length &&
           !(entry.role === 'assistant' && entry.rawMessageId && entry.rawMessageId === raw.endMessageId)) continue;
       const message = {
@@ -3243,6 +3285,7 @@
         rawText,
         ...(attachments.length ? { attachments } : {}),
         renderedHtml,
+        ...(presentation ? { presentation } : {}),
         sectionIndex:
           Number.isInteger(entry.sectionIndex) && entry.sectionIndex >= 0 && entry.sectionIndex < 64
             ? entry.sectionIndex
@@ -3255,7 +3298,8 @@
         continue;
       }
       const prior = messages[priorAt];
-      if (prior.rawText === rawText && prior.renderedHtml === renderedHtml && JSON.stringify(prior.attachments || []) === JSON.stringify(attachments)) {
+      if (prior.rawText === rawText && prior.renderedHtml === renderedHtml &&
+          JSON.stringify(prior.presentation) === JSON.stringify(presentation) && JSON.stringify(prior.attachments || []) === JSON.stringify(attachments)) {
         if (message.stable) prior.stable = true;
         continue;
       }
@@ -3348,7 +3392,9 @@
       codeIds.add(messageId);
       codeModeCalls.push({ messageId, tool: 'functions.exec', requestId: cap(entry.requestId, 100), answered: entry.answered === true });
     }
-    if (codeModeCalls.length === 0 && kept.length === 0 && requests.length === 0 && keptMessages.length === 0 && keptActivities.length === 0 &&
+    const liveActivity = raw.liveActivity === null ? null : typeof raw.liveActivity === 'string' && raw.liveActivity.length <= 300
+      ? raw.liveActivity.replace(/[\r\n\t]+/g, ' ').trim() || null : undefined;
+    if (codeModeCalls.length === 0 && kept.length === 0 && requests.length === 0 && keptMessages.length === 0 && keptActivities.length === 0 && !liveActivity &&
         keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId) {
       return null;
     }
@@ -3364,6 +3410,7 @@
       requests,
       messages: keptMessages,
       activities: keptActivities,
+      ...(liveActivity !== undefined ? { liveActivity } : {}),
       thoughtNotifications: keptThoughtNotifications,
       images: keptImages
     };
@@ -4017,6 +4064,16 @@
         fiberTerminalMessageId = null;
       }
     }
+    const liveCaptionTurn = answer.turns[activeTurnIndex];
+    if (generating && activeLocalTurnId && liveCaptionTurn && !liveCaptionTurn.conversationConflict &&
+        concreteConversation(liveCaptionTurn.conversationId) === askedConversation && liveCaptionTurn.liveActivity !== undefined) {
+      const text = liveCaptionTurn.liveActivity || '';
+      const signature = `${askedConversation}\u0000${activeLocalTurnId}\u0000${text}`;
+      if (signature !== reportedLiveActivity) {
+        reportedLiveActivity = signature;
+        emit({ kind: 'activity_status', turnId: activeLocalTurnId, fiberConversationId: askedConversation, text });
+      }
+    }
     for (let index = 0; index < answer.turns.length; index++) {
       const turn = answer.turns[index];
       const pageConversation = concreteConversation(turn.conversationId);
@@ -4265,7 +4322,7 @@
         // claim is different and fails closed instead of choosing either generation.
         const signature =
           `${state}\u0000${message.rawText}\u0000${message.renderedHtml}\u0000${owner}` +
-          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}`;
+          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}\u0000${JSON.stringify(message.presentation) || ''}`;
         if (priorMessage?.signature === signature) continue;
         messagesReported.set(message.messageId, { signature, owner, conflicted: ownerConflict, text: message.rawText });
         if (state === 'streaming' && owner && priorMessage?.text !== message.rawText && freshPublication) noteTurnProgress(owner);
@@ -4280,6 +4337,7 @@
           turnId: localOwner || undefined,
           text: message.rawText,
           renderedHtml: message.renderedHtml,
+          ...(message.presentation ? { presentation: message.presentation } : {}),
           // create_time is stamped by ChatGPT's server clock while turn/tool events use the
           // machine clock. They are not guaranteed to agree: the live 2026-08-25 turn recorded
           // this response 14 seconds before the user message that caused it. For a current or
@@ -6292,6 +6350,13 @@
       // reply. Until this document has owned a turn, exact question proof may
       // still restore it through this same feed, even after native completion.
       appActiveTurnId = typeof data.activeTurnId === 'string' && data.activeTurnId ? data.activeTurnId : null;
+      // Reconcile the ephemeral headline through the existing activity reply.
+      // A desktop restart may lose presentation without changing public text;
+      // retire only this caption's dedup, never replay transcript/tool/Send data.
+      if (typeof data.recordedTurnId === 'string' && Object.hasOwn(data, 'activityCaption') &&
+          reportedLiveActivity?.startsWith(`${forId}\u0000${data.recordedTurnId}\u0000`) &&
+          reportedLiveActivity !== `${forId}\u0000${data.recordedTurnId}\u0000${data.activityCaption || ''}`)
+        reportedLiveActivity = null;
       if (!generating && pendingTools > 0 && appActiveTurnId === turnId && fiberSettled?.reason === 'thinking_failed') noteTurnProgress();
       const recordedQuestionId = typeof data.recordedQuestionId === 'string' ? data.recordedQuestionId : null;
       if (resumedStoppedTurn && !generating && appActiveTurnId === turnId) adoptOpenTurn(turnId, recordedQuestionId);

@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { createSession, flushSessions, initSessionStore, readSessionPlan, rebindSession, resetSessionStoreForTests, sessionsRoot, updateSessionPlan } from '../src/main/session/store.js';
 import { agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES } from '../src/shared/agent-plan.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
-import { prepareHandoff, resumeBootstrapMatches, resumeBootstrapText } from '../src/main/session/handoff.js';
+import { prepareHandoff, resumeBootstrapMatches, resumeBootstrapText, sessionHandoffPrompt } from '../src/main/session/handoff.js';
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../src/shared/user-prompt.js';
 import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { attachRequestPlan, reconcileRequestPlans, resetRequestPlansForTests, updateRequestPlan } from '../src/main/session/request-plans.js';
@@ -34,7 +34,7 @@ it('carries the saved plan in the durable handoff without requesting a removed t
   expect((await prepareHandoff({ sessionId: session.id, text })).text).toBe(text.trim());
 });
 
-it('keeps the full plan and both brief ends within the replacement message budget', async () => {
+it('preserves middle requirements and the full plan, refusing an oversized brief without truncation', async () => {
   const session = await createSession({ conversationId: 'plan-budget' });
   const saved = agentPlanUpdateSchema.parse({
     explanation: 'Keep all verification obligations. '.repeat(25),
@@ -47,13 +47,19 @@ it('keeps the full plan and both brief ends within the replacement message budge
   await updateSessionPlan(session.id, 'plan-budget', saved, 100);
   const start = 'TASK: preserve the original objective.\n';
   const end = '\nNEXT: finish the pending checks.\nDO NOT: repeat successful commands.';
+  const middle = '\nREQUIRED: preserve the unfinished migration and do not publish before review.\n';
+  await expect(prepareHandoff({ sessionId: session.id,
+    text: start + 'operational details '.repeat(4_000) + middle + 'operational details '.repeat(4_000) + end })).rejects.toThrow('No content was removed');
+  const prompt = await sessionHandoffPrompt(session.id, 'a'.repeat(32), false);
+  const limit = Number(/at most (\d+) characters/.exec(prompt)?.[1]);
+  expect(limit).toBeGreaterThan(200); expect(limit).toBeLessThanOrEqual(80_000);
   const handoff = await prepareHandoff({ sessionId: session.id,
-    text: start + 'operational details '.repeat(8_000) + end });
+    text: start + 'operational details '.repeat(300) + middle + 'operational details '.repeat(300) + end });
   const bootstrap = resumeBootstrapText(handoff.text);
   expect(bootstrap.length).toBeLessThanOrEqual(MAX_CHATGPT_MESSAGE_CHARS);
   expect(bootstrap).toContain(start);
   expect(bootstrap).toContain(end);
-  expect(bootstrap).toContain('left out');
+  expect(bootstrap).toContain(middle); expect(bootstrap).not.toContain('left out');
   expect(bootstrap).toContain(saved.explanation);
   for (const step of saved.plan) {
     expect(bootstrap).toContain(step.step);

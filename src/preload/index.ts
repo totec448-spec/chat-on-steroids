@@ -1,4 +1,5 @@
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
+import { DICTATION, type DictationAudio, type DictationEvent, type DictationStatus } from '../shared/dictation.js';
 import type { ChatModelCatalog } from '../shared/chat-models.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
 import type { TaskProgress } from '../shared/task-progress.js';
@@ -82,6 +83,20 @@ export interface SessionDetail {
 }
 
 const api = {
+  dictationStatus: () => call<DictationStatus>('dictation:request', { action: 'status' }),
+  dictationSetKey: (value: string) => call<DictationStatus>('dictation:request', { action: 'key', value }),
+  dictationBegin: (id: string) => call<void>('dictation:request', { action: 'begin', id }),
+  dictationCancel: (id: string) => call<void>('dictation:request', { action: 'cancel', id }),
+  dictationTranscribe: (audio: DictationAudio): Promise<Reply<string>> => {
+    if (!(audio.bytes instanceof Uint8Array) || audio.bytes.byteLength > DICTATION.maxAudioBytes)
+      return Promise.resolve({ ok: false, error: 'Recording exceeds the audio size limit.' });
+    return call<string>('dictation:request', { id: audio.id, bytes: audio.bytes, mime: audio.mime, language: audio.language, action: 'transcribe' });
+  },
+  onDictationEvent: (listener: (value: DictationEvent) => void): (() => void) => {
+    const wrapped = (_event: unknown, value: DictationEvent): void => listener(value);
+    ipcRenderer.on('dictation:event', wrapped);
+    return () => ipcRenderer.removeListener('dictation:event', wrapped);
+  },
   terminalCreate: (id: string, projectId: string, cols: number, rows: number) => call<WorkspaceTerminalInfo>('workspaceTerminal:request', { action: 'create', id, projectId, cols, rows }),
   terminalWrite: (id: string, data: string) => call<void>('workspaceTerminal:request', { action: 'write', id, data }),
   terminalResize: (id: string, cols: number, rows: number) => call<void>('workspaceTerminal:request', { action: 'resize', id, cols, rows }),
@@ -220,6 +235,7 @@ const api = {
   setZoom: (factor: number) => call<number>('window:zoom', { factor }),
   getZoom: () => call<number>('window:getZoom'),
   openSessionChat: (id: string) => call<boolean>('sessions:openChat', { id }),
+  openSessionReference: (id: string, messageId: string, index: number) => call<boolean>('sessions:openReference', { id, messageId, index }),
   // Stops a chat this app cannot stop in the page: every tool call it has already been proved
   // to own is refused until it is released. Returns the whole blocked set, so one press
   // repaints without a second read.

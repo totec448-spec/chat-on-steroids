@@ -3,6 +3,16 @@ import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
 const script = readFileSync(new URL('../extension/usage.js', import.meta.url), 'utf8');
+const frame = (value: unknown, type = 'message') => `event: ${type}\ndata: ${JSON.stringify(value)}\n\n`;
+const streamConversation = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const otherConversation = '11111111-2222-4333-8444-555555555555';
+const handoff = (conversation_id = streamConversation) => ({ conversation_id, turn_topic_id: 'synthetic-turn-topic' });
+const inputMessage = (request_id: string) => ({ type: 'input_message', input_message: { metadata: { request_id } } });
+const socketItem = (encoded_item: string, stream_item_id: string, parent_stream_item_id: string | null,
+  turn_id = 'synthetic-turn', conversation_id = streamConversation) => [{ type: 'message', payload: {
+  type: 'conversation-turn-stream', payload: { type: 'stream-item', conversation_id, turn_id,
+    stream_item_id, parent_stream_item_id, encoded_item }
+} }];
 function harness() {
   const posts: Array<Record<string, any>> = [];
   let now = Date.parse('2026-09-05T12:00:00Z');
@@ -16,9 +26,15 @@ function harness() {
   class Socket {
     static OPEN = 1;
     handlers: Array<(event: { data: string }) => void> = [];
+    closeHandlers: Array<(event: { data: string }) => void> = [];
     constructor(readonly url: string) {}
-    addEventListener(type: string, listener: (event: { data: string }) => void) { if (type === 'message') this.handlers.push(listener); }
-    receive(data: unknown) { for (const listener of this.handlers) listener({ data: JSON.stringify(data) }); }
+    addEventListener(type: string, listener: (event: { data: string }) => void) {
+      if (type === 'message') this.handlers.push(listener);
+      if (type === 'close') this.closeHandlers.push(listener);
+    }
+    receiveRaw(data: string) { for (const listener of this.handlers) listener({ data }); }
+    receive(data: unknown) { this.receiveRaw(JSON.stringify(data)); }
+    close() { for (const listener of this.closeHandlers) listener({ data: '' }); }
   }
   const window: any = {
     WebSocket: Socket,
@@ -73,7 +89,7 @@ function harness() {
     };
     const returned = await window.fetch('/backend-api/conversation', init);
     expect(returned).toBe(response);
-    if (String(init.method || 'GET').toUpperCase() === 'POST' && new URL(url).origin === 'https://chatgpt.com' && /^\/backend-api\/(?:f\/)?conversation$/.test(new URL(url).pathname)) await inspected;
+    if (String(init.method || 'GET').toUpperCase() === 'POST' && new URL(url).origin === 'https://chatgpt.com' && /^\/backend-api\/(?:conversation|f\/conversation(?:\/resume)?)$/.test(new URL(url).pathname)) await inspected;
     else await new Promise(resolve => setTimeout(resolve, 0));
   }
   return {
@@ -88,16 +104,20 @@ function harness() {
     feedSse,
     openSse: async () => {
       let resolve: (value: unknown) => void = () => {};
+      let consumed: () => void = () => {};
       let cancelled = false, clones = 0;
       const reader = {
-        read: () => new Promise(done => { resolve = done; }),
-        cancel: async () => { cancelled = true; resolve({ done: true }); }
+        read: () => new Promise(done => { resolve = done; consumed(); consumed = () => {}; }),
+        cancel: async () => { cancelled = true; resolve({ done: true }); consumed(); consumed = () => {}; }
       };
       response = { url: 'https://chatgpt.com/backend-api/f/conversation', ok: true,
         headers: { get: () => 'text/event-stream' },
         clone: () => { clones++; return { body: { getReader: () => reader } }; } };
       await window.fetch('/backend-api/f/conversation', { method: 'POST' });
-      return { push: (data: unknown) => resolve({ done: false, value: new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`) }),
+      return { push: (data: unknown) => new Promise<void>(done => {
+        consumed = done;
+        resolve({ done: false, value: new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`) });
+      }),
         get cancelled() { return cancelled; }, get clones() { return clones; } };
     },
     hide: () => dispatch('pagehide', {}),
@@ -128,8 +148,8 @@ describe('MAIN-world usage projection', () => {
   it('retires a versioned observer across replacement while preserving provider wrappers and native sockets', async () => {
     const h = harness(), old = h.observer(), socket = h.socket();
     h.replaceFetch(true);
-    h.evaluate(script.replace('const OBSERVER_VERSION = 2;', 'const OBSERVER_VERSION = 3;'));
-    expect(old.current()).toBe(false); expect(h.observer().version).toBe(3);
+    h.evaluate(script.replace('const OBSERVER_VERSION = 3;', 'const OBSERVER_VERSION = 4;'));
+    expect(old.current()).toBe(false); expect(h.observer().version).toBe(4);
     const stream = await h.openSse(); expect(stream.clones).toBe(1); h.hide();
     expect(socket).toBeInstanceOf(h.nativeSocket);
     const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -445,6 +465,184 @@ describe('MAIN-world usage projection', () => {
     await h.feedSse([`data: {"conversation_id":"${a}","request_id":"wfr_get"}\n\n`], { method: 'GET' });
     await h.feedSse([`data: {"conversation_id":"${a}","request_id":"not-a-workflow"}\n\n`]);
     await h.feedSse([`data: {"conversation_id":"${a}","nested":{"conversation_id":"${b}"},"request_id":"wfr_conflict"}\n\n`]);
+    expect(h.posts).toEqual([]);
+  });
+});
+
+describe('response-scoped input-message request origins', () => {
+  it('publishes typed input-message metadata while the exact HTTP response is still open', async () => {
+    const h = harness(), response = await h.openSse();
+    await response.push(handoff());
+    expect(h.posts).toEqual([]);
+    await response.push({ ...inputMessage('wfr_split_live'), input_message: {
+      metadata: { request_id: 'wfr_split_live' }, content: { parts: ['PRIVATE_SYNTHETIC_BODY'] }
+    } });
+    expect(h.posts).toEqual([{ type: 'cos-request-origin', conversationId: streamConversation,
+      requestIds: ['wfr_split_live'], observedAt: expect.any(Number) }]);
+    expect(response.cancelled).toBe(false);
+    expect(JSON.stringify(h.posts)).not.toContain('PRIVATE_SYNTHETIC_BODY');
+    h.hide();
+  });
+
+  it.each(['conversation', 'f/conversation', 'f/conversation/resume'])('joins chunked typed input messages only within %s', async endpoint => {
+    const h = harness(), request_id = '22222222-3333-4444-8555-666666666666';
+    const input = frame(inputMessage(request_id));
+    await h.feedSse([frame(handoff()), input.slice(0, 63), input.slice(63)], { method: 'POST' },
+      `https://chatgpt.com/backend-api/${endpoint}`);
+    expect(h.posts.map(row => row.requestIds)).toEqual([[request_id]]);
+    await h.feedSse([frame(inputMessage('wfr_other_response'))]);
+    expect(h.posts).toHaveLength(1);
+  });
+
+  it('accepts typed metadata in complete root-add values with explicit or inherited v1 headers', async () => {
+    const h = harness();
+    await h.feedSse([frame({ ...inputMessage('wfr_colocated'), conversation_id: streamConversation })]);
+    await h.feedSse([frame(handoff()), frame({ p: '', o: 'add', v: inputMessage('wfr_root_add') })]);
+    await h.feedSse([frame('v1', 'delta_encoding'), frame({ v: handoff() }, 'delta'),
+      frame({ v: inputMessage('wfr_inherited_root') }, 'delta')]);
+    expect(h.posts.map(row => row.requestIds)).toEqual([['wfr_colocated'], ['wfr_root_add'], ['wfr_inherited_root']]);
+  });
+
+  it('does not borrow the handoff of another concurrently open response', async () => {
+    const h = harness(), a = await h.openSse(), b = await h.openSse();
+    await a.push(handoff());
+    await b.push(inputMessage('wfr_unowned'));
+    expect(h.posts).toEqual([]);
+    await a.push(inputMessage('wfr_owned'));
+    expect(h.posts.map(row => row.requestIds)).toEqual([['wfr_owned']]);
+    h.hide();
+  });
+
+  it('never promotes untyped metadata, message content, tool arguments or partial patches using a retained conversation', async () => {
+    const h = harness();
+    for (const value of [
+      { input_message: { metadata: { request_id: 'wfr_untyped' } } },
+      { type: 'other', input_message: { metadata: { request_id: 'wfr_wrong_type' } } },
+      { type: 'input_message', message: { metadata: { request_id: 'wfr_wrong_slot' } } },
+      { metadata: { request_id: 'wfr_bare' } },
+      { message: { metadata: { request_id: 'wfr_message_only' } } },
+      { type: 'input_message', tool_arguments: inputMessage('wfr_arguments') },
+      { type: 'input_message', input_message: { content: { metadata: { request_id: 'wfr_content' } } } },
+      { p: '/message', o: 'add', v: inputMessage('wfr_partial') },
+      { p: '', o: 'replace', v: inputMessage('wfr_unframed_replace') },
+      { ...inputMessage('wfr_partial_top_level'), p: '/message', o: 'replace' },
+      { ...inputMessage('wfr_missing_operation'), p: '' },
+      { c: -1, p: '', o: 'add', v: inputMessage('wfr_malformed_root') }
+    ]) await h.feedSse([frame(handoff()), frame(value)]);
+    await h.feedSse([frame({ conversation_id: streamConversation,
+      input_message: { metadata: { request_id: 'wfr_untyped_colocated' } } })]);
+    expect(h.posts).toEqual([]);
+  });
+
+  it('does not seed a response owner from nested or patched conversation fields', async () => {
+    const h = harness();
+    for (const value of [
+      { nested: handoff() },
+      { p: '/message', o: 'add', v: handoff() },
+      { message: { content: handoff() } }
+    ]) await h.feedSse([frame(value), frame(inputMessage('wfr_nested_owner'))]);
+    expect(h.posts).toEqual([]);
+  });
+
+  it('does not retain request metadata before a handoff or use unsupported SSE event types', async () => {
+    const h = harness();
+    await h.feedSse([frame(inputMessage('wfr_too_early')), frame(handoff())]);
+    await h.feedSse([frame(handoff(), 'unrecognized'), frame(inputMessage('wfr_unrecognized_owner'))]);
+    await h.feedSse([frame(handoff()), frame(inputMessage('wfr_unrecognized_request'), 'unrecognized')]);
+    expect(h.posts).toEqual([]);
+  });
+
+  it('accepts a complete socket handoff and typed input message in one item without retaining an unlinked owner', () => {
+    const h = harness(), socket = h.socket();
+    const send = (encoded_item: string) => socket.receive([{ type: 'message', payload: {
+      type: 'conversation-turn-stream', payload: { type: 'stream-item', conversation_id: streamConversation, encoded_item }
+    } }]);
+    send(frame(handoff()) + frame(inputMessage('wfr_one_item')));
+    send(frame(inputMessage('wfr_unlinked_item')));
+    expect(h.posts.map(row => row.requestIds)).toEqual([['wfr_one_item']]);
+  });
+
+  it('retires a mixed-conversation response without replacing or later reviving its owner', async () => {
+    const h = harness();
+    await h.feedSse([frame(handoff()), frame(handoff(otherConversation)),
+      frame(inputMessage('wfr_mixed')), frame({ conversation_id: streamConversation, metadata: { request_id: 'wfr_revived' } })]);
+    expect(h.posts).toEqual([]);
+    await h.feedSse([frame(handoff()), frame(inputMessage('wfr_fresh_response'))]);
+    expect(h.posts.map(row => row.requestIds)).toEqual([['wfr_fresh_response']]);
+  });
+
+  it.each([
+    ['root conversation delta', frame('v1', 'delta_encoding') + frame({ p: '/conversation_id', o: 'replace', v: otherConversation }, 'delta')],
+    ['nested conversation delta', frame('v1', 'delta_encoding') + frame({ p: '/message/conversation_id', o: 'replace', v: otherConversation }, 'delta')],
+    ['root patch array', frame('v1', 'delta_encoding') + frame({ p: '', o: 'patch',
+      v: [{ p: '/conversation_id', o: 'replace', v: otherConversation }] }, 'delta')],
+    ['unframed conversation patch', frame({ p: '/conversation_id', o: 'replace', v: otherConversation })],
+    ['unframed root removal', frame({ p: '', o: 'remove' })],
+    ['delta without its format header', frame({ v: { message: { content: 'synthetic' } } }, 'delta')]
+  ])('retires inherited ownership after %s instead of reconstructing partial identity', async (_name, mutation) => {
+    const h = harness();
+    await h.feedSse([frame(handoff()), mutation, frame(inputMessage('wfr_after_identity_patch')),
+      frame({ conversation_id: streamConversation, metadata: { request_id: 'wfr_after_identity_patch_complete' } })]);
+    expect(h.posts).toEqual([]);
+  });
+
+  it.each([
+    ['invalid JSON', 'data: {\n\n'],
+    ['oversized complete event', frame({ padding: 'x'.repeat(513 * 1024) })],
+    ['invalid explicit owner', frame({ conversation_id: 'not-a-conversation' })],
+    ['null explicit owner', frame({ conversation_id: null })],
+    ['conflicting nested owner', frame({ nested: handoff(otherConversation) })],
+    ['duplicate valid owners', `data: {"conversation_id":"${otherConversation}","conversation_id":"${streamConversation}"}\n\n`],
+    ['duplicate malformed owner', `data: {"conversation_id":null,"conversation_id":"${streamConversation}"}\n\n`],
+    ['escaped conflicting key', `data: {"conversation\\u005fid":"${otherConversation}","conversation_id":"${streamConversation}"}\n\n`],
+    ['unsupported encoding', frame('future', 'delta_encoding')],
+    ['invalid delta channel', frame({ c: -1, p: '', o: 'add', v: handoff() }, 'delta')],
+    ['malformed delta path', frame({ p: {}, o: 'add', v: handoff() }, 'delta')]
+  ])('retires response inheritance after %s', async (_name, invalid) => {
+    const h = harness();
+    await h.feedSse([frame(handoff()), invalid, frame(inputMessage('wfr_after_invalid')),
+      frame({ conversation_id: streamConversation, metadata: { request_id: 'wfr_after_invalid_complete' } })]);
+    expect(h.posts).toEqual([]);
+  });
+
+  it('ignores quoted conversation keys and SSE comments while retaining exact server metadata', async () => {
+    const h = harness();
+    await h.feedSse([frame(handoff()), ': keepalive\n\n', 'event: heartbeat\n\n',
+      frame({ ...inputMessage('wfr_quoted_owner'), content: JSON.stringify(handoff(otherConversation)) })]);
+    expect(h.posts.map(row => row.requestIds)).toEqual([['wfr_quoted_owner']]);
+  });
+
+  it('joins socket handoffs only through the exact linked conversation and turn', () => {
+    const h = harness(), socket = h.socket();
+    socket.receive(socketItem(frame(handoff()), 'a0', null));
+    h.socket().receive(socketItem(frame(inputMessage('wfr_other_socket')), 'a1', 'a0'));
+    socket.receive(socketItem(frame(inputMessage('wfr_other_turn')), 'b1', null, 'other-turn'));
+    socket.receive(socketItem(frame(inputMessage('wfr_linked')), 'a1', 'a0'));
+    socket.receive(socketItem(frame(inputMessage('wfr_after_gap')), 'a3', 'missing'));
+    socket.receive(socketItem(frame(inputMessage('wfr_gap_child')), 'a4', 'a3'));
+    expect(h.posts.map(row => row.requestIds)).toEqual([['wfr_linked']]);
+  });
+
+  it('requires matching outer socket ownership even on a handoff that carries no request', () => {
+    const h = harness(), socket = h.socket();
+    socket.receive(socketItem(frame(handoff(otherConversation)), 'a0', null));
+    socket.receive(socketItem(frame(inputMessage('wfr_wrong_envelope')), 'a1', 'a0'));
+    socket.receive(socketItem(frame({ conversation_id: streamConversation, metadata: { request_id: 'wfr_reanchored' } }), 'a2', 'a1'));
+    expect(h.posts).toEqual([]);
+  });
+
+  it('does not inherit socket identity across malformed frames, closure or native done', () => {
+    const h = harness(), socket = h.socket();
+    socket.receive(socketItem(frame(handoff()), 'a0', null));
+    socket.receive(socketItem('data: {\n\n', 'a1', 'a0'));
+    socket.receive(socketItem(frame(inputMessage('wfr_malformed_child')), 'a2', 'a1'));
+    socket.close();
+    socket.receive(socketItem(frame(inputMessage('wfr_after_close')), 'a3', 'a2'));
+    socket.receive(socketItem(frame(handoff()), 'b0', null, 'second-turn'));
+    socket.receive([{ type: 'message', payload: { type: 'conversation-turn-stream', payload: {
+      type: 'done', conversation_id: streamConversation, turn_id: 'second-turn'
+    } } }]);
+    socket.receive(socketItem(frame(inputMessage('wfr_after_done')), 'b1', 'b0', 'second-turn'));
     expect(h.posts).toEqual([]);
   });
 });

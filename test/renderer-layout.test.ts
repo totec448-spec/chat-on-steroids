@@ -71,7 +71,10 @@ it('keeps the context circle in the gear group rather than an auto-placed compos
   const group = document.getElementById('composerSettings')!.parentElement!;
   expect(group.classList.contains('composer-options')).toBe(true);
   expect(document.getElementById('contextMeter')!.parentElement).toBe(group);
-  expect(document.getElementById('contextMeterInfo')!.parentElement?.id).toBe('contextMeter');
+  expect(document.getElementById('contextMeterInfo')!.parentElement?.id).toBe('contextMeterPanel');
+  expect(document.getElementById('contextMeterPanel')!.parentElement?.id).toBe('contextMeter');
+  expect(document.getElementById('contextMeterPanel')!.getAttribute('role')).toBe('dialog');
+  expect(document.getElementById('contextMeterConfigure')!.getAttribute('type')).toBe('button');
 });
 
 it('does not expose a periodic Astra continuation outside session_finish', () => {

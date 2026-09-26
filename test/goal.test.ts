@@ -1475,22 +1475,14 @@ describe('the model catalogue', () => {
   });
 });
 
-/**
- * The draft as it would have been typed, not as a model writes.
- *
- * Two separate claims, and the second one is the load-bearing one: the em dash goes, and a
- * couple of the mistakes a person leaves behind go in — but the whole thing has to be a pure
- * function of the draft, because a retried request has to be handed back the same message.
- */
-describe('the message a person would have typed', () => {
-  it('leaves no em dash anywhere in the reply', () => {
+/** Generated executor instructions are delivered unchanged, including literals in prose. */
+describe('exact validated helper instructions', () => {
+  it('preserves punctuation and all prose instead of inserting synthetic typos', () => {
     const written =
       'the picker stops at twenty — scrolling loads nothing. page a screenful before the end ' +
       '— the button below the list is not where anyone looks.';
     const typed = goal.humanReply(written);
-    expect(typed).not.toMatch(/[—–]/);
-    // A comma is that sentence typed, so the shape of the sentence survives.
-    expect(typed).toContain('at twenty, scrolling loads nothing');
+    expect(typed).toBe(written);
   });
 
   it('keeps a line that opens with a dash a line, and a range a range', () => {
@@ -1498,22 +1490,19 @@ describe('the message a person would have typed', () => {
     // whitespace class is what keeps the newline from being swallowed with it.
     const lines = goal.humanReply('— check the tests\n— then ship it').split('\n');
     expect(lines.length).toBe(2);
-    expect(lines.every((line) => /^[a-z]/.test(line))).toBe(true);
-    expect(goal.humanReply('it took 10—20 seconds')).toContain('10-20');
+    expect(lines).toEqual(['— check the tests', '— then ship it']);
+    expect(goal.humanReply('it took 10—20 seconds')).toBe('it took 10—20 seconds');
   });
 
-  it('never leaves a doubled comma where the dash already had one', () => {
-    expect(goal.humanReply('two things, — the tests and the build')).not.toMatch(/,\s*,/);
+  it('does not rewrite even unusual punctuation from the validated instruction', () => {
+    expect(goal.humanReply('two things, — the tests and the build')).toBe('two things, — the tests and the build');
   });
 
-  it('puts a mistake in, and not many', () => {
+  it('preserves literal expected strings even outside code markup', () => {
     const written = 'that does not fix it. the answer still renders twice, look at the id-less sections';
     const typed = goal.humanReply(written);
-    expect(typed).not.toBe(written);
-    const differing = [...written].filter((letter, at) => letter !== typed[at]).length;
-    // A slip, not a rewrite. Every mutation here is one character long.
-    expect(differing).toBeGreaterThan(0);
-    expect(typed.length).toBeGreaterThanOrEqual(written.length - 3);
+    expect(typed).toBe(written);
+    expect(goal.humanReply('The required literal is successful and the password field remains empty.')).toBe('The required literal is successful and the password field remains empty.');
   });
 
   it('hands back the identical message every time it is asked', () => {
@@ -1561,7 +1550,7 @@ describe('the message a person would have typed', () => {
     const view = await settled('c-typed');
 
     expect(view.stage).toBe('ready');
-    expect(view.reply).not.toMatch(/[—–]/);
+    expect(view.reply).toBe('the tests still fail — look at the id-less sections');
     expect(view.reply).toBe(goal.humanReply('the tests still fail — look at the id-less sections'));
   });
 });
@@ -2536,6 +2525,43 @@ it.each(['goal', 'loop'] as const)('runs Astra %s through its ordinary decision 
     goal.startGoalDraft({ conversationId, sessionId: session.id, turnId: 'astra-turn' });
     expect((await settled(conversationId)).stage).toBe(mode === 'goal' ? 'no-reply' : 'ready');
     expect(fetcher).toHaveBeenCalledOnce();
+  }
+});
+
+it.each([false, true])('continues non-Astra Pro Loop after completion while retaining saved after-turn %s', async afterTurn => {
+  const config = (await import('../src/main/config.js')).getConfig();
+  for (const finishTool of [true, false]) {
+    await saveConfig({ ...config, ui: { ...config.ui, finishTool } });
+    for (const model of ['gpt-5-6-pro', 'gpt-5-6-thinking']) {
+      const conversationId = `older-pro-${model}-${finishTool}-${afterTurn}`;
+      const session = await createSession({ conversationId });
+      await observeSessionModel(session.id, conversationId, model, Date.now(), 'pro');
+      await goal.setGoalSwitchNow(conversationId, 'loop', true, afterTurn);
+      goal.restoreGoalSwitches(goal.snapshotGoalSwitches());
+      expect(goal.goalSwitchFor(conversationId)).toMatchObject({ enabled: true, mode: 'loop', afterTurn });
+      expect(await goal.astraFinishOnly(session.id, conversationId)).toBe(false);
+      const turnId = 'older-pro-completed-turn';
+      await appendEvent(session.id, { kind: 'user_message', source: 'extension', time: Date.now(),
+        message: { text: 'Complete the requested local feature.', chars: 37, truncated: false } });
+      await recordLoopMcpProof(session.id, turnId);
+      await appendEvent(session.id, { kind: 'assistant_message', source: 'extension', turnId, final: true,
+        time: Date.now(), messageId: 'older-pro-final', message: { text: 'The implementation is ready.', chars: 28, truncated: false } });
+      await appendEvent(session.id, { kind: 'turn_end', source: 'extension', turnId, outcome: 'completed', time: Date.now() });
+      await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, replyId: 'older-pro-final', turnId, eventSeq: 10, blocked: false });
+      expect(goal.goalPendingReplyFor(conversationId)?.replyId).toBe('older-pro-final');
+      const fetcher = vi.fn(async () => decision('continue', 'Verify the remaining requirements.'));
+      globalThis.fetch = fetcher as typeof fetch;
+      goal.startGoalDraft({ conversationId, sessionId: session.id, turnId });
+      expect((await settled(conversationId)).stage).toBe('ready');
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(goal.goalSwitchFor(conversationId).afterTurn).toBe(afterTurn);
+
+      // Returning to Astra restores the user's saved choice rather than a rewritten preference.
+      await observeSessionModel(session.id, conversationId, 'gpt-6-pro', Date.now() + 1, 'pro');
+      expect(await goal.astraFinishOnly(session.id, conversationId)).toBe(finishTool && !afterTurn);
+      await goal.setGoalSwitchNow(conversationId, 'loop', false);
+      expect(goal.goalSwitchFor(conversationId)).toMatchObject({ enabled: false, mode: 'loop', afterTurn });
+    }
   }
 });
 

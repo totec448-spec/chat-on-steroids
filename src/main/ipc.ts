@@ -1,4 +1,5 @@
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
+import { openRecordedReference } from './session/message-reference.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { appearanceSchema } from './appearance-schema.js';
 import { mergeAppearance } from '../shared/appearance.js';
@@ -1010,6 +1011,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     }
     await openInPreferredBrowser(chatUrl(conversationId));
     return true;
+  });
+
+  handle('sessions:openReference', async payload => {
+    const { id, messageId, index } = z.object({ id: sessionIdArg.shape.id,
+      messageId: z.string().min(1).max(256), index: z.number().int().min(0).max(63) }).parse(payload);
+    return openRecordedReference(id, messageId, index);
   });
 
   /**
