@@ -171,7 +171,9 @@ beforeEach(async () => {
   // Each case models one independent app history. Reusing CHAT_A/CHAT_B while retaining
   // prior cases on disk hid duplicate-target ownership bugs and made the safe rebind check
   // reject a later test for a session that only existed in an earlier test.
-  await fs.rm(nodePath.join(dir, 'sessions'), { recursive: true, force: true });
+  // Windows can still be closing a file the previous case flushed (ENOTEMPTY); retry like
+  // removeTempDir() does rather than fail the next case over the last one's teardown.
+  await fs.rm(nodePath.join(dir, 'sessions'), { recursive: true, force: true, maxRetries: 5 });
   await fs.mkdir(nodePath.join(dir, 'sessions'), { recursive: true });
   resetSwarm();
   writeDurableSoon('bridge-commands', null);
