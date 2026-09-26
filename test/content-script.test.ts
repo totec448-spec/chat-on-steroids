@@ -7657,6 +7657,24 @@ describe('a stop button that goes missing while the turn is still running', () =
     );
   });
 
+  it.each(['A network error occurred. Please check your connection and try again.', 'Resume stream unavailable'])(
+    'classifies the newer shell failure %s as a recoverable transport failure', async (wording) => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'turn-new-shell-failure', []);
+    live.hook.observe();
+    await settle();
+    alertBanner(live.document, wording);
+    stopGenerating(live.document);
+    live.hook.observe();
+    await settle();
+    live.advance(live.hook.TURN_SETTLE_MS);
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'chat_error').map((entry) => entry.event)).toContainEqual(
+      expect.objectContaining({ text: wording, recoverable: true }));
+  });
+
   it('records an assistant-turn interruption under the local generation that owns the timeline', async () => {
     live = await harness();
     startGenerating(live.document);
