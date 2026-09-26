@@ -1232,7 +1232,13 @@ async function redeemCommand(id, client, conversationId = null, projectEntry = f
   // Another page already owns this command. Not an error to report: this page simply is not
   // the one the app is talking to, and it must type nothing.
   if (result.status === 409) return { ok: true, command: null, gone: true };
-  if (!result.ok) return { ok: false, error: result.error || `HTTP ${result.status}` };
+  if (!result.ok) return {
+    ok: false,
+    error: result.error || `HTTP ${result.status}`,
+    // A same-document redeem is idempotent until destinationAttempt. Surface only transport,
+    // throttling and server failures as retryable; ownership/validation replies stay terminal.
+    retryable: result.status === 0 || result.status === 429 || result.status >= 500
+  };
   const command = result.data && result.data.command ? result.data.command : null;
   return { ok: true, command };
 }
