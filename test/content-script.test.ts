@@ -8513,6 +8513,28 @@ describe('a content script reloaded into a turn already in flight', () => {
     expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
   });
 
+  /**
+   * The 2026-09-26 loop. ChatGPT lost a prime's turn server-side; the app ended it `stalled` and
+   * reloaded; the reloaded page showed Stop for seconds before ChatGPT's own network error, and a
+   * claimed turn for the same question stalled, earned another reload and hid the dead turn from
+   * the automatic Continue. A question whose turn the app has already ended is not unrecorded.
+   */
+  it('does not reopen the question whose turn the app has already ended', async () => {
+    live = await harness(
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { activity: () => activity({ activeTurnId: null, userAnchors: [], settledQuestionId: 'm-turn-live-user' }) },
+      midTurn
+    );
+    await live.hook.pullActivity();
+    live.hook.observe();
+    await settle();
+    live.advance(live.hook.TURN_SETTLE_MS * 2);
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+  });
+
   it('opens nothing when Stop does not outlast the settle window', async () => {
     live = await harness(
       'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',

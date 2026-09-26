@@ -6360,6 +6360,20 @@ describe('unattributed activity recovery', () => {
     outcome
   });
 
+  it('hands a reloaded page the question whose turn this app has already ended', async () => {
+    await pair();
+    await events(OTHER, [{ kind: 'user_message', messageId: 'settled-question', text: 'Audit the paperless setup.', time: Date.now() },
+      openTurn('settled-turn')]);
+    const running = (await request('GET', `/activity?conversationId=${OTHER}`)).body;
+    expect(running.settledQuestionId).toBeNull();
+    await events(OTHER, [endTurn('settled-turn', 'stalled')]);
+    expect((await request('GET', `/activity?conversationId=${OTHER}`)).body.settledQuestionId).toBe('settled-question');
+    // A new question is not settled by the old turn.
+    await events(OTHER, [{ kind: 'user_message', messageId: 'fresh-question', text: 'Now continue.', time: Date.now() + 1 },
+      openTurn('fresh-turn')]);
+    expect((await request('GET', `/activity?conversationId=${OTHER}`)).body.settledQuestionId).toBeNull();
+  });
+
   /**
    * The extension's maintenance pass, which is the whole conversation about repairs.
    *
