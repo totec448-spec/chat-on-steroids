@@ -8703,6 +8703,49 @@ describe('a content script reloaded into a turn already in flight', () => {
     expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
   });
 
+  /**
+   * The 2026-09-26 loop. ChatGPT lost a prime's turn server-side; the app ended it `stalled` and
+   * reloaded; the reloaded page showed Stop for seconds before ChatGPT's own network error, and a
+   * claimed turn for the same question stalled, earned another reload and hid the dead turn from
+   * the automatic Continue. A question whose turn the app has already ended is not unrecorded.
+   */
+  it('does not reopen the question whose turn the app has already ended', async () => {
+    live = await harness(
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { activity: () => activity({ activeTurnId: null, userAnchors: [], settledQuestionId: 'm-turn-live-user' }) },
+      midTurn
+    );
+    await live.hook.pullActivity();
+    live.hook.observe();
+    await settle();
+    live.advance(live.hook.TURN_SETTLE_MS * 2);
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+  });
+
+  it.each([[false, 1], [true, 0]])('treats a clean, lasting regeneration of the settled question as a turn (failure banner: %s)', async (banner, starts) => {
+    // A Compact & Resume brief rewritten by ChatGPT's Retry after "Resume stream unavailable"
+    // is a real generation of the same question; a phantom shows the failure banner instead.
+    live = await harness(
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { activity: () => activity({ activeTurnId: null, userAnchors: [], settledQuestionId: 'm-turn-live-user' }) },
+      midTurn
+    );
+    await live.hook.pullActivity();
+    if (banner) alertBanner(live.document, 'Message delivery timed out. Please try again.');
+    for (let at = 0; at < 7; at++) {
+      live.hook.observe();
+      await settle();
+      live.advance(5_000);
+    }
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(starts);
+  });
+
   it('opens nothing when Stop does not outlast the settle window', async () => {
     live = await harness(
       'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
