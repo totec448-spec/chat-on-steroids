@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import sharp from 'sharp';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APP_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
 import { userPromptText } from '../src/shared/user-prompt.js';
 import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
@@ -156,6 +156,7 @@ const {
 const { makeTempDir, removeTempDir, SAMPLE_BRIEF, faultGate } = await import('./helpers.js');
 const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
 const { getLog } = await import('../src/main/logger.js');
+const { setShippedExtensionBuildForTest } = await import('../src/main/extension-path.js');
 
 const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
 /** The chat that spawns the swarm in these tests: only a proven conversation can. */
@@ -241,7 +242,7 @@ interface Reply {
 function request(
   method: string,
   path: string,
-  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number } = {}
+  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string } = {}
 ): Promise<Reply> {
   const url = new URL(path, base);
   const payload = options.raw ?? (options.body === undefined ? null : JSON.stringify(options.body));
@@ -251,6 +252,7 @@ function request(
   // only produce confusing downstream failures.
   headers['x-extension-version'] = options.extensionVersion ?? APP_VERSION;
   headers['x-extension-protocol'] = String(options.protocol ?? BRIDGE_PROTOCOL);
+  if (options.extensionBuild) headers['x-extension-build'] = options.extensionBuild;
   if (payload !== null) {
     headers['content-type'] = 'application/json';
     headers['content-length'] = String(Buffer.byteLength(payload));
@@ -12607,4 +12609,58 @@ it('preserves pending commands and durable ACK receipts across a port switch', a
     expect(await readDurable('bridge-commands')).toEqual(before);
     expect((await request('POST', '/commands/ack', { body: ackBody })).body).toEqual(ack.body);
   } finally { selection.mockRestore(); }
+});
+
+describe('which extension build is running', () => {
+  const SHIPPED = 'a0a0a0a0a0a0';
+  afterEach(() => setShippedExtensionBuildForTest());
+
+  it('announces each build once while two browsers alternate, and says when one is not the shipped build', async () => {
+    // Measured 2026-09-26: a normal and a debugging Chrome on different builds alternated
+    // requests, and every alternation logged "connected" and pushed renderer state.
+    setShippedExtensionBuildForTest(SHIPPED);
+    const said = (build: string) => getLog().filter((entry) => entry.message.includes(`connected (build ${build})`)).length;
+    const warned = (build: string) => getLog().filter((entry) => entry.message.includes(`running extension build ${build}, but this app ships ${SHIPPED}`)).length;
+    const before = { a: said('b1b1b1b1b1b1'), w: warned('b1b1b1b1b1b1') };
+    for (let i = 0; i < 5; i++) {
+      await request('GET', '/hello', { auth: null, extensionBuild: SHIPPED });
+      await request('GET', '/hello', { auth: null, extensionBuild: 'b1b1b1b1b1b1' });
+    }
+    expect(said('b1b1b1b1b1b1') - before.a).toBe(1);
+    expect(warned('b1b1b1b1b1b1') - before.w, 'the stale build is named once').toBe(1);
+    expect(warned(SHIPPED), 'the shipped build is never called stale').toBe(0);
+  });
+
+  it('refuses work to an out-of-date companion only while an up-to-date one is present', async () => {
+    // 2026-09-26: a second Chrome on the pre-update extension claimed a planner input the
+    // current browser was waiting for, and could not finish it on the newer ChatGPT shell.
+    setShippedExtensionBuildForTest(SHIPPED);
+    await pair();
+    const stale = { body: { id: 'x', client: 'stale-client' }, extensionBuild: 'deadbeefcafe' };
+    const alone = await request('POST', '/commands/redeem', stale);
+    expect(alone.body.error, 'a lone older browser keeps working').not.toBe('stale_extension_build');
+    await request('GET', '/status', { extensionBuild: SHIPPED });
+    const refused = await request('POST', '/commands/redeem', stale);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe('stale_extension_build');
+    expect((await request('POST', '/repairs/claim', { body: {}, extensionBuild: 'deadbeefcafe' })).body).toEqual({ allowed: false });
+    const current = await request('POST', '/commands/redeem', { body: { id: 'x', client: 'current-client' }, extensionBuild: SHIPPED });
+    expect(current.body.error).not.toBe('stale_extension_build');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 61_000);
+    try {
+      const later = await request('POST', '/commands/redeem', stale);
+      expect(later.body.error, 'the up-to-date browser went quiet a minute ago').not.toBe('stale_extension_build');
+    } finally { clock.mockRestore(); }
+  });
+
+  it('compares nothing in a checkout that was never packaged', async () => {
+    setShippedExtensionBuildForTest(null);
+    const warnings = () => getLog().filter((entry) => entry.message.includes('but this app ships')).length;
+    const before = warnings();
+    await pair();
+    await request('GET', '/status', { extensionBuild: 'a1a1a1a1a1a1' });
+    const other = await request('POST', '/commands/redeem', { body: { id: 'x', client: 'c' }, extensionBuild: 'deadbeefcafe' });
+    expect(other.body.error).not.toBe('stale_extension_build');
+    expect(warnings()).toBe(before);
+  });
 });

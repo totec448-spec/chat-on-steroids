@@ -953,6 +953,9 @@ function clearRetryIfIdle() {
 
 async function hello(candidate) {
   try {
+    // The first greeting should already name the build, but it is a diagnostic: never let it
+    // hold up discovery for longer than a packaged file read takes.
+    await Promise.race([workerStampReady, new Promise(resolve => setTimeout(resolve, 500))]);
     const response = await fetchBounded(`http://127.0.0.1:${candidate}/hello`, {
       cache: 'no-store',
       headers: versionHeaders()
@@ -965,6 +968,24 @@ async function hello(candidate) {
   }
 }
 
+/**
+ * Which build of this extension is running, as written by scripts/write-extension-stamp.mjs.
+ *
+ * The manifest version cannot answer that: Chrome keeps a service worker alive across a folder
+ * change, so a replaced extension reports the new version and runs the old code. The stamp is
+ * written once per packaged build over every file the browser loads, so reading it here is one
+ * fetch. A checkout that was never packaged has no stamp and sends no header.
+ */
+let workerStampValue = '';
+const workerStampReady = (async () => {
+  try {
+    const stamped = await (await fetch(chrome.runtime.getURL('build-stamp.txt'))).text();
+    if (/^[0-9a-f]{12}$/.test(stamped.trim())) workerStampValue = stamped.trim();
+  } catch {
+    // No stamp: the app simply cannot compare builds, as before there was one.
+  }
+})();
+
 /** Lets the app say plainly when the two halves are out of step. */
 function versionHeaders() {
   let version = '0';
@@ -973,7 +994,11 @@ function versionHeaders() {
   } catch {
     // Not worth failing a request over.
   }
-  return { 'x-extension-version': version, 'x-extension-protocol': String(BRIDGE_PROTOCOL) };
+  return {
+    'x-extension-version': version,
+    'x-extension-protocol': String(BRIDGE_PROTOCOL),
+    ...(workerStampValue ? { 'x-extension-build': workerStampValue } : {})
+  };
 }
 
 /**
