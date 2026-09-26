@@ -703,6 +703,53 @@ describe('desktop input delivery and helper ownership', () => {
     expect(await run(escaped, true, 'epoch')).toBe(0);
     expect(await run(escaped, true, 'receipt')).toBe(0);
   });
+  /**
+   * The one draft a delivery may overwrite is its own.
+   *
+   * Refusing to clobber typing is right, but the guard could not tell the user's draft from the
+   * residue of a previous attempt by this same delivery: insert the text, fail to press Send, release
+   * the claim — and from then on the composer holds exactly what the next attempt would type, so every
+   * attempt refuses with "ChatGPT already contains an unsent draft".
+   *
+   * Measured on 2026-09-26: one recovery ticket claimed 181 times against its own 352 characters,
+   * alternating `After-turn pickup was withdrawn before Send.` and that refusal, for thirteen hours.
+   * Its original Send failed because the send control was unfindable on the new composer shell; the
+   * deadlock outlived that cause by a whole day.
+   */
+  it.each(['own residue', "someone else's draft"] as const)('delivers over %s only when it is its own', async kind => {
+    const own = kind === 'own residue';
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail || message.response
+        ? { ok: true } : { input: claimed() } })
+    }, () => undefined, false, true);
+    // The composer already holds text before anything is delivered.
+    live.document.querySelector('#prompt-textarea')!.textContent = own ? text : 'A sentence I was still writing';
+    await settle();
+    const sends = watchSend(live.document);
+    // ChatGPT's own half of a successful send: the question mounts and the composer empties.
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'residue-question', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+
+    const result = await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA });
+    await settle();
+
+    const refused = live.sent.filter(message => message.type === 'desktop_input' && message.fail)
+      .map(message => String(message.error));
+    if (own) {
+      expect(refused.filter(error => /unsent draft/.test(error)),
+        'its own leftover text was treated as a draft to protect').toEqual([]);
+      expect(sends(), 'the delivery did not go through over its own residue').toBe(1);
+      expect(result).toEqual({ ok: true });
+    } else {
+      expect(refused.some(error => /unsent draft/.test(error)),
+        "somebody else's draft was overwritten").toBe(true);
+      expect(sends(), 'a real draft was sent over').toBe(0);
+      expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe('A sentence I was still writing');
+    }
+  });
+
   it('keeps a helper claim revocable until its delayed Send is ready', async () => {
     let authorized = true;
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
