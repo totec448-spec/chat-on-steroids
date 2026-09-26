@@ -1688,7 +1688,10 @@
     nativeImageCaptureActiveTasks.clear();
     callsReported.clear();
     requestOwnersConfirmed.clear();
-    pendingStreamOrigins.clear();
+    // Except ids that already name the conversation being entered: see flushStreamRequestOrigins.
+    for (const [requestId, pending] of pendingStreamOrigins) {
+      if (pending.conversationId !== conversationId) pendingStreamOrigins.delete(requestId);
+    }
     requestOwnersPending.clear();
     requestOwnerRetryAt.clear();
     requestOwnerAttempts.clear();
@@ -10713,7 +10716,12 @@
     const route = CLF_DOM.conversationId();
     const pendingEpoch = epoch, calls = [];
     for (const [requestId, pending] of pendingStreamOrigins) {
-      if (!alive || pending.epoch !== epoch || Date.now() >= pending.deadline || (route && route !== pending.conversationId)) {
+      // Retired by its exact conversation, not by the document epoch. A new chat started from a
+      // tab that showed another chat publishes its request id before it has a /c/ route, and the
+      // move from that chat to the new one advances the epoch — which discarded an id naming the
+      // new chat exactly and left page-started chats Unattributed (#393, 2026-09-26). A route to
+      // any other conversation still retires it, and so does its deadline.
+      if (!alive || Date.now() >= pending.deadline || (route && route !== pending.conversationId)) {
         pendingStreamOrigins.delete(requestId);
         continue;
       }
