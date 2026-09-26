@@ -2110,8 +2110,20 @@ async function releaseModelCatalogTarget(nonce) {
     if (validModelCatalogTarget(stored) && stored.nonce === nonce) await chrome.storage.session.remove(MODEL_CATALOG_TARGET_KEY);
   } catch { /* Stale observations still require the app's current nonce and exact document. */ }
 }
+/**
+ * ChatGPT's Plugins settings, under either route. The older shell kept them in a hash
+ * (`/#settings/Plugins/plugin_<app>`); the newer one redirects that to a real path
+ * (`/settings/plugins-settings/plugin_<app>`), keeping our query. Reading only the old form made
+ * every helper tab unrecognisable once it landed: measured 2026-09-26, five helper tabs for one
+ * request, one more per extension restart, none ever reused or closed.
+ */
+function pluginSettingsRoute(url) {
+  return url.origin === 'https://chatgpt.com' && (
+    (url.pathname === '/' && /^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash)) ||
+    /^\/settings\/plugins-settings(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.pathname));
+}
 function pluginRefreshMarker(tab) {
-  try { const url = new URL(tab?.pendingUrl || tab?.url || ''); return url.origin === 'https://chatgpt.com' && url.pathname === '/' && /^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash) ? url.searchParams.get('cos-plugin-refresh') : null; } catch { return null; }
+  try { const url = new URL(tab?.pendingUrl || tab?.url || ''); return pluginSettingsRoute(url) ? url.searchParams.get('cos-plugin-refresh') : null; } catch { return null; }
 }
 function inspectRequestedPluginRefresh(publications, background, browserOnly = false) {
   if (pluginRefreshFlight || !Array.isArray(publications) || !publications.length) return pluginRefreshFlight;
@@ -2129,7 +2141,7 @@ function inspectRequestedPluginRefresh(publications, background, browserOnly = f
       if (!current) return; // A user-closed helper is not permission to reopen it every poll.
       if (pluginRefreshMarker(current) !== owner.id) {
         const url = new URL(current.pendingUrl || current.url || '');
-        if (url.origin !== 'https://chatgpt.com' || url.pathname !== '/' || !/^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash)) return;
+        if (!pluginSettingsRoute(url)) return;
         url.searchParams.set('cos-plugin-refresh', owner.id);
         await chrome.tabs.update(current.id, { url: url.href });
         return;
