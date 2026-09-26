@@ -2709,6 +2709,18 @@ async function performBrowserRepairs(repairs, policy) {
           continue;
         }
       }
+      if (target && reason === 'unattributed') {
+        // An attribution refresh exists to make a live page report again, not to rescue a
+        // broken one, and a reload in the middle of a stream ends that stream: ChatGPT answers
+        // it with "Resume stream unavailable" or "could not be loaded", and the turn is lost.
+        // Reported in #393 and measured on 2026-09-26. A page that answers that it is streaming
+        // is alive; stand down and let the incident's next pass decide.
+        const status = await tabReply(target.id, { type: 'clf-page-status' });
+        if (status?.ok === true && status.streaming === true) {
+          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
+          continue;
+        }
+      }
       if (target) await chrome.tabs.reload(target.id);
       else {
         await createChatTab(`https://chatgpt.com/c/${encodeURIComponent(conversationId)}`, policy.background === true, focus);
