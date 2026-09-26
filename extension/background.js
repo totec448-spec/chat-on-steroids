@@ -2377,6 +2377,9 @@ async function applyRequestedBrowserPreferences(request) {
 }
 
 /** Retire idle app-owned documents and redundant copies, preserving exact unsent drafts. */
+/** Tabs this extension removed itself, until their onRemoved reports the close. */
+const selfRemovedTabs = new Set();
+
 async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
   const retired = new Set((Array.isArray(policy.retiredConversations) ? policy.retiredConversations : []).map(cleanConversationId).filter(Boolean));
   const managed = new Set((Array.isArray(policy.managedConversations) ? policy.managedConversations : []).map(cleanConversationId).filter(Boolean));
@@ -2426,7 +2429,13 @@ async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
       const latest = await chrome.tabs.get(tab.id);
       if (latest.pinned || (idlePage && reading(latest)) || latest.pendingUrl || conversationFromUrl(latest.url) !== conversationId || !ownsDocument(source) || journalCountForConversation(conversationId) > 0) continue;
 
-      await chrome.tabs.remove(tab.id);
+      // Tidying is this extension's decision, not the user's: report it as such, so the app does
+      // not pause the chat's recovery as if its owner had closed it (2026-09-26: a stopped prime
+      // was pruned four times and each close read as "closed deliberately", which blocked its
+      // automatic restart for good).
+      const own = typeof selfRemovedTabs === 'undefined' ? null : selfRemovedTabs;
+      own?.add(tab.id);
+      try { await chrome.tabs.remove(tab.id); } catch (error) { own?.delete(tab.id); throw error; }
       remaining = remaining.filter(other => other.id !== tab.id);
     } catch { /* Missing document, navigation or unreadable draft state is not close permission. */ }
   }
@@ -2728,14 +2737,14 @@ function conversationStillOpen(conversationId) {
   return Object.values(tabConversations).some((value) => value === conversationId);
 }
 
-async function enqueueClose(conversationId) {
+async function enqueueClose(conversationId, byExtension = false) {
   const id = cleanConversationId(conversationId);
   if (!id) return false;
   // Publish the final departure and let the existing maintenance pass revoke its protection.
   // The close itself never grants a replacement tab.
   recoveryMonitoring = true;
   if (!closeOutbox.some((entry) => entry && entry.conversationId === id)) {
-    closeOutbox.push({ conversationId: id, queuedAt: Date.now() });
+    closeOutbox.push({ conversationId: id, queuedAt: Date.now(), ...(byExtension ? { byExtension: true } : {}) });
     closeOutbox = closeOutbox.slice(-200);
     await persistLive();
   }
@@ -2760,7 +2769,7 @@ async function drainCloses() {
       const result = await call('/closed', {
         method: 'POST',
         // Confirmed removal/navigation is a deliberate departure, never a reload or a lost poll.
-        body: JSON.stringify({ conversationId, manual: true })
+        body: JSON.stringify({ conversationId, manual: entry.byExtension !== true })
       });
       if (!result.ok) {
         scheduleRetry();
@@ -2783,7 +2792,7 @@ async function drainCloses() {
  * `expected` protects an old page's delayed close from deleting a mapping that the same
  * tab has already replaced with a new conversation.
  */
-async function releaseTab(tab, expected = null, expectedDocument = null, expectedEpoch = null) {
+async function releaseTab(tab, expected = null, expectedDocument = null, expectedEpoch = null, byExtension = false) {
   await load();
   if (typeof tab !== 'number') return { ok: true, closed: false };
   const key = String(tab);
@@ -2827,7 +2836,7 @@ async function releaseTab(tab, expected = null, expectedDocument = null, expecte
   // Deliver anything still queued before telling the app the final browser view is gone.
   await drain();
   if (!stillOwned() || conversationStillOpen(conversationId)) return { ok: true, closed: false };
-  await enqueueClose(conversationId);
+  await enqueueClose(conversationId, byExtension);
   const delivered = await drainCloses();
   // Closing runs inside this tab's ownership queue. Maintenance can offer input to
   // the same document and await its claim through that queue: awaiting it here
@@ -3810,9 +3819,10 @@ chrome.tabs.onRemoved.addListener((id) => {
     delete discardProtectedTabs[String(id)];
     void persistLive().catch(() => undefined);
   }
+  const byExtension = selfRemovedTabs.delete(id);
   void serializeTab(id, async () => {
     const documentId = await markTerminal(id);
-    return releaseTab(id, null, documentId);
+    return releaseTab(id, null, documentId, null, byExtension);
   }).catch(() => undefined);
 });
 
