@@ -670,6 +670,40 @@ it('finds the stop control by its square when the label is translated', () => {
  * The composer settles it without a label or a clock: voice, send and stop are one button in one slot
  * on this shell, so a slot holding anything but the stop square is a page that is not generating.
  */
+/**
+ * A turn identified by the key that is an identity, not by its position.
+ *
+ * `data-content-search-turn-key` belongs to the search index, and on the current shell it has
+ * degraded to a position. Measured on the live page on 2026-09-26 over the debugging port: three
+ * consecutive exchanges carried `fallback-turn-0`, `fallback-turn-1` and `fallback-turn-2`, while
+ * their own `data-turn-key` held real UUIDs — the same UUIDs `messages()` reported for those turns'
+ * user items.
+ *
+ * A position is not an identity. It renumbers when history virtualizes or an exchange is inserted,
+ * so every join keyed on it moves to a different turn without anything looking wrong.
+ */
+it('identifies a shell turn by data-turn-key when the search key is only a position', () => {
+  const f = fixture();
+  const native = f.doc.querySelector('[data-turn-key]')!;
+  const real = native.getAttribute('data-turn-key')!;
+  expect(real, 'the fixture has no turn key to prefer').toMatch(/^[0-9a-f-]{36}$/);
+
+  // The shell as it actually ships: the search key is a position.
+  native.querySelector('[data-content-search-turn-key]')!.setAttribute('data-content-search-turn-key', 'fallback-turn-0');
+  const shell = f.api.turns().filter((turn: any) => turn.id);
+  expect(shell.length, 'no shell turn was read at all').toBeGreaterThan(0);
+  expect([...new Set(shell.map((turn: any) => turn.id))],
+    'a positional search key was used as the turn identity').toEqual([real]);
+
+  // And the search key stays the fallback for the other direction: a shell whose *turn* key is the
+  // positional one and whose search key is real. `data-turn-key` cannot simply be dropped to test
+  // this — SHELL_TURN selects on it, so a node without it is not a shell turn at all.
+  native.setAttribute('data-turn-key', 'fallback-turn-3');
+  native.querySelector('[data-content-search-turn-key]')!.setAttribute('data-content-search-turn-key', 'a-real-search-key');
+  expect(f.api.turns().filter((turn: any) => turn.id).map((turn: any) => turn.id),
+    'the search key stopped being a fallback').toContain('a-real-search-key');
+});
+
 it('does not call a page generating when its composer offers voice, whatever React still says', () => {
   const f = fixture();
   const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
