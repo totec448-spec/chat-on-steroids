@@ -2006,7 +2006,13 @@ var CLF_DOM = (() => {
       if (!box) return reject('composer_missing');
       const existing = (box.textContent || '').trim();
       if (value === '' && mode !== true) return false;
-      if (existing !== '' && mode === false) return reject('existing_draft');
+      // Text this same value already put there is not a draft to protect: inserting it again would
+      // produce exactly what is on screen. The residue of an attempt whose Send never landed used to
+      // refuse every later attempt by the same delivery — one recovery ticket spent thirteen hours
+      // that way on 2026-09-26, blocked by its own 352 characters. Compared with the same whitespace
+      // normalisation the send receipt uses, so both agree on "the same message".
+      const sameAsValue = String(existing).replace(/\s+/g, '') === String(value || '').replace(/\s+/g, '');
+      if (existing !== '' && mode === false && !sameAsValue) return reject('existing_draft');
       box.focus();
       const selection = document.getSelection();
       if (!selection) return reject('selection_missing');
