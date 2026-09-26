@@ -35,6 +35,47 @@ const optionalTunnels = new Map<OptionalSurface, { handle: TunnelHandle | null; 
 const optionalSurfaces: OptionalSurface[] = ['desktop', 'plugins'];
 const optionalTunnelId = (settings: TunnelSettings, id: OptionalSurface): string =>
   (id === 'desktop' ? settings.desktopTunnelId : settings.pluginsTunnelId) ?? '';
+/**
+ * Says so when two connectors are configured on one Secure Tunnel ID.
+ *
+ * OpenAI's tunnel dispatches round-robin between every client registered on an ID, so two
+ * surfaces sharing one means every other call reaches the wrong connector — which answers
+ * `UNKNOWN_TOOL: This tool name is not in the current Plugins catalog` about a tool that exists
+ * and is published, on the surface next door.
+ *
+ * Measured and reported in #352: twenty consecutive Core `exec_command` calls with byte-identical
+ * payloads, ten succeeded and ten failed, alternating exactly, with the app's own log alternating
+ * `POST mcp/core` and `POST mcp/plugins` in step. Nothing about the failure names its cause —
+ * restarting the app, refreshing the connectors and using fresh chats all left it in place — so
+ * three people reached this the long way before anybody suspected the configuration.
+ *
+ * Only a warning: the IDs are the user's to choose, a tunnel they deliberately share is their
+ * business, and refusing to connect over it would be worse than a 50% failure they can now read
+ * the reason for. Ids are never logged.
+ */
+function warnOnSharedTunnelIds(settings: TunnelSettings): void {
+  const named: Array<[SurfaceId, string]> = [
+    ['core', settings.tunnelId ?? ''],
+    ['desktop', settings.desktopTunnelId ?? ''],
+    ['plugins', settings.pluginsTunnelId ?? '']
+  ];
+  const byId = new Map<string, SurfaceId[]>();
+  for (const [surface, id] of named) {
+    const trimmed = id.trim();
+    if (!trimmed) continue;
+    byId.set(trimmed, [...(byId.get(trimmed) ?? []), surface]);
+  }
+  for (const surfaces of byId.values()) {
+    if (surfaces.length < 2) continue;
+    logWarn(
+      `connection: ${surfaces.join(' and ')} are configured on the same Secure Tunnel ID. ` +
+        'OpenAI dispatches round-robin across every client on one ID, so roughly one call in ' +
+        `${surfaces.length} will reach the wrong connector and come back as UNKNOWN_TOOL for a tool ` +
+        'that exists. Give each connector its own tunnel ID.'
+    );
+  }
+}
+
 /** Core-affecting transport settings the current run actually started with. */
 let activeCoreTransport: Pick<TunnelSettings, 'kind' | 'tunnelId' | 'binaryPath' | 'profileEpoch'> | null = null;
 let status: ConnectionStatus = {
@@ -338,6 +379,7 @@ async function connectImpl(): Promise<void> {
       return;
     }
 
+    warnOnSharedTunnelIds(config.tunnel);
     for (const id of optionalSurfaces) await startOptionalTunnel(id, generation, config.tunnel, apiKey);
   } catch (err) {
     if (shutdownRequested || generation !== connectionGeneration) {
