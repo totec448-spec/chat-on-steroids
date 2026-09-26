@@ -195,6 +195,36 @@ describe('native Project entry readiness', () => {
     expect(clicks).toBe(1);
   });
 
+  it('lets a large source chat take longer than the transition deadline to load (#212)', async () => {
+    // The published reproduction: a source ready at 13 s failed against the old shared 12 s.
+    const link = sourceLink();
+    box.textContent = '';
+    box.remove();
+    let clicks = 0;
+    link.addEventListener('click', event => {
+      event.preventDefault(); clicks++;
+      dom.window.setTimeout(() => { dom.reconfigure({ url: projectUrl }); box.replaceWith(box.cloneNode(true)); }, 2_000);
+    });
+    const entered = api.enterProject(entry);
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(clicks).toBe(0);
+    document.querySelector('form')!.prepend(box);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await entered).toBe(true);
+    expect(clicks).toBe(1);
+  });
+
+  it('still gives up on a native transition that does not arrive within its own deadline', async () => {
+    const link = sourceLink();
+    let clicks = 0;
+    link.addEventListener('click', event => { event.preventDefault(); clicks++; });
+    box.textContent = '';
+    const entered = api.enterProject(entry);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(clicks).toBe(1);
+    expect(await entered).toBe(false);
+  });
+
   it.each(['missing', 'draft', 'cancelled', 'foreign-route'])('never clicks an unready or retired source: %s', async reason => {
     const link = sourceLink();
     box.textContent = reason === 'draft' ? 'Keep my draft' : '';
@@ -206,7 +236,7 @@ describe('native Project entry readiness', () => {
     if (reason === 'cancelled') current = false;
     if (reason === 'foreign-route') dom.reconfigure({ url: 'https://chatgpt.com/c/bbbbbbbb-1111-4222-8333-444444444444' });
     if (reason !== 'missing') document.querySelector('form')!.prepend(box);
-    await vi.advanceTimersByTimeAsync(12_000);
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(await entered).toBe(false);
     expect(clicks).not.toHaveBeenCalled();
     if (reason === 'draft') expect(box.textContent).toBe('Keep my draft');
