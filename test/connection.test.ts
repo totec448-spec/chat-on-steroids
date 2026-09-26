@@ -161,6 +161,58 @@ describe('connection surface state', () => {
     }
   });
 
+  /**
+   * Two connectors on one Secure Tunnel ID, said out loud.
+   *
+   * OpenAI's tunnel dispatches round-robin across every client registered on an ID, so two
+   * surfaces sharing one means every other call reaches the wrong connector — which answers
+   * `UNKNOWN_TOOL: This tool name is not in the current Plugins catalog` about a tool that exists
+   * and is published on the surface next door.
+   *
+   * Measured in #352: twenty consecutive Core `exec_command` calls with byte-identical payloads,
+   * ten succeeded and ten failed, alternating exactly, with the log alternating `POST mcp/core`
+   * and `POST mcp/plugins` in step. Nothing about the failure named its cause — restarting the app,
+   * refreshing the connectors and opening fresh chats all left it in place — so three people
+   * reached it the long way before anyone suspected the configuration.
+   *
+   * A warning and not a refusal: the IDs are the user's to choose. And no ID is ever logged.
+   */
+  it('warns when two connectors share one Secure Tunnel ID, and names both', async () => {
+    mocks.config.tunnel.kind = 'openai';
+    Object.assign(mocks.config.tunnel, { tunnelId: 'shared-id', pluginsTunnelId: 'shared-id', desktopTunnelId: '' });
+    const connection = await import('../src/main/connection.js');
+    const { logWarn } = await import('../src/main/logger.js');
+    try {
+      await connection.connect();
+      const said = (logWarn as unknown as { mock: { calls: string[][] } }).mock.calls
+        .map(call => String(call[0])).filter(line => line.includes('same Secure Tunnel ID'));
+      expect(said, 'a shared tunnel ID was not reported').toHaveLength(1);
+      expect(said[0]).toContain('core and plugins');
+      expect(said[0]).toContain('UNKNOWN_TOOL');
+      expect(said[0], 'the tunnel ID itself was logged').not.toContain('shared-id');
+    } finally {
+      await connection.disconnect();
+      Object.assign(mocks.config.tunnel, { tunnelId: '', pluginsTunnelId: '', desktopTunnelId: '' });
+    }
+  });
+
+  /** The control: distinct IDs are the ordinary case and must stay silent. */
+  it('says nothing when each connector has its own tunnel ID', async () => {
+    mocks.config.tunnel.kind = 'openai';
+    Object.assign(mocks.config.tunnel, { tunnelId: 'core-id', pluginsTunnelId: 'plugins-id', desktopTunnelId: 'desktop-id' });
+    const connection = await import('../src/main/connection.js');
+    const { logWarn } = await import('../src/main/logger.js');
+    try {
+      await connection.connect();
+      expect((logWarn as unknown as { mock: { calls: string[][] } }).mock.calls
+        .map(call => String(call[0])).filter(line => line.includes('same Secure Tunnel ID')),
+        'distinct IDs were reported as shared').toEqual([]);
+    } finally {
+      await connection.disconnect();
+      Object.assign(mocks.config.tunnel, { tunnelId: '', pluginsTunnelId: '', desktopTunnelId: '' });
+    }
+  });
+
   it('ignores retired Plugins tunnel reports after changing only its tunnel', async () => {
     mocks.config.tunnel.kind = 'openai';
     mocks.config.tunnel.tunnelId = 'core-test';

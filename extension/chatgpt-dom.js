@@ -64,14 +64,27 @@ var CLF_DOM = (() => {
 
   // Wire framing matches shared/user-prompt.ts; neither reader changes provider text.
   const promptContinuation = value => /^\[\[CLF-(?:HANDOFF|RESUME):[A-Za-z0-9_-]{16,64}\]\]\n\n/.exec(value)?.[0] ?? '';
-  function userPromptText(value) {
-    value = value.replace(/\r\n?/g, '\n');
+  // The composer treats what it is given as Markdown source and escapes it on readback: a
+  // backslash before ASCII punctuation, and one before a newline for a hard line break. The
+  // frame is punctuation and newlines almost entirely, so an escaped readback matches none of
+  // it — and the declared length stops matching too, because escaping adds characters. Read
+  // exactly first, as everywhere else; only a frame that cannot be read as sent is read as one
+  // the page escaped. Keep in sync with asTyped() in shared/user-prompt.ts.
+  const promptAsTyped = value => value.replace(/\\\n/g, '\n').replace(/\\([!-/:-@[-`{-~])/g, '$1');
+  function readPromptFrame(value) {
     const identity = promptContinuation(value);
     const header = /^\[\[COS_CONTEXT:(\d{1,6})\]\]\n/.exec(value.slice(identity.length));
     if (!header) return null;
     const end = identity.length + header[0].length + Number(header[1]);
     const boundary = '\n[[/COS_CONTEXT]]\n\n';
     return value.startsWith(boundary, end) ? identity + value.slice(end + boundary.length) : null;
+  }
+  function userPromptText(value) {
+    value = value.replace(/\r\n?/g, '\n');
+    const exact = readPromptFrame(value);
+    if (exact !== null) return exact;
+    const typed = promptAsTyped(value);
+    return typed === value ? null : readPromptFrame(typed);
   }
   function presentUserPrompts(readUserText) {
     return safe(() => {
@@ -288,9 +301,11 @@ var CLF_DOM = (() => {
     }, '0|0|');
   }
 
+  // The newer shell's wording, measured live on 2026-09-26 after a reload mid-stream: "A network error
+  // occurred. Please check your connection and try again." and "Resume stream unavailable".
   function transportFailure(value) {
     const line = String(value || '').replace(/\s+/g, ' ').trim();
-    return /^(?:message delivery timed out(?:\. please try again\.?)?|connection interrupted\.? waiting for the complete answer\.?|unknown error occurred\.?|there was an error generating (?:a|the) response\.?|error in message stream\.?|network error\.?|something went wrong\.?|something went wrong while generating the response(?:\. if this issue persists please contact us through our help center at help\.openai\.com\.?)?\.?)(?: retry)?$/i.test(line);
+    return /^(?:message delivery timed out(?:\. please try again\.?)?|connection interrupted\.? waiting for the complete answer\.?|chatgpt stream recovery polling timed out\.?|unknown error occurred\.?|there was an error generating (?:a|the) response\.?|error in message stream\.?|network error\.?|a network error occurred\.?(?: please check your connection and try again\.?)?|resume stream unavailable\.?|something went wrong\.?|something went wrong while generating the response(?:\. if this issue persists please contact us through our help center at help\.openai\.com\.?)?\.?)(?: retry)?$/i.test(line);
   }
 
   /**
@@ -476,9 +491,24 @@ var CLF_DOM = (() => {
   }
 
   const shellRole = node => /:(user|assistant)$/.exec(node?.getAttribute?.('data-content-search-unit-key') || '')?.[1] || '';
+  /**
+   * A shell exchange's identity, preferring the key that is one.
+   *
+   * `data-content-search-turn-key` is the search index's key, and on the current shell it has
+   * degraded to a position: measured on the live page on 2026-09-26, three consecutive exchanges
+   * carried `fallback-turn-0`, `fallback-turn-1` and `fallback-turn-2` while their own
+   * `data-turn-key` held real UUIDs — the same UUIDs `messages()` reports for those turns' user
+   * items. A position is not an identity: it renumbers when history virtualizes or an exchange is
+   * inserted, so every join keyed on it silently moves to a different turn.
+   *
+   * `data-turn-key` is read first for that reason, and the search key stays as the fallback so a
+   * shell that supplies a real one there keeps working unchanged.
+   */
   function turnIdOf(section) {
-    return section?.matches?.(SHELL_TURN) ? section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key') || null
-      : section?.getAttribute?.('data-turn-id') || null;
+    if (!section?.matches?.(SHELL_TURN)) return section?.getAttribute?.('data-turn-id') || null;
+    const key = section.getAttribute('data-turn-key');
+    if (key && !/^fallback-turn-\d+$/.test(key)) return key;
+    return section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key') || null;
   }
   function messageIdOf(node) {
     const explicit = node?.getAttribute?.('data-message-id');
@@ -701,18 +731,129 @@ var CLF_DOM = (() => {
   /** Stop is a busy hint only; the exact provider terminal still owns turn completion. */
   function generating() {
     return safe(() => {
-      if (nativeComposerControls(STOP).length > 0) return true;
+      if (stopControls().length > 0) return true;
       // Historical interrupted exchanges can retain in_progress forever. Only the
       // latest native response can describe this composer's current generation.
       const latest = [...document.querySelectorAll(SHELL_TURN)].filter(node =>
         !node.closest(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`)).at(-1);
-      return latest?.getAttribute('data-clf-shell-running') === location.pathname;
+      if (latest?.getAttribute('data-clf-shell-running') !== location.pathname) return false;
+      /*
+       * The stamp alone is not enough, and the comment above understates why: `in_progress` is
+       * React's own word, it outlives an interrupted exchange, and the "latest turn only" guard
+       * does not help when the latest turn *is* the interrupted one.
+       *
+       * Measured on the live page on 2026-09-26, in the chat this was found in: all three shell
+       * turns carried `data-clf-shell-running` for the current pathname at once, hours after the
+       * generation had died. Three turns cannot be running. `generating()` therefore answered yes
+       * for the rest of the chat's life, `nowGenerating` never went false, and the observer's whole
+       * outcome branch — the only path that can end a turn — was unreachable. The turn stayed open
+       * for nine hours, and with it the compaction handoff and every queued follow-up behind it.
+       *
+       * The composer settles it without a label or a clock: voice, send and stop are one button in
+       * one slot on this shell, so a slot occupied by anything that is not the stop square is a
+       * page that is not generating, whatever React still says. An empty slot proves nothing and is
+       * left to the stamp.
+       */
+      const primary = primarySlotControls();
+      if (primary.length > 0 && !primary.some(isStopSquare)) return false;
+      return true;
     }, false);
+  }
+
+  /**
+   * The stop control on a composer whose buttons carry nothing but a translated label.
+   *
+   * `STOP` is a list of English labels and two test ids. ChatGPT's newer composer has neither:
+   * voice, send and stop are the same `type="button"` in the same slot, and only the label and
+   * the icon change. On a localised install the label is translated — `aria-label="Durdur"`
+   * measured on a Turkish page on 2026-09-25 — so stop was never found, `generating()` never
+   * said yes, and nothing could end a turn through the page.
+   *
+   * What is not translated is the icon. Stop is a rounded square: one `path`, its `d` beginning
+   * `M4.5 5.75`. The dictation control in the same slot draws four paths and carries
+   * `data-state`; send draws an arrow. Matching the square is therefore both locale-free and
+   * narrow, and narrow is what matters here: a send button mistaken for stop would report a
+   * generation that never ends.
+   *
+   * Tried second, never first. Where the labels do match they stay authoritative.
+   */
+  const STOP_SQUARE = /^\s*M4\.5 5\.75/;
+  /**
+   * The composer's primary-action slot: the one button that is voice, send or stop by turn.
+   *
+   * Named separately because who occupies it is evidence in its own right — see `generating`.
+   */
+  function primarySlotControls() {
+    const form = composer()?.closest('form');
+    if (!form) return [];
+    return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
+      .filter(button => renderedComposerNode(button) && button.closest('form') === form);
+  }
+
+  /** The rounded square, which is the one thing about stop that nobody translates. */
+  function isStopSquare(button) {
+    // The dictation control keeps a popover state on itself; stop never does.
+    if (!button || button.hasAttribute('data-state')) return false;
+    const paths = button.querySelectorAll('svg path');
+    return paths.length === 1 && STOP_SQUARE.test(paths[0].getAttribute('d') || '');
+  }
+
+  function localeFreeStopControls() {
+    return primarySlotControls().filter(isStopSquare);
+  }
+
+  function stopControls() {
+    const labelled = nativeComposerControls(STOP);
+    return labelled.length > 0 ? labelled : localeFreeStopControls();
+  }
+
+  /**
+   * Send, found without a label, for the same composer and the same reason as the square above.
+   *
+   * All three of `SEND`'s strategies fail on ChatGPT's newer composer: the `data-testid` is gone,
+   * `aria-label^="Send"` is translated, and nothing in that slot is `type="submit"` any more —
+   * voice, send and stop are one `type="button"`. Measured on a Turkish page on 2026-09-25 and
+   * reported in #415 on an English one: a new chat opened, the prompt was typed, and nothing was
+   * ever submitted, because `submitDraft` waits on `sendButton()` and deliberately has no Enter
+   * fallback ("neither a guessed Enter nor an unrelated Stop/composer-clear is evidence that this
+   * draft was submitted").
+   *
+   * Send has no icon signature of its own worth trusting — an arrow's path data is not a contract
+   * — so this identifies it by the state it is the only occupant of. Every caller consults this
+   * with our exact text standing in the composer and `generating()` false, and in that state the
+   * primary-action slot cannot be stop (which exists only while generating) and cannot be voice
+   * (which the composer replaces as soon as it holds text, and which carries `data-state`
+   * regardless). Both are excluded explicitly all the same, and one candidate is still required,
+   * so an unexpected third control refuses rather than being clicked.
+   */
+  function localeFreeSendControls() {
+    const box = composer();
+    const form = box?.closest('form');
+    if (!form) return [];
+    // Read the editor here rather than reusing the submitter's own `draftText`, which is a local
+    // closure over its captured box. Only "the composer holds something" is needed, not equality.
+    const drafted = (typeof box.innerText === 'string' ? box.innerText : box.textContent || '').trim();
+    if (drafted === '' || generating()) return [];
+    return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
+      .filter(button => {
+        if (!renderedComposerNode(button) || button.closest('form') !== form) return false;
+        // Dictation keeps a popover state on itself; send never does.
+        if (button.hasAttribute('data-state')) return false;
+        const paths = button.querySelectorAll('svg path');
+        // Not the stop square, and not the four-path microphone.
+        if (paths.length === 1 && STOP_SQUARE.test(paths[0].getAttribute('d') || '')) return false;
+        return paths.length >= 1 && paths.length <= 2;
+      });
+  }
+
+  function sendControls() {
+    const labelled = nativeComposerControls(SEND);
+    return labelled.length > 0 ? labelled : localeFreeSendControls();
   }
 
   function stopButton() {
     return safe(() => {
-      const buttons = nativeComposerControls(STOP);
+      const buttons = stopControls();
       return buttons.length === 1 ? buttons[0] : null;
     }, null);
   }
@@ -732,7 +873,7 @@ var CLF_DOM = (() => {
   /** The page-owned Send control, exposed so content.js can witness an actual submission. */
   function sendButton() {
     return safe(() => {
-      const buttons = nativeComposerControls(SEND);
+      const buttons = sendControls();
       return buttons.length === 1 ? buttons[0] : null;
     }, null);
   }
@@ -1447,6 +1588,30 @@ var CLF_DOM = (() => {
   }
 
   /**
+   * ChatGPT's own "this conversation could not be loaded" surface, as its retry button, or null.
+   *
+   * Measured 2026-09-26 on the new shell after a tab reload landed mid-turn: the main area held
+   * one centred message and one "Retry" button, with no composer and no turn. Nothing about it
+   * is identified — no test id, role or stable class — so the recognition is structural and
+   * locale-free: a /c/ route whose main area has no composer, no turn, no editable host, little
+   * text and exactly one rendered button. The page stayed that way indefinitely while the turn
+   * kept running server-side, so every later observation of that chat was blind.
+   */
+  function conversationLoadFailure() {
+    return safe(() => {
+      if (!conversationId() || composer() || document.querySelector(`${TURN},[data-turn-key]`)) return null;
+      const area = document.querySelector('[data-app-shell-focus-area="main"]') || document.querySelector('main');
+      if (!area || area.querySelector('[contenteditable="true"],textarea,[role="textbox"],form')) return null;
+      const text = (area.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!text || text.length > 300) return null;
+      const buttons = [...area.querySelectorAll('button')].filter(button =>
+        !button.closest(`${OWN_SURFACES},[hidden],[inert],[aria-hidden="true"]`) && button.getClientRects().length > 0);
+      if (buttons.length !== 1 || buttons[0].disabled || buttons[0].getAttribute('aria-disabled') === 'true') return null;
+      return buttons[0];
+    }, null);
+  }
+
+  /**
    * Whether ChatGPT's editing host is presently safe to receive a new user message.
    *
    * This deliberately says nothing about whether *our* recorder still considers the previous
@@ -1880,7 +2045,13 @@ var CLF_DOM = (() => {
       if (!box) return reject('composer_missing');
       const existing = (box.textContent || '').trim();
       if (value === '' && mode !== true) return false;
-      if (existing !== '' && mode === false) return reject('existing_draft');
+      // Text this same value already put there is not a draft to protect: inserting it again would
+      // produce exactly what is on screen. The residue of an attempt whose Send never landed used to
+      // refuse every later attempt by the same delivery — one recovery ticket spent thirteen hours
+      // that way on 2026-09-26, blocked by its own 352 characters. Compared with the same whitespace
+      // normalisation the send receipt uses, so both agree on "the same message".
+      const sameAsValue = String(existing).replace(/\s+/g, '') === String(value || '').replace(/\s+/g, '');
+      if (existing !== '' && mode === false && !sameAsValue) return reject('existing_draft');
       box.focus();
       const selection = document.getSelection();
       if (!selection) return reject('selection_missing');
@@ -2418,23 +2589,55 @@ var CLF_DOM = (() => {
     try {
       // Exact provider slug is preferred. Existing saved display slugs may resolve
       // only to an actually observed, available pair; never to an account default.
-      const name = normalizeModelLabel(model), candidates = [];
+      const name = normalizeModelLabel(model);
+      const modelRank = choice => !model || choice.familyId === model || choice.id === model ? 2
+        : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
+      // Every available choice of the requested model, read once across versions, so the effort
+      // can be resolved against what the account actually offers before anything is moved.
+      const offered = [];
       for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
         const state = await ui.version(version.id); if (!state) return false;
         for (const choice of state.choices) {
-          if (!choice.available || (effort && choice.effort !== effort)) continue;
-          const rank = !model || choice.familyId === model || choice.id === model ? 2
-            : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
-          if (rank) candidates.push({ version: version.id, choice, rank });
+          const rank = choice.available ? modelRank(choice) : 0;
+          if (rank) offered.push({ version: version.id, choice, rank });
         }
       }
+      /*
+       * An effort the account no longer offers resolves to the nearest one it does.
+       *
+       * ChatGPT's newer model picker replaced its effort ladder: measured on 2026-09-26, the thinking
+       * models offer `medium`, `high` and `max`, and the step the UI now labels "Sehr hoch" is `max`.
+       * `xhigh` is simply gone. A saved `multiAgent.defaultReasoning = xhigh` therefore matched no
+       * choice at all, and every worker spawn failed outright with "The requested model or reasoning
+       * is unavailable" — worker-11, -12 and -13 in one homelab run, each one work the prime then had
+       * to do itself or abandon.
+       *
+       * Nearest by position in the shared vocabulary, ties upward: the request asked for at least
+       * this much reasoning, so the step above honours it better than the step below. Only within the
+       * requested model — a missing model still refuses, because picking a different model is not a
+       * rounding decision.
+       */
+      let wantedEffort = effort;
+      if (effort && offered.length && !offered.some(entry => entry.choice.effort === effort)) {
+        const ladder = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+        const target = ladder.indexOf(effort);
+        const efforts = [...new Set(offered.map(entry => entry.choice.effort))].filter(value => ladder.includes(value));
+        if (target >= 0 && efforts.length) {
+          efforts.sort((a, b) => {
+            const da = Math.abs(ladder.indexOf(a) - target), db = Math.abs(ladder.indexOf(b) - target);
+            return da - db || ladder.indexOf(b) - ladder.indexOf(a);
+          });
+          wantedEffort = efforts[0];
+        }
+      }
+      const candidates = offered.filter(entry => !wantedEffort || entry.choice.effort === wantedEffort);
       // An earlier version's display name cannot shadow a later exact execution id.
       // Captions such as High are effort labels, never model-name aliases. Repeated
       // Latest/version entries may describe the same pair; distinct families may not.
       const rank = Math.max(0, ...candidates.map(candidate => candidate.rank));
       const matches = candidates.filter(candidate => candidate.rank === rank);
       if (!matches.length || (model && new Set(matches.map(candidate => candidate.choice.familyId)).size !== 1) ||
-          (model && effort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1)) return false;
+          (model && wantedEffort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1)) return false;
       const wanted = matches.find(candidate => candidate.version === original.version && candidate.choice.bucket === original.currentBucket) || matches[0];
       const state = await ui.version(wanted.version), choice = wanted.choice;
       // Versions can change while traversing the UI. Revalidate before moving its slider.
@@ -2538,6 +2741,7 @@ var CLF_DOM = (() => {
     userMessageReaction,
     presentUserPrompts,
     composerVisible,
+    conversationLoadFailure,
     prepareChatModelSurface,
     newChatControl,
     projectHomeId,
@@ -2552,7 +2756,16 @@ var CLF_DOM = (() => {
     pluginInstalledButtons,
     pluginManagementIdle,
     selectModelSettings,
-    temporaryChatReady: () => safe(() => [...document.querySelectorAll('button')].some(button => {
+    temporaryChatReady: () => safe(() => {
+      // The page's own state, where a mounted turn has published it. The glyph below is the only
+      // evidence an empty document has, and a layout that stops drawing it stops proving the
+      // mode at all; React holds the answer either way. The stamp carries the pathname it was
+      // made on, so one left behind by another route cannot answer for this one.
+      if ([...document.querySelectorAll(`${SHELL_TURN}[data-clf-temporary-chat]`)]
+        .some(node => node.getAttribute('data-clf-temporary-chat') === location.pathname)) return true;
+      // An empty document: the header toggle's own state, stamped by fiber.js on each scan.
+      if (document.documentElement.getAttribute('data-clf-temporary-page') === location.pathname) return true;
+      return [...document.querySelectorAll('button')].some(button => {
       if (button.closest(`${OWN_SURFACES}, [data-message-author-role], [data-testid^="conversation-turn-"]`) || !button.getClientRects().length) return false;
       // The provider renders both icons at once. Only the visible checked glyph proves
       // the mode; translated labels and the requested URL are not activation receipts.
@@ -2565,7 +2778,8 @@ var CLF_DOM = (() => {
         }
         return true;
       });
-    }), false),
+      });
+    }, false),
     confirmTemporaryChatIntroduction: () => {
       const dialog = [...document.querySelectorAll('[role="dialog"]')].find(node =>
         [...node.querySelectorAll('h1,h2,[role="heading"]')].some(heading => text(heading, 100) === 'Temporary Chat') && /Not in history/.test(text(node, 2000)));

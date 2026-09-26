@@ -183,3 +183,54 @@ export function extensionDir(): string | null {
   }
   return null;
 }
+
+/**
+ * The folder this app shipped the extension in, without materializing anything.
+ *
+ * `extensionDir()` cannot answer this: in a packaged app it materializes the folder as a side
+ * effect, which is right for "where should Chrome load it from" and wrong for "what did I ship".
+ * Each root is read where it is used, because `process.resourcesPath` is undefined outside
+ * Electron and must not stop the other candidates from answering.
+ */
+function shippedExtensionDir(): string | null {
+  const candidates = app.isPackaged
+    ? [() => path.join(process.resourcesPath, 'extension'), () => path.join(app.getPath('userData'), 'extension')]
+    : [() => path.join(app.getAppPath(), 'extension'), () => path.join(process.cwd(), 'extension')];
+  for (const candidate of candidates) {
+    try {
+      const dir = candidate();
+      if (validExtension(dir)) return dir;
+    } catch {
+      // A root this host does not have is not an error; the next one may still answer.
+    }
+  }
+  return null;
+}
+
+/**
+ * The build stamp this app ships, as written by scripts/write-extension-stamp.mjs at packaging
+ * time — the same file the extension's worker reports in `x-extension-build`, so the two are
+ * comparable without either end hashing anything at runtime.
+ *
+ * Null in a development checkout that was never packaged: there is no stamp to compare, and the
+ * comparisons that use this stay silent, exactly as they were before there was one. Read once
+ * and remembered, because the file cannot change under a running app and this sits on the path
+ * that greets every extension request.
+ */
+let shippedStamp: string | null | undefined;
+export function shippedExtensionBuild(): string | null {
+  if (shippedStamp !== undefined) return shippedStamp;
+  shippedStamp = null;
+  try {
+    const dir = shippedExtensionDir();
+    if (dir) shippedStamp = readFileSync(path.join(dir, 'build-stamp.txt'), 'utf8').trim().slice(0, 12) || null;
+  } catch {
+    // No stamp, a damaged resource, or no Electron at all: the comparison simply says nothing.
+  }
+  return shippedStamp;
+}
+
+/** Test seam: pretend this app shipped `stamp`, or forget the remembered one with no argument. */
+export function setShippedExtensionBuildForTest(stamp?: string | null): void {
+  shippedStamp = stamp;
+}

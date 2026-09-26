@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chat On Steroids companion",
-  "version": "2.1.14",
+  "version": "2.1.15",
   "description": "Connects ChatGPT to Chat On Steroids and controls browser tabs in the background with DOM, screenshots and developer tools.",
   "minimum_chrome_version": "125",
   "permissions": [
