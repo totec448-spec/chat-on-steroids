@@ -1008,6 +1008,33 @@ describe('desktop input delivery and helper ownership', () => {
     ]);
   });
 
+  /**
+   * #393 (2026-09-26): chats started on chatgpt.com from a tab that already showed another chat
+   * stayed Unattributed. ChatGPT publishes the request id before the new chat has its /c/ route;
+   * the id waited for that route under the old document epoch, and the move from chat A to chat B
+   * advanced the epoch and discarded it as stale, although it named B exactly.
+   */
+  it('keeps a stream request id published before a new chat has its route, after leaving another chat', async () => {
+    const chatB = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff', requestId = 'wfr_new_chat_from_old_tab';
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      correlate: message => ({ ok: true, data: { ok: true, conversationId: message.conversationId,
+        confirmed: message.calls.map((call: any) => call.requestId) } })
+    });
+    live.dom.reconfigure({ url: 'https://chatgpt.com/' });
+    live.hook.observe(); await settle();
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-request-origin', conversationId: chatB, requestIds: [requestId] }
+    }));
+    await settle();
+    expect(live.sent.filter(message => message.type === 'correlate')).toHaveLength(0);
+    live.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+    live.hook.observe(); await settle();
+    expect(live.sent.filter(message => message.type === 'correlate')).toEqual([
+      expect.objectContaining({ conversationId: chatB, calls: [expect.objectContaining({ requestId })] })
+    ]);
+  });
+
   it('does not let a late correlation success retire a newer exact project claim', async () => {
     const secondInput = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
     const firstRequest = 'wfr_late_old_project_bind', secondRequest = 'wfr_current_project_bind';
