@@ -840,7 +840,9 @@ describe('surface boundaries', () => {
           // Largest Window2 method is click at 882 bytes; composition is 1458 bytes.
           ? (tool.name === 'exec' ? 1_500 : 950)
           : tool.name === 'computer'
-          // Retain the existing legacy schema allowance on macOS.
+          // Retain the existing legacy schema allowance on macOS. The pointer work spends part
+          // of it: drag spells out its own step budget and scroll its fraction, rather than
+          // leaving either to a free-form number the model has to guess at.
           ? 7_400
           : tool.name === 'apply_patch'
             ? 5_000
@@ -1302,7 +1304,7 @@ describe('desktop capabilities', () => {
       arguments: IS_WINDOWS ? { text: 'nope' } : { actions: [{ type: 'write_clipboard', text: 'nope' }] }
     });
     expect(written.body.result?.isError).toBe(true);
-    expect(textOf(written)).toContain(IS_WINDOWS ? 'TOOL_DISABLED' : 'Replace clipboard text permission');
+    expect(textOf(written)).toContain(IS_WINDOWS ? 'TOOL_DISABLED' : '"Replace clipboard text"');
   });
 
   it('publishes only the clipboard read tool and composition with clipboard-read permission alone', async () => {

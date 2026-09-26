@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fake = vi.hoisted(() => {
+  // The desktop helper process is fully mocked in this unit test. On a real macOS
+  // runner the production locator still requires an existing executable before it
+  // reaches mocked spawn(), so point the explicit test override at Node itself.
+  // Production behavior is unchanged: packaged/dev helpers must still exist.
+  process.env.COS_MACOS_DESKTOP_HELPER = process.execPath;
   type Listener = { fn: (...args: any[]) => void; once: boolean };
   class Emitter {
     private readonly listeners = new Map<string, Listener[]>();
@@ -82,6 +87,11 @@ vi.stubEnv('COS_MACOS_DESKTOP_HELPER', process.execPath);
 
 import { act } from '../src/main/computer/index.js';
 
+// Window-scoped input exists on Windows and macOS only; Linux refuses it with
+// WINDOW_TARGET_UNSUPPORTED before the helper runs. These cases are about the partial-batch
+// report, not the target, so they aim at a window only where a window can be aimed at.
+const target = process.platform === 'linux' ? undefined : { window: 42 };
+
 describe('desktop partial batch result', () => {
   beforeEach(() => fake.resetResponse());
 
@@ -90,7 +100,7 @@ describe('desktop partial batch result', () => {
       act([
         { type: 'type', text: 'first' },
         { type: 'type', text: 'second' }
-      ])
+      ], target)
     ).rejects.toMatchObject({
       completedCount: 1,
       failedIndex: 1,
@@ -113,7 +123,7 @@ describe('desktop partial batch result', () => {
       act([
         { type: 'type', text: 'first' },
         { type: 'type', text: 'second' }
-      ])
+      ], target)
     ).rejects.toMatchObject({
       completedCount: 1,
       failedIndex: 1,

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const source = readFileSync(path.join(root, 'native/macos-desktop-helper/main.swift'), 'utf8');
-const names = ['convincinglyMatchesWindow', 'windowGeometryDistance', 'matchingAXWindow'];
+const names = ['convincinglyMatchesWindow', 'windowGeometryDistance', 'titlesAgree', 'matchingAXWindow'];
 const functions = names.map(name => {
   const start = source.indexOf(`private func ${name}(`);
   const end = source.indexOf('\n}', start);

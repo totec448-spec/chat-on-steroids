@@ -60,6 +60,8 @@ public static class Clf {
   const uint MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004;
   const uint MOUSEEVENTF_RIGHTDOWN = 0x0008, MOUSEEVENTF_RIGHTUP = 0x0010;
   const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020, MOUSEEVENTF_MIDDLEUP = 0x0040;
+  const uint MOUSEEVENTF_XDOWN = 0x0080, MOUSEEVENTF_XUP = 0x0100;
+  const uint XBUTTON1 = 0x0001, XBUTTON2 = 0x0002;
   const uint MOUSEEVENTF_WHEEL = 0x0800, MOUSEEVENTF_HWHEEL = 0x1000;
   // Nonzero when the user has swapped the primary and secondary mouse buttons. See ButtonFlags.
   const int SM_SWAPBUTTON = 23;
@@ -91,8 +93,16 @@ public static class Clf {
   [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
   [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
   [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
+  [DllImport("user32.dll")] static extern bool GetCursorInfo(ref CURSORINFO ci);
+  [DllImport("user32.dll")] static extern bool GetIconInfo(IntPtr icon, out ICONINFO info);
+  [DllImport("user32.dll")] static extern bool DrawIconEx(IntPtr hdc, int x, int y, IntPtr icon, int w, int h, uint step, IntPtr brush, uint flags);
+  [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
 
   public struct POINT { public int X, Y; }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct CURSORINFO { public int cbSize; public int flags; public IntPtr hCursor; public POINT ptScreenPos; }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct ICONINFO { public bool fIcon; public int xHotspot; public int yHotspot; public IntPtr hbmMask; public IntPtr hbmColor; }
   public struct RECT { public int Left, Top, Right, Bottom; }
   [StructLayout(LayoutKind.Sequential)]
   struct GUITHREADINFO {
@@ -151,18 +161,24 @@ public static class Clf {
    *
    * Read per call rather than cached: it is a checkbox in Mouse properties and can change while
    * the app runs, and a stale answer is the same wrong-button bug with a longer fuse. Only the
-   * primary and secondary swap -- middle and the wheel are untouched.
+   * primary and secondary swap -- middle, the wheel and the side buttons are untouched.
+   *
+   * The side buttons are one event pair distinguished by mouseData, not their own flags,
+   * which is why the data word has to travel with the flags rather than being zero.
    *
    * (No backticks in this comment: the whole script is a String.raw template literal.)
    */
-  static void ButtonFlags(string button, out uint down, out uint up) {
+  static void ButtonFlags(string button, out uint down, out uint up, out uint data) {
     bool swapped = GetSystemMetrics(SM_SWAPBUTTON) != 0;
+    data = 0;
     switch (button) {
       case "right":
         down = swapped ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
         up = swapped ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP;
         break;
       case "middle": case "wheel": down = MOUSEEVENTF_MIDDLEDOWN; up = MOUSEEVENTF_MIDDLEUP; break;
+      case "back": down = MOUSEEVENTF_XDOWN; up = MOUSEEVENTF_XUP; data = XBUTTON1; break;
+      case "forward": down = MOUSEEVENTF_XDOWN; up = MOUSEEVENTF_XUP; data = XBUTTON2; break;
       default:
         down = swapped ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN;
         up = swapped ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP;
@@ -173,12 +189,12 @@ public static class Clf {
   public static void Click(int x, int y, string button, int times) {
     if (times < 1 || times > 3) throw new ArgumentException("BAD_ACTION: click count must be between 1 and 3");
     Move(x, y);
-    uint down, up;
-    ButtonFlags(button, out down, out up);
+    uint down, up, data;
+    ButtonFlags(button, out down, out up, out data);
     List<INPUT> batch = new List<INPUT>();
     for (int n = 0; n < times; n++) {
-      batch.Add(Mouse(down, 0, 0, 0));
-      batch.Add(Mouse(up, 0, 0, 0));
+      batch.Add(Mouse(down, 0, 0, data));
+      batch.Add(Mouse(up, 0, 0, data));
     }
     try { Send(batch.ToArray()); }
     catch {
@@ -203,6 +219,20 @@ public static class Clf {
     if (batch.Count > 0) Send(batch.ToArray());
   }
 
+  // Paced and interpolated for the same reason as the macOS helper: a press that moves
+  // immediately reads as a click, and two waypoints are a teleport that never crosses the
+  // system drag threshold. QA saw a Finder drag report success three times while the file
+  // stayed put; Explorer's shell drag has the same requirements.
+  const int DragPressHoldMs = 90;
+  const int DragStepMs = 8;
+  const int DragDropDwellMs = 140;
+  const double DragMaxStep = 8.0;
+  // One budget for the whole path, not per hop. Per hop, a 64-waypoint drag could post
+  // thousands of events and outlast the parent's deadline, and a helper killed mid-drag never
+  // reaches the release below — leaving the button logically held down. Longer paths take
+  // longer strides instead of more time.
+  const int DragMaxTotalSteps = 180;
+
   public static void Drag(int[] xs, int[] ys, string button) {
     Drag(xs, ys, button, 350);
   }
@@ -215,16 +245,27 @@ public static class Clf {
       double dx = (double)xs[i] - xs[i - 1], dy = (double)ys[i] - ys[i - 1];
       distance[i] = distance[i - 1] + Math.Sqrt(dx * dx + dy * dy);
     }
-    uint down, up;
-    ButtonFlags(button, out down, out up);
+    double total = distance[distance.Length - 1];
+    uint down, up, data;
+    ButtonFlags(button, out down, out up, out data);
     Move(xs[0], ys[0]);
     try {
-      Send(new INPUT[] { Mouse(down, 0, 0, 0) });
-      int steps = Math.Min(256, Math.Max(2, (int)Math.Ceiling(durationMs / 10.0)));
+      Send(new INPUT[] { Mouse(down, 0, 0, data) });
+      // Hold before moving: a press that moves in the same instant reads as a click, and the
+      // shell never starts a drag at all.
+      System.Threading.Thread.Sleep(DragPressHoldMs);
+      // Two budgets, whichever is smaller. The stride keeps each hop under the system drag
+      // threshold; the caller's duration divided by one step's own pacing keeps a 50 ms drag
+      // from becoming a 1.4 s one just because its path is long.
+      int steps = (int)Math.Ceiling(total / DragMaxStep);
+      if (steps > DragMaxTotalSteps) steps = DragMaxTotalSteps;
+      int affordable = durationMs / DragStepMs;
+      if (steps > affordable) steps = affordable;
+      if (steps < 2) steps = 2;
       int segment = 1;
       var clock = System.Diagnostics.Stopwatch.StartNew();
       for (int step = 1; step <= steps; step++) {
-        double at = distance[distance.Length - 1] * step / steps;
+        double at = total * step / steps;
         while (segment < distance.Length - 1 && distance[segment] < at) segment++;
         double length = distance[segment] - distance[segment - 1];
         double fraction = length <= 0 ? 1 : (at - distance[segment - 1]) / length;
@@ -234,8 +275,13 @@ public static class Clf {
         int remaining = (int)Math.Ceiling((double)durationMs * step / steps - clock.ElapsedMilliseconds);
         if (remaining > 0) System.Threading.Thread.Sleep(Math.Min(10, remaining));
       }
+      Move(xs[xs.Length - 1], ys[ys.Length - 1]);
+      // And still under the target when the button comes up: a release in the same instant as
+      // the last move is what made Explorer report a drop that never happened.
+      System.Threading.Thread.Sleep(DragDropDwellMs);
     } finally {
-      Send(new INPUT[] { Mouse(up, 0, 0, 0) });
+      // Whatever went wrong above, the button does not stay logically held.
+      Send(new INPUT[] { Mouse(up, 0, 0, data) });
     }
   }
 
@@ -509,10 +555,48 @@ public static class Clf {
     return outW + "," + outH;
   }
 
+  /**
+   * Paints the live pointer into a shot whose top-left is at screen (originX, originY).
+   *
+   * Neither CopyFromScreen nor the compositor capture composites the cursor, while ScreenCaptureKit does
+   * it for us on macOS. Without this the model cannot see where the pointer is, cannot read a
+   * hover state, and cannot confirm from the picture that a move actually landed.
+   *
+   * Drawn at the hotspot rather than the icon origin, because the hotspot is the pixel the
+   * pointer actually addresses — an I-beam or a resize arrow is centred, not top-left, and
+   * drawing at the raw position would put the tip a few pixels off exactly when a coordinate
+   * is being read off the image. Failure here is never fatal: a screenshot without the
+   * pointer is still a screenshot.
+   */
+  static void PaintCursor(Graphics g, int originX, int originY, int w, int h) {
+    CURSORINFO ci = new CURSORINFO();
+    ci.cbSize = Marshal.SizeOf(typeof(CURSORINFO));
+    if (!GetCursorInfo(ref ci)) return;
+    // CURSOR_SHOWING. A hidden pointer — full-screen video, a text field mid-typing — must
+    // not be invented into the picture.
+    if ((ci.flags & 0x00000001) == 0 || ci.hCursor == IntPtr.Zero) return;
+    ICONINFO info;
+    if (!GetIconInfo(ci.hCursor, out info)) return;
+    try {
+      int x = ci.ptScreenPos.X - originX - info.xHotspot;
+      int y = ci.ptScreenPos.Y - originY - info.yHotspot;
+      // Cheap reject only for a pointer nowhere near the shot; DrawIconEx clips the rest.
+      if (x < -256 || y < -256 || x > w + 256 || y > h + 256) return;
+      IntPtr dc = g.GetHdc();
+      try { DrawIconEx(dc, x, y, ci.hCursor, 0, 0, 0, IntPtr.Zero, 0x0003); }
+      finally { g.ReleaseHdc(dc); }
+    } finally {
+      // GetIconInfo hands over two bitmap copies; hCursor itself is shared and is not ours.
+      if (info.hbmMask != IntPtr.Zero) DeleteObject(info.hbmMask);
+      if (info.hbmColor != IntPtr.Zero) DeleteObject(info.hbmColor);
+    }
+  }
+
   public static string Capture(int x, int y, int w, int h, int maxW, string file) {
     using (Bitmap shot = new Bitmap(w, h))
     using (Graphics g = Graphics.FromImage(shot)) {
       g.CopyFromScreen(x, y, 0, 0, new Size(w, h), CopyPixelOperation.SourceCopy);
+      PaintCursor(g, x, y, w, h);
       return SavePng(shot, maxW, file);
     }
   }

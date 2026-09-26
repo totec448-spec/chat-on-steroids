@@ -157,6 +157,29 @@ export interface ActionResult {
   clipboard: string[];
   completedCount: number;
   routes: ActionRoute[];
+  /** Exact single-window lease proven before this batch, when one exists. */
+  targetWindow: number | null;
+  /**
+   * What became of a scroll: which window the wheel actually reached, and whether anything moved.
+   *
+   * A wheel is delivered by the window server to whatever is under the pointer, not to whatever
+   * holds the lease — so "sent" and "scrolled" are different claims, and a reply that only made the
+   * first one could not be told apart from an application ignoring the wheel. Absent for a batch
+   * with no scroll in it, and on platforms whose helper does not report it.
+   */
+  scroll: Record<string, unknown> | null;
+  /**
+   * Whether a `click_ref` on a semantic control actually changed the value it reports, when
+   * that could be checked.
+   *
+   * `AXUIElementPerformAction` returning success is the OS saying the message was accepted, not
+   * that anything happened — measured directly: a System Settings toggle answered success and
+   * stayed exactly where it was, while a coordinate click on the same spot moved it. This is the
+   * same claim as `scroll`'s `moved` for the semantic path. Null when the control has nothing
+   * comparable to check (an ordinary button) or no click_ref ran; that is a different fact from
+   * "unchanged" and must not collapse into it.
+   */
+  uiChanged: boolean | null;
 }
 
 export type VerificationSpec =
@@ -293,17 +316,34 @@ export function helperTimeoutMs(
       return platform === 'darwin' ? 120_000 : 10_000;
     case 'warm':
       return 10_000;
-    case 'act':
-      if (platform !== 'darwin') {
-        const actions = Array.isArray(request['actions']) ? request['actions'].slice(0, 20) : [];
-        return 15_000 + actions.reduce((duration, action) => duration + (action?.type === 'drag'
-          ? Math.min(2000, Math.max(50, Number(action.durationMs) || 350)) : 0), 0);
-      }
+    case 'act': {
+      // A drag is paced on purpose — held still, travelled in strides, dwelt on before the
+      // release — so it costs real time a click does not, and a deadline that fires mid-drag
+      // kills the helper before it releases the button. The caller's own duration is the
+      // budget; the fixed part is the press-hold and drop-dwell either side of it, which no
+      // requested duration includes.
+      const actions = Array.isArray(request['actions'])
+        ? (request['actions'] as Array<Record<string, unknown>>).slice(0, 20)
+        : [];
+      const dragAllowance = actions.reduce(
+        (allowance, action) =>
+          allowance +
+          (action?.['type'] === 'drag'
+            ? Math.min(2_000, Math.max(50, Number(action['durationMs']) || 350)) + 500
+            : 0),
+        0
+      );
+      if (platform !== 'darwin') return 15_000 + dragAllowance;
       // Every macOS physical mutation can now re-prove the exact AX/WindowServer input
       // target, and an explicit focus may spend up to two seconds in its bounded poll. Size
       // the parent deadline for the whole permitted batch so the helper can return partial
       // completion evidence instead of being killed after earlier actions already landed.
-      return 15_000 + Math.min(20, Array.isArray(request['actions']) ? request['actions'].length : 1) * 2_100;
+      return (
+        15_000 +
+        Math.min(20, Array.isArray(request['actions']) ? request['actions'].length : 1) * 2_100 +
+        dragAllowance
+      );
+    }
     default:
       return HELPER_TIMEOUT_MS;
   }
@@ -605,8 +645,33 @@ function completedHelperRoutes(reply: Record<string, any>, completed: number): A
   return routes as ActionRoute[];
 }
 
+/**
+ * A refusal the operating system just made is better evidence than a verdict we polled.
+ *
+ * The permission rows are fed by CGPreflightScreenCaptureAccess and AXIsProcessTrusted, asked on
+ * a timer. QA revoked Screen Recording and watched the row stay green for over forty seconds
+ * while capture was already failing with a TCC denial — so the answer those calls give a running
+ * process does not track a revocation, and no polling interval will fix that.
+ *
+ * A failed operation does track it. When the helper refuses for want of a permission, that is
+ * the operating system speaking about this process right now, and the row is corrected from it
+ * immediately. Nothing is inferred in the other direction: a success does not restore a row,
+ * because macOS caches a grant for the life of a process and a stale success would say the
+ * permission is back when only the cache is.
+ */
+function notePermissionRefusal(code: string): void {
+  const current = macOSDesktopAccess;
+  if (!current) return;
+  if (code === 'SCREEN_PERMISSION_REQUIRED' && current.screen !== 'missing') {
+    publishMacOSDesktopAccess({ ...current, screen: 'missing' });
+  } else if (code === 'ACCESSIBILITY_PERMISSION_REQUIRED' && current.accessibility !== 'missing') {
+    publishMacOSDesktopAccess({ ...current, accessibility: 'missing' });
+  }
+}
+
 function protocolFailure(reply: Record<string, any>): ComputerError | null {
   if (reply['ok'] !== false) return null;
+  notePermissionRefusal(String(reply['error_code'] ?? ''));
   const completed = Number(reply['completed_count']);
   const failed = Number(reply['failed_index']);
   const completedRoutes = completedHelperRoutes(reply, completed);
@@ -905,12 +970,12 @@ function uiTarget(ref: string): { window: number; runtimeKey: string; snapshotId
   const target = uiRefs.get(ref);
   if (!target) {
     throw new ComputerError(
-      `UNKNOWN_UI_REF: ${ref}. Call get_window_state or find_ui again and use a ref from that reply.`
+      `UNKNOWN_UI_REF: ${ref}. Call observe on the window again and use a ref from that reply.`
     );
   }
   if (!isHelperGenerationActive(target.generation)) {
     throw new ComputerError(
-      `STALE_REF: ${ref} was issued by a desktop helper that is no longer active, so it no longer identifies anything. Call get_window_state again and use a ref from that reply.`
+      `STALE_REF: ${ref} was issued by a desktop helper that is no longer active, so it no longer identifies anything. Call observe on the window again and use a ref from that reply.`
     );
   }
   return target;
@@ -953,11 +1018,16 @@ export async function focusWindow(id: number): Promise<boolean> {
   return reply['focused'] === true;
 }
 
-export async function activeWindow(): Promise<{ window: WindowInfo | null; screen: Rect }> {
+export async function activeWindow(): Promise<{
+  window: WindowInfo | null;
+  screen: Rect;
+  /** The frontmost application is Chat On Steroids, whose windows are never automatable. */
+  foregroundIsSelf: boolean;
+}> {
   const reply = await runHelper({ op: 'active' });
   const value = reply['window'];
   const window = value && typeof value === 'object' ? (value as WindowInfo) : null;
-  return { window, screen: reply['screen'] as Rect };
+  return { window, screen: reply['screen'] as Rect, foregroundIsSelf: reply['foregroundIsSelf'] === true };
 }
 
 export async function findUi(opts: {
@@ -1112,7 +1182,15 @@ export async function getWindowState(opts: {
       });
       const value = reply['window'];
       const window = value && typeof value === 'object' ? (value as WindowInfo) : null;
-      if (!window) throw new ComputerError('WINDOW_NOT_FOUND: no matching visible window is available');
+      // Name it. A caller that asked for one window in particular should not have to guess whether
+      // it closed, was never valid, or the desktop is empty.
+      if (!window) {
+        throw new ComputerError(
+          opts.window === undefined
+            ? 'WINDOW_NOT_FOUND: no window is in the foreground to read'
+            : `WINDOW_NOT_FOUND: window ${opts.window} is no longer on screen`
+        );
+      }
       const pixelFailure = reply['screenshotUnavailable'] as Record<string, unknown> | undefined;
       const screenshotUnavailable = includeScreenshot && includeUi && pixelFailure?.code === 'CAPTURE_FAILED' && typeof pixelFailure.message === 'string'
         ? { code: 'CAPTURE_FAILED', message: pixelFailure.message.slice(0, 500) } : undefined;
@@ -1292,8 +1370,16 @@ async function screenshotFromReply(
   rememberFrame(frame);
   const encodeStartedAt = Date.now();
   const data = png.toString('base64');
+  // The pointer note rides along here rather than in the Screenshot contract: it answers one
+  // question, and only for a person reading a log. A pointer missing from a macOS window
+  // capture looks identical whether the system would not describe a cursor, the pointer was
+  // outside the window, or the buffer failed, and telling those apart from the picture alone
+  // is impossible — which has already cost one round of guessing. Windows and older helpers
+  // that do not report it log "unreported" rather than inventing a verdict.
+  const pointerNote = typeof reply['pointer'] === 'string' ? reply['pointer'] : 'unreported';
   logInfo(
-    `desktop timing screenshot_read_ms=${readMs} screenshot_base64_ms=${Date.now() - encodeStartedAt} screenshot_bytes=${png.length}`
+    `desktop timing screenshot_read_ms=${readMs} screenshot_base64_ms=${Date.now() - encodeStartedAt} ` +
+      `screenshot_bytes=${png.length} pointer=${pointerNote}`
   );
   return {
     data,
@@ -1302,9 +1388,9 @@ async function screenshotFromReply(
     height: frame.height,
     region: frame.region,
     scale: frame.scale,
-    focused: requestedWindow === null ? null : reply['focused'] === true,
+    focused: frameWindow === null ? null : reply['focused'] === true,
     captureMode,
-    windowId: frame.windowId
+    windowId: frameWindow
   };
 }
 
@@ -1446,7 +1532,7 @@ export async function actAndCapture(
     };
     verify?: VerificationSpec;
   } = {}
-): Promise<ActionResult & { screenshot: Screenshot | null; verification: VerificationResult | null }> {
+): Promise<ActionResult & { screenshot: Screenshot | null; verification: VerificationResult | null; captureFallback: string | null }> {
   return exclusive(async () => {
     const before = opts.frameId === undefined ? qualifiedFrame(lastFrame) : frameById(opts.frameId);
     // capture.crop is expressed in pixels of the screenshot the caller saw, exactly like a
@@ -1478,22 +1564,77 @@ export async function actAndCapture(
         );
       }
     }
-    if (!opts.capture) return { ...result, screenshot: null, verification };
+    if (!opts.capture) return { ...result, screenshot: null, verification, captureFallback: null };
 
-    try {
-      const { preferActiveWindow, ...capture } = opts.capture;
-      // Resolve under the action lock. An explicit input target also owns its default result
-      // capture, even if the completed action opened a different foreground window.
-      if (capture.window === undefined && capture.full !== true && capture.crop === undefined) {
-        capture.window = opts.window ?? (preferActiveWindow ? (await activeWindow()).window?.id : undefined);
-      }
-      return { ...result, screenshot: await screenshotLocked(capture, before), verification };
-    } catch (err) {
-      throw new ComputerError(
+    const { preferActiveWindow, ...capture } = opts.capture;
+    // Resolve under the action lock. An explicit input target also owns its default result
+    // capture, even if the completed action opened a different foreground window.
+    if (capture.window === undefined && capture.full !== true && capture.crop === undefined) {
+      capture.window =
+        result.targetWindow ?? opts.window ?? (preferActiveWindow ? (await activeWindow()).window?.id : undefined);
+    }
+    const captureAfterFailed = (err: unknown): ComputerError =>
+      new ComputerError(
         `CAPTURE_AFTER_FAILED: completed_count=${result.completedCount}. ${err instanceof Error ? err.message : String(err)}. Observe again; do not repeat completed actions.`,
         { completedCount: result.completedCount, failedIndex: result.completedCount, completedRoutes: result.routes }
       );
+    let resultScreenshot: Screenshot;
+    let captureFallback: string | null = null;
+    try {
+      resultScreenshot = await screenshotLocked(capture, before);
+    } catch (err) {
+      // An action that closes its own target window is an ordinary success — a dialog
+      // dismissed, a document saved and shut — and answering it with CAPTURE_AFTER_FAILED
+      // tells the caller its work failed when the work is exactly what removed the window.
+      // Capture what is there instead, and say so. Anything else is still a failed capture.
+      const targetUnavailable =
+        capture.window !== undefined &&
+        err instanceof ComputerError &&
+        /WINDOW_NOT_FOUND|STALE_FRAME/.test(err.message);
+      if (!targetUnavailable) throw captureAfterFailed(err);
+      try {
+        const active = (await activeWindow()).window;
+        if (active) {
+          resultScreenshot = await screenshotLocked({ window: active.id, maxWidth: capture.maxWidth });
+          captureFallback = `target window ${capture.window} closed or changed before result capture; captured active window ${active.id} instead`;
+        } else {
+          resultScreenshot = await screenshotLocked({ maxWidth: capture.maxWidth });
+          captureFallback = `target window ${capture.window} closed or changed before result capture; captured the primary display instead`;
+        }
+      } catch (fallbackErr) {
+        throw captureAfterFailed(fallbackErr);
+      }
     }
+    // Describe the pointer against the picture that is going back, not the one that was current
+    // before the actions ran. The cursor was computed inside actLocked, so a call that moved the
+    // pointer and then captured a window reported an image coordinate belonging to some earlier
+    // frame — true, and about a different image than the one in the caller's hands. QA read that
+    // as a regression, and it is at least an ambiguity worth removing.
+    const shotFrame = result.cursor ? frameById(resultScreenshot.frameId) : null;
+    const previous = result.cursor;
+    const cursor = shotFrame && previous
+      ? (() => {
+          const inFrame = {
+            x: Math.round((previous.screen.x - shotFrame.region.x) * shotFrame.scale),
+            y: Math.round((previous.screen.y - shotFrame.region.y) * shotFrame.scale)
+          };
+          const inside =
+            inFrame.x >= 0 && inFrame.y >= 0 && inFrame.x < shotFrame.width && inFrame.y < shotFrame.height;
+          return {
+            screen: previous.screen,
+            image: inside ? inFrame : null,
+            frameId: shotFrame.id,
+            imageSize: { width: shotFrame.width, height: shotFrame.height }
+          };
+        })()
+      : result.cursor;
+    return {
+      ...result,
+      cursor,
+      screenshot: resultScreenshot,
+      verification,
+      captureFallback
+    };
   });
 }
 
@@ -1586,7 +1727,13 @@ async function actLocked(
     throw new ComputerError('PASTE_SEQUENCE: observe the first paste result before replacing clipboard text again; queued Ctrl+V does not prove the app consumed it.');
   }
   if (opts.window !== undefined) {
-    if (process.platform !== 'win32') throw new ComputerError('WINDOW_TARGET_UNSUPPORTED: window-scoped input is currently Windows only.');
+    // Windows-only until macOS had a window to aim at. It does now: the helper resolves the AX
+    // window for this exact id, refuses when it cannot tell two of them apart, and posts the
+    // event to that window — which is what the rest of this branch is for. Elsewhere there is
+    // still no way to bind input to a window, and saying so beats aiming at the screen.
+    if (process.platform !== 'win32' && process.platform !== 'darwin') {
+      throw new ComputerError('WINDOW_TARGET_UNSUPPORTED: window-scoped input is currently Windows and macOS only.');
+    }
     if (!Number.isSafeInteger(opts.window) || opts.window <= 0) throw new ComputerError('INVALID_WINDOW: expected a window id from observe.');
     if (actions.some(action => action.type === 'focus' && action.window !== opts.window)) {
       throw new ComputerError('WINDOW_MISMATCH: focus must name the same window as the input target.');
@@ -1616,7 +1763,7 @@ async function actLocked(
   // immediately before input, so retaining it does not turn old pixels into blind clicks.
   if (needsFrame && !requestedFrame) {
     throw new ComputerError(
-      `STALE_FRAME: frame ${opts.frameId} is no longer retained. Take a screenshot or call get_window_state again and point at the new frame.`
+      `STALE_FRAME: frame ${opts.frameId} is no longer retained. Call observe again and point at the frameId from that reply's screenshot.`
     );
   }
   if (needsFrame && opts.window !== undefined && requestedFrame?.windowId !== opts.window) {
@@ -1683,6 +1830,45 @@ async function actLocked(
     }
   }
 
+  const targetCandidates = new Set<number>();
+  if (requestedFrame?.windowId !== null && requestedFrame?.windowId !== undefined) {
+    targetCandidates.add(requestedFrame.windowId);
+  }
+  for (const target of uiTargets.values()) targetCandidates.add(target.window);
+  for (const action of actions) if (action.type === 'focus') targetCandidates.add(action.window);
+  if (targetCandidates.size > 1) {
+    throw new ComputerError(
+      `TARGET_WINDOW_CONFLICT: this batch spans windows ${[...targetCandidates].join(', ')}. Split cross-window work into separate computer calls.`
+    );
+  }
+  // An explicit window is already checked against the frame, the refs and any focus action
+  // above, so this only has to say which window the batch ended up bound to — the asserted one,
+  // or the single one everything in the batch agrees on.
+  const inferredTargetWindow =
+    opts.window ?? (targetCandidates.size === 1 ? [...targetCandidates][0] : undefined);
+  const requiresWindowLease = actions.some((action) =>
+    action.type === 'click' ||
+    action.type === 'double_click' ||
+    action.type === 'scroll' ||
+    action.type === 'drag' ||
+    action.type === 'type'
+  );
+  // Only where a window can actually be aimed at. On a platform with no window-scoped input
+  // there is nothing a caller could pass to satisfy this, so the fence would refuse every
+  // pointer action instead of proving anything about where it lands.
+  const windowScopedInput = process.platform === 'win32' || process.platform === 'darwin';
+  if (windowScopedInput && requiresWindowLease && inferredTargetWindow === undefined) {
+    throw new ComputerError(
+      'INPUT_TARGET_REQUIRED: physical pointer and application text mutations require targetWindow, a window-bound frame, a semantic ref, or focus(window) in the same batch.'
+    );
+  }
+
+  if (needsFrame && frame.captureMode === 'screen_fallback' && inferredTargetWindow !== undefined) {
+    throw new ComputerError(
+      'INPUT_TARGET_UNPROVEN: visible screen_fallback pixels cannot authorize window-bound coordinate input. Focus the target and observe it again before pointing.'
+    );
+  }
+
   const mapOne = (action: Action): Record<string, unknown> => {
     switch (action.type) {
       case 'click_ref': {
@@ -1734,14 +1920,34 @@ async function actLocked(
           scroll_y: action.scroll_y ?? 0,
           ...(action.scrollUnit === 'wheel' ? { rawWheel: true } : {})
         };
-      case 'drag':
+      case 'drag': {
+        const xs = action.path.map((p) => toScreenX(p.x));
+        const ys = action.path.map((p) => toScreenY(p.y));
+        // A drag that goes nowhere is not a drag, and must not be reported as one.
+        //
+        // Points are already checked against the frame above, so an out-of-frame route is
+        // refused before it reaches here. What survives that and still collapses is a path too
+        // short to survive the scale: a screenshot of a Retina display is larger than the region
+        // it shows, so image pixels divide down, and a drag of a pixel or two lands on one
+        // screen point. Nothing crosses the drag threshold, no session begins, and the helper
+        // answers ok because every event it was asked to post was posted — the "success with no
+        // effect" a caller cannot tell from a real drag.
+        const distinct = xs.some((x, index) => x !== xs[0] || ys[index] !== ys[0]);
+        if (!distinct) {
+          throw new ComputerError(
+            `DRAG_PATH_COLLAPSED: every point of this drag lands on ${xs[0]},${ys[0]} on screen. The ` +
+              `image is ${frame.scale > 1 ? `${frame.scale}x` : 'not'} scaled relative to the desktop, so a path ` +
+              'this short covers no distance there. Nothing was sent — use endpoints further apart.'
+          );
+        }
         return {
           type: 'drag',
-          xs: action.path.map((p) => toScreenX(p.x)),
-          ys: action.path.map((p) => toScreenY(p.y)),
+          xs,
+          ys,
           button: action.button ?? 'left',
           ...(action.duration_ms === undefined ? {} : { durationMs: action.duration_ms })
         };
+      }
       case 'type':
         return { type: 'type', text: action.text };
       case 'keypress':
@@ -1759,6 +1965,8 @@ async function actLocked(
   // lock in between, which a second call from the tool layer would have done.
   const clipboard: string[] = [];
   const routes: ActionResult['routes'] = [];
+  let scrollEvidence: ActionResult['scroll'] = null;
+  let uiChanged: ActionResult['uiChanged'] = null;
   let completedCount = 0;
   // Validation above is synchronous; pin its helper through every queued native segment,
   // including a segment reached after a local wait or clipboard operation.
@@ -1779,7 +1987,7 @@ async function actLocked(
       reply = await runHelper({
         op: 'act',
         actions: sending,
-        ...(opts.window === undefined ? {} : { targetWindow: opts.window }),
+        ...(inferredTargetWindow === undefined ? {} : { targetWindow: inferredTargetWindow }),
         ...(opts.ownerWindow === undefined ? {} : { ownerWindow: opts.ownerWindow }),
         ...(opts.app === undefined ? {} : { targetApp: opts.app }),
         ...(opts.ownerApp === undefined ? {} : { ownerApp: opts.ownerApp }),
@@ -1800,6 +2008,12 @@ async function actLocked(
           : {})
       }, expected);
       helperUsed = true;
+      if (reply['scroll'] && typeof reply['scroll'] === 'object') {
+        scrollEvidence = reply['scroll'] as Record<string, unknown>;
+      }
+      if (typeof reply['ui_changed'] === 'boolean') {
+        uiChanged = reply['ui_changed'];
+      }
       const helperRoutes = Array.isArray(reply['routes']) ? reply['routes'].map(String) : [];
       for (let index = 0; index < sending.length; index++) {
         const route = helperRoutes[index];
@@ -1912,7 +2126,17 @@ async function actLocked(
     reply = await runHelper({ op: 'cursor' });
   }
 
-  if (reply === null) return { cursor: null, clipboard, completedCount, routes };
+  if (reply === null) {
+    return {
+      cursor: null,
+      clipboard,
+      completedCount,
+      routes,
+      targetWindow: inferredTargetWindow ?? null,
+      scroll: scrollEvidence,
+      uiChanged
+    };
+  }
 
   const raw = reply['cursor'] as { x?: unknown; y?: unknown } | undefined;
   const sx = Number(raw?.x);
@@ -1920,13 +2144,28 @@ async function actLocked(
   if (!Number.isFinite(sx) || !Number.isFinite(sy)) {
     throw new ComputerError('The desktop helper returned an invalid pointer position.');
   }
+  // Both halves of this line have a reason, and they are about different things.
+  //
+  // `qualifiedFrame(..., generationOfReply(reply))` is upstream's: a frame from an older capture
+  // generation no longer describes what the helper just answered about, so it must not be used to
+  // place a point at all.
   const current = qualifiedFrame(requestedFrame ?? lastFrame, generationOfReply(reply));
-  const image = current
+  // And the bounds check below is ours. The conversion is arithmetic and answers for any point on
+  // the desktop, including points the frame does not contain — so a pointer below a captured
+  // window produced "875,754" for an image 646 tall, a coordinate that cannot exist. QA caught it,
+  // and a caller reading that as an image position would address a pixel that is not there.
+  // Outside the frame there is no image coordinate to give; `screen` still says where the pointer
+  // is. A right frame and a point inside it are separate questions, so both are asked.
+  const inFrame = current
     ? {
         x: Math.round((sx - current.region.x) * current.scale),
         y: Math.round((sy - current.region.y) * current.scale)
       }
     : null;
+  const image =
+    inFrame && current && inFrame.x >= 0 && inFrame.y >= 0 && inFrame.x < current.width && inFrame.y < current.height
+      ? inFrame
+      : null;
   return {
     cursor: {
       screen: { x: sx, y: sy },
@@ -1936,7 +2175,10 @@ async function actLocked(
     },
     clipboard,
     completedCount,
-    routes
+    routes,
+    targetWindow: inferredTargetWindow ?? null,
+    scroll: scrollEvidence,
+    uiChanged
   };
 }
 

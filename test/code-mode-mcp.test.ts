@@ -282,7 +282,7 @@ it.runIf(process.platform === 'win32').each([true, false])('routes sky through D
   } as never);
   const action = vi.spyOn(desktopBackend, 'act').mockImplementation(async () => {
     callers.push(currentCall()!.caller.sessionId!);
-    return { completedCount: 1, routes: ['uia'], cursor: null, clipboard: [] };
+    return { completedCount: 1, routes: ['uia'], cursor: null, clipboard: [], targetWindow: null, scroll: {}, uiChanged: false };
   });
   const observed = await rpc('tools/call', { name: 'exec', arguments: { code: 'const window = (await sky.list_windows())[0]; const state = await sky.get_window_state({window,include_text:true}); nodeRepl.write({window:state.window,tree:state.accessibility.tree});' } }, who.requestId, 'desktop');
   expect(observed.result.isError, text(observed)).not.toBe(true);

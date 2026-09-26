@@ -16,7 +16,7 @@ function fixture() {
     getWindowState: vi.fn(async () => result),
     listWindows: vi.fn(async () => ({ windows: [nativeWindow], screen: shot.region })),
     listDesktopApps: vi.fn(async () => ({ apps: [{ id: window.app, displayName: 'Fixture', windows: [nativeWindow] }], truncated: false })),
-    act: vi.fn(async () => ({ cursor: null, clipboard: [], completedCount: 1, routes: ['sendinput' as const] }))
+    act: vi.fn(async () => ({ cursor: null, clipboard: [], completedCount: 1, routes: ['sendinput' as const], targetWindow: null, scroll: {}, uiChanged: false }))
   };
   return { backend, result, api: createWindowsComputerApi(backend) };
 }

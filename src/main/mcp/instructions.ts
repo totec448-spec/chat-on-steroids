@@ -167,7 +167,15 @@ function desktopInstructions(ctx: ToolContext, platform: NodeJS.Platform): strin
     'Use click_ref/set_value for exposed controls; refs resolve the same control again when acted on.',
     'Physical input requires the target window in front. Use computer focus to activate it; when something steals focus, observe first.',
     'Coordinates are pixels of a screenshot frame. Coordinate actions require frameId so a click cannot land on a screen',
-    'whose owner or geometry has since changed. Batch related actions and use captureAfter to inspect the result; input acceptance alone does not prove the task succeeded.',
+    'whose owner or geometry has since changed. For physical pointer or application keyboard input, pass the observed window id as targetWindow; system-owned shortcuts remain global. targetWindow is a fail-closed assertion, not permission to guess a different focus.',
+    // "Batch related actions" and the one-decision rule below cannot both be told to the same
+    // model: the schema now refuses the second UI-changing step, so an instruction to batch them
+    // would send every caller into a rejection. The half of that sentence which is still true
+    // whatever the batching rule is — acceptance is not success — is kept here instead.
+    'Keep a computer call on one target window and one UI-changing decision. focus/move/wait/clipboard setup may accompany it; inspect the returned capture before deciding the next action, because input acceptance alone does not prove the task succeeded.',
+    'Mutating computer calls return a fresh result screenshot by default when screen access is available. Set captureAfter=false only when the result genuinely does not need visual verification.',
+    'When a small Retina control is visually ambiguous, observe it again with a larger max_width instead of guessing a pixel.',
+    'Prefer focus(window) over command+tab/alt+tab when the destination window id is known. Never use a fixed sleep as proof that an app switch finished.',
     // Waiting was the single most repeated desktop pattern in the recorded sessions: a batch of
     // nothing but a fixed sleep plus a screenshot, over and over, because the model had no way to
     // say what it was waiting *for*. verify is that way, and it waits inside the one call.

@@ -185,7 +185,14 @@ describe.each(['stdio', 'addon'] as const)('Desktop reply provenance (%s)', (tra
     await computer.screenshot({ window: 77 });
     await replace();
     expect((await computer.findUi({ window: 77 })).elements[0]).toMatchObject({ imageBounds: null, imageCenter: null });
-    expect((await computer.act([{ type: 'type', text: 'example' }])).cursor).toMatchObject({ image: null, frameId: null });
+    // Application text input now requires a proven destination on the platforms that can aim at
+    // one, so a bare `type` is refused there before it reaches the code this test is about. The
+    // subject is the pointer report's frame binding and the action is only a way to get a cursor
+    // back, so name the window the screenshot above already used — and only where a window can
+    // be named, since the linux transport has no window-scoped input to satisfy.
+    const target = transport === 'addon' ? { window: 77 } : {};
+    expect((await computer.act([{ type: 'type', text: 'example' }], target)).cursor)
+      .toMatchObject({ image: null, frameId: null });
   });
 
   it('refuses crops expressed in an earlier helper frame', async () => {
@@ -305,7 +312,9 @@ describe.each(['stdio', 'addon'] as const)('Desktop reply provenance (%s)', (tra
 
   it('retains completed input evidence if the subsequent screenshot fails', async () => {
     vi.spyOn(fs, 'stat').mockRejectedValueOnce(new Error('fixture image unavailable'));
-    await expect(computer.actAndCapture([{ type: 'type', text: 'already sent' }], { capture: { window: 77 } }))
+    // Same fence as above: on a platform that can aim input at a window, this one has to name it.
+    await expect(computer.actAndCapture([{ type: 'type', text: 'already sent' }],
+      { ...(transport === 'addon' ? { window: 77 } : {}), capture: { window: 77 } }))
       .rejects.toMatchObject({ completedCount: 1, failedIndex: 1, completedRoutes: ['uia'], message: expect.stringMatching(/CAPTURE_AFTER_FAILED.*do not repeat/) });
     expect(fake.requests.filter(request => request.op === 'act')).toHaveLength(1);
   });
