@@ -16124,6 +16124,33 @@ describe('the goal loop', () => {
     expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
   });
 
+  it('acks a worker bootstrap whose hard line breaks ChatGPT stored as Markdown backslashes', async () => {
+    // #426, measured 2026-09-26: ChatGPT stores each composer hard break of a worker bootstrap as
+    // `\<newline>`. The receipt kept those backslashes, never recognised the bootstrap it had
+    // just sent, and the worker stayed unbound — its calls refused — until its turn had ended.
+    const commandId = 'cmd-worker-hard-breaks';
+    const typed = '[[COS_CONTEXT:34]]\nYou are worker-1. Run the check.\n[[/COS_CONTEXT]]\nReport with agents action=finish.';
+    const asRendered = typed.replace(/\n/g, '\\\n');
+    expect(asRendered).not.toBe(typed);
+    live = await harness(
+      `https://chatgpt.com/?clf=${commandId}`,
+      {
+        redeem: () => ({ ok: true, command: { id: commandId, type: 'worker', text: typed, agent: 'worker-1' } }),
+        ack: () => ({ ok: true })
+      },
+      (document, dom) => {
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          document.querySelector('#prompt-textarea')!.textContent = '';
+          dom.reconfigure({ url: `https://chatgpt.com/c/${CHAT}` });
+          userTurn(document, 'worker-user', asRendered, { sent: false });
+        });
+      }
+    );
+    await settle(2000);
+    const acks = live.sent.filter((message) => message.type === 'ack' && message.id === commandId);
+    expect(acks.map((message) => message.conversationId)).toContain(CHAT);
+  });
+
   it('keeps the resume conversation when it gets an id despite a visible failure', async () => {
     const commandId = 'cmd-resume-failure-with-id';
     const token = '0123456789abcdef0123456789abcdef';
