@@ -8,7 +8,7 @@ import { prepareSessionPrompt } from './session/prompt.js';
 import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
 import { isProModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
-import { injectedUserMessage, recordedRequestTurn, responseTurnId } from '../shared/chronology.js';
+import { injectedUserMessage, recordedRequestTurn, responseTurnId, type TimelineTurns } from '../shared/chronology.js';
 import type { SessionSummary } from '../shared/session.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, type InputActivity } from './session/input.js';
 import { pluginRefreshPublications, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
@@ -2736,6 +2736,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // Boot adoption must not mint a replacement turn merely because liveness expired.
         recordedTurnId: live.activeTurnId ?? null,
         recordedQuestionId: live.activeTurnId ? summary?.timelineTurns?.[live.activeTurnId]?.questionId ?? null : null,
+        // The question whose turn this app has already ended, while nothing is running. See
+        // settledQuestionOf(): a reloaded page must not reopen it as a turn nobody recorded.
+        settledQuestionId: live.activeTurnId ? null : settledQuestionOf(summary?.timelineTurns),
         ...(pendingStop?.spec.type === 'stop' ? { stopTurn: { turnId: pendingStop.spec.turnId, userMessageId: pendingStop.spec.userMessageId ?? null } } : {}),
         // A revival names an existing worker conversation. The extension, which alone can
         // inspect Chrome's real tab set, routes it to that tab before it considers opening one.
@@ -6415,6 +6418,25 @@ const lastBrowserRecoveryAt = new Map<string, number>();
  * refund it when another recovery takes over. Only a positive no-action failure can release it.
  */
 const turnRepairSpent = new Map<string, { sessionId: string; turnKey: string; token: string }>();
+
+/**
+ * The question of the newest recorded turn, when that turn has ended; otherwise null.
+ *
+ * Measured 2026-09-26 on a resumed prime whose turn ChatGPT lost server-side: the app ended it
+ * `stalled` and reloaded, the reloaded page showed Stop for a few seconds before ChatGPT's own
+ * "A network error occurred", and claimUnrecordedGeneration() opened a new turn for the same
+ * question. That turn had no tool call and no output, stalled ten minutes later, earned another
+ * reload, and so on — three rounds, 11:17 → 11:45 → 11:58 — and when the error reload was finally
+ * spent, the automatic Continue was refused because the newest turn "has no confirmed local tool
+ * call". Handing the page the settled question lets it tell a turn nobody recorded from the one
+ * this app has just put down.
+ */
+function settledQuestionOf(turns: TimelineTurns | undefined): string | null {
+  if (!turns) return null;
+  let newest: TimelineTurns[string] | null = null;
+  for (const turn of Object.values(turns)) if (!newest || turn.origin > newest.origin) newest = turn;
+  return newest && newest.endTime !== undefined && typeof newest.questionId === 'string' ? newest.questionId : null;
+}
 
 async function assistantRepairSource(sessionId: string): Promise<NonNullable<Repair['assistantSource']>> {
   const [start] = await readRecentEvents(sessionId, 1, { kinds: ['turn_start'] });
