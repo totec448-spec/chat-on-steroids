@@ -701,7 +701,7 @@ var CLF_DOM = (() => {
   /** Stop is a busy hint only; the exact provider terminal still owns turn completion. */
   function generating() {
     return safe(() => {
-      if (nativeComposerControls(STOP).length > 0) return true;
+      if (stopControls().length > 0) return true;
       // Historical interrupted exchanges can retain in_progress forever. Only the
       // latest native response can describe this composer's current generation.
       const latest = [...document.querySelectorAll(SHELL_TURN)].filter(node =>
@@ -710,9 +710,89 @@ var CLF_DOM = (() => {
     }, false);
   }
 
+  /**
+   * The stop control on a composer whose buttons carry nothing but a translated label.
+   *
+   * `STOP` is a list of English labels and two test ids. ChatGPT's newer composer has neither:
+   * voice, send and stop are the same `type="button"` in the same slot, and only the label and
+   * the icon change. On a localised install the label is translated — `aria-label="Durdur"`
+   * measured on a Turkish page on 2026-09-25 — so stop was never found, `generating()` never
+   * said yes, and nothing could end a turn through the page.
+   *
+   * What is not translated is the icon. Stop is a rounded square: one `path`, its `d` beginning
+   * `M4.5 5.75`. The dictation control in the same slot draws four paths and carries
+   * `data-state`; send draws an arrow. Matching the square is therefore both locale-free and
+   * narrow, and narrow is what matters here: a send button mistaken for stop would report a
+   * generation that never ends.
+   *
+   * Tried second, never first. Where the labels do match they stay authoritative.
+   */
+  const STOP_SQUARE = /^\s*M4\.5 5\.75/;
+  function localeFreeStopControls() {
+    const form = composer()?.closest('form');
+    if (!form) return [];
+    return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
+      .filter(button => {
+        if (!renderedComposerNode(button) || button.closest('form') !== form) return false;
+        // The dictation control keeps a popover state on itself; stop never does.
+        if (button.hasAttribute('data-state')) return false;
+        const paths = button.querySelectorAll('svg path');
+        return paths.length === 1 && STOP_SQUARE.test(paths[0].getAttribute('d') || '');
+      });
+  }
+
+  function stopControls() {
+    const labelled = nativeComposerControls(STOP);
+    return labelled.length > 0 ? labelled : localeFreeStopControls();
+  }
+
+  /**
+   * Send, found without a label, for the same composer and the same reason as the square above.
+   *
+   * All three of `SEND`'s strategies fail on ChatGPT's newer composer: the `data-testid` is gone,
+   * `aria-label^="Send"` is translated, and nothing in that slot is `type="submit"` any more —
+   * voice, send and stop are one `type="button"`. Measured on a Turkish page on 2026-09-25 and
+   * reported in #415 on an English one: a new chat opened, the prompt was typed, and nothing was
+   * ever submitted, because `submitDraft` waits on `sendButton()` and deliberately has no Enter
+   * fallback ("neither a guessed Enter nor an unrelated Stop/composer-clear is evidence that this
+   * draft was submitted").
+   *
+   * Send has no icon signature of its own worth trusting — an arrow's path data is not a contract
+   * — so this identifies it by the state it is the only occupant of. Every caller consults this
+   * with our exact text standing in the composer and `generating()` false, and in that state the
+   * primary-action slot cannot be stop (which exists only while generating) and cannot be voice
+   * (which the composer replaces as soon as it holds text, and which carries `data-state`
+   * regardless). Both are excluded explicitly all the same, and one candidate is still required,
+   * so an unexpected third control refuses rather than being clicked.
+   */
+  function localeFreeSendControls() {
+    const box = composer();
+    const form = box?.closest('form');
+    if (!form) return [];
+    // Read the editor here rather than reusing the submitter's own `draftText`, which is a local
+    // closure over its captured box. Only "the composer holds something" is needed, not equality.
+    const drafted = (typeof box.innerText === 'string' ? box.innerText : box.textContent || '').trim();
+    if (drafted === '' || generating()) return [];
+    return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
+      .filter(button => {
+        if (!renderedComposerNode(button) || button.closest('form') !== form) return false;
+        // Dictation keeps a popover state on itself; send never does.
+        if (button.hasAttribute('data-state')) return false;
+        const paths = button.querySelectorAll('svg path');
+        // Not the stop square, and not the four-path microphone.
+        if (paths.length === 1 && STOP_SQUARE.test(paths[0].getAttribute('d') || '')) return false;
+        return paths.length >= 1 && paths.length <= 2;
+      });
+  }
+
+  function sendControls() {
+    const labelled = nativeComposerControls(SEND);
+    return labelled.length > 0 ? labelled : localeFreeSendControls();
+  }
+
   function stopButton() {
     return safe(() => {
-      const buttons = nativeComposerControls(STOP);
+      const buttons = stopControls();
       return buttons.length === 1 ? buttons[0] : null;
     }, null);
   }
@@ -732,7 +812,7 @@ var CLF_DOM = (() => {
   /** The page-owned Send control, exposed so content.js can witness an actual submission. */
   function sendButton() {
     return safe(() => {
-      const buttons = nativeComposerControls(SEND);
+      const buttons = sendControls();
       return buttons.length === 1 ? buttons[0] : null;
     }, null);
   }
