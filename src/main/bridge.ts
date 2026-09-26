@@ -158,6 +158,7 @@ import {
   rollbackWorkerRevivalClaim,
   releaseQuiescentRun,
   retiredWorkerForConversation,
+  waitingForSubAgents,
   sleepSilentWorkers,
   occupiesSlot,
   sleepWorker,
@@ -5959,6 +5960,10 @@ async function goalWaitFor(conversationId: string, sessionId: string, now = Date
     return visible ? { reason: 'silence', until: visible.deadline } : null;
   }
   if (runningToolCalls(conversationId) > 0) return { reason: 'tools' };
+  // A run's own workers report back into this chat, so the next instruction waits for them
+  // rather than deciding from a context that is about to change. No deadline: the wait ends
+  // when the last worker stops, and a countdown would only be a second, guessed clock.
+  if (waitingForSubAgents(conversationId)) return { reason: 'workers' };
   if ((pending.listenUntil ?? 0) > now) return { reason: pending.silenceSourceTurnId ? 'listening' : 'native-busy', until: pending.listenUntil };
   const grant = activeUntil.get(conversationId);
   if (grant?.sessionId === sessionId && grant.mcpBacked && !grant.thinkingFailed && grant.until > now)
@@ -7506,7 +7511,8 @@ function notePickupActivity(conversationId: string): void {
   watch.dueAt = Date.now() + gap;
 }
 
-/** One pickup tree for authored input, unfinished Continue and final-driven Goal/Loop.
+/**
+ * One pickup tree for authored input, unfinished Continue and final-driven Goal/Loop.
  * Their durable owners retain text/decision debt; this projection elects one source per
  * chat and shares its reload budget. A reload never generates a second obligation. */
 async function owedPickups(now: number): Promise<Map<string, { conversationId: string; sessionId: string; replyId: string; acceptedAt: number; listenUntil: number; pro: boolean; queued: boolean }>> {
@@ -7537,6 +7543,11 @@ async function owedPickups(now: number): Promise<Map<string, { conversationId: s
     if (now - pickup.acceptedAt >= PICKUP_WATCH_LIFETIME_MS || session?.conversationId !== id ||
         session.browserRecoveryDismissedAt !== undefined) owed.delete(id);
   }
+  // The wait for a run's own workers is a delay, not a consumed step: the debt stays exactly
+  // as it is and is collected on the first sweep after they stop. Deleting it here (rather
+  // than deferring inside the scheduler) is what covers the pre-action re-check, the silence
+  // re-check and the handout re-check with one rule instead of three.
+  for (const id of owed.keys()) if (waitingForSubAgents(id)) owed.delete(id);
   return owed;
 }
 

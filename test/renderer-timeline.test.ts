@@ -2988,6 +2988,25 @@ it('shows Loop settling, its real waiting deadline, and generated text in the sa
   expect(row.textContent).toBe('');
 });
 
+it('names the wait for this chat’s own sub-agents without inventing a countdown', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  // The wait ends when the last worker stops, which is not a time this page can predict, so
+  // the row says what it is waiting for and shows no timer at all.
+  const controls = { automation: 'loop', objective: 'Continue the task', blocked: '', job: null,
+    goalWait: { reason: 'workers' }, goalDraft: null as unknown };
+  api.getSessionControls = async () => ({ ok: true, data: controls });
+  await append([]);
+  const row = w.document.getElementById('goalLifecycle')!;
+  expect(row.hidden).toBe(false);
+  expect(row.textContent).toContain('Loop · Waiting for this chat’s sub-agents');
+  expect(row.querySelector('[role="timer"]')).toBeNull();
+  expect(row.getAttribute('aria-busy')).toBe('true');
+  api.getSessionControls = async () => ({ ok: true, data: { ...controls, goalWait: null } });
+  await append([]);
+  expect(row.hidden).toBe(true);
+});
+
 it('follows the accepted New Chat receipt while preserving a typed follow-up', async () => {
   const { w, live, append } = await boot([], false);
   const composer = w.document.getElementById('chatInput') as HTMLTextAreaElement;
