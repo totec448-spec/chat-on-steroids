@@ -205,6 +205,7 @@ import { conversationHasMcpCallSince } from './session/store.js';
 import { sessionWorkingAt } from '../shared/session-activity.js';
 import { requestCorrelation } from './session/correlation.js';
 import { bindAgentWorkspace } from './workspace.js';
+import { shippedExtensionBuild } from './extension-path.js';
 
 /** Fixed candidates so the extension can find the app without being told a port. */
 export const DEFAULT_PORTS = BROWSER_BRIDGE_PORTS;
@@ -525,6 +526,41 @@ const commandRedeems = new Map<string, Promise<void>>();
 let requestWindow = { start: Date.now(), count: 0 };
 const listeners = new Set<() => void>();
 let extensionVersion: string | null = null;
+/**
+ * When each (version, build) pair was last announced. Two browsers with the extension installed
+ * alternate requests, and a single "current" pair would turn every alternation into a fresh
+ * "connected" line, a repeated mismatch warning and a renderer push: measured 2026-09-26, a
+ * normal and a debugging Chrome on different builds wrote ~80 of each per minute for an hour.
+ */
+const announcedExtensions = new Map<string, number>();
+const EXTENSION_ANNOUNCE_MS = 30 * 60_000;
+/** When each extension build last made a request, to tell a stale companion from a lone one. */
+const extensionBuildSeenAt = new Map<string, number>();
+const STALE_COMPANION_WINDOW_MS = 60_000;
+
+function extensionBuildOf(req: http.IncomingMessage): string | null {
+  const build = req.headers['x-extension-build'];
+  return typeof build === 'string' && /^[0-9a-f]{12}$/.test(build) ? build : null;
+}
+
+/**
+ * Whether this request comes from an out-of-date companion while an up-to-date one is present.
+ *
+ * With the extension installed in two browsers, both poll and both may claim work. Measured
+ * 2026-09-26: a planner input was claimed twice within 11 ms and sent by a second Chrome still
+ * running the pre-update extension, which could not collect the answer on the newer ChatGPT
+ * shell — so the planner timed out while the current browser's helper tab sat empty. A stale
+ * companion is refused work only while a companion on the shipped build was seen within the last
+ * minute; a lone browser on an older build, or any build of an unpackaged checkout, keeps working
+ * exactly as before.
+ */
+function staleCompanion(req: http.IncomingMessage): boolean {
+  const stamp = extensionBuildOf(req);
+  const shipped = shippedExtensionBuild();
+  if (!stamp || !shipped || stamp === shipped) return false;
+  const current = extensionBuildSeenAt.get(shipped);
+  return current !== undefined && Date.now() - current < STALE_COMPANION_WINDOW_MS;
+}
 let versionWarned = false;
 let latestCompanionDiagnostics: CompanionDiagnostics | null = null;
 let companionDiagnosticsRevision = 0;
@@ -845,13 +881,41 @@ function protocolCompatible(req: http.IncomingMessage): boolean {
 function noteExtensionVersion(req: http.IncomingMessage): void {
   const version = req.headers['x-extension-version'];
   const protocol = extensionProtocol(req);
-  if (typeof version === 'string' && version !== extensionVersion) {
-    extensionVersion = version.slice(0, 32);
-    logInfo(`bridge: browser extension ${extensionVersion} connected`);
+  const stamp = extensionBuildOf(req);
+  if (stamp) {
+    extensionBuildSeenAt.delete(stamp);
+    extensionBuildSeenAt.set(stamp, Date.now());
+    if (extensionBuildSeenAt.size > 16) extensionBuildSeenAt.delete(extensionBuildSeenAt.keys().next().value!);
+  }
+  if (typeof version !== 'string') return warnProtocol(protocol);
+  extensionVersion = version.slice(0, 32);
+  const key = `${extensionVersion}\u0000${stamp ?? ''}`;
+  const announcedAt = announcedExtensions.get(key);
+  if (announcedAt === undefined || Date.now() - announcedAt >= EXTENSION_ANNOUNCE_MS) {
+    announcedExtensions.delete(key);
+    announcedExtensions.set(key, Date.now());
+    if (announcedExtensions.size > 16) announcedExtensions.delete(announcedExtensions.keys().next().value!);
+    logInfo(`bridge: browser extension ${extensionVersion} connected${stamp ? ` (build ${stamp})` : ''}`);
+    // Chrome answers "which manifest did I load" with the version and keeps running whatever
+    // service worker it already had, so an extension folder replaced under a live browser
+    // reports the new version and runs the old code — and every symptom after that points
+    // somewhere else. Said once per announcement, and only when both ends reported a stamp.
+    const shipped = shippedExtensionBuild();
+    if (shipped && stamp && stamp !== shipped) {
+      logWarn(
+        `bridge: the browser is running extension build ${stamp}, but this app ships ${shipped}. ` +
+          'Chrome keeps a service worker alive across a folder change, so reload the extension at ' +
+          'chrome://extensions to pick up the shipped code.'
+      );
+    }
     // Even an incompatible peer reports its version before the protocol fence.
     // Publish that evidence without falsely granting compatible browser presence.
     changed();
   }
+  warnProtocol(protocol);
+}
+
+function warnProtocol(protocol: number | null): void {
   if (!versionWarned && protocol !== null && protocol !== BRIDGE_PROTOCOL) {
     versionWarned = true;
     logWarn(
@@ -2032,11 +2096,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     if (body.authorize === true) return json(res, 200, { ok: await authorizeBrowserInput(body.id, body.owner, target) }, origin);
     if (target && runningToolCalls(target) > 0) return json(res, 200, { input: null }, origin);
+    if (staleCompanion(req)) return json(res, 200, { input: null }, origin);
     const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
     return json(res, 200, { input }, origin);
   }
 
   if (route === '/repairs/claim' && req.method === 'POST') {
+    if (staleCompanion(req)) return json(res, 200, { allowed: false }, origin);
     let body: unknown;
     try { body = await readBody(req); } catch { return json(res, 400, { error: 'bad_request' }, origin); }
     const token = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>).token : null;
@@ -3722,6 +3788,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // token as everything else — it is a correlation marker, which is why a leaked URL or a
   // synced history entry is worth nothing on its own.
   if (route === '/commands/redeem' && req.method === 'POST') {
+    if (staleCompanion(req)) return json(res, 409, { error: 'stale_extension_build' }, origin);
     let body: Record<string, unknown>;
     try {
       body = (await readBody(req)) as Record<string, unknown>;
@@ -9077,6 +9144,8 @@ export function resetBridgeForTests(): void {
   lastBrowserLaunchAt = 0;
   lastSeenAt = null;
   extensionVersion = null;
+  announcedExtensions.clear();
+  extensionBuildSeenAt.clear();
   versionWarned = false;
   requestWindow = { start: Date.now(), count: 0 };
 }
