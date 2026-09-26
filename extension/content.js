@@ -11183,8 +11183,11 @@
   let pluginRefreshBusy = false;
   function ownsPluginRefreshPage(id) {
     const url = new URL(location.href);
-    return alive && !generating && !CLF_DOM.generating() && url.pathname === '/' &&
-      /^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash) && url.searchParams.get('cos-plugin-refresh') === id;
+    // Either settings route (see background.js pluginSettingsRoute). The newer path-routed page
+    // is owned so that its unreadable card is reported, not left as a silent, reopened request.
+    const route = (url.pathname === '/' && /^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash)) ||
+      /^\/(?:settings\/plugins-settings(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?|plugins\/plugin_asdk_app_[a-zA-Z0-9_-]+)$/.test(url.pathname);
+    return alive && !generating && !CLF_DOM.generating() && route && url.searchParams.get('cos-plugin-refresh') === id;
   }
   function waitPageView(read, current, milliseconds) {
     return new Promise(resolve => {
@@ -11246,7 +11249,22 @@
         const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(new URL(location.href).hash);
         return route && next?.appId === route[1] && Array.isArray(next.tools) && next.tools.length > 0 ? next : null;
       }, current, 8000);
-      if (!view) return false;
+      if (!view) {
+        // Say so. `pluginSnapshot()` refuses for two different reasons — the page has not
+        // rendered the card yet, and the page renders a card this build cannot read — and
+        // returning false told the app neither. On 2026-09-11 that cost thirty hours: the
+        // durable row carried no `error` at all, so nothing anywhere named a cause while the
+        // request was retried. Reporting is not terminal — `failPluginRefresh` records the
+        // reason and leaves maintenance free to reobserve — so the only thing silence bought
+        // was the absence of a diagnosis.
+        //
+        // Gated on still owning the page. `waitPageView` also yields null when it stops
+        // because this document is no longer the one the request belongs to, and a navigation
+        // is not the page failing to render a card — blaming it for one would put a false
+        // cause in the durable row, which is the opposite of the point.
+        if (current()) await fail('The connector settings card could not be read on the page this request owns');
+        return false;
+      }
       if (!current()) return false;
       if (request.appId && view.appId !== request.appId) { await fail('Exact connector settings could not be verified'); return false; }
       const ownedEpoch = epoch, appId = view.appId;
