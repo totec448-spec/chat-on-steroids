@@ -10265,13 +10265,33 @@
     // From here onward a competing fresh wake must not supersede this attempt: the bridge may
     // persist this document as owner before the response gets back to us.
     if (attempt) attempt.phase = 'redeeming';
-    const reply = await ask({
+    const redeemEpoch = epoch;
+    const redeemRequest = {
       type: 'redeem',
       id,
       client: RUN_ID,
       ...(fromUrl && OPENED_PROJECT_ENTRY ? { projectEntry: true } : {}),
       ...(openedConversation ? { conversationId: openedConversation } : {})
+    };
+    const redeemStillCurrent = () => alive && epoch === redeemEpoch && !attempt?.cancelled &&
+      (!attempt || commandAttempt === attempt) &&
+      (!fromUrl || markerId() === id) &&
+      (openedConversation ? CLF_DOM.conversationId() === openedConversation : !CLF_DOM.conversationId());
+    const redeemOnce = () => new Promise(resolve => {
+      let done = false;
+      const finish = value => { if (done) return; done = true; clearTimeout(timer); resolve(value); };
+      // The app may have durably assigned this RUN_ID as owner even if the MV3 reply disappears.
+      // Keep retry bounded to the pre-Send handshake; destinationAttempt has its own no-replay fence.
+      const timer = setTimeout(() => finish(null), 30_000);
+      void ask(redeemRequest).then(finish, () => finish(null));
     });
+    let reply = await redeemOnce();
+    for (let retry = 0; retry < 2 && (!reply || (reply.ok !== true && reply.retryable === true)); retry++) {
+      if (!redeemStillCurrent()) break;
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      if (!redeemStillCurrent()) break;
+      reply = await redeemOnce();
+    }
     if (!reply || reply.ok !== true) {
       // The app could not be reached at all, so there is nothing to acknowledge and nothing
       // to acknowledge it to. Its own deadline ends the command; this page stops here.
