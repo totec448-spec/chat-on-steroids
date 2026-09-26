@@ -11071,7 +11071,22 @@
         decision.messageId = receipt.user.id;
         decision.conversationId = deliveredConversation;
         decision.epoch = epoch;
-        decision.onTarget = () => alive && epoch === decision.epoch && CLF_DOM.conversationId() === deliveredConversation;
+        // The newer shell gives a temporary chat a real /c/<id> route shortly after Send
+        // (measured 2026-09-26: `/c/6ab7e420…?temporary-chat=true`). A decision pinned to the
+        // route-less page it was sent from then counted as off target for good, so the plan
+        // ChatGPT wrote was never collected and the planner timed out. A temporary decision binds
+        // once to the first concrete route after its own Send; any later move still leaves it.
+        let boundConversation = deliveredConversation;
+        decision.onTarget = () => {
+          if (!alive || epoch !== decision.epoch) return false;
+          const route = CLF_DOM.conversationId();
+          if (temporary && boundConversation === null && route) {
+            boundConversation = route;
+            decision.conversationId = route;
+            if (desktopDecisionSession?.temporary) desktopDecisionSession.conversationId = route;
+          }
+          return route === boundConversation;
+        };
         desktopDecisionSession = { conversationId: deliveredConversation, temporary };
         completeDesktopDecision();
       }
