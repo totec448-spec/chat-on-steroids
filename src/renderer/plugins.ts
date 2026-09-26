@@ -14,7 +14,7 @@ function button(label: string | (() => string), action: () => void | Promise<voi
   node.type = 'button';
   node.addEventListener('click', async () => {
     node.disabled = true;
-    try { await action(); } catch (error) { toast(error instanceof Error ? error.message : 'Plugin operation failed'); }
+    try { await action(); } catch (error) { toast(error instanceof Error ? error.message : t('Plugin operation failed')); }
     finally { node.disabled = false; }
   });
   return node;
@@ -62,11 +62,11 @@ export function applyPluginsState(next: AppState): void {
     ? contacted ? t("Connected to ChatGPT") : t("Connector online · waiting for ChatGPT")
     : configured ? t("Plugins connector offline") : t("Setup required · connect your plugins"));
   status.dataset.live = String(surface?.state === 'live');
-  status.title = surface?.detail ?? '';
+  ui(status, 'title', () => t(surface?.detail ?? ''));
   const setupStatus = document.getElementById('pluginSetupStatus');
   if (setupStatus) ui(setupStatus, 'textContent', () => surface?.state === 'live'
     ? t("{0} tools available · {1}", [surface.tools.length, surface.lastRequestAt ? t("Connected to ChatGPT") : t("Ready to add in ChatGPT")])
-    : surface?.state === 'error' ? surface.detail : t("Save your connection below to make enabled plugins available in ChatGPT."));
+    : surface?.state === 'error' ? t(surface.detail) : t("Save your connection below to make enabled plugins available in ChatGPT."));
 }
 function showConnection(): void {
   if (!appState) { toast(t("Connection settings are still loading.")); return; }
@@ -102,8 +102,8 @@ function showConnection(): void {
     if (tunnel && !tunnel.value.trim()) { tunnel.focus(); throw new Error(t("Enter your Plugins tunnel ID.")); }
     if (key?.value) { const next = await run(window.api.setApiKey(key.value)); if (!next) return; key.value = ''; applyAppState(next); applyPluginsState(next); }
     if (tunnel) {
-      const { capabilities, readOnly, tunnel: previousTunnel, ui, sessions, compaction, multiAgent, goal, mcp } = appState.config;
-      const base: SettingsPatch = { capabilities, readOnly, tunnel: previousTunnel, ui, sessions, compaction, multiAgent, goal, mcp };
+      const { capabilities, readOnly, commandAllowlist, tunnel: previousTunnel, ui, sessions, compaction, multiAgent, goal, mcp } = appState.config;
+      const base: SettingsPatch = { capabilities, readOnly, commandAllowlist, tunnel: previousTunnel, ui, sessions, compaction, multiAgent, goal, mcp };
       const next = await run(window.api.saveSettings({ ...base, tunnel: { ...previousTunnel, pluginsTunnelId: tunnel.value.trim() } }, base));
       if (!next) return; applyAppState(next); applyPluginsState(next);
     }
@@ -273,13 +273,27 @@ function showCustom(kind: PluginSource['kind'], path = ''): void {
   select.value = kind; label.append(select); body.append(label);
   const location = field(body, () => t("Package, executable, URL or bundle path"), path); const version = field(body, () => t("Version (npm / Python)"), '', false, () => t("Pin a published version for reproducible installation."));
   const args = field(body, () => t("Arguments (JSON array)"), '[]', false, () => t("Example: [\"--port\", \"9876\"]. Passed directly, without a shell."));
+  // Remote servers can sign in through the provider instead of a static header; the backend
+  // already supports `auth: "oauth"`, so only the choice was missing here.
+  const authLabel = el('label', 'plugin-field'); authLabel.append(el('span', '', () => t("Authentication"))); const auth = document.createElement('select');
+  for (const [value, text] of [['', t("None or a static credential")], ['oauth', t("OAuth (sign in through the provider)")]]) { const option = document.createElement('option'); option.value = value!; option.textContent = text!; auth.append(option); }
+  authLabel.append(auth); body.append(authLabel);
   const key = field(body, () => t("Credential name (optional)"), '', false, () => t("An environment variable for local servers, or an HTTP header such as Authorization.")); const credential = field(body, () => t("Credential value"), '', true);
+  const oauth = () => select.value === 'remote' && auth.value === 'oauth';
+  const sync = () => { authLabel.hidden = select.value !== 'remote'; key.parentElement!.hidden = credential.parentElement!.hidden = oauth(); };
+  select.addEventListener('change', sync); auth.addEventListener('change', sync); sync();
   body.append(el('p', 'hint', () => t("Remote servers must support MCP Streamable HTTP. GitHub links require a known recipe or supported manifest. Local servers run outside the CoS folder sandbox.")), button(() => t("Install and connect"), async () => {
     const selected = select.value as PluginSource['kind']; const value = location.value.trim(); if (!value) throw new Error(t("Enter the server location first."));
     const parsed: unknown = JSON.parse(args.value); if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === 'string')) throw new Error(t("Arguments must be a JSON array of strings."));
     const source: PluginSource = { kind: selected, args: parsed };
     if (selected === 'remote' || selected === 'github') source.url = value; else if (selected === 'mcpb') source.path = value; else if (selected === 'command') source.command = value; else { source.package = value; if (version.value.trim()) source.version = version.value.trim(); }
-    if (await mutate(window.api.pluginsInstall({ name: name.value, source, credentials: key.value.trim() && credential.value ? { [key.value.trim()]: credential.value } : {} }))) box.close();
+    const signIn = oauth(); if (signIn) source.auth = 'oauth';
+    const before = new Set(snapshot.plugins.map(plugin => plugin.id));
+    if (await mutate(window.api.pluginsInstall({ name: name.value, source, credentials: !signIn && key.value.trim() && credential.value ? { [key.value.trim()]: credential.value } : {} }))) {
+      box.close();
+      // Like a catalog OAuth recipe: land on the new plugin, where its Sign in button is.
+      const installed = signIn ? snapshot.plugins.find(plugin => !before.has(plugin.id)) : undefined; if (installed) showPlugin(installed);
+    }
   }, true));
 }
 export function initPlugins(onState: (next: AppState) => void = () => {}): void {

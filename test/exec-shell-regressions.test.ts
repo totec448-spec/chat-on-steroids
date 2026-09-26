@@ -18,12 +18,27 @@ function fixture() {
   return dir;
 }
 
+/**
+ * Whether a ripgrep exists for these cases to run at all.
+ *
+ * They execute the real binary, bound by `bindBundledRipgrep`, which needs one: the copy under
+ * `resources/rg` that packaging prepares, or one on PATH. A checkout that has not run that
+ * preparation and a host with no system ripgrep have neither, and then every one of these fails
+ * with `Command failed: /bin/sh -c rg …` — a missing tool reported as a quoting regression.
+ * Measured on macOS 27 from a fresh worktree, and reported from a Windows machine as the
+ * "bundled-rg shell-path assertion" failing identically on unmodified `main`.
+ *
+ * The parity these cases assert is about argument handling, not about shipping ripgrep, so the
+ * honest answer without one is to skip and say so — the same shape as the `!shell` guard below.
+ */
+const ripgrep = locateRipgrep();
+
 describe('native shell argument and batch parity', () => {
   // Every installed shell runs real child processes. macOS CI includes zsh; Linux
   // includes bash/sh. Windows exercises both PS generations when installed.
   for (const name of process.platform === 'win32' ? ['powershell', 'pwsh'] : ['bash', 'zsh', 'sh']) {
     const shell = getShellByModelProvidedPath(name);
-    it.skipIf(!shell)(`${name}: preserves quotes followed by spaces and adjacent paths`, () => {
+    it.skipIf(!shell || !ripgrep)(`${name}: preserves quotes followed by spaces and adjacent paths`, () => {
       const cwd = fixture();
       const original = String.raw`rg -n "history=\"older\"|Load older" sample.txt second.txt`;
       const repaired = repairPowerShellQuoting(original, shell!.shellType);

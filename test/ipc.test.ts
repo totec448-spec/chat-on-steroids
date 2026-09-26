@@ -32,7 +32,7 @@ vi.mock('electron', () => ({
 }));
 
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
-vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd() }));
+vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd(), shippedExtensionBuild: () => null }));
 vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: vi.fn(async () => 'chrome.exe') }));
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
@@ -376,6 +376,7 @@ function settings(over: { record: boolean; multiAgent: boolean }) {
   return {
     capabilities: base.capabilities,
     readOnly: base.readOnly,
+    commandAllowlist: base.commandAllowlist,
     tunnel: base.tunnel,
     ui: base.ui,
     sessions: { ...base.sessions, record: over.record },
@@ -840,6 +841,28 @@ describe('settings writes from more than one UI', () => {
       height: 36, color: '#00000000', symbolColor: '#ffffff'
     });
     expect(getConfig().goal.enabled).toBe(false);
+  });
+
+  it('persists command policy fields independently across stale renderer saves', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    const enabled = await save({
+      ...base, commandAllowlist: { enabled: true, mode: 'deny', rules: ['git status', 'git diff *'] }
+    }, base);
+    expect(enabled.ok, enabled.error).toBe(true);
+
+    const stale = await save({ ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } }, base);
+    expect(stale.ok, stale.error).toBe(true);
+    expect(getConfig().commandAllowlist).toEqual({ enabled: true, mode: 'deny', rules: ['git status', 'git diff *'] });
+
+    const current = getConfig();
+    expect((await save({
+      ...current, commandAllowlist: { ...current.commandAllowlist, enabled: false }
+    }, current)).ok).toBe(true);
+    expect(getConfig().commandAllowlist).toEqual({ enabled: false, mode: 'deny', rules: ['git status', 'git diff *'] });
+    expect((await save({
+      ...getConfig(), commandAllowlist: { enabled: true, mode: 'allow', rules: ['git status; whoami'] }
+    }, getConfig())).ok).toBe(false);
   });
 
   it('preserves a newer unattributed-call choice across an unrelated stale renderer save', async () => {
