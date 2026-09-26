@@ -1447,6 +1447,30 @@ var CLF_DOM = (() => {
   }
 
   /**
+   * ChatGPT's own "this conversation could not be loaded" surface, as its retry button, or null.
+   *
+   * Measured 2026-09-26 on the new shell after a tab reload landed mid-turn: the main area held
+   * one centred message and one "Retry" button, with no composer and no turn. Nothing about it
+   * is identified — no test id, role or stable class — so the recognition is structural and
+   * locale-free: a /c/ route whose main area has no composer, no turn, no editable host, little
+   * text and exactly one rendered button. The page stayed that way indefinitely while the turn
+   * kept running server-side, so every later observation of that chat was blind.
+   */
+  function conversationLoadFailure() {
+    return safe(() => {
+      if (!conversationId() || composer() || document.querySelector(`${TURN},[data-turn-key]`)) return null;
+      const area = document.querySelector('[data-app-shell-focus-area="main"]') || document.querySelector('main');
+      if (!area || area.querySelector('[contenteditable="true"],textarea,[role="textbox"],form')) return null;
+      const text = (area.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!text || text.length > 300) return null;
+      const buttons = [...area.querySelectorAll('button')].filter(button =>
+        !button.closest(`${OWN_SURFACES},[hidden],[inert],[aria-hidden="true"]`) && button.getClientRects().length > 0);
+      if (buttons.length !== 1 || buttons[0].disabled || buttons[0].getAttribute('aria-disabled') === 'true') return null;
+      return buttons[0];
+    }, null);
+  }
+
+  /**
    * Whether ChatGPT's editing host is presently safe to receive a new user message.
    *
    * This deliberately says nothing about whether *our* recorder still considers the previous
@@ -2538,6 +2562,7 @@ var CLF_DOM = (() => {
     userMessageReaction,
     presentUserPrompts,
     composerVisible,
+    conversationLoadFailure,
     prepareChatModelSurface,
     newChatControl,
     projectHomeId,
