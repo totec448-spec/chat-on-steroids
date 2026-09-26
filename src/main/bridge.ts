@@ -103,8 +103,7 @@ import {
   restoreRecordedConversation,
   setCallAttributionListener,
   type ChatObservation,
-  type PageCallEvidence,
-  recordNote
+  type PageCallEvidence
 } from './session/recorder.js';
 import { noticeChatStopped } from './stuck-notice.js';
 import {
