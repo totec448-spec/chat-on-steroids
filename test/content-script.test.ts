@@ -13305,6 +13305,36 @@ describe('the fresh chat the app opened', () => {
     ]);
   });
 
+  it('retries a lost pre-destination redeem response and sends that command exactly once', async () => {
+    let redeemCalls = 0, sends = 0;
+    live = await harness(
+      'https://chatgpt.com/?clf=cmd-redeem-retry#clf=cmd-redeem-retry',
+      {
+        redeem: () => {
+          redeemCalls++;
+          if (redeemCalls === 1) return new Promise(() => {});
+          return { ok: true, command: { id: 'cmd-redeem-retry', type: 'resume',
+            text: '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nRetry the same durable claim.', agent: null } };
+        },
+        ack: () => ({ ok: true })
+      },
+      (document, dom) => {
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          sends++;
+          dom.reconfigure({ url: 'https://chatgpt.com/c/21212121-3434-5656-8787-909090909090' });
+          userTurn(document, 'redeem-retry-user', '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nRetry the same durable claim.', { sent: false });
+        });
+      }
+    );
+    await new Promise(resolve => globalThis.setTimeout(resolve, 0));
+    await settle(500);
+    expect(redeemCalls).toBe(2);
+    expect(live.sent.filter(message => message.type === 'redeem')).toHaveLength(2);
+    expect(live.sent.filter(message => message.type === 'compact' && message.destinationAttempt === true)).toHaveLength(1);
+    expect(sends).toBe(1);
+    expect(live.sent.filter(message => message.type === 'ack' && message.status === 'sent')).toHaveLength(1);
+  });
+
   /**
    * The same acquisition, inside a Project.
    *
