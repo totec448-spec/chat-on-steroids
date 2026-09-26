@@ -1066,8 +1066,18 @@ export function fileRecoveryInput(sessionId: string, conversationId: string, tur
     const question = await readLatestUserMessage(sessionId, turnId);
     const [work] = await readRecentEvents(sessionId, 1, { kinds: RECOVERY_WORK_KINDS });
     if (!question?.messageId || !work || !currentOwner()) return false;
+    // One live ticket per turn, and never a replay of an authorized send — but a ticket that ended
+    // without ever reaching Send answered nothing and must not stand in for one. Watched live on
+    // 2026-09-23: a rescue was filed at 20:32:35 when the chat stopped, and cancelled fifteen
+    // seconds later as "the source received new work" — correct, the chat had resumed by itself.
+    // Two minutes after that the same turn broke again: its error reload was spent, three silence
+    // reloads came back with the same failure, the watch gave up, and this check refused the
+    // second rescue on the strength of the cancelled first. The chat sat until its owner typed.
+    // `sendAuthorizedAt` keeps its own veto: an authorized send is ambiguous forever and is never
+    // retried, whatever state its row reached.
     if (current.some(row => row.sessionId === sessionId && row.recovery && row.silenceBoundary?.turnId === turnId &&
-        (!row.recovery.episode || row.recovery.episode === episode || row.sendAuthorizedAt !== undefined))) return false;
+        (row.sendAuthorizedAt !== undefined ||
+          (!terminal(row) && (!row.recovery.episode || row.recovery.episode === episode))))) return false;
     const now = Date.now();
     const row: InputEntry = { id: randomUUID(), sessionId, conversationId, owner: null, state: 'queued',
       mode: 'after-turn', dueAt: now, createdAt: now, model: null, reasoningEffort: null,
