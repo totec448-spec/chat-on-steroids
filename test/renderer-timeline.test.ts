@@ -183,6 +183,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
       create: false, edit: false, move: false, deleteFile: false, command: false,
       screen: false, control: false, clipboardRead: false, clipboardWrite: false
     },
+    commandAllowlist: { enabled: false, mode: 'allow' as const, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
@@ -1496,6 +1497,152 @@ it('reorders whole project groups without changing chat selection, ownership or 
   expect(live.sent).toEqual([]);
 });
 
+it('keeps working state per chat and marks only completed background chats as unseen until opened', async () => {
+  const startedAt = Date.now();
+  const chats: SessionSummary[] = [
+    { ...summary([]), id: 'chat-a', title: 'Alpha', conversationId: 'conversation-a', chatIds: ['conversation-a'], updatedAt: startedAt,
+      lastToolCallAt: startedAt, activityExpiresAt: startedAt + 60_000 },
+    { ...summary([]), id: 'chat-b', title: 'Beta', conversationId: 'conversation-b', chatIds: ['conversation-b'], updatedAt: startedAt - 1,
+      lastToolCallAt: startedAt, activityExpiresAt: startedAt + 60_000 }
+  ];
+  const { w } = await boot([], false, [], [], { sessions: chats });
+  const row = (id: string) => w.document.querySelector<HTMLElement>(`.sess[data-id="${id}"]`)!;
+  const refresh = async () => { (w.document.getElementById('chatRefresh') as HTMLButtonElement).click(); await settle(); };
+  let observedAt = Date.now();
+  const nextAt = () => ++observedAt;
+
+  row('chat-a').click();
+  expect(row('chat-a').querySelector('.session-status.is-active')).not.toBeNull();
+  expect(row('chat-b').querySelector('.session-status.is-active')).not.toBeNull();
+
+  const backgroundCompletedAt = nextAt();
+  Object.assign(chats[1]!, {
+    activityExpiresAt: null,
+    lastAssistantFinalAt: backgroundCompletedAt,
+    lastTurnEndAt: backgroundCompletedAt,
+    lastTurnOutcome: 'completed',
+    updatedAt: backgroundCompletedAt
+  });
+  await refresh();
+  expect(row('chat-a').querySelector('.session-status.is-active')).not.toBeNull();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')?.getAttribute('aria-label')).toBe('New response');
+
+  row('chat-b').click();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
+  await settle();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).toBeNull();
+  expect(w.localStorage.getItem('chat-on-steroids.sidebar-completion-seen')).toContain('chat-b');
+
+  const selectedWorkingAt = nextAt();
+  Object.assign(chats[1]!, { lastToolCallAt: selectedWorkingAt, activityExpiresAt: selectedWorkingAt + 60_000, updatedAt: selectedWorkingAt });
+  await refresh();
+  expect(row('chat-b').querySelector('.session-status.is-active')).not.toBeNull();
+  const selectedCompletedAt = nextAt();
+  Object.assign(chats[1]!, {
+    activityExpiresAt: null,
+    lastAssistantFinalAt: selectedCompletedAt,
+    lastTurnEndAt: selectedCompletedAt,
+    lastTurnOutcome: 'completed',
+    updatedAt: selectedCompletedAt
+  });
+  await refresh();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).toBeNull();
+
+  const alphaCompletedAt = nextAt();
+  Object.assign(chats[0]!, {
+    activityExpiresAt: null,
+    lastAssistantFinalAt: alphaCompletedAt,
+    lastTurnEndAt: alphaCompletedAt,
+    lastTurnOutcome: 'completed',
+    updatedAt: alphaCompletedAt
+  });
+  await refresh();
+  expect(row('chat-a').querySelector('.session-status.is-unseen')).not.toBeNull();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).toBeNull();
+});
+
+it('keeps the sidebar working spinner on one continuous phase across activity repaints', async () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+  try {
+    const chats: SessionSummary[] = [{
+      ...summary([]), id: 'chat-a', title: 'Alpha', conversationId: 'conversation-a', chatIds: ['conversation-a'],
+      updatedAt: 10_000, lastToolCallAt: 10_000, activityExpiresAt: 70_000
+    }];
+    const { w } = await boot([], false, [], [], { sessions: chats });
+    const spinner = () => w.document.querySelector<HTMLElement>('.sess[data-id="chat-a"] .session-status.is-active')!;
+    expect(spinner().style.animationDelay).toBe('-100ms');
+
+    clock.mockReturnValue(10_450);
+    chats[0]!.lastToolCallAt = 10_450;
+    chats[0]!.updatedAt = 10_450;
+    (w.document.getElementById('chatRefresh') as HTMLButtonElement).click();
+    await settle();
+    // The row node was rebuilt, but the spinner resumes the wall-clock phase instead of 0deg.
+    expect(spinner().style.animationDelay).toBe('-550ms');
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+it('keeps unseen completions unread through failed and stale A-to-B-to-A detail loads', async () => {
+  const chats: SessionSummary[] = [
+    { ...summary([]), id: 'chat-a', title: 'Alpha', conversationId: 'conversation-a', chatIds: ['conversation-a'] },
+    { ...summary([]), id: 'chat-b', title: 'Beta', conversationId: 'conversation-b', chatIds: ['conversation-b'] }
+  ];
+  const { w } = await boot([], false, [], [], { sessions: chats });
+  const row = (id: string) => w.document.querySelector<HTMLElement>(`.sess[data-id="${id}"]`)!;
+  let observedAt = Date.now();
+  for (const chat of chats) {
+    const completedAt = ++observedAt;
+    Object.assign(chat, {
+      activeTurnId: null,
+      activityExpiresAt: null,
+      lastAssistantFinalAt: completedAt,
+      lastTurnEndAt: completedAt,
+      lastTurnOutcome: 'completed',
+      updatedAt: completedAt
+    });
+  }
+  (w.document.getElementById('chatRefresh') as HTMLButtonElement).click();
+  await settle();
+  expect(row('chat-a').querySelector('.session-status.is-unseen')).not.toBeNull();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
+
+  type Reply = (value: unknown) => void;
+  const pending: Array<{ id: string; reply: Reply }> = [];
+  const api = (w as any).api;
+  api.getSession = vi.fn((id: string) => new Promise(resolve => pending.push({ id, reply: resolve })));
+  const detail = (sum: SessionSummary) => ({ ok: true, data: { summary: sum, events: [], total: 0, nextFrom: 0 } });
+
+  // A failed current read is not a review receipt.
+  row('chat-b').click();
+  await vi.waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b']));
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
+  pending[0]!.reply({ ok: false, error: 'B detail unavailable' });
+  await settle();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
+
+  // Returning to A creates a new selection/load generation. Neither the old A response nor
+  // the intervening B response may acknowledge work just because the selected id later matches.
+  row('chat-a').click();
+  await vi.waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b', 'chat-a']));
+  row('chat-b').click();
+  await vi.waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b', 'chat-a', 'chat-b']));
+  row('chat-a').click();
+  await vi.waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b', 'chat-a', 'chat-b', 'chat-a']));
+
+  pending[1]!.reply(detail(chats[0]!));
+  pending[2]!.reply(detail(chats[1]!));
+  await settle();
+  expect(row('chat-a').querySelector('.session-status.is-unseen')).not.toBeNull();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
+
+  pending[3]!.reply(detail(chats[0]!));
+  await settle();
+  expect(row('chat-a').querySelector('.session-status.is-unseen')).toBeNull();
+  expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
+});
+
 it('folds a whole Compact & Resume into one row that says the new chat opened', async () => {
   const { w } = await boot([
     { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },
@@ -2073,6 +2220,46 @@ it('shows elapsed work for the exact recorded turn without exposing lifecycle ro
   expect(w.document.getElementById('chatState')!.textContent).toBe('Worked for 1m 5s');
 });
 
+
+/**
+ * A chat whose page stopped reporting turns still says it is working.
+ *
+ * Every branch of this caption needs a turn to describe, and a page that stopped reporting
+ * supplies none — so the line either fell silent or went on describing the previous turn as
+ * finished while the chat kept working. Measured on 2026-09-25: a conversation resumed after an
+ * automatic compaction made 650 exactly attributed tool calls over two and a half hours with no
+ * turn reported by its page, and the app said nothing about any of it. The person then sits in
+ * front of a chat that looks idle and waits for work that is already happening.
+ *
+ * The recorded tool clock is what the page is not: `lastToolCallAt` comes from calls the
+ * request-id join has already tied to this exact conversation.
+ */
+it('says a chat is working when its page reports no turn but its tools keep arriving', async () => {
+  const ended: SessionEvent[] = [
+    { seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'page-turn' },
+    { seq: 2, time: T0 + 5_000, source: 'extension', kind: 'turn_end', turnId: 'page-turn', outcome: 'completed' }
+  ];
+  const row = { ...summary(ended), lastToolCallAt: null as number | null };
+  const { w, append } = await boot(ended, true, [], [], { sessions: [row] });
+  // No turn from the page's side, which is the whole subject.
+  (w as any).api.getSessionControls = (id: string) => Promise.resolve({ ok: true,
+    data: { sessionId: id, automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
+  const note = w.document.getElementById('chatState')!;
+
+  // The turn the page did report is over, and nothing has happened since.
+  await append([]);
+  expect(note.textContent).toBe('Worked for 5s');
+
+  row.lastToolCallAt = Date.now() - 20_000;
+  await append([]);
+  expect(note.textContent, 'a blind chat still claimed to be finished').toBe('Working…');
+  expect(note.classList.contains('is-working')).toBe(true);
+
+  // Old enough to be the record of a chat that has since stopped: the caption lets go again.
+  row.lastToolCallAt = Date.now() - 10 * 60_000;
+  await append([]);
+  expect(note.textContent).toBe('Worked for 5s');
+});
 
 it('stops directly from the empty composer without a second Stop menu action', async () => {
   const { w } = await boot([]);
@@ -2800,6 +2987,25 @@ it('shows Loop settling, its real waiting deadline, and generated text in the sa
   controls.automation = 'off'; await append([]);
   expect(row.hidden).toBe(true);
   expect(row.textContent).toBe('');
+});
+
+it('names the wait for this chat’s own sub-agents without inventing a countdown', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  // The wait ends when the last worker stops, which is not a time this page can predict, so
+  // the row says what it is waiting for and shows no timer at all.
+  const controls = { automation: 'loop', objective: 'Continue the task', blocked: '', job: null,
+    goalWait: { reason: 'workers' }, goalDraft: null as unknown };
+  api.getSessionControls = async () => ({ ok: true, data: controls });
+  await append([]);
+  const row = w.document.getElementById('goalLifecycle')!;
+  expect(row.hidden).toBe(false);
+  expect(row.textContent).toContain('Loop · Waiting for this chat’s sub-agents');
+  expect(row.querySelector('[role="timer"]')).toBeNull();
+  expect(row.getAttribute('aria-busy')).toBe('true');
+  api.getSessionControls = async () => ({ ok: true, data: { ...controls, goalWait: null } });
+  await append([]);
+  expect(row.hidden).toBe(true);
 });
 
 it('follows the accepted New Chat receipt while preserving a typed follow-up', async () => {
@@ -3563,4 +3769,24 @@ it('keeps a cancelled automatic draft at its creation time as later messages arr
   await app.append([]);
   expect(timeline.textContent).not.toContain('Unused automatic instruction');
   expect(live.sent).toHaveLength(0);
+});
+
+it('keeps the latest recovery verdict in view until the chat works again', async () => {
+  // 2026-09-26: a stopped prime was explained only by timeline notes that scrolled away.
+  const verdict = 'Could not restart this chat automatically: the browser chat was closed. Send a message here to continue it.';
+  const app = await boot([
+    { seq: 1, time: T0 + 1000, source: 'extension', kind: 'turn_start', turnId: 'stalled' },
+    { seq: 2, time: T0 + 2000, source: 'extension', kind: 'turn_end', turnId: 'stalled', outcome: 'stalled' },
+    { seq: 3, time: T0 + 3000, source: 'app', kind: 'note', message: text(verdict) }
+  ] as SessionEvent[]);
+  const host = app.w.document.getElementById('recoveryStatus')!;
+  expect(host.hidden).toBe(false);
+  expect(host.textContent).toContain('Could not restart this chat automatically');
+  await app.append([{ seq: 4, time: T0 + 4000, source: 'extension', kind: 'turn_start', turnId: 'resumed' } as SessionEvent]);
+  expect(host.hidden).toBe(true);
+});
+
+it('does not show a handoff note as a recovery verdict', async () => {
+  const app = await boot([{ seq: 1, time: T0 + 1000, source: 'app', kind: 'note', continuation: TOKEN, message: text('Compact & Resume abandoned') }] as SessionEvent[]);
+  expect(app.w.document.getElementById('recoveryStatus')!.hidden).toBe(true);
 });

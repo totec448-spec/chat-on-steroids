@@ -1730,6 +1730,47 @@ describe('worker settings authority', () => {
    * cannot decide this from outside. It answers the capture request with the successor instead,
    * and the browser that holds chat A creates the tab in chat A's own window.
    */
+  /**
+   * A successor with nowhere to be placed is still opened.
+   *
+   * The placement below arranges the new tab beside its predecessor, which needs the home
+   * conversation's own tab to decide the window and the index. When that cannot be worked out the
+   * opener used to return without opening anything and without saying so, and the app then waited
+   * out its redeem deadline and reported "the chat this app opened did not report back in time"
+   * about a chat it had never opened.
+   *
+   * Two ordinary situations reach it, both reported from a live machine on 2026-09-25 with
+   * Background chats off: a command from a caller that has no ChatGPT conversation of its own —
+   * an unattributed MCP client spawning a worker, where the run starts "by conversation null" —
+   * and a home conversation whose tab the user has since closed. In both, no tab appeared at all
+   * and the only trace was the timeout twenty seconds later.
+   */
+  it('opens a successor that names no home conversation instead of silently giving up', async () => {
+    let offered = false;
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/status') {
+        if (offered) return response(200, { ok: true, repairs: [] });
+        offered = true;
+        // What a worker spawn from an unattributed caller answers with: a command to redeem and
+        // no conversation to sit beside.
+        return response(200, { ok: true, repairs: [], placement: { id: 'cmd-orphan' } });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(41);
+    await worker.fireAlarm();
+
+    expect(worker.tabsCreate, 'the command was left to time out with no tab').toHaveBeenCalledTimes(1);
+    const created = worker.tabsCreate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(created.url)).toBe('https://chatgpt.com/?clf=cmd-orphan#clf=cmd-orphan');
+    // The ordinary current window: no placement was possible, and none is claimed.
+    expect(created.windowId).toBeUndefined();
+    expect(created.active).toBe(true);
+  });
+
   it('opens the replacement chat in the window of the chat it continues', async () => {
     const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
       const url = new URL(input);
@@ -4460,4 +4501,62 @@ it.each([
   if (scenario.freshAt === 1) expect(proof).not.toHaveBeenCalled();
   if (scenario.freshAt === 2) expect(proof).toHaveBeenCalledOnce();
   expect(policy.conversationActivityAt[conversationId]).toBe(now - 3_600_000);
+});
+
+/**
+ * #393, 2026-09-26: an attribution refresh reloaded a page in the middle of its stream, and the
+ * turn was lost ("Resume stream unavailable"). Only that reason stands down for a streaming page;
+ * silence and error recovery exist for pages that look busy and are not, and keep reloading.
+ */
+it.each([
+  ['unattributed', { ok: true, draft: false, streaming: true }, 0],
+  ['unattributed', { ok: true, draft: false, streaming: false }, 1],
+  ['unattributed', null, 1],
+  ['blind', { ok: true, draft: false, streaming: true }, 0],
+  ['blind', { ok: true, draft: false, streaming: false }, 1],
+  ['silence', { ok: true, draft: false, streaming: true }, 1]
+])('for reason %s and page status %j reloads %i time(s)', async (reason, status, reloads) => {
+  const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const tab = { id: 76, url: `https://chatgpt.com/c/${conversationId}`, discarded: false, frozen: false };
+  const reload = vi.fn();
+  const call = vi.fn(async () => ({ ok: true }));
+  const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+    backgroundSource.indexOf('\nfunction conversationStillOpen('));
+  const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+    tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
+    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
+    createChatTab: vi.fn(), call, tabReply: async () => status,
+    chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+  });
+  await repair([{ conversationId, token: `stream-${reason}`, reason, suspended: false }], {});
+  expect(reload).toHaveBeenCalledTimes(reloads);
+  const reported = call.mock.calls.map((args: unknown[]) => String(args[0]));
+  expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(1 - reloads);
+});
+
+/**
+ * 2026-09-26: after an extension update, open tabs kept the old MAIN-world usage observer. The
+ * worker asks usage.js to replace itself, and only while the page says it is not streaming.
+ */
+it('replaces the usage observer of an open tab only once it is not streaming', async () => {
+  const source = backgroundSource.slice(backgroundSource.indexOf('const USAGE_REPLACE_RETRY_MS'),
+    backgroundSource.indexOf('async function restoreOpenChatgptTabs('));
+  const statuses: Array<unknown> = [{ ok: true, streaming: true }, null, { ok: true, streaming: false }];
+  const timers: Array<() => void> = [];
+  const executed: Array<Record<string, unknown>> = [];
+  const replace = vm.runInNewContext(`${source}\nreplaceUsageObserver`, {
+    tabReply: async () => statuses.shift(),
+    setTimeout: (fn: () => void) => { timers.push(fn); return timers.length; },
+    chrome: { scripting: { executeScript: async (options: Record<string, unknown>) => { executed.push(options); return []; } } }
+  });
+  expect(await replace(7)).toBe(false);
+  expect(executed).toEqual([]);
+  timers.shift()!();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(executed).toEqual([]);
+  timers.shift()!();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(executed.map(options => options.files ?? 'flag')).toEqual(['flag', ['usage.js']]);
+  expect(executed.every(options => options.world === 'MAIN')).toBe(true);
 });

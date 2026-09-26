@@ -191,12 +191,14 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Recording | On, 30-day retention. | Explicit Off stays Off; retention still applies to old history. |
 | Context / compaction | Advisory 400,000; limit rounded from advisory × 4/3; auto-compaction on at advisory. | Estimated local units. Automatic execution additionally requires live work, current ownership and eligible model/role. |
 | Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8. | Legacy absent enabled/allow-unattributed fields remain false. Existing choices stay exact. |
+| Wait for sub-agents | Off. | When on, a Goal/Loop chat's next automatic step waits for the workers that exact chat started. A chat with no run, or a run with no workers, waits either way. See §16. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-5.6-sol` High. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
 | Desktop | Windows on; macOS retains its off default and separate native OS consent; Linux supports extension browser control. | Existing screen/control grants also govern browser tools; unsupported native clipboard remains masked. No new per-tab permission dialog. |
 | Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
+| Command policy | Off, in Allowlist mode, with no rules. | Missing legacy settings stay Off; a missing mode defaults to Allowlist. Rules and mode persist while Off. An enabled empty Allowlist rejects every launch; an enabled empty Denylist permits simple supported commands. |
 | Plugin auto-refresh | Off. | Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
 | Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
@@ -726,6 +728,17 @@ The launch's classification also governs later polls, completion revisions and s
 a proven benign non-zero exit stays non-error while preserving the raw exit code. Incomplete
 or omitted classification evidence fails closed. Batch summaries name `cmds`; polling retains
 the “Waited on session” title with its numeric id and measured exit status.
+An optional application-wide command launch policy is owned by validated config and enforced once
+in the shared Core `exec_command` handler used by direct and code-mode calls. Disabled preserves
+existing behavior. Enabled preflights every user-authored batch item before normalization,
+apply-patch interception, process-id allocation or launch. Rules match literal executable and
+argument boundaries: exact argv, or a final standalone `*` for zero or more extra arguments.
+Allowlist mode permits matches and rejects non-matches; Denylist mode rejects matches and permits
+non-matches. Unsupported shell syntax and malformed policy fail closed with `COMMAND_NOT_ALLOWED`;
+a permitted command never overrides live
+capability, Read-only, cwd, caller or process-ownership checks. `write_stdin` is unchanged.
+Programs permitted to start, their stdin/children/project code and shell environment remain trusted; this
+is not an OS sandbox and does not govern the human workspace terminal.
 The shell's virtual-path diagnostic excludes an exact approved native POSIX spelling, even
 when `/Users` collides with a `users` alias. This classification never rewrites command text
 or grants filesystem permission; genuine virtual paths retain their native-path guidance.
@@ -2443,6 +2456,36 @@ commit publication gap. Old source requests retain their historical proof and ca
 prime authority in the successor. Distinct fleets remain distinct; process custody stays with
 the same durable session.
 
+### A chat's automatic step waits for its own workers
+
+A prime that delegated half its task has not finished it. Its workers report back into the same
+conversation, so taking the next Goal/Loop decision while they run reads a context that is about
+to change and then types the instruction into a chat that is still being worked on. When
+`multiAgent.waitForSubAgents` is on, that decision waits.
+
+`agents.ts::waitingForSubAgents` is the one owner of that answer, because worker state lives
+there. It resolves through the same per-family lookup (`runForConversation`) and the private
+`workingWorkers` that `freeWorkerSlots` already trusts, so one family can never hold another,
+an invited worker already counts, and an unknown, ambiguous, runless or workerless chat never
+waits: a hold can only come from work this exact chat started. The predicate lives here rather
+than in `bridge.ts` because `bridge.ts` imports `session/finish.js` and the finish decision needs
+the same answer, so a predicate in the bridge would close an import cycle.
+
+Three consumers needed that one fact. `owedPickups` deletes the owed key while its workers run
+instead of teaching each caller to skip it, which covers the pre-action re-check, the silence
+re-check and the handout from a single rule, and spends nothing: no attempt, no backoff window,
+no schedule movement; the debt is collected on the first sweep after the last worker stops.
+`goalWaitFor` returns a `workers` reason that `sessionControlsFor` and `/activity` already both
+read, with no `until` because the end of the wait is not a moment this app can predict, so both
+UIs name the wait without inventing a countdown. `prepareNotice` returns before the provider call
+that drafts the automatic decision and **releases** the hold rather than leaving it held, so the
+user's own answer is never stuck behind workers they did not ask about; the durable reply
+obligation survives and the pickup tree collects it later. A notice-only hold is untouched.
+
+The wait cannot starve the reports it is waiting for: worker reports reach their prime through
+the kernel's caller offer, never through the browser outbox. `/goal/draft` needed no change; it
+already answers `409 chat_still_working` and the extension already retries that code.
+
 The app's configurable worker capacity is distinct from the coding agent's delegation policy
 in §19. Do not infer permission to launch development subagents from a product feature toggle.
 
@@ -2508,6 +2551,9 @@ reply-ID prefixes cannot grant it. Recheck restored automatic debt, provider sta
 This condition does not change ordinary Goal mode or user-message delivery.
 Automatic tickets retain exact source ownership. Native busy uses the shared one/five-minute
 wait and one Stop claim; uncollected tickets use the shared 2/5/10/15 pickup schedule (§14).
+A chat that started its own workers defers that pickup and the automatic decision
+`session_finish` would otherwise draft until the last of them stops, when the switch asks
+for it (§16). The debt is deferred, never spent.
 Fresh work and queue priority are checked again before Send. A Thinking-failed notice learned
 from an already-confirmed refresh reuses that receipt rather than earning another immediate
 reload. Genuine new work retires the receipt.
@@ -2710,6 +2756,13 @@ membership before saving. Off-page order survives partial list refreshes.
 Whole project groups use the same bounded order owner in a separate scope. Dragging a
 project summary or pressing Alt+Up/Down moves the group without changing any chat's project;
 the summary handle keeps focus and disclosure state. Group order survives reload.
+`renderer/sidebar-completion.ts` owns only device-local read state for completed chat rows.
+Existing session completion evidence remains authoritative: active chats keep the per-chat spinner,
+a completed background chat gets a static accent marker until selected, and a selected chat's
+completion is acknowledged locally without writing session metadata. The receipt advances only after
+the current selection/load generation has successfully rendered that conversation at the live tail;
+failed or stale selection loads leave it unseen. A first-run baseline prevents historical completions
+from appearing unread after an update, and the stored receipts stay bounded.
 The chat keeps the current input queue/plan visible alongside a
 paged transcript. Main owns durable mutation acknowledgements; renderer optimism is not a
 receipt. Native edit context menus respect the focused editable control and selection.

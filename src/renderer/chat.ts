@@ -15,6 +15,7 @@ import type { GoalModel } from '../shared/goal-reasoning.js';
 import { renderGoalReasoning } from './goal-reasoning.js';
 import { preserveTimelineViewport } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
+import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
@@ -155,6 +156,7 @@ function selectedLocalProject(): LocalProject | null {
 const PROJECT_TASK_PAGE_SIZE = 5;
 const PROJECT_TASK_PAGE_INCREMENT = 8;
 let sidebarOrder: ReturnType<typeof createSidebarOrder> | undefined;
+let sidebarCompletion: ReturnType<typeof createSidebarCompletionState> | undefined;
 function draftKey(): string { return selectedId ?? (selectedProjectId ? `project:${selectedProjectId}` : 'new'); }
 let selectionGeneration = 0;
 // Async file import belongs to one visible composer draft, not just to a session key.
@@ -291,7 +293,7 @@ function pressureOf(id: string): TokenPressure | null {
 /** A short word about a session, drawn as a chip on its row. */
 interface Badge {
   text: string;
-  tone: '' | 'is-active' | 'is-finished' | 'is-failed';
+  tone: '' | 'is-active' | 'is-finished' | 'is-failed' | 'is-unseen';
 }
 
 /** Live word per worker state, in the user's vocabulary rather than the protocol's. */
@@ -323,6 +325,16 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
 /** Keep callback arguments separate from the shared predicate's explicit clock. */
 function sessionWorking(summary: SessionSummary): boolean {
   return sessionWorkingAt(summary, Date.now());
+}
+
+/**
+ * Sidebar rows are intentionally rebuilt when fresh activity arrives. Anchor the spinner to a
+ * wall-clock phase so a new tool repaint does not visually restart an already-running turn.
+ * Keep this period aligned with `.session-status.is-active` in styles.css.
+ */
+const SESSION_SPIN_MS = 900;
+function syncSessionSpinner(indicator: HTMLElement): void {
+  indicator.style.animationDelay = `-${Date.now() % SESSION_SPIN_MS}ms`;
 }
 
 /**
@@ -381,6 +393,7 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   else if (!agent && workerReportedFinish(summary)) badges.push(AGENT_BADGE.sleeping);
   else if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
   else if (agent && agent.role !== 'prime') badges.push(AGENT_BADGE[agent.state]);
+  if (!sessionWorking(summary) && sidebarCompletion?.isUnseen(summary)) badges.push({ text: 'New response', tone: 'is-unseen' });
   return badges;
 }
 
@@ -407,9 +420,12 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   row.addEventListener('pointerenter', showTip);
   row.addEventListener('pointerleave', () => document.getElementById('sessionTooltip')?.remove());
   row.addEventListener('click', () => document.getElementById('sessionTooltip')?.remove());
+  // Unseen is presentation only and is appended last, so every existing lifecycle tone keeps
+  // its previous priority (blocked/active/worker finished/failed).
   const status = badges.find((badge) => badge.tone);
   if (status) {
     const indicator = el('span', `session-status ${status.tone}`);
+    if (status.tone === 'is-active') syncSessionSpinner(indicator);
     ui(indicator, 'title', () => t(status.text));
     ui(indicator, 'aria-label', () => t(status.text));
     top.append(indicator);
@@ -890,7 +906,7 @@ function paintGoalProgress(): void {
   labels.retrying = t("Provider busy · retry {0}{1}", [progress?.attempt ?? '', progress?.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString()]) : '']);
   const mode = $<HTMLSelectElement>('chatAutomation').value === 'loop' ? t('Loop') : t('Goal');
   labels.settling = `${mode} · ${wait?.reason === 'native-busy' ? t('ChatGPT resumed work · waiting before retry') : wait?.reason === 'silence' ? t('Waiting before recovery reload') : wait?.reason === 'quiet' ? t('Waiting for tool inactivity') :
-    wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : t('Answer settling')}`;
+    wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : t('Answer settling')}`;
   // The dock already describes this same silence/listening deadline. Keep the
   // Loop/Goal task controls, but do not present its shared wait as another action.
   const sharedRecoveryWait = phase === 'settling' && wait?.until !== undefined &&
@@ -1252,6 +1268,9 @@ async function refreshSessionControls(): Promise<void> {
 async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: number): Promise<boolean> {
   const prepend = olderBefore !== undefined;
   const wanted = selectedId;
+  const selection = selectionGeneration;
+  const observed = wanted === null ? undefined : sessions.find(row => row.id === wanted);
+  const observedCompletion = observed ? { ...observed } : undefined;
   if (wanted !== null && (historyBefore !== null || historyLoading) && detailFor === wanted && !navigate) {
     if (historyLoading) historyRefreshPending = true;
     void refreshSessionControls(); paintDetail(); return false;
@@ -1276,7 +1295,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   const detail = await run(
     api.getSession(wanted, newerFrom !== undefined ? { after: newerFrom, limit: TIMELINE_BATCH_SIZE } : incremental ? { from: detailCursor!, limit: TIMELINE_BATCH_SIZE } : { ...(olderBefore !== undefined ? { before: olderBefore } : historyBefore !== null ? { before: historyBefore } : {}), limit: TIMELINE_BATCH_SIZE })
   );
-  if (generation !== detailLoadGeneration || selectedId !== wanted) return false;
+  if (generation !== detailLoadGeneration || selection !== selectionGeneration || selectedId !== wanted) return false;
   if (!detail) {
     // A failed destination read must not leave another chat displayed indefinitely.
     // run() already presents the read error; keep the destination empty and retryable.
@@ -1318,6 +1337,13 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   totalEvents = detail.total;
   if (opening) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
   paintDetail(!prepend && newerFrom === undefined);
+  // A sidebar completion becomes read only after this exact selection/load has successfully
+  // painted its conversation at the live tail. Keep the completion snapshot from request time:
+  // a newer completion observed while this load is in flight must remain unseen.
+  if (visible && historyBefore === null && generation === detailLoadGeneration && selection === selectionGeneration && selectedId === wanted) {
+    sidebarCompletion?.markSeen(observedCompletion);
+    paintSessions();
+  }
   // A selection opens at the latest message; the previous chat's viewport is not
   // a reading position in this one. Apply only after the current load has rendered.
   if (opening) $('chatBody').scrollTop = $('chatBody').scrollHeight;
@@ -2701,6 +2727,7 @@ function paintRecoveryStatus(): boolean {
       (event.kind === 'user_message' && event.source === 'extension')));
   host.hidden = !recovery || !!advanced || Date.now() - recovery.time > 120000 || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision);
   host.replaceChildren();
+  if (host.hidden) return paintRecoveryVerdict(host, sessionId);
   if (!host.hidden && recovery?.kind === 'progress') {
     const row = el('div', 'recovery-notice');
     row.append(icon('i-pulse'), el('span', 'queue-label', recovery.message.text),
@@ -2710,6 +2737,33 @@ function paintRecoveryStatus(): boolean {
       }));
     host.append(row);
   }
+  return false;
+}
+
+/**
+ * The app's latest verdict about this chat, kept in view until the chat works again.
+ *
+ * A stopped chat used to be explained only by a note in its timeline — "this chat stopped",
+ * "stopped reloading", "could not restart it automatically: …" — which scrolls away, while the
+ * repair line above disappears after two minutes. On 2026-09-26 a prime sat stopped for hours
+ * with every reason written somewhere nobody was looking. The newest app note (never a handoff
+ * note) stays here until a newer question or turn supersedes it, or it is dismissed.
+ */
+function paintRecoveryVerdict(host: HTMLElement, sessionId: string | null): boolean {
+  const verdict = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'note' && !event.continuation) : undefined;
+  if (verdict?.kind !== 'note') return false;
+  const revision = JSON.stringify(['note', verdict.time, verdict.message.text]);
+  const superseded = events.some(event => positionOf(event) > positionOf(verdict) &&
+    (event.kind === 'turn_start' || (event.kind === 'user_message' && event.source === 'extension')));
+  if (superseded || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision)) return false;
+  const row = el('div', 'recovery-notice');
+  row.append(icon('i-pulse'), el('span', 'queue-label', verdict.message.text),
+    dockAction(() => t('Dismiss recovery notice'), 'i-x', () => {
+      if (sessionId) dismissedRecoveryNotices.set(sessionId, revision);
+      host.hidden = true; host.replaceChildren();
+    }));
+  host.append(row);
+  host.hidden = false;
   return false;
 }
 
@@ -2747,19 +2801,53 @@ function badgeSignature(): string {
   return sessions.map((entry) => sessionBadges(entry).map((badge) => badge.text).join(',')).join('|');
 }
 
+/**
+ * How recently a recorded tool call still means "working now" for the caption above.
+ *
+ * Short enough that a finished chat stops claiming to work within a minute and a half, long
+ * enough to survive the gaps between calls of a chat that is thinking between them. The app's
+ * own blind-work stretch uses three minutes before it starts repairing; this is the display
+ * half of the same fact and may be quicker, because being wrong here costs a stale word rather
+ * than an interrupted page.
+ */
+const BLIND_CAPTION_MS = 90_000;
+
 function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?: boolean; ticking?: boolean } {
   if (!deps.state()?.config.ui.developerMode) {
     const summary = sessions.find(entry => entry.id === selectedId);
     if (!summary || detailFor !== selectedId) return { text: '', tone: '' };
     const active = controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledTurnId : null;
     const lastBoundary = [...events].reverse().find(event => event.kind === 'turn_start' || event.kind === 'turn_end');
+    /*
+     * A chat whose page never opened a turn is still working, and this app knows it.
+     *
+     * Every line below needs a turn to describe, and a page that stopped reporting supplies
+     * none — so the caption fell silent, or worse, kept describing the *previous* turn as
+     * "Worked for 12s" while the chat went on editing files. Measured on 2026-09-25: a
+     * conversation resumed after an automatic compaction made 650 exactly attributed tool
+     * calls over two and a half hours without its page reporting a single turn, and the app
+     * said nothing about any of it. The complaint that follows is always the same one — the
+     * chat looks idle, there is no Stop control, and the person sits and waits for something
+     * that is already happening.
+     *
+     * The recorded tool clock is the honest witness the page is not: the app keeps
+     * `lastToolCallAt` from calls the request-id join has already tied to this exact
+     * conversation. A call in the last ninety seconds means work now, whatever the page says.
+     * This only changes what the caption admits — no turn is invented, and nothing here
+     * offers a Stop the app could not carry out.
+     */
+    const blind = !active && summary.lastToolCallAt !== null &&
+      Date.now() - summary.lastToolCallAt < BLIND_CAPTION_MS
+      ? { text: t("Working…"), tone: '' as const, working: true }
+      : null;
     const turnId = active ?? lastBoundary?.turnId;
-    if (!turnId) return { text: '', tone: '' };
+    if (!turnId) return blind ?? { text: '', tone: '' };
     const startedAt = summary.finishTurn?.turnId === turnId ? summary.finishTurn.startedAt
       : events.find(event => event.kind === 'turn_start' && event.turnId === turnId)?.time;
     const endedAt = events.find(event => event.kind === 'turn_end' && event.turnId === turnId)?.time;
-    if (startedAt === undefined) return { text: active ? t("Working…") : '', tone: '', working: !!active };
-    if (!active && endedAt === undefined) return { text: '', tone: '' };
+    if (startedAt === undefined) return active ? { text: t("Working…"), tone: '', working: true } : blind ?? { text: '', tone: '' };
+    if (!active && endedAt === undefined) return blind ?? { text: '', tone: '' };
+    if (blind) return blind;
     const seconds = Math.max(0, Math.floor(((active ? Date.now() : endedAt!) - startedAt) / 1000));
     return { text: t("{0} for {1}{2}s", [active ? t("Working") : t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };
   }
@@ -2933,7 +3021,8 @@ export function chatSettingsPatch(current: Config): {
       enabled: $<HTMLInputElement>('homeMaEnabled').checked,
       maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8),
       allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked,
-      recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked
+      recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked,
+      waitForSubAgents: $<HTMLInputElement>('waitForSubAgents').checked
     },
     goal: {
       enabled: current.goal.enabled, mode: current.goal.mode,
@@ -3307,6 +3396,7 @@ const CHAT_INPUTS = [
   'maWorkers',
   'allowUnattributedCalls',
   'recoverAgentTabs',
+  'waitForSubAgents',
   'autoContinue',
   'goalProvider',
   'goalBaseUrl',
@@ -3342,6 +3432,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLInputElement>('recoverAgentTabs'),
     config.multiAgent.recoverAgentTabs,
     previous?.multiAgent.recoverAgentTabs
+  );
+  applyChatChecked(
+    $<HTMLInputElement>('waitForSubAgents'),
+    config.multiAgent.waitForSubAgents === true,
+    previous?.multiAgent.waitForSubAgents
   );
 
   applyChatValue($<HTMLSelectElement>('workerModel'), config.multiAgent.defaultModel ?? '', previous?.multiAgent.defaultModel);
@@ -3943,6 +4038,7 @@ function selectNewChat(projectId: string | null = null): void {
 }
 
 export function initChat(next: Deps): void {
+  sidebarCompletion = createSidebarCompletionState();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
     ...projectSortEntries(),
     ...sessions.filter(entry => (entry.conversationId || entry.origin?.kind === 'desktop') && entry.origin?.kind !== 'worker')

@@ -42,6 +42,11 @@ import {
 import { logError } from './logger.js';
 import { RESERVED_ROOT_NAMES } from './sandbox.js';
 import { capabilitiesForPlatform } from './platform.js';
+import {
+  MAX_COMMAND_ALLOWLIST_RULES,
+  MAX_COMMAND_ALLOWLIST_RULE_CHARS,
+  validateCommandAllowlistRule
+} from '../shared/command-allowlist.js';
 
 export const browserBridgePortSchema = z.union([z.literal('auto'), z.literal(BROWSER_BRIDGE_PORTS)]);
 
@@ -158,7 +163,10 @@ const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
   allowUnattributedCalls: false,
   // Off: Goal/Loop chats are always recovered, and reopening anything else — a worker, a prime,
   // a plain chat that once called a tool — is the user's choice to make.
-  recoverAgentTabs: false
+  recoverAgentTabs: false,
+  // Off: waiting for a run's own workers before its next automatic step is a deliberate choice.
+  // A chat that delegated nothing, and a chat with no run, never wait either way.
+  waitForSubAgents: false
 };
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
@@ -252,6 +260,11 @@ const capabilitiesSchema = z
  */
 export const MAX_MCP_INSTRUCTIONS_CHARS = 4000;
 const DEFAULT_MCP = { instructions: '' } as const;
+const DEFAULT_COMMAND_ALLOWLIST = { enabled: false, mode: 'allow', rules: [] } as const;
+const commandAllowlistRuleSchema = z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHARS).superRefine((rule, ctx) => {
+  const message = validateCommandAllowlistRule(rule);
+  if (message) ctx.addIssue({ code: 'custom', message });
+});
 
 const configSchema = z.object({
   // A config written by hand — or by a build before `/skills` was reserved — must not be
@@ -263,6 +276,11 @@ const configSchema = z.object({
     .transform(uniqueStoredRoots),
   capabilities: capabilitiesSchema,
   readOnly: z.boolean(),
+  commandAllowlist: z.object({
+    enabled: z.boolean(),
+    mode: z.enum(['allow', 'deny']).optional().default('allow'),
+    rules: z.array(commandAllowlistRuleSchema).max(MAX_COMMAND_ALLOWLIST_RULES)
+  }).optional().default({ ...DEFAULT_COMMAND_ALLOWLIST, rules: [] }),
   tunnel: z.object({
     profileId: z.string().min(1).max(64).optional(),
     profileName: z.string().trim().min(1).max(80).optional(),
@@ -347,10 +365,11 @@ const configSchema = z.object({
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
       maxWorkers: z.number().int().min(1).max(8).optional().default(DEFAULT_MULTI_AGENT.maxWorkers),
       allowUnattributedCalls: z.boolean().optional().default(DEFAULT_MULTI_AGENT.allowUnattributedCalls),
-      recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs)
+      recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs),
+      waitForSubAgents: z.boolean().optional().default(DEFAULT_MULTI_AGENT.waitForSubAgents ?? false)
     })
     .optional()
-    .default({ ...DEFAULT_MULTI_AGENT }),
+    .default({ ...DEFAULT_MULTI_AGENT, waitForSubAgents: DEFAULT_MULTI_AGENT.waitForSubAgents ?? false }),
   // An empty model id is repaired rather than rejected: the id is free text from a
   // provider listing that changes weekly, and a config that lost it must still load with
   // every root and permission in it intact.
@@ -464,6 +483,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     roots: [],
     capabilities: firstLaunchCapabilities(platform, release),
     readOnly: false,
+    commandAllowlist: { ...DEFAULT_COMMAND_ALLOWLIST, rules: [] },
     tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: false, backgroundChats: true, browserBridgePort: 'auto', autoContinue: true },
     sessions: { ...DEFAULT_SESSIONS },
