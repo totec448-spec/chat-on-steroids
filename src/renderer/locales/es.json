@@ -1400,5 +1400,15 @@
   "Terminal height": "Altura del terminal",
   "Open a terminal in this project": "Abrir un terminal en este proyecto",
   "Select a project to open a terminal": "Selecciona un proyecto para abrir un terminal",
-  "Terminal input is busy. Try a smaller paste.": "La entrada del terminal está ocupada. Intenta pegar menos texto."
+  "Terminal input is busy. Try a smaller paste.": "La entrada del terminal está ocupada. Intenta pegar menos texto.",
+  "Limit command launches": "Limitar el inicio de comandos",
+  "Command policy mode": "Modo de política de comandos",
+  "Allowlist": "Lista de permitidos",
+  "Denylist": "Lista de bloqueados",
+  "Only commands matching one of these rules may start.": "Solo pueden iniciarse comandos que coincidan con una de estas reglas.",
+  "Commands matching any of these rules may not start.": "No pueden iniciarse comandos que coincidan con alguna de estas reglas.",
+  "Allowed commands (one rule per line)": "Comandos permitidos (una regla por línea)",
+  "Blocked commands (one rule per line)": "Comandos bloqueados (una regla por línea)",
+  "Use an exact command or a trailing standalone * for additional arguments. Compound shell syntax is rejected. Allowed programs and their child processes remain trusted; this is not an OS sandbox.": "Usa un comando exacto o un * independiente al final para argumentos adicionales. Se rechaza la sintaxis compuesta del shell. Los programas permitidos y sus procesos secundarios siguen siendo de confianza; esto no es un sandbox del sistema operativo.",
+  "Line {0}: {1}": "Línea {0}: {1}"
 }

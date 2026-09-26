@@ -1457,5 +1457,15 @@
   "A little wooden companion with a baseball bat.": "Beyzbol sopası taşıyan küçük, ahşap bir yoldaş.",
   "A crocodile bomber with tiny propellers and a big personality.": "Küçük pervaneleri ve renkli bir kişiliği olan bombardıman uçağı biçiminde bir timsah.",
   "Auto-connect": "Otomatik bağlan",
-  "{0}: drag, click, or open the context menu": "{0}: sürükleyin, tıklayın veya sağ tık menüsünü açın"
+  "{0}: drag, click, or open the context menu": "{0}: sürükleyin, tıklayın veya sağ tık menüsünü açın",
+  "Limit command launches": "Komut başlatmalarını sınırla",
+  "Command policy mode": "Komut ilkesi modu",
+  "Allowlist": "İzin listesi",
+  "Denylist": "Engel listesi",
+  "Only commands matching one of these rules may start.": "Yalnızca bu kurallardan biriyle eşleşen komutlar başlatılabilir.",
+  "Commands matching any of these rules may not start.": "Bu kurallardan biriyle eşleşen komutlar başlatılamaz.",
+  "Allowed commands (one rule per line)": "İzin verilen komutlar (satır başına bir kural)",
+  "Blocked commands (one rule per line)": "Engellenen komutlar (satır başına bir kural)",
+  "Use an exact command or a trailing standalone * for additional arguments. Compound shell syntax is rejected. Allowed programs and their child processes remain trusted; this is not an OS sandbox.": "Tam bir komut veya ek bağımsız değişkenler için sonda tek başına * kullanın. Bileşik kabuk sözdizimi reddedilir. İzin verilen programlara ve alt süreçlerine güvenilmeye devam edilir; bu bir işletim sistemi sanal alanı değildir.",
+  "Line {0}: {1}": "Satır {0}: {1}"
 }

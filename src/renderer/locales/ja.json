@@ -1436,5 +1436,15 @@
   "Illustrative example. ChatGPT’s appearance may vary.": "説明用の例です。ChatGPT の表示は異なる場合があります。",
   "Illustrative ChatGPT tool approval showing Deny, Allow once, and Always allow": "Deny、Allow once、Always allow を表示した ChatGPT のツール承認画面の例",
   "Files were not added because the draft changed.": "下書きが変更されたため、ファイルを追加しませんでした。",
-  "Reached": "到達"
+  "Reached": "到達",
+  "Limit command launches": "コマンドの起動を制限",
+  "Command policy mode": "コマンドポリシーモード",
+  "Allowlist": "許可リスト",
+  "Denylist": "拒否リスト",
+  "Only commands matching one of these rules may start.": "これらのルールのいずれかに一致するコマンドだけを起動できます。",
+  "Commands matching any of these rules may not start.": "これらのルールのいずれかに一致するコマンドは起動できません。",
+  "Allowed commands (one rule per line)": "許可するコマンド（1行に1ルール）",
+  "Blocked commands (one rule per line)": "ブロックするコマンド（1行に1ルール）",
+  "Use an exact command or a trailing standalone * for additional arguments. Compound shell syntax is rejected. Allowed programs and their child processes remain trusted; this is not an OS sandbox.": "完全一致のコマンド、または追加引数を許可する末尾の独立した * を使用します。複合シェル構文は拒否されます。許可したプログラムと子プロセスは信頼されます。これは OS サンドボックスではありません。",
+  "Line {0}: {1}": "{0}行目: {1}"
 }

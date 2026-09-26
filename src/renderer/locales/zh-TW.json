@@ -1434,5 +1434,15 @@
   "Terminal height": "終端機高度",
   "Open a terminal in this project": "在此專案中開啟終端機",
   "Select a project to open a terminal": "選擇一個專案以開啟終端機",
-  "Terminal input is busy. Try a smaller paste.": "終端機輸入忙碌，請減少貼上的文字。"
+  "Terminal input is busy. Try a smaller paste.": "終端機輸入忙碌，請減少貼上的文字。",
+  "Limit command launches": "限制指令啟動",
+  "Command policy mode": "指令原則模式",
+  "Allowlist": "允許清單",
+  "Denylist": "封鎖清單",
+  "Only commands matching one of these rules may start.": "只有符合其中一條規則的指令才能啟動。",
+  "Commands matching any of these rules may not start.": "符合其中任何一條規則的指令都無法啟動。",
+  "Allowed commands (one rule per line)": "允許的指令（每行一條規則）",
+  "Blocked commands (one rule per line)": "封鎖的指令（每行一條規則）",
+  "Use an exact command or a trailing standalone * for additional arguments. Compound shell syntax is rejected. Allowed programs and their child processes remain trusted; this is not an OS sandbox.": "使用完全相符的指令，或在尾端使用獨立的 * 允許額外參數。複合 Shell 語法會被拒絕。允許的程式及其子程序仍受信任；這不是作業系統沙箱。",
+  "Line {0}: {1}": "第 {0} 行：{1}"
 }

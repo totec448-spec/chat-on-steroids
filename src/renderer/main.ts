@@ -10,6 +10,7 @@ import { initAppearance } from './appearance.js';
 import { initPet } from './pet.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
+import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
  *
@@ -111,7 +112,7 @@ let applying = false;
  * its `change` event saves it. Only that exact dirty case is protected; an idle/focused-but-clean
  * field still follows persisted state normally.
  */
-function applyValue(control: HTMLInputElement | HTMLSelectElement, next: string, previous?: string): void {
+function applyValue(control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, next: string, previous?: string): void {
   const dirty = document.activeElement === control && previous !== undefined && control.value !== previous;
   if (!dirty) control.value = next;
 }
@@ -273,6 +274,98 @@ function toolNames(names: readonly string[]): HTMLElement {
   return row;
 }
 
+function buildCommandAllowlist(): HTMLElement {
+  const section = el('div', 'command-allowlist');
+  const enabled = document.createElement('input');
+  enabled.type = 'checkbox';
+  enabled.id = 'commandAllowlistEnabled';
+  const toggle = el('label', 'tool command-allowlist-toggle');
+  const body = el('span');
+  const description = el('em');
+  description.id = 'commandPolicyDescription';
+  body.append(
+    el('strong', '', () => t('Limit command launches')),
+    description
+  );
+  toggle.append(enabled, body);
+
+  const mode = el('div', 'seg command-policy-mode');
+  mode.id = 'commandPolicyMode';
+  mode.setAttribute('role', 'radiogroup');
+  ui(mode, 'aria-label', () => t('Command policy mode'));
+  for (const [value, text] of [['allow', 'Allowlist'], ['deny', 'Denylist']] as const) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = value === 'allow' ? 'commandPolicyAllow' : 'commandPolicyDeny';
+    button.dataset.commandPolicyMode = value;
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-checked', String(value === 'allow'));
+    button.classList.toggle('is-sel', value === 'allow');
+    ui(button, 'textContent', () => t(text));
+    button.addEventListener('click', () => {
+      paintCommandPolicyMode(value);
+      if (!applying) void save();
+    });
+    mode.append(button);
+  }
+
+  const label = el('label', 'command-allowlist-label');
+  label.id = 'commandPolicyRulesLabel';
+  label.setAttribute('for', 'commandAllowlistRules');
+  const rules = document.createElement('textarea');
+  rules.id = 'commandAllowlistRules';
+  rules.rows = 5;
+  rules.placeholder = 'git status\ngit diff *\ndotnet build *\ndotnet test *';
+  const help = el('p', 'hint', () => t('Use an exact command or a trailing standalone * for additional arguments. Compound shell syntax is rejected. Allowed programs and their child processes remain trusted; this is not an OS sandbox.'));
+  const error = el('p', 'command-allowlist-error');
+  error.id = 'commandAllowlistError';
+  error.setAttribute('role', 'alert');
+  error.hidden = true;
+  const changed = (): void => { if (!applying) void save(); };
+  enabled.addEventListener('change', changed);
+  rules.addEventListener('change', changed);
+  rules.addEventListener('input', () => readCommandAllowlist());
+  ui(description, 'textContent', () => t(readCommandPolicyMode() === 'deny'
+    ? 'Commands matching any of these rules may not start.'
+    : 'Only commands matching one of these rules may start.'));
+  ui(label, 'textContent', () => t(readCommandPolicyMode() === 'deny'
+    ? 'Blocked commands (one rule per line)'
+    : 'Allowed commands (one rule per line)'));
+  section.append(toggle, mode, label, rules, help, error);
+  return section;
+}
+
+function readCommandPolicyMode(): 'allow' | 'deny' {
+  return document.getElementById('commandPolicyDeny')?.getAttribute('aria-checked') === 'true' ? 'deny' : 'allow';
+}
+
+function paintCommandPolicyMode(mode: 'allow' | 'deny'): void {
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-command-policy-mode]')) {
+    const selected = button.dataset.commandPolicyMode === mode;
+    button.setAttribute('aria-checked', String(selected));
+    button.classList.toggle('is-sel', selected);
+  }
+  $('commandPolicyRulesLabel').textContent = t(mode === 'deny'
+    ? 'Blocked commands (one rule per line)'
+    : 'Allowed commands (one rule per line)');
+  $('commandPolicyDescription').textContent = t(mode === 'deny'
+    ? 'Commands matching any of these rules may not start.'
+    : 'Only commands matching one of these rules may start.');
+}
+
+function readCommandAllowlist(): SettingsPatch['commandAllowlist'] | null {
+  const parsed = parseCommandAllowlistText($<HTMLTextAreaElement>('commandAllowlistRules').value);
+  const error = $('commandAllowlistError');
+  const first = parsed.issues[0];
+  error.textContent = first ? t('Line {0}: {1}', [first.line, first.message]) : '';
+  error.hidden = !first;
+  return first ? null : {
+    enabled: $<HTMLInputElement>('commandAllowlistEnabled').checked,
+    mode: readCommandPolicyMode(),
+    rules: parsed.rules
+  };
+}
+
 function buildGroups(): void {
   const permissionGroups = GROUPS.map((group) => {
     const box = document.createElement('input');
@@ -301,6 +394,7 @@ function buildGroups(): void {
       tools.append(label);
     }
     tools.append(toolNames([]));
+    if (group.id === 'run') tools.append(buildCommandAllowlist());
 
     root.append(tools);
     return root;
@@ -454,6 +548,8 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
   const previous: AppState['config'] = requestedSettings
     ? { ...state.config, ...requestedSettings }
     : state.config;
+  const commandAllowlist = readCommandAllowlist();
+  if (!commandAllowlist) return Promise.resolve();
   const capabilities = { ...previous.capabilities };
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const capability = input.dataset.cap as Capability;
@@ -470,6 +566,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
   const patch: SettingsPatch = {
     capabilities,
     readOnly,
+    commandAllowlist,
     tunnel: {
       profileId: previous.tunnel.profileId,
       profileEpoch: previous.tunnel.profileEpoch,
@@ -524,6 +621,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
   const base: SettingsPatch = {
     capabilities: previous.capabilities,
     readOnly: previous.readOnly,
+    commandAllowlist: previous.commandAllowlist,
     tunnel: previous.tunnel,
     ui: previous.ui,
     sessions: previous.sessions,
@@ -1045,6 +1143,22 @@ function apply(next: AppState): void {
     config.multiAgent.enabled,
     previousState?.config.multiAgent.enabled
   );
+  applyChecked(
+    $<HTMLInputElement>('commandAllowlistEnabled'),
+    config.commandAllowlist.enabled,
+    previousState?.config.commandAllowlist.enabled
+  );
+  const previousCommandPolicyMode = previousState?.config.commandAllowlist.mode;
+  const focusedCommandPolicyMode = (document.activeElement as HTMLElement | null)?.dataset.commandPolicyMode;
+  if (!focusedCommandPolicyMode || previousCommandPolicyMode === undefined || focusedCommandPolicyMode === previousCommandPolicyMode) {
+    paintCommandPolicyMode(config.commandAllowlist.mode);
+  }
+  applyValue(
+    $<HTMLTextAreaElement>('commandAllowlistRules'),
+    config.commandAllowlist.rules.join('\n'),
+    previousState?.config.commandAllowlist.rules.join('\n')
+  );
+  readCommandAllowlist();
   paintGroups();
   paintDesktopAccess(next);
 

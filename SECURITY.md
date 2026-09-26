@@ -18,6 +18,7 @@ Chat On Steroids is a permission boundary between ChatGPT and the logged-in OS u
 - Filesystem tools validate paths against folders you explicitly approve.
 - Read-only mode disables effective file writes, commands, desktop control and clipboard writes.
 - `exec_command` is intentionally **not** confined to approved folders. It starts in an approved working directory, then runs with the normal privileges of your account.
+- The optional Allowlist/Denylist command policy controls which simple command invocation may start. Unsupported shell syntax still fails closed. It does not sandbox a permitted executable, its child processes, interactive stdin, build scripts or later filesystem/system effects.
 - Screen/control permissions also enable the companion's background browser tools on Chromium hosts. Chrome grants required debugger/tabs and HTTP(S) host permissions; there is no additional per-tab approval dialog. Read-only disables browser input, navigation, tab creation/closure and page JavaScript. Native screen, mouse/keyboard and clipboard remain desktop-wide on supported Windows/macOS hosts, independent of approved folders and macOS OS consent.
 - MCP servers bind to loopback and use secret tokenized paths. Public reachability comes only from the tunnel you configure.
 - The companion-extension bridge is a separate loopback service and exposes no filesystem, command or settings-mutation route.
