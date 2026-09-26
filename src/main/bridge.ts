@@ -2479,6 +2479,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const activityExpiry = summary ? sessionActivityExpiresAt(summary) : undefined;
     const hasActivityDeadline = activityExpiry !== undefined;
     const activityCurrent = runningToolCalls(id) > 0 || (activityExpiry !== null && activityExpiry !== undefined && activityExpiry > Date.now());
+    // A worker this app put to sleep for silence has no turn to hand back. Its open turn is one
+    // the app already judged dead; a reloaded page adopting it counts as generating and refuses
+    // the wake until the ten-minute stall closes it — past the wake's own three-minute deadline.
+    // Measured 2026-09-26: worker-8's turn from 17:04 the day before, adopted on reopen, failed
+    // one wake outright. A turn that really still runs shows Stop and is claimed afresh.
+    const sleptWorker = agentInfoForOwnedConversation(id);
+    const sleptOverTurn = sleptWorker?.role === 'worker' &&
+      (sleptWorker.state === 'sleeping' || sleptWorker.state === 'waking') &&
+      sleptWorker.sleptAt !== null && live.activeTurnStartedAt !== null && live.activeTurnStartedAt <= sleptWorker.sleptAt;
     const pendingStop = !superseded && summary?.conversationId === id && summary.activeTurnId === live.activeTurnId && stopRequestedFor(id, live.activeTurnId)
       ? commands.find(command => command.spec.type === 'stop' && command.spec.sessionId === live!.sessionId && command.spec.turnId === live!.activeTurnId) : undefined;
     if (!automaticCompactionAllowed(summary)) await cancelAutomaticResumesNow(live.sessionId);
@@ -2731,11 +2740,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // The generation this chat currently has open, if it has one. A content script that
         // has just been reloaded into a turn already in flight adopts this instead of
         // minting a second id for the same run. See liveConversations().
-        activeTurnId: hasActivityDeadline && !activityCurrent && !pendingStop ? null : live.activeTurnId ?? null,
+        activeTurnId: sleptOverTurn || (hasActivityDeadline && !activityCurrent && !pendingStop) ? null : live.activeTurnId ?? null,
         // Durable answer identity survives a quiet deadline and app/extension restart.
         // Boot adoption must not mint a replacement turn merely because liveness expired.
-        recordedTurnId: live.activeTurnId ?? null,
-        recordedQuestionId: live.activeTurnId ? summary?.timelineTurns?.[live.activeTurnId]?.questionId ?? null : null,
+        recordedTurnId: sleptOverTurn ? null : live.activeTurnId ?? null,
+        recordedQuestionId: live.activeTurnId && !sleptOverTurn ? summary?.timelineTurns?.[live.activeTurnId]?.questionId ?? null : null,
         ...(pendingStop?.spec.type === 'stop' ? { stopTurn: { turnId: pendingStop.spec.turnId, userMessageId: pendingStop.spec.userMessageId ?? null } } : {}),
         // A revival names an existing worker conversation. The extension, which alone can
         // inspect Chrome's real tab set, routes it to that tab before it considers opening one.
