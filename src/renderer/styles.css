@@ -2033,8 +2033,9 @@ input[readonly] {
 .sess-top { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .sess-top b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale, 1)); font-weight: 400; line-height: 22px; }
 .session-status { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
-.session-status.is-active, .session-status.is-working { width: 12px; height: 12px; background: transparent; border: 2px solid #4388ef40; border-top-color: #4388ef; animation: session-spin 900ms linear infinite; }
+.session-status.is-active, .session-status.is-working { width: 12px; height: 12px; background: transparent; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: session-spin 900ms linear infinite; }
 @keyframes session-spin { to { transform: rotate(360deg); } }
+.session-status.is-unseen { width: 8px; height: 8px; background: var(--accent); }
 .session-status.is-failed { background: var(--red); }
 .sess-actions { display: none; align-items: center; flex: none; gap: 1px; margin-left: 4px; }
 .sess:hover .sess-actions, .sess:focus-within .sess-actions { display: flex; }
