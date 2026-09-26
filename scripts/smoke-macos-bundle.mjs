@@ -50,6 +50,8 @@ const expectedPlist = {
   CFBundleVersion: packageVersion,
   LSApplicationCategoryType: 'public.app-category.developer-tools',
   LSMinimumSystemVersion: '13.0',
+  NSMicrophoneUsageDescription:
+    'Chat On Steroids records your microphone only when you start voice to text. Finishing sends the audio to your configured transcription API.',
   NSScreenCaptureUsageDescription:
     'Chat On Steroids captures a display or window only when the enabled Desktop connector asks to observe it.'
 };
@@ -59,7 +61,7 @@ for (const [key, expected] of Object.entries(expectedPlist)) {
 }
 
 const packagedPlist = JSON.parse(run('plutil', ['-convert', 'json', '-o', '-', plist]).stdout);
-for (const key of ['NSCameraUsageDescription', 'NSMicrophoneUsageDescription', 'NSAudioCaptureUsageDescription']) {
+for (const key of ['NSCameraUsageDescription', 'NSAudioCaptureUsageDescription']) {
   if (Object.hasOwn(packagedPlist, key)) throw new Error(`Info.plist unexpectedly contains unused media privacy key ${key}`);
 }
 

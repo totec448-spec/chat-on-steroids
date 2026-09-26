@@ -18,11 +18,13 @@ import { renderGoalReasoning } from './goal-reasoning.js';
 import { preserveTimelineViewport } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { toolResultText } from './tool-result.js';
+import { renderActionDetails } from './action-details.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
 import type { RecoveryCountdown } from '../shared/recovery.js';
 import { communicationTitle, foldAgentCommunication } from './agent-communication.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
+import { initDictation } from './dictation.js';
 import { isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
@@ -168,7 +170,8 @@ function composerDraftOwner(): ComposerDraftOwner { return { key: draftKey(), ge
 function ownsComposerDraft(owner: ComposerDraftOwner): boolean {
   return owner.key === draftKey() && owner.generation === composerDraftGeneration;
 }
-function replaceComposerDraft(): void { composerDraftGeneration++; skillPicker?.close(); }
+let dictation: ReturnType<typeof initDictation> | undefined;
+function replaceComposerDraft(): void { composerDraftGeneration++; skillPicker?.close(); dictation?.cancel(); }
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
@@ -1752,6 +1755,8 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
   ui(facts, 'textContent', () => `${call.tool} · ${call.outcome} · ${Math.round(call.durationMs)} ms · ` +
     t("placed by {0}", [ATTRIBUTION_LABELS[call.attribution] ?? call.attribution]));
   raw.append(facts);
+  const actionDetails = renderActionDetails(call);
+  if (actionDetails) raw.append(actionDetails);
 
   if (call.changes && call.changes.length > 0) {
     const changes = el('ul', 'changes');
@@ -1765,12 +1770,17 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
     raw.append(changes);
   }
 
-  raw.append(el('h4', '', () => t("Arguments")));
-  raw.append(textBlock('pre', call.args.text, call.args.truncated, call.args.chars));
-  raw.append(el('h4', '', () => t("Result")));
+  const original = actionDetails ? document.createElement('details') : raw;
+  if (original !== raw) {
+    original.className = 'action-original';
+    original.append(el('summary', '', () => t('Original arguments and result'))); raw.append(original);
+  }
+  original.append(el('h4', '', () => t("Arguments")));
+  original.append(textBlock('pre', call.args.text, call.args.truncated, call.args.chars));
+  original.append(el('h4', '', () => t("Result")));
   const images = call.assets?.filter(asset => ['image/png', 'image/jpeg', 'image/webp'].includes(asset.mimeType)) ?? [];
   const readable = toolResultText(call.result.text, call.result.truncated, images.length > 0);
-  if (readable) raw.append(textBlock('pre', readable, call.result.truncated && images.length === 0, call.result.chars));
+  if (readable) original.append(textBlock('pre', readable, call.result.truncated && images.length === 0, call.result.chars));
   // Older recordings did not retain the reason an image asset was omitted. Explain
   // the missing local preview without inferring a historical provider receipt.
   if (call.tool === 'view_image' && call.outcome === 'ok' && images.length === 0) {
@@ -4284,6 +4294,19 @@ export function initChat(next: Deps): void {
   });
   $('composerSettings').addEventListener('toggle', paintTaskActions);
   initContextMeter();
+  document.getElementById('contextMeterConfigure')?.addEventListener('click', () => {
+    $('contextMeter').classList.remove('pinned'); $('contextMeterButton').setAttribute('aria-expanded', 'false');
+    $<HTMLInputElement>('settingsSearch').value = '';
+    filterSettingsSections(document.querySelector<HTMLElement>('[data-view="settings"]')!, '');
+    showView('settings');
+    const control = $<HTMLInputElement>('autoCompact');
+    control.closest('.setting')?.scrollIntoView({ block: 'center' }); control.focus();
+  });
+  if (typeof (api as Partial<typeof api>).dictationStatus === 'function' && document.getElementById('dictationButton')) dictation = initDictation({
+    input: $<HTMLTextAreaElement>('chatInput'), button: $<HTMLButtonElement>('dictationButton'),
+    owner: () => `${draftKey()}:${composerDraftGeneration}`, api,
+    copy: async text => { const copied = await api.writeClipboard(text); if (!copied.ok || !copied.data) throw new Error('Copy failed'); }
+  });
   $('createPlan').addEventListener('click', () => { if (taskPlans.has(draftKey())) cancelTaskPlan(); else void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); });
   $('composer').addEventListener('submit', (event) => {
     event.preventDefault();

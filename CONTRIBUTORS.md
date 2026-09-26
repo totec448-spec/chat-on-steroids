@@ -224,4 +224,14 @@ live-validation limits are recorded in
 
 Keep original authorship when merging a contribution. When adapting or consolidating contributed work, name the original author and PR, and preserve appropriate `Co-authored-by` trailers using the contributor's public GitHub noreply identity. Reports and review deserve explicit acknowledgment without inventing code authorship. See [CONTRIBUTING.md](CONTRIBUTING.md#credit-and-attribution).
 
+The September 26 compaction/action/dictation follow-up adapts
+[@Haz4rdovisk](https://github.com/Haz4rdovisk)'s ACK-first destination receipt repair from
+[#345](https://github.com/totec448-spec/chat-on-steroids/pull/345), with additional
+marker-first contradiction and failed-write regressions, and
+[@Maximapple](https://github.com/Maximapple)'s exact-work refusal admission repair from
+[#395](https://github.com/totec448-spec/chat-on-steroids/pull/395). The renderer-only action
+preview does not incorporate #345's separate Git Changes/snapshot backend. Related #391/#388
+policy changes remain unincorporated. Scope and validation are recorded in
+[the follow-up worklog](docs/worklog-compaction-actions-dictation-20260926.md).
+
 The September 2026 attribution correction adds a new public record and retroactive co-author credit for incorporated work. It does not rewrite released commits or imply that contributors authored the correction's prose. GitHub's automatic contributor displays are separate from this maintained record.

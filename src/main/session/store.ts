@@ -1028,11 +1028,14 @@ export function automaticCompactionAllowed(summary?: SessionSummary | null): boo
     !(selected?.conversationId === summary?.conversationId && isProModel(selected?.model, selected?.reasoningEffort));
 }
 
-export function autoCompactionReady(summary: SessionSummary | null | undefined): boolean {
+export function autoCompactionReady(summary: SessionSummary | null | undefined, working = false): boolean {
   if (!summary) return false;
   const refusal = summary.autoCompactionRefusal;
+  // Adapted from Maximapple #395. A missing page turn is not proof that exact
+  // local MCP work stopped. Only the bridge's current-work witness can relax
+  // this branch; a known refused turn stays fenced, and cold reads default false.
   if (refusal?.conversationId === summary.conversationId &&
-      (!summary.activeTurnId || summary.activeTurnId === refusal.turnId)) return false;
+      (summary.activeTurnId ? summary.activeTurnId === refusal.turnId : !working)) return false;
   const config = getConfig().compaction;
   return automaticCompactionAllowed(summary) && config.autoTokens > 0 && summary.contextTokens >= config.autoTokens;
 }

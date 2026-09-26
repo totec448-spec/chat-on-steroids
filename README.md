@@ -62,6 +62,34 @@ Windows 10/11, **macOS 13 Ventura or newer**, or a current desktop Linux. Chrome
 
 </details>
 
+## Context, action details and dictation
+
+**Compact & Resume** keeps the durable local session while moving work to a new ChatGPT
+conversation. The small context meter beside Chat options shows the local token estimate and
+links to **Automatic compaction settings**. The existing global switch and token threshold
+apply only to eligible active chats; Pro models, workers and decision helpers retain their
+existing exclusions. A saved handoff and its exact destination receipt—not a clicked button—
+determine whether the move completed. Cancelling does not automatically resend a handoff.
+
+Expand a recorded tool action to inspect its **submitted patch**, added/removed lines, command,
+working directory, output, exit status, or read/search/browser metadata. These are bounded
+previews of that recorded action, not a live Git diff. **Original arguments and result** retains
+the full recorded detail and existing truncation notices. A failed patch is shown as proposed,
+not applied; native website activity exposes only the detail actually recorded.
+
+**Voice to text** is optional and uses a **separate OpenAI transcription API key**. Click the
+microphone beside Send to configure the encrypted key, then explicitly choose **Record**.
+The waveform reflects microphone level; Pause mutes capture. Finish uploads the recording and
+streams its transcription into a review panel. Edit the text and choose **Insert into draft**;
+it is never sent to the conversation automatically. Cancelling discards the recording.
+
+Dictation uses `gpt-4o-mini-transcribe`, supports automatic language detection, and is bounded
+to five minutes / 8 MiB per recording. CoS does not save audio to disk. The OpenAI API receives
+the audio after Finish and applies its own data and billing terms; ChatGPT subscription and
+tunnel credentials are not used for transcription. No cloud request is made merely by opening
+the microphone panel. See the [OpenAI speech-to-text guide](https://developers.openai.com/api/docs/guides/speech-to-text)
+and [API billing guidance](https://help.openai.com/en/articles/9039756-billing-settings-in-chatgpt-vs-platform).
+
 <details>
 <summary>More screenshots</summary>
 

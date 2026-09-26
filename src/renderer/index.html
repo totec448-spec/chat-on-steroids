@@ -4,6 +4,8 @@
     <meta charset="utf-8" />
     <title>Chat On Steroids</title>
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./dictation.css" />
+    <link rel="stylesheet" href="./action-details.css" />
   </head>
   <body>
     <!-- Icon sprite. Inline so there is no request and no font, and every glyph
@@ -1009,10 +1011,14 @@
                     </div>
                   </details>
                 <div class="context-meter" id="contextMeter">
-                  <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-controls="contextMeterInfo">
+                  <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-haspopup="dialog" aria-controls="contextMeterPanel">
                     <svg viewBox="0 0 16 16" aria-hidden="true"><circle class="context-track" cx="8" cy="8" r="6"/><circle id="contextMeterArc" cx="8" cy="8" r="6" stroke-dasharray="0 37.7"/></svg>
                   </button>
-                  <div id="contextMeterInfo" role="tooltip">Session context · estimated</div>
+                  <div id="contextMeterPanel" role="dialog" aria-label="Context and automatic compaction">
+                    <p id="contextMeterInfo">Session context · estimated</p>
+                    <p id="contextMeterPolicy"></p>
+                    <button id="contextMeterConfigure" type="button">Automatic compaction settings</button>
+                  </div>
                 </div>
                 </div>
                 <details class="composer-menu model-menu" id="modelMenu">
@@ -1026,6 +1032,7 @@
                   </div>
                 </details>
                 <button class="btn" id="generateFinishGoal" type="button" hidden>Generate Goal</button>
+                <button id="dictationButton" type="button" aria-label="Voice to text" title="Voice to text"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"/></svg></button>
                 <div class="send-control">
                   <div class="send-options" id="sendOptions" hidden>
                     <div class="delivery-choices" role="radiogroup" aria-label="Message delivery">

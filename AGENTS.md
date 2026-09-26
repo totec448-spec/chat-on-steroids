@@ -3210,6 +3210,31 @@ diagnostics, not restart authority; secrets must never be printed to investigate
 
 ## 20. Build, installation, updater and release
 
+### Optional dictation and recorded-action presentation
+
+`dictation-ipc.ts` owns explicit microphone admission and one transcription operation in the
+main-window document. Both Electron permission handlers deny all other media, frames and pages.
+The separate encrypted `dictationApiKey` never comes from the tunnel/Goal credentials and never
+returns to the renderer. Audio remains in memory, is uploaded only after Finish to the fixed
+OpenAI transcription endpoint, and is bounded to five minutes / 8 MiB. SSE is limited to 512 KiB
+and 24,000 transcript characters; partial text is preview-only and no automatic retry is made.
+`renderer/dictation.ts` owns media tracks and an exact original draft generation/value/selection.
+Pause mutes recording, cancellation retires tracks/late replies, and Insert never calls Send.
+Close cleanup happens synchronously; a queued close event must not steal focus or cancel a new
+recording. Detach a recording's chunks before Blob conversion yields. Fake-device Chromium
+checks prove IPC/media/UI plumbing, not real microphone recognition or paid-provider behavior.
+
+`action-details.ts` projects exact stored tool arguments/results inside the existing lazy
+disclosure. Requested and recorded values stay separate; failed/unknown edits remain proposed.
+Original details, images and truncation notices remain available. No current Git/filesystem
+read, historical preimage reconstruction, URL click authority or tool replay is added. The
+context popup links to canonical automatic-compaction settings rather than cloning the switch.
+
+The compaction owner accepts a late native destination marker after an ACK-first commit only
+for its already-dispatched exact destination. A marker-first destination rejects a contradictory
+ACK. A refused chat with no page turn can refile only when the bridge revalidates current exact
+work; cold state defaults to no such permission, and a known refused turn remains fenced.
+
 Source, bundle, package, installed bytes and live behavior are separate gates (§3). The app id
 is `com.chatonsteroids.app`. Native release targets are Windows x64/arm64 NSIS, macOS x64/arm64
 DMG+ZIP and Linux x64/arm64 AppImage+DEB. Windows is per-user-capable and `asInvoker`; replacing
@@ -3219,8 +3244,9 @@ the package preserves userData. Synchronize package/main/extension versions deli
 a bundler. `electron-builder.yml` puts executable tunnel/rg, extension and required native
 payloads outside asar. `extension-path.ts` transactionally mirrors the packaged extension to
 stable `userData/extension`, never an ephemeral AppImage mount.
-The macOS afterPack hook removes Electron's unused camera, microphone and audio-capture
-privacy descriptions before sealing, retaining Screen Recording. Strict plist readback and
+The macOS afterPack hook removes Electron's unused camera and system-audio-capture
+privacy descriptions before sealing, retaining Screen Recording and the explicit dictation
+microphone description. Strict plist readback and
 bundle smoke checks reject failed cleanup. This does not establish publisher signing,
 notarization or permission continuity across updates.
 

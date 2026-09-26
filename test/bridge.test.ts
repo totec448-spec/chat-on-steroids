@@ -2386,6 +2386,38 @@ describe('automatic compaction', () => {
     expect((await request('POST', '/compact', { body: { conversationId, token, sourceDispatch: true } })).status).toBe(409);
   });
 
+  // Adapted from Maximapple #395: missing page turn != stopped local MCP work.
+  it('refiles an oversized refused chat only after fresh exact local work without a page turn', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0b';
+    await withThreshold(10_000, async () => {
+      await request('POST', '/events', { body: { conversationId, events: over() } });
+      await settled();
+      const sessionId = (await request('GET', `/activity?conversationId=${conversationId}`)).body.sessionId as string;
+      const { refuseAutomaticCompactionNow, autoCompactionReady } = await import('../src/main/session/store.js');
+      await refuseAutomaticCompactionNow(sessionId, conversationId, null);
+      const open = continuationForSession(sessionId);
+      if (open) await request('POST', '/compact', { body: { conversationId, token: open.token, sourceLost: true } });
+      expect(continuationForSession(sessionId)).toBeNull();
+      expect(autoCompactionReady(await getSession(sessionId))).toBe(false);
+      // Merely opening/polling an oversized old chat must not refile its refusal.
+      await request('GET', `/activity?conversationId=${conversationId}`); await settled();
+      expect(continuationForSession(sessionId)).toBeNull();
+      for (let index = 0; index < 3; index++) {
+        const requestId = `wfr_refused_still_working_${index}`;
+        await request('POST', '/events', { body: { conversationId, events: [{
+          kind:'tool_evidence', time:Date.now(), calls:[{messageId:`m-refused-working-${index}`,tool:'read',order:0,answered:false,requestId}]
+        }] } });
+        await recordToolCall({tool:'read',args:{paths:['/project/a.ts']},content:[{type:'text',text:'ok'}],outcome:'ok',durationMs:1,startedAt:Date.now(),requestId});
+        await settled();
+      }
+      await vi.waitFor(() => expect(continuationForSession(sessionId)).toMatchObject({automatic:true,state:'awaiting-summary'}),{timeout:3000});
+      const token = continuationForSession(sessionId)!.token;
+      await request('GET', `/activity?conversationId=${conversationId}`); await settled();
+      expect(continuationForSession(sessionId)?.token).toBe(token);
+    });
+  });
+
   it('does not immediately refile a rejected automatic compaction in the same working turn', async () => {
     await pair();
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac09';

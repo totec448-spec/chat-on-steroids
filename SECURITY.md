@@ -23,6 +23,7 @@ Chat On Steroids is a permission boundary between ChatGPT and the logged-in OS u
 - The companion-extension bridge is a separate loopback service and exposes no filesystem, command or settings-mutation route.
 - Stored API/bridge credentials use Electron `safeStorage` (DPAPI on Windows, Keychain on macOS, a secure desktop secret store on Linux). Linux `basic_text` is refused; normal Activity logs are redacted, capped and memory-only.
 - Session recording is separate durable local history. It is on for fresh installs and can be disabled.
+- Optional voice dictation requires an explicit recording action and audio-only permission for the current main window. Camera and system-audio capture remain denied. Finishing sends in-memory audio to the fixed OpenAI transcription API using its own encrypted API key; provider data/billing terms apply. Cancelling while recording prevents upload; cancelling after Finish aborts the request but cannot recall audio already transmitted. Neither action sends a chat message. A completed transcript is reviewed before insertion into the unchanged original draft, never automatically submitted. Audio and temporary transcription previews are not recorded in session history by this feature.
 
 ## Provider rules and responsible use
 

@@ -38,7 +38,6 @@ import { assertNoTrustBearingMacCodeSignature } from './macos-audit-utils.mjs';
 
 const UNUSED_MEDIA_PRIVACY_KEYS = [
   'NSCameraUsageDescription',
-  'NSMicrophoneUsageDescription',
   'NSAudioCaptureUsageDescription'
 ];
 
@@ -65,14 +64,14 @@ export default async function sealMacOsBundle(context) {
     if (Object.hasOwn(originalPlist, key)) run('plutil', ['-remove', key, plist]);
   }
 
-  // Electron's generic app template declares camera/microphone/audio capture even when an app
-  // never uses those APIs. CoS denies renderer permission requests and has no media-capture
-  // feature, so shipping those declarations is misleading and can make macOS surface unrelated
-  // privacy prompts. Keep only privacy declarations for capabilities CoS actually exposes.
+  // Dictation now has an explicit audio-only permission gate. Keep its microphone
+  // declaration, but not Electron's unused camera/system-audio-capture declarations.
   const cleanedPlist = JSON.parse(run('plutil', ['-convert', 'json', '-o', '-', plist]).stdout);
   for (const key of UNUSED_MEDIA_PRIVACY_KEYS) {
     if (Object.hasOwn(cleanedPlist, key)) throw new Error(`afterPack failed to remove unused Info.plist key ${key}`);
   }
+  if (typeof cleanedPlist.NSMicrophoneUsageDescription !== 'string' || !cleanedPlist.NSMicrophoneUsageDescription.trim())
+    throw new Error('afterPack requires the explicit dictation microphone usage description');
 
   // Electron nests frameworks and helper apps that each need their own signature. Signing only the outer
   // bundle would leave the same self-contradiction one level down. Apple discourages --deep for

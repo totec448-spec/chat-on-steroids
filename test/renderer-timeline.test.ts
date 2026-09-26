@@ -1939,6 +1939,31 @@ it('keeps a streaming message anchor and its following tool group across canonic
   expect(group.open).toBe(true);
 });
 
+it('lazily integrates recorded patch details and preserves raw evidence and disclosure across updates', async () => {
+  const event = toolCall(1, 'recorded-patch') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  const patch = '*** Begin Patch\n*** Update File: src/example.ts\n@@\n-oldValue\n+newValue\n*** End Patch';
+  event.call = { ...event.call, tool: 'apply_patch', args: text(JSON.stringify({ patch })),
+    result: text('One recorded patch was applied.'), summary: { kind: 'other', title: 'Updated example.ts', tone: 'good' } };
+  const { w, append, live } = await boot([event]);
+  const timeline = w.document.getElementById('timeline')!;
+  const row = timeline.querySelector<HTMLDetailsElement>('.ev-tool_call details.tool')!;
+  expect(row.querySelector('.action-details')).toBeNull();
+  row.open = true; row.dispatchEvent(new w.Event('toggle'));
+  expect(row.querySelector('.action-details-title')?.textContent).toBe('Applied patch');
+  expect(row.querySelector('.action-details-line-added')?.textContent).toBe('+newValue\n');
+  expect(row.querySelector('.action-details-line-removed')?.textContent).toBe('-oldValue\n');
+  const original = row.querySelector<HTMLDetailsElement>('.action-original')!;
+  expect(original.open).toBe(false);
+  expect(original.textContent).toContain(event.call.args.text);
+  expect(original.textContent).toContain(event.call.result.text);
+  original.open = true;
+  await append([toolCall(2, 'subsequent-read')]);
+  expect(timeline.querySelector('.ev-tool_call details.tool')).toBe(row);
+  expect(row.querySelector('.action-original')).toBe(original);
+  expect(original.open).toBe(true);
+  expect(live.sent).toEqual([]);
+});
+
 it('keeps an unfolded tool row as the same open node while the chat keeps appending', async () => {
   const { w, append } = await boot([
     { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },

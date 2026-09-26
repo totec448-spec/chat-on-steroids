@@ -603,6 +603,68 @@ describe('committing', () => {
     expect(await bindContinuationDestinationMessageNow(token, CHAT_C, 'resume-message-b')).toBe(false);
     expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'other-message')).toBe(false);
   });
+
+  it.each([false, true])('binds the exact destination marker when command ACK commits first (restart=%s)', async restart => {
+    const { sessionId, token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    expect(await commitContinuation(token, CHAT_B)).toBe(true);
+    expect(continuationByToken(token)).toMatchObject({ state: 'committed', to: CHAT_B,
+      destinationSend: { state: 'dispatched-unresolved', conversationId: null, messageId: null } });
+    if (restart) {
+      const snapshot = snapshotContinuations();
+      resetContinuationsForTests();
+      await restoreContinuations(snapshot);
+    }
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_C, 'foreign-message')).toBe(false);
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).toBe(true);
+    expect(continuationByToken(token)).toMatchObject({ state: 'committed', to: CHAT_B,
+      destinationSend: { state: 'sent', conversationId: CHAT_B, messageId: 'resume-message-b' } });
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'other-message')).toBe(false);
+    expect(await releaseContinuationDestinationSendNow(token)).toBe(false);
+    expect(await attachedChat(sessionId)).toBe(CHAT_B);
+  });
+
+  it('refuses a command ACK whose destination contradicts the already bound marker', async () => {
+    const { sessionId, token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).toBe(true);
+    expect(await commitContinuation(token, CHAT_C)).toBe(false);
+    expect(await attachedChat(sessionId)).toBe(CHAT_A);
+    expect(await commitContinuation(token, CHAT_B)).toBe(true);
+  });
+
+  it('keeps an ACK-first receipt unresolved when its late marker write fails', async () => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    await beginContinuationDestinationSendNow(token);
+    await dispatchContinuationDestinationSendNow(token);
+    expect(await commitContinuation(token, CHAT_B)).toBe(true);
+    const durable = await import('../src/main/durable.js');
+    vi.spyOn(durable, 'writeDurableNow').mockRejectedValueOnce(new Error('disk full'));
+    await expect(bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).rejects.toThrow('disk full');
+    expect(continuationByToken(token)).toMatchObject({ state: 'committed', to: CHAT_B,
+      destinationSend: { state: 'dispatched-unresolved', conversationId: null, messageId: null } });
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).toBe(true);
+  });
+
+  it.each(['aborted', 'unattempted'] as const)('does not invent a late destination receipt for a %s continuation', async state => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    if (state === 'aborted') {
+      await beginContinuationDestinationSendNow(token);
+      await dispatchContinuationDestinationSendNow(token);
+      await abortContinuationNow(token, 'cancelled');
+    } else {
+      expect(await commitContinuation(token, CHAT_B)).toBe(true);
+    }
+    const before = snapshotContinuations().entries;
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).toBe(false);
+    expect(snapshotContinuations().entries).toEqual(before);
+  });
 });
 
 describe('the commit lock', () => {
