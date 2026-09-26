@@ -39,6 +39,9 @@ const {
   currentRunId,
   dormantWorkerNotice,
   reactivateDormantRunForConversation,
+  recoverSilentCeilingWorker,
+  silentCeilingRecoveryAuthority,
+  silentCeilingRecoveryTurn,
   failAgent,
   finishAgent,
   finishWorkerConversation,
@@ -96,7 +99,7 @@ const {
 const { startMcpServer } = await import('../src/main/mcp/server.js');
 const { runningToolCalls } = await import('../src/main/mcp/call-context.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
-const { findSessionByConversation, initSessionStore, readRecentEvents, resetSessionStoreForTests } = await import(
+const { findSessionByConversation, initSessionStore, readRecentEvents, requestTurnOwnershipCutoff, resetSessionStoreForTests } = await import(
   '../src/main/session/store.js'
 );
 const { recordChatObservations, resetRecorderForTests } = await import('../src/main/session/recorder.js');
@@ -906,6 +909,196 @@ describe('a worker whose chat closed', () => {
     const finished = swarmState().agents.find((agent) => agent.id === 'worker-1');
     expect(finished?.revivable).toBe(false);
     expect(noteAgentAlive('c-worker-1', 'page')?.revived).toBe(false);
+  });
+
+  it('parks a ceiling worker on an unresolved turn without granting a new-task wake', () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    fillContext('c-worker-1');
+    const now = Date.now();
+
+    const [parked] = sleepSilentWorkers(
+      now + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => 'turn-old'
+    );
+    expect(parked?.info).toMatchObject({
+      state: 'sleeping',
+      revivable: false,
+      silenceRecoveryTurnId: 'turn-old'
+    });
+    expect(freeWorkerSlots()).toBe(3);
+    expect(silentCeilingRecoveryTurn('c-worker-1')).toBe('turn-old');
+    expect(closableWorkerConversations(0)).not.toContain('c-worker-1');
+    expect(() => stageMessages(prime, [{ to: 'worker-1', text: 'new task' }])).toThrow(/context-limited|unresolved/i);
+    expect(noteAgentAlive('c-worker-1', 'call')?.revived).toBe(false);
+    expect(recoverSilentCeilingWorker('c-worker-1', 'turn-new')).toBeNull();
+
+    const recovered = recoverSilentCeilingWorker('c-worker-1', 'turn-old');
+    expect(recovered).toMatchObject({ agentId: 'worker-1', revived: true });
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'active',
+      revivable: false,
+      silenceRecoveryTurnId: null
+    });
+  });
+
+  it('parks rather than terminalizes missing turn identity at the ceiling', () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    fillContext('c-worker-1');
+
+    expect(sleepSilentWorkers(
+      Date.now() + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => null
+    )).toHaveLength(1);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      revivable: false,
+      silenceParked: true,
+      silenceRecoveryTurnId: null
+    });
+    expect(closableWorkerConversations(0)).not.toContain('c-worker-1');
+  });
+
+  it('clears a dormant ceiling-silence marker as explicit terminal user authority', () => {
+    startSwarm(1);
+    startWorker('worker-1', 'c-worker-clear-ceiling-park');
+    fillContext('c-worker-clear-ceiling-park');
+    sleepSilentWorkers(
+      Date.now() + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => 'turn-clear-ceiling-park',
+      () => 11
+    );
+    expect(releaseQuiescentRun()).toBe(true);
+
+    resetSwarm();
+
+    expect(retiredWorkerForConversation('c-worker-clear-ceiling-park')).toMatchObject({
+      id: 'worker-1',
+      conversationId: 'c-worker-clear-ceiling-park'
+    });
+    expect(silentCeilingRecoveryTurn('c-worker-clear-ceiling-park')).toBeNull();
+  });
+
+  it('preserves an ambiguous below-ceiling sleep when delayed accounting later crosses 400k', () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    noteAgentContextTokens('c-worker-1', WORKER_CONTEXT_CEILING_TOKENS - 1);
+
+    const [slept] = sleepSilentWorkers(
+      Date.now() + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => 'turn-delayed-meter'
+    );
+    expect(slept?.info).toMatchObject({
+      state: 'sleeping',
+      revivable: true,
+      silenceRecoveryTurnId: 'turn-delayed-meter'
+    });
+
+    noteAgentContextTokens('c-worker-1', WORKER_CONTEXT_CEILING_TOKENS);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      revivable: false,
+      silenceRecoveryTurnId: 'turn-delayed-meter'
+    });
+    expect(() => stageMessages(prime, [{ to: 'worker-1', text: 'new task' }])).toThrow(/context-limited|unresolved/i);
+  });
+
+  it('preserves exact ceiling-silence recovery authority across parked restore', () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    fillContext('c-worker-1');
+    sleepSilentWorkers(
+      Date.now() + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => 'turn-old',
+      () => 17
+    );
+    releaseQuiescentRun();
+    const saved = snapshotSwarm()!;
+    resetAgentsForTests();
+    restoreSwarm(saved);
+
+    expect(silentCeilingRecoveryTurn('c-worker-1')).toBe('turn-old');
+    expect(silentCeilingRecoveryAuthority('c-worker-1')).toEqual({ turnId: 'turn-old', requestOriginMax: 17 });
+    expect(reactivateDormantRunForConversation('c-worker-1')).toBe(false);
+    expect(recoverSilentCeilingWorker('c-worker-1', 'turn-old')).toMatchObject({
+      agentId: 'worker-1',
+      revived: true
+    });
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
+  });
+
+  it('keeps a ceiling-silenced worker fenced until its staged terminal snapshot commits', async () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    fillContext('c-worker-1');
+    sleepSilentWorkers(
+      Date.now() + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => 'turn-terminal-stage',
+      () => 7
+    );
+    const staged = stageWorkerConversationFinish('c-worker-1', 'durably done')!;
+    const writes: Array<ReturnType<typeof snapshotSwarm>> = [];
+    onSwarmPersistNow(async snapshot => { writes.push(structuredClone(snapshot)); });
+
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      silenceParked: true,
+      silenceRecoveryTurnId: 'turn-terminal-stage'
+    });
+    const durableWorker = writes.at(-1)?.activeRuns?.[0]?.agents.find((entry) => entry.info.id === 'worker-1')?.info;
+    expect(durableWorker).toMatchObject({
+      state: 'finished',
+      revivable: false,
+      silenceParked: false,
+      silenceRecoveryTurnId: null,
+      silenceRecoveryRequestOriginMax: null
+    });
+
+    staged.rollback();
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      revivable: false,
+      silenceParked: true,
+      silenceRecoveryTurnId: 'turn-terminal-stage'
+    });
+    onSwarmPersistNow(async () => undefined);
+  });
+
+  it('treats feature disable as terminal evidence for a ceiling-silenced worker', async () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    fillContext('c-worker-1');
+    sleepSilentWorkers(
+      Date.now() + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => 'turn-old'
+    );
+    expect(releaseQuiescentRun()).toBe(true);
+
+    await setEnabled(false);
+    expect(pauseSwarmForDisable()).toBe(true);
+    const worker = snapshotSwarm()!.dormantRuns?.[0]?.agents.find((entry) => entry.info.id === 'worker-1');
+    expect(worker?.info).toMatchObject({
+      state: 'finished',
+      revivable: false,
+      silenceRecoveryTurnId: null
+    });
+    await setEnabled(true);
   });
 
   it('sleeps a detached worker only once it has also gone quiet, and reports that to prime', () => {
@@ -2876,6 +3069,249 @@ describe('through the MCP endpoint', () => {
     expect(text).not.toContain('WORKER_SLEEPING');
     expect(swarmRunning()).toBe(true);
     expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
+  });
+
+  it('recovers a dormant ceiling-silenced worker only from the exact retained request turn', async () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    const requestId = 'wfr_ceiling_same_turn';
+    const turnId = 't-ceiling-same-turn';
+    await recordChatObservations('c-worker-1', [
+      { kind: 'turn_start', time: Date.now(), turnId },
+      {
+        kind: 'tool_evidence',
+        time: Date.now(),
+        turnId,
+        calls: [{ messageId: 'm-ceiling-same-turn', tool: 'read', order: 0, answered: false, requestId }]
+      }
+    ]);
+    expect(textOfReply(await ordinaryWithRequestId(requestId, 'read', { paths: ['/anything'] }))).toMatch(REFUSED_ON_ROOTS);
+    const session = await findSessionByConversation('c-worker-1', { requireUnique: true });
+    const cutoff = await requestTurnOwnershipCutoff(session!.id, 'c-worker-1');
+
+    fillContext('c-worker-1');
+    sleepSilentWorkers(
+      Date.now() + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => turnId,
+      () => cutoff
+    );
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(silentCeilingRecoveryTurn('c-worker-1')).toBe(turnId);
+
+    const late = textOfReply(await ordinaryWithRequestId(requestId, 'read', { paths: ['/anything'] }));
+    expect(late).not.toContain('WORKER_CONTEXT_LIMITED');
+    expect(late).toMatch(REFUSED_ON_ROOTS);
+    expect(swarmRunning()).toBe(true);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'active',
+      silenceRecoveryTurnId: null
+    });
+  });
+
+  it('refuses a new post-sleep turn in the same ceiling worker conversation', async () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    const oldRequestId = 'wfr_ceiling_old_turn';
+    const oldTurnId = 't-ceiling-old-turn';
+    await recordChatObservations('c-worker-1', [
+      { kind: 'turn_start', time: Date.now(), turnId: oldTurnId },
+      {
+        kind: 'tool_evidence',
+        time: Date.now(),
+        turnId: oldTurnId,
+        calls: [{ messageId: 'm-ceiling-old-turn', tool: 'read', order: 0, answered: false, requestId: oldRequestId }]
+      }
+    ]);
+    await ordinaryWithRequestId(oldRequestId, 'read', { paths: ['/anything'] });
+    const session = await findSessionByConversation('c-worker-1', { requireUnique: true });
+    const cutoff = await requestTurnOwnershipCutoff(session!.id, 'c-worker-1');
+    fillContext('c-worker-1');
+    sleepSilentWorkers(
+      Date.now() + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => oldTurnId,
+      () => cutoff
+    );
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const newRequestId = 'wfr_ceiling_new_turn';
+    await recordChatObservations('c-worker-1', [
+      { kind: 'turn_start', time: Date.now() + 1, turnId: 't-ceiling-new-turn' },
+      {
+        kind: 'tool_evidence',
+        time: Date.now() + 1,
+        turnId: 't-ceiling-new-turn',
+        calls: [{ messageId: 'm-ceiling-new-turn', tool: 'read', order: 0, answered: false, requestId: newRequestId }]
+      }
+    ]);
+    const refused = textOfReply(await ordinaryWithRequestId(newRequestId, 'read', { paths: ['/anything'] }));
+    expect(refused).toContain('WORKER_CONTEXT_LIMITED');
+    expect(refused).toContain('Nothing was run');
+    expect(swarmRunning()).toBe(false);
+    expect(silentCeilingRecoveryTurn('c-worker-1')).toBe(oldTurnId);
+  });
+
+  it('refuses ordinary tools from a null-marker ceiling park', async () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    fillContext('c-worker-1');
+    sleepSilentWorkers(
+      Date.now() + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => null
+    );
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const requestId = 'wfr_ceiling_null_marker_new';
+    await recordChatObservations('c-worker-1', [{
+      kind: 'tool_evidence',
+      time: Date.now() + 1,
+      turnId: 't-ceiling-null-marker-new',
+      calls: [{ messageId: 'm-ceiling-null-marker-new', tool: 'read', order: 0, answered: false, requestId }]
+    }]);
+    const refused = textOfReply(await ordinaryWithRequestId(requestId, 'read', { paths: ['/anything'] }));
+    expect(refused).toContain('WORKER_CONTEXT_LIMITED');
+    expect(refused).toContain('Nothing was run');
+    expect(refused).toContain('No complete pre-park request/turn recovery proof was retained');
+    expect(swarmRunning()).toBe(false);
+  });
+
+  it('does not let post-park request attribution manufacture same-old-turn authority', async () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    const oldRequestId = 'wfr_ceiling_cutoff_old';
+    const oldTurnId = 't-ceiling-cutoff-old';
+    await recordChatObservations('c-worker-1', [
+      { kind: 'turn_start', time: Date.now(), turnId: oldTurnId },
+      {
+        kind: 'tool_evidence',
+        time: Date.now(),
+        turnId: oldTurnId,
+        calls: [{ messageId: 'm-ceiling-cutoff-old', tool: 'read', order: 0, answered: false, requestId: oldRequestId }]
+      }
+    ]);
+    await ordinaryWithRequestId(oldRequestId, 'read', { paths: ['/anything'] });
+    const session = await findSessionByConversation('c-worker-1', { requireUnique: true });
+    const cutoff = await requestTurnOwnershipCutoff(session!.id, 'c-worker-1');
+    fillContext('c-worker-1');
+    sleepSilentWorkers(
+      Date.now() + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => oldTurnId,
+      () => cutoff
+    );
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const newRequestId = 'wfr_ceiling_cutoff_new';
+    await recordChatObservations('c-worker-1', [
+      { kind: 'user_message', time: Date.now() + 1, messageId: 'new-question-without-turn-start', text: 'new task' },
+      {
+        kind: 'tool_evidence',
+        time: Date.now() + 2,
+        turnId: oldTurnId,
+        calls: [{ messageId: 'm-ceiling-cutoff-new', tool: 'read', order: 0, answered: false, requestId: newRequestId }]
+      }
+    ]);
+
+    const first = textOfReply(await ordinaryWithRequestId(newRequestId, 'read', { paths: ['/anything'] }));
+    const second = textOfReply(await ordinaryWithRequestId(newRequestId, 'read', { paths: ['/anything'] }));
+    expect(first).toContain('WORKER_CONTEXT_LIMITED');
+    expect(second).toContain('WORKER_CONTEXT_LIMITED');
+    expect(first).toContain('Nothing was run');
+    expect(second).toContain('Nothing was run');
+    expect(swarmRunning()).toBe(false);
+    expect(silentCeilingRecoveryTurn('c-worker-1')).toBe(oldTurnId);
+  });
+
+  it('refuses agents finish from a new post-sleep turn instead of treating it as a lost finish retry', async () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    const oldRequestId = 'wfr_ceiling_finish_old';
+    const oldTurnId = 't-ceiling-finish-old';
+    await recordChatObservations('c-worker-1', [
+      { kind: 'turn_start', time: Date.now(), turnId: oldTurnId },
+      {
+        kind: 'tool_evidence',
+        time: Date.now(),
+        turnId: oldTurnId,
+        calls: [{ messageId: 'm-ceiling-finish-old', tool: 'read', order: 0, answered: false, requestId: oldRequestId }]
+      }
+    ]);
+    await ordinaryWithRequestId(oldRequestId, 'read', { paths: ['/anything'] });
+    const session = await findSessionByConversation('c-worker-1', { requireUnique: true });
+    const cutoff = await requestTurnOwnershipCutoff(session!.id, 'c-worker-1');
+    fillContext('c-worker-1');
+    sleepSilentWorkers(
+      Date.now() + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => oldTurnId,
+      () => cutoff
+    );
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const newRequestId = 'wfr_ceiling_finish_new';
+    await recordChatObservations('c-worker-1', [
+      { kind: 'turn_start', time: Date.now() + 1, turnId: 't-ceiling-finish-new' },
+      {
+        kind: 'tool_evidence',
+        time: Date.now() + 1,
+        turnId: 't-ceiling-finish-new',
+        calls: [{ messageId: 'm-ceiling-finish-new', tool: 'agents', order: 0, answered: false, requestId: newRequestId }]
+      }
+    ]);
+    const refused = await agentsWithRequestId(newRequestId, 'finish', { result: 'wrong turn must not finish' });
+    expect(refused).toContain('WORKER_CONTEXT_LIMITED');
+    expect(refused).toContain('Nothing was run');
+    expect(silentCeilingRecoveryTurn('c-worker-1')).toBe(oldTurnId);
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      revivable: false,
+      silenceRecoveryTurnId: oldTurnId
+    });
+  });
+
+  it('accepts agents finish from the exact pre-park ceiling turn', async () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    const requestId = 'wfr_ceiling_finish_same';
+    const turnId = 't-ceiling-finish-same';
+    await recordChatObservations('c-worker-1', [
+      { kind: 'turn_start', time: Date.now(), turnId },
+      {
+        kind: 'tool_evidence',
+        time: Date.now(),
+        turnId,
+        calls: [{ messageId: 'm-ceiling-finish-same', tool: 'read', order: 0, answered: false, requestId }]
+      }
+    ]);
+    await ordinaryWithRequestId(requestId, 'read', { paths: ['/anything'] });
+    const session = await findSessionByConversation('c-worker-1', { requireUnique: true });
+    const cutoff = await requestTurnOwnershipCutoff(session!.id, 'c-worker-1');
+    fillContext('c-worker-1');
+    sleepSilentWorkers(
+      Date.now() + WORKER_SILENCE_MS + 1,
+      undefined,
+      () => false,
+      () => turnId,
+      () => cutoff
+    );
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const finished = await agentsWithRequestId(requestId, 'finish', { result: 'same old turn done' });
+    expect(finished).toMatch(/finished/i);
+    expect(finished).not.toContain('WORKER_CONTEXT_LIMITED');
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'finished',
+      revivable: false,
+      silenceParked: false,
+      silenceRecoveryTurnId: null
+    });
   });
 
   it('delivers and acknowledges a parked prime inbox by exact conversation without adopting another history', async () => {

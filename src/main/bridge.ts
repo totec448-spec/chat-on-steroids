@@ -49,7 +49,7 @@ import type { BridgeStatus, CompanionDiagnostics, CompanionPageDiagnostics, Comp
 import { recoveryBusyMs } from '../shared/recovery.js';
 import { CHAT_ACTIVE_MS, CHAT_SILENCE_MS, continuationMarkerOf, isReasoningEffort, normalizedToolOutcome, toolCallSummary, unescapeMarkdown,
   type ReasoningEffort, type SessionEvent, type SessionOrigin, type StoredText, type ToolCallRecord } from '../shared/session.js';
-import { isChatBlocked, chatBlockedAt } from './session/blocked-chats.js';
+import { blockedChatIds, isChatBlocked, chatBlockedAt } from './session/blocked-chats.js';
 export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
 import { effectiveCapabilities, getConfig, updateConfig } from './config.js';
 import { BROWSER_BRIDGE_PORTS } from '../shared/browser-bridge.js';
@@ -121,7 +121,9 @@ import {
   turnHasMcpCall,
   readActivityEvents,
   readHydratedActivityCall,
-  sessionDurableModifiedAt
+  sessionDurableModifiedAt,
+  turnEndedDurably,
+  requestTurnOwnershipCutoff
 } from './session/store.js';
 import { inFlightMcpRequests, runningToolCalls, runningToolProgress, settlingToolCalls } from './mcp/call-context.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
@@ -142,6 +144,7 @@ import {
   activeRunIds,
   swarmRunning,
   failAgent,
+  finishSilentCeilingWorker,
   WORKER_SILENCE_MS,
   failWorkerRevival,
   finishWorkerConversation,
@@ -167,6 +170,7 @@ import {
   swarmTransferActive,
   noteAgentAlive,
   noteAgentContextTokens,
+  reactivateSilentCeilingRunForTerminal,
   persistCriticalSwarmNow,
   stageWorkerConversationFinish,
   workerConversationGone,
@@ -1287,9 +1291,30 @@ async function reconcileWorkerFinish(id: string, sessionId: string, observations
   const deliveredTurn = await reconcileDeliveredWorkerTurn(id, sessionId);
   // An ACK alone cannot make a historical final current, including after an MCP-only wake.
   if (!observations && !deliveredTurn) return true;
-  const worker = agentInfoForOwnedConversation(id);
-  if (worker?.role !== 'worker' || !['active', 'detached', 'invited'].includes(worker.state)) return true;
-  const finalText = await workerFinalAcrossBatches(sessionId, id, observations);
+  let worker = agentInfoForOwnedConversation(id);
+  if (worker?.role !== 'worker') return true;
+  let retainedTerminalText: string | null = null;
+  if (worker.state === 'sleeping' && worker.silenceParked && !worker.revivable) {
+    const completed = await readCompletedFinal(
+      sessionId,
+      id,
+      worker.silenceRecoveryTurnId ?? undefined
+    );
+    const observedEndTurn = observations
+      ? [...observations].reverse().find(
+          (entry) => entry.kind === 'turn_end' && typeof entry.turnId === 'string' && entry.turnId.length > 0
+        )?.turnId ?? null
+      : null;
+    const terminalTurn = worker.silenceRecoveryTurnId ?? observedEndTurn;
+    const ended = completed
+      ? true
+      : Boolean(terminalTurn && await turnEndedDurably(sessionId, id, terminalTurn));
+    if (!ended || !reactivateSilentCeilingRunForTerminal(id)) return true;
+    retainedTerminalText = completed?.text || 'Worker turn ended without a canonical final answer.';
+    worker = agentInfoForOwnedConversation(id);
+  }
+  if (!worker || (!retainedTerminalText && !['active', 'detached', 'invited'].includes(worker.state))) return true;
+  const finalText = retainedTerminalText ?? await workerFinalAcrossBatches(sessionId, id, observations);
   const current = agentInfoForOwnedConversation(id);
   if (!finalText || !current || current.runId !== worker.runId || current.state !== worker.state ||
       current.sleptAt !== worker.sleptAt || current.lastRevivalCommandId !== worker.lastRevivalCommandId) return true;
@@ -4430,9 +4455,18 @@ async function durableQuiescence(conversationId: string, now: number): Promise<D
     if (openTurns.size > 0) return { quiescent: false, ended: summary.endedAt !== null, lastOutcome };
   }
   if (summary.endedAt !== null) return { quiescent: true, ended: true, lastOutcome };
-  // A live-but-idle session needs one durable terminal turn. A session with only a bootstrap
-  // message and no turn_end is not proof that ChatGPT ever finished the worker/prime turn.
-  return { quiescent: lastOutcome !== null, ended: false, lastOutcome };
+  // A live-but-idle session needs a terminal boundary that is still the newest durable work.
+  // `lastTurnOutcome` by itself is historical: a later response can produce exact tool work when
+  // its browser never supplied turn_start, leaving activeTurnId null and the prior outcome stale.
+  // Treating that stale outcome as current is the ceiling-worker false-finish this sweep must not
+  // reintroduce after sleepSilentWorkers deliberately declined the ambiguous silence verdict.
+  const recentWork = await readRecentEvents(summary.id, 256, {
+    kinds: ['turn_start', 'turn_end', 'user_message', 'assistant_message', 'tool_call', 'page_tool']
+  });
+  const latest = recentWork.at(-1);
+  if (!latest || latest.kind !== 'turn_end') return { quiescent: false, ended: false, lastOutcome };
+  lastOutcome = latest.outcome;
+  return { quiescent: true, ended: false, lastOutcome };
 }
 
 /**
@@ -4448,6 +4482,18 @@ export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
   // worker's running calls separately. Do not race a recorder batch being committed.
   let brokerChanged = false;
   if (observationWritesInFlight === 0) {
+    // A user block is explicit terminal authority even if ambiguous silence already parked the
+    // ceiling worker's family. Dormant histories are not in activeRunIds(), so resolve this
+    // narrow state by exact blocked conversation before sweeping active runs.
+    for (const conversationId of blockedChatIds()) {
+      const finished = finishSilentCeilingWorker(
+        conversationId,
+        'The user blocked its chat, so its tools are refused and its unresolved turn was abandoned.'
+      );
+      if (!finished) continue;
+      if (finished.report) await recordAgentMessage(finished.report, 'sent', finished.info.conversationId);
+      brokerChanged = true;
+    }
     for (const runId of activeRunIds()) {
       if (swarmTransferActive(runId)) continue;
       brokerChanged = await sweepOwnedSwarm(runId, now) || brokerChanged;
@@ -4496,7 +4542,34 @@ async function sweepOwnedSwarm(runId: string, now: number): Promise<boolean> {
     finishSilentChats([agent.conversationId]);
   }
 
-  for (const slept of sleepSilentWorkers(now, runId, id => runningToolProgress(id) !== null)) {
+  const unresolvedTurns = new Map<string, { turnId: string | null; requestOriginMax: number | null }>();
+  await Promise.all(
+    state.agents
+      .filter(
+        (agent) =>
+          agent.role === 'worker' &&
+          agent.conversationId &&
+          (agent.state === 'active' || agent.state === 'detached')
+      )
+      .map(async (agent) => {
+        const session = await findSessionByConversation(agent.conversationId!, { requireUnique: true });
+        // A missing/ambiguous durable owner is not terminal evidence. Only a successfully
+        // resolved session may say either "this exact turn is still open" or "no turn is open".
+        if (session) {
+          unresolvedTurns.set(agent.conversationId!, {
+            turnId: session.activeTurnId ?? null,
+            requestOriginMax: await requestTurnOwnershipCutoff(session.id, agent.conversationId!)
+          });
+        }
+      })
+  );
+  for (const slept of sleepSilentWorkers(
+    now,
+    runId,
+    id => runningToolProgress(id) !== null,
+    id => unresolvedTurns.get(id)?.turnId,
+    id => unresolvedTurns.get(id)?.requestOriginMax
+  )) {
     if (slept.report) await recordAgentMessage(slept.report, 'sent', slept.info.conversationId);
     stoppedWorkers.push(slept.info.id);
   }
@@ -7184,7 +7257,7 @@ async function browserTabPolicy(openConversations: Set<string>) {
     if (protectedChats.has(id) || terminal.has(id) || isChatBlocked(id) || !lastActivity.has(id)) return false;
     const agent = agentInfoForOwnedConversation(id);
     // A sleeping worker keeps its durable identity and report, but need not keep a tab.
-    if (agent?.role === 'worker') return agent.state === 'sleeping';
+    if (agent?.role === 'worker') return agent.state === 'sleeping' && agent.revivable;
     const row = summariesByChat.get(id);
     // An old open turn or mere creation timestamp cannot establish a quiet chat.
     return row?.activeTurnId === null && Math.max(row.lastTurnEndAt ?? 0, row.lastAssistantFinalAt ?? 0) > 0;

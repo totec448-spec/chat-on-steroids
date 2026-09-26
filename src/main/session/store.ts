@@ -1797,6 +1797,58 @@ export async function turnHasMcpCall(sessionId: string, conversationId: string, 
   return calls.length > 0;
 }
 
+/** Exact durable ownership proof for a context-limited worker's unresolved pre-silence turn. */
+export async function requestBelongsToActiveTurn(
+  sessionId: string,
+  conversationId: string,
+  requestId: string,
+  expectedTurnId: string,
+  requestOriginMax: number
+): Promise<boolean> {
+  const summary = await getSession(sessionId);
+  if (!summary || summary.conversationId !== conversationId || !summary.activeTurnId) return false;
+  const owner = recordedRequestTurn(summary.requestTurns, requestId, conversationId);
+  if (!owner || owner.origin > requestOriginMax) return false;
+  const expected = responseTurnId(summary.timelineTurns, expectedTurnId);
+  return responseTurnId(summary.timelineTurns, owner.turnId) === expected &&
+    responseTurnId(summary.timelineTurns, summary.activeTurnId) === expected;
+}
+
+/** Durable journal boundary used to distinguish pre-park request ownership from later attribution. */
+export async function requestTurnOwnershipCutoff(
+  sessionId: string,
+  conversationId: string
+): Promise<number | null> {
+  const entry = await ensureOpen(sessionId);
+  await flushSession(sessionId);
+  if (entry.summary.conversationId !== conversationId) return null;
+  return Math.max(0, entry.nextSeq - 1);
+}
+
+/** Durable terminal boundary for one exact response, with false-end reopening kept authoritative. */
+export async function turnEndedDurably(
+  sessionId: string,
+  conversationId: string,
+  expectedTurnId: string
+): Promise<boolean> {
+  const entry = await ensureOpen(sessionId);
+  await flushSession(sessionId);
+  if (entry.summary.conversationId !== conversationId) return false;
+  const sameTurn = (turnId: string | null | undefined): boolean =>
+    !!turnId && responseTurnId(entry.summary.timelineTurns, turnId) ===
+      responseTurnId(entry.summary.timelineTurns, expectedTurnId);
+  // A late exact call can reopen a page-reported end. While that response is active again, the
+  // historical end is not terminal authority for a parked ceiling worker.
+  if (sameTurn(entry.summary.activeTurnId)) return false;
+  const recent = await readRecentEventsFromDisk(sessionId, 256, {
+    kinds: ['turn_start', 'turn_end', 'user_message', 'assistant_message', 'tool_call', 'page_tool']
+  });
+  const latest = recent.at(-1);
+  // The terminal boundary must itself still be the newest durable work. This rejects an old
+  // replayed end when a newer response exists but never published a local turn_start.
+  return Boolean(latest?.kind === 'turn_end' && sameTurn(latest.turnId));
+}
+
 /**
  * Recorded local execution by any turn that answered the same question as `turnId`.
  *

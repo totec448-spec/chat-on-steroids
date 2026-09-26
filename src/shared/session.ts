@@ -806,12 +806,26 @@ export interface AgentInfo {
   /**
    * Whether this agent can be brought back — by the prime, or by its own next call.
    *
-   * True for every sleeping worker under the context ceiling, and for one that ended for a
+   * True for every ordinary sleeping worker under the context ceiling, and for one that ended for a
    * reason that says nothing about the turn itself (its chat was closed, or it went quiet
    * after that). False for a worker whose tab never opened, one a person cleared, and one
-   * whose chat crossed the ceiling, which is what makes that crossing terminal.
+   * whose chat crossed the ceiling. A worker parked only because of ambiguous silence records
+   * silenceParked; when the recorder also knows the exact unresolved response, it stores that
+   * identity in silenceRecoveryTurnId. Neither field grants new work at the ceiling.
    */
   revivable: boolean;
+  /** Durable reason that this stopped worker released its slot on ambiguous silence, not completion. */
+  silenceParked?: boolean;
+  /**
+   * Exact unresolved server-turn identity retained alongside silenceParked when recorder evidence
+   * has one. This never grants a new-task wake; only exact same-turn recovery may consume it.
+   */
+  silenceRecoveryTurnId?: string | null;
+  /**
+   * Highest durable journal origin that existed when silence parked this worker. Same-turn MCP
+   * recovery accepts only request ownership already present at or before this boundary.
+   */
+  silenceRecoveryRequestOriginMax?: number | null;
   /**
    * Bridge command id of the most recent revival whose user message ChatGPT accepted.
    *
