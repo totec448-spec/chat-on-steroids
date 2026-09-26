@@ -1056,25 +1056,45 @@ async function recoveryInvalidReason(row: InputEntry): Promise<string | null> {
   return (await getSession(row.sessionId))?.conversationId === boundary.conversationId ? null : 'the session moved to another chat';
 }
 
+const recoveryRefusalsTold = new Set<string>();
+
 /** Shared unfinished-response ticket; mode policy belongs to the bridge hook. */
 export function fileRecoveryInput(sessionId: string, conversationId: string, turnId: string, pro: boolean,
   currentOwner: () => boolean, busyUntil = Date.now() + recoveryBusyMs(pro), episode = `turn:${turnId}`): Promise<boolean> {
+  // Every refusal says why, once per turn and reason. Silent refusals cost a stopped chat its
+  // only automatic restart with nothing anywhere naming the cause (2026-09-26: a prime's restart
+  // was refused twice and the log said only that the chat had stopped).
+  const refused = (why: string): false => {
+    const key = `${conversationId}:${turnId}:${why}`;
+    if (!recoveryRefusalsTold.has(key)) {
+      recoveryRefusalsTold.add(key);
+      if (recoveryRefusalsTold.size > 500) recoveryRefusalsTold.delete(recoveryRefusalsTold.values().next().value!);
+      logInfo(`input: automatic Continue for ${conversationId} not filed — ${why} (turn ${turnId})`);
+    }
+    return false;
+  };
   return serial(async () => {
     const current = await load();
     // Never overtake authored input, retry an ambiguous send, or reuse a spent source.
-    if (current.some(row => row.sessionId === sessionId && !terminal(row))) return false;
+    if (current.some(row => row.sessionId === sessionId && !terminal(row))) return refused('an earlier message of this session is still awaiting delivery');
     const question = await readLatestUserMessage(sessionId, turnId);
     const [work] = await readRecentEvents(sessionId, 1, { kinds: RECOVERY_WORK_KINDS });
-    if (!question?.messageId || !work || !currentOwner()) return false;
+    if (!question?.messageId) return refused('the session has no recorded question to continue');
+    if (!work) return refused('the session has no recorded work to continue');
+    if (!currentOwner()) return false;
     if (current.some(row => row.sessionId === sessionId && row.recovery && row.silenceBoundary?.turnId === turnId &&
-        (!row.recovery.episode || row.recovery.episode === episode || row.sendAuthorizedAt !== undefined))) return false;
+        (!row.recovery.episode || row.recovery.episode === episode || row.sendAuthorizedAt !== undefined))) return refused('this turn already has its restart');
     const now = Date.now();
     const row: InputEntry = { id: randomUUID(), sessionId, conversationId, owner: null, state: 'queued',
       mode: 'after-turn', dueAt: now, createdAt: now, model: null, reasoningEffort: null,
       text: recoveryMessage(),
       recovery: { questionId: question.messageId, episode, pro, busyUntil, phase: 'ready' },
       silenceBoundary: { turnId, conversationId, workSeq: workSequence(work), acceptedAt: now } };
-    if (!await recoveryCurrent(row) || !currentOwner()) return false;
+    if (!await recoveryCurrent(row)) {
+      const why = await recoveryInvalidReason(row);
+      return refused(why ?? 'a local tool call is still running');
+    }
+    if (!currentOwner()) return false;
     await commit(append(current, row));
     return true;
   });
