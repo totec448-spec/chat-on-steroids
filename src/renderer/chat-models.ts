@@ -50,7 +50,6 @@ export function applyComposerSessionModel(scope: string | null, observation: Obs
 function composerModels() {
   if (!catalog.models.length) return [];
   return catalog.models
-    .filter(model => !/^gpt[ -]?5\.5(?:$|[ -])/i.test(model.label))
     .map(model => ({ ...model, efforts: composerEfforts.filter(effort => model.efforts.includes(effort)) }))
     .filter(model => model.efforts.length > 0);
 }

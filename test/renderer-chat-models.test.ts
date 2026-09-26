@@ -100,7 +100,7 @@ it('opening an empty or pending picker requests models immediately without a sep
   expect(requestChatModels).toHaveBeenCalledTimes(2);
 });
 
-it('excludes GPT-5.5 from the composer slider without excluding future observed models or settings choices', async () => {
+it('keeps every observed model with a supported composer effort in the slider', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
   const models = [
@@ -112,10 +112,10 @@ it('excludes GPT-5.5 from the composer slider without excluding future observed 
   const { initChatModels, applyChatModels, confirmedComposerModel } = await import('../src/renderer/chat-models.js');
   initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
   const slider = dom.window.document.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
-  expect(slider.max).toBe('2');
-  expect([...dom.window.document.querySelectorAll<HTMLOptionElement>('#composerModel option')].map(option => option.value)).toEqual(['sol', 'future']);
+  expect(slider.max).toBe('5');
+  expect([...dom.window.document.querySelectorAll<HTMLOptionElement>('#composerModel option')].map(option => option.value)).toEqual(['old', 'sol', 'future']);
   expect([...dom.window.document.querySelectorAll<HTMLOptionElement>('#workerModel option')].some(option => option.value === 'old')).toBe(true);
-  slider.value = '2'; slider.dispatchEvent(new dom.window.Event('input'));
+  slider.value = '5'; slider.dispatchEvent(new dom.window.Event('input'));
   expect(confirmedComposerModel()).toEqual({ model: 'future', reasoningEffort: 'high' });
 });
 
@@ -270,7 +270,7 @@ it('offers only observed models, prefers supported GPT-6 High, and replaces a re
   expect([...select('composerReasoning').options].some(option => option.value === 'high')).toBe(false);
 });
 
-it('keeps observed composer choices in provider order except the user-excluded GPT-5.5 section', async () => {
+it('keeps all observed composer choices in provider order', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
   const models = [
@@ -283,14 +283,14 @@ it('keeps observed composer choices in provider order except the user-excluded G
   initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
   const doc = dom.window.document;
   const slider = doc.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
-  expect(slider.max).toBe('3');
-  expect(doc.querySelectorAll('.power-dot')).toHaveLength(4);
+  expect(slider.max).toBe('6');
+  expect(doc.querySelectorAll('.power-dot')).toHaveLength(7);
   const header = doc.querySelector('.power-header')!;
   expect(header.querySelector('.power-icon') === null).toBe(true);
   expect(header.querySelector('#composerPowerTitle')).not.toBeNull();
   expect(header.querySelector('#composerPowerModel')).not.toBeNull();
   expect(header.querySelector('#refreshComposerModels')).not.toBeNull();
-  const expected = [['astra', 'high'], ['sol', 'low'], ['sol', 'medium'], ['sol', 'high']];
+  const expected = [['astra', 'high'], ['old', 'low'], ['old', 'high'], ['old', 'pro'], ['sol', 'low'], ['sol', 'medium'], ['sol', 'high']];
   for (const [index, [model, reasoningEffort]] of expected.entries()) {
     slider.value = String(index); slider.dispatchEvent(new dom.window.Event('input'));
     expect(confirmedComposerModel()).toEqual({ model, reasoningEffort });
