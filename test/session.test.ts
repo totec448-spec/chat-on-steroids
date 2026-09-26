@@ -2298,14 +2298,16 @@ describe('handoff storage', () => {
     expect(chunkText('short brief', 1000)).toEqual(['short brief']);
   });
 
-  it('asks for dense user-authoritative handoffs without forcing a near-message-limit brief', () => {
+  it('asks for user-authoritative handoffs up to the documented 30k-token ceiling', () => {
     const prompt = nativeHandoffPrompt();
     expect(prompt).toContain(DEFAULT_HANDOFF_PROMPT);
     expect(prompt).toMatch(/user's messages as the highest-authority source/i);
-    expect(prompt).toMatch(/2,000-6,000 tokens/i);
-    expect(prompt).toMatch(/Compress completed chronology aggressively/i);
-    expect(prompt).toMatch(/never pad the brief/i);
+    expect(prompt).toMatch(/10,000[–-]30,000 tokens/i);
+    expect(prompt).toMatch(/~6,000-token brief is normally too short/i);
+    expect(prompt).toMatch(/Never exceed 30,000 tokens/i);
+    expect(prompt).toMatch(/lossless operational compression/i);
     expect(prompt).toMatch(/failure.*root cause.*change.*verification/i);
+    expect(prompt).toMatch(/PLANNED \/ DECIDED/i);
     expect(prompt).toMatch(/FAILED \/ UNRESOLVED/i);
     expect(prompt).toMatch(/VERIFICATION/i);
     expect(prompt).toMatch(/completed and verified/i);
@@ -3905,4 +3907,14 @@ describe('activity windows', () => {
     // tick and the extension's thirty-second alarm floor.
     expect(CHAT_ACTIVE_MS - CHAT_SILENCE_MS).toBeGreaterThanOrEqual(60_000);
   });
+});
+
+it('ships the long-standing handoff brief rules as the editable default, unchanged', () => {
+  // Making the prompt editable must not quietly change Compact & Resume for everyone who never
+  // opens the editor: the default is the brief the app has always asked for.
+  expect(DEFAULT_HANDOFF_PROMPT).toContain('target roughly 10,000–30,000 tokens');
+  for (const heading of ['TASK —', 'USER SPECIFICATION —', 'CURRENT STATE —', 'DONE —', 'IN PROGRESS —', 'PLANNED / DECIDED —',
+    'FAILED / UNRESOLVED —', 'FILES —', 'VERIFICATION —', 'ENVIRONMENT —', 'NEXT —', 'DO NOT —']) {
+    expect(DEFAULT_HANDOFF_PROMPT, heading).toContain(heading);
+  }
 });

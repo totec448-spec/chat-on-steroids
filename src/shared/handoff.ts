@@ -9,24 +9,32 @@ export const MAX_HANDOFF_PROMPT_CHARS = 20_000;
  * user-editable: it controls what the brief emphasizes, not whether the handoff is valid.
  */
 export const DEFAULT_HANDOFF_PROMPT = `Rules:
-- Treat the user's messages as the highest-authority source. Preserve the original task, every material requirement, later correction, constraint, explicit preference and request about what should happen next. When a later message changes an earlier requirement, state the final position clearly.
-- Distinguish verified work from plans and claims. Use successful tool evidence to say what actually happened; do not present an assistant promise, TODO or guess as completed work.
-- Center the brief on continuation-critical state: what is complete and verified, what is currently in progress and exactly where it stopped, what remains to do, and what failed or is still uncertain. The next agent should be able to choose its next action without rediscovering the session.
-- Keep exact identifiers that matter to continuation, including relevant file paths, symbols, versions, hashes, ids, commands and error text. Preserve important failure -> root cause -> change -> verification links.
-- Include unresolved bugs and failed attempts with enough detail to avoid repeating them. Preserve material reports from other agents and note work that is still delegated.
-- Compress completed chronology aggressively. Summarize repeated successful commands, routine exploration and superseded intermediate states instead of replaying the session. Spend space on the latest state, user corrections, unresolved work and evidence that changes the next decision.
-- For a substantial coding/debugging session, prefer a dense operational brief of roughly 2,000-6,000 tokens. Shorter is appropriate when the task is simple. Exceed that range only when essential continuation state would otherwise be lost; never pad the brief to reach a target.
-- Be concise and operational: compact sections, bullets and short lines. No preamble, praise, closing remark or narration of obvious chronology. If the recording is incomplete or ambiguous, say so briefly rather than inventing detail.
+- Treat the user's messages as the highest-authority source in the entire handoff. They are the specification. Preserve the original task, every requirement, every later correction, every constraint, every explicit preference, and every request about what should happen next. If a later message changed an earlier requirement, state the final position and say that it changed. Never let an assistant plan, guess, TODO, or tool-side interpretation override what the user actually said.
+- Preserve the substance of every user message that could matter to continuing the work, even when it is conversational, repetitive, frustrated, shorthand, or speech-to-text. Collapse duplicates only when their meaning is genuinely identical; preserve differences, changed decisions, priorities, and corrections.
+- Never drop a requirement because it looks minor or because it was not worked on. Unfinished requirements matter most.
+- Use the tool evidence to decide what is actually done. An assistant message saying it will do something is not evidence that it happened; a recorded tool call that succeeded is. Say plainly which is which.
+- Keep exact identifiers: file paths, function names, versions, ports, hashes, ids, command lines, error text. Do not paraphrase them.
+- Make the current state the centre of the brief: what is complete and verified · what is currently in progress and exactly where it stopped · what is planned/decided but not implemented yet · what was attempted and failed · what was only discussed · what is still to do. Write enough state that the next agent can choose its very next tool call without rediscovering the session.
+- Include failures and unresolved bugs with the actual error, and say what was already tried so it is not repeated.
+- AGENT MESSAGE lines are traffic with other agents in a multi-agent run. One delivered to this agent is a report about work done outside this recording — treat it as the only evidence of that work and keep its substance. One sent by this agent is work already delegated; say who is doing it so it is not delegated again.
+- State the current state of the repository, install and running processes as far as the recording shows it.
+- Preserve causal links, not just facts. When a bug, design decision or patch exists because of a specific observed failure, keep the failure → root cause → change → verification chain together. Keep known-good and known-bad behaviours distinct.
+- Treat the brief as a lossless operational compression, not an executive summary. Prefer completeness over brevity. For a substantial coding/debugging session, target roughly 10,000–30,000 tokens when the material warrants it and use the available answer budget aggressively; a ~6,000-token brief is normally too short when the conversation contains many user corrections, tool calls, patches, tests, agent reports or unresolved branches. Shorter is appropriate only when there genuinely is less useful state to preserve. Never exceed 30,000 tokens.
+- Spend extra space on concrete continuation value: exact changed files and symbols, dirty-tree caveats, test/build commands and outcomes, live-session evidence, current hypotheses with confidence, rejected approaches and why, pending worker ownership, release/install state, and the precise next actions. Do not spend that space repeating prose or narrating obvious chronology.
+- Be dense and operational even when long. No preamble, no praise, no restating these instructions, no "in this session we". Use compact sections, bullets and short lines so a 10k–30k-token brief remains navigable rather than repetitive.
+- If the recording is incomplete or ambiguous, say so in one line rather than inventing detail.
 
 Structure the brief with these headings, omitting any that would be empty:
 
-TASK - the original goal, in the user's terms.
-USER SPECIFICATION - material requirements, constraints, preferences, corrections and changed decisions, with the final position explicit.
-CURRENT STATE - what is true right now: active implementation, repository/app/session state and latest relevant behavior.
-DONE - completed and verified work, with the evidence that matters.
-IN PROGRESS - started but unfinished work and exactly where it stopped.
-FAILED / UNRESOLVED - failures, uncertainties and what was already tried.
-FILES - paths and symbols that matter to continuation, plus what changed in them.
-VERIFICATION - tests, builds, smoke checks and live evidence already run, plus what remains unverified.
-NEXT - concrete next actions, in order.
-DO NOT - work the next agent should not repeat, undo or accidentally broaden.`;
+TASK — the original goal, in the user's terms.
+USER SPECIFICATION — every material user request, constraint, preference, correction and changed decision, with the final position explicit. This is the authoritative section.
+CURRENT STATE — what is true right now: repository/app/session state, active implementation, versions, processes, and latest relevant observed behaviour.
+DONE — completed and verified, with the evidence.
+IN PROGRESS — started, not finished, and exactly where it stopped.
+PLANNED / DECIDED — concrete work the user or agent decided should happen next but that tool evidence does not show as completed yet.
+FAILED / UNRESOLVED — what broke, the error, what was already tried.
+FILES — paths touched or inspected that matter to continuation, what changed in each, and important symbols/line regions when known.
+VERIFICATION — tests, builds, smoke checks and live evidence already run, with exact commands/results and what remains unverified.
+ENVIRONMENT — commands, versions, running processes, repo/dirty-tree state, installation/release state, and anything the next agent must preserve.
+NEXT — the concrete next actions, in order.
+DO NOT — what the next agent should not redo or undo.`;
