@@ -2074,6 +2074,46 @@ it('shows elapsed work for the exact recorded turn without exposing lifecycle ro
 });
 
 
+/**
+ * A chat whose page stopped reporting turns still says it is working.
+ *
+ * Every branch of this caption needs a turn to describe, and a page that stopped reporting
+ * supplies none — so the line either fell silent or went on describing the previous turn as
+ * finished while the chat kept working. Measured on 2026-09-25: a conversation resumed after an
+ * automatic compaction made 650 exactly attributed tool calls over two and a half hours with no
+ * turn reported by its page, and the app said nothing about any of it. The person then sits in
+ * front of a chat that looks idle and waits for work that is already happening.
+ *
+ * The recorded tool clock is what the page is not: `lastToolCallAt` comes from calls the
+ * request-id join has already tied to this exact conversation.
+ */
+it('says a chat is working when its page reports no turn but its tools keep arriving', async () => {
+  const ended: SessionEvent[] = [
+    { seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'page-turn' },
+    { seq: 2, time: T0 + 5_000, source: 'extension', kind: 'turn_end', turnId: 'page-turn', outcome: 'completed' }
+  ];
+  const row = { ...summary(ended), lastToolCallAt: null as number | null };
+  const { w, append } = await boot(ended, true, [], [], { sessions: [row] });
+  // No turn from the page's side, which is the whole subject.
+  (w as any).api.getSessionControls = (id: string) => Promise.resolve({ ok: true,
+    data: { sessionId: id, automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
+  const note = w.document.getElementById('chatState')!;
+
+  // The turn the page did report is over, and nothing has happened since.
+  await append([]);
+  expect(note.textContent).toBe('Worked for 5s');
+
+  row.lastToolCallAt = Date.now() - 20_000;
+  await append([]);
+  expect(note.textContent, 'a blind chat still claimed to be finished').toBe('Working…');
+  expect(note.classList.contains('is-working')).toBe(true);
+
+  // Old enough to be the record of a chat that has since stopped: the caption lets go again.
+  row.lastToolCallAt = Date.now() - 10 * 60_000;
+  await append([]);
+  expect(note.textContent).toBe('Worked for 5s');
+});
+
 it('stops directly from the empty composer without a second Stop menu action', async () => {
   const { w } = await boot([]);
   const stop = vi.fn(async () => ({ ok: true, data: {} }));
@@ -3563,4 +3603,24 @@ it('keeps a cancelled automatic draft at its creation time as later messages arr
   await app.append([]);
   expect(timeline.textContent).not.toContain('Unused automatic instruction');
   expect(live.sent).toHaveLength(0);
+});
+
+it('keeps the latest recovery verdict in view until the chat works again', async () => {
+  // 2026-09-26: a stopped prime was explained only by timeline notes that scrolled away.
+  const verdict = 'Could not restart this chat automatically: the browser chat was closed. Send a message here to continue it.';
+  const app = await boot([
+    { seq: 1, time: T0 + 1000, source: 'extension', kind: 'turn_start', turnId: 'stalled' },
+    { seq: 2, time: T0 + 2000, source: 'extension', kind: 'turn_end', turnId: 'stalled', outcome: 'stalled' },
+    { seq: 3, time: T0 + 3000, source: 'app', kind: 'note', message: text(verdict) }
+  ] as SessionEvent[]);
+  const host = app.w.document.getElementById('recoveryStatus')!;
+  expect(host.hidden).toBe(false);
+  expect(host.textContent).toContain('Could not restart this chat automatically');
+  await app.append([{ seq: 4, time: T0 + 4000, source: 'extension', kind: 'turn_start', turnId: 'resumed' } as SessionEvent]);
+  expect(host.hidden).toBe(true);
+});
+
+it('does not show a handoff note as a recovery verdict', async () => {
+  const app = await boot([{ seq: 1, time: T0 + 1000, source: 'app', kind: 'note', continuation: TOKEN, message: text('Compact & Resume abandoned') }] as SessionEvent[]);
+  expect(app.w.document.getElementById('recoveryStatus')!.hidden).toBe(true);
 });

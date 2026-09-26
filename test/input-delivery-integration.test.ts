@@ -23,7 +23,7 @@ vi.mock('electron', () => ({
     decryptStringAsync: async (data: Buffer) => ({ result: data.toString(), shouldReEncrypt: false })
   }
 }));
-vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd() }));
+vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd(), shippedExtensionBuild: () => null }));
 vi.mock('../src/main/connection.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/main/connection.js')>();
   return { ...actual, connect: async () => {}, getStatus: () => ({ ...actual.getStatus(), state: 'connected' }) };
@@ -125,6 +125,70 @@ it('keeps automatic Continue attached to the native question after injected corr
     expect(row.recovery?.questionId).toBe(questionId);
     expect((await input.pendingBrowserInputs()).find(item => item.id === row.id)?.recovery?.questionId).toBe(questionId);
     expect(await input.claimBrowserInput(row.id, 'replacement-document', conversationId, true)).not.toBeNull();
+  } finally { clock.mockRestore(); }
+});
+
+/**
+ * The reason a recovery message could not be sent, kept instead of dropped.
+ *
+ * A Continue that was never authorized is still owed, so `releaseRecoveryClaim` hands the ticket back
+ * to the queue on purpose and keeps its pickup budget. What went with it was the explanation: the page
+ * tells the app exactly why it could not send, `failBrowserInput` receives that string, and this one
+ * branch was the only one that discarded it — every other branch there stores it as `error`.
+ *
+ * Measured on 2026-09-26: one recovery row claimed twelve times in three minutes, back to `queued`
+ * every time, with no `error` on the receipt and not a single line in the log. The loop was visible
+ * only because the *claims* are logged; the reason for the release was nowhere.
+ */
+it('keeps the reason a recovery claim was released, and says it once', async () => {
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const bridge = await import('../src/main/bridge.js');
+    const { getLog } = await import('../src/main/logger.js');
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+    const conversationId = randomUUID(), turnId = randomUUID(), questionId = randomUUID();
+    const session = await createSession({ title: 'Released recovery claim', conversationId });
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+      { kind: 'user_message', messageId: questionId, text: 'Finish the task', time: now },
+      { kind: 'turn_start', turnId, time: now }
+    ] });
+    await attributedMcp(conversationId);
+    now += 120_000;
+    await bridge.sweepStaleSwarm(now);
+    const repair = (await post('/status', { openConversations: [conversationId] })).body.repairs
+      .find((item: any) => item.conversationId === conversationId);
+    expect(repair?.reason, 'no silence repair, so no recovery row to release').toBe('silence');
+    expect((await post('/repairs/claim', { token: repair.token })).body.allowed).toBe(true);
+    await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
+    const row = (await input.listInputs()).find(item => item.sessionId === session.id && item.recovery)!;
+    expect(row, 'no recovery row was filed').toBeTruthy();
+
+    expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
+    const reason = 'The composer refused the prepared text.';
+    expect(await input.failBrowserInput(row.id, 'a-document', reason)).toBe(true);
+
+    // The ticket survives — that is the point of releasing rather than failing it — and now it
+    // carries why it came back.
+    const released = (await input.listInputs()).find(item => item.id === row.id)!;
+    expect(released.state, 'the ticket was not handed back to the queue').toBe('queued');
+    expect(released.owner).toBeNull();
+    expect(released.error, 'the reason the browser gave was discarded').toBe(reason);
+
+    const said = getLog().filter(entry => entry.message.includes('could not send this recovery message'));
+    expect(said, 'the release was not reported at all').toHaveLength(1);
+    expect(said[0]!.message).toContain(reason);
+
+    // Said once per reason, not once per attempt: the schedule re-offers the same ticket in seconds.
+    expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
+    expect(await input.failBrowserInput(row.id, 'a-document', reason)).toBe(true);
+    expect(getLog().filter(entry => entry.message.includes('could not send this recovery message')),
+      'it repeated itself once per attempt').toHaveLength(1);
+
+    // A different reason is new information and is said.
+    expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
+    expect(await input.failBrowserInput(row.id, 'a-document', 'The tab moved to another chat.')).toBe(true);
+    expect(getLog().filter(entry => entry.message.includes('could not send this recovery message'))).toHaveLength(2);
   } finally { clock.mockRestore(); }
 });
 
@@ -1842,6 +1906,34 @@ describe('native progress silence authority', () => {
     if (repair.requiresClaim) expect((await post('/repairs/claim', { conversationId, token: repair.token })).body.allowed).toBe(true);
     await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
   }
+
+  /**
+   * A rescue that was withdrawn must not stand in for the one the chat still needs.
+   *
+   * The ticket is cancelled for a good reason — the chat resumed on its own, so typing into it
+   * would be noise — but the check that keeps one ticket per turn counted the cancelled row all
+   * the same. Watched live on 2026-09-23: a rescue filed at 20:32:35, cancelled fifteen seconds
+   * later as "the source received new work", and the same turn broke again two minutes after
+   * that. The second rescue was refused on the strength of the first, and the chat sat until its
+   * owner typed into it.
+   */
+  it('files a second rescue for a turn whose first was cancelled without ever sending', async () => {
+    const source = await open('gpt-5.6-sol');
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+    const first = (await input.listInputs()).find(row => row.recovery)!;
+    expect(first.silenceBoundary?.turnId).toBe(source.turnId);
+
+    // Withdrawn because the chat carried on by itself — nothing was ever sent.
+    expect(await input.cancelInput(first.id)).toBe(true);
+    expect((await input.listInputs()).find(row => row.id === first.id)?.state).toBe('cancelled');
+
+    // The same turn breaks again. This is the rescue that used to be refused.
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true),
+      'a cancelled ticket still blocked the turn it never answered').toBe(true);
+    const live = (await input.listInputs()).filter(row => row.recovery && row.state === 'queued');
+    expect(live).toHaveLength(1);
+    expect(live[0]!.id).not.toBe(first.id);
+  });
 
   it('keeps authored queued work ahead of automatic Continue after a committed handoff', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);

@@ -1888,6 +1888,24 @@
           const running = shell.entry.turn.status === 'in_progress' ? location.pathname : null;
           if (running && section.getAttribute('data-clf-shell-running') !== running) section.setAttribute('data-clf-shell-running', running);
           else if (!running) section.removeAttribute('data-clf-shell-running');
+          /*
+           * Whether this is a temporary chat, said by the page's own state rather than read off
+           * an icon.
+           *
+           * `temporaryChatReady()` proves the mode from the checked glyph in the toolbar, which
+           * is the only evidence a document has while nothing is mounted. Once a turn exists,
+           * React holds the answer directly — measured on 2026-09-25 across both kinds of chat:
+           * `entry.isTemporaryChat` is true on `/c/<id>?temporary-chat=true` and false on an
+           * ordinary chat, at every depth it appears. A layout that stops drawing that glyph
+           * therefore stops proving the mode, while this keeps proving it.
+           *
+           * Stamped with the pathname for the same reason the running hint is: a stamp left on a
+           * section from another route must not answer for this one. Absent state leaves no
+           * stamp at all, so the glyph remains the proof where React says nothing.
+           */
+          const temporary = shell.entry.isTemporaryChat === true ? location.pathname : null;
+          if (temporary && section.getAttribute('data-clf-temporary-chat') !== temporary) section.setAttribute('data-clf-temporary-chat', temporary);
+          else if (!temporary) section.removeAttribute('data-clf-temporary-chat');
         }
         if (!conversation.conflict) for (const [node, id] of exactAnchors) {
           desiredMessageStamps.set(node, `${scanToken}:${index}:${encodeURIComponent(id)}`);
@@ -1935,7 +1953,10 @@
             if (currentImage !== null) node.removeAttribute('data-clf-fiber-image');
           } else if (currentImage !== wantedImage) node.setAttribute('data-clf-fiber-image', wantedImage);
         }
-        if (!desiredTurnStamps.has(section)) section.removeAttribute('data-clf-shell-running');
+        if (!desiredTurnStamps.has(section)) {
+          section.removeAttribute('data-clf-shell-running');
+          section.removeAttribute('data-clf-temporary-chat');
+        }
         for (const stamped of [section, ...section.querySelectorAll('[data-content-search-unit-key]')]) {
           const wanted = desiredTurnStamps.get(stamped);
           const current = stamped.getAttribute('data-clf-fiber-turn');
@@ -1962,6 +1983,7 @@
   function scan(nonce) {
     // The existing scan also refreshes mounted-picker evidence; no new poll timer.
     try { pickerSnapshot(); } catch { /* An unknown picker cannot affect recording. */ }
+    try { temporaryModeSnapshot(); } catch { /* Unknown mode leaves no stamp, never a false one. */ }
     // The request nonce already uniquely names this scan across the two worlds. Reuse it as
     // the ephemeral frame token rather than minting a second random value: every DOM stamp
     // can then prove both which descriptor index it names and which exact scan produced it.
@@ -2009,6 +2031,33 @@
     post({ source: REPLY, nonce, scanToken, v: VERSION, scanOk, rows, turns }, location.origin);
   }
 
+  /**
+   * Whether this document is a temporary chat, from React's own state rather than an icon.
+   *
+   * The newer shell draws the header toggle with inline paths instead of the `#chat-temp-checked`
+   * sprite `temporaryChatReady()` looked for, so an empty temporary chat stopped proving its mode
+   * at all (measured 2026-09-26, English and German). The toggle's owner carries
+   * `isTemporaryChat` a few Fibers up — true on `/?temporary-chat=true`, false after switching it
+   * off — which is the same state the mounted-turn stamp reads. Only a single consistent answer
+   * from visible header buttons stamps the document, with the pathname it was made on.
+   */
+  function temporaryModeSnapshot() {
+    const answers = new Set();
+    const buttons = [...document.querySelectorAll('button')].filter(button => button.getClientRects().length > 0 &&
+      !button.closest(`${OWN_SURFACES},form,[data-turn-key],[data-testid^="conversation-turn"],nav,aside`)).slice(0, 40);
+    for (const button of buttons) {
+      let at = fiberOf(button);
+      for (let up = 0; at && up < 12; up++, at = at.return) {
+        const props = at.memoizedProps;
+        if (props && typeof props === 'object' && typeof props.isTemporaryChat === 'boolean') { answers.add(props.isTemporaryChat); break; }
+      }
+    }
+    const root = document.documentElement;
+    if (answers.size === 1 && answers.has(true)) {
+      if (root.getAttribute('data-clf-temporary-page') !== location.pathname) root.setAttribute('data-clf-temporary-page', location.pathname);
+    } else root.removeAttribute('data-clf-temporary-page');
+  }
+
   /** Picker data is account-evaluated state, never a scraped English announcement.
    * Copy only selection metadata; no conversation, account object or callbacks cross worlds. */
   function pickerSnapshot() {
@@ -2054,17 +2103,24 @@
     const machine = node.getAttribute('data-selected-reasoning-effort');
     // The reported alternate trigger exposes a locale-independent selected effort.
     // Unknown explicit values invalidate proof rather than falling back to its caption.
-    const effort = machine !== null ? (['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(machine) ? machine : null)
-      : ({ instant: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high',
-        'extra high': 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[String(node.textContent || '').trim().toLowerCase()];
-    if (!effort) return null;
-    let model = null;
+    const captionEffort = ({ instant: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high',
+      'extra high': 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[String(node.textContent || '').trim().toLowerCase()];
+    let model = null, lane = null;
     for (let fiber = fiberOf(node), up = 0; fiber && up < MAX_CLIMB; up++, fiber = fiber.return) {
+      // The shell picker's selected lane carries the visible effort name: the machine
+      // attribute reports its transport value (medium/max) for Pro/Extra High lanes.
+      const sel = fiber.memoizedProps?.selectedPowerSelection ?? fiber.memoizedProps?.selectedLabelCandidate;
+      if (lane === null && sel) lane = { model: sel.model,
+        effort: ({ instant:'none', minimal:'minimal', low:'low', medium:'medium', high:'high',
+          'extra high':'xhigh', max:'max', ultra:'ultra', pro:'pro' })[String(sel.labels?.effort ?? sel.sliderLabel ?? '').trim().toLowerCase()] ?? null };
       const current = fiber.memoizedProps?.currentModelId;
       if (current === undefined) continue;
       if (typeof current !== 'string' || !/^[a-zA-Z0-9._-]{1,80}$/.test(current) || (model && model !== current)) return null;
       model = current;
     }
+    const effort = (lane && lane.model === model && lane.effort) ||
+      (machine !== null ? (['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(machine) ? machine : null) : captionEffort);
+    if (!effort) return null;
     return model ? { id: model, effort } : null;
   }
   function readPickerSnapshot(node) {
@@ -2120,19 +2176,23 @@
       const id = value => typeof value === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(value) ? value : null;
       const group = value => typeof value === 'string' && /^[\p{L}\p{N}._ -]{1,80}$/u.test(value) && value.trim() === value ? value : null;
       const label = value => typeof value === 'string' && value.trim() && value.length <= 80 ? value.trim() : null;
-      const effort = value => ({ none:'none', instant:'none', minimal:'minimal', min:'low', low:'low', standard:'medium', medium:'medium', extended:'high', high:'high', xhigh:'xhigh', max:'max', ultra:'ultra', pro:'pro' })[value] || null;
+      const effort = value => ({ none:'none', instant:'none', minimal:'minimal', min:'low', low:'low', standard:'medium', medium:'medium', extended:'high', high:'high', xhigh:'xhigh', 'extra high':'xhigh', max:'max', ultra:'ultra', pro:'pro' })[value] || null;
+      // The machine reasoningEffort is a lane's transport setting, not its identity: the
+      // Pro and Extra High lanes still report medium/max. The lane's visible label is what
+      // the picker offers, matching readPickerSnapshot's modelLane/thinkingEffort mapping.
+      const laneEffort = c => effort(String(c?.labels?.effort ?? c?.sliderLabel ?? '').trim().toLowerCase()) ?? effort(c?.reasoningEffort);
       const current = options.filter(o => o?.selected === true);
       if (current.length !== 1) return null;
       const version = group(current[0].id);
       const versions = options.filter(o => o && o.disabled !== true).map(o => ({ id: group(o.id), label: label(o.label) }));
       const choices = p.powerSelections.map(c => ({ bucket: c?.powerSettingIndex, id: id(c?.model),
-        label: label(c?.modelLabel), familyId: id(c?.model), familyLabel: label(c?.modelLabel), effort: effort(c?.reasoningEffort),
+        label: label(c?.modelLabel), familyId: id(c?.model), familyLabel: label(c?.modelLabel), effort: laneEffort(c),
         available: p.modelSelectionDisabled !== true && c?.disabled !== true &&
           (!c?.availability || c.availability.status === 'available') && !p.modelSwitcherDenialsBySlug?.[c?.model] }));
       if (!version || !versions.length || versions.some(v => !v.id || !v.label) || !choices.length ||
           choices.some(c => !Number.isInteger(c.bucket) || !c.id || !c.label || !c.effort) ||
           new Set(versions.map(v => v.id)).size !== versions.length || new Set(choices.map(c => c.bucket)).size !== choices.length || !versions.some(v => v.id === version)) return null;
-      const matches = choices.filter(c => c.id === id(selected.model) && c.effort === effort(selected.reasoningEffort));
+      const matches = choices.filter(c => c.id === id(selected.model) && c.effort === laneEffort(selected));
       if (matches.length !== 1 || (selected.powerSettingIndex !== undefined && selected.powerSettingIndex !== matches[0].bucket)) return null;
       return { version, currentBucket: matches[0].bucket, versions, choices };
     }

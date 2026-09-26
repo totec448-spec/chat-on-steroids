@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import sharp from 'sharp';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APP_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
 import { userPromptText } from '../src/shared/user-prompt.js';
 import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
@@ -83,6 +83,7 @@ const {
   unpair
 } = await import('../src/main/bridge.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
+const { setStuckNotifier } = await import('../src/main/stuck-notice.js');
 const {
   GOAL_OBJECTIVES_STATE,
   GOAL_REPLIES_STATE,
@@ -156,6 +157,7 @@ const {
 const { makeTempDir, removeTempDir, SAMPLE_BRIEF, faultGate } = await import('./helpers.js');
 const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
 const { getLog } = await import('../src/main/logger.js');
+const { setShippedExtensionBuildForTest } = await import('../src/main/extension-path.js');
 
 const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
 /** The chat that spawns the swarm in these tests: only a proven conversation can. */
@@ -241,7 +243,7 @@ interface Reply {
 function request(
   method: string,
   path: string,
-  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number } = {}
+  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string } = {}
 ): Promise<Reply> {
   const url = new URL(path, base);
   const payload = options.raw ?? (options.body === undefined ? null : JSON.stringify(options.body));
@@ -251,6 +253,7 @@ function request(
   // only produce confusing downstream failures.
   headers['x-extension-version'] = options.extensionVersion ?? APP_VERSION;
   headers['x-extension-protocol'] = String(options.protocol ?? BRIDGE_PROTOCOL);
+  if (options.extensionBuild) headers['x-extension-build'] = options.extensionBuild;
   if (payload !== null) {
     headers['content-type'] = 'application/json';
     headers['content-length'] = String(Buffer.byteLength(payload));
@@ -1268,6 +1271,51 @@ describe('activity feed', () => {
     });
   });
 
+  /**
+   * A stream origin has no message to name, and that is not a defect in it.
+   *
+   * It is read off the `/f/conversation` SSE body before ChatGPT has mounted anything, so the page
+   * sends `messageId: null` by construction. This route reads only `requestId` — it never looks at
+   * the message — but the parser required one anyway, so every stream-derived id was dropped
+   * silently and the route answered `bad_request_evidence` with no log line.
+   *
+   * Measured on the live page and reported in #393: the origin was published up to eighteen
+   * seconds *before* the call arrived and still counted for nothing. The call waited out the full
+   * twenty-second identity window, was filed under Unattributed activity, and the bridge then
+   * reloaded the tab looking for the evidence it had already been given and thrown away.
+   * `identity_ms` 15001 -> 2 after the fix.
+   */
+  it('registers a stream origin the page cannot yet name a message for', async () => {
+    await pair();
+    const conversationId = '17171717-3939-6161-8383-959595959595';
+    const requestId = '11111111-2222-4333-8444-555555555555';
+    const mapped = await request('POST', '/correlations', {
+      body: { conversationId, calls: [{ messageId: null, requestId, createTime: Date.now() / 1000 }] }
+    });
+    expect(mapped.status, 'the stream origin was refused').toBe(200);
+    expect(mapped.body).toMatchObject({ ok: true, conversationId, confirmed: [requestId], complete: true });
+  });
+
+  /**
+   * Two stream origins in one batch are two ids, not one duplicate. Dedup keys on the message
+   * when there is one and on the request id when there is not; keying both on an absent message
+   * would have collapsed every stream row in a batch into the first.
+   */
+  it('keeps two stream origins apart when neither names a message', async () => {
+    await pair();
+    const conversationId = '18181818-4040-6262-8484-969696969696';
+    const first = '21111111-2222-4333-8444-555555555555';
+    const second = '31111111-2222-4333-8444-555555555555';
+    const mapped = await request('POST', '/correlations', {
+      body: { conversationId, calls: [
+        { messageId: null, requestId: first, createTime: Date.now() / 1000 },
+        { messageId: null, requestId: second, createTime: Date.now() / 1000 }
+      ] }
+    });
+    expect(mapped.status).toBe(200);
+    expect((mapped.body as { confirmed: string[] }).confirmed.sort()).toEqual([first, second].sort());
+  });
+
   it('still refuses correlation evidence that names no request id at all', async () => {
     await pair();
     const refused = await request('POST', '/correlations', {
@@ -1830,6 +1878,69 @@ describe('activity feed', () => {
 describe('automatic compaction', () => {
   const settled = () => new Promise((resolve) => setTimeout(resolve, 25));
 
+  /**
+   * A repair nobody ever claims.
+   *
+   * Re-offering an unclaimed repair is right — a claim can be missed, and the page that missed it
+   * is the one that needs the reload — but it had no end. Every give-up here reads what the page
+   * reports back, so a page that never returns reports nothing, no counter moves, and no ceiling
+   * can fire. Measured on 2026-09-21: one chat whose tab was gone took 645 offers in five and a
+   * half hours, one of them ever confirmed, and it stopped only because the app was restarted.
+   */
+  it('stops offering a repair the browser never claims, and says the chat has no page', async () => {
+    await pair();
+    const conversationId = randomUUID();
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'user_message', time: Date.now(), text: 'Continue this task', messageId: 'never-claimed' },
+      { kind: 'turn_start', time: Date.now(), turnId: 'never-claimed-turn' },
+      { kind: 'chat_error', time: Date.now(), turnId: 'never-claimed-turn', recoverable: true,
+        text: 'Connection interrupted. Waiting for the complete answer' }
+    ] } });
+    await settled();
+
+    const offered = async (): Promise<boolean> => {
+      const status = await request('GET', '/status');
+      return (status.body.repairs as Array<{ conversationId: string }>)
+        .some(row => row.conversationId === conversationId);
+    };
+    expect(await offered(), 'no repair was offered at all').toBe(true);
+
+    // Never claimed, only re-read. Bounded well above the ceiling so the loop cannot be what
+    // passes: if the offers were still unbounded this would still be true on the last pass.
+    let seen = 1;
+    for (let pass = 0; pass < 40 && await offered(); pass++) seen += 1;
+
+    expect(seen, 'the repair was still being offered after forty reads').toBeLessThan(40);
+    expect(await offered(), 'it came back after being retired').toBe(false);
+
+    // The ceiling above bounds one repair, not the supply of them: the chat goes quiet, the sweep
+    // reads silence, and a fresh repair used to arrive with its own budget. Measured on 2026-09-21
+    // over seven hours after a tab was discarded — four `no page` verdicts, 106 reload attempts,
+    // 600 offers, all into an empty room. A new failure must not restart it.
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time: Date.now(), turnId: 'never-claimed-again' },
+      { kind: 'chat_error', time: Date.now(), turnId: 'never-claimed-again', recoverable: true,
+        text: 'Connection interrupted. Waiting for the complete answer' }
+    ] } });
+    await settled();
+    expect(await offered(), 'a fresh failure handed the same page-less chat a new budget').toBe(false);
+
+    // Lifted by the one thing that can disprove it: the page itself, asking for its chat.
+    await request('GET', `/activity?conversationId=${conversationId}&since=0`);
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'chat_error', time: Date.now(), turnId: 'never-claimed-again', recoverable: true,
+        text: 'Connection interrupted. Waiting for the complete answer' }
+    ] } });
+    await settled();
+    expect(await offered(), 'a page that came back was still refused recovery').toBe(true);
+
+    const session = (await findSessionByConversation(conversationId))!;
+    const notes = (await readEvents(session.id, { kinds: ['note'] }))
+      .map(event => (event as { message: { text: string } }).message.text);
+    expect(notes.some(text => text.includes('has no page to reload')),
+      'the chat was dropped without saying why').toBe(true);
+  });
+
   it.each([false, true])('hands manual compaction the pending repair only before browser claim (claimed=%s)', async claimed => {
     await pair();
     const conversationId = randomUUID();
@@ -1975,6 +2086,60 @@ describe('automatic compaction', () => {
         else expect(continuationForSession(sessionId)).toBeNull();
       });
     });
+
+  /**
+   * A chat whose last turn produced nothing, and the silence nobody reported.
+   *
+   * The watchdog that reaches the desktop is the reload budget's, and only a chat that keeps
+   * answering reloads with the same failure ever reaches it. The commonest stop does not: a turn
+   * ends, nothing follows it, and there is no open turn left to watch. The app treats that as
+   * settled — correctly, there is nothing left to repair — and says so only to its log.
+   *
+   * `stalled` is the worse half and only ever fell outside by omission. The page writes it for
+   * "no visible output and no progress for ten minutes": a turn that produced nothing at all,
+   * which for the person watching is the same standstill as a failure. Without the mark such a
+   * chat took the branch that drops it out of the silence watch entirely, so nothing reached
+   * finishSilentChats and nothing was ever said.
+   *
+   * Measured on one machine on 2026-09-13: four episodes, 24 + 53 + 76 + 45 minutes, 198 minutes
+   * of a working day, the last ended by the user noticing. And on 2026-09-25 the `stalled` half:
+   * a turn opened at 17:31:59 after a resume, produced nothing, was closed `stalled` at 17:44:44,
+   * and the chat sat untouched with four workers still running until its owner typed by hand.
+   */
+  it.each(['stalled', 'failed'] as const)('reports a chat whose last turn ended %s with nothing after it', async outcome => {
+    const told: Array<{ title: string; body: string }> = [];
+    setStuckNotifier((title, body) => { told.push({ title, body }); return true; });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = `a1a1a1a1-0000-4000-8000-00000000${outcome === 'stalled' ? 'de01' : 'de02'}`;
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), text: 'audit the homelab', messageId: `m-${outcome}` },
+        { kind: 'turn_start', time: Date.now(), turnId: `turn-${outcome}` }
+      ] } });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: `turn-${outcome}`, outcome,
+          ...(outcome === 'stalled' ? { detail: 'no visible output and no progress for ten minutes' } : {}) }
+      ] } });
+
+      // Nothing follows it: no new turn, no reply, no call.
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS + 30_000);
+      await sweepStaleSwarm(Date.now());
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS + 30_000);
+      await sweepStaleSwarm(Date.now());
+
+      expect(told.map(item => item.title), `a ${outcome} turn left the chat unreported`)
+        .toContain('A chat stopped');
+      // The wording says which of the two happened: "ended in a transport failure" is not true
+      // of a turn that simply never spoke.
+      expect(told.find(item => item.title === 'A chat stopped')!.body)
+        .toContain(outcome === 'stalled' ? 'produced nothing' : 'failed');
+    } finally {
+      setStuckNotifier(null);
+      vi.useRealTimers();
+    }
+  });
 
   it('observes Astra per chat, refuses automatic tickets, and preserves manual compaction', async () => {
     await pair();
@@ -2355,6 +2520,53 @@ describe('automatic compaction', () => {
     expect(continuationByToken(token)).toMatchObject({ state: 'aborted', error: 'handoff_never_sent' });
     expect(continuationForSession(filed.body.sessionId as string)).toBeNull();
     expect((await request('POST', '/compact', { body: { conversationId, token, sourceDispatch: true } })).status).toBe(409);
+  });
+
+  /**
+   * The chat that kept working after its ticket was refused, with no turn on its page.
+   *
+   * A refusal is a verdict about the turn that would not take the handoff, and it is read as
+   * standing while no turn is running. That is right for a chat that stopped and wrong for one
+   * whose page lost its turn while the connector went on answering tool calls for it:
+   * `activeTurnId` is null for that whole stretch, so the refusal never lapses and the level rule
+   * that protects an oversized chat can never fire again. Measured on 2026-09-21 with the
+   * threshold at 400,000: a ticket given up at 417,733 tokens, twenty-two minutes of work with no
+   * turn on the page, nothing filed, 632,211 by the time the run stopped on its own.
+   */
+  it('files again for an oversized chat still working after its ticket was refused', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0b';
+    await withThreshold(10_000, async () => {
+      await request('POST', '/events', { body: { conversationId, events: over() } });
+      await settled();
+      const activity = await request('GET', `/activity?conversationId=${conversationId}`);
+      const sessionId = activity.body.sessionId as string;
+
+      // The verdict a given-up ticket leaves behind. Its turn is null because the chat had none,
+      // which is exactly the state the read below used to treat as "no turn is running".
+      const { refuseAutomaticCompactionNow } = await import('../src/main/session/store.js');
+      await refuseAutomaticCompactionNow(sessionId, conversationId, null);
+      const open = continuationForSession(sessionId);
+      if (open) await request('POST', '/compact', { body: { conversationId, token: open.token, sourceLost: true } });
+      expect(continuationForSession(sessionId)).toBeNull();
+
+      // Working, and with no turn of its own: exactly attributed local calls, close enough
+      // together that the chat never stops working between them.
+      for (let index = 0; index < 3; index += 1) {
+        const requestId = `wfr_refused_still_working_${index}`;
+        await request('POST', '/events', { body: { conversationId, events: [{
+          kind: 'tool_evidence', time: Date.now(),
+          calls: [{ messageId: `m-refused-working-${index}`, tool: 'read', order: 0, answered: false, requestId }]
+        }] } });
+        await recordToolCall({ tool: 'read', args: { paths: ['/project/a.ts'] },
+          content: [{ type: 'text' as const, text: 'ok' }], outcome: 'ok' as const,
+          durationMs: 1, startedAt: Date.now(), requestId });
+        await settled();
+      }
+
+      await vi.waitFor(() => expect(continuationForSession(sessionId))
+        .toMatchObject({ automatic: true, state: 'awaiting-summary' }), { timeout: 3000 });
+    });
   });
 
   it('does not immediately refile a rejected automatic compaction in the same working turn', async () => {
@@ -5054,6 +5266,41 @@ describe('delivering a bootstrap', () => {
     expect(pendingWorkerRevivals()[0]?.text).toContain('inspect the parser');
   });
 
+  it('does not hand a slept worker its dead turn, nor count its replayed native rows as work', async () => {
+    // Measured 2026-09-26 (worker-8): a turn left open the day before was adopted by the reopened
+    // tab, which refused the wake as "generating" until a ten-minute stall, and its native rows —
+    // keyed `thought-<id>-0` by the old renderer, `<id>` by the new shell — replayed as new output.
+    await pair();
+    spawn({ workers: [{ task: 'survive the renderer switch' }], caller: { conversationId: PRIME_CHAT } });
+    const workerConversation = 'cafe0926-0000-4000-8000-000000000926';
+    expect(bindConversation('worker-1', workerConversation)).toBe(true);
+    const start = Date.now();
+    await recordChatObservations(workerConversation, [
+      { kind: 'turn_start', time: start, turnId: 'g-dead-turn' },
+      { kind: 'page_tool', time: start + 1, turnId: 'g-dead-turn', messageId: 'thought-259c5310-0',
+        text: 'Audited Startpage configuration', activeNow: true }
+    ], 'worker-1');
+    expect(workerConversationGone(workerConversation)).toBe(true);
+    const worker = () => swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((agent) => agent.id === 'worker-1')!;
+    const lastWorkAt = Math.max(worker().activatedAt ?? 0, worker().lastSeenAt ?? 0);
+    stageMessages({ conversationId: PRIME_CHAT }, [{ to: 'worker-1', text: 'continue the consolidation' }]).commit();
+    expect(await sweepStaleSwarm(lastWorkAt + WORKER_SILENCE_MS + 1_000)).toBe(true);
+    expect(worker().state).toBe('waking');
+    const sleptAt = worker().sleptAt!;
+
+    const activity = (await request('GET', `/activity?conversationId=${workerConversation}`)).body;
+    expect(activity.activeTurnId).toBeNull();
+    expect(activity.recordedTurnId).toBeNull();
+
+    expect((await request('POST', '/events', { body: { conversationId: workerConversation, events: [
+      { kind: 'page_tool', time: sleptAt + 5_000, turnId: 'g-dead-turn', messageId: '259c5310',
+        text: 'Audited Startpage configuration', activeNow: true }
+    ] } })).status).toBe(200);
+    // Still waiting for the wake to be typed, not "revived" by its own history.
+    expect(worker().state).toBe('waking');
+    expect(pendingWorkerRevivals()[0]?.text).toContain('continue the consolidation');
+  });
+
   it('still releases worker capacity when the durable prime turn remains open', async () => {
     spawn({ workers: [{ task: 'open turn veto' }], caller: { conversationId: PRIME_CHAT } });
     const workerConversation = 'stale-worker-open-prime';
@@ -6360,6 +6607,20 @@ describe('unattributed activity recovery', () => {
     outcome
   });
 
+  it('hands a reloaded page the question whose turn this app has already ended', async () => {
+    await pair();
+    await events(OTHER, [{ kind: 'user_message', messageId: 'settled-question', text: 'Audit the paperless setup.', time: Date.now() },
+      openTurn('settled-turn')]);
+    const running = (await request('GET', `/activity?conversationId=${OTHER}`)).body;
+    expect(running.settledQuestionId).toBeNull();
+    await events(OTHER, [endTurn('settled-turn', 'stalled')]);
+    expect((await request('GET', `/activity?conversationId=${OTHER}`)).body.settledQuestionId).toBe('settled-question');
+    // A new question is not settled by the old turn.
+    await events(OTHER, [{ kind: 'user_message', messageId: 'fresh-question', text: 'Now continue.', time: Date.now() + 1 },
+      openTurn('fresh-turn')]);
+    expect((await request('GET', `/activity?conversationId=${OTHER}`)).body.settledQuestionId).toBeNull();
+  });
+
   /**
    * The extension's maintenance pass, which is the whole conversation about repairs.
    *
@@ -7203,6 +7464,77 @@ describe('unattributed activity recovery', () => {
         expect((await input.listInputs()).filter(row => row.sessionId === session.id && row.recovery)).toEqual([]);
       }
     } finally { await writeDurableNow('session-input', []); input.resetInputForTests(); vi.useRealTimers(); await saveConfig(previous); }
+  });
+
+  /**
+   * A thinking turn is not a silent one.
+   *
+   * The silence window is chosen by model family — Pro gets ten minutes, everything else two — and
+   * a reasoning effort of `high` or above is legitimately quiet for far longer than two minutes
+   * between tool calls. Until request attribution worked this never mattered: every silence path is
+   * gated on `turnHasMcpCall`, so while calls landed under Unattributed activity the watchdog never
+   * ran at all. Fixing attribution (#414) switched it on for the first time.
+   *
+   * Measured by @moderntanri in #393, twice in a single task: an Extra-high turn went quiet after a
+   * long render, `active chat silent for 2 minutes — asking the browser to reload` fired, the reload
+   * killed the streaming turn, and the Continue queued behind it was claimed and never delivered.
+   * Their workaround was to turn Automatic Continue off entirely, which gives up the feature to
+   * avoid the watchdog.
+   *
+   * So the window follows the effort that was actually observed. Deliberately not by widening
+   * `model === 'pro'`: Pro carries other rules — Continue eligibility among them — that must not
+   * extend to an ordinary model merely because it is thinking hard.
+   */
+  it.each(['xhigh', 'max', 'ultra'] as const)('gives a %s reasoning turn the long silence window, not two minutes', async effort => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), turnId = `thinking-${effort}`;
+      await events(chat, [
+        { kind: 'user_message', messageId: 'question', text: 'Do the long analysis', time: Date.now(), authoredNow: true },
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: effort, time: Date.now() },
+        openTurn(turnId)
+      ]);
+      await attributed(chat, false, Date.now());
+
+      // Two minutes of quiet is an ordinary pause for this turn, not a dead page.
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 30_000);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance(), `a ${effort} turn was reloaded mid-thought`).toBeNull();
+
+      // The watchdog still exists: the Pro window applies, and past it the reload is offered.
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance(), `a ${effort} turn was never recovered at all`)
+        .toMatchObject({ conversationId: chat, reason: 'silence' });
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
+  /**
+   * The control, and `high` is the one that matters in it: `high` is the ordinary effort for the
+   * current models and every other test here uses it as the plain non-Pro case. Widening it would
+   * be the opposite mistake — a genuinely dead page waiting ten minutes instead of two.
+   */
+  it.each(['medium', 'high'] as const)('keeps the two-minute silence window for %s, the ordinary effort', async effort => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID();
+      await events(chat, [
+        { kind: 'user_message', messageId: 'question', text: 'Quick question', time: Date.now(), authoredNow: true },
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: effort, time: Date.now() },
+        openTurn(`ordinary-${effort}`)
+      ]);
+      await attributed(chat, false, Date.now());
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 30_000);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance(), 'an ordinary turn lost its two-minute watchdog')
+        .toMatchObject({ conversationId: chat, reason: 'silence' });
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
   });
 
   it.each(['normal', 'pro'] as const)('keeps the %s silence countdown and reload valid across same-turn corrections', async model => {
@@ -10531,6 +10863,82 @@ describe('unattributed activity recovery', () => {
       vi.useRealTimers();
     }
   });
+
+  /**
+   * A reload that worked is not a spent remedy.
+   *
+   * The budget is charged to the question, and the question does not move while one long answer
+   * runs. Measured 2026-09-26: a reload at 17:44 resumed a prime for ten minutes of tool
+   * calls, the stream dropped again at 17:58, and the chat was left on "Resume stream
+   * unavailable" for good because the answer had "already spent its error reload".
+   */
+  it('gives an answer its error reload back once the reload brought it back to work', async () => {
+    vi.useFakeTimers();
+    try {
+      const RESUMED = 'dcdc0505-1111-2222-3333-444444444444';
+      const drop = () => events(RESUMED, [{
+        kind: 'chat_error', time: Date.now(), text: 'Resume stream unavailable', turnId: 'turn-long', recoverable: true
+      }]);
+      await pair();
+      await events(RESUMED, [
+        { kind: 'user_message', messageId: 'long-question', text: 'Work through the backlog', time: Date.now() },
+        openTurn('turn-long')
+      ]);
+      await drop();
+      const first = await maintenance();
+      expect(first?.reason).toBe('assistant-error');
+      await maintenance(first!.token, 'reloaded');
+
+      // The same failure straight back, with nothing done in between: the reload bought nothing.
+      await drop();
+      expect(await maintenance(), 'no second reload without work in between').toBeNull();
+
+      // The reload brought the answer back: ten minutes later, as measured, and past the shared
+      // reload cooldown, it is still calling local tools when the stream drops again.
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await attributed(RESUMED, false, Date.now());
+      await drop();
+      expect((await maintenance())?.reason, 'a reload that led to real work earns the next one').toBe('assistant-error');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('earns a finished answer no reload, whatever its stream reports afterwards', async () => {
+    vi.useFakeTimers();
+    try {
+      const RESUMED = 'dcdc0606-1111-2222-3333-444444444444';
+      const drop = () => events(RESUMED, [{
+        kind: 'chat_error', time: Date.now(), text: 'Resume stream unavailable', turnId: 'turn-long', recoverable: true
+      }]);
+      await pair();
+      await events(RESUMED, [
+        { kind: 'user_message', messageId: 'long-question', text: 'Work through the backlog', time: Date.now() },
+        openTurn('turn-long')
+      ]);
+      await drop();
+      const first = await maintenance();
+      expect(first?.reason).toBe('assistant-error');
+      await maintenance(first!.token, 'reloaded');
+
+      // The same failure straight back, with nothing done in between: the reload bought nothing.
+      await drop();
+      expect(await maintenance(), 'no second reload without work in between').toBeNull();
+
+      // The reload brought the answer back: ten minutes later, as measured, and past the shared
+      // reload cooldown, it is still calling local tools when the stream drops again.
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await attributed(RESUMED, false, Date.now());
+      // Measured 2026-09-26: the prime's complete final report, then "Resume stream unavailable"
+      // three minutes later about a stream that had nothing left to resume.
+      await events(RESUMED, [{ kind: 'assistant_message', time: Date.now(), turnId: 'turn-long', messageId: 'long-final',
+        text: 'The audit is complete.', state: 'final', final: true }]);
+      await drop();
+      expect(await maintenance(), 'a finished answer is not broken').toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ------------------------------------------------------------- restarting
@@ -11828,6 +12236,73 @@ describe('the goal loop over the bridge', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  /**
+   * A page that will not take the next message, said out loud.
+   *
+   * The pickup schedule runs for twelve hours — every two, five, ten, then fifteen minutes — and
+   * in all that time the only trace is one `info` line per attempt. Measured on 2026-09-24: a
+   * chat whose turn had frozen was offered its rescue, the page never collected it, the app
+   * reloaded on schedule, and the chat sat until its owner noticed and typed. Three times in one
+   * morning, each time the person found it before the app said anything.
+   *
+   * The schedule is unchanged — a page can still come back hours later — but the person who can
+   * fix it in one line now hears about it.
+   */
+  it('says once that a page is not collecting its next message, and keeps trying anyway', async () => {
+    vi.useFakeTimers();
+    const { resetInputForTests, enqueueInput } = await import('../src/main/session/input.js');
+    resetInputForTests();
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0175-0000-4000-8000-000000000175';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'uncollected-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'uncollected-turn' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      await enqueueInput({ id: 'abca0175-0000-4000-8000-000000000175', sessionId: session.id,
+        text: 'next step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await vi.advanceTimersByTimeAsync(1);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'uncollected-turn', outcome: 'completed' }
+      ] } });
+      await recordFinalForTest(chat, 'uncollected-turn');
+
+      // Reloaded on schedule and never collected, which is the whole case.
+      for (const minutes of [2, 5]) {
+        await vi.advanceTimersByTimeAsync(minutes * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = (await request('GET', '/status')).body.repairs?.[0];
+        expect(repair).toMatchObject({ conversationId: chat, reason: 'goal' });
+        await request('GET', `/status?repaired=${repair.token}&repairAction=reloaded`);
+      }
+      const said = async (): Promise<number> => (await readEvents(session.id, { kinds: ['note'] }))
+        .flatMap(event => event.kind === 'note' ? [event.message.text] : [])
+        .filter(text => /will not take/i.test(text)).length;
+      expect(await said(), 'two reloads is still an ordinary slow pickup').toBe(0);
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      const third = (await request('GET', '/status')).body.repairs?.[0];
+      expect(third).toMatchObject({ conversationId: chat, reason: 'goal' });
+      await request('GET', `/status?repaired=${third.token}&repairAction=reloaded`);
+
+      expect(await said(), 'the chat was left waiting without a word').toBe(1);
+
+      // Still trying, and still only said once.
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      const fourth = (await request('GET', '/status')).body.repairs?.[0];
+      expect(fourth, 'the schedule gave up instead of carrying on').toMatchObject({ conversationId: chat, reason: 'goal' });
+      expect(await said(), 'it repeated itself').toBe(1);
+    } finally {
+      await writeDurableNow('session-input', []);
+      resetInputForTests();
+      vi.useRealTimers();
+    }
+  });
+
   it('gives a queued head the bounded pickup schedule without an enabled Goal', async () => {
     const { enqueueInput, cancelInput, reorderQueuedInputs, resetInputForTests } = await import('../src/main/session/input.js');
     vi.useFakeTimers();
@@ -12607,4 +13082,58 @@ it('preserves pending commands and durable ACK receipts across a port switch', a
     expect(await readDurable('bridge-commands')).toEqual(before);
     expect((await request('POST', '/commands/ack', { body: ackBody })).body).toEqual(ack.body);
   } finally { selection.mockRestore(); }
+});
+
+describe('which extension build is running', () => {
+  const SHIPPED = 'a0a0a0a0a0a0';
+  afterEach(() => setShippedExtensionBuildForTest());
+
+  it('announces each build once while two browsers alternate, and says when one is not the shipped build', async () => {
+    // Measured 2026-09-26: a normal and a debugging Chrome on different builds alternated
+    // requests, and every alternation logged "connected" and pushed renderer state.
+    setShippedExtensionBuildForTest(SHIPPED);
+    const said = (build: string) => getLog().filter((entry) => entry.message.includes(`connected (build ${build})`)).length;
+    const warned = (build: string) => getLog().filter((entry) => entry.message.includes(`running extension build ${build}, but this app ships ${SHIPPED}`)).length;
+    const before = { a: said('b1b1b1b1b1b1'), w: warned('b1b1b1b1b1b1') };
+    for (let i = 0; i < 5; i++) {
+      await request('GET', '/hello', { auth: null, extensionBuild: SHIPPED });
+      await request('GET', '/hello', { auth: null, extensionBuild: 'b1b1b1b1b1b1' });
+    }
+    expect(said('b1b1b1b1b1b1') - before.a).toBe(1);
+    expect(warned('b1b1b1b1b1b1') - before.w, 'the stale build is named once').toBe(1);
+    expect(warned(SHIPPED), 'the shipped build is never called stale').toBe(0);
+  });
+
+  it('refuses work to an out-of-date companion only while an up-to-date one is present', async () => {
+    // 2026-09-26: a second Chrome on the pre-update extension claimed a planner input the
+    // current browser was waiting for, and could not finish it on the newer ChatGPT shell.
+    setShippedExtensionBuildForTest(SHIPPED);
+    await pair();
+    const stale = { body: { id: 'x', client: 'stale-client' }, extensionBuild: 'deadbeefcafe' };
+    const alone = await request('POST', '/commands/redeem', stale);
+    expect(alone.body.error, 'a lone older browser keeps working').not.toBe('stale_extension_build');
+    await request('GET', '/status', { extensionBuild: SHIPPED });
+    const refused = await request('POST', '/commands/redeem', stale);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe('stale_extension_build');
+    expect((await request('POST', '/repairs/claim', { body: {}, extensionBuild: 'deadbeefcafe' })).body).toEqual({ allowed: false });
+    const current = await request('POST', '/commands/redeem', { body: { id: 'x', client: 'current-client' }, extensionBuild: SHIPPED });
+    expect(current.body.error).not.toBe('stale_extension_build');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 61_000);
+    try {
+      const later = await request('POST', '/commands/redeem', stale);
+      expect(later.body.error, 'the up-to-date browser went quiet a minute ago').not.toBe('stale_extension_build');
+    } finally { clock.mockRestore(); }
+  });
+
+  it('compares nothing in a checkout that was never packaged', async () => {
+    setShippedExtensionBuildForTest(null);
+    const warnings = () => getLog().filter((entry) => entry.message.includes('but this app ships')).length;
+    const before = warnings();
+    await pair();
+    await request('GET', '/status', { extensionBuild: 'a1a1a1a1a1a1' });
+    const other = await request('POST', '/commands/redeem', { body: { id: 'x', client: 'c' }, extensionBuild: 'deadbeefcafe' });
+    expect(other.body.error).not.toBe('stale_extension_build');
+    expect(warnings()).toBe(before);
+  });
 });

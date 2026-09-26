@@ -6,7 +6,7 @@ import { emptyEvidence } from '../src/main/mcp/call-context.js';
 import { flushRecorder, recordToolCall, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { appendEvent, completeProcessCall, createSession, flushSessions, getSession, initSessionStore,
   readActivityEvents, readEvents, readHydratedActivityCall, readRecentEvents, recordProcessCall,
-  rebindSession, resetSessionStoreForTests, turnHasMcpCall } from '../src/main/session/store.js';
+  rebindSession, resetSessionStoreForTests, turnHasMcpCall, questionHasMcpCall } from '../src/main/session/store.js';
 import { foldProgress, toolCallSummary, workSequence, type SessionEvent } from '../src/shared/session.js';
 import { UnifiedExecProcessManager, type ProcessCompletion } from '../src/main/codex/unified-exec.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -198,4 +198,21 @@ it('real process exit updates history while all output remains available to its 
     expect((await readEvents(session.id)).find(e => e.kind === 'tool_call')).toMatchObject({ call: { process: { exitCode: 7 } } });
     await expect.poll(async () => manager.offerCompletedOutput(new Set([id]), { completedAt: null, failed: false }, 1000)).toMatchObject({ exitCode: 7, output: 'retained\n' });
   } finally { await manager.terminateAllProcesses(); }
+});
+
+it('credits the work of any turn that answered the same question', async () => {
+  // 2026-09-26: reloads reopened a prime's question as turns with no work of their own, and the
+  // automatic restart judged only the newest of them.
+  const session = await createSession({ conversationId: 'owner', title: 'question' });
+  const user = (messageId: string, time: number) => appendEvent(session.id, { kind: 'user_message', source: 'extension', time, messageId,
+    message: { text: messageId, chars: messageId.length, truncated: false } } as any);
+  const start = (turnId: string, time: number) => appendEvent(session.id, { kind: 'turn_start', source: 'extension', time, turnId } as any);
+  const end = (turnId: string, time: number) => appendEvent(session.id, { kind: 'turn_end', source: 'extension', time, turnId, outcome: 'stalled' } as any);
+  await user('question-one', 90); await start('turn', 95);
+  await recordProcessCall(session.id, launch('call-one', 'owner'));
+  await end('turn', 200); await start('phantom', 210); await end('phantom', 800);
+  expect(await turnHasMcpCall(session.id, 'owner', 'phantom')).toBe(false);
+  expect(await questionHasMcpCall(session.id, 'owner', 'phantom')).toBe(true);
+  await user('question-two', 900); await start('other', 910);
+  expect(await questionHasMcpCall(session.id, 'owner', 'other')).toBe(false);
 });
