@@ -6479,7 +6479,11 @@ function queueBrowserRecovery(
     // a prime for ten minutes of tool calls, the stream dropped again at 17:58, and the chat was
     // left on "Resume stream unavailable" for good. Only an attributed local tool call counts —
     // a page cannot manufacture one.
-    const progressed = spent !== undefined && (lastAttributedCallAt.get(conversationId) ?? 0) > spent.at;
+    // An answer whose final is already recorded is not broken, whatever its stream says next:
+    // measured the same day, "Resume stream unavailable" arrived three minutes after that
+    // prime's complete final report. That answer earns nothing further.
+    const progressed = spent !== undefined && !assistantSource.completed &&
+      (lastAttributedCallAt.get(conversationId) ?? 0) > spent.at;
     if (spent?.sessionId === sessionId && assistantSource.key === spent.turnKey && !progressed) return false;
     if (spent) turnRepairSpent.delete(conversationId);
     // Its finished repair carries the same episode name — same question, often the same
