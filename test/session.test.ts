@@ -687,6 +687,7 @@ describe('session store', () => {
     expect((await findSessionByConversation('catalog-readable', { requireUnique: true }))?.id).toBe(present.id);
   });
 
+  /**
    * The publishing rename may not outrun the bytes it publishes.
    *
    * `writeFile` then `rename` makes the *name* change atomically and says nothing about the
