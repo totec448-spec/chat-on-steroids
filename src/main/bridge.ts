@@ -2134,7 +2134,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (allowed) {
       repair.claimed = true;
       if (repair.reason === 'assistant-error' && repair.assistantSource)
-        turnRepairSpent.set(conversationId, { sessionId: repair.sessionId, turnKey: repair.assistantSource.key, token });
+        turnRepairSpent.set(conversationId, { sessionId: repair.sessionId, turnKey: repair.assistantSource.key, token, at: Date.now() });
       if (repair.attribution && repair.attribution.incident.firstAttemptAt === null)
         repair.attribution.incident.firstAttemptAt = Date.now();
     }
@@ -6530,7 +6530,7 @@ const lastBrowserRecoveryAt = new Map<string, number>();
  * Reserved at the browser's action claim, before Chrome can reload. A lost ACK cannot
  * refund it when another recovery takes over. Only a positive no-action failure can release it.
  */
-const turnRepairSpent = new Map<string, { sessionId: string; turnKey: string; token: string }>();
+const turnRepairSpent = new Map<string, { sessionId: string; turnKey: string; token: string; at: number }>();
 
 async function assistantRepairSource(sessionId: string): Promise<NonNullable<Repair['assistantSource']>> {
   const [start] = await readRecentEvents(sessionId, 1, { kinds: ['turn_start'] });
@@ -6617,8 +6617,22 @@ function queueBrowserRecovery(
   if (reason === 'assistant-error') {
     const spent = turnRepairSpent.get(conversationId);
     if (!assistantSource) return false;
-    if (spent?.sessionId === sessionId && assistantSource.key === spent.turnKey) return false;
+    // A reload that brought the answer back to work was not a failed remedy. The question does
+    // not move while one long answer runs, so without this a stream that dropped twice in an
+    // hour was treated as the same broken turn: measured 2026-09-26, a reload at 17:44 resumed
+    // a prime for ten minutes of tool calls, the stream dropped again at 17:58, and the chat was
+    // left on "Resume stream unavailable" for good. Only an attributed local tool call counts —
+    // a page cannot manufacture one.
+    // An answer whose final is already recorded is not broken, whatever its stream says next:
+    // measured the same day, "Resume stream unavailable" arrived three minutes after that
+    // prime's complete final report. That answer earns nothing further.
+    const progressed = spent !== undefined && !assistantSource.completed &&
+      (lastAttributedCallAt.get(conversationId) ?? 0) > spent.at;
+    if (spent?.sessionId === sessionId && assistantSource.key === spent.turnKey && !progressed) return false;
     if (spent) turnRepairSpent.delete(conversationId);
+    // Its finished repair carries the same episode name — same question, often the same
+    // wording — and would otherwise read below as this very failure already being handled.
+    if (progressed && repairsInFlight.get(conversationId)?.state === 'done') repairsInFlight.delete(conversationId);
   }
   const held = repairsInFlight.get(conversationId);
   if (held?.episode === episode) return false;
@@ -8152,7 +8166,7 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | nu
       if (repair.reason === 'assistant-error') {
         // Charge the original question, never the replacement document seen at ACK time.
         if (repair.assistantSource) turnRepairSpent.set(conversationId,
-          { sessionId: repair.sessionId, turnKey: repair.assistantSource.key, token: repair.token });
+          { sessionId: repair.sessionId, turnKey: repair.assistantSource.key, token: repair.token, at: Date.now() });
       }
       await updateRepairProgress(
         conversationId,
