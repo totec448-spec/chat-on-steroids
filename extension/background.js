@@ -2113,14 +2113,15 @@ async function releaseModelCatalogTarget(nonce) {
 /**
  * ChatGPT's Plugins settings, under either route. The older shell kept them in a hash
  * (`/#settings/Plugins/plugin_<app>`); the newer one redirects that to a real path
- * (`/settings/plugins-settings/plugin_<app>`), keeping our query. Reading only the old form made
+ * (`/settings/plugins-settings/plugin_<app>`), keeping our query, and in English reloads it as
+ * `/plugins/plugin_<app>`. Reading only the old form made
  * every helper tab unrecognisable once it landed: measured 2026-09-26, five helper tabs for one
  * request, one more per extension restart, none ever reused or closed.
  */
 function pluginSettingsRoute(url) {
   return url.origin === 'https://chatgpt.com' && (
     (url.pathname === '/' && /^#settings\/Plugins(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.hash)) ||
-    /^\/settings\/plugins-settings(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?$/.test(url.pathname));
+    /^\/(?:settings\/plugins-settings(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?|plugins\/plugin_asdk_app_[a-zA-Z0-9_-]+)$/.test(url.pathname));
 }
 function pluginRefreshMarker(tab) {
   try { const url = new URL(tab?.pendingUrl || tab?.url || ''); return pluginSettingsRoute(url) ? url.searchParams.get('cos-plugin-refresh') : null; } catch { return null; }
