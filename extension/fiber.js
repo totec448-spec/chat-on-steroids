@@ -2179,6 +2179,7 @@
       const versions = options.filter(o => o && o.disabled !== true).map(o => ({ id: group(o.id), label: label(o.label) }));
       const choices = p.powerSelections.map(c => ({ bucket: c?.powerSettingIndex, id: id(c?.model),
         label: label(c?.modelLabel), familyId: id(c?.model), familyLabel: label(c?.modelLabel), effort: effort(c?.reasoningEffort),
+        ...(label(c?.sliderLabel) ? { effortLabel: label(c.sliderLabel) } : {}),
         available: p.modelSelectionDisabled !== true && c?.disabled !== true &&
           (!c?.availability || c.availability.status === 'available') && !p.modelSwitcherDenialsBySlug?.[c?.model] }));
       if (!version || !versions.length || versions.some(v => !v.id || !v.label) || !choices.length ||

@@ -2103,14 +2103,14 @@ describe('handoff storage', () => {
     expect(chunkText('short brief', 1000)).toEqual(['short brief']);
   });
 
-  it('asks for user-authoritative handoffs up to the documented 30k-token ceiling', () => {
+  it('asks for requirement-preserving handoffs within an explicit character allowance', () => {
     const prompt = nativeHandoffPrompt();
     expect(prompt).toContain(HANDOFF_BRIEF_RULES);
-    expect(prompt).toMatch(/user's messages as the highest-authority source/i);
-    expect(prompt).toMatch(/10,000[–-]30,000 tokens/i);
-    expect(prompt).toMatch(/~6,000-token brief is normally too short/i);
-    expect(prompt).toMatch(/Never exceed 30,000 tokens/i);
-    expect(prompt).toMatch(/lossless operational compression/i);
+    expect(prompt).toContain("real user's instructions as the task specification");
+    expect(prompt).toContain('at most 80000 characters');
+    expect(nativeHandoffPrompt('', true, 12000)).toContain('at most 12000 characters');
+    expect(prompt).not.toContain('30,000 tokens');
+    expect(prompt).toContain('Distinguish a requested or dispatched action from a verified postcondition');
     expect(prompt).toMatch(/failure.*root cause.*change.*verification/i);
     expect(prompt).toMatch(/PLANNED \/ DECIDED/i);
     expect(prompt).toMatch(/FAILED \/ UNRESOLVED/i);

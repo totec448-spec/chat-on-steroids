@@ -491,17 +491,23 @@ async function transition(current: InputEntry[], next: InputEntry[], automated: 
   }
   await commit(next);
 }
-/** Freeze the exact transport bytes with its durable claim, never the authored enqueue payload. */
-async function prepare(entry: InputEntry, suffix = ''): Promise<InputEntry> {
-  if (entry.purpose === 'decision') return entry;
+/** The generated plan's first entry carries the captured task; later checkpoints stay literal. */
+function executorInputText(entry: InputEntry): string {
   // Generated openings and plans cannot replace the user's complete request.
-  // Keep the authored text intact; freeze the complete objective in the same
-  // delivery claim so retries cannot reconstruct a different opening message.
-  const text = entry.stages !== undefined && entry.mode !== 'finish'
-    ? `Original user request:\n${entry.objective || entry.text}\n\nComplete workflow:\n${[entry.text, ...entry.stages].map((stage, index) => `${index + 1}. ${stage}`).join('\n\n')}\n\nBegin the complete implementation now. Later queued messages are verification checkpoints; do not wait for them to learn or implement requirements. Carry out and verify each received checkpoint before asking for the next one with session_finish; never call it repeatedly just to collect the queue.`
+  // Explicit queue edits make text human-authored again. Objective metadata on
+  // ordinary messages must not turn them into generated-plan carriers.
+  // Finish timing belongs to the Astra-only delivery reminder, not this shared workflow.
+  return entry.stages !== undefined && (entry.mode !== 'finish' ||
+    (entry.authoredSource === 'objective' && !!entry.objective))
+    ? `Original user request:\n${entry.objective || entry.text}\n\nComplete workflow:\n${[entry.text, ...entry.stages].map((stage, index) => `${index + 1}. ${stage}`).join('\n\n')}\n\nBegin the complete implementation now. Later queued messages are verification checkpoints; do not wait for them to learn or implement requirements. Complete and verify each received checkpoint before proceeding to the next.`
     : entry.objective && (entry.opening || !entry.sessionId)
       ? `Original user request:\n${entry.objective}\n\nOpening instruction:\n${entry.text}\n\nFollow the complete original request, including all constraints, throughout this task.`
       : entry.text;
+}
+/** Freeze the exact transport bytes with its durable claim, never the authored enqueue payload. */
+async function prepare(entry: InputEntry, suffix = ''): Promise<InputEntry> {
+  if (entry.purpose === 'decision') return entry;
+  const text = executorInputText(entry);
   const mandatoryOverhead = `${TOOL_INPUT_HEADER}\n\n${finishInstruction(getConfig().ui.finishLeadMinutes)}`;
   const deliveryText = entry.deliveryText ?? await deliveryHooks?.prepareText?.({ ...entry, text: text + suffix }, {
     maxChars: MAX_CHATGPT_MESSAGE_CHARS, maxBytes: TOOL_INPUT_TEXT_BYTES - Buffer.byteLength(mandatoryOverhead)
@@ -1271,7 +1277,9 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
       ? finishInstruction(settings.finishLeadMinutes) : '';
     const suffix = instruction && !entry.text.includes(instruction) ? '\n\n' + instruction : '';
     let claimed: InputEntry;
-    const prepareClaim = (checkpoint?: InputEntry) => prepare({ ...combinedInput(entry, checkpoint), ...(checkpoint ? { companionInputId: checkpoint.id } : {}), ...(completedTurnId ? { completedTurnId } : {}),
+    // A plan accompanying a correction needs the same complete executor text.
+    // The durable claim and history below retain both original authored rows.
+    const prepareClaim = (checkpoint?: InputEntry) => prepare({ ...combinedInput(entry, checkpoint ? { ...checkpoint, text: executorInputText(checkpoint) } : undefined), ...(checkpoint ? { companionInputId: checkpoint.id } : {}), ...(completedTurnId ? { completedTurnId } : {}),
       ...(entry.transportIntent === 'tool' ? { transportIntent: 'browser' } : {}),
       state: 'browser', owner, conversationId, offeredAt: entry.offeredAt ?? Date.now(), requiresAuthorization }, suffix);
     try {

@@ -10,6 +10,16 @@ import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt, userPromptText } from '..
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let directory: string;
+it('opening instructions distinguish workflow intent from permissions and truthful completion', async () => {
+  const text = await prepareSessionPrompt('Implement the requested fix, then verify it.');
+  expect(userPromptText(text)).toBe('Implement the requested fix, then verify it.');
+  expect(text).toContain('Respect explicit denials and revoked access');
+  expect(text).toContain('Goal continues unfinished requested work');
+  expect(text).toContain('Neither mode grants permission for unrelated work or overrides Stop');
+  expect(text).toContain('without repeating already completed actions');
+  expect(text).toContain('distinguish source changes, passing tests, installed code and live behavior');
+  expect(text).not.toContain('You can always use');
+});
 it('reduces AGENTS to 5000 before shortening every selected skill under char and byte limits', () => {
   const agents = { directory: '/work', text: 'A'.repeat(30_000), truncated: false };
   const skills = [{ id: 'first', text: 'FIRST\n' + '🐱漢字'.repeat(20_000) }, { id: 'second', text: 'SECOND\n' + 'z'.repeat(60_000) }];

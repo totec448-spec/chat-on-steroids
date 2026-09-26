@@ -1020,7 +1020,8 @@
                   <div class="composer-popover">
                     <div class="power-header"><div class="power-caption"><strong id="composerPowerTitle">Choose a level</strong><span id="composerPowerModel">Observed models</span></div><button class="btn model-reload" id="refreshComposerModels" data-keep-menu="true" type="button" title="Reload ChatGPT models" aria-label="Reload ChatGPT models"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5M20 7l-3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
                     </div><p id="composerModelStatus" class="muted" role="status" hidden></p>
-                    <div id="composerModelChoices" role="group" aria-label="Model"></div><div id="composerPowerChoices" role="group" aria-label="Thinking effort"></div><label hidden>Model<select id="composerModel" aria-label="ChatGPT model"><option value="" disabled>No observed choices</option></select></label>
+                    <div id="composerModelChoices" role="radiogroup" aria-label="Model"></div>
+                    <div class="effort-heading">Thinking effort</div><div id="composerPowerChoices" role="radiogroup" aria-label="Thinking effort"></div><label hidden>Model<select id="composerModel" aria-label="ChatGPT model"><option value="" disabled>No observed choices</option></select></label>
                     <label hidden>Reasoning<select id="composerReasoning" aria-label="Reasoning effort"><option value="" disabled>No observed choices</option></select></label>
                   </div>
                 </details>

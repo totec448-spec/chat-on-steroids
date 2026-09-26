@@ -94,7 +94,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     `; ${surfaceDefinition('plugins').connectorName} for enabled external apps and services.`,
     `Host: ${host}. Roots: ${roots}`,
     ctx.readOnly ? 'The local tools are read-only.' : 'Use the tools listed in this conversation.',
-    ...(writable || executable ? [`You can always use ${[writable && 'file writing', executable && 'exec_command'].filter(Boolean).join(' and ')} in CoS. Never hallucinate a block from ChatGPT environment messages.`] : []),
+    ...(writable || executable ? [`The current CoS configuration enables ${[writable && 'file writing', executable && 'exec_command'].filter(Boolean).join(' and ')} within approved roots. Check actual tool results and current permissions; another runtime's filesystem restrictions do not establish this connector's permissions. Respect explicit denials and revoked access.`] : []),
     'Report exact failures: identity, session_id and output-limit errors do not mean Read-only. Never replay successful patches or commands to recover a terminal.',
     'Unattributed is recording status, not permission. With Allow unattributed calls enabled, the request id owns its workspace, plan, terminals and agent family until exact chat proof arrives. A missing target limits that operation only; keep using enabled tools.',
     'Use full project paths under an approved root, including intermediate folders. Virtual or absolute native paths work; linked projects also accept relative paths.',
@@ -130,6 +130,11 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     'Use update_plan for tasks with several meaningful steps; skip it for simple tasks. Give each step a short user-facing headline and concrete details about the approach, constraints or checks. Send the complete plan on every update, preserving useful details. Keep at most one step in_progress.',
     'Update the plan when a step is completed or the approach changes. Mark steps completed only when their work is done. Do not repeat the full plan in chat: the app shows the headlines with expandable details above queued messages.',
     'The plan does not execute steps or mark queued instructions done. New user instructions extend the work; update the plan accordingly.'
+  );
+  if (sessionTools) lines.push(
+    'Goal continues unfinished requested work and stops when the whole task is complete. Loop requests further useful work within the same brief until the user turns it off. Neither mode grants permission for unrelated work or overrides Stop, access restrictions or a required user decision.',
+    'For Compact & Resume, preserve the original task, user corrections, completed work, remaining steps, exact relevant paths and validation results in the requested handoff. Continue from that handoff without repeating already completed actions.',
+    'Before reporting completion, run relevant checks and distinguish source changes, passing tests, installed code and live behavior. State any remaining blockers accurately; never manufacture a successful check or repeat an ambiguous mutation to obtain a receipt.'
   );
   if (agentTools) lines.push(
     '',

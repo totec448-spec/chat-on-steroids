@@ -2205,7 +2205,8 @@ var CLF_DOM = (() => {
           Array.isArray(state.choices) && state.choices.length > 0 && state.choices.length <= 12 &&
           state.choices.every(c => Number.isInteger(c.bucket) && typeof c.id === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(c.id) && typeof c.label === 'string' && c.label.length > 0 && c.label.length <= 80 &&
             groupId(c.familyId) && typeof c.familyLabel === 'string' && c.familyLabel.length > 0 && c.familyLabel.length <= 80 &&
-            ['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(c.effort) && typeof c.available === 'boolean') &&
+            ['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(c.effort) && typeof c.available === 'boolean' &&
+            (c.effortLabel === undefined || typeof c.effortLabel === 'string' && c.effortLabel.trim().length > 0 && c.effortLabel.length <= 80)) &&
           new Set(state.versions.map(v => v.id)).size === state.versions.length && new Set(state.choices.map(c => c.bucket)).size === state.choices.length &&
           state.versions.some(v => v.id === state.version) && state.choices.some(c => c.bucket === state.currentBucket);
         finish(valid ? state : null);
@@ -2388,6 +2389,7 @@ var CLF_DOM = (() => {
       const entry = result.get(choice.familyId) || { id: choice.familyId, label: choice.familyLabel, efforts: [], aliases: [] };
       if (!entry.efforts.includes(choice.effort)) entry.efforts.push(choice.effort);
       if (!entry.aliases.includes(choice.id)) entry.aliases.push(choice.id);
+      if (choice.effortLabel) (entry.effortLabels ||= {})[choice.effort] = choice.effortLabel;
       result.set(choice.familyId, entry);
     }
   }

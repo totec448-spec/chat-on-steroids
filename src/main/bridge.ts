@@ -123,8 +123,7 @@ import {
   sessionDurableModifiedAt
 } from './session/store.js';
 import { inFlightMcpRequests, runningToolCalls, runningToolProgress, settlingToolCalls } from './mcp/call-context.js';
-import { nativeHandoffPrompt } from './session/handoff-prompt.js';
-import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
+import { briefShortfall, briefOverflow, resumeBootstrapText, sessionHandoffPrompt } from './session/handoff.js';
 import {
   PRIME_ID,
   agentConversation,
@@ -3073,7 +3072,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // continuation holds one, a retry's text is discarded in favour of it, so
       // refusing that text would refuse a capture that already succeeded.
       const source = known ?? (await getSession(sessionId));
-      const shortfall = entry.handoffId ? null : briefShortfall(brief, source?.estimatedTokens ?? 0);
+      const shortfall = entry.handoffId ? null : briefShortfall(brief, source?.estimatedTokens ?? 0)
+        ?? await briefOverflow(sessionId, brief, token);
       if (shortfall) {
         logWarn(`bridge: refused the compaction brief for ${sessionId} — ${shortfall}`);
         try {
@@ -3176,7 +3176,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (already) {
       const prompt =
         already.state === 'awaiting-summary' && sendUnattempted(already.sourceSend)
-          ? nativeHandoffPrompt(already.token, getConfig().goal.includeToolCalls === true)
+          ? await sessionHandoffPrompt(sessionId, already.token, getConfig().goal.includeToolCalls === true)
           : null;
       return json(
         res,
@@ -3215,7 +3215,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         token: opened.token,
         sourceSend: opened.sourceSend,
         // The prompt the page injects as the compaction turn. Its answer is the brief.
-        prompt: nativeHandoffPrompt(opened.token, getConfig().goal.includeToolCalls === true),
+        prompt: await sessionHandoffPrompt(sessionId, opened.token, getConfig().goal.includeToolCalls === true),
         job: resumeJobFor(sessionId)
       },
       origin

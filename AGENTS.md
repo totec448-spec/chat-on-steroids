@@ -1682,6 +1682,13 @@ Send. A visible option, an English label, a remembered release name or “Upgrad
 entitlement. Do not enumerate every model × effort or create helper tabs to compensate for an
 uncertain catalog. Exact family rules live in `shared/chat-models.ts`.
 
+The composer exposes every observed lane, including Instant and older generations, in a model
+radio group and a separate reasoning group. Hidden native selects remain the requested-selection
+authority. Numeric provider captions are disambiguated for display; optional `effortLabels`
+carry native captions (for example `max` to Extra High, Pro's native `medium` to Pro) without
+rewriting execution values. Keyboard focus, the requested selection and unsent text survive
+unrelated catalog pushes. Unknown pairs never become sendable by display matching.
+
 Model names and recovery policy checked against native picker metadata on **2026-09-17**:
 
 | Display family / compatible short name | Execution identity / selected effort | Silence refresh |
@@ -2494,6 +2501,13 @@ its pending attempt. Objective text survives Off/completion for later reuse. Rep
 → On → Off must operate on current durable authority, not an old callback's enabled snapshot.
 Master Off clears ordinary chat overrides while keeping internal helper-role records.
 
+User-facing objective/switch saves stage outside the accepted maps. The existing serialized
+control queue publishes only after durable acceptance. Synchronous clear, restore and resume
+movement invalidate overlapping pending saves; failures repair disk from current accepted state,
+never roll memory back over a newer operation. A new Off retires an unaccepted mode switch when
+it targets the published mode. Rebase and repair attempts are bounded. These guarantees do not
+make separate configuration, objective, switch and reply ledgers one atomic transaction.
+
 Deliberate On files/rearms an obligation **only when the chat is idle**: a proven eligible final
 or an exhausted model-specific silence/failure window with no current work. Generating chats,
 running MCP calls and an unexpired ten-/two-minute window do not file a ticket merely because
@@ -2506,9 +2520,10 @@ a handled source record. This creates no pending ticket or draft. Later explicit
 that exact exhausted source, including an unreconciled open recorder turn, only while no newer
 question/work exists and the current model's continuation setting permits it.
 
-Ordinary non-Pro Goal/Loop considers verified **completed final answers**, not interrupted
-turns or generic composer idleness. With the finish tool enabled, both Astra Goal and Loop,
-and older Pro Loop, default to **Only finish** and may opt into **After this turn + finish**.
+Non-Astra Goal/Loop considers verified **completed final answers**, not interrupted
+turns or generic composer idleness. With the finish tool enabled, both Astra Goal and Loop
+default to **Only finish** and may opt into **After this turn + finish**. Older Pro models do
+not support the Astra-only finish tool and cannot wait for that unavailable signal.
 `shared/finish.ts::supportsFinishAutomation()` supplies the same model/mode eligibility to main
 and renderer. Disabling the finish tool makes after-turn effective for both modes and hides
 the unavailable timing choice in desktop and extension, without changing the saved preference.

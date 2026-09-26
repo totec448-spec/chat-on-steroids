@@ -2989,8 +2989,8 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 #attachmentMenu > summary .ico { display: block; width: 20px; height: 20px; }
 .composer-menu > summary:hover, .composer-menu[open] > summary { color: var(--ink); background: var(--hover); }
 .composer-popover { position: absolute; z-index: 30; bottom: calc(100% + 12px); left: 0; width: 224px; padding: 7px; background: var(--card); border: 1px solid var(--edge); border-radius: 14px; box-shadow: 0 8px 30px #0005; }
-.model-menu .composer-popover { left: 50%; right: auto; translate: -50% 0; width: 260px; }
-.model-menu { width: 164px; flex: 0 0 164px; }
+.model-menu .composer-popover { left: auto; right: 0; width: min(340px, calc(100vw - 48px)); }
+.model-menu { width: 210px; flex: 0 1 210px; min-width: 0; }
 .model-menu > summary { width: 100%; min-width: 0; justify-content: center; }
 #composerModelLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
 #composerModelLabel > strong { font-weight: 600; }
@@ -3097,21 +3097,23 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
   .usage-panel .setting > input, .usage-panel .setting > select { flex-basis: 130px; width: 130px; }
 }
 
-.model-menu .composer-popover { width: 272px; padding: 8px 12px 15px; }
+.model-menu .composer-popover { padding: 12px; max-height: min(600px, 75vh); overflow-y: auto; }
 .model-menu .model-reload { display: flex; width: 28px; height: 28px; min-height: 28px; padding: 5px; justify-content: center; }
 #composerModelStatus { font-size: calc(12px * var(--text-scale, 1)); padding: 4px 10px; line-height: 1.5; }
-.power-header { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; align-items: center; gap: 8px; margin-bottom: 17px; }
-.power-caption { grid-column: 2; display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 3px; }
-.power-header .model-reload { grid-column: 3; }
+.power-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 2px 4px 12px; }
+.power-caption { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
 .power-caption strong { font-size: calc(14px * var(--text-scale, 1)); font-weight: 600; }
 .power-caption span { font-size: calc(11px * var(--text-scale, 1)); color: var(--soft); }
-#composerPowerChoices:not(:empty) { padding: 0 3px; }
-.power-track { position: relative; height: 28px; border-radius: 999px; background: linear-gradient(to right, var(--accent) var(--power-position, 0%), var(--edge) var(--power-position, 0%)); }
-.power-dots { position: absolute; inset: 0 16px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
-.power-dot { width: 4px; height: 4px; background: #fff9; border-radius: 50%; }
-#composerPowerChoices input { position: absolute; inset: -2px 0; appearance: none; width: 100%; height: 32px; border: 0; padding: 0; margin: 0; background: transparent; cursor: pointer; }
-#composerPowerChoices input::-webkit-slider-thumb { appearance: none; width: 32px; height: 32px; background: #fff; border-radius: 50%; border: 1px solid #d5dce5; box-shadow: 0 1px 4px #0004; }
-#composerPowerChoices input:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
+#composerModelChoices { display: grid; gap: 3px; max-height: 290px; overflow-y: auto; scrollbar-gutter: stable; }
+.model-choice { justify-content: space-between; font-size: calc(13px * var(--text-scale, 1)); }
+.model-choice-check { opacity: 0; color: var(--blue); }
+.model-choice[aria-checked='true'] .model-choice-check { opacity: 1; }
+.model-choice[aria-checked='true'], .effort-choice[aria-checked='true'] { background: var(--wash); font-weight: 600; }
+.effort-heading { margin: 12px 4px 8px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
+#composerPowerChoices { display: flex; flex-wrap: wrap; gap: 5px; }
+.composer-popover .effort-choice { width: auto; flex: 1 1 auto; justify-content: center; text-align: center; padding: 8px 10px; border: 1px solid var(--line); font-size: calc(12px * var(--text-scale, 1)); }
+.composer-popover .effort-choice[aria-checked='true'] { border-color: var(--blue); }
+.model-choice:focus-visible, .effort-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* Contextual controls: normal chat contains prose and work, diagnostics stay optional. */
 #workspaceSettings { flex: 1; min-height: 36px; height: 36px; justify-content: flex-start; text-align: left; font-size: calc(14px * var(--text-scale, 1)); padding: 8px 10px; border: 0; border-radius: 9px; }

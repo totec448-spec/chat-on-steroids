@@ -2852,13 +2852,14 @@ it('follows the accepted New Chat receipt while preserving a typed follow-up', a
   expect(composer.value).toBe('Follow-up while delivery is pending');
 });
 
-it('shows Pro Loop delivery before sending and freezes changes made while the opening is being accepted', async () => {
-  const { w, live } = await boot([], false, [], [], { pro: true });
+it('shows Astra Loop delivery before sending and freezes changes made while the opening is being accepted', async () => {
+  const { w, live } = await boot([], false, [], [], { astra: true });
   (await (w as any).api.getState()).data.config.ui.finishTool = true;
   const row = w.document.getElementById('loopDeliveryRow')!;
   const effort = w.document.getElementById('composerReasoning') as HTMLSelectElement;
+  const model = w.document.getElementById('composerModel') as HTMLSelectElement;
   const delivery = w.document.getElementById('loopDelivery') as HTMLSelectElement;
-  const choose = (value: string) => { effort.value = value; effort.dispatchEvent(new w.Event('change')); };
+  const choose = (value: string) => { model.value = value === 'pro' ? 'gpt-6-pro' : 'gpt-5.6-sol'; model.dispatchEvent(new w.Event('change')); effort.value = value; effort.dispatchEvent(new w.Event('change')); };
   w.document.querySelector<HTMLButtonElement>('#automationSwitch [data-mode="loop"]')!.click();
   expect(row.hidden).toBe(true);
   choose('pro'); expect(row.hidden).toBe(false);
@@ -2872,7 +2873,7 @@ it('shows Pro Loop delivery before sending and freezes changes made while the op
   let accept!: () => void;
   api.sendInput = vi.fn((input: InputArgs) => new Promise(resolve => { accept = () => resolve(originalSend(input)); }));
   api.setInputAutomation = vi.fn(async () => ({ ok: true, data: true }));
-  (w.document.getElementById('chatInput') as HTMLTextAreaElement).value = 'First Pro Loop message';
+  (w.document.getElementById('chatInput') as HTMLTextAreaElement).value = 'First Astra Loop message';
   w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
   await settle();
   expect(api.sendInput.mock.calls[0][0]).toMatchObject({ sessionId: null, automation: 'loop', loopAfterTurn: true });
@@ -2880,9 +2881,19 @@ it('shows Pro Loop delivery before sending and freezes changes made while the op
   accept(); await settle();
   expect(api.setInputAutomation).toHaveBeenLastCalledWith(live.sent[0]!.id, 'loop', false);
   w.document.querySelector<HTMLButtonElement>('#automationSwitch [data-mode="goal"]')!.click();
-  expect(row.hidden).toBe(true);
+  expect(row.hidden).toBe(false);
   w.document.getElementById('newChat')!.click();
   expect(delivery.value).toBe('finish');
+});
+
+it('never offers an unavailable Astra finish boundary for an older Pro Loop', async () => {
+  const { w } = await boot([], false, [], [], { pro: true });
+  (await (w as any).api.getState()).data.config.ui.finishTool = true;
+  const effort = w.document.getElementById('composerReasoning') as HTMLSelectElement;
+  effort.value = 'pro'; effort.dispatchEvent(new w.Event('change'));
+  w.document.querySelector<HTMLButtonElement>('#automationSwitch [data-mode="loop"]')!.click();
+  expect(w.document.getElementById('loopDeliveryRow')!.hidden).toBe(true);
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('loop');
 });
 
 it.each(['goal', 'loop'] as const)('keeps Astra %s selected when changing delivery and hides finish choices when finish is disabled', async mode => {

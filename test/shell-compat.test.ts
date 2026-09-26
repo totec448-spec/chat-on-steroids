@@ -131,6 +131,19 @@ it('never turns an unknown typed assistant phase into public commentary', async 
   expect(JSON.stringify(await f.ask())).not.toContain('PRIVATE_REASONING');
 });
 
+it('carries native thinking captions without changing model selection semantics', async () => {
+  const f = fixture();
+  f.selections[0]![0]!.reasoningEffort = 'max';
+  (f.selections[0]![0] as any).sliderLabel = 'Extra High';
+  const state = (await f.ask('clf-picker-ask')).picker;
+  expect(state.choices[0]).toMatchObject({ effort: 'max', effortLabel: 'Extra High', id: 'gpt-5-6-thinking' });
+  const catalog = await f.api.inspectModelSettings();
+  expect(catalog.find((model: any) => model.id === 'gpt-5-6-thinking')).toMatchObject({
+    efforts: ['max', 'high'], effortLabels: { max: 'Extra High' }
+  });
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-5-6-thinking', reasoningEffort: 'max' });
+});
+
 // Models the observed Markdown editor's native text/break serialization, not
 // the app's receipt check. No exported scripts, credentials or chat text are used.
 function editing(f: ReturnType<typeof fixture>) {

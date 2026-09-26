@@ -1252,6 +1252,113 @@ it('delivers the original objective and complete workflow in the first plan mess
   resetInputForTests();
   expect((await listInputs()).find(row => row.id === first.id)?.deliveryText).toBe(claimed?.deliveryText);
 });
+it.each(['tool', 'browser'] as const)('delivers an existing-chat plan with its complete captured objective and workflow over %s before exact checkpoints', async transport => {
+  if (transport === 'browser') binding.model = 'gpt-5-6-thinking';
+  const objective = 'ORIGINAL_START: keep the change inside the approved project.\n' +
+    'Preserve the requested behavior 界. '.repeat(200) + '\nORIGINAL_END: do not deploy or install anything.';
+  const args = input({ mode: 'finish', authoredSource: 'objective', objective,
+    text: 'Implement the requested change.', stages: ['Verify C:\\work\\fixture with **literal** text.', 'Run the optional review.', 'Check the final result.'] });
+  const first = await enqueueInput(args);
+  const initial = await listInputs();
+  expect(initial.map(row => row.text)).toEqual([args.text, ...args.stages!]);
+  resetInputForTests();
+  expect((await enqueueInput(args)).id).toBe(first.id);
+  expect((await listInputs()).map(row => row.id)).toEqual(initial.map(row => row.id));
+
+  const claim = async (id: string): Promise<string | undefined> => {
+    if (transport === 'browser') return (await claimBrowserInput(id, 'plan-page', binding.conversationId, true))?.text;
+    const messages = await offerToolInput(sessionId, binding.conversationId, 'plan-request', now, true);
+    expect(messages).toHaveLength(1);
+    return messages[0]?.text;
+  };
+  const acknowledge = async (id: string): Promise<void> => {
+    now++;
+    if (transport === 'browser') {
+      expect(await authorizeBrowserInput(id, 'plan-page', binding.conversationId)).toBe(true);
+      expect(await acknowledgeBrowserInput(id, 'plan-page', binding.conversationId, `native-${id}`)).toBe(true);
+    } else await acknowledgeToolInput(sessionId, binding.conversationId, 'next-request', now);
+  };
+  const completeTurn = (turnId: string): void => {
+    now += 10;
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId, time: now };
+  };
+  completeTurn('before-plan');
+  const delivered = await claim(first.id);
+  expect(delivered?.includes(objective)).toBe(true);
+  for (const stage of [args.text, ...args.stages!]) expect(delivered).toContain(stage);
+  expect((await listInputs()).find(row => row.id === first.id)).toMatchObject({ text: args.text, objective, stages: args.stages });
+  resetInputForTests();
+  expect(await claim(first.id)).toBe(delivered);
+  await acknowledge(first.id);
+
+  // Later checkpoints remain independently editable; they do not repeat the captured workflow.
+  expect(await cancelInput(initial[2]!.id)).toBe(true);
+  const edited = 'Check the revised result without changing C:\\work\\fixture.';
+  expect(await editQueuedInput(initial[3]!.id, edited)).toBe(true);
+  resetInputForTests();
+  completeTurn('after-implementation');
+  expect(await claim(initial[1]!.id)).toBe(args.stages![0]);
+  await acknowledge(initial[1]!.id);
+  completeTurn('after-verification');
+  expect(await claim(initial[3]!.id)).toBe(edited);
+  await acknowledge(initial[3]!.id);
+  const final = await listInputs();
+  expect(final.filter(row => row.state === 'queued')).toEqual([]);
+  expect(final.find(row => row.id === initial[2]!.id)?.state).toBe('cancelled');
+  expect(final).toHaveLength(initial.length);
+  expect(automate).not.toHaveBeenCalled();
+});
+
+it.each(['ordinary', 'edited-plan'] as const)('keeps %s finish input literal even when it retains objective metadata', async kind => {
+  const text = 'Only execute this exact instruction.';
+  const row = await enqueueInput(input({ mode: 'finish', text, objective: 'A separate saved objective.', authoredSource: 'objective',
+    ...(kind === 'edited-plan' ? { stages: ['A later checkpoint.'] } : {}) }));
+  if (kind === 'edited-plan') expect(await editQueuedInput(row.id, text)).toBe(true);
+  expect((await offerToolInput(sessionId, binding.conversationId, 'literal-request', now, true))[0]?.text).toBe(text);
+  expect(automate).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['new', 'gpt-5-6-pro', true, false],
+  ['existing', 'gpt-5-6-pro', true, false],
+  ['new', 'gpt-5-6-thinking', true, false],
+  ['existing', 'gpt-5-6-thinking', true, false],
+  ['new', 'gpt-6-astra', true, true],
+  ['existing', 'gpt-6-astra', true, true],
+  ['new', 'gpt-6-astra', false, false],
+  ['existing', 'gpt-6-astra', false, false]
+] as const)('uses eligible finish wording in the %s browser plan for %s (finish enabled=%s)', async (kind, model, finishEnabled, expectsFinish) => {
+  binding.model = model; binding.finishEnabled = finishEnabled;
+  const opening = kind === 'new';
+  const row = await enqueueInput(input({ sessionId: opening ? null : sessionId, mode: opening ? 'auto' : 'finish',
+    afterTurn: true, model, authoredSource: 'objective', objective: 'Build the requested feature without deploying it.',
+    text: 'Implement the full feature.', stages: ['Verify the requested behavior.', 'Review all acceptance criteria.'] }));
+  binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'before-wording-plan', time: ++now };
+  const claimed = await claimBrowserInput(row.id, 'wording-page', opening ? null : binding.conversationId, true);
+  expect(claimed).not.toBeNull();
+  expect(claimed!.text).toContain(row.objective);
+  for (const stage of [row.text, ...row.stages!]) expect(claimed!.text).toContain(stage);
+  expect(claimed!.text.match(/\bsession_finish\b/g) ?? []).toHaveLength(expectsFinish ? 1 : 0);
+  if (expectsFinish) {
+    expect(claimed!.text).toContain('about 5 minutes of final verification remain');
+    expect(claimed!.text).toContain('Do not use this tool for progress updates or to collect queued tasks.');
+  }
+  expect(claimed!.text).not.toContain('asking for the next one with session_finish');
+});
+
+it('keeps workflow finish wording in the Astra tool reminder only', async () => {
+  const row = await enqueueInput(input({ mode: 'finish', authoredSource: 'objective', objective: 'Finish the complete local feature.',
+    text: 'Implement the requested behavior.', stages: ['Verify all requirements.'] }));
+  const batch = await offerToolInputBatch(sessionId, binding.conversationId, 'wording-tool', now, true);
+  expect(batch.messages).toHaveLength(1);
+  expect(batch.messages[0]!.text).toContain(row.objective);
+  for (const stage of [row.text, ...row.stages!]) expect(batch.messages[0]!.text).toContain(stage);
+  expect(batch.messages[0]!.text).not.toContain('session_finish');
+  expect(batch.reminder.match(/\bsession_finish\b/g) ?? []).toHaveLength(1);
+  expect(batch.reminder).toContain('about 5 minutes of final verification remain');
+  expect(batch.reminder).toContain('Do not use this tool for progress updates or to collect queued tasks.');
+});
+
 it('durably queues all finish-plan stages immediately and keeps manual deletion and edits independent', async () => {
   const args = input({ mode: 'finish', text: 'First checkpoint', stages: ['Delete this checkpoint', 'Last checkpoint'] });
   const first = await enqueueInput(args);
@@ -1690,6 +1797,34 @@ describe('one silence delivery for a correction and its next checkpoint', () => 
     for (const id of [head.id, correction.id]) expect(rows.find(row => row.id === id)).toMatchObject({ state: 'sent', messageId: 'native-id', historyRecorded: true });
     expect(rows.find(row => row.id === later.id)).toMatchObject({ state: 'queued' });
     expect(await enqueueInput(input({ ...correction }))).toMatchObject({ text: 'Use real 3D shapes' });
+  });
+
+  it('preserves the complete existing-chat plan when its first entry accompanies a silence correction', async () => {
+    binding.model = 'gpt-5-6-thinking';
+    binding.activeTurnId = 'silent-plan-turn';
+    binding.end = { kind: 'turn_start', outcome: '', turnId: 'silent-plan-turn', time: now, seq: 12 };
+    const objective = 'ORIGINAL_CONSTRAINT: finish the local feature without deploying it.';
+    const head = await enqueueInput(input({ mode: 'finish', authoredSource: 'objective', objective,
+      text: 'Implement the feature.', stages: ['Verify the complete feature.', 'Review the final result.'] }));
+    const checkpoints = (await listInputs()).filter(row => row.id !== head.id);
+    const correction = await enqueueInput(input({ text: 'Preserve the existing public interface.' }));
+    const listenUntil = now + 180_000;
+    expect(await fileSilenceInput(sessionId, binding.conversationId, 'silent-plan-turn', () => true, listenUntil)).toBe(true);
+    now = listenUntil;
+    const claim = await claimBrowserInput(correction.id, 'plan-page', binding.conversationId, true);
+    expect(claim?.text).toContain(correction.text);
+    expect(claim?.text).toContain(objective);
+    for (const stage of [head.text, ...head.stages!]) expect(claim?.text).toContain(stage);
+    expect(claim?.text).not.toContain('session_finish');
+    expect(claim?.companionInputId).toBe(head.id);
+    resetInputForTests();
+    expect((await claimBrowserInput(correction.id, 'plan-page', binding.conversationId, true))?.text).toBe(claim?.text);
+    expect(await authorizeBrowserInput(correction.id, 'plan-page', binding.conversationId)).toBe(true);
+    expect(await acknowledgeBrowserInput(correction.id, 'plan-page', binding.conversationId, 'native-plan-correction')).toBe(true);
+    const rows = await listInputs();
+    for (const id of [head.id, correction.id]) expect(rows.find(row => row.id === id)).toMatchObject({ state: 'sent', messageId: 'native-plan-correction' });
+    expect(rows.filter(row => row.state === 'queued').map(row => [row.id, row.text])).toEqual(checkpoints.map(row => [row.id, row.text]));
+    expect(automate).not.toHaveBeenCalled();
   });
 
   it('releases both unsubmitted claims when real work resumes and injects only the correction', async () => {

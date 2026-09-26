@@ -1,10 +1,10 @@
-import { isAstraModel, isProModel } from './chat-models.js';
+import { isAstraModel } from './chat-models.js';
 import type { InputAutomation } from './input.js';
 import type { ReasoningEffort } from './session.js';
 
-/** Both Astra modes and older Pro Loop can use the finish boundary. */
+/** Finish automation follows the Astra-only session_finish contract in either mode. */
 export function supportsFinishAutomation(mode: InputAutomation, model: string | null | undefined, effort?: ReasoningEffort): boolean {
-  return mode !== 'off' && (isAstraModel(model, effort) || (mode === 'loop' && isProModel(model, effort)));
+  return mode !== 'off' && isAstraModel(model, effort);
 }
 
 /** One completion policy for browser and tool delivery; authored user text stays unchanged. */
