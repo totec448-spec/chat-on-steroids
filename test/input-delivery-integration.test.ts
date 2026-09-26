@@ -128,6 +128,70 @@ it('keeps automatic Continue attached to the native question after injected corr
   } finally { clock.mockRestore(); }
 });
 
+/**
+ * The reason a recovery message could not be sent, kept instead of dropped.
+ *
+ * A Continue that was never authorized is still owed, so `releaseRecoveryClaim` hands the ticket back
+ * to the queue on purpose and keeps its pickup budget. What went with it was the explanation: the page
+ * tells the app exactly why it could not send, `failBrowserInput` receives that string, and this one
+ * branch was the only one that discarded it — every other branch there stores it as `error`.
+ *
+ * Measured on 2026-09-26: one recovery row claimed twelve times in three minutes, back to `queued`
+ * every time, with no `error` on the receipt and not a single line in the log. The loop was visible
+ * only because the *claims* are logged; the reason for the release was nowhere.
+ */
+it('keeps the reason a recovery claim was released, and says it once', async () => {
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const bridge = await import('../src/main/bridge.js');
+    const { getLog } = await import('../src/main/logger.js');
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+    const conversationId = randomUUID(), turnId = randomUUID(), questionId = randomUUID();
+    const session = await createSession({ title: 'Released recovery claim', conversationId });
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+      { kind: 'user_message', messageId: questionId, text: 'Finish the task', time: now },
+      { kind: 'turn_start', turnId, time: now }
+    ] });
+    await attributedMcp(conversationId);
+    now += 120_000;
+    await bridge.sweepStaleSwarm(now);
+    const repair = (await post('/status', { openConversations: [conversationId] })).body.repairs
+      .find((item: any) => item.conversationId === conversationId);
+    expect(repair?.reason, 'no silence repair, so no recovery row to release').toBe('silence');
+    expect((await post('/repairs/claim', { token: repair.token })).body.allowed).toBe(true);
+    await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
+    const row = (await input.listInputs()).find(item => item.sessionId === session.id && item.recovery)!;
+    expect(row, 'no recovery row was filed').toBeTruthy();
+
+    expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
+    const reason = 'The composer refused the prepared text.';
+    expect(await input.failBrowserInput(row.id, 'a-document', reason)).toBe(true);
+
+    // The ticket survives — that is the point of releasing rather than failing it — and now it
+    // carries why it came back.
+    const released = (await input.listInputs()).find(item => item.id === row.id)!;
+    expect(released.state, 'the ticket was not handed back to the queue').toBe('queued');
+    expect(released.owner).toBeNull();
+    expect(released.error, 'the reason the browser gave was discarded').toBe(reason);
+
+    const said = getLog().filter(entry => entry.message.includes('could not send this recovery message'));
+    expect(said, 'the release was not reported at all').toHaveLength(1);
+    expect(said[0]!.message).toContain(reason);
+
+    // Said once per reason, not once per attempt: the schedule re-offers the same ticket in seconds.
+    expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
+    expect(await input.failBrowserInput(row.id, 'a-document', reason)).toBe(true);
+    expect(getLog().filter(entry => entry.message.includes('could not send this recovery message')),
+      'it repeated itself once per attempt').toHaveLength(1);
+
+    // A different reason is new information and is said.
+    expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
+    expect(await input.failBrowserInput(row.id, 'a-document', 'The tab moved to another chat.')).toBe(true);
+    expect(getLog().filter(entry => entry.message.includes('could not send this recovery message'))).toHaveLength(2);
+  } finally { clock.mockRestore(); }
+});
+
 it.each([
   { model: 'gpt-5.6-sol', alias: false }, { model: 'gpt-5.6-sol', alias: true },
   { model: 'gpt-6-pro', alias: false }, { model: 'gpt-6-pro', alias: true }
