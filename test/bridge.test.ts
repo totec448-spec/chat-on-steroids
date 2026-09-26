@@ -2702,6 +2702,50 @@ describe('automatic compaction', () => {
   });
 
   /**
+   * The retry is bounded. Each pickup reloads the source page, and a chat that can never reach Send
+   * (#419: a turn that died mid-tool-call leaves results the page never acknowledges) would
+   * otherwise be reloaded every two minutes for as long as it exists. After the first burst and two
+   * slowed bursts the ticket is abandoned as a manual one is, and the next working turn opens anew.
+   */
+  it('abandons an automatic ticket that never reaches Send after its bounded retry bursts', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac07';
+      await request('POST', '/events', {
+        body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a chat that cannot send', messageId: 'm-auto-bound' }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+      const token = filed.body.token as string;
+      const takeRepair = async (): Promise<{ token: string; reason: string } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repairs?.[0] ?? null;
+      };
+      let reloads = 0;
+      // Three bursts of five pickups; the pause between bursts is ten minutes.
+      for (let burst = 0; burst < 3; burst += 1) {
+        await vi.advanceTimersByTimeAsync(burst === 0 ? 2 * 60_000 : 10 * 60_000);
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          if (attempt > 0) await vi.advanceTimersByTimeAsync(2 * 60_000);
+          const handout = await takeRepair();
+          expect(handout, `burst ${burst} attempt ${attempt}`).toMatchObject({ reason: 'compaction' });
+          await request('GET', `/status?repaired=${handout!.token}&repairAction=reloaded`);
+          reloads += 1;
+        }
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+        expect(await takeRepair()).toBeNull();
+      }
+      expect(reloads).toBe(15);
+      expect(continuationForSession(filed.body.sessionId as string)?.token, 'abandoned, not retained').not.toBe(token);
+      // No further reloads, however long the chat stays open.
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(await takeRepair()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
    * Once the marked prompt is with ChatGPT the pickup is a five-minute clock with three reloads,
    * so a glitched writing page costs a quarter of an hour at most rather than three of them. The
    * ticket itself is never failed by a pickup here; it stays open for the page to finish. The
