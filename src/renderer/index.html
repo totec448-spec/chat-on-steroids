@@ -920,6 +920,23 @@
                 <div class="pane">
                   <div class="setting">
                     <span class="setting-text">
+                      <b>Handoff prompt</b>
+                      <em>Controls what Compact &amp; Resume preserves in the brief. Continuation identity and recovery rules stay fixed.</em>
+                    </span>
+                    <button class="btn" id="handoffPromptEdit" type="button">Edit prompt</button>
+                  </div>
+
+                  <div class="field goal-prompt" id="handoffPromptPanel" hidden>
+                    <label for="handoffPrompt">Handoff prompt</label>
+                    <textarea dir="auto" id="handoffPrompt" rows="14" spellcheck="false"></textarea>
+                    <p class="hint">Saved when you leave the editor. This changes brief content only; Compact &amp; Resume protocol framing remains fixed.</p>
+                    <div class="step-actions">
+                      <button class="btn" id="handoffPromptReset" type="button">Restore default</button>
+                    </div>
+                  </div>
+
+                  <div class="setting">
+                    <span class="setting-text">
                       <b>Goal prompt, no task</b>
                       <em>Reads the goal from your messages and stops when it is complete.</em>
                     </span>
