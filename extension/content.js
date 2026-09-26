@@ -11000,9 +11000,12 @@
         if (!onTarget()) return fail('The chat changed before direct delivery.');
       }
       const temporary = input.lifetime === 'temporary-planner';
-      if (temporary && temporaryPlannerPage() && !CLF_DOM.temporaryChatReady()) {
+      // On the newer shell an empty temporary chat is proven only by the page-model stamp, and
+      // nothing else scans a document with no conversation yet: ask for one before judging.
+      const temporaryProven = async () => { await askFiber(); return CLF_DOM.temporaryChatReady(); };
+      if (temporary && temporaryPlannerPage() && !(await temporaryProven())) {
         CLF_DOM.confirmTemporaryChatIntroduction();
-        await waitPageView(() => CLF_DOM.temporaryChatReady(), onTarget, 3000);
+        await waitPageView(temporaryProven, onTarget, 3000);
       }
       if (temporary && (!temporaryPlannerPage() || !CLF_DOM.temporaryChatReady())) return fail('Temporary Chat was not confirmed. Open the helper tab and complete its Temporary Chat introduction.');
       const providerLimitation = () => CLF_DOM.errors().find(error => error.blocking === true)?.text;
