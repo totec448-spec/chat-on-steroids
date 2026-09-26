@@ -11183,6 +11183,12 @@
       // The legacy wire field also binds unfiled reserved openings before recorder evidence.
       if (input.opening || input.projectId) desktopProjectInput = { id: input.id, owner: input.owner };
       let receipt = null;
+      // This text was inserted by the app, and the newer shell stores inserted text
+      // Markdown-escaped — hard breaks as `\<newline>`. Measured 2026-09-26 on a chat started
+      // from the app: its first row read back `[[COS_CONTEXT:19956]]\ You are…`, the raw
+      // comparison never matched, and that first turn got no ACK, no turn start and no turn end
+      // for Goal or Loop to act on. The bootstrap comparison is exact either way (raw, then one
+      // unescape); a person's own sends keep the raw comparison in matchesUserSendReceipt.
       if (!(await sendSubmittedText(sendingTarget, false, async sendCurrent => {
         // Preserve the outbox's revocable claim until the actual native Send is ready.
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current())) return false;
@@ -11194,12 +11200,12 @@
       }, (user, conversation) => {
         if ((!conversation && !temporary) || (target && !onTarget())) return false;
         const users = CLF_DOM.messages().filter(row => row.role === 'user');
-        if ((!target && users.length !== 1) || users.at(-1)?.id !== user.id || user.id === previousUserId || !matchesSubmittedUser(user, submittedText)) return false;
+        if ((!target && users.length !== 1) || users.at(-1)?.id !== user.id || user.id === previousUserId || !matchesSubmittedBootstrap(user, submittedText)) return false;
         // Freeze only identity while native Send still holds the proven row. React
         // may replace it before this async operation resumes; do not rediscover it.
         receipt = { conversation, user: { id: user.id } };
         return true;
-      }))) return false;
+      }, matchesSubmittedBootstrap))) return false;
       if (!receipt || !sendingTarget()) return false;
       // Native Send listeners refresh the receipt; pin only that witnessed object.
       const witnessedSendReceipt = userSendReceipt;

@@ -1110,6 +1110,52 @@ describe('desktop input delivery and helper ownership', () => {
     ]);
   });
 
+  /**
+   * The newer shell gives a fresh chat a local placeholder route before its real id: measured
+   * 2026-09-26, `/?cos-input=…` → `/c/local-chatgpt:<uuid>` → `/c/<id>`, with the user row
+   * already rendered under the placeholder.
+   */
+  it('ACKs a fresh input whose chat passes through a local-chatgpt placeholder route', async () => {
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize ? { ok: true } : message.ack ? { ok: true } : { input: claimed() } })
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      live!.dom.reconfigure({ url: 'https://chatgpt.com/c/local-chatgpt%3A7e6c97ba-64cb-434e-9b49-c45755777c73' });
+      userTurn(live!.document, 'placeholder-desktop-user', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      startGenerating(live!.document, { send: false });
+      live!.hook.observe();
+      setTimeout(() => { live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` }); live!.hook.observe(); }, 50);
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toEqual([
+      expect.objectContaining({ id: inputId, owner: 'input-owner', conversationId: chatA, ack: true })
+    ]);
+  });
+
+  /**
+   * The newer shell stores inserted text Markdown-escaped. Measured 2026-09-26 on a chat started
+   * from the app: its first user row read back `[[COS_CONTEXT:19956]]\\ You are…`, so the send
+   * was never recognised — no ACK, and no turn start or end for Goal or Loop to act on.
+   */
+  it('ACKs a fresh input whose user row the page stores Markdown-escaped', async () => {
+    const typed = '[[COS_CONTEXT:1]]\nInspect #3 of the *exact* task_list [here](x).';
+    const stored = '[[COS_CONTEXT:1]]\\\nInspect \\#3 of the \\*exact\\* task\\_list \\[here\\](x).';
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize ? { ok: true } : message.ack ? { ok: true } : { input: claimed({ text: typed }) } })
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      userTurn(live!.document, 'escaped-desktop-user', stored);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toEqual([
+      expect.objectContaining({ id: inputId, owner: 'input-owner', conversationId: chatA, ack: true })
+    ]);
+  });
+
   it.each([false, true])('carries a reserved opening into route binding before activity (project: %s)', async project => {
     live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
       events: () => ({ ok: false }),
