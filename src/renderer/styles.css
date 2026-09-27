@@ -54,6 +54,26 @@
 .plugin-count, .plugin-section-head > .muted { color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; letter-spacing: 0; }
 .plugin-section-head .btn { color: var(--ink); font-size: calc(11.5px * var(--text-scale, 1)); }
 #pluginsInstalled, .plugin-directory, .plugin-catalog, .pet-library-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; }
+/* Skills library. */
+.skill-import-menu { position: relative; top: auto; right: auto; flex: 0 0 44px; }
+.skill-import-menu > summary.plugin-add { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--edge); border-radius: var(--pill); background: var(--card); color: var(--ink); }
+.skill-import-menu .plugin-menu-actions { min-width: 190px; top: 50px; }
+.skill-library-card .plugin-entry { align-items: stretch; min-height: 122px; padding: 16px; }
+.skill-library-card .plugin-card-title { display: flex; flex-direction: column; }
+.skill-library-card .plugin-card-title :is(h2, p) { padding-right: 38px; }
+.skill-library-icon { display: grid; place-items: center; align-self: center; flex: 0 0 58px; width: 58px; height: 64px; border-radius: 12px; background: var(--sunk); color: var(--ink); }
+.skill-library-icon .ico { width: 26px; height: 26px; font-size: 26px; }
+.skill-library-card .plugin-card-foot { margin-top: auto; padding-top: 12px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+.skill-library-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-library-source { display: inline-flex; align-items: center; gap: 5px; min-width: 0; flex: 0 1 auto; margin-left: auto; color: var(--soft); white-space: nowrap; }
+.skill-library-source > span { overflow: hidden; text-overflow: ellipsis; }
+.skill-library-source .ico { font-size: 13px; }
+.skill-library-source.is-current .ico { color: var(--green); }
+.skill-library-source.is-error .ico { color: var(--red); }
+.skill-library-update { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
+.skill-library-update:hover { text-decoration: underline; text-underline-offset: 3px; }
+.skill-source-url { margin: 10px 0 0; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); overflow-wrap: anywhere; user-select: text; }
+#skillGithubDialog[aria-busy='true'] .plugin-dialog-head button, #skillGithubDialog[aria-busy='true'] #skillGithubCancel { opacity: .45; pointer-events: none; }
 /* Pets library (desktop pets). */
 .pet-library-grid { align-items: stretch; }
 .pet-library-card { height: 100%; }
