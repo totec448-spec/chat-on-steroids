@@ -2366,6 +2366,7 @@ async function recordChatObservationsNow(
           ...base,
           kind: 'turn_end',
           outcome: item.outcome ?? 'unknown',
+          ...(item.outcome === 'completed' && item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
           ...(item.outcome === 'failed' && item.reason === 'thinking_failed' ? { reason: item.reason } : {}),
           ...(item.detail ? { detail: item.detail } : {})
         });
