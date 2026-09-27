@@ -37,6 +37,12 @@ extraResources:
     to: LICENSE.electron.txt
   - from: node_modules/electron/dist/LICENSES.chromium.html
     to: LICENSES.chromium.html
+  - from: pets
+    to: pets
+    filter:
+      - '*/pet.json'
+      - '*/atlas.png'
+      - '*/animations.json'
   - from: extension
     to: extension
     filter:

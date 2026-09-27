@@ -57,7 +57,22 @@ function persist(): void {
   writeDurableSoon(STATE_KEY, stored);
 }
 
-export async function initPetLibrary(userData: string): Promise<void> {
+/** Read-only pet packages that ship with the app (pets/<id> in the app resources). */
+let bundledDirectory: string | null = null;
+
+function bundledIds(): string[] {
+  if (!bundledDirectory) return [];
+  try {
+    return fs.readdirSync(bundledDirectory, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && !entry.isSymbolicLink() && PET_ID_PATTERN.test(entry.name) && entry.name !== BUILTIN_PET_ID)
+      .map(entry => entry.name).slice(0, MAX_PACKAGES);
+  } catch { return []; }
+}
+
+function isBundled(id: string): boolean { return bundledIds().includes(id); }
+
+export async function initPetLibrary(userData: string, bundled: string | null = null): Promise<void> {
+  bundledDirectory = bundled;
   directory = path.join(userData, 'pets');
   fs.mkdirSync(directory, { recursive: true });
   const restored = await readDurable<Partial<StoredPetLibraryState>>(STATE_KEY);
@@ -209,6 +224,13 @@ function inspectPackage(folder: string, expectedId?: string): InspectedPet {
 
 function installedPet(id: string): InspectedPet {
   if (!PET_ID_PATTERN.test(id)) throw new Error('Invalid pet id.');
+  if (bundledDirectory && isBundled(id)) {
+    const realRoot = fs.realpathSync(bundledDirectory);
+    const realFolder = fs.realpathSync(path.join(bundledDirectory, id));
+    if (!realFolder.startsWith(realRoot + path.sep)) throw new Error('Pet package escapes the library.');
+    const inspected = inspectPackage(realFolder, id);
+    return { ...inspected, record: { ...inspected.record, builtin: true } };
+  }
   const root = ensureReady();
   const folder = path.join(root, id);
   const info = fs.lstatSync(folder, { throwIfNoEntry: false });
@@ -235,9 +257,13 @@ function preference(record: Omit<PetRecord, 'enabled' | 'favorite'>): PetRecord 
 export function petLibraryState(): PetLibraryState {
   const root = ensureReady();
   const pets: PetRecord[] = [preference(builtin)];
+  const bundled = bundledIds();
+  for (const id of bundled) {
+    try { pets.push(preference(installedPet(id).record)); } catch { /* A damaged bundled package stays unavailable. */ }
+  }
   let count = 0;
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    if (count >= MAX_PACKAGES || entry.name === BUILTIN_PET_ID || !entry.isDirectory() || !PET_ID_PATTERN.test(entry.name)) continue;
+    if (count >= MAX_PACKAGES || entry.name === BUILTIN_PET_ID || bundled.includes(entry.name) || !entry.isDirectory() || !PET_ID_PATTERN.test(entry.name)) continue;
     count += 1;
     try { pets.push(preference(installedPet(entry.name).record)); } catch { /* Invalid packages remain unavailable. */ }
   }
@@ -264,7 +290,7 @@ export function setPetFavorite(id: string, favorite: boolean): PetLibraryState {
 }
 
 export function deletePet(id: string): PetLibraryState {
-  if (id === BUILTIN_PET_ID) throw new Error('The built-in pet cannot be deleted.');
+  if (id === BUILTIN_PET_ID || isBundled(id)) throw new Error('Bundled pets cannot be deleted. Turn them off instead.');
   if (!PET_ID_PATTERN.test(id)) throw new Error('Invalid pet id.');
   const root = ensureReady();
   const folder = path.join(root, id);
@@ -286,7 +312,7 @@ export function deletePet(id: string): PetLibraryState {
 export function importPet(sourceFolder: string): PetLibraryState {
   const source = fs.realpathSync(sourceFolder);
   const inspected = inspectPackage(source);
-  if (inspected.record.id === BUILTIN_PET_ID) throw new Error('That pet id is reserved for the built-in companion.');
+  if (inspected.record.id === BUILTIN_PET_ID || isBundled(inspected.record.id)) throw new Error('That pet id is reserved for a bundled pet.');
   const root = ensureReady();
   const destination = path.join(root, inspected.record.id);
   if (fs.existsSync(destination)) throw new Error(`${inspected.record.displayName} is already imported.`);
