@@ -11368,10 +11368,11 @@
       /^\/(?:settings\/plugins-settings(?:\/plugin_asdk_app_[a-zA-Z0-9_-]+)?|plugins\/plugin_asdk_app_[a-zA-Z0-9_-]+)$/.test(url.pathname);
     return alive && !generating && !CLF_DOM.generating() && route && url.searchParams.get('cos-plugin-refresh') === id;
   }
-  function waitPageView(read, current, milliseconds) {
+  // `tickMs` re-reads on a clock too, for a read that waits on time rather than on the DOM.
+  function waitPageView(read, current, milliseconds, tickMs = 0) {
     return new Promise(resolve => {
-      let busy = false, dirty = false, done = false;
-      const finish = value => { if (done) return; done = true; pageViewChecks.delete(check); observer.disconnect(); clearTimeout(timer); resolve(value); };
+      let busy = false, dirty = false, done = false, tick = null;
+      const finish = value => { if (done) return; done = true; pageViewChecks.delete(check); observer.disconnect(); clearTimeout(timer); if (tick) clearInterval(tick); resolve(value); };
       const check = async () => {
         if (done) return;
         if (!current()) return finish(null);
@@ -11383,8 +11384,27 @@
       };
       const observer = new MutationObserver(check); observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
       pageViewChecks.add(check);
-      const timer = setTimeout(() => finish(null), milliseconds); void check();
+      const timer = setTimeout(() => finish(null), milliseconds);
+      if (tickMs > 0) tick = setInterval(() => void check(), tickMs);
+      void check();
     });
+  }
+  /**
+   * Measured 2026-09-27 on ChatGPT's plugin page: the connector and its tools render about
+   * 100 ms before the "Refresh tools" control, and the page keeps loading for a moment after
+   * both. A read in that gap reported "no Refresh control", which the app records as needing
+   * manual action and never retries. On that page a view is accepted only once its refresh
+   * control (or its absence) has held for a while.
+   */
+  const PLUGIN_PAGE_SETTLE_MS = 1500, PLUGIN_PAGE_ABSENT_MS = 4000;
+  function settledPluginView() {
+    let seen, since = 0;
+    return next => {
+      if (!next?.settled) return next;
+      const control = next.refresh || null;
+      if (control !== seen) { seen = control; since = Date.now(); return null; }
+      return Date.now() - since >= (control ? PLUGIN_PAGE_SETTLE_MS : PLUGIN_PAGE_ABSENT_MS) ? next : null;
+    };
   }
   // The App Id a management page shows, under the old hash or the newer path route.
   function pluginViewAppId(href) {
@@ -11432,11 +11452,12 @@
       // Identity and Refresh paint before the tool declarations. A partial settings
       // panel is neither an old schema nor permission to click; wait on the existing
       // DOM observer and leave an unclaimed request available if hydration times out.
+      const settle = settledPluginView();
       const view = await waitPageView(async () => {
         const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, request.appId);
         const appId = pluginViewAppId(location.href);
-        return appId && next?.appId === appId && Array.isArray(next.tools) && (next.tools.length > 0 || next.settled === true) ? next : null;
-      }, current, 8000);
+        return settle(appId && next?.appId === appId && Array.isArray(next.tools) && (next.tools.length > 0 || next.settled === true) ? next : null);
+      }, current, 12000, 250);
       if (!view) {
         // Say so. `pluginSnapshot()` refuses for two different reasons — the page has not
         // rendered the card yet, and the page renders a card this build cannot read — and

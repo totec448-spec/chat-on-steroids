@@ -36,7 +36,7 @@ it.each([false, true])('waits for readable tool schemas before claim (navigation
   let ready = false, refreshed = false;
   const click = vi.fn(() => { refreshed = true; });
   const ask = vi.fn(async () => ({ data: { ok: true } }));
-  const context = vm.createContext({ URL, setTimeout, clearTimeout, pageViewChecks: new Set(), MutationObserver: dom.window.MutationObserver,
+  const context = vm.createContext({ URL, setTimeout, clearTimeout, setInterval, clearInterval, pageViewChecks: new Set(), MutationObserver: dom.window.MutationObserver,
     document: dom.window.document, alive: true, generating: false, epoch: 1, ask,
     location: { pathname: '/', href: `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic` },
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
@@ -262,10 +262,11 @@ it('refreshes a settled empty Plugins page and passes its tunnel id to the claim
   const click = vi.fn(() => { refreshed = true; });
   const ask = vi.fn(async (_message: Record<string, unknown>) => ({ data: { ok: true } }));
   const href = `https://chatgpt.com/settings/plugins-settings/plugin_asdk_app_synthetic?cos-plugin-refresh=${id}`;
-  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, location: { pathname: new URL(href).pathname, href },
+  const refresh = { click };
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, location: { pathname: new URL(href).pathname, href }, ...clock(),
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
-      pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', refresh: { click }, tunnelId: 'tunnel_synthetic01', settled: true, tools: refreshed ? tools : [] }) } });
-  vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
+      pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', refresh, tunnelId: 'tunnel_synthetic01', settled: true, tools: refreshed ? tools : [] }) } });
+  vm.runInContext(`${section}\n${ticking}; globalThis.run = refreshManagedPlugin;`, context);
   expect(await (context.run as Function)({ id, appId: null, connectorName: 'Chat On Steroids Plugins', tools })).toBe(true);
   expect(click).toHaveBeenCalledTimes(1);
   expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
@@ -285,4 +286,33 @@ it('forwards the page tunnel id from the extension to the app, and only a well-f
   expect(JSON.parse(call.mock.calls[0]![1].body)).toMatchObject({ action: 'claim', tunnelId: 'tunnel_synthetic01' });
   await send('tunnel_x"; drop');
   expect(JSON.parse(call.mock.calls[1]![1].body)).not.toHaveProperty('tunnelId');
+});
+
+// A stand-in clock: each read of a ticking wait advances it by 250 ms, like the real interval.
+function clock() { const now = { t: 1_000_000 }; return { Date: { now: () => now.t }, advance: (ms: number) => { now.t += ms; } }; }
+const ticking = 'waitPageView = async (read, current) => { for (let i = 0; i < 60; i++) { if (!current()) return null; const value = await read(); if (value) return value; advance(250); } return null; }';
+it('waits for the Refresh control that renders just after the tools, and settles before clicking', async () => {
+  // Measured 2026-09-27: tools at t, "Refresh tools" at t+100 ms. A read in the gap reported
+  // "no Refresh control", which the app records as manual and never retries.
+  const click = vi.fn(); const ask = vi.fn(async (_message: Record<string, unknown>) => ({ data: { ok: true } }));
+  let reads = 0; const refresh = { click };
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, location: { pathname: new URL(pathRouted).pathname, href: pathRouted }, ...clock(),
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
+      pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', settled: true, refresh: ++reads > 1 ? refresh : null, tools: [{ ...tools[0], description: 'Old' }] }) } });
+  vm.runInContext(`${section}\n${ticking}; globalThis.run = refreshManagedPlugin;`, context);
+  await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools });
+  expect(ask.mock.calls.map(([message]) => message.action)[0]).toBe('claim');
+  expect(click).toHaveBeenCalledTimes(1);
+  expect(reads).toBeGreaterThanOrEqual(1 + 1500 / 250);
+});
+it('reports a missing Refresh control only after it stayed absent', async () => {
+  const ask = vi.fn(async (_message: Record<string, unknown>) => ({ data: { ok: true } }));
+  let reads = 0;
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, location: { pathname: new URL(pathRouted).pathname, href: pathRouted }, ...clock(),
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
+      pluginRefreshView: () => (++reads, { appId: 'asdk_app_synthetic', settled: true, refresh: null, tools: [{ ...tools[0], description: 'Old' }] }) } });
+  vm.runInContext(`${section}\n${ticking}; globalThis.run = refreshManagedPlugin;`, context);
+  await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools });
+  expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['manual']);
+  expect(reads).toBeGreaterThanOrEqual(1 + 4000 / 250);
 });
