@@ -518,6 +518,28 @@ let lastSeenAt: number | null = null;
 let browserPresenceTimer: NodeJS.Timeout | null = null;
 let commands: Command[] = [];
 let commandReceipts: CommandReceipt[] = [];
+
+/**
+ * Binds the exact fresh worker page that redeemed one still-live bootstrap command.
+ *
+ * The friendly worker id is deliberately insufficient because every later run reuses it.
+ * The random command id is the browser-held authority that proves which invited slot opened
+ * this document. Both `/events` lost-ACK recovery and the earlier `/correlations` handshake
+ * use this same boundary so a worker cannot begin MCP work in a gap where attribution already
+ * knows its conversation but the agent dispatcher still sees a stranger.
+ */
+function bindLeasedWorkerCommand(agent: string | null, commandId: string | null, conversation: string): boolean {
+  if (!agent || !commandId) return false;
+  const pending = commands.find(
+    (command) =>
+      command.id === commandId &&
+      command.spec.type === 'worker' &&
+      command.spec.agent === agent &&
+      swarmRunning(command.spec.runId) &&
+      command.claimedAt !== null
+  );
+  return pending?.spec.type === 'worker' ? bindConversation(agent, conversation, pending.spec.runId) : false;
+}
 /**
  * Worker/revival transports already removed from live delivery but still kept in durable
  * snapshots until the broker-side failed/sleeping transition has crossed its own fsync.
@@ -2181,6 +2203,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
     const calls = parseCallEvidence(body['calls'], true).filter((call) => call.requestId !== null);
     if (calls.length === 0) return json(res, 400, { error: 'bad_request_evidence' }, origin);
+    const reportedAgent = typeof body['agent'] === 'string' && /^[a-z0-9-]{1,40}$/i.test(body['agent'])
+      ? body['agent']
+      : null;
+    const reportedCommandId = typeof body['agentCommandId'] === 'string' ? body['agentCommandId'] : null;
+    bindLeasedWorkerCommand(reportedAgent, reportedCommandId, id);
 
     // This is the live-turn ownership handshake, deliberately separate from transcript
     // delivery. A fresh ChatGPT conversation can expose metadata.request_id before its
@@ -2245,17 +2272,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       ? body['agent']
       : null;
     const reportedCommandId = typeof body['agentCommandId'] === 'string' ? body['agentCommandId'] : null;
-    if (reportedAgent && reportedCommandId) {
-      const pending = commands.find(
-        (command) =>
-          command.id === reportedCommandId &&
-          command.spec.type === 'worker' &&
-          command.spec.agent === reportedAgent &&
-          swarmRunning(command.spec.runId) &&
-          command.claimedAt !== null
-      );
-      if (pending?.spec.type === 'worker') bindConversation(reportedAgent, id, pending.spec.runId);
-    }
+    bindLeasedWorkerCommand(reportedAgent, reportedCommandId, id);
     // This reports attachment only. The recorder below owns actual work and replay deduplication.
     const revived = noteAgentAlive(id, 'page');
     if (revived?.report) await recordAgentMessage(revived.report, 'sent', id);

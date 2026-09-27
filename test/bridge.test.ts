@@ -3523,6 +3523,105 @@ describe('delivering a bootstrap', () => {
     expect(pendingWorkerSpawns()).toEqual([]);
   });
 
+  it('binds a fresh worker from exact early request correlation before its delayed command acknowledgement', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'report through agents as soon as the first tool call begins' }], caller: { conversationId: PRIME_CHAT } });
+    const command = await redeem(undefined, 'early-correlation-worker-page');
+    const conversationId = 'acacacac-3456-7890-abcd-ef1234567890';
+    const correlate = (agentCommandId: string, requestId: string) => request('POST', '/correlations', {
+      body: {
+        conversationId,
+        agent: 'worker-1',
+        agentCommandId,
+        calls: [{ requestId, messageId: null, tool: 'exec_command', order: 0, answered: false }]
+      }
+    });
+
+    const stale = await correlate('not-the-leased-command', 'f0f00001-1111-4111-8111-111111111111');
+    expect(stale.status).toBe(200);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'invited',
+      conversationId: null
+    });
+
+    const exact = await correlate(command.id, 'f0f00002-1111-4111-8111-111111111111');
+    expect(exact.status).toBe(200);
+    expect(exact.body).toMatchObject({ conversationId, confirmed: ['f0f00002-1111-4111-8111-111111111111'] });
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'active',
+      conversationId
+    });
+  });
+
+  it('recovers the exact leased worker command if a crash loses an early correlation binding before ACK', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'survive the early-correlation crash window' }], caller: { conversationId: PRIME_CHAT } });
+    const command = await redeem(undefined, 'early-correlation-crash-page');
+    const conversationId = 'abababab-3456-7890-abcd-ef1234567890';
+
+    // Model the durable state immediately before the new fast path: the worker invitation and
+    // exact claimed browser command are already on disk, but the worker conversation is not.
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    const invitedSwarm = await readDurable<any>('swarm');
+    expect(invitedSwarm).not.toBeNull();
+    expect((await readDurable<any>('bridge-commands'))?.commands).toContainEqual(expect.objectContaining({
+      id: command.id,
+      phase: 'leased',
+      owner: 'early-correlation-crash-page'
+    }));
+
+    const first = await request('POST', '/correlations', {
+      body: {
+        conversationId,
+        agent: 'worker-1',
+        agentCommandId: command.id,
+        calls: [{ requestId: 'f0f00004-1111-4111-8111-111111111111', messageId: null }]
+      }
+    });
+    expect(first.status).toBe(200);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'active',
+      conversationId
+    });
+
+    // Crash before the debounced swarm write. The safe side is the old invited snapshot plus
+    // the still-leased exact command; restart must therefore be able to bind the same slot again
+    // instead of needing a guessed run/worker fallback.
+    restoreSwarm(invitedSwarm);
+    resetBridgeForTests();
+    await restoreCommands();
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'invited',
+      conversationId: null
+    });
+    expect(pendingCommands()).toContainEqual(expect.objectContaining({ id: command.id }));
+
+    const retry = await request('POST', '/correlations', {
+      body: {
+        conversationId,
+        agent: 'worker-1',
+        agentCommandId: command.id,
+        calls: [{ requestId: 'f0f00005-1111-4111-8111-111111111111', messageId: null }]
+      }
+    });
+    expect(retry.status).toBe(200);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'active',
+      conversationId
+    });
+
+    const ack = await request('POST', '/commands/ack', {
+      body: {
+        id: command.id,
+        status: 'sent',
+        conversationId,
+        client: 'early-correlation-crash-page'
+      }
+    });
+    expect(ack.status).toBe(200);
+    expect(pendingCommands().some((entry) => entry.id === command.id)).toBe(false);
+  });
+
   it('keeps the worker command durable until the worker binding itself crosses its crash barrier', async () => {
     await pair();
     spawn({ workers: [{ task: 'prove ack ordering' }], caller: { conversationId: PRIME_CHAT } });
