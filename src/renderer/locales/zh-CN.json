@@ -122,7 +122,7 @@
   "Estimated context processed per tool call · last 52 weeks": "每次工具调用处理的估算上下文 · 最近 52 周",
   "Cost estimate per day": "每日费用估算",
   "Edit cost formula": "编辑费用公式",
-  "Automatic baselines use Standard short-context cached-input prices, checked 7 September 2026:": "自动基准采用标准短上下文缓存输入价格，核对日期为 2026 年 9 月 7 日：",
+  "Automatic baselines use Standard short-context cached-input prices, checked 27 September 2026:": "自动基准采用标准短上下文缓存输入价格，核对日期为 2026 年 9 月 27 日：",
   "GPT-5.6 Sol": "GPT-5.6 Sol",
   "GPT-5.6 Terra": "GPT-5.6 Terra",
   "GPT-5.6 Luna": "GPT-5.6 Luna",
@@ -1054,7 +1054,7 @@
   "ChatGPT has not reported per-model message balances. Shared usage and feature quotas do not establish a model-specific balance.": "ChatGPT 尚未报告各模型的消息余额。共享用量和功能配额不能作为单个模型的余额。",
   "Estimated equivalent · USD": "估算等值费用 · 美元",
   "Recorded model attribution; missing history assumes GPT-5.6 High. Unchanged recordings reuse saved totals.": "依据记录的模型归属统计；缺失历史按 GPT-5.6 High 估算。未变更的记录沿用已保存的总计。",
-  "USD / 1M cached input · editable official baseline, checked 7 September 2026": "美元／百万缓存输入 Token · 可编辑的官方基准，核对于 2026 年 9 月 7 日",
+  "USD / 1M cached input · editable official baseline, checked 27 September 2026": "美元／百万缓存输入 Token · 可编辑的官方基准，核对于 2026 年 9 月 27 日",
   "USD / 1M cached input · enter a verified comparison rate": "美元／百万缓存输入 Token · 请输入已核实的对比单价",
   "Unknown rate": "未知单价",
   "{0} cached-input USD per million tokens": "{0} 每百万缓存输入 Token 的美元单价",
@@ -1624,5 +1624,7 @@
   "Locally cached remote branch; no automatic fetch": "本地缓存的远程分支；不会自动抓取更新",
   "No changes between branches": "分支之间没有更改",
   "Changes from comparison base": "相对于比较基点的更改",
-  "Committed changes only; local work is excluded": "仅显示已提交的更改；不包括本地工作"
+  "Committed changes only; local work is excluded": "仅显示已提交的更改；不包括本地工作",
+  "GPT-6 Sol": "GPT-6 Sol",
+  "GPT-6 Luna": "GPT-6 Luna"
 }

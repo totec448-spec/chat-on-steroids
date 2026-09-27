@@ -117,7 +117,7 @@
   "Estimated context processed per tool call · last 52 weeks": "Araç çağrısı başına işlenen tahmini bağlam · son 52 hafta",
   "Cost estimate per day": "Günlük maliyet tahmini",
   "Edit cost formula": "Maliyet formülünü düzenle",
-  "Automatic baselines use Standard short-context cached-input prices, checked 7 September 2026:": "Otomatik temel değerler, 7 Eylül 2026'da kontrol edilen Standard kısa bağlam önbellekli girdi fiyatlarını kullanır:",
+  "Automatic baselines use Standard short-context cached-input prices, checked 27 September 2026:": "Otomatik temel değerler, 27 Eylül 2026'da kontrol edilen Standard kısa bağlam önbellekli girdi fiyatlarını kullanır:",
   "GPT-5.6 Sol": "GPT-5.6 Sol",
   "GPT-5.6 Terra": "GPT-5.6 Terra",
   "GPT-5.6 Luna": "GPT-5.6 Luna",
@@ -971,7 +971,7 @@
   "ChatGPT has not reported per-model message balances. Shared usage and feature quotas do not establish a model-specific balance.": "ChatGPT model başına kalan mesaj sayısını bildirmedi. Ortak kullanım ve özellik kotaları, belirli bir modelin kalan hakkını göstermez.",
   "Estimated equivalent · USD": "Tahmini karşılık · USD",
   "Recorded model attribution; missing history assumes GPT-5.6 High. Unchanged recordings reuse saved totals.": "Kaydedilen model bilgisi kullanılır; eksik geçmiş için GPT-5.6 High varsayılır. Değişmeyen kayıtlarda kaydedilmiş toplamlar yeniden kullanılır.",
-  "USD / 1M cached input · editable official baseline, checked 7 September 2026": "USD / 1 milyon önbelleğe alınmış girdi · düzenlenebilir resmî temel fiyat, 7 Eylül 2026'da kontrol edildi",
+  "USD / 1M cached input · editable official baseline, checked 27 September 2026": "USD / 1 milyon önbelleğe alınmış girdi · düzenlenebilir resmî temel fiyat, 27 Eylül 2026'da kontrol edildi",
   "USD / 1M cached input · enter a verified comparison rate": "USD / 1 milyon önbelleğe alınmış girdi · doğrulanmış bir karşılaştırma fiyatı girin",
   "Unknown rate": "Bilinmeyen fiyat",
   "{0} cached-input USD per million tokens": "{0} önbelleğe alınmış girdi fiyatı: milyon token başına USD",
@@ -1624,5 +1624,7 @@
   "Locally cached remote branch; no automatic fetch": "Yerelde kayıtlı uzak dal; otomatik güncelleme yapılmaz",
   "No changes between branches": "Dallar arasında değişiklik yok",
   "Changes from comparison base": "Karşılaştırma tabanından itibaren değişiklikler",
-  "Committed changes only; local work is excluded": "Yalnız commit edilmiş değişiklikler; yerel çalışmalar hariç"
+  "Committed changes only; local work is excluded": "Yalnız commit edilmiş değişiklikler; yerel çalışmalar hariç",
+  "GPT-6 Sol": "GPT-6 Sol",
+  "GPT-6 Luna": "GPT-6 Luna"
 }
