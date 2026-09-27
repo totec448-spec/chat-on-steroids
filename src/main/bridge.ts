@@ -2018,6 +2018,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, 200, { ok: true }, origin);
   }
 
+  // The offer carries whether this app is running a tool call right now. That, not "a chat has
+  // an agent or an active Goal" (almost always true on a busy install), is what a reload could
+  // cut short; the pages report their own in-flight turns to the extension directly.
+  const extensionUpdateReply = (running: string | null) => {
+    const offer = extensionUpdateOffer(running);
+    return offer ? { ...offer, busy: runningToolCalls() > 0 } : null;
+  };
   // The extension is idle and about to reload into the build this app ships: bring the folder
   // Chrome loads from up to date first, and say whether it now holds that build.
   if (route === '/extension/update' && req.method === 'POST') {
@@ -2099,7 +2106,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         recoveryMonitoring: browserRecoveryMonitoring(),
         // A newer extension build ships with this app. The extension reloads into it on its own
         // when nothing is running; see `/extension/update`.
-        extensionUpdate: extensionUpdateOffer(extensionBuildOf(req))
+        extensionUpdate: extensionUpdateReply(extensionBuildOf(req))
       },
       origin
     );

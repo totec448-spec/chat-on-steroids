@@ -17,8 +17,8 @@ function worker(options: { running?: string; pings?: Array<object | null>; prepa
       storage: { local: { get: async (key: string) => ({ [key]: store[key] }), set: async (value: Record<string, unknown>) => Object.assign(store, value) } } }
   });
   vm.runInContext(`${code}\nglobalThis.run = reloadForExtensionUpdate;`, context);
-  const run = (offer: unknown = { build: 'bbbbbbbbbbbb' }, busy: { chats?: string[]; inputs?: string[]; commands?: string[] } = {}) =>
-    (context.run as Function)(offer, new Set(busy.chats ?? []), new Set(busy.inputs ?? []), new Set(busy.commands ?? []));
+  const run = (offer: unknown = { build: 'bbbbbbbbbbbb', busy: false }, busy: { inputs?: string[]; commands?: string[] } = {}) =>
+    (context.run as Function)(offer, new Set(busy.inputs ?? []), new Set(busy.commands ?? []));
   return { run, reload, call, store };
 }
 
@@ -31,12 +31,13 @@ it('reloads into the offered build once everything is idle and the folder is rea
 });
 
 it.each([
-  ['a chat with live work', { chats: ['c'] }],
-  ['an input in flight', { inputs: ['i'] }],
-  ['a command in flight', { commands: ['x'] }]
-])('waits while there is %s', async (_label, busy) => {
+  ['an input in flight', undefined, { inputs: ['i'] }],
+  ['a command in flight', undefined, { commands: ['x'] }],
+  ['a running tool call in the app', { build: 'bbbbbbbbbbbb', busy: true }, {}],
+  ['an app that does not say', { build: 'bbbbbbbbbbbb' }, {}]
+])('waits while there is %s', async (_label, offer, busy) => {
   const h = worker();
-  await h.run(undefined, busy);
+  await h.run(offer, busy);
   expect(h.call).not.toHaveBeenCalled();
   expect(h.reload).not.toHaveBeenCalled();
 });
@@ -51,7 +52,7 @@ it('waits for a generating page and for an older page that cannot say whether it
 
 it('never reloads for no offer, the same build, a folder that is not ready, or a repeated attempt', async () => {
   for (const [options, offer] of [
-    [{}, null], [{}, { build: 'not-a-stamp' }], [{ running: 'bbbbbbbbbbbb' }, undefined],
+    [{}, null], [{}, { build: 'not-a-stamp', busy: false }], [{ running: 'bbbbbbbbbbbb' }, undefined],
     [{ prepared: { build: 'bbbbbbbbbbbb', ready: false } }, undefined],
     [{ attempt: 'aaaaaaaaaaaa>bbbbbbbbbbbb' }, undefined]
   ] as const) {
