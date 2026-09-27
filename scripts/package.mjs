@@ -24,6 +24,11 @@ function run(command, commandArgs, env = process.env) {
 }
 
 const node = process.execPath;
+// electron-builder can download its own runtime into its cache, but our package also copies
+// Electron's LICENSE files from node_modules/electron/dist. A fresh npm install may leave that
+// package payload lazy until Electron itself is resolved, so make the local runtime materialize
+// before assembly instead of emitting an otherwise-working installer with missing notices.
+run(node, ['-e', "require('electron')"]);
 run(node, ['scripts/generate-third-party-notices.mjs']);
 run(node, ['scripts/make-icon.mjs']);
 // Before the bundle is built, so the stamp that ships is the stamp of what ships. The app and the
@@ -47,4 +52,9 @@ for (const arch of arches) {
   ];
   if (dirOnly) builderArgs.push('--dir');
   run(node, builderArgs, { ...process.env, COS_PACKAGE_ARCH: arch });
+  // A successful electron-builder exit only proves that an artifact was assembled. Exercise the
+  // unpacked artifact immediately so missing transitive runtime modules (for example when the
+  // checkout's node_modules was linked to another tree) fail this same packaging command instead
+  // of producing an installer that crashes before the first BrowserWindow exists.
+  run(node, ['scripts/smoke-packaged-runtime.mjs', ...targetArgs]);
 }
