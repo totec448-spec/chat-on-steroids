@@ -123,12 +123,19 @@ void app.whenReady().then(async () => {
       cdpSocket!.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
     const manifest = JSON.parse(await fs.readFile(path.join(extension, 'manifest.json'), 'utf8'));
+    // A localized manifest name reaches getManifest() already translated into the browser's UI language.
+    const messageKey = /^__MSG_(\w+)__$/.exec(manifest.name)?.[1];
+    const names = new Set<string>([manifest.name]);
+    if (messageKey) for (const locale of await fs.readdir(path.join(extension, '_locales'))) {
+      const messages = JSON.parse(await fs.readFile(path.join(extension, '_locales', locale, 'messages.json'), 'utf8'));
+      if (messages[messageKey]?.message) names.add(messages[messageKey].message);
+    }
     const sessionId = await until(async () => {
       for (const target of (await cdp('Target.getTargets')).targetInfos.filter((target: any) =>
         target.type === 'service_worker' && target.url.endsWith('/background.js'))) {
         const attached = (await cdp('Target.attachToTarget', { targetId: target.targetId, flatten: true })).sessionId;
         const name = await cdp('Runtime.evaluate', { expression: 'chrome.runtime.getManifest().name', returnByValue: true }, attached);
-        if (name.result?.value === manifest.name) return attached;
+        if (names.has(name.result?.value)) return attached;
         await cdp('Target.detachFromTarget', { sessionId: attached });
       }
       return null;
