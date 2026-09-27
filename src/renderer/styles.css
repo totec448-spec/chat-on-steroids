@@ -3017,36 +3017,59 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .queued-input .queue-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .usage-panel { overflow: auto; padding: 52px max(28px, calc((100% - 760px) / 2)) 64px; }
-.usage-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 18px; padding: 22px 8px; margin: 30px 0 42px; }
+.usage-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 18px; padding: 22px 8px; margin: 0 0 20px; background: var(--card); }
 /* A label that wraps ("Estimated equivalent · USD") must not lift its number above the others. */
 .usage-summary > div { display: grid; align-content: start; gap: 8px; padding: 0 10px; text-align: center; border-right: 1px solid var(--line); }
 .usage-summary > div:last-child { border: 0; }
 .usage-summary strong { font-size: calc(25px * var(--text-scale, 1)); font-weight: 500; letter-spacing: -.7px; }
 .usage-summary span, .muted { color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); }
-.usage-section { margin: 0 0 38px; }
+.usage-section { margin: 0 0 20px; padding: 22px 24px; border: 1px solid var(--line); border-radius: 18px; background: var(--card); }
+.usage-section > :last-child { margin-bottom: 0; }
 .usage-section h2 { display: flex; align-items: center; justify-content: space-between; font-size: calc(15px * var(--text-scale, 1)); margin-bottom: 15px; text-transform: none; letter-spacing: 0; }
 .usage-messages h2 { gap: 12px; flex-wrap: wrap; }
-.usage-week-start { min-height: 42px; max-width: 100%; gap: 18px; padding: 10px 14px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); font-size: calc(14px * var(--text-scale, 1)); }
+.usage-week-start { width: auto; max-width: 100%; min-height: 36px; padding: 7px 12px; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; background-color: var(--sunk); color: var(--ink); font-size: calc(13.5px * var(--text-scale, 1)); cursor: pointer; }
 .usage-week-start:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.usage-message-counts { margin: 0; }
-.usage-message-counts .usage-limit { align-items: center; }
+/* The two message counters read as tiles, like the summary above. */
+.usage-message-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0 0 6px; }
+.usage-message-counts .usage-limit { flex-direction: column; align-items: flex-start; gap: 6px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--sunk); }
+
 .usage-message-counts dt { font-weight: 600; }
-.usage-message-counts dd { display: flex; align-items: baseline; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin: 0; font-variant-numeric: tabular-nums; }
-.usage-message-counts strong { font-size: calc(20px * var(--text-scale, 1)); font-weight: 600; overflow-wrap: anywhere; }
+.usage-message-counts dd { display: flex; align-items: baseline; justify-content: flex-start; flex-wrap: wrap; gap: 8px; margin: 0; font-variant-numeric: tabular-nums; }
+.usage-message-counts strong { font-size: calc(26px * var(--text-scale, 1)); font-weight: 500; letter-spacing: -.6px; overflow-wrap: anywhere; }
 .usage-limit { display: flex; justify-content: space-between; padding: 18px 0; border-bottom: 1px solid var(--line); gap: 20px; }
 .usage-limit > div { display: grid; gap: 6px; }
 .usage-limit > div:last-child { text-align: right; }
 .usage-limit progress { width: 180px; height: 5px; accent-color: var(--blue); justify-self: end; }
-.usage-heatmap { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 10px); grid-template-columns: repeat(52, minmax(0, 1fr)); gap: 4px; }
-.heat-cell { border-radius: 3px; background: var(--card); }
-.heat-cell[data-level='1'] { background: color-mix(in srgb, var(--accent) 25%, var(--card)); }
-.heat-cell[data-level='2'] { background: color-mix(in srgb, var(--accent) 50%, var(--card)); }
-.heat-cell[data-level='3'] { background: color-mix(in srgb, var(--accent) 75%, var(--card)); }
+/* A calendar: square days, weekday labels on the left, months on top, a legend below. */
+.usage-heatmap { --heat-label: 36px; --heat-max: 24px; display: grid; gap: 10px; }
+.heat-grid { display: grid; gap: 4px; }
+.heat-grid > .heat-cell { aspect-ratio: 1; min-width: 0; }
+.heat-day, .heat-month { align-self: center; color: var(--soft); font-size: calc(10.5px * var(--text-scale, 1)); line-height: 1; white-space: nowrap; }
+.heat-month { align-self: end; padding-bottom: 2px; }
+.heat-legend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+.heat-legend .heat-cell { width: 11px; height: 11px; }
+.heat-legend > span:first-child { margin-right: 4px; }
+.heat-legend > span:last-child { margin-left: 4px; }
+.heat-cell.is-future { background: transparent; }
+.heat-cell { border-radius: 3px; background: color-mix(in srgb, var(--ink) 7%, transparent); }
+.heat-cell:not(.is-future):hover, .heat-cell:focus-visible { outline: 1px solid var(--ink); outline-offset: 0; }
+.heat-cell[data-level='1'] { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.heat-cell[data-level='2'] { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.heat-cell[data-level='3'] { background: color-mix(in srgb, var(--accent) 78%, transparent); }
 .heat-cell[data-level='4'] { background: var(--accent); }
-.usage-bars { display: flex; align-items: flex-end; gap: 3px; height: 96px; margin: 18px 0 6px; padding-bottom: 1px; border-bottom: 1px solid var(--line); }
-.usage-bar { flex: 1 1 0; min-width: 3px; border-radius: 3px 3px 0 0; background: color-mix(in srgb, var(--accent) 70%, var(--card)); transition: background .12s; }
+.usage-bars { display: flex; align-items: flex-end; gap: 4px; height: 120px; margin: 4px 0 6px; padding-bottom: 1px; border-bottom: 1px solid var(--line); background: repeating-linear-gradient(to top, transparent 0 29px, color-mix(in srgb, var(--line) 60%, transparent) 29px 30px); }
+.usage-bars-scale { margin-top: 20px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+.usage-bars-axis { display: flex; justify-content: space-between; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+.usage-bar { flex: 1 1 0; min-width: 3px; border-radius: 4px 4px 1px 1px; background: color-mix(in srgb, var(--accent) 55%, transparent); transition: background .12s; }
+.usage-bar.is-peak { background: var(--accent); }
 .usage-bar:hover { background: var(--accent); }
 .usage-breakdown { margin-top: 14px; }
+/* Disclosures on this page use a drawn chevron instead of the browser's triangle. */
+.usage-panel details > summary { display: inline-flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; }
+.usage-panel details > summary::-webkit-details-marker { display: none; }
+.usage-panel details > summary::before { content: ''; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform .15s; }
+.usage-panel details[open] > summary::before { transform: rotate(45deg); }
+@media (prefers-reduced-motion: reduce) { .usage-panel details > summary::before { transition: none; } }
 .usage-breakdown > summary { cursor: pointer; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); }
 .usage-breakdown > summary:hover { color: var(--ink); }
 .usage-breakdown[open] > summary { margin-bottom: 8px; }
