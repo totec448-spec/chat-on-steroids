@@ -305,6 +305,7 @@ const configSchema = z.object({
     autoContinue: z.boolean().optional().default(true),
     chatBrowser: z.enum(CHAT_BROWSERS).optional().default('chrome'),
     developerMode: z.boolean().optional(),
+    playfulStatus: z.boolean().optional(),
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),
     finishAction: z.enum(['notify', 'goal']).optional(),

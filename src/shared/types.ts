@@ -145,6 +145,8 @@ export interface UiPrefs {
   finishAction?: 'notify' | 'goal';
   finishLeadMinutes?: number;
   developerMode?: boolean;
+  /** Rotating joke words instead of "Working" in a chat's status line. Off by default. */
+  playfulStatus?: boolean;
   minimizeToTray: boolean;
   autoConnect: boolean;
   startAtLogin?: boolean;

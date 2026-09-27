@@ -1648,5 +1648,6 @@
   "Delete pet": "Eliminar mascote",
   "No pets match your search.": "Nenhuma mascote corresponde à tua pesquisa.",
   "Pet operation failed": "A operação da mascote falhou",
-  "This removes the pet from your local library. You can import it again later.": "Isto remove a mascote da tua biblioteca local. Podes importá-la de novo mais tarde."
+  "This removes the pet from your local library. You can import it again later.": "Isto remove a mascote da tua biblioteca local. Podes importá-la de novo mais tarde.",
+  "Playful status words: show rotating gym jokes instead of “Working”": "Palavras de estado divertidas: mostrar piadas de ginásio em vez de «Working»"
 }

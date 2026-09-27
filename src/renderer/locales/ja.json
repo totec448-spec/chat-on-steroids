@@ -1648,5 +1648,6 @@
   "Delete pet": "ペットを削除",
   "No pets match your search.": "検索に一致するペットはありません。",
   "Pet operation failed": "ペットの操作に失敗しました",
-  "This removes the pet from your local library. You can import it again later.": "ペットをローカルライブラリから削除します。後でもう一度インポートできます。"
+  "This removes the pet from your local library. You can import it again later.": "ペットをローカルライブラリから削除します。後でもう一度インポートできます。",
+  "Playful status words: show rotating gym jokes instead of “Working”": "遊び心のあるステータス: 「Working」の代わりにジムネタを順番に表示"
 }

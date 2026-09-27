@@ -1648,5 +1648,6 @@
   "Delete pet": "刪除寵物",
   "No pets match your search.": "沒有符合搜尋的寵物。",
   "Pet operation failed": "寵物操作失敗",
-  "This removes the pet from your local library. You can import it again later.": "這會將寵物從你的本機資料庫中移除。你可以稍後重新匯入。"
+  "This removes the pet from your local library. You can import it again later.": "這會將寵物從你的本機資料庫中移除。你可以稍後重新匯入。",
+  "Playful status words: show rotating gym jokes instead of “Working”": "趣味狀態詞：以輪換的健身梗取代「Working」"
 }
