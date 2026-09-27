@@ -53,11 +53,12 @@ This notice states the project's intended use; it does not certify compliance or
 <details>
 <summary>Requirements &amp; installation notes</summary>
 
-Windows 10/11, **macOS 13 Ventura or newer**, or a current desktop Linux. Chrome 116+ or current Edge, plus a ChatGPT account/workspace with Developer mode and custom MCP apps. [Check account availability](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt).
+Windows 10/11, **macOS 13 Ventura or newer**, or a current desktop Linux. Chrome 116+, current Edge or Brave, plus a ChatGPT account/workspace with Developer mode and custom MCP apps. [Check account availability](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt).
 
 - **Unsigned beta:** Windows is not publisher-signed; macOS is unsigned and unnotarized. Verify the package against the release checksums.
 - **Linux:** a Secret Service keyring is required. Prefer the DEB; when unprivileged user namespaces are disabled, the AppImage launcher can fall back to <code>--no-sandbox</code>.
 - **Permissions:** choose your approved folders and review capabilities before connecting. Fresh installs enable Core capabilities and two workers; Windows also enables Desktop permissions. Shell commands run with your normal user privileges.
+- **Languages:** English, Spanish, French, Portuguese (Portugal), Turkish, Japanese, and Simplified and Traditional Chinese. Choose one in **Appearance → Language**.
 - **After updating:** reload the companion extension and refresh the CoS apps in ChatGPT when prompted.
 
 </details>
