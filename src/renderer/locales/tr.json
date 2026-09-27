@@ -1554,5 +1554,9 @@
   "The helper returned an unusable continuation. Nothing was sent. Review the continuation instructions or choose another helper model.": "Yardımcı kullanılamaz bir devam döndürdü. Hiçbir şey gönderilmedi. Devam talimatlarını gözden geçirin veya başka bir yardımcı model seçin.",
   "The provider reported an error while generating the continuation. Check its status or choose another model.": "Sağlayıcı devamı oluştururken bir hata bildirdi. Durumunu kontrol edin veya başka bir model seçin.",
   "PDF exceeds the preview limit": "PDF önizleme sınırını aşıyor",
-  "PDF page dimensions exceed the preview limit": "PDF sayfası boyutları önizleme sınırını aşıyor"
+  "PDF page dimensions exceed the preview limit": "PDF sayfası boyutları önizleme sınırını aşıyor",
+  "ChatGPT’s current model": "ChatGPT'nin mevcut modeli",
+  "Sent without choosing a model": "Model seçilmeden gönderilir",
+  "Use ChatGPT’s current model": "ChatGPT'nin mevcut modelini kullan",
+  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "ChatGPT planınızda model seçici yok. ChatGPT'nin zaten kullandığı modelle gönderin."
 }
