@@ -1648,5 +1648,6 @@
   "Delete pet": "Evcil hayvanı sil",
   "No pets match your search.": "Aramanla eşleşen evcil hayvan yok.",
   "Pet operation failed": "Evcil hayvan işlemi başarısız oldu",
-  "This removes the pet from your local library. You can import it again later.": "Bu, evcil hayvanı yerel kitaplığından kaldırır. Daha sonra yeniden içe aktarabilirsin."
+  "This removes the pet from your local library. You can import it again later.": "Bu, evcil hayvanı yerel kitaplığından kaldırır. Daha sonra yeniden içe aktarabilirsin.",
+  "Playful status words: show rotating gym jokes instead of “Working”": "Eğlenceli durum sözcükleri: “Working” yerine değişen spor salonu şakaları göster"
 }

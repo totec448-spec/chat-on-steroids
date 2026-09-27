@@ -1648,5 +1648,6 @@
   "Delete pet": "Eliminar mascota",
   "No pets match your search.": "Ninguna mascota coincide con tu búsqueda.",
   "Pet operation failed": "La operación con la mascota falló",
-  "This removes the pet from your local library. You can import it again later.": "Esto quita la mascota de tu biblioteca local. Puedes volver a importarla más tarde."
+  "This removes the pet from your local library. You can import it again later.": "Esto quita la mascota de tu biblioteca local. Puedes volver a importarla más tarde.",
+  "Playful status words: show rotating gym jokes instead of “Working”": "Palabras de estado divertidas: mostrar bromas de gimnasio en lugar de «Working»"
 }
