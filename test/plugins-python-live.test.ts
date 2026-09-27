@@ -5,11 +5,14 @@ import { createServer } from 'node:http';
 import { PluginManager } from '../src/main/plugins/manager.js';
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import { pluginCatalog } from '../src/main/plugins/catalog.js';
+import { initUvRuntime } from '../src/main/plugins/uv-runtime.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 /** Live regression: reviewed Fetch release and bounded Windows installation paths. */
 it.runIf(process.env.COS_PLUGIN_LIVE_TEST === '1')('installs the reviewed Fetch release and discovers its real server', async () => {
   const temporary = await makeTempDir('cos-python-plugin-live-');
+  // As at app startup: without uv on PATH, installs fall back to the managed copy under userData.
+  initUvRuntime(temporary);
   const packageData = 'venv/Lib/site-packages/jsonschema_specifications/schemas/draft201909/metaschema.json';
   const legacySuffix = path.win32.join('plugins', '0'.repeat(36), '0'.repeat(36), packageData);
   const windowsRootLength = 267 - legacySuffix.length - 1;
