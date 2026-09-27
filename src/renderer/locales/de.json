@@ -104,7 +104,7 @@
   "Estimated context processed per tool call · last 52 weeks": "Geschätzter verarbeiteter Kontext pro Tool-Aufruf · letzte 52 Wochen",
   "Cost estimate per day": "Kostenschätzung pro Tag",
   "Edit cost formula": "Kostenformel bearbeiten",
-  "Automatic baselines use Standard short-context cached-input prices, checked 7 September 2026:": "Die automatischen Basiswerte verwenden die Standardpreise für gecachten Input bei kurzem Kontext, Stand 7. September 2026:",
+  "Automatic baselines use Standard short-context cached-input prices, checked 27 September 2026:": "Die automatischen Basiswerte verwenden die Standardpreise für gecachten Input bei kurzem Kontext, Stand 27. September 2026:",
   "GPT-5.6 Sol": "GPT-5.6 Sol",
   "GPT-5.6 Terra": "GPT-5.6 Terra",
   "GPT-5.6 Luna": "GPT-5.6 Luna",
@@ -958,7 +958,7 @@
   "ChatGPT has not reported per-model message balances. Shared usage and feature quotas do not establish a model-specific balance.": "ChatGPT hat keine Nachrichtenkontingente pro Modell gemeldet. Gemeinsame Nutzung und Funktionskontingente ergeben kein modellspezifisches Kontingent.",
   "Estimated equivalent · USD": "Geschätzter Gegenwert · USD",
   "Recorded model attribution; missing history assumes GPT-5.6 High. Unchanged recordings reuse saved totals.": "Zuordnung zu den aufgezeichneten Modellen; bei fehlendem Verlauf wird GPT-5.6 High angenommen. Unveränderte Aufzeichnungen verwenden gespeicherte Summen.",
-  "USD / 1M cached input · editable official baseline, checked 7 September 2026": "USD / 1 Mio. gecachter Input · anpassbarer offizieller Basiswert, Stand 7. September 2026",
+  "USD / 1M cached input · editable official baseline, checked 27 September 2026": "USD / 1 Mio. gecachter Input · anpassbarer offizieller Basiswert, Stand 27. September 2026",
   "USD / 1M cached input · enter a verified comparison rate": "USD / 1 Mio. gecachter Input · gib einen geprüften Vergleichswert ein",
   "Unknown rate": "Unbekannter Preis",
   "{0} cached-input USD per million tokens": "{0} USD pro Million gecachter Input-Tokens",
@@ -1624,5 +1624,7 @@
   "Locally cached remote branch; no automatic fetch": "Lokal zwischengespeicherter Remote-Branch; kein automatisches Fetch",
   "No changes between branches": "Keine Unterschiede zwischen den Branches",
   "Changes from comparison base": "Änderungen gegenüber der Vergleichsbasis",
-  "Committed changes only; local work is excluded": "Nur committete Änderungen; lokale Arbeit ist ausgenommen"
+  "Committed changes only; local work is excluded": "Nur committete Änderungen; lokale Arbeit ist ausgenommen",
+  "GPT-6 Sol": "GPT-6 Sol",
+  "GPT-6 Luna": "GPT-6 Luna"
 }
