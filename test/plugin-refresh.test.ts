@@ -344,3 +344,15 @@ it('hands out a refresh only after the surface tunnel has been live for its grac
   vi.advanceTimersByTime(19_000); expect(await pendingPluginRefreshes()).toEqual([]);
   vi.advanceTimersByTime(1_000); expect((await pendingPluginRefreshes())[0]?.tools[0]?.description).toBe('Changed at runtime');
 });
+it('does not take an older completion as current after an unconfirmed click for a newer schema', async () => {
+  publish('1', tools); let request = (await pendingPluginRefreshes())[0]!;
+  expect(await claim(request)).toBe(true);
+  expect(await completePluginRefresh({ ...request, appId, tools })).toBe(true);
+  const narrower = [{ ...tools[0]!, description: 'Narrower' }];
+  publish('2', narrower); request = (await pendingPluginRefreshes())[0]!;
+  expect(await claim(request, tools)).toBe(true); // clicked; the app quits before completion
+  publish('3', tools);
+  const back = await pendingPluginRefreshes();
+  expect(back).toHaveLength(1); // ChatGPT may hold the narrower schema, so the original is due again
+  expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ completedSchemaId: null, attempted: false });
+});
