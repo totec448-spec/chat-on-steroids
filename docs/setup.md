@@ -28,7 +28,7 @@ Want screen and keyboard control? Enable **Desktop** permissions and connect its
 4. In ChatGPT, open [Plugins](https://chatgpt.com/plugins), click **Add** at the top right and choose **Create MCP App**. Pick **Tunnel** as the connection, select your tunnel and choose **No authentication**. Older ChatGPT versions instead need Developer mode turned on first (**Settings → Security and login**) and show a **+** button. Review and enable the app's actions.
 5. Name each app exactly as CoS shows it (for example `Chat On Steroids Core`). CoS recognizes its tool calls by that name; a renamed app still works, but its calls are filed under Unattributed activity instead of your chat, which also keeps Goal and Loop from seeing them.
 
-> **ChatGPT Plus:** new Plus accounts may no longer be able to create custom MCP apps, while apps created earlier keep working ([#522](https://github.com/totec448-spec/chat-on-steroids/issues/522)). If you are on Plus and CoS already works, keep your existing apps: don't delete and re-create them, because you may not be able to add them again.
+> **No Developer mode switch?** That's expected. Current ChatGPT accounts, including new Plus accounts, create the app from **Plugins → Add → Create MCP App** without it, and file edits and desktop control work as before ([#522](https://github.com/totec448-spec/chat-on-steroids/issues/522)).
 
 Core, Desktop and Plugins are separate connectors. Configure each surface you enable. Release packages include the pinned, checksum-verified `tunnel-client`.
 
