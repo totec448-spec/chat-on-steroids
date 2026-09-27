@@ -10,6 +10,7 @@ interface DomApi {
   generating(): boolean;
   sendButton(): HTMLButtonElement | null;
   temporaryChatReady(): boolean;
+  confirmTemporaryChatIntroduction(): void;
   errors(): Array<{ text: string; recoverable: boolean; blocking?: boolean }>;
   captureComposerDraft(text: string, current?: () => boolean): { current(): boolean; clear(): Promise<boolean>; dispose(): void; attachments(nodes: Element[]): void };
   visibleModelSelection(): { model: string; reasoningEffort?: string } | null;
@@ -707,9 +708,40 @@ describe('rendered temporary-chat state independent of language', () => {
     document.body.append(control);
     return control;
   }
+  function currentToggle(label: string, active: boolean) {
+    const control = document.createElement('button');
+    control.setAttribute('aria-label', label);
+    const paths = [
+      'M16.8525 7.06128C17.1968 6.93341 17.5801 7.10859 17.708 7.45288Z',
+      'M2.29199 7.45288C2.41986 7.10859 2.80317 6.93341 3.14746 7.06128Z',
+      'M11.957 7.40698C12.1557 7.09821 12.5671 7.00824 12.8756 7.20697Z'
+    ];
+    if (active) paths.push('M9.99902 2.25171C11.8772 2.25171 13.6066 2.88171 14.9531 3.93042Z');
+    control.innerHTML = `<svg viewBox="0 0 20 20">${paths.map(d => `<path d="${d}"></path>`).join('')}</svg>`;
+    document.body.append(control);
+    return control;
+  }
   it.each(['Temporären Chat ausschalten', '一時チャットをオフにする', 'Turn off temporary chat', ''])('reads the checked glyph with arbitrary label %s', label => {
     toggle(label, true);
     expect(api.temporaryChatReady()).toBe(true);
+  });
+  it.each(['beliebig', '任意', ''])('reads the current four-path active temporary-chat icon with arbitrary label %s', label => {
+    currentToggle(label, true);
+    expect(api.temporaryChatReady()).toBe(true);
+  });
+  it('does not mistake the current three-path inactive temporary-chat icon for active mode', () => {
+    currentToggle('Temporary chat', false);
+    expect(api.temporaryChatReady()).toBe(false);
+  });
+  it('accepts the current Temporary Chat introduction wording', () => {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.innerHTML = '<h2>Temporary chat</h2><p>This chat won\'t appear in history.</p><button>Continue</button>';
+    document.body.append(dialog);
+    const clicked = vi.fn();
+    dialog.querySelector('button')!.addEventListener('click', clicked);
+    api.confirmTemporaryChatIntroduction();
+    expect(clicked).toHaveBeenCalledOnce();
   });
   /**
    * The same answer from the page's own state, for a layout that no longer draws the glyph.
