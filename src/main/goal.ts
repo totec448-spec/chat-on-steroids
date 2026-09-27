@@ -50,7 +50,7 @@ import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-te
 import type { GoalBackend } from '../shared/types.js';
 import { createHash } from 'node:crypto';
 import { getConfig } from './config.js';
-import { writeDurableNow, writeDurableSoon } from './durable.js';
+import { writeDurableNow, writeDurableSnapshotSoon, writeDurableSoon } from './durable.js';
 import { logInfo, logWarn } from './logger.js';
 import { getSecret } from './secrets.js';
 import { findSessionByConversation, getSession, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
@@ -693,6 +693,74 @@ export interface GoalObjectivesSnapshot {
   objectives: Array<{ conversationId: string; objective: string }>;
 }
 
+/** One staged Goal-control save. */
+type GoalControlWrite = { conversationId: string; invalidated: boolean; changed: boolean };
+const pendingGoalObjectives = new Set<GoalControlWrite>();
+const pendingGoalSwitches = new Set<GoalControlWrite>();
+
+function invalidateGoalControlWrites(pending: Set<GoalControlWrite>, conversations?: readonly string[]): void {
+  for (const write of pending) {
+    write.changed = true;
+    if (!conversations || conversations.includes(write.conversationId)) write.invalidated = true;
+  }
+}
+
+function retargetGoalControlWrites(pending: Set<GoalControlWrite>, fromConversationId: string, toConversationId: string): number {
+  let moved = 0;
+  for (const write of pending) {
+    // Every synchronous projection changes the whole-file ledger seen by every staged save.
+    write.changed = true;
+    if (write.invalidated || write.conversationId !== fromConversationId) continue;
+    write.conversationId = toConversationId;
+    moved += 1;
+  }
+  return moved;
+}
+
+function saveGoalControl<T>(
+  pending: Set<GoalControlWrite>,
+  conversationId: string,
+  state: string,
+  snapshot: () => unknown,
+  stage: (targetConversationId: string) => { snapshot: unknown; publish: () => T } | { result: T }
+): Promise<T> {
+  const write: GoalControlWrite = { conversationId, invalidated: false, changed: false };
+  pending.add(write);
+  return serialGoalSwitch(async () => {
+    let attempted = false;
+    try {
+      for (let revision = 0; revision < 8; revision++) {
+        if (write.invalidated) throw new Error('Goal controls changed while saving; this request was superseded.');
+        write.changed = false;
+        const next = stage(write.conversationId);
+        if ('result' in next) return next.result;
+        attempted = true;
+        await writeDurableNow(state, next.snapshot);
+        if (write.invalidated) throw new Error('Goal controls changed while saving; this request was superseded.');
+        // Rebase when another synchronous projection or Compact & Resume changed the ledger.
+        if (!write.changed) return next.publish();
+      }
+      throw new Error('Goal controls kept changing during the save. No new control was accepted; retry when changes settle.');
+    } catch (error) {
+      if (attempted) {
+        // Never roll memory back. Repair durable state from the current accepted projection.
+        for (let repair = 0; repair < 4; repair++) {
+          write.changed = false;
+          const accepted = snapshot();
+          writeDurableSoon(state, accepted);
+          try { await writeDurableNow(state, accepted); }
+          catch { writeDurableSoon(state, snapshot()); break; }
+          if (!write.changed) break;
+        }
+        if (write.changed) writeDurableSoon(state, snapshot());
+      }
+      throw error;
+    } finally {
+      pending.delete(write);
+    }
+  });
+}
+
 /**
  * The specific goal a chat is being driven towards, keyed by conversation.
  *
@@ -708,19 +776,26 @@ export interface GoalObjectivesSnapshot {
  */
 const goalObjectives = new Map<string, string>();
 
-export function snapshotGoalObjectives(): GoalObjectivesSnapshot {
+function goalObjectivesSnapshot(objectives: ReadonlyMap<string, string>): GoalObjectivesSnapshot {
   return {
     version: 1,
     savedAt: Date.now(),
-    objectives: [...goalObjectives.entries()].map(([conversationId, objective]) => ({ conversationId, objective }))
+    objectives: [...objectives.entries()].map(([conversationId, objective]) => ({ conversationId, objective }))
   };
 }
 
+export function snapshotGoalObjectives(): GoalObjectivesSnapshot {
+  return goalObjectivesSnapshot(goalObjectives);
+}
+
 function persistGoalObjectives(): void {
-  writeDurableSoon(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives());
+  // Capture at the serialized write boundary so a concurrent immediate save cannot make this
+  // background generation preserve another conversation's stale pre-commit row.
+  writeDurableSnapshotSoon(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives);
 }
 
 export function restoreGoalObjectives(snapshot: GoalObjectivesSnapshot | null): void {
+  invalidateGoalControlWrites(pendingGoalObjectives);
   goalObjectives.clear();
   if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.objectives)) return;
   for (const raw of snapshot.objectives) {
@@ -744,6 +819,7 @@ export function goalObjectiveFor(conversationId: string): string {
  * than the one it sent — the two differ whenever the text had whitespace around it.
  */
 export function setGoalObjective(conversationId: string, text: string): string {
+  invalidateGoalControlWrites(pendingGoalObjectives, [conversationId]);
   const goal = text.trim();
   goalObjectives.delete(conversationId);
   if (goal) goalObjectives.set(conversationId, goal);
@@ -756,38 +832,45 @@ export function setGoalObjective(conversationId: string, text: string): string {
  *
  * `/goal/objective` tells the page the value was saved, so returning before the ordinary
  * 300 ms durable debounce leaves a real crash window where a successfully acknowledged goal
- * disappears on restart. Stage the in-memory value, make that exact snapshot durable, and only
- * then let the bridge publish success. If the write fails, restore the previous live value and
- * supersede durable.ts's retained failed generation with the still-authoritative snapshot.
+ * disappears on restart. Stage outside the published map and only publish after durable
+ * acceptance. A later synchronous set/clear supersedes this request. Compact & Resume instead
+ * retargets this same save to the replacement conversation and repeats the barrier there.
  */
 export async function setGoalObjectiveNow(conversationId: string, text: string): Promise<string> {
-  const before = goalObjectives.get(conversationId);
   const goal = text.trim();
-  goalObjectives.delete(conversationId);
-  if (goal) goalObjectives.set(conversationId, goal);
-  try {
-    await writeDurableNow(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives());
-    return goal;
-  } catch (error) {
-    goalObjectives.delete(conversationId);
-    if (before) goalObjectives.set(conversationId, before);
-    writeDurableSoon(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives());
-    throw error;
-  }
+  return saveGoalControl(pendingGoalObjectives, conversationId, GOAL_OBJECTIVES_STATE, snapshotGoalObjectives, (targetConversationId) => {
+    const next = new Map(goalObjectives);
+    next.delete(targetConversationId);
+    if (goal) next.set(targetConversationId, goal);
+    return {
+      snapshot: goalObjectivesSnapshot(next),
+      publish: () => {
+        goalObjectives.delete(targetConversationId);
+        if (goal) goalObjectives.set(targetConversationId, goal);
+        persistGoalObjectives();
+        return goal;
+      }
+    };
+  });
 }
 
 export function clearGoalObjective(conversationId: string): void {
+  invalidateGoalControlWrites(pendingGoalObjectives, [conversationId]);
   if (goalObjectives.delete(conversationId)) persistGoalObjectives();
 }
 
 /** Moves one chat-owned objective to the replacement conversation used by Compact & Resume. */
 export function moveGoalObjective(fromConversationId: string, toConversationId: string): boolean {
   if (!fromConversationId || !toConversationId || fromConversationId === toConversationId) return false;
+  invalidateGoalControlWrites(pendingGoalObjectives, [toConversationId]);
+  const pendingMoves = retargetGoalControlWrites(pendingGoalObjectives, fromConversationId, toConversationId);
   const objective = goalObjectives.get(fromConversationId);
-  if (!objective) return false;
+  if (!objective && pendingMoves === 0) return false;
   goalObjectives.delete(fromConversationId);
-  goalObjectives.delete(toConversationId);
-  goalObjectives.set(toConversationId, objective);
+  if (objective) {
+    goalObjectives.delete(toConversationId);
+    goalObjectives.set(toConversationId, objective);
+  }
   persistGoalObjectives();
   return true;
 }
@@ -856,24 +939,34 @@ function serialGoalSwitch<T>(work: () => Promise<T>): Promise<T> {
  */
 const MAX_GOAL_SWITCHES = 400;
 
-function boundGoalSwitches(): void {
-  if (goalSwitches.size <= MAX_GOAL_SWITCHES) return;
-  const oldestFirst = [...goalSwitches.entries()].filter(([, row]) => row.role !== 'decision').sort((a, b) => a[1].at - b[1].at);
-  for (const [conversationId] of oldestFirst.slice(0, goalSwitches.size - MAX_GOAL_SWITCHES)) {
-    goalSwitches.delete(conversationId);
+function boundGoalSwitches(switches = goalSwitches): void {
+  if (switches.size <= MAX_GOAL_SWITCHES) return;
+  const oldestFirst = [...switches.entries()].filter(([, row]) => row.role !== 'decision').sort((a, b) => a[1].at - b[1].at);
+  for (const [conversationId] of oldestFirst.slice(0, switches.size - MAX_GOAL_SWITCHES)) {
+    switches.delete(conversationId);
   }
+}
+
+function goalSwitchesSnapshot(switches: ReadonlyMap<string, GoalSwitchRow>): GoalSwitchesSnapshot {
+  return {
+    version: 1,
+    savedAt: Date.now(),
+    switches: [...switches.entries()].map(([conversationId, row]) => ({ conversationId, ...row }))
+  };
 }
 
 export function snapshotGoalSwitches(): GoalSwitchesSnapshot {
   boundGoalSwitches();
-  return {
-    version: 1,
-    savedAt: Date.now(),
-    switches: [...goalSwitches.entries()].map(([conversationId, row]) => ({ conversationId, ...row }))
-  };
+  return goalSwitchesSnapshot(goalSwitches);
+}
+
+function publishGoalSwitches(next: ReadonlyMap<string, GoalSwitchRow>): void {
+  goalSwitches.clear();
+  for (const [conversationId, row] of next) goalSwitches.set(conversationId, row);
 }
 
 export function restoreGoalSwitches(snapshot: GoalSwitchesSnapshot | null): void {
+  invalidateGoalControlWrites(pendingGoalSwitches);
   goalSwitches.clear();
   if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.switches)) return;
   for (const raw of snapshot.switches) {
@@ -917,34 +1010,21 @@ export function isGoalDecisionChat(conversationId: string): boolean {
 
 /** The bridge commits this before acknowledging a helper's first send. */
 export function registerGoalDecisionChat(conversationId: string, sourceSessionId?: string): Promise<void> {
-  return serialGoalSwitch(async () => {
-    if (!/^[0-9a-z-]{8,256}$/i.test(conversationId)) throw new Error('bad_conversation_id');
-    const before = goalSwitches.get(conversationId);
+  return saveGoalControl<void>(pendingGoalSwitches, conversationId, GOAL_SWITCHES_STATE, snapshotGoalSwitches, (targetConversationId) => {
+    if (!/^[0-9a-z-]{8,256}$/i.test(targetConversationId)) throw new Error('bad_conversation_id');
+    const before = goalSwitches.get(targetConversationId);
     if (sourceSessionId && !/^[\w-]{8,64}$/.test(sourceSessionId)) throw new Error('bad_source_session_id');
     if (sourceSessionId && before?.sourceSessionId && before.sourceSessionId !== sourceSessionId) throw new Error('goal_helper_wrong_source');
-    if (sourceSessionId && [...goalSwitches].some(([id, row]) => id !== conversationId && row.sourceSessionId === sourceSessionId)) throw new Error('goal_helper_already_bound');
-    if (before?.role === 'decision' && (!sourceSessionId || before.sourceSessionId === sourceSessionId)) return;
+    if (sourceSessionId && [...goalSwitches].some(([id, row]) => id !== targetConversationId && row.sourceSessionId === sourceSessionId)) throw new Error('goal_helper_already_bound');
+    if (before?.role === 'decision' && (!sourceSessionId || before.sourceSessionId === sourceSessionId)) return { result: undefined };
     if (before?.role !== 'decision' && [...goalSwitches.values()].filter(row => row.role === 'decision').length >= MAX_GOAL_SWITCHES) {
       throw new Error('goal_helper_capacity');
     }
-    const previous = new Map(goalSwitches);
+    const next = new Map(goalSwitches);
     const row: GoalSwitchRow = { enabled: false, mode: before?.mode ?? 'goal', at: Date.now(), role: 'decision', sourceSessionId };
-    goalSwitches.set(conversationId, row);
-    const snapshot = snapshotGoalSwitches();
-    const staged = new Map(goalSwitches);
-    try {
-      await writeDurableNow(GOAL_SWITCHES_STATE, snapshot);
-    } catch (error) {
-      if (goalSwitches.size === staged.size && [...staged].every(([id, value]) => goalSwitches.get(id) === value)) {
-        goalSwitches.clear();
-        for (const [id, value] of previous) goalSwitches.set(id, value);
-      } else if (goalSwitches.get(conversationId) === row) {
-        goalSwitches.delete(conversationId);
-        if (before) goalSwitches.set(conversationId, before);
-      }
-      writeDurableSoon(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
-      throw error;
-    }
+    next.set(targetConversationId, row);
+    boundGoalSwitches(next);
+    return { snapshot: goalSwitchesSnapshot(next), publish: () => publishGoalSwitches(next) };
   });
 }
 
@@ -970,10 +1050,9 @@ export function goalArmedFor(conversationId: string): boolean {
 /**
  * Durable acceptance boundary for one chat's Goal/Loop switch.
  *
- * Same contract as `setGoalObjectiveNow`, for the same reason: the page is told the switch was
- * saved, so the value must be on disk before that is said. A failed write restores the previous
- * override exactly — including its absence, which is itself the meaningful state "this chat
- * still follows the app-wide setting".
+ * The accepted map remains authoritative until the new snapshot is durable. A synchronous
+ * clear/resume revokes pending saves instead of allowing their success or failure to recreate
+ * the old conversation's override.
  */
 export async function setGoalSwitchNow(
   conversationId: string,
@@ -981,26 +1060,34 @@ export async function setGoalSwitchNow(
   on: boolean,
   afterTurn?: boolean
 ): Promise<{ enabled: boolean; mode: GoalMode }> {
-  return serialGoalSwitch(async () => {
-    const before = goalSwitches.get(conversationId);
-    if (before?.role === 'decision') return { enabled: false, mode: before.mode };
-    if (!before && [...goalSwitches.values()].filter(row => row.role === 'decision').length >= MAX_GOAL_SWITCHES) {
-      throw new Error('goal_switch_capacity');
-    }
-    const next = applyGoalSwitch(goalSwitchFor(conversationId), which, on);
-    goalSwitches.set(conversationId, { enabled: next.enabled, mode: next.mode,
-      afterTurn: afterTurn ?? before?.afterTurn ?? false, at: Date.now() });
-    try {
-      await writeDurableNow(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
-    } catch (error) {
-      goalSwitches.delete(conversationId);
-      if (before) goalSwitches.set(conversationId, before);
-      writeDurableSoon(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
-      throw error;
-    }
-    notifyGoalChange();
-    return { enabled: next.enabled, mode: next.mode };
-  });
+  if (!on && goalSwitchFor(conversationId).mode === which) {
+    invalidateGoalControlWrites(pendingGoalSwitches, [conversationId]);
+  }
+  return saveGoalControl<{ enabled: boolean; mode: GoalMode }>(
+    pendingGoalSwitches,
+    conversationId,
+    GOAL_SWITCHES_STATE,
+    snapshotGoalSwitches,
+    (targetConversationId) => {
+      const before = goalSwitches.get(targetConversationId);
+      if (before?.role === 'decision') return { result: { enabled: false, mode: before.mode } };
+      if (!before && [...goalSwitches.values()].filter(row => row.role === 'decision').length >= MAX_GOAL_SWITCHES) {
+        throw new Error('goal_switch_capacity');
+      }
+      const next = applyGoalSwitch(goalSwitchFor(targetConversationId), which, on);
+      const staged = new Map(goalSwitches);
+      staged.set(targetConversationId, { enabled: next.enabled, mode: next.mode,
+        afterTurn: afterTurn ?? before?.afterTurn ?? false, at: Date.now() });
+      boundGoalSwitches(staged);
+      return {
+        snapshot: goalSwitchesSnapshot(staged),
+        publish: () => {
+          publishGoalSwitches(staged);
+          notifyGoalChange();
+          return { enabled: next.enabled, mode: next.mode };
+        }
+      };
+    });
 }
 
 /**
@@ -1012,6 +1099,7 @@ export async function setGoalSwitchNow(
  * "stop everything".
  */
 export function clearAllGoalSwitches(): void {
+  invalidateGoalControlWrites(pendingGoalSwitches);
   if (goalSwitches.size === 0) return;
   for (const [id, row] of goalSwitches) if (row.role !== 'decision') goalSwitches.delete(id);
   persistGoalSwitches();
@@ -1020,6 +1108,7 @@ export function clearAllGoalSwitches(): void {
 /** Drops one chat's override, putting it back under the app-wide setting. */
 export function clearGoalSwitch(conversationId: string): void {
   if (isGoalDecisionChat(conversationId)) return;
+  invalidateGoalControlWrites(pendingGoalSwitches, [conversationId]);
   if (goalSwitches.delete(conversationId)) persistGoalSwitches();
 }
 
@@ -1027,8 +1116,10 @@ export function clearGoalSwitch(conversationId: string): void {
 export function moveGoalSwitch(fromConversationId: string, toConversationId: string): boolean {
   if (!fromConversationId || !toConversationId || fromConversationId === toConversationId) return false;
   if (isGoalDecisionChat(fromConversationId) || isGoalDecisionChat(toConversationId)) return false;
+  invalidateGoalControlWrites(pendingGoalSwitches, [fromConversationId]);
   const row = goalSwitches.get(fromConversationId);
   if (!row) return false;
+  invalidateGoalControlWrites(pendingGoalSwitches, [toConversationId]);
   goalSwitches.delete(fromConversationId);
   goalSwitches.set(toConversationId, row);
   persistGoalSwitches();
@@ -1351,6 +1442,10 @@ export async function claimGoalRecoveryStopNow(conversationId: string, replyId: 
 
 export function resetGoalStateForTests(): void {
   for (const draft of drafts.values()) draft.abort?.abort();
+  invalidateGoalControlWrites(pendingGoalObjectives);
+  invalidateGoalControlWrites(pendingGoalSwitches);
+  pendingGoalObjectives.clear();
+  pendingGoalSwitches.clear();
   drafts.clear();
   goalReplies.clear();
   goalObjectives.clear();
