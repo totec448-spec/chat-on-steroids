@@ -214,7 +214,7 @@ import { conversationHasMcpCallSince } from './session/store.js';
 import { sessionWorkingAt } from '../shared/session-activity.js';
 import { requestCorrelation } from './session/correlation.js';
 import { bindAgentWorkspace } from './workspace.js';
-import { shippedExtensionBuild } from './extension-path.js';
+import { extensionUpdateOffer, prepareExtensionUpdate, shippedExtensionBuild } from './extension-path.js';
 
 /** Fixed candidates so the extension can find the app without being told a port. */
 export const DEFAULT_PORTS = BROWSER_BRIDGE_PORTS;
@@ -2018,6 +2018,22 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, 200, { ok: true }, origin);
   }
 
+  // The offer carries whether this app is running a tool call right now. That, not "a chat has
+  // an agent or an active Goal" (almost always true on a busy install), is what a reload could
+  // cut short; the pages report their own in-flight turns to the extension directly.
+  const extensionUpdateReply = (running: string | null) => {
+    const offer = extensionUpdateOffer(running);
+    return offer ? { ...offer, busy: runningToolCalls() > 0 } : null;
+  };
+  // The extension is idle and about to reload into the build this app ships: bring the folder
+  // Chrome loads from up to date first, and say whether it now holds that build.
+  if (route === '/extension/update' && req.method === 'POST') {
+    const prepared = prepareExtensionUpdate(extensionBuildOf(req));
+    if (prepared?.ready) logInfo(`bridge: extension folder updated to build ${prepared.build}; the extension reloads itself now`);
+    else if (prepared) logWarn(`bridge: could not update the extension folder to build ${prepared.build}`);
+    return json(res, 200, prepared ?? { ready: false }, origin);
+  }
+
   if (route === '/status') {
     const live = liveConversations();
     let openConversations: string[] = [];
@@ -2087,7 +2103,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // replace the visible failure with "Trying" before a renderer could ever observe it.
         repairs: repairFailed ? [] : await takePendingRepairs(),
         ...tabPolicy,
-        recoveryMonitoring: browserRecoveryMonitoring()
+        recoveryMonitoring: browserRecoveryMonitoring(),
+        // A newer extension build ships with this app. The extension reloads into it on its own
+        // when nothing is running; see `/extension/update`.
+        extensionUpdate: extensionUpdateReply(extensionBuildOf(req))
       },
       origin
     );
