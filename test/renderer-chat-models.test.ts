@@ -119,6 +119,23 @@ it('excludes GPT-5.5 from the composer slider without excluding future observed 
   expect(confirmedComposerModel()).toEqual({ model: 'future', reasoningEffort: 'high' });
 });
 
+it('disambiguates duplicate account model labels by their observed lane', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const models = [
+    { id: 'gpt-5-6', label: '5.6', efforts: ['none'] },
+    { id: 'gpt-5-6-thinking', label: '5.6', efforts: ['medium', 'high'] },
+    { id: 'gpt-5-5-instant', label: '5.5', efforts: ['none'] },
+    { id: 'gpt-5-5-thinking', label: '5.5', efforts: ['medium', 'high'] }
+  ];
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: 2, models } }) } });
+  const { initChatModels, applyChatModels } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  const labels = [...dom.window.document.querySelectorAll<HTMLOptionElement>('#workerModel option')].map(option => option.textContent);
+  expect(labels).toEqual(['5.6 · Instant', '5.6 · Reasoning', '5.5 · Instant', '5.5 · Reasoning']);
+  expect([...dom.window.document.querySelectorAll<HTMLOptionElement>('#workerModel option')].map(option => option.value)).toEqual(models.map(model => model.id));
+});
+
 it('binds composer selection to the selected session across delayed catalog, user edits and A-B-A navigation', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
@@ -211,7 +228,15 @@ it('uses observed account choices, preserves unverified defaults, and clears inc
   const select = (id: string) => dom.window.document.getElementById(id) as HTMLSelectElement;
   expect(select('workerModel').value).toBe('unseen');
   expect(select('workerModel').selectedOptions[0]!.disabled).toBe(true);
+  expect(select('workerModel').selectedOptions[0]!.textContent).toBe('unseen');
+  expect(dom.window.document.getElementById('workerModelVerification')!.textContent).toBe('Unverified');
+  expect(dom.window.document.getElementById('helperModelVerification')!.hasAttribute('hidden')).toBe(true);
   expect(select('helperModel').value).toBe('first');
+  // Selects without the badge still say so in the option itself.
+  applyChatModels({ multiAgent: { defaultModel: 'unseen', defaultReasoning: 'high' }, goal: { helperModel: 'first', helperReasoning: 'ultra' } } as Config);
+  await Promise.resolve();
+  expect(select('helperReasoning').value).toBe('ultra');
+  expect(select('helperReasoning').selectedOptions[0]!.textContent).toBe('ultra · not verified');
   expect([...select('composerModel').options].map(row => row.value)).toEqual(['first', 'second']);
   select('composerModel').value = 'first'; select('composerModel').dispatchEvent(new dom.window.Event('change'));
   expect([...select('composerReasoning').options].map(row => row.value)).toEqual(['high']);

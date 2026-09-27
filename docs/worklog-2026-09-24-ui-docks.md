@@ -50,6 +50,23 @@
 - Typecheck, 90 focused renderer/terminal tests, the real Electron PowerShell fixture,
   and the isolated Chromium workspace fixture passed. The latter checks Files drafts,
   PDF/editor views and responsive layouts; no provider or installed app was involved.
+
+### CI follow-up — terminal test doubles
+
+- Upstream PR #489 failed on Linux, Windows and macOS with the same
+  `rightWorkspaceTerminal?.tabs is not a function` error. Three renderer suites
+  still mocked the pre-dock terminal shape. Updated those test doubles to expose
+  the terminal tab methods used by the dock; application code is unchanged.
+- Typecheck and production build passed. The three focused suites passed 257 of
+  258 tests together; one unrelated renderer-state test hit its 30-second limit
+  under that combined run, then passed alone (51 other tests skipped). A full
+  CI pass is not claimed until the upstream checks rerun.
+- After the test-double fix, upstream Linux and macOS checks passed. Windows
+  passed 6,097 tests but failed one unrelated `bridge.test.ts` unattributed
+  recovery assertion; that exact case passed alone on Windows. The contributor
+  account cannot rerun an upstream Actions job directly, so a documentation
+  update triggers a fresh PR check without changing bridge behavior.
+
 ## Part 3 — `feat/ui-dock-review`
 
 - Consolidated the read-only Git Changes adaptation and dock integration into

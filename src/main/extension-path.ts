@@ -340,3 +340,43 @@ export function shippedExtensionBuild(): string | null {
 export function setShippedExtensionBuildForTest(stamp?: string | null): void {
   shippedStamp = stamp;
 }
+
+/** The build stamp of the folder Chrome loads the packaged extension from, or null. */
+export function materializedExtensionBuild(): string | null {
+  try {
+    if (app?.isPackaged !== true) return null;
+    return readFileSync(path.join(app.getPath('userData'), 'extension', 'build-stamp.txt'), 'utf8').trim().slice(0, 12) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The newer build a running extension could reload into, or null when there is none.
+ *
+ * Only a packaged app with a stamped extension of its own offers one, and only to an extension
+ * that reported a different stamp. Offering does not touch the folder Chrome loads from: a
+ * folder replaced under a live service worker hands newly opened tabs the new content scripts
+ * while the old worker still runs, so the copy waits for `prepareExtensionUpdate`, which the
+ * extension asks for only when it is idle and about to reload.
+ */
+export function extensionUpdateOffer(running: string | null): { build: string } | null {
+  // Part of every `/status` answer, so it must never throw: a missing stamp or a partly
+  // available Electron simply means there is nothing to offer.
+  try {
+    if (!running) return null;
+    const shipped = shippedExtensionBuild();
+    if (!shipped || running === shipped || app?.isPackaged !== true) return null;
+    return { build: shipped };
+  } catch {
+    return null;
+  }
+}
+
+/** Brings the loaded folder up to the shipped build for an idle extension that will reload now. */
+export function prepareExtensionUpdate(running: string | null): { build: string; ready: boolean } | null {
+  const offer = extensionUpdateOffer(running);
+  if (!offer) return null;
+  try { extensionDir(); } catch { /* reported as not ready below */ }
+  return { build: offer.build, ready: materializedExtensionBuild() === offer.build };
+}

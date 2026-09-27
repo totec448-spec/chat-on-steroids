@@ -77,7 +77,7 @@ export function paletteTokens(background: string, accent: string, contrast: numb
   const hover = mixColor(background, ink, .055 + .07 * c);
   return {
     '--page': background, '--ink': ink, '--card': card, '--sunk': mixColor(background, ink, .018 + .025 * c),
-    '--hover': hover, '--raise': hover,
+    '--hover': hover, '--raise': hover, '--popover': mixColor(background, ink, .06 + .06 * c),
     '--soft': readableTint(mixColor(background, ink, .53 + .2 * c), card, 4.5),
     '--faint': readableTint(mixColor(background, ink, .43 + .2 * c), card, 4.5),
     '--line': mixColor(background, ink, .09 + .13 * c), '--edge': mixColor(background, ink, .12 + .15 * c),
