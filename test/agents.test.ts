@@ -373,12 +373,25 @@ describe('account-observed worker admission', () => {
     expect(swarmRunning()).toBe(false);
   });
 
-  it('validates effective app defaults before reservation', async () => {
+  it('uses ChatGPT\'s current reasoning, and says so, when the saved default effort is not offered', async () => {
     const base = defaultConfig();
     await saveConfig({ ...base, multiAgent: { ...base.multiAgent, enabled: true, defaultModel: '5.6', defaultReasoning: 'ultra' } });
     try {
-      expect(() => spawn({ caller: prime, workers: [{ task: 'defaults' }] })).toThrow(/reasoning_effort "ultra"/);
-      expect(swarmRunning()).toBe(false);
+      const result = spawn({ caller: prime, workers: [{ task: 'defaults' }] });
+      expect(result.created[0]).toMatchObject({ model: '5.6', reasoningEffort: null });
+      expect(result.defaultNotes).toEqual([expect.stringMatching(/default worker reasoning "ultra" saved in Settings is not offered for model "5.6"/)]);
+    } finally { await setEnabled(true); }
+  });
+
+  // #499: a default saved before 2.1.15 read picker lanes stopped matching, and every spawn failed.
+  it('uses ChatGPT\'s current model when the saved default model is not offered, but keeps explicit requests strict', async () => {
+    const base = defaultConfig();
+    await saveConfig({ ...base, multiAgent: { ...base.multiAgent, enabled: true, defaultModel: 'gpt-5.6-sol', defaultReasoning: 'high' } });
+    try {
+      const result = spawn({ caller: prime, workers: [{ task: 'stale default' }, { task: 'second' }] });
+      expect(result.created.map(worker => [worker.model, worker.reasoningEffort])).toEqual([[null, 'high'], [null, 'high']]);
+      expect(result.defaultNotes).toEqual([expect.stringMatching(/default worker model "gpt-5.6-sol" saved in Settings is not offered/)]);
+      expect(() => spawn({ caller: prime, workers: [{ task: 'explicit', model: 'gpt-5.6-sol' }] })).toThrow(/not observed/);
     } finally { await setEnabled(true); }
   });
 
