@@ -159,7 +159,12 @@ export function pendingPluginRefreshes(): Promise<PluginRefreshRequest[]> {
     for (const publication of publications.values()) {
       const found = current.find(row => row.surface === publication.surface);
       if (found?.schemaId === publication.schemaId) continue;
-      const next: Row = { surface: publication.surface, schemaId: publication.schemaId, id: randomUUID(), appId: found?.appId ?? null, completedSchemaId: found?.completedSchemaId ?? null, attempted: false, manual: false };
+      // A click for `found` that never confirmed its outcome leaves ChatGPT's schema unknown: it may
+      // hold that newer schema, so the older completion no longer says what ChatGPT has. Measured
+      // 2026-09-27: 11 -> 8 tools clicked, app quit before completion, back to 11 was then taken
+      // as already current while ChatGPT showed 8.
+      const unconfirmed = found?.attempted === true && found.completedSchemaId !== found.schemaId;
+      const next: Row = { surface: publication.surface, schemaId: publication.schemaId, id: randomUUID(), appId: found?.appId ?? null, completedSchemaId: unconfirmed ? null : found?.completedSchemaId ?? null, attempted: false, manual: false };
       if (found) current[current.indexOf(found)] = next; else current.push(next);
       changed = true;
     }
