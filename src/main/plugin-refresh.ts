@@ -16,6 +16,16 @@ const publications = new Map<PluginSurface, PluginPublication>();
 const settling = new Map<PluginSurface, { schemaId: string; readyAt: number; timer?: ReturnType<typeof setTimeout> }>();
 export const PLUGIN_REFRESH_DEBOUNCE_MS = 20_000;
 /**
+ * How long a surface's tunnel must have been live before its refresh is handed to the browser.
+ *
+ * Measured 2026-09-27: a Refresh clicked about 4 s after the Desktop tunnel (re)connected never
+ * reached this app (no MCP request at all; 3 of 3 app starts), so ChatGPT kept the old tools and
+ * the attempt was recorded as clicked. Clicks about 20 s after connecting, and at runtime,
+ * arrived every time.
+ */
+export const PLUGIN_REFRESH_TUNNEL_GRACE_MS = 30_000;
+let tunnelGraceMs = PLUGIN_REFRESH_TUNNEL_GRACE_MS;
+/**
  * Pre-claim failures one schema may spend before automatic browser maintenance stops.
  *
  * A failure before the claim was treated as free to repeat, and on the newer ChatGPT shell it
@@ -92,25 +102,34 @@ export function publishPluginSurface(surface: PluginSurface, connectorName: stri
   const changed = previous?.schemaId !== publication.schemaId;
   const restored = !publications.has(surface);
   publications.set(surface, publication);
+  const due = (next: { readyAt: number; timer?: ReturnType<typeof setTimeout> }, delayMs: number) => {
+    if (next.timer) clearTimeout(next.timer);
+    next.timer = undefined;
+    if (delayMs <= 0) { wakeBrowserWork(); return; }
+    next.timer = setTimeout(() => {
+      next.timer = undefined;
+      logInfo(`plugin refresh due surface=${surface} schema=${publication.schemaId.slice(0, 12)} published=${publications.has(surface)}`);
+      if (publications.has(surface)) wakeBrowserWork();
+    }, delayMs);
+    next.timer.unref();
+  };
+  // A surface that just came live is published at once but handed out only after its tunnel grace.
+  const graceUntil = restored ? Date.now() + tunnelGraceMs : 0;
   if (changed) {
     if (previous?.timer) clearTimeout(previous.timer);
-    // Initial enrollment is immediate. Changes to an existing declaration wait for
-    // the last tool-shape edit, including edits that reconnect the endpoint.
-    const next = { schemaId: publication.schemaId, readyAt: previous ? Date.now() + PLUGIN_REFRESH_DEBOUNCE_MS : 0, timer: undefined as ReturnType<typeof setTimeout> | undefined };
+    // Changes to an existing declaration wait for the last tool-shape edit, including edits
+    // that reconnect the endpoint; initial enrollment waits only for the tunnel grace.
+    const readyAt = Math.max(previous ? Date.now() + PLUGIN_REFRESH_DEBOUNCE_MS : 0, graceUntil);
+    const next = { schemaId: publication.schemaId, readyAt, timer: undefined as ReturnType<typeof setTimeout> | undefined };
     settling.set(surface, next);
-    logInfo(`plugin refresh scheduled surface=${surface} schema=${publication.schemaId.slice(0, 12)} delayMs=${previous ? PLUGIN_REFRESH_DEBOUNCE_MS : 0}`);
-    if (previous) {
-      next.timer = setTimeout(() => {
-        next.timer = undefined;
-        logInfo(`plugin refresh due surface=${surface} schema=${publication.schemaId.slice(0, 12)} published=${publications.has(surface)}`);
-        if (publications.has(surface)) wakeBrowserWork();
-      }, PLUGIN_REFRESH_DEBOUNCE_MS);
-      next.timer.unref();
-    } else wakeBrowserWork();
-  } else if (restored && previous.readyAt <= Date.now()) {
-    // A reconnect can outlast the debounce. Its timer intentionally skipped the
-    // absent surface; restoring that same now-due declaration must deliver the wake.
-    wakeBrowserWork();
+    const delayMs = Math.max(0, readyAt - Date.now());
+    logInfo(`plugin refresh scheduled surface=${surface} schema=${publication.schemaId.slice(0, 12)} delayMs=${delayMs}`);
+    due(next, delayMs);
+  } else if (restored) {
+    // A reconnect can outlast the debounce. Its timer intentionally skipped the absent surface;
+    // restoring that same declaration must deliver the wake, after the new tunnel's grace.
+    previous.readyAt = Math.max(previous.readyAt, graceUntil);
+    due(previous, Math.max(0, previous.readyAt - Date.now()));
   }
 }
 export function unpublishPluginSurface(surface: PluginSurface): void { publications.delete(surface); }
@@ -243,4 +262,6 @@ export function failPluginRefresh(input: { id: string; error: string }): Promise
     await writeDurableNow('plugin-refresh', current); return true;
   });
 }
+/** Tests that are not about tunnel timing publish surfaces as if their tunnel were long live. */
+export function setPluginRefreshTunnelGraceForTests(ms: number): void { tunnelGraceMs = ms; }
 export function resetPluginRefreshForTests(): void { for (const row of settling.values()) if (row.timer) clearTimeout(row.timer); settling.clear(); publications.clear(); chain = Promise.resolve(); }
