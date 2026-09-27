@@ -1139,7 +1139,7 @@
   "In ChatGPT, open Settings → Security and login and turn on Developer mode.": "Dans ChatGPT, ouvrez Settings → Security and login et activez Developer mode.",
   "B · Create the Core plugin": "B · Créer le plugin Core",
   "Open the ChatGPT Plugins page using the button above. Click + at the top right to open New Plugin.": "Ouvrez la page Plugins de ChatGPT avec le bouton ci-dessus. Cliquez sur + en haut à droite pour ouvrir New Plugin.",
-  "Copy the name and description from the Core card below.": "Copiez le nom et la description depuis la carte Core ci-dessous.",
+  "Copy the name and description from the Core card below. Keep the name exactly as shown: CoS recognizes its tool calls by this name, and a renamed plugin's calls are not linked to your chats.": "Copiez le nom et la description depuis la carte Core ci-dessous. Gardez le nom exactement tel quel : CoS reconnaît ses appels d’outils à ce nom, et les appels d’un plugin renommé ne sont pas associés à vos chats.",
   "Under Authentication, choose No Auth.": "Sous Authentication, choisissez No Auth.",
   "Do not paste your API key here.": "Ne collez pas votre clé d'API ici.",
   "Read and accept the notice, then click Create. Keep the tunnel running while ChatGPT connects.": "Lisez et acceptez l'avis, puis cliquez sur Create. Gardez le tunnel actif pendant que ChatGPT se connecte.",
