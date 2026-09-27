@@ -1814,9 +1814,14 @@ External navigation may hide its destination URL under ChatGPT-only host permiss
 A completed tab absent from a successful ChatGPT URL query can release the departed
 conversation only while its original document, epoch and terminal lease still agree.
 Loading alone and failed queries are not departure proof; replacement registration wins.
-Confirmed removal or navigation sends an explicit departure to the bridge. It suspends
+Confirmed user removal or navigation sends a manual departure to the bridge. It suspends
 automatic browser recovery, including silence, Goal/queue and compaction pickups. Exact local
 tool execution remains visible under its existing activity deadline independently of tab presence.
+Managed idle/retired/duplicate pruning records a successful removal against the exact tab,
+document, navigation epoch and conversation in the existing session-storage snapshot. Its
+lifecycle event carries a non-manual departure through the close outbox; it does not create
+recovery authority. Main still requires eligible outstanding work. Failed removals and unknown
+origins remain conservative, and a later manual close supersedes a pending automatic departure.
 An unexpected lost/discarded page retains its existing recovery contract. A newer observation
 of the exact departed page clears the dismissal; unresolved work reuses its last exact MCP
 timestamp and normal deadline. A tab close never fabricates provider completion.
@@ -2769,6 +2774,10 @@ dragging or Alt+Up/Down moves a parent and its worker children within its curren
 unfiled group. A drag beyond the group clamps to its first/last visible slot; it cannot change
 project ownership. Pointer custody defers row replacement during live refresh and revalidates
 membership before saving. Off-page order survives partial list refreshes.
+The worker drawer is a read-only split view of the selected worker's own recorded conversation;
+opening it never switches the prime composer. Its cards show the scoped worker id, task, observed
+current-conversation model and broker status when known, falling back to recorded session activity.
+Unknown models stay absent rather than borrowing a configured default.
 Whole project groups use the same bounded order owner in a separate scope. Dragging a
 project summary or pressing Alt+Up/Down moves the group without changing any chat's project;
 the summary handle keeps focus and disclosure state. Group order survives reload.
@@ -2782,6 +2791,11 @@ from appearing unread after an update, and the stored receipts stay bounded.
 The chat keeps the current input queue/plan visible alongside a
 paged transcript. Main owns durable mutation acknowledgements; renderer optimism is not a
 receipt. Native edit context menus respect the focused editable control and selection.
+The timeline retains each exact tool row. It folds five or more consecutive successful agent
+status checks or waits on the same process inside the existing activity disclosure, preserving
+each row on expansion; a failed call breaks the fold. An immediately preceding recorded progress
+line may title that disclosure as the observed activity phase. Tool diff counts and shell/result
+headers are projections of recorded data, not new execution or completion evidence.
 Setup's Show/Hide guide button stays available even while setup is incomplete. Manual collapse
 survives status pushes. Profile management stays out of first-run Setup: a compact row below
 Language in Appearance has a dropdown, a plus button with a name dialog and a delete button
@@ -2841,8 +2855,8 @@ names render as plain chips; unresolved file citations do not gain invented loca
 Tool result rendering preserves structured text/image/resource distinctions within bounds.
 App-owned external/local links cross their validated main-process route.
 
-English, Spanish, Simplified Chinese, Traditional Chinese, Japanese, Turkish, French and European Portuguese use the existing UI
-catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja,tr,fr,pt-PT}.json`), with the selected locale in
+English, Spanish, Simplified Chinese, Traditional Chinese, Japanese, Turkish, French, European Portuguese, Brazilian Portuguese and German use the existing UI
+catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja,tr,fr,pt-PT,pt-BR,de}.json`), with the selected locale in
 `cos.ui.language`. Setup uses SVG flags only, with native language names in tooltips and
 accessible labels; Appearance retains the named language dropdown. Both controls share the
 same persisted preference. `translate="no"` protects text and attributes, including native
@@ -2880,6 +2894,9 @@ six-digit RGB color. A shared font choice, 12–18px base text size and transluc
 apply immediately; Reset appearance restores both palettes and typography without changing the
 theme, language or setup profile. Text size scales the existing typography hierarchy, including
 code, independently of window zoom. System font retains the locale-specific fallback stack.
+The Appearance sample chat reflects the same semantic color and typography tokens immediately;
+it contains no session data. The composer context ring and compact count remain labeled as local
+estimates. Unverified saved model preferences show their status beside the model select.
 Readable foregrounds, secondary text, borders, status colors and accent labels derive from the
 chosen surfaces; sidebar text derives from its own color. Translucency is an in-window tinted
 gradient/blur, not transparency through the native window to other applications.
