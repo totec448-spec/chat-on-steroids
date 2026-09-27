@@ -47,11 +47,13 @@ it('materializes a packaged extension into a stable per-user folder', async () =
   expect(first).not.toContain('ephemeral-appimage-mount');
   expect(await fs.readFile(path.join(first!, 'background.js'), 'utf8')).toBe('current package');
   expect(await fs.readFile(path.join(first!, 'icons', 'icon128.png'), 'utf8')).toBe('icon');
+  const publishedInode = (await fs.stat(first!)).ino;
 
   // An app update refreshes files at the same Chrome-visible path rather than asking the user
   // to Load unpacked again from a new versioned directory.
   await fs.writeFile(path.join(bundled, 'background.js'), 'updated package');
   expect(extensionDir()).toBe(first);
+  expect((await fs.stat(first!)).ino).toBe(publishedInode);
   expect(await fs.readFile(path.join(first!, 'background.js'), 'utf8')).toBe('updated package');
 
   // Once a complete stable copy exists, later package damage must not make the Finder/Chrome
@@ -79,6 +81,7 @@ it('repairs a stale destination shape with a complete staged extension instead o
   await fs.writeFile(path.join(stable, 'manifest.json'), JSON.stringify({ version: '1.0.0' }));
   await fs.writeFile(path.join(stable, 'background.js'), 'old background');
   await fs.writeFile(path.join(stable, 'icons'), 'stale file where a directory belongs');
+  const publishedInode = (await fs.stat(stable)).ino;
 
   Object.defineProperty(process, 'resourcesPath', {
     configurable: true,
@@ -95,6 +98,7 @@ it('repairs a stale destination shape with a complete staged extension instead o
 
   const { extensionDir } = await import('../src/main/extension-path.js');
   expect(extensionDir()).toBe(stable);
+  expect((await fs.stat(stable)).ino).toBe(publishedInode);
   expect(await fs.readFile(path.join(stable, 'background.js'), 'utf8')).toBe('new background');
   expect(await fs.readFile(path.join(stable, 'icons', 'icon128.png'), 'utf8')).toBe('new icon');
   await expect(fs.access(`${stable}.new`)).rejects.toBeDefined();
@@ -117,6 +121,7 @@ it('recovers an interrupted promotion from the valid old copy before trusting st
   await fs.writeFile(path.join(bundled, 'background.js'), 'package without manifest');
   await fs.mkdir(stable, { recursive: true });
   await fs.writeFile(path.join(stable, 'background.js'), 'corrupt stable');
+  const publishedInode = (await fs.stat(stable)).ino;
   await fs.mkdir(backup, { recursive: true });
   await fs.writeFile(path.join(backup, 'manifest.json'), JSON.stringify({ version: '1.9.9' }));
   await fs.writeFile(path.join(backup, 'background.js'), 'last known good');
@@ -139,8 +144,59 @@ it('recovers an interrupted promotion from the valid old copy before trusting st
 
   const { extensionDir } = await import('../src/main/extension-path.js');
   expect(extensionDir()).toBe(stable);
+  expect((await fs.stat(stable)).ino).toBe(publishedInode);
   expect(await fs.readFile(path.join(stable, 'background.js'), 'utf8')).toBe('last known good');
   expect(JSON.parse(await fs.readFile(path.join(stable, 'manifest.json'), 'utf8'))).toEqual({ version: '1.9.9' });
+  await expect(fs.access(backup)).rejects.toBeDefined();
+  await expect(fs.access(stage)).rejects.toBeDefined();
+});
+
+it('restores an interrupted in-place update even when the mixed published tree still has a manifest', async () => {
+  base = await makeTempDir('clf-extension-in-place-recovery-');
+  const resources = path.join(base, 'resources');
+  const bundled = path.join(resources, 'extension');
+  const userData = path.join(base, 'user-data');
+  const stable = path.join(userData, 'extension');
+  const backup = `${stable}.old`;
+  const stage = `${stable}.new`;
+
+  await fs.mkdir(bundled, { recursive: true });
+  await fs.writeFile(path.join(bundled, 'manifest.json'), JSON.stringify({ version: '2.0.3' }));
+  await fs.writeFile(path.join(bundled, 'background.js'), 'next package');
+
+  await fs.mkdir(stable, { recursive: true });
+  await fs.writeFile(path.join(stable, 'manifest.json'), JSON.stringify({ version: '2.0.2' }));
+  await fs.writeFile(path.join(stable, 'background.js'), 'partially replaced');
+  const publishedInode = (await fs.stat(stable)).ino;
+
+  await fs.mkdir(backup, { recursive: true });
+  await fs.writeFile(path.join(backup, 'manifest.json'), JSON.stringify({ version: '2.0.2' }));
+  await fs.writeFile(path.join(backup, 'background.js'), 'last complete package');
+  await fs.mkdir(stage, { recursive: true });
+  await fs.writeFile(path.join(stage, 'manifest.json'), JSON.stringify({ version: '2.0.3' }));
+  await fs.writeFile(path.join(stage, 'background.js'), 'next package');
+  await fs.writeFile(path.join(stage, '.chat-on-steroids-source'), 'complete-stage');
+
+  Object.defineProperty(process, 'resourcesPath', {
+    configurable: true,
+    writable: true,
+    value: resources
+  });
+  vi.doMock('electron', () => ({
+    app: {
+      isPackaged: true,
+      getPath: (name: string) => (name === 'userData' ? userData : ''),
+      getAppPath: () => path.join(base!, 'not-used')
+    }
+  }));
+
+  const { extensionDir } = await import('../src/main/extension-path.js');
+  expect(extensionDir()).toBe(stable);
+  expect((await fs.stat(stable)).ino).toBe(publishedInode);
+  // Recovery first restores the complete old copy, then this same startup safely applies the
+  // complete bundled update. The important invariant is that neither step replaces the root.
+  expect(await fs.readFile(path.join(stable, 'background.js'), 'utf8')).toBe('next package');
+  expect(JSON.parse(await fs.readFile(path.join(stable, 'manifest.json'), 'utf8'))).toEqual({ version: '2.0.3' });
   await expect(fs.access(backup)).rejects.toBeDefined();
   await expect(fs.access(stage)).rejects.toBeDefined();
 });
