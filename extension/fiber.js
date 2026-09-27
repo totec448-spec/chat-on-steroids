@@ -80,7 +80,7 @@
   /** ChatGPT-rendered authored prose. Tool rows and this extension's own surfaces are excluded. */
   const MARKDOWN = '.markdown, [data-markdown-text-style="assistant-message"]';
   const TOOL = 'span[class*="tool-message"], div.pointer-events-none.contents, div:has(> [data-testid="cot-v5-tool-icon-pile"])';
-  const GENERATED_IMAGE = '[class~="group/imagegen-image"] img';
+  const GENERATED_IMAGE = '[class~="group/imagegen-image"] img, [class~="group/generated-image-preview"] img';
   const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot';
   const MAX_RENDERED_HTML = 120_000;
   // A 15k–20k-token compaction answer is routinely 60k–90k characters. Capping public
@@ -658,7 +658,7 @@
    * uploads and every other role/channel is private or unknown. Only the provider message UUID,
    * sediment file id and bounded geometry cross worlds; no signed URL or arbitrary metadata does.
    */
-  function generatedImagesOf(sections, messages, exactImageNodes) {
+  function generatedImagesOf(sections, messages, exactImageNodes, shellImages = new Map()) {
     const out = [];
     const seen = new Set();
     if (!Array.isArray(messages)) return out;
@@ -715,8 +715,24 @@
       for (const node of nodes) {
         try {
           const url = new URL(node.currentSrc || node.src, location.href);
-          if (url.origin !== location.origin || url.pathname !== '/backend-api/estuary/content') continue;
-          const assetId = url.searchParams.get('id');
+          if (url.origin !== location.origin) continue;
+          let assetId = url.pathname === '/backend-api/estuary/content' ? url.searchParams.get('id') : null;
+          if (url.protocol === 'blob:') {
+            // Current image previews use blob pixels. Only the mounted typed item
+            // and its exact per-image control can identify those pixels; a blob URL
+            // or a nearby gallery alone is not an asset identity.
+            let control = null;
+            for (let at = fiberOf(node), up = 0; at && up < MAX_CLIMB; up++, at = at.return) {
+              const props = at.memoizedProps;
+              if (props?.imageId && !control) control = props;
+              if (shellImages.has(props?.item)) {
+                if (control?.imageId === props.item.id && control.isComplete === true && control.isPreview === false)
+                  assetId = shellImages.get(props.item);
+                break;
+              }
+              if (props?.entry) break;
+            }
+          }
           if (!assetId || !descriptorsByAsset.has(assetId)) continue;
           const list = nodesByAsset.get(assetId) || [];
           list.push(node);
@@ -1803,7 +1819,8 @@
       if (Array.isArray(at.memoizedProps?.entry?.turn?.items)) { entry = at.memoizedProps.entry; break; }
     }
     if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_ROWS) return null;
-    const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [];
+    const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map();
+    let lastAnswer = null;
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
     let work = 0;
     for (const [index, item] of entry.turn.items.entries()) {
@@ -1814,6 +1831,7 @@
         if (!remember(id) || (user && item.serverMessageId && item.messageId && item.serverMessageId !== item.messageId)) return null;
         const role = user ? 'user' : 'assistant', text = user ? item.message : item.content;
         const final = !user && item.phase === 'final_answer';
+        if (final) lastAnswer = item;
         const completed = final && item.completed === true && entry.turn.status === 'complete';
         messages.push({ id, author: { role }, content: { content_type: 'text', parts: [typeof text === 'string' ? text : ''] },
           channel: user ? null : final ? 'final' : 'commentary', end_turn: completed,
@@ -1822,6 +1840,18 @@
         const nodes = [...section.querySelectorAll('[data-content-search-unit-key]')].filter(node =>
           node.closest('[data-turn-key]') === section && node.getAttribute('data-content-search-unit-key') === key);
         if (nodes.length === 1) slots.push({ node: nodes[0], id });
+      } else if (item?.type === 'generated-image') {
+        lastAnswer = item;
+        const id = str(item.chatGptMessageId);
+        const asset = typeof item.src === 'string' && /^sediment:\/\/(file_[A-Za-z0-9_-]{8,100})$/.exec(item.src)?.[1];
+        if (!id || !asset || !Array.isArray(entry.turn.messageIds) || !entry.turn.messageIds.includes(id)) continue;
+        images.set(item, asset);
+        // Typed generated outputs are public tool media, never assistant prose.
+        // Multiple assets may share their owning provider message.
+        messages.push({ id, author: { role: 'tool' }, recipient: 'all', channel: 'final',
+          status: item.status === 'completed' && item.isPreview !== true ? 'finished_successfully' : 'in_progress',
+          content: { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer',
+            asset_pointer: item.src, width: item.width, height: item.height }] } });
       } else {
         const steps = item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items) ? item.items : [item];
         for (const step of steps) {
@@ -1843,7 +1873,18 @@
         }
       }
     }
-    return { entry, messages, calls, slots, callSources, executionIds };
+    // Media may share a provider message with other media, never an authored row
+    // or local call. Keep malformed cross-kind identities out of the whole scan.
+    if ([...images.keys()].some(item => seen.has(item.chatGptMessageId))) return null;
+    // Image-only answers have no assistant final item. Both the selected public
+    // images and the containing turn must finish; previews/retries cannot settle it.
+    const imageAnswer = lastAnswer?.type === 'generated-image';
+    const imageEnd = imageAnswer && entry.turn.status === 'complete' && images.has(lastAnswer) &&
+      entry.turn.items.filter(item => item?.type === 'generated-image').every(item =>
+        images.has(item) && item.status === 'completed' && item.isPreview !== true)
+      ? lastAnswer.chatGptMessageId : null;
+    return { entry, messages, calls, slots, callSources, executionIds, images,
+      endMessageId: imageAnswer ? imageEnd : turnEndMessageId(messages) };
   }
   function turnsOf(scanToken) {
     const out = [];
@@ -1941,9 +1982,9 @@
         const renderedMessages = renderedMessagesOf(group.sections, messages, turnBudget, exactAnchors, conversation.conversationId);
         const nativeActivities = shell ? shellPublicActivity(shell, metadata, renderedMessages, turnBudget, section, exactAnchors) : nativeActivitiesOf(group.sections, messages, exactThoughtRows);
         responseBudget.remaining -= before - turnBudget.remaining;
-        const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes);
+        const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes, shell?.images);
         const activities = nativeActivities.events;
-        const endMessageId = turnEndMessageId(messages);
+        const endMessageId = shell ? shell.endMessageId : turnEndMessageId(messages);
         // The shell supplies the completed final item's own exact message id,
         // without the classic thought-parent/timestamp tuple. Preserve that
         // identity for handoff capture; streaming and cancelled items stay weak.
@@ -2060,6 +2101,11 @@
           if (wantedImage === undefined) {
             if (currentImage !== null) node.removeAttribute('data-clf-fiber-image');
           } else if (currentImage !== wantedImage) node.setAttribute('data-clf-fiber-image', wantedImage);
+          const blobSource = wantedImage !== undefined && (node.currentSrc || node.src)?.startsWith('blob:')
+            ? node.currentSrc || node.src : null;
+          if (blobSource === null) node.removeAttribute('data-clf-fiber-image-source');
+          else if (node.getAttribute('data-clf-fiber-image-source') !== blobSource)
+            node.setAttribute('data-clf-fiber-image-source', blobSource);
         }
         if (!desiredTurnStamps.has(section)) {
           section.removeAttribute('data-clf-shell-running');

@@ -2278,7 +2278,11 @@
         pageTurn: ended || null
       });
     }
-    if (endedTurnId) emit({ kind: 'turn_end', turnId: endedTurnId, ...result });
+    const nativeEnd = result.outcome === 'completed' ? fiberTurnFor(ended) : null;
+    const imageEnd = nativeEnd?.endMessageId && nativeEnd.images?.some(image =>
+      image.messageId === nativeEnd.endMessageId && image.providerStatus === 'finished_successfully');
+    if (endedTurnId) emit({ kind: 'turn_end', turnId: endedTurnId, ...result,
+      ...(imageEnd ? { providerMessageId: nativeEnd.endMessageId } : {}) });
     // Same moment, the other reader: the goal loop wants this turn's answer while `ended`
     // still names its section. It decides for itself whether the turn is one to answer —
     // and waits for it to hold still first. See noteGoalTurn.
@@ -3484,8 +3488,9 @@
       if (!turn || !(turn.images || []).some(entry => nativeImageKey(entry) === nativeImageKey(image))) continue;
       try {
         const url = new URL(node.currentSrc || node.src, location.href);
-        if (url.origin !== location.origin || url.pathname !== '/backend-api/estuary/content' ||
-            url.searchParams.get('id') !== image.assetId || !node.isConnected) continue;
+        const exactUrl = url.pathname === '/backend-api/estuary/content' && url.searchParams.get('id') === image.assetId;
+        const exactBlob = url.protocol === 'blob:' && node.getAttribute('data-clf-fiber-image-source') === url.href;
+        if (url.origin !== location.origin || (!exactUrl && !exactBlob) || !node.isConnected) continue;
       } catch { continue; }
       found.push(node);
     }
