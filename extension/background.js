@@ -2505,18 +2505,19 @@ function maintain(woken = false) {
  *
  * Chrome keeps running the old service worker after the folder changes, so an app update used to
  * leave every user on the old extension until they found Reload in chrome://extensions. The app
- * now offers the newer build in `/status`; this waits until no chat has live work, no input or
- * command is in flight and every ChatGPT page answers that it is idle, then has the app update
+ * now offers the newer build in `/status`; this waits until the app runs no tool call, no input
+ * or command is in flight and every ChatGPT page answers that it is idle, then has the app update
  * the folder and reloads at once. `onInstalled` re-injects the open ChatGPT tabs afterwards.
  * One attempt per (running build, offered build): an extension loaded from some other folder
  * would come back as the same old build, and must not reload again and again.
  */
 let extensionReloadPending = false;
-async function reloadForExtensionUpdate(offer, liveChats, liveOpenings, liveCommands) {
+async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands) {
   if (extensionReloadPending || !offer || typeof offer.build !== 'string' || !/^[0-9a-f]{12}$/.test(offer.build)) return;
   await workerStampReady;
   if (!workerStampValue || workerStampValue === offer.build) return;
-  if (liveChats.size || liveOpenings.size || liveCommands.size) return;
+  // A chat with an agent or an active Goal is usually just waiting; only running work counts.
+  if (offer.busy !== false || liveOpenings.size || liveCommands.size) return;
   const attempt = `${workerStampValue}>${offer.build}`;
   if ((await chrome.storage.local.get('extensionReloadAttempt')).extensionReloadAttempt === attempt) return;
   for (const tab of await chrome.tabs.query({ url: CHATGPT_TAB_URLS })) {
@@ -2560,7 +2561,7 @@ async function maintainOnce() {
   const liveChats = new Set(Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : []);
   const liveOpenings = new Set(Array.isArray(reply.data.inputOpeningIds) ? reply.data.inputOpeningIds : []);
   const liveCommands = new Set(Array.isArray(reply.data.commandIds) ? reply.data.commandIds : []);
-  void reloadForExtensionUpdate(reply.data.extensionUpdate, liveChats, liveOpenings, liveCommands).catch(() => undefined);
+  void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands).catch(() => undefined);
   const renderingWanted = tab => {
     if (intent !== connectionEpoch || !token || disconnected) return false;
     if (liveChats.has(conversationForTab(tab))) return true;
