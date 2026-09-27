@@ -19,7 +19,11 @@ const identity = z.object({ id: z.string().min(1).max(80) });
 type Register = <T>(channel: string, fn: (payload: unknown) => Promise<T>) => void;
 
 /** Named, validated operations; credentials cross IPC only toward encrypted storage. */
-export function registerPluginIpc(handle: Register, getWindow: () => BrowserWindow | null): void {
+export function registerPluginIpc(
+  handle: Register,
+  getWindow: () => BrowserWindow | null,
+  publishStateChange: () => void
+): void {
   handle('plugins:legalNotices', async () => {
     const error = await shell.openPath(path.join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'THIRD-PARTY-NOTICES.txt'));
     if (error) throw new Error('Could not open the bundled Third-party Notices file.');
@@ -51,5 +55,8 @@ export function registerPluginIpc(handle: Register, getWindow: () => BrowserWind
     refreshPluginPublication('plugins');
     const window = getWindow();
     if (window && !window.isDestroyed()) window.webContents.send('plugins:changed', pluginManager.snapshot());
+    // The plugin snapshot repaints the Plugins panel, while AppState carries the exact
+    // connector schema fingerprint used by the global ChatGPT-refresh reminder.
+    publishStateChange();
   });
 }
