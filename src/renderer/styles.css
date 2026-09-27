@@ -1954,7 +1954,8 @@ input[readonly] {
 /* One hairline for the input and every row stacked above it. */
 .card.is-session { --composer-edge: color-mix(in srgb, var(--ink) 6%, var(--card)); }
 .card.is-session:has(> .composer:focus-within, > .composer-dock:focus-within) { --composer-edge: color-mix(in srgb, var(--ink) 8%, var(--card)); }
-.composer { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto 36px; align-items: center; gap: 8px; width: calc(100% - 48px); max-width: 860px; margin: 14px auto 24px; border: 1px solid var(--composer-edge); border-radius: 22px; background: var(--card); padding: 14px 12px 10px; box-shadow: 0 8px 28px rgb(0 0 0 / 10%); }
+.composer { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto 36px; align-content: end; align-items: center; gap: 8px; width: calc(100% - 48px); max-width: 860px; margin: 14px auto 24px; border: 1px solid var(--composer-edge); border-radius: 22px; background: var(--card); padding: 14px 12px 10px; box-shadow: 0 8px 28px rgb(0 0 0 / 10%); }
+.composer.is-resizing { overflow: clip; will-change: height; }
 /* Skills library and selection design adapted from igorbelchior86's #260. */
 .composer-selected-skills { grid-column: 1 / -1; grid-row: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 2px 8px; min-width: 0; }
 .composer-selected-skills[hidden] { display: none; }
