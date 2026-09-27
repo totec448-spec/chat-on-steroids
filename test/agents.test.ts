@@ -3333,7 +3333,22 @@ describe('through the MCP endpoint', () => {
 
     const finished = await asChat('c-worker-1', 'finish', { result: 'parked-prime-report' });
     expect(finished).toMatch(/reported and is now asleep/i);
+    expect(finished).toContain('This acknowledgment does not confirm delivery to the prime');
+    expect(finished).not.toContain('The prime agent has your result');
     expect(swarmRunning()).toBe(false);
+
+    const pending = () => snapshotSwarm()!.dormantRuns
+      ?.find(family => family.primeConversationId === PRIME_CHAT)
+      ?.agents.find(agent => agent.info.id === PRIME_ID)?.queue ?? [];
+    expect(pending()).toHaveLength(1);
+    expect(pending()[0]).toMatchObject({ offeredAt: null, offers: 0, ackedAt: null });
+    const retry = await asChat('c-worker-1', 'finish', { result: 'retry must not replace the original report' });
+    expect(retry).toContain('This acknowledgment does not confirm delivery to the prime');
+    expect(retry).not.toContain('already has that result');
+    expect(pending()).toHaveLength(1);
+    expect(pending()[0]).toMatchObject({ offeredAt: null, offers: 0, ackedAt: null });
+    expect(pending()[0]!.text).toContain('parked-prime-report');
+    expect(pending()[0]!.text).not.toContain('retry must not replace');
 
     // The final worker report lives in A's dormant prime queue. There is no live agent:prime
     // identity to address here, so delivery must resolve from the exact prime conversation.
@@ -3615,6 +3630,8 @@ describe('through the MCP endpoint', () => {
 
     const workerResult = await asChat('c-worker-1', 'finish', { result: 'all of it done' });
     expect(workerResult).toContain('reached its context limit');
+    expect(workerResult).toContain('This acknowledgment does not confirm delivery to the prime');
+    expect(workerResult).not.toContain('The prime agent has your result');
     expect(workerResult).not.toContain('remains reusable');
     const report = offerMessagesForConversation(PRIME_CHAT)?.messages.find((message) =>
       message.text.includes('[worker-1 finished]')

@@ -1106,8 +1106,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
       title: 'Multi-agent run',
       description:
         'Run ChatGPT workers. Omit model and reasoning_effort unless the user explicitly requests an override; saved app defaults apply. Do not ask the user to choose them. Reuse a suitable sleeping worker with message before spawn. ' +
-        'message: prime→worker or worker→prime; a free slot revives the same sleeping chat. Replies arrive with tool results; never poll. ' +
-        'status: all active, sleeping/revivable and terminal/non-revivable workers in this prime’s durable history, including parked runs. finish: report the result, normally then sleep.',
+        'message: prime↔worker. Reports ride tool results, never restart primes. Use status once to collect pending reports before finalizing; otherwise state that review is pending. Never poll repeatedly. ' +
+        'status: your active, sleeping/revivable and terminal workers, including parked families. finish: record the report, then normally sleep.',
       inputSchema: z.object({
         action: z.enum(['spawn', 'message', 'status', 'finish']).describe('What to do.'),
         run_id: z.string().uuid().optional().describe('Select your returned worker family when status lists several; never grants another caller’s workers.'),
@@ -1381,13 +1381,13 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               {
                 type: 'text' as const,
                 text: repeat
-                  ? `${info.id} was already ${info.state} and the prime agent already has that result, so nothing was ` +
-                    'sent again. Stop working and stop calling tools.'
+                  ? `${info.id} was already ${info.state}; the previous result was already recorded for the prime, so nothing was ` +
+                    'queued again. This acknowledgment does not confirm delivery to the prime. Stop working and stop calling tools.'
                   : info.state === 'finished'
-                    ? `${info.id} is finished. The prime agent has your result. This chat has also reached its context ` +
+                    ? `${info.id} is finished. Your result was recorded for the prime. This acknowledgment does not confirm delivery to the prime. This chat has also reached its context ` +
                       'limit, so there will be no more work in it: stop working and stop calling tools.'
-                    : `${info.id} reported and is now asleep but remains reusable. The prime agent has your result and ` +
-                      'your worker slot is free. Stop working and stop calling tools; for related follow-up work the ' +
+                    : `${info.id} reported and is now asleep but remains reusable. Your result was recorded for the prime. ` +
+                      'This acknowledgment does not confirm delivery to the prime. Your worker slot is free. Stop working and stop calling tools; for related follow-up work the ' +
                       'prime should wake this same chat with agents action=message before spawning a replacement.'
               }
             ],
