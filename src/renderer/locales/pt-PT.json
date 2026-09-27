@@ -773,7 +773,7 @@
   "Disconnecting": "A desligar",
   "Closing connection…": "A fechar ligação…",
   "Published": "Publicado",
-  "Please remember to refresh the plugins in ChatGPT.": "Não se esqueça de atualizar os plugins no ChatGPT.",
+  "Chat On Steroids connector tools changed. Refresh the affected connector in ChatGPT; this is separate from the browser extension.": "As ferramentas do conector do Chat On Steroids mudaram. Atualize o conector afetado no ChatGPT; isto é independente da extensão do browser.",
   "Dismiss reminder": "Dispensar lembrete",
   "Files, patches and the terminal. Required — this is the coding connector.": "Ficheiros, patches e terminal. Obrigatório — este é o conector de programação.",
   "Screenshots, windows, mouse/keyboard control and the clipboard. Optional — connect it only if you want desktop automation.": "Capturas de ecrã, janelas, controlo do rato/teclado e área de transferência. Opcional — ligue-o apenas se quiser automatização do ambiente de trabalho.",
