@@ -44,6 +44,22 @@ it('renders a selected worker and offers an explicit full-chat navigation', asyn
   expect(host.querySelector('aside')!.hidden).toBe(true);
 });
 
+it('keeps the back button title and accessible label synchronized with language changes', async () => {
+  dom = new JSDOM('<main></main><button></button>', { url: 'https://local.test/' });
+  Object.assign(globalThis, { window: dom.window, document: dom.window.document, Node: dom.window.Node });
+  const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
+  createAgentPanel({ host, toggle, load: async () => ({ events: [] }), render: () => [], openMain: vi.fn(), working: () => false });
+  const back = host.querySelector<HTMLButtonElement>('.agent-panel-header button')!;
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('tr');
+  expect(back.title).toBe('Yardımcı ajanlara dön');
+  expect(back.getAttribute('aria-label')).toBe('Yardımcı ajanlara dön');
+  setLanguage('fr');
+  expect(back.title).toBe('Retour aux sous-agents');
+  expect(back.getAttribute('aria-label')).toBe('Retour aux sous-agents');
+  setLanguage('en');
+});
+
 it('preserves a readers scroll position during refresh and Escape returns focus', async () => {
   dom = new JSDOM('<main></main><button></button>', { pretendToBeVisual: true });
   Object.assign(globalThis, { document: dom.window.document });

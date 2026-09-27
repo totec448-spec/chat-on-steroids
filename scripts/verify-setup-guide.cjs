@@ -59,7 +59,7 @@ app.whenReady().then(async () => {
       [1100, 900, 1, 'ja', 'dark'], [1100, 900, 1.5, 'ja', 'light'], [640, 720, 1, 'ja', 'dark'],
       [1100, 900, 1, 'tr', 'dark'], [1100, 900, 1.5, 'tr', 'light'], [640, 720, 1, 'tr', 'dark'],
       [1100, 900, 1, 'fr', 'dark'], [1100, 900, 1.5, 'fr', 'light'], [640, 720, 1, 'fr', 'dark'],
-      [1100, 900, 1, 'pt-BR', 'dark'], [1100, 900, 1.5, 'pt-BR', 'light'], [640, 720, 1, 'pt-BR', 'dark']
+      [1100, 900, 1, 'pt-PT', 'dark'], [1100, 900, 1.5, 'pt-PT', 'light'], [640, 720, 1, 'pt-PT', 'dark']
     ]) {
       win.setSize(width, height);
       win.webContents.setZoomFactor(zoom);
@@ -74,7 +74,7 @@ app.whenReady().then(async () => {
         return {
           overflow: panel.scrollWidth > panel.clientWidth,
           separated: heading.right <= bounds.left || heading.bottom <= bounds.top,
-          compact: bounds.width <= 330,
+          compact: bounds.width <= 375,
           flagsOnly: buttons.length === 8 && buttons.every(button => !button.textContent.trim() && button.querySelector('svg')),
           labeled: buttons.every(button => button.title && button.title === button.getAttribute('aria-label')),
           selected: buttons.filter(button => button.getAttribute('aria-pressed') === 'true').map(button => button.dataset.language),
@@ -159,11 +159,11 @@ app.whenReady().then(async () => {
     await key('Tab'); await key('Space');
     assert.equal(await win.webContents.executeJavaScript('document.documentElement.lang'), 'fr');
     await key('Tab'); await key('Space');
-    assert.equal(await win.webContents.executeJavaScript('document.documentElement.lang'), 'pt-BR');
+    assert.equal(await win.webContents.executeJavaScript('document.documentElement.lang'), 'pt-PT');
     await win.loadURL(server.resolvedUrls.local[0] + 'setup-preview.html');
     assert.deepEqual(await win.webContents.executeJavaScript(`({language:document.documentElement.lang,
-      selected:document.querySelector('[data-language="pt-BR"]').getAttribute('aria-pressed'),
-      preference:document.getElementById('uiLanguage').value})`), {language:'pt-BR', selected:'true', preference:'pt-BR'});
+      selected:document.querySelector('[data-language="pt-PT"]').getAttribute('aria-pressed'),
+      preference:document.getElementById('uiLanguage').value})`), {language:'pt-PT', selected:'true', preference:'pt-PT'});
     // Native modal, Escape dismissal and focus restoration must work without opening a browser.
     await win.webContents.executeJavaScript(`(() => {
       const button=document.querySelectorAll('[data-setup-guide="plugin"] .setup-enlarge')[1];

@@ -126,8 +126,12 @@ it('switches all app languages without replacing authored drafts, focus, selecti
   expect(t('gpt-6-astra')).toBe('gpt-6-astra');
 });
 
-it('keeps English for pt-PT or unavailable storage and still switches to pt-BR in memory', async () => {
+it('keeps pt-PT and pt-BR apart, falls back for an unsupported variant, and switches in memory', async () => {
+  // Both Portuguese variants ship; neither may be taken for the other.
   window.localStorage.setItem('cos.ui.language', 'pt-PT');
+  expect((await import('../src/renderer/i18n.js')).currentLanguage()).toBe('pt-PT');
+  vi.resetModules();
+  window.localStorage.setItem('cos.ui.language', 'pt-AO');
   expect((await import('../src/renderer/i18n.js')).currentLanguage()).toBe('en');
 
   vi.resetModules();
