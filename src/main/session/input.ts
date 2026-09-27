@@ -1609,8 +1609,8 @@ export async function publishBrowserDecision(id: string, owner: string, conversa
 }
 export async function requestBrowserDecision(text: string, signal: AbortSignal, options: {
   lifetime?: 'temporary-planner';
-  sourceSessionId?: string; conversationId?: string | null; model?: string;
-  reasoningEffort?: InputArgs['reasoningEffort'];
+  sourceSessionId?: string; conversationId?: string | null; model?: string | null;
+  reasoningEffort?: InputArgs['reasoningEffort'] | null;
   publish?: (text: string) => void;
 } = {}): Promise<string> {
   if (!text.trim() || text.length > MAX_CHATGPT_MESSAGE_CHARS) throw new Error('goal_context_too_large');
@@ -1636,7 +1636,9 @@ export async function requestBrowserDecision(text: string, signal: AbortSignal, 
         throw new Error('goal_browser_send_unconfirmed');
       }
       const entry = entrySchema.parse({ id, sessionId: null, text, mode: 'after-turn', dueAt: Date.now(),
-        model: options.model ?? 'gpt-5.6-sol', reasoningEffort: options.reasoningEffort ?? 'high',
+        // null means ChatGPT's current selection; only an omitted value gets the historical default.
+        model: options.model === undefined ? 'gpt-5.6-sol' : options.model,
+        reasoningEffort: options.reasoningEffort === undefined ? 'high' : options.reasoningEffort,
         decisionSourceSessionId: options.sourceSessionId, lifetime: options.lifetime, purpose: 'decision', state: 'queued', owner: null,
         createdAt: Date.now(), conversationId: options.conversationId ?? null });
       await commit(append(current, entry));
