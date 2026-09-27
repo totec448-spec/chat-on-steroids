@@ -19,6 +19,7 @@ interface DomApi {
   send(options?: { acceptanceTimeoutMs?: number; stillCurrent?: () => boolean; beforeSend?: () => Promise<boolean> }): Promise<boolean>;
   selectModelSettings(model: string | null, effort: string | null, current?: () => boolean): Promise<boolean>;
   uploadImages(images: Array<{ name: string; dataUrl: string }>, current?: () => boolean, draft?: ReturnType<DomApi['captureComposerDraft']>, files?: File[]): Promise<boolean>;
+  messages(): Array<{ id: string; role: 'user' | 'assistant'; text: string; turnId: string | null }>;
 }
 let dom: JSDOM;
 let document: Document;
@@ -47,6 +48,32 @@ function user(text: string) {
   message.textContent = text;
   section.append(message); document.body.append(section);
 }
+
+it('reads the September search-unit renderer without legacy message attributes', () => {
+  const turn = document.createElement('div');
+  turn.setAttribute('data-turn-key', 'search-turn');
+  const userUnit = document.createElement('div');
+  userUnit.setAttribute('data-chatgpt-search-unit-key', 'search-turn:0:user');
+  userUnit.setAttribute('data-chatgpt-search-message-ids', 'search-user');
+  const userText = document.createElement('div');
+  userText.className = 'whitespace-pre-wrap';
+  userText.textContent = 'Search unit question';
+  userUnit.append(userText);
+  const assistantUnit = document.createElement('div');
+  assistantUnit.setAttribute('data-chatgpt-search-unit-key', 'search-turn:2:assistant');
+  assistantUnit.setAttribute('data-chatgpt-selection-message-id', 'search-assistant');
+  const prose = document.createElement('div');
+  prose.setAttribute('data-markdown-text-style', 'assistant-message');
+  prose.textContent = 'Search unit answer';
+  assistantUnit.append(prose);
+  turn.append(userUnit, assistantUnit);
+  document.body.append(turn);
+
+  expect(api.messages()).toEqual([
+    expect.objectContaining({ id: 'search-user', role: 'user', text: 'Search unit question', turnId: 'search-turn' }),
+    expect.objectContaining({ id: 'search-assistant', role: 'assistant', text: 'Search unit answer', turnId: 'search-turn' })
+  ]);
+});
 
 describe('one native HTML edit for prepared text', () => {
   beforeEach(() => {
