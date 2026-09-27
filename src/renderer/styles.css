@@ -773,6 +773,9 @@ main {
   box-shadow: var(--lift);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  /* An implicit auto column grows with its widest row; a long folder path pushed the whole
+     card, and its Add button, past the page edge. */
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
