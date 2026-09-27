@@ -11,7 +11,7 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## Unreleased
 
-## [2.1.17] — Workspace and self-updating extension
+Draft for 2.1.17 — Workspace and self-updating extension. The release sets the version heading.
 
 A feature update. The app gets a workspace next to your chat, pets on your desktop, and an extension that keeps itself up to date. CoS now speaks German and Brazilian Portuguese.
 
