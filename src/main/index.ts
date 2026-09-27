@@ -19,6 +19,7 @@ import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } fro
 import { setStuckNotifier } from './stuck-notice.js';
 import { flushSessions, initSessionStore } from './session/store.js';
 import { initSkillsPath } from './skills.js';
+import { initUvRuntime } from './plugins/uv-runtime.js';
 import { initPetLibrary } from './pet-library.js';
 import { shutdownPetOverlay, startPetOverlay } from './pet-overlay.js';
 import { usageOverview } from './session/usage.js';
@@ -327,6 +328,7 @@ void app.whenReady().then(async () => {
   try { await initSkillsPath(userData); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
+  initUvRuntime(userData);
   try { await initPetLibrary(userData); }
   catch (error) { logWarn(`Pet library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   await restoreChatModels();
