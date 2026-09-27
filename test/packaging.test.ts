@@ -124,6 +124,11 @@ describe('cross-platform packaging targets', () => {
     expect(smoke).toContain('const expectedElectronVersion = sourcePackage.devDependencies?.electron;');
     expect(smoke).toContain('electron: process.versions.electron');
     expect(smoke).toContain('runtime.electron !== expectedElectronVersion');
+    expect(smoke).toContain("'@modelcontextprotocol/core/internal'");
+    expect(smoke).toContain("'@modelcontextprotocol/server'");
+    expect(smoke).toContain("'@modelcontextprotocol/client'");
+    expect(smoke).toContain("'@modelcontextprotocol/node'");
+    expect(smoke).toContain('runtime.mcp !== true');
   });
 
   it('grants sandbox read access only to the Windows install tree and fails on ACL errors', () => {
@@ -358,7 +363,9 @@ describe('cross-platform packaging targets', () => {
     expect(iconScript).toContain("build', 'icon.png'), pngFor(1024)");
 
     const packageScript = readFileSync(path.join(root, 'scripts', 'package.mjs'), 'utf8');
+    expect(packageScript).toContain("run(node, ['-e', \"require('electron')\"]);");
     expect(packageScript).toContain('COS_PACKAGE_ARCH: arch');
+    expect(packageScript).toContain("run(node, ['scripts/smoke-packaged-runtime.mjs', ...targetArgs]);");
     const releaseWorkflow = readFileSync(path.join(root, '.github', 'workflows', 'release.yml'), 'utf8');
     expect(releaseWorkflow).toContain('HOME="$deb_smoke_root/home"');
     expect(releaseWorkflow).toContain('HOME="$smoke_root/home"');
