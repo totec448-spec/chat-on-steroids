@@ -3018,7 +3018,8 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 
 .usage-panel { overflow: auto; padding: 52px max(28px, calc((100% - 760px) / 2)) 64px; }
 .usage-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 18px; padding: 22px 8px; margin: 30px 0 42px; }
-.usage-summary > div { display: grid; gap: 8px; text-align: center; border-right: 1px solid var(--line); }
+/* A label that wraps ("Estimated equivalent · USD") must not lift its number above the others. */
+.usage-summary > div { display: grid; align-content: start; gap: 8px; padding: 0 10px; text-align: center; border-right: 1px solid var(--line); }
 .usage-summary > div:last-child { border: 0; }
 .usage-summary strong { font-size: calc(25px * var(--text-scale, 1)); font-weight: 500; letter-spacing: -.7px; }
 .usage-summary span, .muted { color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); }
