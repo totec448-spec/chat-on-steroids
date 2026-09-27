@@ -2770,8 +2770,7 @@ membership before saving. Off-page order survives partial list refreshes.
 The worker drawer is a read-only split view of the selected worker's own recorded conversation;
 opening it never switches the prime composer. Its cards show the scoped worker id, task, observed
 current-conversation model and broker status when known, falling back to recorded session activity.
-Unknown models
-stay absent rather than borrowing a configured default.
+Unknown models stay absent rather than borrowing a configured default.
 Whole project groups use the same bounded order owner in a separate scope. Dragging a
 project summary or pressing Alt+Up/Down moves the group without changing any chat's project;
 the summary handle keeps focus and disclosure state. Group order survives reload.

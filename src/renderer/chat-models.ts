@@ -81,7 +81,10 @@ function options(select: HTMLSelectElement, choices: Array<{ id: string; label: 
     const unavailable = option(() => t("No observed choices"), ''); unavailable.disabled = true; desired.push(unavailable);
   }
   if (value && !choices.some(choice => choice.id === value)) {
-    const unverified = option(value, value);
+    // The worker and helper selects show an Unverified badge beside them; every other select
+    // (the composer and the reasoning pickers) keeps saying so in the option itself.
+    const badged = select.id === 'workerModel' || select.id === 'helperModel';
+    const unverified = option(badged ? value : () => t("{0} · not verified", [value]), value);
     unverified.disabled = true;
     desired.push(unverified);
   }
