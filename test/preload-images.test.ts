@@ -1,7 +1,9 @@
 import { expect, it, vi } from 'vitest';
 
 const { invoke, expose, getPath } = vi.hoisted(() => ({
-  invoke: vi.fn(async (_channel: string, payload: any) => ({ ok: true, data: payload.files.map((_: unknown, index: number) => ({ id: String(index), name: 'staged', size: 0, mimeType: 'application/octet-stream' })) })),
+  invoke: vi.fn(async (channel: string, payload: any) => ({ ok: true, data: channel === 'sessions:dropFiles'
+    ? payload.files.map((_: unknown, index: number) => ({ id: String(index), name: 'staged', size: 0, mimeType: 'application/octet-stream' }))
+    : null })),
   expose: vi.fn(), getPath: vi.fn((file: any) => file.path ?? '')
 }));
 vi.mock('electron', () => ({
