@@ -102,6 +102,13 @@ const STATE = 'session-input';
 const TOOL_INPUT_TEXT_BYTES = 128000;
 /** A confirmed send receipt lands in seconds. This only bounds one that is never reported. */
 const UNCERTAIN_SEND_MS = 15 * 60_000;
+/**
+ * The same bound for the sends the one above leaves in custody: an automatic Continue, a new
+ * chat's first message and a combined delivery. Their own paths normally settle them in seconds
+ * to minutes. Measured 2026-09-27, seven such rows had waited in `browser` for up to ten days;
+ * each kept its chat protected and told the extension an input was still in flight.
+ */
+const ABANDONED_SEND_MS = 6 * 60 * 60_000;
 export const TOOL_INPUT_HEADER = '\n--- New instructions from the user ---\n';
 export interface ToolInputBatch {
   messages: Array<{ text: string; images: InputImage[] }>;
@@ -456,6 +463,8 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
     // combined delivery keep their existing custody.
     if (row.state === 'browser' && row.sendAuthorizedAt !== undefined && !row.recovery && !row.opening &&
         !row.companionInputId && manualInput(row) && Date.now() - row.sendAuthorizedAt >= UNCERTAIN_SEND_MS)
+      return { ...row, state: 'cancelled', error: 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.' };
+    if (row.state === 'browser' && row.sendAuthorizedAt !== undefined && Date.now() - row.sendAuthorizedAt >= ABANDONED_SEND_MS)
       return { ...row, state: 'cancelled', error: 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.' };
     return row;
   }));

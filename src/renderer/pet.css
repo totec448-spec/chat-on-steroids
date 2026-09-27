@@ -1,4 +1,4 @@
-.pet-launcher { width:30px; height:30px; padding:2px; border:0; border-radius:7px; background:transparent; cursor:pointer; display:grid; place-items:center; }
+.pet-launcher { width:32px; height:32px; padding:2px; border:1px solid var(--line); border-radius:9px; background:var(--card); cursor:pointer; display:grid; place-items:center; }
 .pet-launcher img { width:22px; height:26px; image-rendering:pixelated; object-fit:contain; }
 .pet-launcher:hover,.pet-launcher[aria-pressed="true"] { background:var(--hover); }
 .pet-layer { position:fixed; inset:0; overflow:hidden; pointer-events:none; z-index:1500; contain:layout style; }

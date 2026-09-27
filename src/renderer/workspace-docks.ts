@@ -258,8 +258,11 @@ export function createWorkspaceDocks(host: HTMLElement) {
   document.addEventListener('keydown', event => {
     if (!event.ctrlKey || event.altKey || event.metaKey) return;
     if (!event.shiftKey && event.key === '`') { event.preventDefault(); setBottomOpen(!bottomOpen); return; }
-    if (!event.shiftKey || !['1', '2', '3', '4'].includes(event.key)) return;
-    event.preventDefault(); activate((['review', 'terminal', 'files', 'agents'] as DockView[])[Number(event.key) - 1]!);
+    // With Shift held, `key` is the shifted character (!, ", § … by layout), never the digit;
+    // `code` names the physical key.
+    const digit = /^Digit([1-4])$/.exec(event.code)?.[1];
+    if (!event.shiftKey || !digit) return;
+    event.preventDefault(); activate((['review', 'terminal', 'files', 'agents'] as DockView[])[Number(digit) - 1]!);
   });
   paint();
   return { body, bottomBody, rightToggle, bottomToggle, register, registerTerminal, activate, adopt,
