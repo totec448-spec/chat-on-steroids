@@ -1690,5 +1690,7 @@
   "Install": "Installieren",
   "Less": "Weniger",
   "More": "Mehr",
-  "{0}K": "{0} Tsd."
+  "{0}K": "{0} Tsd.",
+  "Open a chat to see its sub-agents": "Öffne einen Chat, um seine Sub-Agents zu sehen",
+  "Open a project to use Files and Review": "Öffne ein Projekt, um Dateien und Review zu nutzen"
 }

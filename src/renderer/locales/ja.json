@@ -1690,5 +1690,7 @@
   "Install": "インストール",
   "Less": "少ない",
   "More": "多い",
-  "{0}K": "{0}千"
+  "{0}K": "{0}千",
+  "Open a chat to see its sub-agents": "サブエージェントを見るにはチャットを開いてください",
+  "Open a project to use Files and Review": "ファイルとレビューを使うにはプロジェクトを開いてください"
 }
