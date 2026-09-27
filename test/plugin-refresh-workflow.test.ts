@@ -12,6 +12,7 @@ function workflow(options: { unchanged?: boolean; deny?: boolean; navigateDuring
   const click = vi.fn(() => { refreshed = true; });
   const href = options.href ?? `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic`;
   const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1,
+    t: (_key: string, fallback: string) => fallback,
     location: { pathname: new URL(href).pathname, href },
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
       pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', refresh: options.refreshAvailable === false ? null : { click }, tools: options.unchanged || refreshed ? tools : [{ ...tools[0], description: 'Old description.' }] }) }
@@ -158,7 +159,7 @@ it.each(['unpinned', 'pinned', 'pinned-during-proof'])('reuses management tabs a
  */
 it('reports why a page it owns produced no readable view, instead of returning in silence', async () => {
   const ask = vi.fn(async (_message: { action: string; error?: string }) => ({ data: { ok: true } }));
-  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask,
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, t: (_key: string, fallback: string) => fallback,
     location: { pathname: '/', href: `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic` },
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginRefreshView: () => null }
   });
@@ -207,7 +208,7 @@ it.each([
 });
 it('owns the path-routed settings page, so an unreadable card is reported rather than silent', async () => {
   const ask = vi.fn(async (_message: { action: string; error?: string }) => ({ data: { ok: true } }));
-  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask,
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, t: (_key: string, fallback: string) => fallback,
     location: { pathname: '/settings/plugins-settings/plugin_asdk_app_synthetic', hash: '', href: pathRouted },
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginRefreshView: () => null }
   });
@@ -296,7 +297,8 @@ it('waits for the Refresh control that renders just after the tools, and settles
   // "no Refresh control", which the app records as manual and never retries.
   const click = vi.fn(); const ask = vi.fn(async (_message: Record<string, unknown>) => ({ data: { ok: true } }));
   let reads = 0; const refresh = { click };
-  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, location: { pathname: new URL(pathRouted).pathname, href: pathRouted }, ...clock(),
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, t: (_key: string, fallback: string) => fallback,
+    location: { pathname: new URL(pathRouted).pathname, href: pathRouted }, ...clock(),
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
       pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', settled: true, refresh: ++reads > 1 ? refresh : null, tools: [{ ...tools[0], description: 'Old' }] }) } });
   vm.runInContext(`${section}\n${ticking}; globalThis.run = refreshManagedPlugin;`, context);
@@ -308,7 +310,8 @@ it('waits for the Refresh control that renders just after the tools, and settles
 it('reports a missing Refresh control only after it stayed absent', async () => {
   const ask = vi.fn(async (_message: Record<string, unknown>) => ({ data: { ok: true } }));
   let reads = 0;
-  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, location: { pathname: new URL(pathRouted).pathname, href: pathRouted }, ...clock(),
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, t: (_key: string, fallback: string) => fallback,
+    location: { pathname: new URL(pathRouted).pathname, href: pathRouted }, ...clock(),
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
       pluginRefreshView: () => (++reads, { appId: 'asdk_app_synthetic', settled: true, refresh: null, tools: [{ ...tools[0], description: 'Old' }] }) } });
   vm.runInContext(`${section}\n${ticking}; globalThis.run = refreshManagedPlugin;`, context);

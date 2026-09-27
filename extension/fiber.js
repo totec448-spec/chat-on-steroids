@@ -2385,8 +2385,10 @@
     if (pageRoute && !location.hash) return pagePluginSnapshot(pageRoute[1]);
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash);
     if (!route) return null;
-    const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel =>
-      panel.getAttribute('aria-labelledby')?.endsWith('-trigger-Plugins') && !panel.hidden);
+    // The hash already names one exact installed connector settings route. Provider tab labels
+    // are localized, so the remaining DOM proof is simply one visible tabpanel for that route;
+    // ambiguity still fails closed rather than guessing between multiple mounted panels.
+    const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => !panel.hidden);
     if (panels.length !== 1) return null;
     const buttons = [...panels[0].querySelectorAll('button')].slice(0, 100);
     let result = null, control = null, observedActions = null, observedCard = null;
