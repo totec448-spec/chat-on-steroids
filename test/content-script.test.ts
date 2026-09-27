@@ -15900,7 +15900,8 @@ describe('one live isolated-world recorder per document', () => {
 
     await expect(live.runtimeMessage({ type: 'clf-recorder-ping' })).resolves.toEqual({
       ok: true,
-      recorderVersion: 21
+      recorderVersion: 21,
+      busy: false
     });
   });
 
