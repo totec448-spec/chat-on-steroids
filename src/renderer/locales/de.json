@@ -1675,5 +1675,12 @@
   "Checking GitHub…": "GitHub wird geprüft …",
   "Remove {0}?": "{0} entfernen?",
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "Der Skill und seine Ressourcen werden in den Papierkorb verschoben. Bereits vorbereitete Nachrichten ändern sich nicht.",
-  "Skill imported into the CoS library": "Skill in die CoS-Bibliothek importiert"
+  "Skill imported into the CoS library": "Skill in die CoS-Bibliothek importiert",
+  "Weekly limit": "Wochenlimit",
+  "{0}-hour limit": "{0}-Stunden-Limit",
+  "Shared across all models": "Gilt für alle Modelle gemeinsam",
+  "Estimated context processed per tool call · last {0} weeks": "Geschätzter verarbeiteter Kontext pro Tool-Aufruf · letzte {0} Wochen",
+  "Estimated cost per day, last {0} days": "Geschätzte Kosten pro Tag, letzte {0} Tage",
+  "{0} estimated tokens": "{0} geschätzte Tokens",
+  "Daily breakdown": "Aufschlüsselung pro Tag"
 }

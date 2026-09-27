@@ -1675,5 +1675,12 @@
   "Checking GitHub…": "正在检查 GitHub…",
   "Remove {0}?": "移除 {0}？",
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "这会将技能及其资源移至回收站。已经准备好的消息不会改变。",
-  "Skill imported into the CoS library": "技能已导入 CoS 技能库"
+  "Skill imported into the CoS library": "技能已导入 CoS 技能库",
+  "Weekly limit": "每周限额",
+  "{0}-hour limit": "{0} 小时限额",
+  "Shared across all models": "所有模型共享",
+  "Estimated context processed per tool call · last {0} weeks": "每次工具调用处理的估算上下文 · 最近 {0} 周",
+  "Estimated cost per day, last {0} days": "每日估算费用，最近 {0} 天",
+  "{0} estimated tokens": "估算 {0} 个 Token",
+  "Daily breakdown": "每日明细"
 }

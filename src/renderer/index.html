@@ -62,6 +62,7 @@
         <g id="i-trash">
           <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9L17.5 7" />
         </g>
+        <g id="i-chart"><path d="M4.5 19.5h15M7.5 16V11M12 16V6.5M16.5 16v-7" /></g>
         <g id="i-x"><path d="M6 6l12 12M18 6 6 18" /></g>
         <g id="i-star"><path d="M12 3.8l2.5 5.1 5.6.8-4 3.9.9 5.6L12 16.6l-5 2.6.9-5.6-4-3.9 5.6-.8Z" /></g>
         <g id="i-paw"><circle cx="6.5" cy="10" r="1.8" /><circle cx="10" cy="6" r="1.8" /><circle cx="14" cy="6" r="1.8" /><circle cx="17.5" cy="10" r="1.8" /><path d="M12 11.5c-2.6 0-5 3-5 5.2 0 1.6 1.3 2.3 2.6 2.3.9 0 1.6-.5 2.4-.5s1.5.5 2.4.5c1.3 0 2.6-.7 2.6-2.3 0-2.2-2.4-5.2-5-5.2Z" /></g>
@@ -112,7 +113,7 @@
         <button class="is-sel" data-tab="home" type="button">
           <svg class="ico" viewBox="0 0 24 24"><use href="#i-home" /></svg>Workspace
         </button>
-        <button data-tab="usage" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Usage</button>
+        <button data-tab="usage" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-chart" /></svg>Usage</button>
 <button data-tab="setup" type="button">
           <svg class="ico" viewBox="0 0 24 24"><use href="#i-steps" /></svg>Setup
           <span class="badge" id="setupBadge" hidden></span>
@@ -369,16 +370,6 @@
         <section class="panel usage-panel" data-panel="usage">
           <div class="settings-heading"><span class="eyebrow">YOUR ACTIVITY</span><h1>Usage</h1><p>Model availability and the work recorded in this workspace.</p></div>
           <div class="usage-summary" id="usageSummary"></div>
-          <section class="usage-section"><h2>Token activity per day</h2><div id="usageHeatmap" class="usage-heatmap"></div><p class="muted">Estimated context processed per tool call · last 52 weeks</p></section>
-          <section class="usage-section"><h2>Cost estimate per day</h2>
-            <details id="usageFormulaDetails"><summary>Edit cost formula</summary>
-            <p id="usageFormula" class="muted"></p>
-            <p class="muted">Automatic baselines use Standard short-context cached-input prices, checked 27 September 2026: <a href="https://developers.openai.com/api/docs/models/gpt-5.6-sol" target="_blank" rel="noopener noreferrer">GPT-5.6 Sol</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-terra" target="_blank" rel="noopener noreferrer">GPT-5.6 Terra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-luna" target="_blank" rel="noopener noreferrer">GPT-5.6 Luna</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-astra" target="_blank" rel="noopener noreferrer">GPT-6 Astra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-sol" target="_blank" rel="noopener noreferrer">GPT-6 Sol</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-luna" target="_blank" rel="noopener noreferrer">GPT-6 Luna</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.5" target="_blank" rel="noopener noreferrer">GPT-5.5</a>. These are editable cost comparisons, not actual bills.</p>
-            <label class="setting"><span class="setting-text"><b>Context times unique tool calls, divided by</b><em>Changes estimated tokens and costs.</em></span><input id="usageDivisor" aria-label="Usage token divisor" type="number" min="0.01" step="0.01" value="2" /></label>
-            <label class="setting"><span class="setting-text"><b>Cached-input cost multiplier</b><em>Applied after each model's cached-input rate.</em></span><input id="usageMultiplier" aria-label="Cached-input cost multiplier" type="number" min="0" step="0.01" value="1.2" /></label>
-            <div id="usageRates"></div></details>
-            <p id="usageCost" class="muted">Set per-model cached-input rates to compare costs.</p><div id="usageDays"></div>
-          </section>
           <section class="usage-section usage-messages" aria-labelledby="usageMessagesTitle">
             <h2><span id="usageMessagesTitle">Messages and limits</span><button class="btn" id="refreshUsage" type="button">Refresh</button></h2>
             <button class="btn usage-week-start" id="usageWeekStart" type="button" title="Change start day" aria-describedby="usageMessagePeriod"><span id="usageWeekStartLabel"></span><span aria-hidden="true">›</span></button>
@@ -391,6 +382,16 @@
               </dl>
               <div id="usageLimits"></div>
             </div>
+          </section>
+          <section class="usage-section"><h2>Token activity per day</h2><div id="usageHeatmap" class="usage-heatmap"></div><p class="muted" id="usageHeatmapCaption">Estimated context processed per tool call · last 52 weeks</p></section>
+          <section class="usage-section"><h2>Cost estimate per day</h2>
+            <details id="usageFormulaDetails"><summary>Edit cost formula</summary>
+            <p id="usageFormula" class="muted"></p>
+            <p class="muted">Automatic baselines use Standard short-context cached-input prices, checked 27 September 2026: <a href="https://developers.openai.com/api/docs/models/gpt-5.6-sol" target="_blank" rel="noopener noreferrer">GPT-5.6 Sol</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-terra" target="_blank" rel="noopener noreferrer">GPT-5.6 Terra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-luna" target="_blank" rel="noopener noreferrer">GPT-5.6 Luna</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-astra" target="_blank" rel="noopener noreferrer">GPT-6 Astra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-sol" target="_blank" rel="noopener noreferrer">GPT-6 Sol</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-luna" target="_blank" rel="noopener noreferrer">GPT-6 Luna</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.5" target="_blank" rel="noopener noreferrer">GPT-5.5</a>. These are editable cost comparisons, not actual bills.</p>
+            <label class="setting"><span class="setting-text"><b>Context times unique tool calls, divided by</b><em>Changes estimated tokens and costs.</em></span><input id="usageDivisor" aria-label="Usage token divisor" type="number" min="0.01" step="0.01" value="2" /></label>
+            <label class="setting"><span class="setting-text"><b>Cached-input cost multiplier</b><em>Applied after each model's cached-input rate.</em></span><input id="usageMultiplier" aria-label="Cached-input cost multiplier" type="number" min="0" step="0.01" value="1.2" /></label>
+            <div id="usageRates"></div></details>
+            <p id="usageCost" class="muted">Set per-model cached-input rates to compare costs.</p><div id="usageDays"></div>
           </section>
         </section>
         <!-- ============================================================ Home -->
