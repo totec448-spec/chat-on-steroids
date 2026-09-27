@@ -780,7 +780,7 @@
   "Disconnecting": "Bağlantı kesiliyor",
   "Closing connection…": "Bağlantı kapatılıyor…",
   "Published": "Yayımlandı",
-  "Please remember to refresh the plugins in ChatGPT.": "ChatGPT'deki eklentileri yenilemeyi unutmayın.",
+  "Chat On Steroids connector tools changed. Refresh the affected connector in ChatGPT; this is separate from the browser extension.": "Bir Chat On Steroids bağlayıcısının araçları değişti. ChatGPT'de etkilenen bağlayıcıyı yenileyin; bu, tarayıcı uzantısından ayrıdır.",
   "Dismiss reminder": "Hatırlatmayı kapat",
   "Files, patches and the terminal. Required — this is the coding connector.": "Dosyalar, yamalar ve terminal. Zorunludur — kodlama bağlayıcısıdır.",
   "Screenshots, windows, mouse/keyboard control and the clipboard. Optional — connect it only if you want desktop automation.": "Ekran görüntüleri, pencereler, fare/klavye kontrolü ve pano. İsteğe bağlıdır — yalnızca masaüstü otomasyonu istiyorsanız bağlayın.",
