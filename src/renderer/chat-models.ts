@@ -81,7 +81,7 @@ function options(select: HTMLSelectElement, choices: Array<{ id: string; label: 
     const unavailable = option(() => t("No observed choices"), ''); unavailable.disabled = true; desired.push(unavailable);
   }
   if (value && !choices.some(choice => choice.id === value)) {
-    const unverified = option(() => t("{0} · not verified", [value]), value);
+    const unverified = option(value, value);
     unverified.disabled = true;
     desired.push(unverified);
   }
@@ -91,6 +91,18 @@ function options(select: HTMLSelectElement, choices: Array<{ id: string; label: 
     return !current || current.value !== node.value || current.text !== node.text || current.disabled !== node.disabled;
   })) select.replaceChildren(...desired);
   select.value = value;
+  if (select.id === 'workerModel' || select.id === 'helperModel') {
+    let badge = select.nextElementSibling as HTMLElement | null;
+    if (!badge?.classList.contains('model-verification')) {
+      badge = el('span', 'model-verification');
+      badge.id = `${select.id}Verification`;
+      select.after(badge);
+      select.setAttribute('aria-describedby', badge.id);
+    }
+    const unverified = !!value && !choices.some(choice => choice.id === value);
+    badge.hidden = !unverified;
+    if (unverified) ui(badge, 'textContent', () => t('Unverified'));
+  }
 }
 
 function paintPair(modelId: string, effortId: string, modelValue?: string, effortValue?: string): void {

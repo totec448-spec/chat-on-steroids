@@ -26,6 +26,7 @@ it('keeps Pro static and identifies token estimates and compaction exclusion', (
 it('uses configured limits for ordinary models and supports click and Escape', () => {
   const doc = setup('gpt-5.6-sol-high');
   expect(doc.getElementById('contextMeterInfo')?.textContent).toContain('50% of configured limit');
+  expect(doc.getElementById('contextMeterCompact')?.textContent).toMatch(/100\s*K \/ 200\s*K est\./i);
   initContextMeter();
   const button = doc.getElementById('contextMeterButton')!;
   button.click();
