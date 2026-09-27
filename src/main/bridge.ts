@@ -1072,8 +1072,10 @@ function parseCallEvidence(input: unknown, untooled = false): PageCallEvidence[]
     if (!raw || typeof raw !== 'object') continue;
     const item = raw as Record<string, unknown>;
     const tool = typeof item['tool'] === 'string' && TOOL_NAME.test(item['tool']) ? item['tool'] : '';
-    const messageId = typeof item['messageId'] === 'string' ? item['messageId'].slice(0, 120) : '';
-    const bare = untooled && typeof item['requestId'] === 'string';
+    const requestId =
+      typeof item['requestId'] === 'string' && /^[a-z0-9_-]{1,100}$/i.test(item['requestId']) ? item['requestId'] : null;
+    const pageMessageId = typeof item['messageId'] === 'string' ? item['messageId'].slice(0, 120) : '';
+    const bare = untooled && requestId !== null;
     if (!tool && !bare) continue;
     // A stream origin has no message to name. It is read off the `/f/conversation` SSE body
     // before ChatGPT has mounted anything, so `messageId` is null by construction — and the one
@@ -1083,14 +1085,20 @@ function parseCallEvidence(input: unknown, untooled = false): PageCallEvidence[]
     // answered `bad_request_evidence` without a log line, and the call still waited out the full
     // twenty-second identity window and was filed under Unattributed activity. Reported with
     // before/after measurements on the live page in #393: `identity_ms` 15001 -> 2, and no
-    // attribution repair reload afterwards. Bare rows are deduplicated by the id they do carry.
-    const key = messageId || `request:${item['requestId'] as string}`;
-    if (!messageId && !bare) continue;
-    if (seen.has(key)) {
-      duplicated.add(key);
+    // attribution repair reload afterwards. The durable correlation registry also requires a
+    // nonempty message key when restoring after restart, so a pre-DOM stream sighting gets one
+    // deterministic, explicitly non-provider identity. It is never used for transcript joins;
+    // requestId remains the only ownership key.
+    const stream = bare && !pageMessageId;
+    const messageId = stream ? `stream:${requestId}` : pageMessageId;
+    if (!messageId) continue;
+    if (seen.has(messageId)) {
+      // Re-observing the same exact stream request is one fact. A reused provider message id is
+      // ambiguous and still drops both sides as before.
+      if (!stream) duplicated.add(messageId);
       continue;
     }
-    seen.add(key);
+    seen.add(messageId);
     out.push({
       messageId,
       tool,
@@ -1100,15 +1108,12 @@ function parseCallEvidence(input: unknown, untooled = false): PageCallEvidence[]
       answered: item['answered'] === true,
       // Rebuilt like everything else here — an opaque id checked for shape, and a finite
       // number — so the page cannot smuggle anything through them.
-      requestId:
-        typeof item['requestId'] === 'string' && /^[a-z0-9_-]{1,100}$/i.test(item['requestId'])
-          ? item['requestId']
-          : null,
+      requestId,
       createTime:
         typeof item['createTime'] === 'number' && Number.isFinite(item['createTime']) ? item['createTime'] : null
     });
   }
-  return out.filter((call) => !duplicated.has(call.messageId || `request:${call.requestId}`));
+  return out.filter((call) => !duplicated.has(call.messageId));
 }
 
 /**

@@ -105,6 +105,7 @@ const { completeProcessCall, createSession, deleteSession, findSessionByConversa
 );
 const sessionStoreModule = await import('../src/main/session/store.js');
 const { closeConversation, liveConversations, noteChatOrigin, recordChatObservations, recordProgress, recordToolCall, REQUEST_ID_GRACE_MS, resetRecorderForTests } = await import('../src/main/session/recorder.js');
+const { requestCorrelation, resetCorrelationRegistryForTests, restoreRequestCorrelations } = await import('../src/main/session/correlation.js');
 const { resetBlockedChatsForTests, setChatBlocked } = await import('../src/main/session/blocked-chats.js');
 const {
   CONTINUATIONS_STATE,
@@ -1294,6 +1295,27 @@ describe('activity feed', () => {
     });
     expect(mapped.status, 'the stream origin was refused').toBe(200);
     expect(mapped.body).toMatchObject({ ok: true, conversationId, confirmed: [requestId], complete: true });
+  });
+
+  it('restores a stream origin with no native message id after an app restart', async () => {
+    await pair();
+    const conversationId = '19191919-4141-6363-8585-979797979797';
+    const requestId = '41111111-2222-4333-8444-555555555555';
+    const mapped = await request('POST', '/correlations', {
+      body: { conversationId, calls: [{ messageId: null, requestId, createTime: Date.now() / 1000 }] }
+    });
+    expect(mapped.status).toBe(200);
+    expect(mapped.body.confirmed).toContain(requestId);
+    await flushDurable();
+
+    resetCorrelationRegistryForTests();
+    expect(requestCorrelation(requestId)).toBeNull();
+    await restoreRequestCorrelations();
+
+    expect(requestCorrelation(requestId)).toMatchObject({
+      conversationId,
+      messageId: `stream:${requestId}`
+    });
   });
 
   /**
