@@ -53,6 +53,9 @@
   "content_bootstrap_missing_target": {
     "message": "se ofreció a un chat que ya existe y no identifica ninguno"
   },
+  "content_bootstrap_composer_unavailable": {
+    "message": "ChatGPT no volvió a mostrar un editor utilizable tras seleccionar el modelo"
+  },
   "content_bootstrap_model_unavailable": {
     "message": "El modelo o nivel de razonamiento solicitado no está disponible o no pudo confirmarse en ChatGPT"
   },
@@ -283,6 +286,12 @@
   },
   "content_connector_refresh_unverified": {
     "message": "No se pudo verificar la actualización del conector"
+  },
+  "content_connector_schema_no_refresh": {
+    "message": "El esquema del conector es distinto, pero ChatGPT no muestra el control Actualizar. Vuelve a crear o publicar esta aplicación personalizada para cargar el esquema de herramientas actual."
+  },
+  "content_connector_settings_unreadable": {
+    "message": "No se pudo leer la tarjeta de configuración del conector en la página de esta solicitud"
   },
   "content_connector_settings_unverified": {
     "message": "No se pudieron verificar los ajustes exactos del conector"

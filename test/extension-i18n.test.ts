@@ -55,7 +55,7 @@ function manifestKeys(value: unknown): string[] {
 }
 
 describe('extension localization catalogs', () => {
-  it('ships the supported renderer languages plus English with Chrome locale names', async () => {
+  it('ships the supported companion languages with Chrome locale names', async () => {
     const localesRoot = path.join(extension, '_locales');
     const found = (await readdir(localesRoot, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory())

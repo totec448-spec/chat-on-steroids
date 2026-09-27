@@ -53,6 +53,9 @@
   "content_bootstrap_missing_target": {
     "message": "它被提供給既有聊天，但未指定目標聊天"
   },
+  "content_bootstrap_composer_unavailable": {
+    "message": "選擇模型後，ChatGPT 未重新顯示可用的輸入框"
+  },
   "content_bootstrap_model_unavailable": {
     "message": "要求的模型或推理層級無法使用，或無法在 ChatGPT 中確認"
   },
@@ -283,6 +286,12 @@
   },
   "content_connector_refresh_unverified": {
     "message": "無法驗證連接器重新整理結果"
+  },
+  "content_connector_schema_no_refresh": {
+    "message": "連接器結構描述不同，但 ChatGPT 未顯示重新整理控制項。請重新建立或發佈此自訂應用程式，以載入目前的工具結構描述。"
+  },
+  "content_connector_settings_unreadable": {
+    "message": "無法讀取此要求所屬頁面上的連接器設定卡片"
   },
   "content_connector_settings_unverified": {
     "message": "無法驗證精確的連接器設定"

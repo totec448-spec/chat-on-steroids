@@ -53,6 +53,9 @@
   "content_bootstrap_missing_target": {
     "message": "它被提供给一个已有聊天，但没有指定目标聊天"
   },
+  "content_bootstrap_composer_unavailable": {
+    "message": "选择模型后，ChatGPT 未重新显示可用的输入框"
+  },
   "content_bootstrap_model_unavailable": {
     "message": "请求的模型或推理级别不可用，或无法在 ChatGPT 中确认"
   },
@@ -283,6 +286,12 @@
   },
   "content_connector_refresh_unverified": {
     "message": "无法验证连接器刷新"
+  },
+  "content_connector_schema_no_refresh": {
+    "message": "连接器架构不同，但 ChatGPT 未显示刷新控件。请重新创建或发布此自定义应用，以加载当前工具架构。"
+  },
+  "content_connector_settings_unreadable": {
+    "message": "无法读取属于此请求的页面上的连接器设置卡片"
   },
   "content_connector_settings_unverified": {
     "message": "无法验证准确的连接器设置"

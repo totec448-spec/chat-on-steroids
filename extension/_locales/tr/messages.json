@@ -53,6 +53,9 @@
   "content_bootstrap_missing_target": {
     "message": "mevcut bir sohbete sunuldu ve hedef sohbet belirtilmedi"
   },
+  "content_bootstrap_composer_unavailable": {
+    "message": "Model seçiminden sonra ChatGPT kullanılabilir bir ileti alanını yeniden göstermedi"
+  },
   "content_bootstrap_model_unavailable": {
     "message": "İstenen model veya akıl yürütme kullanılamıyor ya da ChatGPT içinde doğrulanamadı"
   },
@@ -283,6 +286,12 @@
   },
   "content_connector_refresh_unverified": {
     "message": "Bağlayıcının yenilendiği doğrulanamadı"
+  },
+  "content_connector_schema_no_refresh": {
+    "message": "Bağlayıcı şeması farklı, ancak ChatGPT Yenile denetimini göstermiyor. Güncel araç şemasını yüklemek için bu özel uygulamayı yeniden oluşturun veya yayımlayın."
+  },
+  "content_connector_settings_unreadable": {
+    "message": "Bu isteğe ait sayfadaki bağlayıcı ayar kartı okunamadı"
   },
   "content_connector_settings_unverified": {
     "message": "Bağlayıcının kesin ayarları doğrulanamadı"
