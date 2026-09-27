@@ -78,3 +78,11 @@ catalog coverage; after correction, the Portuguese suite passed all 5 tests. On 
 rebased source, `npm run verify` exited 0 with 220 test files / 6,024 tests in the main run and
 6 tests in the isolated run; `npm run build` also passed. This validates the source and build,
 not an installed payload or a signed-in browser session.
+
+## Model selector spacing follow-up
+
+The selected-model chip had a fixed 164px width, leaving broad empty space around short labels.
+It now sizes to its contents with the existing 164px cap (120px in narrow layouts), and its
+popover aligns to the chip's right edge. An isolated Electron layout check measured the
+`5.6 · High` chip at about 100px with 9px of space on each side at 500, 760 and 900px viewports;
+the popover stayed within each viewport.
