@@ -11,6 +11,8 @@ private struct AXUIElement { let name: String; let id: CGWindowID?; let bounds: 
 private struct WindowRow { let id: CGWindowID; let pid: Int32; let bounds: CGRect }
 private struct ProbeFailure: Error { let code: String }
 private let kAXWindowsAttribute = "windows"
+private let kAXFocusedWindowAttribute = "focused"
+private let kAXMainWindowAttribute = "main"
 private let maxAXTraversalSeconds = 6.0
 private var suppliedWindows: [AXUIElement] = []
 private func requireAccessibility() throws {}
@@ -20,6 +22,8 @@ private func axElementValues(_ app: AXUIElement, attribute: CFString, limit: Int
 }
 private func axWindowNumber(_ window: AXUIElement) -> CGWindowID? { window.id }
 private func axBounds(_ window: AXUIElement) -> CGRect? { window.bounds }
+private func axElementAttribute(_ element: AXUIElement, _ attribute: CFString) -> AXUIElement? { nil }
+private func allWindowRows(includeMinimized: Bool = true) -> [WindowRow] { [target] }
 private func fail(_ code: String, _ message: String) -> ProbeFailure { ProbeFailure(code: code) }
 
 // PRODUCTION_FUNCTIONS
