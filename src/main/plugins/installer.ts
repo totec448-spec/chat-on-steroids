@@ -8,6 +8,7 @@ import { pluginCatalog, reviewedPluginLicense } from './catalog.js';
 import { getDefaultEnvironment } from '@modelcontextprotocol/client/stdio';
 import { terminateProcessTree } from '../exec.js';
 import { envValue, pathEntries, setEnvValue } from '../env.js';
+import { ensureManagedUv, managedUvDirectory } from './uv-runtime.js';
 
 /** One minimal environment for runtime discovery, installation and plugin startup. */
 export function pluginEnvironment(inherited = getDefaultEnvironment(), platform = process.platform): Record<string, string> {
@@ -21,6 +22,8 @@ export function pluginEnvironment(inherited = getDefaultEnvironment(), platform 
       const directories = (envValue(env, 'PATH') ?? '').split(';').filter(Boolean);
       const userBin = path.win32.join(home, '.local', 'bin');
       if (!directories.some(directory => directory.toLowerCase() === userBin.toLowerCase())) directories.push(userBin);
+      const managed = managedUvDirectory();
+      if (managed && !directories.some(directory => directory.toLowerCase() === managed.toLowerCase())) directories.push(managed);
       setEnvValue(env, 'PATH', directories.join(';'));
     }
     return env;
@@ -33,6 +36,9 @@ export function pluginEnvironment(inherited = getDefaultEnvironment(), platform 
   directories.push('/usr/local/bin');
   const home = envValue(env, 'HOME');
   if (home) directories.push(path.posix.join(home, '.local', 'bin'));
+  // The uv CoS downloads when none is installed (uv-runtime.ts); last, so a user's own uv wins.
+  const managed = managedUvDirectory();
+  if (managed) directories.push(managed);
   setEnvValue(env, 'PATH', [...new Set(directories)].join(':'));
   return env;
 }
@@ -252,10 +258,12 @@ export async function installSource(source: PluginSource, dir: string): Promise<
   if (source.kind === 'python') {
     if (source.command && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(source.command))
       throw new Error('Python recipes need an executable name; use Custom executable for a full command path');
-    await runInstaller('uv', ['venv', path.join(dir, 'venv')], dir);
+    // A user's own uv first; otherwise a pinned, checksum-verified download (see uv-runtime.ts).
+    const uv = await findExecutable('uv').catch(() => ensureManagedUv());
+    await runInstaller(uv, ['venv', path.join(dir, 'venv')], dir);
     const scripts = path.join(dir, 'venv', process.platform === 'win32' ? 'Scripts' : 'bin');
     await runInstaller(
-      'uv',
+      uv,
       [
         'pip',
         'install',
