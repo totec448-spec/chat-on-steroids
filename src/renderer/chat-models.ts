@@ -81,7 +81,10 @@ function options(select: HTMLSelectElement, choices: Array<{ id: string; label: 
     const unavailable = option(() => t("No observed choices"), ''); unavailable.disabled = true; desired.push(unavailable);
   }
   if (value && !choices.some(choice => choice.id === value)) {
-    const unverified = option(() => t("{0} · not verified", [value]), value);
+    // The worker and helper selects show an Unverified badge beside them; every other select
+    // (the composer and the reasoning pickers) keeps saying so in the option itself.
+    const badged = select.id === 'workerModel' || select.id === 'helperModel';
+    const unverified = option(badged ? value : () => t("{0} · not verified", [value]), value);
     unverified.disabled = true;
     desired.push(unverified);
   }
@@ -91,6 +94,43 @@ function options(select: HTMLSelectElement, choices: Array<{ id: string; label: 
     return !current || current.value !== node.value || current.text !== node.text || current.disabled !== node.disabled;
   })) select.replaceChildren(...desired);
   select.value = value;
+  if (select.id === 'workerModel' || select.id === 'helperModel') {
+    let badge = select.nextElementSibling as HTMLElement | null;
+    if (!badge?.classList.contains('model-verification')) {
+      badge = el('span', 'model-verification');
+      badge.id = `${select.id}Verification`;
+      select.after(badge);
+      select.setAttribute('aria-describedby', badge.id);
+    }
+    const unverified = !!value && !choices.some(choice => choice.id === value);
+    badge.hidden = !unverified;
+    if (unverified) ui(badge, 'textContent', () => t('Unverified'));
+  }
+}
+
+function distinctModelChoices(models: ChatModelCatalog['models']): Array<{ id: string; label: string | (() => string) }> {
+  const sameName = new Map<string, number>();
+  for (const model of models) sameName.set(model.label, (sameName.get(model.label) ?? 0) + 1);
+  const variant = (model: ChatModelCatalog['models'][number]): string | null => {
+    if (model.efforts.length && model.efforts.every(effort => effort === 'none')) return 'Instant';
+    if (model.efforts.length && model.efforts.every(effort => effort !== 'none' && effort !== 'pro')) return 'Reasoning';
+    if (model.efforts.length && model.efforts.every(effort => effort === 'pro')) return 'Pro';
+    return null;
+  };
+  const variantCounts = new Map<string, number>();
+  for (const model of models) {
+    const lane = variant(model);
+    if (lane) {
+      const key = `${model.label}\0${lane}`;
+      variantCounts.set(key, (variantCounts.get(key) ?? 0) + 1);
+    }
+  }
+  return models.map(model => {
+    if (sameName.get(model.label) === 1) return { id: model.id, label: model.label };
+    const lane = variant(model);
+    return { id: model.id, label: lane && variantCounts.get(`${model.label}\0${lane}`) === 1
+      ? () => `${model.label} · ${t(lane)}` : `${model.label} · ${model.id}` };
+  });
 }
 
 function paintPair(modelId: string, effortId: string, modelValue?: string, effortValue?: string): void {
@@ -105,7 +145,7 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
     // A saved execution alias is an exact lane request. The family effort union
     // cannot prove which efforts that alias supports. Retain both requested values
     // until the user deliberately selects a family; native selection proves the pair.
-    options(model, [...models, { id: nextModel, label: `${observed.label} · ${nextModel}` }], nextModel);
+    options(model, [...distinctModelChoices(models), { id: nextModel, label: `${observed.label} · ${nextModel}` }], nextModel);
     options(effort, [{ id: nextEffort, label: () => nextEffort ? effortLabel(nextEffort) : t('Keep requested model settings') }], nextEffort);
     return;
   }
@@ -120,7 +160,7 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
   if (supported && !nextEffort) {
     nextEffort = supported.includes('high') ? 'high' : supported[0] ?? '';
   }
-  options(model, models, nextModel);
+  options(model, distinctModelChoices(models), nextModel);
   options(effort, (models.find(item => item.id === model.value)?.efforts ?? []).map(id => ({ id, label: () => effortLabel(id) })), nextEffort);
 }
 

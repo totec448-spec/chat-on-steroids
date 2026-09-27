@@ -1645,6 +1645,24 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
   if (!box.textContent?.trim() && safeFallback) {
     box.classList.remove('rich');
     box.textContent = safeFallback;
+  } else {
+    // Captured provider toolbars are stripped above. Add app-owned controls only after
+    // sanitizing and after the empty-capture fallback has been decided.
+    for (const pre of box.querySelectorAll('pre')) {
+      const value = pre.textContent ?? '';
+      const panel = el('div', 'markdown-code');
+      const header = el('div', 'tool-output-header');
+      header.append(icon('i-terminal', 'ico'), el('strong', '', () => t('Code')));
+      const copy = el('button', 'tool-copy', () => t('Copy')) as HTMLButtonElement;
+      copy.type = 'button';
+      copy.addEventListener('click', () => void (async () => {
+        if (await run(api.writeClipboard(value))) ui(copy, 'textContent', () => t('Copied'));
+        else toast(t('Could not copy text.'));
+      })());
+      header.append(copy);
+      pre.replaceWith(panel);
+      panel.append(header, pre);
+    }
   }
   return box;
 }
@@ -1684,6 +1702,8 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
   const summary = toolCallSummary(call);
   const box = document.createElement('details');
   box.className = `tool tone-${call.summary.tone}`;
+  box.dataset.outcome = call.outcome;
+  if (call.changes?.length || ['exec_command', 'write_stdin', 'apply_patch'].includes(call.tool)) box.classList.add('is-artifact');
   box.open = openTools.has(call.callId);
   box.addEventListener('toggle', () => {
     if (box.open) openTools.add(call.callId);
@@ -1692,8 +1712,16 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
 
   const head = document.createElement('summary');
   head.append(icon(KIND_ICON[call.summary.kind] ?? 'i-bolt', 'ico tool-ico'));
+  if (call.tool === 'exec_command' || call.tool === 'write_stdin') head.append(el('span', 'tool-tag', 'shell'));
+  else if (call.changes?.length || call.tool === 'apply_patch') head.append(el('span', 'tool-tag', 'diff'));
   head.append(el('b', '', call.summary.title));
   if (call.summary.detail) head.append(el('em', '', call.summary.detail));
+  if (call.changes?.length) {
+    const added = call.changes.reduce((total, change) => total + change.added, 0);
+    const removed = call.changes.reduce((total, change) => total + change.removed, 0);
+    const approximate = call.changes.some(change => change.approximate);
+    head.append(el('span', 'tool-change-count', () => `+${added} −${removed}${approximate ? t(' (approx.)') : ''}`));
+  }
   if (summary.metric) head.append(el('span', 'metric', summary.metric));
   box.append(head);
 
@@ -1779,6 +1807,20 @@ async function fillTimelineHistory(): Promise<void> {
 function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEvent, { kind: 'tool_call' }>,
   context?: { id: string; current: () => boolean }): void {
   const raw = el('div', 'raw');
+  const appendText = (label: () => string, value: string, truncated: boolean, chars: number) => {
+    const panel = el('div', 'tool-output');
+    const header = el('div', 'tool-output-header');
+    header.append(icon(KIND_ICON[call.summary.kind] ?? 'i-terminal', 'ico'), el('strong', '', label));
+    const copy = el('button', 'tool-copy', () => t('Copy')) as HTMLButtonElement;
+    copy.type = 'button';
+    copy.addEventListener('click', () => void (async () => {
+      if (await run(api.writeClipboard(value))) ui(copy, 'textContent', () => t('Copied'));
+      else toast(t('Could not copy text.'));
+    })());
+    header.append(copy);
+    panel.append(header, textBlock('pre', value, truncated, chars));
+    raw.append(panel);
+  };
   const facts = el('p', 'raw-facts');
   ui(facts, 'textContent', () => `${call.tool} · ${call.outcome} · ${Math.round(call.durationMs)} ms · ` +
     t("placed by {0}", [ATTRIBUTION_LABELS[call.attribution] ?? call.attribution]));
@@ -1796,12 +1838,10 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
     raw.append(changes);
   }
 
-  raw.append(el('h4', '', () => t("Arguments")));
-  raw.append(textBlock('pre', call.args.text, call.args.truncated, call.args.chars));
-  raw.append(el('h4', '', () => t("Result")));
+  appendText(() => `${t('Arguments')} · ${call.tool}`, call.args.text, call.args.truncated, call.args.chars);
   const images = call.assets?.filter(asset => ['image/png', 'image/jpeg', 'image/webp'].includes(asset.mimeType)) ?? [];
   const readable = toolResultText(call.result.text, call.result.truncated, images.length > 0);
-  if (readable) raw.append(textBlock('pre', readable, call.result.truncated && images.length === 0, call.result.chars));
+  if (readable) appendText(() => `${t('Result')} · ${call.tool} · ${Math.round(call.durationMs)} ms`, readable, call.result.truncated && images.length === 0, call.result.chars);
   // Older recordings did not retain the reason an image asset was omitted. Explain
   // the missing local preview without inferring a historical provider receipt.
   if (call.tool === 'view_image' && call.outcome === 'ok' && images.length === 0) {
@@ -2520,6 +2560,44 @@ function reconcileChildren(parent: Element, children: HTMLElement[]): void {
     cursor = child.nextSibling;
   }
 }
+/** Fold presentation noise without merging or dropping any recorded call. */
+function foldRoutineActivity(rows: HTMLElement[]): HTMLElement[] {
+  const result: HTMLElement[] = [];
+  const retained = new Set<HTMLDetailsElement>();
+  const routineTitle = (row: HTMLElement) => row.querySelector('.tool[data-outcome="ok"] > summary b')?.textContent ?? '';
+  for (let i = 0; i < rows.length;) {
+    const title = routineTitle(rows[i]!);
+    if (title !== 'Checked agent status' && !title.startsWith('Waited on session ')) {
+      result.push(rows[i++]!); continue;
+    }
+    let end = i + 1;
+    while (end < rows.length && routineTitle(rows[end]!) === title) end++;
+    if (end - i < 5) { result.push(...rows.slice(i, end)); i = end; continue; }
+    const members = rows.slice(i, end);
+    const previous = members.map(row => row.closest<HTMLDetailsElement>('.routine-activity'))
+      .find((fold): fold is HTMLDetailsElement => !!fold && !retained.has(fold));
+    const fold = previous ?? document.createElement('details');
+    retained.add(fold);
+    if (!previous) {
+      fold.className = 'routine-activity';
+      fold.open = openTools.has(`routine:${members[0]!.dataset.timelineKey}`);
+      fold.addEventListener('toggle', () => {
+        const key = `routine:${fold.dataset.firstKey}`;
+        if (fold.open) openTools.add(key); else openTools.delete(key);
+      });
+      fold.append(el('summary'), el('div', 'routine-activity-body'));
+    }
+    fold.dataset.firstKey = members[0]!.dataset.timelineKey;
+    fold.querySelector('summary')!.replaceChildren(
+      el('span', 'routine-symbol', '↺'),
+      el('span', 'activity-title', title),
+      el('span', 'routine-count', `×${members.length}`)
+    );
+    reconcileChildren(fold.lastElementChild!, members);
+    result.push(fold); i = end;
+  }
+  return result;
+}
 function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGroups): HTMLElement[] {
   const grouped: HTMLElement[] = [], retained = new Set<string>();
   for (let i = 0; i < rows.length;) {
@@ -2545,12 +2623,16 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     }
     const latest = rows[end - 1]!;
     const latestHead = latest.querySelector('.tool > summary, .agent-communication > summary, .thinking-line');
-    const label = latestHead?.querySelector('b, span:not(.agent-avatar)')?.textContent || t("Activity");
+    const observedPhase = rows[i - 1]?.matches('.ev-progress')
+      ? rows[i - 1]!.querySelector('.is-progress')?.textContent?.trim() : '';
+    const label = observedPhase || latestHead?.querySelector('b')?.textContent
+      || latestHead?.querySelector('span:not(.agent-avatar)')?.textContent || t("Activity");
+    group.classList.toggle('has-activity-phase', !!observedPhase);
     group.querySelector('.activity-title')!.textContent = label;
     ui(group.querySelector('summary')!, 'title', () => t("{0} actions · {1}", [end - i, label]));
     const symbol = latestHead?.querySelector('svg, .agent-avatar');
     group.querySelector('.activity-symbol')!.replaceChildren(...(symbol ? [symbol.cloneNode(true)] : []));
-    reconcileChildren(group.lastElementChild!, rows.slice(i, end));
+    reconcileChildren(group.lastElementChild!, foldRoutineActivity(rows.slice(i, end)));
     grouped.push(group); i = end;
   }
   for (const key of groups.keys()) if (!retained.has(key)) groups.delete(key);
@@ -4107,6 +4189,8 @@ export function initChat(next: Deps): void {
     onShow: () => { filePanel?.hide(); docks.adopt('agents'); },
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); },
     load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
+    agent: worker => swarm?.agents.find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
+      !!entry.conversationId && entry.conversationId === worker.conversationId) ?? null,
     render: (source, id, current) => {
       let boundary = '';
       const rows = foldAgentCommunication(source).flatMap(event => {
