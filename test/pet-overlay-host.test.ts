@@ -75,7 +75,7 @@ afterEach(async () => { await shutdownPetOverlay(); vi.useRealTimers(); });
 it('reads the catalog once; polling, activity, hover and controls use its published projection', async () => {
   await startPetOverlay(() => null, () => undefined);
   const win = mocks.windows[0];
-  expect(win.options.focusable).toBe(false);
+  expect(win.options.focusable).toBe(process.platform === 'win32');
   expect(win.options.skipTaskbar).toBe(true);
   // macOS forwards ignored mouse moves instead of polling. Enter interaction
   // before measuring the native poll shared by all three platforms.

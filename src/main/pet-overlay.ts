@@ -303,7 +303,10 @@ async function ensureOverlay(): Promise<BrowserWindow> {
   overlayReady = false;
   const win = new BrowserWindow({
     x: area.x, y: area.y, width: area.width, height: area.height,
-    acceptFirstMouse: true, backgroundColor: '#00000000', focusable: false, frame: false,
+    // Windows Chromium consumes left-button down (MA_NOACTIVATEANDEAT) on a
+    // non-activatable window after hide/show. Allow explicit clicks to activate;
+    // showInactive below still preserves the foreground window when pets appear.
+    acceptFirstMouse: true, backgroundColor: '#00000000', focusable: process.platform === 'win32', frame: false,
     fullscreenable: false, hasShadow: false, maximizable: false, minimizable: false, movable: false,
     resizable: false, show: false, skipTaskbar: true, title: 'Pets', transparent: true,
     webPreferences: {
