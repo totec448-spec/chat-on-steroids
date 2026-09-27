@@ -1740,6 +1740,8 @@ export interface ChatObservation {
   messageId?: string;
   /** Raw public provider message UUID, retained as evidence, never used to guess ownership. */
   providerMessageId?: string;
+  /** Server-reported model of an assistant reply; see SessionEvent.resolvedModel. */
+  resolvedModel?: string;
   /** Exact non-secret provider asset id for a native generated image. */
   providerAssetId?: string;
   providerRole?: 'tool' | 'assistant';
@@ -2066,6 +2068,7 @@ async function recordSupersededMessages(
           messageId: item.messageId,
           state,
           ...(item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
+          ...(item.resolvedModel ? { resolvedModel: item.resolvedModel } : {}),
           final: state === 'final'
         },
         { preferTime: item.authoredTime === true }
@@ -2212,6 +2215,7 @@ async function recordChatObservationsNow(
           state,
           final: state === 'final',
           ...(item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
+          ...(item.resolvedModel ? { resolvedModel: item.resolvedModel } : {}),
           ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
         }, { preferTime: item.authoredTime === true, work: item.activeNow === true });
         const canonicalTurn = written.event.turnId;

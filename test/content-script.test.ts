@@ -2691,6 +2691,26 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     });
   });
 
+  it('passes the reply model on, re-emits when it arrives late, and drops a malformed one', async () => {
+    live = await harness();
+    const section = assistantTurn(live.document, 'resolved-model-turn', []);
+    const message = {
+      messageId: 'assistant:working:exchange:1787165100126', rawMessageId: 'provider-model',
+      role: 'assistant', stable: true, createTime: 1_787_165_100_126,
+      rawText: 'Answer with a model.', renderedHtml: '<p>Answer with a model.</p>'
+    };
+    for (const resolvedModel of [undefined, 'gpt-5-6-thinking', 'gpt-6 <b>pro</b>']) {
+      await bindFiberTurns([{ section, turn: {
+        turnId: 'resolved-model-turn',
+        messages: [{ ...message, ...(resolvedModel ? { resolvedModel } : {}) }]
+      } }]);
+      await live.hook.flush();
+      await settle();
+    }
+    const revisions = emitted(live.sent, 'assistant_message').map(entry => entry.event);
+    expect(revisions.map(entry => entry.resolvedModel)).toEqual([undefined, 'gpt-5-6-thinking', undefined]);
+  });
+
   it('records the first unstable assistant interim before any MCP request id exists', async () => {
     live = await harness();
     startGenerating(live.document);

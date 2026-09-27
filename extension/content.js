@@ -3344,6 +3344,8 @@
           typeof entry.createTime === 'number' && Number.isFinite(entry.createTime) && entry.createTime > 0
             ? entry.createTime
             : null,
+        ...(entry.role === 'assistant' && typeof entry.resolvedModel === 'string' &&
+          /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(entry.resolvedModel) ? { resolvedModel: entry.resolvedModel } : {}),
         rawText,
         ...(attachments.length ? { attachments } : {}),
         renderedHtml,
@@ -4379,7 +4381,7 @@
         // claim is different and fails closed instead of choosing either generation.
         const signature =
           `${state}\u0000${message.rawText}\u0000${message.renderedHtml}\u0000${owner}` +
-          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}`;
+          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}\u0000${message.resolvedModel || ''}`;
         if (priorMessage?.signature === signature) continue;
         messagesReported.set(message.messageId, { signature, owner, conflicted: ownerConflict, text: message.rawText });
         if (state === 'streaming' && owner && priorMessage?.text !== message.rawText && freshPublication) noteTurnProgress(owner);
@@ -4390,6 +4392,7 @@
           kind: 'assistant_message',
           messageId: message.messageId,
           providerMessageId: message.rawMessageId,
+          ...(message.resolvedModel ? { resolvedModel: message.resolvedModel } : {}),
           ...(message.createTime ? { authoredAt: message.createTime } : {}),
           turnId: localOwner || undefined,
           text: message.rawText,

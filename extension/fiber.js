@@ -152,6 +152,11 @@
     return typeof value === 'string' && value.length > 0 ? value.slice(0, MAX_TEXT) : null;
   }
 
+  /** A model slug such as `gpt-5-6-thinking`, or null. Slugs are short ids, never prose. */
+  function modelSlugOf(value) {
+    return typeof value === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(value) ? value : null;
+  }
+
   function num(value) {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
   }
@@ -546,6 +551,8 @@
       const parentId = meta ? str(meta.parent_id) : null;
       const workingTurnId = meta ? str(meta.working_turn_id) : null;
       const turnExchangeId = meta ? str(meta.turn_exchange_id) : null;
+      // The server's own answer to "which model produced this": the only per-reply model proof.
+      const resolvedModel = meta ? modelSlugOf(meta.resolved_model_slug) || modelSlugOf(meta.model_slug) : null;
       const createTime = authoredTime(message);
       const authoredId = assistantLogicalId(id, parentId, workingTurnId, turnExchangeId, createTime);
       // Two messages of one branch sharing a creation millisecond would collide on that
@@ -595,7 +602,8 @@
         stable,
         rawText,
         order: index,
-        createTime
+        createTime,
+        ...(resolvedModel ? { resolvedModel } : {})
       });
       logicalIds.add(logicalId);
     }
@@ -928,6 +936,7 @@
         stable: assistantCandidates[c].stable,
         order: assistantCandidates[c].order,
         createTime: assistantCandidates[c].createTime,
+        ...(assistantCandidates[c].resolvedModel ? { resolvedModel: assistantCandidates[c].resolvedModel } : {}),
         rawText: assistantCandidates[c].rawText,
         renderedHtml: ''
       });

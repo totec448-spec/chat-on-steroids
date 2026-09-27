@@ -1687,5 +1687,7 @@
   "{0} estimated tokens": "推定 {0} トークン",
   "Daily breakdown": "日別の内訳",
   "Recommended": "おすすめ",
-  "Install": "インストール"
+  "Install": "インストール",
+  "Less": "少ない",
+  "More": "多い"
 }

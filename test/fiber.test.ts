@@ -951,6 +951,18 @@ describe('the calls a turn says it made', () => {
     expect(result.turns[0]!.messages[0]!.rawText).toBe('Public prose');
   });
 
+  it('carries the server-resolved model of a reply, and only a plain slug', async () => {
+    const resolved = authored('resolved', 'Answer');
+    resolved.metadata = { ...resolved.metadata, resolved_model_slug: 'gpt-5-6-thinking', model_slug: 'gpt-5-6' };
+    const fallback = authored('fallback', 'Answer two');
+    fallback.metadata = { ...fallback.metadata, model_slug: 'gpt-6-pro' };
+    const hostile = authored('hostile', 'Answer three');
+    hostile.metadata = { ...hostile.metadata, resolved_model_slug: 'gpt-6 <img src=x>' };
+    const result = await scan([], [{ id: 'model-turn', messages: [resolved, fallback, hostile], conversationProps: { conversationId: THREAD } }]);
+    const byId = Object.fromEntries(result.turns[0]!.messages.map((row: any) => [row.rawText, row.resolvedModel]));
+    expect(byId).toEqual({ Answer: 'gpt-5-6-thinking', 'Answer two': 'gpt-6-pro', 'Answer three': undefined });
+  });
+
   it.each(['exact', 'missing-scope', 'foreign', 'conflicting-scope', 'unknown', 'wrong-type', 'wrong-prefix', 'conflicting-id', 'private', 'tool', 'duplicate'])('joins typed preambles at native Fiber depths (%s)', async mode => {
     const a = authored('public-a', 'Same public prose');
     const b = authored('public-b', 'Same public prose');
