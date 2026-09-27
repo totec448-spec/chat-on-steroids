@@ -1175,6 +1175,7 @@ function apply(next: AppState): void {
 
   // ---- permissions
   $('readOnlyBtn').classList.toggle('is-on', config.readOnly);
+  $('readOnlyBtn').setAttribute('aria-pressed', String(config.readOnly));
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const cap = input.dataset.cap as Capability;
     const supported = (next.platform?.desktopAutomation ?? true) || !DESKTOP_CAPABILITIES.includes(cap) || cap === 'screen' || cap === 'control';
