@@ -55,7 +55,7 @@
 .plugin-section-head .btn { color: var(--ink); font-size: calc(11.5px * var(--text-scale, 1)); }
 #pluginsInstalled, .plugin-directory, .plugin-catalog, .pet-library-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; }
 /* Skills library. */
-.skill-import-menu { position: relative; top: auto; right: auto; flex: 0 0 44px; }
+.plugin-menu.skill-import-menu { position: relative; top: auto; right: auto; flex: 0 0 44px; }
 .skill-import-menu > summary.plugin-add { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--edge); border-radius: var(--pill); background: var(--card); color: var(--ink); }
 .skill-import-menu .plugin-menu-actions { min-width: 190px; top: 50px; }
 .skill-library-card .plugin-entry { align-items: stretch; min-height: 122px; padding: 16px; }
