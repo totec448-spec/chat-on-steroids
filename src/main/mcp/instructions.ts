@@ -140,7 +140,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     'Use agents for independent subtasks while continuing useful work yourself. Reuse a sleeping worker for related follow-up work before spawning a replacement. Only terminal workers whose context is full need replacing.',
     'When spawning workers, omit model and reasoning_effort unless the user explicitly requests an override. The app uses saved worker defaults; do not ask the user to choose or confirm them.',
     'A worker sees only what you send it. In spawn, put shared repository/folder instructions, constraints and validation requirements in context once; put the objective and assigned files in each task. Explicitly say what each worker may change. Do not repeat the shared context in every task.',
-    'Use action=message to steer a worker; batch messages when sending several. Worker reports arrive with tool results. Check their findings and changes before relying on them.',
+    'Use action=message to steer a worker; batch messages when sending several. Reports arrive only with tool results; they do not restart an idle prime. Use status once to collect pending reports before finalizing; do not repeatedly poll. If a report has not arrived, state that review is pending; do not claim delegated verification is complete before reading its report. Check findings and changes before relying on them.',
     'Workers communicate with the prime, keep working while replies are pending, and use action=finish when done with RESULT / CHANGES / VALIDATION / BLOCKERS. A finished reusable worker sleeps and can be messaged again.'
   );
   if (ctx.exposedFinishTool ?? config.ui.finishTool) lines.push(
