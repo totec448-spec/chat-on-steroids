@@ -208,12 +208,14 @@ export function createFilePanel(options: FilePanelOptions) {
   ui(refresh, 'title', () => t('Refresh files')); ui(refresh, 'aria-label', () => t('Refresh files'));
 
   const toolbar = el('div', 'file-panel-toolbar');
+  const toolbarActions = el('div', 'file-panel-toolbar-actions');
   const newFile = actionButton(() => t('New file'), 'i-plus', () => createEntry('file'));
   const newFolder = actionButton(() => t('New folder'), 'i-folder', () => createEntry('directory'));
   const rename = actionButton(() => t('Rename'), 'i-pencil', renameSelection);
   const remove = actionButton(() => t('Delete'), 'i-trash', deleteSelection);
   const reveal = actionButton(() => t('Reveal'), 'i-out', revealSelection);
-  toolbar.append(newFile, newFolder, rename, remove, reveal, refresh);
+  toolbarActions.append(newFile, newFolder, rename, remove, reveal);
+  toolbar.append(toolbarActions, refresh);
 
   const body = el('div', 'file-panel-body');
   const tree = el('div', 'file-tree'); tree.setAttribute('role', 'tree');
@@ -1054,6 +1056,7 @@ export function createFilePanel(options: FilePanelOptions) {
   return {
     hide,
     show,
+    mountAt(parent: HTMLElement): void { if (pane.parentElement !== parent) parent.append(pane); },
     visible: () => !pane.hidden,
     update(next: LocalProject | null): void {
       const changed = project?.id !== next?.id;

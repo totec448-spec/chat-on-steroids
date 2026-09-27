@@ -1580,5 +1580,7 @@
   "Unverified": "Nicht bestätigt",
   "Failed": "Fehlgeschlagen",
   "Finished": "Fertig",
-  "Could not copy text.": "Text konnte nicht kopiert werden."
+  "Could not copy text.": "Text konnte nicht kopiert werden.",
+  "Bottom panel": "Untere Leiste",
+  "Hide bottom panel": "Untere Leiste ausblenden"
 }

@@ -23,3 +23,46 @@
 - Typecheck, the focused chat regression, 36 adjacent dock/File tests, and the
   production bundle build passed. The full renderer-timeline suite was stopped
   after a long silent run; its new regression passed in isolation.
+
+## Part 2 — `feat/ui-dock-tools`
+
+- Extended the single dock owner to a right tool frame and bottom terminal frame. Files
+  and Sub-agents open on the right; the bottom frame owns only Terminal. Right terminal
+  sessions appear in the dock's single tab strip, while the bottom has its own terminal
+  tabs. Both keep live PTYs when their panel is hidden; closing a tab ends that PTY.
+- Moved bottom height control to the dock frame. Ctrl+backtick toggles bottom Terminal;
+  Ctrl+Shift+2/3/4 open right Terminal/Files/Sub-agents. Files drafts survive a hidden
+  panel while its watches retire. A projectless terminal starts in the main-owned home
+  directory without weakening exact project validation for selected projects.
+- Checks: typecheck, focused renderer/terminal suites, production renderer build and
+  isolated Electron terminal scenario. Electron exercised hidden-panel continuity,
+  independent right and bottom PTYs, additional tabs, Ctrl+C, exit and sizing.
+  The Electron fixture now compares the detached connection popover to the sidebar
+  surface under a non-translucent test theme; the old assertion incorrectly equated
+  sidebar and page background colors.
+
+### PR preparation — terminal and Files ownership
+
+- Corrected the dock controls and placement to the final right-tools/bottom-Terminal
+  contract. Removed nested right terminal tabs, allowed projectless terminal creation
+  through the existing fixed IPC, and kept Files actions horizontally scrollable with
+  Refresh fixed at the edge. Dock tabs retain keyboard focus and hover as one capsule.
+- Typecheck, 90 focused renderer/terminal tests, the real Electron PowerShell fixture,
+  and the isolated Chromium workspace fixture passed. The latter checks Files drafts,
+  PDF/editor views and responsive layouts; no provider or installed app was involved.
+
+### CI follow-up — terminal test doubles
+
+- Upstream PR #489 failed on Linux, Windows and macOS with the same
+  `rightWorkspaceTerminal?.tabs is not a function` error. Three renderer suites
+  still mocked the pre-dock terminal shape. Updated those test doubles to expose
+  the terminal tab methods used by the dock; application code is unchanged.
+- Typecheck and production build passed. The three focused suites passed 257 of
+  258 tests together; one unrelated renderer-state test hit its 30-second limit
+  under that combined run, then passed alone (51 other tests skipped). A full
+  CI pass is not claimed until the upstream checks rerun.
+- After the test-double fix, upstream Linux and macOS checks passed. Windows
+  passed 6,097 tests but failed one unrelated `bridge.test.ts` unattributed
+  recovery assertion; that exact case passed alone on Windows. The contributor
+  account cannot rerun an upstream Actions job directly, so a documentation
+  update triggers a fresh PR check without changing bridge behavior.

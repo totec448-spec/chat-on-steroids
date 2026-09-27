@@ -8,7 +8,7 @@ export function registerWorkspaceTerminalIpc(getWindow: () => BrowserWindow | nu
   const dispose = (): void => { terminals?.dispose(); terminals = null; owner = null; };
   app.on('before-quit', dispose);
   const request = z.discriminatedUnion('action', [
-    z.object({ action: z.literal('create'), id: z.string().uuid(), projectId: z.string().uuid(), cols: z.number().int().min(2).max(500), rows: z.number().int().min(1).max(200) }).strict(),
+    z.object({ action: z.literal('create'), id: z.string().uuid(), projectId: z.string().uuid().nullable(), cols: z.number().int().min(2).max(500), rows: z.number().int().min(1).max(200) }).strict(),
     z.object({ action: z.literal('write'), id: z.string().uuid(), data: z.string().max(65_536) }).strict(),
     z.object({ action: z.literal('resize'), id: z.string().uuid(), cols: z.number().int().min(2).max(500), rows: z.number().int().min(1).max(200) }).strict(),
     z.object({ action: z.literal('ack'), id: z.string().uuid(), count: z.number().int().min(0).max(65_536) }).strict(),
@@ -22,7 +22,7 @@ export function registerWorkspaceTerminalIpc(getWindow: () => BrowserWindow | nu
       if (owner !== event.sender) {
         dispose(); owner = event.sender;
         const current = owner;
-        terminals = new WorkspaceTerminals(value => { if (owner === current && !current.isDestroyed()) current.send('workspaceTerminal:event', value); });
+        terminals = new WorkspaceTerminals(value => { if (owner === current && !current.isDestroyed()) current.send('workspaceTerminal:event', value); }, app.getPath('home'));
         const retire = (): void => { if (owner === current) dispose(); };
         current.once('destroyed', retire); current.once('did-start-loading', retire);
       }

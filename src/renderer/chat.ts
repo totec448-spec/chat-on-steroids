@@ -144,6 +144,7 @@ function projectGroup(id: string | null | undefined): string | null {
   return id && !projects.find(project => project.id === id)?.ungrouped ? id : null;
 }
 let workspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
+let rightWorkspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
 let workspaceDocks: ReturnType<typeof createWorkspaceDocks> | null = null;
 
 function selectedLocalProject(): LocalProject | null {
@@ -798,6 +799,7 @@ function paintSessions(): void {
   filePanel?.update(selectedLocalProject());
   workspaceDocks?.sync();
   workspaceTerminal?.update(selectedLocalProject());
+  rightWorkspaceTerminal?.update(selectedLocalProject());
   badgeKey = badgeSignature();
   $('projectsEmpty').hidden = projectSections.length > 0;
   $('sessionsEmpty').hidden = rows.length > 0;
@@ -4372,10 +4374,26 @@ export function initChat(next: Deps): void {
     }
   });
   filePanel.update(selectedLocalProject());
-  docks.register('files', 'Files', 'i-folder', () => void filePanel?.show(), () => filePanel?.hide(), () => selectedLocalProject() !== null);
+  docks.register('files', 'Files', 'i-folder', mount => {
+    filePanel?.mountAt(mount); void filePanel?.show();
+  }, () => filePanel?.hide(), () => selectedLocalProject() !== null);
   docks.register('agents', 'Sub-agents', 'i-agents', () => agentPanel?.show(), () => agentPanel?.hide(), () => selectedId !== null);
-  workspaceTerminal = createWorkspaceTerminal(docks.bottomToggle);
+  workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody,
+    { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false) });
   workspaceTerminal.update(selectedLocalProject());
+  rightWorkspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.body,
+    { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync() });
+  rightWorkspaceTerminal.update(selectedLocalProject());
+  docks.registerTerminal({
+    show: (mount, createIfEmpty) => rightWorkspaceTerminal?.show(mount, createIfEmpty),
+    hide: () => rightWorkspaceTerminal?.hide(), canCreate: () => true,
+    newTab: () => rightWorkspaceTerminal?.newTab() ?? null,
+    tabs: () => rightWorkspaceTerminal?.tabs() ?? [],
+    selectTab: id => rightWorkspaceTerminal?.selectTab(id), closeTab: id => rightWorkspaceTerminal?.closeTab(id)
+  }, {
+    show: (mount, createIfEmpty) => workspaceTerminal?.show(mount, createIfEmpty),
+    hide: () => workspaceTerminal?.hide()
+  });
   $('attachImages').addEventListener('click', async () => {
     const owner = composerDraftOwner();
     appendImages(owner, await run(api.chooseFiles()));

@@ -1580,5 +1580,7 @@
   "Toggle right panel": "Mostrar ou ocultar painel direito",
   "Toggle bottom panel": "Mostrar ou ocultar painel inferior",
   "Toggle bottom panel (Ctrl+`)": "Mostrar ou ocultar painel inferior (Ctrl+`)",
-  "Close tab": "Fechar separador"
+  "Close tab": "Fechar separador",
+  "Bottom panel": "Painel inferior",
+  "Hide bottom panel": "Ocultar painel inferior"
 }
