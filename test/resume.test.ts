@@ -19,6 +19,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../src/shared/user-prompt.js';
 import { nativeHandoffPrompt } from '../src/main/session/handoff-prompt.js';
+import { DEFAULT_HANDOFF_PROMPT } from '../src/shared/handoff.js';
 import { resumeBootstrapText } from '../src/main/session/handoff.js';
 
 vi.mock('electron', () => ({
@@ -171,7 +172,9 @@ beforeEach(async () => {
   // Each case models one independent app history. Reusing CHAT_A/CHAT_B while retaining
   // prior cases on disk hid duplicate-target ownership bugs and made the safe rebind check
   // reject a later test for a session that only existed in an earlier test.
-  await fs.rm(nodePath.join(dir, 'sessions'), { recursive: true, force: true });
+  // Windows can still be closing a file the previous case flushed (ENOTEMPTY); retry like
+  // removeTempDir() does rather than fail the next case over the last one's teardown.
+  await fs.rm(nodePath.join(dir, 'sessions'), { recursive: true, force: true, maxRetries: 5 });
   await fs.mkdir(nodePath.join(dir, 'sessions'), { recursive: true });
   resetSwarm();
   writeDurableSoon('bridge-commands', null);
@@ -245,6 +248,45 @@ describe('the whole move, when it works', () => {
     // Handed to A's browser, not to the OS — and exactly one chat either way.
     expect(stored.body.placement).toEqual({ id: pendingCommands()[0]!.id, model: null, reasoningEffort: null, active: true, homeConversationId: CHAT_A, project: null });
     expect(opened).toHaveLength(0);
+  });
+
+  /**
+   * The browser that was offered the chat and never opened it.
+   *
+   * Placement is worth having — only A's own browser can put B in A's window — but it was offered
+   * with no deadline of its own. The only bound was the command's lease, and an automatic resume
+   * leases for fifteen minutes. Measured on 2026-09-22: the brief was captured at 04:32:53 and
+   * nothing happened at all until the lease let go at 04:47:53, at which point the app opened the
+   * chat itself and the handoff committed eight seconds later. One handoff in four that day; a
+   * quarter of an hour of a run doing nothing, with no sign of why.
+   */
+  it('opens the chat itself when the browser it was offered to never does', async () => {
+    vi.useFakeTimers();
+    try {
+      await connect();
+      await record();
+      const { token: continuation } = await press();
+      const stored = await capture(continuation);
+      expect(stored.body.placement, 'the offer under test was never made').toBeTruthy();
+      expect(opened, 'the app opened it straight away, so there is nothing to fall back from')
+        .toHaveLength(0);
+
+      // A page that is merely slow still wins: nothing is taken back inside the window.
+      await vi.advanceTimersByTimeAsync(50_000);
+      expect(opened).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(opened, 'the offer was never taken back').toHaveLength(1);
+      // The same command, not a second one: its ticket, its lease and its identity are intact.
+      expect(pendingCommands()).toHaveLength(1);
+      expect(pendingCommands()[0]!.id).toBe(stored.body.commandId);
+    } finally {
+      vi.useRealTimers();
+      // This case is the only one here that lets the app act on its own after the assertions.
+      // Let that work land before the next case removes the sessions directory under it.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await flushDurable();
+    }
   });
 });
 
@@ -353,6 +395,28 @@ describe('one press, one transaction', () => {
       body: { conversationId: CHAT_A, token: first.token, sourceAttempt: true }
     });
     expect(reclaimed.body.allowed).toBe(true);
+  });
+
+  it('uses the configured handoff content prompt without making framing editable', async () => {
+    const conversationId = 'f0f00099-1111-4111-8111-111111111111';
+    await connect();
+    await record(conversationId);
+    const previous = defaultConfig();
+    const custom = 'CUSTOM COMPACTION BRIEF: preserve only continuation-critical state.';
+    await saveConfig({
+      ...previous,
+      compaction: { ...previous.compaction, handoffPrompt: custom }
+    });
+    try {
+      const first = await press(conversationId);
+      expect(first.prompt).toContain(custom);
+      expect(first.prompt).not.toContain(DEFAULT_HANDOFF_PROMPT);
+      expect(first.prompt).toContain(`[[CLF-HANDOFF:${first.token}]]`);
+      expect(first.prompt).toContain('Your reply to this message must be the brief itself and nothing else');
+      expect((await request('POST', '/compact', { body: { conversationId, cancel: true } })).status).toBe(200);
+    } finally {
+      await saveConfig(previous);
+    }
   });
 
   it('never re-offers the prompt once a document armed the click', async () => {

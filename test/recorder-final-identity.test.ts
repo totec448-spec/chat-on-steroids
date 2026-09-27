@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { closeConversation, liveConversations, recordChatObservations, recordToolCall, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { emptyEvidence, trackInFlight } from '../src/main/mcp/call-context.js';
-import { appendEvent, flushSessions, getSession, initSessionStore, readEvents, readCompletedFinal, upsertMessageEvent, rebindSession, resetSessionStoreForTests } from '../src/main/session/store.js';
+import { appendEvent, flushSessions, getSession, initSessionStore, readEvents, readCompletedFinal, turnEndedDurably, upsertMessageEvent, rebindSession, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { sessionInputPolicy } from '../src/main/session/input.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -164,6 +164,23 @@ it.each(['canonical', 'explicit'])('keeps a turn reopened for late tools open un
     ? [{ kind: 'assistant_message', time: 40, messageId: 'answer', text: 'A new final after the late work.', state: 'final', final: true }]
     : [{ kind: 'turn_end', time: 40, turnId: 'turn', outcome: 'completed' }]);
   expect((await getSession(opened.sessionId!))?.activeTurnId).toBeNull();
+});
+
+it('treats a reopened exact response as nonterminal until its fresh end', async () => {
+  const conversationId = 'durable-ended-response-reopen';
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'turn_start', time: 10, turnId: 'turn' },
+    { kind: 'turn_end', time: 12, turnId: 'turn', outcome: 'completed' }
+  ]);
+  expect(await turnEndedDurably(opened.sessionId!, conversationId, 'turn')).toBe(true);
+
+  await appendEvent(opened.sessionId!, {
+    kind: 'turn_start', source: 'app', time: 20, turnId: 'turn', detail: 'Late exact work reopened this response'
+  });
+  expect(await turnEndedDurably(opened.sessionId!, conversationId, 'turn')).toBe(false);
+
+  await appendEvent(opened.sessionId!, { kind: 'turn_end', source: 'app', time: 30, turnId: 'turn', outcome: 'completed' });
+  expect(await turnEndedDurably(opened.sessionId!, conversationId, 'turn')).toBe(true);
 });
 
 it('does not close the old turn after a newer user message arrives in the recovery batch', async () => {

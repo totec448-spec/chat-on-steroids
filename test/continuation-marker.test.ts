@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { describe, expect, it } from 'vitest';
-import { continuationMarkerOf } from '../src/shared/session.js';
+import { continuationMarkerOf, unescapeMarkdown } from '../src/shared/session.js';
 
 // The unbundled browser reader must agree with the main/store/renderer reader.
 const content = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
@@ -11,6 +11,8 @@ const declarations = content.split('\n').filter(line => /^\s*const CONTINUATION_
 if (begin < 0 || end < 0 || declarations.length !== 2) throw new Error('Continuation reader not found');
 const pageMarker = vm.runInNewContext(`${declarations.join('\n')}\n${content.slice(begin, end)}\nmarkedAs`) as
   (text: string) => RegExpMatchArray | null;
+const pageUnescape = vm.runInNewContext(`${declarations.join('\n')}\n${content.slice(begin, end)}\nunescapeMarkdown`) as
+  (text: string) => string;
 const token = '_0123456789abc-def';
 const clean = `[[CLF-RESUME:${token}]]`;
 
@@ -41,5 +43,18 @@ describe('continuation markers from native readback', () => {
   ])('refuses malformed or non-leading marker %s in both readers', text => {
     expect(continuationMarkerOf(text)).toBeNull();
     expect(pageMarker(text)).toBeNull();
+  });
+});
+
+describe('page readback unescaping', () => {
+  // #426: ChatGPT stores composer hard breaks as `\<newline>`; both readers must drop them.
+  it.each([
+    ['[[COS_CONTEXT:34]]\\\nYou are worker-1.\\\nRun it.', '[[COS_CONTEXT:34]]\nYou are worker-1.\nRun it.'],
+    ['a\\\r\nb', 'a\nb'],
+    ['Keep C:\\_work and \\* unchanged', 'Keep C:_work and * unchanged'],
+    ['no escapes here', 'no escapes here']
+  ])('reads %j as %j in both readers', (raw, typed) => {
+    expect(unescapeMarkdown(raw)).toBe(typed);
+    expect(pageUnescape(raw)).toBe(typed);
   });
 });
