@@ -3079,6 +3079,13 @@ select option:hover, select option:focus { background: var(--hover); outline: no
 select option:checked { background: color-mix(in srgb, var(--accent) 16%, var(--card)); }
 select option:disabled { color: var(--soft); opacity: .55; }
 select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink); }
+:is(#workerModel, #workerReasoning, #helperModel, #helperReasoning)::picker(select) {
+  width: max-content; min-width: anchor-size(width); max-width: min(260px, calc(100vw - 24px));
+  left: auto; right: anchor(right);
+}
+:is(#workerModel, #workerReasoning, #helperModel, #helperReasoning) option {
+  white-space: nowrap; overflow-wrap: normal;
+}
 
 .session-controls-menu { padding: 8px 0 0; margin-top: 8px; border-top: 1px solid var(--line); }
 #composerSettings > summary { width: 36px; height: 36px; padding: 8px; justify-content: center; }

@@ -86,3 +86,12 @@ It now sizes to its contents with the existing 164px cap (120px in narrow layout
 popover aligns to the chip's right edge. An isolated Electron layout check measured the
 `5.6 · High` chip at about 100px with 9px of space on each side at 500, 760 and 900px viewports;
 the popover stayed within each viewport.
+
+Settings model pickers also had two presentation problems: account families with the same short
+label were indistinguishable, and the native reasoning picker wrapped “Medium” in its narrow
+field-width popup. Settings choices now append the observed lane (`Instant`, `Reasoning`, or
+`Pro`) only when duplicate labels need disambiguation. The Settings picker keeps its field as a
+minimum width, sizes to its longest option within a viewport bound, and keeps options on one line.
+The focused model test passed 25 tests, the production build passed, and the isolated Electron
+picker check showed 36px single-line options for both model and reasoning pickers at 500, 760 and
+984px windows. The repository dropdown fixture also passed at both themes and zoom levels.
