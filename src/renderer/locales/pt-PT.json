@@ -1571,5 +1571,14 @@
   "ChatGPT’s current model": "Modelo atual do ChatGPT",
   "Sent without choosing a model": "Enviado sem escolher um modelo",
   "Use ChatGPT’s current model": "Usar o modelo atual do ChatGPT",
-  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "O seu plano do ChatGPT não mostra seletor de modelos. Envie com o modelo que o ChatGPT já usa."
+  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "O seu plano do ChatGPT não mostra seletor de modelos. Envie com o modelo que o ChatGPT já usa.",
+  "Right panel": "Painel direito",
+  "New tab": "Novo separador",
+  "Hide right panel": "Ocultar painel direito",
+  "Restore right panel": "Restaurar painel direito",
+  "Expand right panel": "Expandir painel direito",
+  "Toggle right panel": "Mostrar ou ocultar painel direito",
+  "Toggle bottom panel": "Mostrar ou ocultar painel inferior",
+  "Toggle bottom panel (Ctrl+`)": "Mostrar ou ocultar painel inferior (Ctrl+`)",
+  "Close tab": "Fechar separador"
 }

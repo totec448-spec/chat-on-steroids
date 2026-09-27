@@ -340,6 +340,18 @@ it('makes parent and worker session selectors keyboard-focusable and activates t
   expect(w.document.querySelector(`.sess.is-sel[data-id="${worker.id}"]`)).not.toBeNull();
 });
 
+it('keeps legacy Files and Agents buttons out of the chat while dock controls work', async () => {
+  const project: LocalProject = { id: '33333333-3333-4333-8333-333333333333', name: 'Workspace', path: '/workspace', createdAt: T0 };
+  const { w } = await boot([], false, [], [project]);
+  const chat = w.document.querySelector('[data-panel="chat"]')!;
+  expect(chat.querySelectorAll('#filePanelToggle, #agentPanelToggle, .file-panel-toggle')).toHaveLength(0);
+  expect([...chat.children].filter(node => node.tagName === 'BUTTON')).toHaveLength(0);
+  expect(w.document.getElementById('rightDockToggle')).not.toBeNull();
+  expect(w.document.getElementById('terminalToggle')).not.toBeNull();
+  w.document.getElementById('rightDockToggle')!.click();
+  expect(w.document.getElementById('workDockRight')?.hidden).toBe(false);
+});
+
 it('patches native reactions in place and hides streamed envelopes without changing authored messages', async () => {
   const user: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'extension', messageId: 'reaction-user', message: text('Question') };
   const answer: SessionEvent = { kind: 'assistant_message', seq: 2, time: T0 + 1, source: 'extension', messageId: 'reaction-answer', message: text('\uE200message_'), final: false };
