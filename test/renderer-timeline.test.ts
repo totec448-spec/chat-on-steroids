@@ -2163,6 +2163,43 @@ it('keeps an unfolded tool row as the same open node while the chat keeps append
   expect(group.querySelector('summary')!.title).toContain('4 actions');
 });
 
+it('colors removed lines separately from added lines without changing other tool metrics', async () => {
+  const edit = toolCall(1, 'edit-lines') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  edit.call.tool = 'apply_patch';
+  edit.call.summary = { kind: 'edit', tone: 'good', title: 'Edited 2 files', metric: '+28 −11' };
+  edit.call.changes = [{ path: '/repo/file.ts', added: 28, removed: 11, approximate: false }];
+  const removal = toolCall(2, 'removed-lines') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  removal.call.tool = 'apply_patch';
+  removal.call.summary = { kind: 'delete', tone: 'warn', title: 'Deleted file.ts', metric: '~−7' };
+  removal.call.changes = [{ path: '/repo/removed.ts', added: 0, removed: 7, approximate: true }];
+  const read = toolCall(3, 'read-lines') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  read.call.summary = { kind: 'read', tone: 'neutral', title: 'Read file.ts', metric: '12 lines' };
+
+  const { w } = await boot([edit, removal, read]);
+  const rows = [...w.document.querySelectorAll<HTMLDetailsElement>('details.tool')];
+  expect(rows).toHaveLength(3);
+  expect(rows[0]!.querySelector('summary .metric')?.textContent).toBe('+28 −11');
+  expect(rows[0]!.querySelector('summary .metric-added')?.textContent).toBe('+28');
+  expect(rows[0]!.querySelector('summary .metric-removed')?.textContent).toBe('−11');
+  // The per-call change count beside the title splits the same way.
+  expect(rows[0]!.querySelector('summary .tool-change-count .metric-added')?.textContent).toBe('+28');
+  expect(rows[0]!.querySelector('summary .tool-change-count .metric-removed')?.textContent).toBe('−11');
+  expect(rows[1]!.querySelector('summary .metric')?.textContent).toBe('~−7');
+  expect(rows[1]!.querySelector('summary .metric-removed')?.textContent).toBe('−7');
+  expect(rows[2]!.querySelector('summary .metric')?.textContent).toBe('12 lines');
+  expect(rows[2]!.querySelector('summary .metric-added, summary .metric-removed')).toBeNull();
+
+  rows[0]!.open = true;
+  rows[0]!.dispatchEvent(new w.Event('toggle'));
+  expect(rows[0]!.querySelector('.changes .metric')?.textContent).toBe('+28 −11');
+  expect(rows[0]!.querySelector('.changes .metric-added')?.textContent).toBe('+28');
+  expect(rows[0]!.querySelector('.changes .metric-removed')?.textContent).toBe('−11');
+  rows[1]!.open = true;
+  rows[1]!.dispatchEvent(new w.Event('toggle'));
+  expect(rows[1]!.querySelector('.changes .metric')?.textContent).toBe('+0 −7 (approx.)');
+  expect(rows[1]!.querySelector('.changes .metric-removed')?.textContent).toBe('−7');
+});
+
 it('keeps mixed tool and agent activity in one latest-action disclosure between authored messages', async () => {
   const { w, append } = await boot([
     { seq: 1, time: T0, source: 'extension', kind: 'progress', message: text('Checking the implementation') },
