@@ -61,3 +61,8 @@
   258 tests together; one unrelated renderer-state test hit its 30-second limit
   under that combined run, then passed alone (51 other tests skipped). A full
   CI pass is not claimed until the upstream checks rerun.
+- After the test-double fix, upstream Linux and macOS checks passed. Windows
+  passed 6,097 tests but failed one unrelated `bridge.test.ts` unattributed
+  recovery assertion; that exact case passed alone on Windows. The contributor
+  account cannot rerun an upstream Actions job directly, so a documentation
+  update triggers a fresh PR check without changing bridge behavior.
