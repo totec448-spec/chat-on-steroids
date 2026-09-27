@@ -1738,20 +1738,29 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   const revision = entry.nextSeq;
   if (entry.summary.conversationId !== conversationId) return null;
   const [recent, questions] = await Promise.all([
-    readRecentEventsFromDisk(sessionId, 256, { kinds: ['turn_start', 'turn_end', 'user_message', 'assistant_message', 'tool_call', 'page_tool'] }),
+    readRecentEventsFromDisk(sessionId, 256, { kinds: ['turn_start', 'turn_end', 'user_message', 'assistant_message', 'native_image', 'tool_call', 'page_tool'] }),
     readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true,
       before: Infinity, acceptEvent: event => !injectedUserMessage(event, entry.summary.timelineTurns) })
   ]);
   if (entry.nextSeq !== revision || entry.summary.conversationId !== conversationId) return null;
   const sameTurn = (left: string | null | undefined, right: string | null | undefined) => !!left && !!right &&
     responseTurnId(entry.summary.timelineTurns, left) === responseTurnId(entry.summary.timelineTurns, right);
-  const final = recent.findLast(event => event.kind === 'assistant_message' && event.final === true &&
+  // Pixels/media alone are not completion. Require the provider's exact terminal
+  // message on a completed lifecycle boundary and its matching recorded image.
+  // These facts may arrive in either batch; never manufacture assistant prose.
+  const imageEnd = (event: SessionEvent) => event.kind === 'turn_end' && event.outcome === 'completed' &&
+    !!event.providerMessageId && !!event.turnId && (!turnId || sameTurn(event.turnId, turnId)) &&
+    recent.some(image => image.kind === 'native_image' && image.messageId === event.providerMessageId &&
+      image.providerStatus === 'finished_successfully' && sameTurn(image.turnId, event.turnId));
+  const final = recent.findLast(event => imageEnd(event) || (event.kind === 'assistant_message' && event.final === true &&
     (!!event.message.text.trim() || !!event.providerMessageId) && !!event.messageId && (!turnId || event.turnId === turnId ||
       (!!event.providerMessageId && sameTurn(event.turnId, turnId)) ||
-      (turnId.startsWith('reply:') && event.messageId === turnId.slice(6))));
-  if (!final || final.kind !== 'assistant_message' || !final.messageId) return null;
-  const seq = final.finalContentSeq ?? positionOf(final);
-  const completedAt = final.finalObservedAt ?? final.time;
+      (turnId.startsWith('reply:') && event.messageId === turnId.slice(6)))));
+  if (!final || (final.kind !== 'assistant_message' && final.kind !== 'turn_end')) return null;
+  const messageId = final.kind === 'turn_end' ? final.providerMessageId : final.messageId;
+  if (!messageId) return null;
+  const seq = final.kind === 'turn_end' ? positionOf(final) : final.finalContentSeq ?? positionOf(final);
+  const completedAt = final.kind === 'turn_end' ? final.time : final.finalObservedAt ?? final.time;
   const question = questions[0];
   const correction = (event: SessionEvent) => isTurnCorrection(event, final.turnId, entry.summary.timelineTurns) && positionOf(event) < seq;
   if (question && positionOf(question) >= positionOf(final) && !correction(question)) return null;
@@ -1771,7 +1780,7 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
       // request or conflicting generation is fresh work, not a trailing result.
       const owner = event.source === 'mcp' && event.call.attribution === 'request_id'
         ? recordedRequestTurn(entry.summary.requestTurns, event.call.requestId, conversationId) : undefined;
-      return !(final.providerMessageId && final.state === 'final' && owner && owner.origin < seq &&
+      return !(final.providerMessageId && (final.kind === 'turn_end' || final.state === 'final') && owner && owner.origin < seq &&
         sameTurn(owner.turnId, final.turnId) && event.call.conversationId === conversationId &&
         (!event.turnId || sameTurn(event.turnId, final.turnId)));
     }
@@ -1780,7 +1789,8 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
     if (event.kind === 'user_message') return !correction(event);
     return event.kind === 'assistant_message' || event.kind === 'page_tool';
   })) return null;
-  return { messageId: final.messageId, turnId: final.turnId ?? null, completedAt, contentSeq: seq, text: final.message.text };
+  return { messageId, turnId: final.turnId ?? null, completedAt, contentSeq: seq,
+    text: final.kind === 'turn_end' ? '' : final.message.text };
 }
 
 /** Recorded local execution, not a native tool label or a request-id sighting alone. */

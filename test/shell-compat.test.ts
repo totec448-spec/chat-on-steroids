@@ -203,6 +203,91 @@ it('reports an explicit per-call completion without a synthetic result message',
   const turn = (await f.ask()).turns[0]; expect(turn.calls[0].answered).toBe(true);
   expect(turn.messages).toHaveLength(2); expect(turn.endMessageId).toBeNull();
 });
+
+function generatedAnswer(f: ReturnType<typeof fixture>) {
+  const image = { type: 'generated-image', id: `${ANSWER}:image-asset:0`, chatGptMessageId: ANSWER,
+    src: 'sediment://file_1234567890abcdef', status: 'completed', isPreview: false, width: 1448, height: 1086 };
+  f.entry.turn.status = 'complete'; f.entry.turn.messageIds = [USER, ANSWER];
+  f.entry.turn.items = [f.entry.turn.items[0], image];
+  f.doc.querySelector('[data-content-search-unit-key$=":assistant"]')!.remove();
+  const group = f.doc.createElement('div'); group.className = 'group/generated-image-preview';
+  const node = f.doc.createElement('img'); node.src = 'blob:https://chatgpt.com/selected-image'; group.append(node);
+  f.doc.querySelector('[data-turn-key]')!.append(group);
+  const owner = f.chain({ item: image }, f.row);
+  (node as any).__reactFiber$fixture = f.chain({ imageId: image.id, isComplete: true, isPreview: false }, owner);
+  return { image, node, owner };
+}
+
+it.each(['complete', 'running turn', 'running image', 'preview', 'foreign message', 'invalid asset', 'retry'])(
+  'recognizes only a selected completed image answer (%s)', async scenario => {
+    const f = fixture(); const { image } = generatedAnswer(f);
+    if (scenario === 'running turn') f.entry.turn.status = 'in_progress';
+    if (scenario === 'running image') image.status = 'in_progress';
+    if (scenario === 'preview') image.isPreview = true;
+    if (scenario === 'foreign message') image.chatGptMessageId = OTHER;
+    if (scenario === 'invalid asset') image.src = 'https://example.com/private-url';
+    if (scenario === 'retry') f.entry.turn.items.push({ ...image, id: `${OTHER}:image-asset:0`,
+      chatGptMessageId: OTHER, status: 'in_progress' });
+    const turn = (await f.ask()).turns[0];
+    expect(turn.endMessageId).toBe(scenario === 'complete' ? ANSWER : null);
+    expect(turn.messages.every((message: any) => message.role === 'user')).toBe(true);
+    if (scenario === 'complete') expect(turn.images).toEqual([expect.objectContaining({ messageId: ANSWER,
+      assetId: 'file_1234567890abcdef', providerRole: 'tool', providerStatus: 'finished_successfully' })]);
+  });
+
+it('stamps blob pixels only for the exact mounted image item and retires replaced ownership', async () => {
+  const f = fixture(); const { image, node, owner } = generatedAnswer(f);
+  await f.ask();
+  expect(node.getAttribute('data-clf-fiber-image')).toContain(encodeURIComponent(ANSWER));
+  expect(node.getAttribute('data-clf-fiber-image-source')).toBe(node.src);
+  owner.memoizedProps.item = { ...image }; // Same-looking stale Fiber object is not this mounted item.
+  await f.ask();
+  expect(node.hasAttribute('data-clf-fiber-image')).toBe(false);
+  expect(node.hasAttribute('data-clf-fiber-image-source')).toBe(false);
+});
+
+it('rejects an image borrowing the authored user message identity', async () => {
+  const f = fixture(); const { image } = generatedAnswer(f);
+  image.chatGptMessageId = USER;
+  const turn = (await f.ask()).turns[0];
+  expect(turn?.endMessageId ?? null).toBeNull();
+  expect(turn?.images ?? []).toEqual([]);
+});
+
+it('closes a tracked image-only shell turn and releases its page generation state', async () => {
+  const f = fixture(), edit = editing(f);
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  let input = { id: OTHER, owner: 'image-request', text: 'Create an image', model: 'gpt-5-6-thinking',
+    reasoningEffort: 'high', purpose: 'user', images: [] };
+  let latest: ReturnType<typeof addExchange>;
+  let sends = 0;
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); latest = addExchange(f, ++sends, edit.serialize()); edit.box.replaceChildren();
+    latest.entry.turn.items = [latest.entry.turn.items[0]!, { type: 'generated-image',
+      chatGptMessageId: latest.answerId, id: `${latest.answerId}:image-asset:0`,
+      src: 'sediment://file_1234567890abcdef', status: 'in_progress', isPreview: false } as any];
+  });
+  const r = await recorder(f, { desktop_input: m => ({ ok: true,
+    data: m.authorize || m.ack || m.fail ? { ok: true } : { input } }) });
+  const sent = r.runtime({ type: 'clf-desktop-input', id: input.id, conversationId: THREAD });
+  await vi.waitFor(() => expect(latest).toBeTruthy());
+  await r.hook.refreshFiber(); r.hook.observe(); expect(await sent).toEqual({ ok: true });
+  await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+  expect((await r.runtime({ type: 'clf-page-status' })).generating).toBe(true);
+  (latest!.entry.turn.items[1] as any).status = 'completed'; latest!.entry.turn.status = 'complete';
+  await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+  expect(r.events().filter((event: any) => event.kind === 'turn_end')).toEqual([
+    expect.objectContaining({ outcome: 'completed', providerMessageId: latest!.answerId })
+  ]);
+  expect((await r.runtime({ type: 'clf-page-status' })).generating).toBe(false);
+  input = { ...input, id: CALL, owner: 'follow-up', text: 'Continue after the image' };
+  const followup = r.runtime({ type: 'clf-desktop-input', id: input.id, conversationId: THREAD });
+  await vi.waitFor(() => expect(sends).toBe(2));
+  await r.hook.refreshFiber(); r.hook.observe();
+  expect(await followup).toEqual({ ok: true });
+  expect(r.sent.filter(message => message.type === 'desktop_input' && message.ack && message.id === CALL)).toHaveLength(1);
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+});
 it('reads request metadata only for the mounted shell message ids in the exact native cache', async () => {
   const f = fixture();
   const message = { id: CALL, author: { role: 'assistant' }, recipient: 'api_tool.call_tool',

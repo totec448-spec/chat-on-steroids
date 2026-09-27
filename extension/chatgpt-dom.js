@@ -2289,8 +2289,15 @@ var CLF_DOM = (() => {
     }
   }
 
-  /** Native ChatGPT photo input, observed as #upload-photos. Sending waits for every tile. */
+  /** Native attachment identity from the composer's exact tile/remove control. */
   function composerFileName(button) {
+    const tile = button.closest('[data-composer-attachments] [role="button"][aria-label]');
+    if (tile && tile !== button) {
+      const name = tile.getAttribute('aria-label');
+      const actions = [...tile.querySelectorAll('button')];
+      if (name && actions.length === 1 && actions[0] === button &&
+          [...tile.querySelectorAll('img[alt]')].some(image => image.getAttribute('alt') === name)) return name;
+    }
     const group = button.closest('[role="group"][aria-label]');
     if (group?.querySelector('[data-default-action="true"] button')) {
       const actions = [...group.querySelectorAll('button')].filter(node => !node.closest('[data-default-action="true"]'));
@@ -2359,7 +2366,12 @@ var CLF_DOM = (() => {
     if (files.length) images = [...(images || []), ...files];
     if (!images?.length) return true;
     if (!Array.isArray(images) || images.length > 20 || !stillCurrent() || hasComposerAttachments()) return false;
-    const input = document.querySelector(files.length ? 'input#upload-files[type="file"]' : 'input#upload-photos[type="file"][accept="image/*"]');
+    // The current shell uses React-generated ids. Elect by the native upload kind
+    // inside this exact composer's form; a second matching input is ambiguous.
+    const host = composerBox();
+    const candidates = [...(host?.querySelectorAll('input[type="file"]') || [])].filter(node =>
+      !node.disabled && (files.length ? !node.accept : node.accept === 'image/*'));
+    const input = candidates.length === 1 ? candidates[0] : null;
     if (!input) return false;
     const priorTiles = new Set((composerBox() || composerActions()?.host)?.querySelectorAll('button[aria-label]') || []);
     const transfer = new DataTransfer();

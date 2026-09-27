@@ -2302,6 +2302,41 @@ describe('automatic compaction', () => {
       });
     });
 
+  it.each(['image-first', 'end-first', 'missing-proof', 'wrong-image', 'stopped', 'unfinished-image'] as const)(
+    'releases input only for the exact completed native image (%s)', async scenario => {
+      await pair();
+      const conversationId = randomUUID(), messageId = randomUUID();
+      const opened = await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), messageId: randomUUID(), text: 'Generate an image.' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'image-turn' }
+      ] } });
+      const sessionId = opened.body.sessionId;
+      const image = { kind: 'native_image', time: Date.now(), turnId: 'image-turn', messageId,
+        providerAssetId: 'file_1234567890abcdef', providerRole: 'tool', providerChannel: 'final',
+        providerStatus: scenario === 'unfinished-image' ? 'in_progress' : 'finished_successfully', previewStatus: 'pending' };
+      const end = { kind: 'turn_end', time: Date.now(), turnId: 'image-turn',
+        outcome: scenario === 'stopped' ? 'stopped' : 'completed',
+        ...(scenario !== 'missing-proof' ? { providerMessageId: scenario === 'wrong-image' ? randomUUID() : messageId } : {}) };
+      const batch = async (event: unknown) => request('POST', '/events', { body: { conversationId, events: [event] } });
+      await batch(scenario === 'end-first' ? end : image);
+      expect(await sessionStoreModule.readCompletedFinal(sessionId, conversationId)).toBeNull();
+      await batch(scenario === 'end-first' ? image : end);
+      const complete = scenario === 'image-first' || scenario === 'end-first';
+      expect(!!await sessionStoreModule.readCompletedFinal(sessionId, conversationId)).toBe(complete);
+      const { sessionInputActivity } = await import('../src/main/bridge.js');
+      const { sessionInputPolicy } = await import('../src/main/session/input.js');
+      if (complete) {
+        const activity = sessionInputActivity((await getSession(sessionId))!);
+        expect(activity).toMatchObject({ possible: false, exact: false });
+        expect(await sessionInputPolicy(sessionId, activity)).toMatchObject({ browserAllowed: true, settled: true });
+      }
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), messageId: randomUUID(), text: 'New question.' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'new-turn' }
+      ] } });
+      expect(await sessionStoreModule.readCompletedFinal(sessionId, conversationId)).toBeNull();
+    });
+
   it.each(['expired', 'clock-back', 'auto-off', 'rebound'] as const)(
     'rechecks attributed compaction after storage yields when %s', async scenario => {
       await pair();
