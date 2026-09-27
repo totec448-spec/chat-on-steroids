@@ -29,11 +29,11 @@ let temporary = '';
 beforeEach(async () => { durable.value = null; temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'cos-pets-bundled-')); await initPetLibrary(temporary, bundled); });
 afterEach(() => fs.rmSync(temporary, { recursive: true, force: true }));
 
-it('ships Hammy as a valid bundled pet that is off until enabled', () => {
-  const hammy = petLibraryState().pets.find(pet => pet.id === 'hammy');
-  expect(hammy).toMatchObject({ id: 'hammy', displayName: 'Hammy', builtin: true, enabled: false });
-  expect(setPetEnabled('hammy', true).pets.find(pet => pet.id === 'hammy')?.enabled).toBe(true);
-  const asset = loadPetAsset('hammy', false);
+it.each([['hammy', 'Hammy'], ['capy', 'Capy']])('ships %s as a valid bundled pet that is off until enabled', (id, displayName) => {
+  const pet = petLibraryState().pets.find(entry => entry.id === id);
+  expect(pet).toMatchObject({ id, displayName, builtin: true, enabled: false });
+  expect(setPetEnabled(id, true).pets.find(entry => entry.id === id)?.enabled).toBe(true);
+  const asset = loadPetAsset(id, false);
   expect(asset.atlasDataUrl.startsWith('data:image/png;base64,')).toBe(true);
   expect(Object.keys(asset.manifest.animations)).toHaveLength(14);
 });
