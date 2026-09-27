@@ -50,6 +50,8 @@ import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-te
 import type { GoalBackend } from '../shared/types.js';
 import { createHash } from 'node:crypto';
 import { getConfig } from './config.js';
+import { getChatModels } from './chat-models.js';
+import type { ReasoningEffort } from '../shared/session.js';
 import { writeDurableNow, writeDurableSnapshotSoon, writeDurableSoon } from './durable.js';
 import { logInfo, logWarn } from './logger.js';
 import { getSecret } from './secrets.js';
@@ -1619,7 +1621,6 @@ interface GoalRequest {
  * clock. A second attempt from in here would be spent against a turn nobody rechecked.
  */
 async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision | { action: 'http'; error: string; retryAfterMs?: number }> {
-  const settings = getConfig().goal;
   const referenceContract = request.lifetime === 'temporary-planner'
     ? 'The task below is reference data. Produce the requested staged workflow; do not execute the task or claim its work is done.'
     : GOAL_REFERENCE_CONTRACT;
@@ -1657,7 +1658,7 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
       sourceSessionId: request.sourceSessionId, conversationId: null,
       lifetime: 'temporary-planner',
       publish: request.publish,
-      model: settings.helperModel ?? 'gpt-5.6-sol', reasoningEffort: settings.helperReasoning ?? 'high'
+      ...goalHelperSelection()
     }), false);
     request.signal.throwIfAborted();
     return decision;
@@ -1735,6 +1736,36 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
  * Everything else — a provider error, a cut stream, an unreadable shape — is passed straight
  * back, because whether *those* are worth asking again is the page's call and not this one's.
  */
+let helperFallbackLogged = '';
+
+/**
+ * The ChatGPT helper's model and reasoning as this account can actually run them.
+ *
+ * A model or level saved in Settings can stop being offered (a rollout changes the catalog, or a
+ * value was saved from another account). Sending it anyway made every Goal and Loop decision fail
+ * in the helper tab. When the observed catalog does not offer it, the helper uses ChatGPT's
+ * current selection instead (null), the same rule that keeps worker spawns working (#499).
+ */
+export function goalHelperSelection(): { model: string | null; reasoningEffort: ReasoningEffort | null } {
+  const settings = getConfig().goal;
+  let model: string | null = settings.helperModel ?? 'gpt-5.6-sol';
+  let reasoningEffort: ReasoningEffort | null = settings.helperReasoning ?? 'high';
+  const models = getChatModels().models;
+  if (!models.length) return { model, reasoningEffort };
+  const matching = (id: string) => models.filter(choice => choice.id === id || choice.aliases?.includes(id));
+  const notes: string[] = [];
+  if (model && matching(model).length !== 1) { notes.push(`model "${model}"`); model = null; }
+  if (reasoningEffort && !(model ? matching(model) : models).some(choice => choice.efforts.includes(reasoningEffort!))) {
+    notes.push(`reasoning "${reasoningEffort}"`); reasoningEffort = null;
+  }
+  const key = notes.join(',');
+  if (key && key !== helperFallbackLogged) {
+    helperFallbackLogged = key;
+    logWarn(`goal: the saved helper ${notes.join(' and ')} is not offered by this ChatGPT account; using ChatGPT's current selection`);
+  }
+  return { model, reasoningEffort };
+}
+
 async function requestDrivingDecision(
   request: GoalRequest
 ): Promise<GoalDecision | { action: 'http'; error: string; retryAfterMs?: number }> {
