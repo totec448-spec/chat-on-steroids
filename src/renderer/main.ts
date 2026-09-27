@@ -8,6 +8,7 @@ import { initConnectionAdvanced } from './connection-popover.js';
 import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
 import { initPet } from './pet.js';
+import { initPets } from './pets.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
@@ -49,7 +50,7 @@ declare global {
 
 const api = window.api;
 initLanguage();
-initPet();
+const pet = initPet(api, () => showTab('pets'));
 initSetupGuide();
 // Escape the translucent sidebar's backdrop-filter containing block.
 document.body.append($('connectionPopover'));
@@ -130,8 +131,9 @@ let setupKeySave: Promise<boolean> = Promise.resolve(true);
 // ------------------------------------------------------------------- tabs
 
 function showTab(name: string): void {
-  const settings = name !== 'chat' && name !== 'plugins';
-  document.querySelector<HTMLElement>('.app')!.dataset.screen = name === 'plugins' ? 'library' : settings ? 'settings' : 'chat';
+  const library = name === 'plugins' || name === 'pets';
+  const settings = name !== 'chat' && !library;
+  document.querySelector<HTMLElement>('.app')!.dataset.screen = library ? 'library' : settings ? 'settings' : 'chat';
   document.querySelector<HTMLElement>('.sidebar-brand')!.hidden = settings;
   $('sidebarPrimary').hidden = settings;
   $('workspaceSettings').hidden = false;
@@ -200,6 +202,9 @@ $('sessionList').addEventListener('click', event => {
 }, { capture: true });
 $('newChat').addEventListener('click', () => showTab('chat'));
 $('sidebarPlugins').addEventListener('click', () => showTab('plugins'));
+$('sidebarPets').addEventListener('click', () => showTab('pets'));
+$('viewPets').addEventListener('click', () => { ($('viewMenu') as HTMLDetailsElement).open = false; pet.toggle(); });
+api.onPetOverlayOpenOwner(screen => showTab(screen));
 $('addProject').addEventListener('click', () => showTab('chat'));
 $('composerFolder').addEventListener('click', () => $('addProject').click());
 let zoomFactor = 1;
@@ -2039,6 +2044,7 @@ buildGroups();
 initSidebarResize();
 initUsage();
 initPlugins(apply);
+initPets(api, pet);
 initBrowserPreferences();
 initChat({ save: () => save(), state: () => state });
 
