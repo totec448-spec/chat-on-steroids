@@ -11647,7 +11647,9 @@
         return true;
       }
       if (message.type === 'clf-recorder-ping') {
-        sendResponse({ ok: true, recorderVersion: RECORDER_VERSION });
+        // `busy`: this page is mid-turn or mid-handoff, so the extension must not reload under it.
+        sendResponse({ ok: true, recorderVersion: RECORDER_VERSION,
+          busy: Boolean(generating || CLF_DOM.generating() || desktopInputBusy || pluginRefreshBusy || modelCatalogBusy || pendingTools > 0) });
         return false;
       }
       if (message.type === 'clf-repair-check') {
