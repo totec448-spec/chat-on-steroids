@@ -1,4 +1,5 @@
 import { ui, uiText, t, initLanguage } from './i18n.js';
+import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
@@ -1545,7 +1546,7 @@ function facts(next: AppState): HTMLElement[] {
       ]);
     }
     if (health?.clientVersion) rows.push(['Tunnel client', () => health.clientVersion!]);
-    if (status.localUrl) rows.push(['Local server', () => status.localUrl!.replace(/^https?:\/\//, '')]);
+    if (status.localUrl) rows.push(['Local server', () => displayLocalServer(status.localUrl!)]);
   } else {
     rows.push(['Route to OpenAI', () => t('not running')]);
   }
