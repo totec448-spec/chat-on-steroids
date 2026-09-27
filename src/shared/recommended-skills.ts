@@ -153,5 +153,141 @@ When editing someone else's text, keep their meaning. Point out anything you cha
 4. **Compute** with code (Python, SQL or spreadsheet formulas) rather than by eye, and keep the code so it can be rerun.
 5. **Sanity-check results**: totals add up, percentages make sense, units are right.
 6. **Present**: the answer first, then a small table or chart, then caveats (sample size, missing data, correlation vs causation).
+`),
+  skill('security-review', 'Security review',
+    'Check code or a change for common security problems such as injection, secrets, unsafe file access and weak permissions.',
+    `
+# Security review
+
+Use this on a change, a module or a small app before it ships.
+
+## Look for
+
+- **Injection**: user input reaching a shell command, SQL, file path, URL, HTML or template without escaping or parameterisation.
+- **Secrets**: keys, tokens or passwords in code, logs, error messages, URLs or client-side bundles.
+- **File and path access**: path traversal (\`../\`), following symlinks, writing outside an intended folder.
+- **Authentication and authorisation**: missing checks, checks only in the UI, IDs that let one user reach another's data.
+- **Unsafe defaults**: debug modes, permissive CORS, disabled TLS verification, world-writable files.
+- **Dependencies**: known-vulnerable or abandoned packages, unpinned versions.
+
+## Report
+
+For each finding: where, how it could be exploited in one sentence, how bad it is (high, medium, low), and the fix. Do not print working exploit code. If nothing serious is found, say what was checked.
+`),
+  skill('write-documentation', 'Write documentation',
+    'Write or improve a README, guide or reference page that a newcomer can follow without asking questions.',
+    `
+# Write documentation
+
+1. **Know the reader**: a newcomer, a user or a maintainer. Write for exactly one.
+2. **Start with what it is and why it matters**, in two or three sentences.
+3. **Quick start first**: the shortest path from nothing to a working result, with copy-pasteable commands.
+4. **Then the details**: configuration, common tasks, troubleshooting, reference.
+5. **Test every step yourself** where possible; commands and paths must be exactly right.
+6. Prefer **examples over explanations**, and keep each section short with clear headings.
+7. Note prerequisites, supported versions and where to get help.
+`),
+  skill('refactor-safely', 'Refactor safely',
+    'Improve the structure of existing code without changing what it does, in small verified steps.',
+    `
+# Refactor safely
+
+1. **Make sure tests cover the behaviour** you are about to touch. If they don't, add characterisation tests first.
+2. **One kind of change at a time**: rename, extract, move or simplify, never all at once, and never mixed with new features or bug fixes.
+3. **Small steps**, running the tests after each one.
+4. **Keep the public interface stable** unless changing it is the goal; update every caller if it changes.
+5. Follow the surrounding code's style and patterns.
+6. Summarise what moved and why, and confirm that behaviour is unchanged (tests, types, a quick manual check).
+`),
+  skill('performance-investigation', 'Performance investigation',
+    'Find out why something is slow by measuring first, fix the real bottleneck, and prove the improvement with numbers.',
+    `
+# Performance investigation
+
+1. **Define slow**: which action, how slow now, how fast it needs to be.
+2. **Measure before changing anything**: timings, a profiler, query plans, network traces. Reproduce with realistic data.
+3. **Find the bottleneck** in the measurement: the part that dominates the time. Ignore everything else for now.
+4. **Fix that part**, typically less work (fewer calls, queries or re-renders), caching, better algorithms or indexes, or doing it later.
+5. **Measure again** under the same conditions and report before and after numbers.
+6. Keep correctness: run the tests, and watch memory and error rates as well as speed.
+`),
+  skill('upgrade-dependencies', 'Upgrade dependencies',
+    'Upgrade a project dependency or runtime safely: read the changelog, change one thing at a time and verify.',
+    `
+# Upgrade dependencies
+
+1. **List what is outdated** and why each upgrade is wanted (security fix, feature, support ending).
+2. **Read the changelog and migration notes** between the current and target version, especially breaking changes.
+3. **Upgrade one package (or one related group) at a time.** Commit each separately.
+4. **Apply the required code changes**, then run build, type checks and tests.
+5. **Check the lockfile diff** for surprising transitive changes.
+6. Report what changed, what needed code changes and anything left for later.
+`),
+  skill('accessibility-review', 'Accessibility review',
+    'Check a web page or app screen for accessibility problems: keyboard use, labels, contrast, structure and screen readers.',
+    `
+# Accessibility review
+
+Check against WCAG 2.2 AA and report concrete fixes.
+
+- **Keyboard**: everything reachable and usable with Tab, Shift+Tab, Enter, Space and arrow keys; a visible focus indicator; no keyboard traps.
+- **Names and labels**: every button, link, input and icon-only control has an accessible name; form fields have labels; images have useful alt text (or empty alt if decorative).
+- **Structure**: one main heading, logical heading order, landmarks, lists as lists, tables with headers.
+- **Contrast and colour**: text at least 4.5:1 (3:1 for large text); meaning is never carried by colour alone.
+- **Motion and timing**: respects reduced motion; no content that flashes; timeouts can be extended.
+- **Dynamic content**: status messages are announced; dialogs move and trap focus correctly and return it on close.
+
+For each problem: element, impact, fix.
+`),
+  skill('sql-queries', 'SQL queries',
+    'Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.',
+    `
+# SQL queries
+
+1. **Understand the schema first**: tables, keys, relationships and the database engine.
+2. **Write the query step by step**: start from the main table, add joins one at a time, then filters, grouping and ordering.
+3. **Always use parameters** for user-supplied values, never string concatenation.
+4. **Be explicit**: named columns instead of \`SELECT *\`, explicit join types, table aliases.
+5. **Check correctness**: row counts before and after each join (watch for duplication), NULL handling, time zones.
+6. **For slow queries**, read the query plan and look for missing indexes or scans on large tables.
+7. For changes (\`UPDATE\`, \`DELETE\`), run the matching \`SELECT\` first and use a transaction.
+`),
+  skill('summarize-documents', 'Summarize documents',
+    'Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.',
+    `
+# Summarize documents
+
+1. **Read everything** before summarising; note the purpose and audience of the source.
+2. Lead with a **one-paragraph summary**: what it is about and the most important conclusion.
+3. Then **key points** as a short list, in order of importance.
+4. Pull out **decisions, action items (with owners and dates) and open questions** separately.
+5. **Stay faithful**: no new claims, keep numbers and names exact, mark uncertainty and quote when wording matters.
+6. Keep it to about a tenth of the original length unless asked otherwise, and cite sections or timestamps for important points.
+`),
+  skill('translate-faithfully', 'Translate faithfully',
+    'Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.',
+    `
+# Translate faithfully
+
+1. **Identify the purpose and audience** (UI text, legal, marketing, casual) and match the register.
+2. **Keep meaning over word order**: the result should read as if written in the target language.
+3. **Preserve formatting and placeholders** exactly: Markdown, HTML tags, code, \`{0}\`-style placeholders, numbers and units.
+4. **Keep terminology consistent**; use an existing glossary or earlier translations when there is one.
+5. **Do not translate** product names, code identifiers or proper names unless an established translation exists.
+6. Flag anything ambiguous or culture-specific instead of guessing silently.
+`),
+  skill('plan-a-project', 'Plan a project',
+    'Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.',
+    `
+# Plan a project
+
+1. **State the goal and success criteria**: what done looks like and how it will be measured.
+2. **Set the scope**: what is in, what is explicitly out.
+3. **Break it into milestones**, each delivering something usable, then into tasks small enough to finish in a day or less.
+4. **Order by dependencies and risk**: do the uncertain or blocking parts early.
+5. **List risks and assumptions** with a mitigation for each.
+6. **Estimate roughly** and add a buffer; name who does what if more than one person is involved.
+7. End with the **first concrete step** that can start right away.
 `)
+
 ];
