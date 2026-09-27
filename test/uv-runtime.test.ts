@@ -36,9 +36,15 @@ it('installs nothing when the download does not match its published checksum', a
   await expect(fs.stat(managedUvDirectory()!)).rejects.toThrow();
 });
 
-it('puts the managed uv folder last on the plugin PATH, after a user install', () => {
+// A simulated POSIX PATH cannot hold a real Windows temp path (it contains "C:"), so this case runs on POSIX hosts.
+it.skipIf(process.platform === 'win32')('puts the managed uv folder last on the plugin PATH, after a user install', () => {
   const env = pluginEnvironment({ PATH: '/usr/bin', HOME: '/home/me' }, 'linux');
   const entries = env.PATH!.split(':');
   expect(entries.at(-1)).toBe(managedUvDirectory());
   expect(entries.indexOf('/home/me/.local/bin')).toBeLessThan(entries.length - 1);
+});
+
+it.runIf(process.platform === 'win32')('adds the managed uv folder to the Windows plugin PATH', () => {
+  const env = pluginEnvironment({ PATH: 'C:\\Windows\\System32', USERPROFILE: 'C:\\Users\\me' }, 'win32');
+  expect((env.PATH ?? env.Path)!.split(';')).toContain(managedUvDirectory());
 });
