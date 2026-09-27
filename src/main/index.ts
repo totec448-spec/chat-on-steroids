@@ -119,6 +119,10 @@ function createWindow(): void {
       titleBarStyle: 'hidden' as const,
       titleBarOverlay: titleBarOverlayForTheme(getConfig().ui.theme, getConfig().ui.appearance)
     } : {}),
+    // macOS: the app's own top bar is the title bar, with the traffic lights inside it, instead
+    // of a native title row above a second row that only held the sidebar and View buttons.
+    // The overlay publishes the traffic-light area as env(titlebar-area-x) to the page.
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hidden' as const, titleBarOverlay: true } : {}),
     // Painted before the renderer loads, so a dark window never flashes white.
     backgroundColor: windowBackgroundForTheme(getConfig().ui.theme, getConfig().ui.appearance),
     title: 'Chat On Steroids',
