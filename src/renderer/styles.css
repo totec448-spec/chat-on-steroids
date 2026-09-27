@@ -58,7 +58,8 @@
 .plugin-menu.skill-import-menu { position: relative; top: auto; right: auto; flex: 0 0 44px; }
 .skill-import-menu > summary.plugin-add { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--edge); border-radius: var(--pill); background: var(--card); color: var(--ink); }
 .skill-import-menu .plugin-menu-actions { min-width: 190px; top: 50px; }
-.skill-library-card .plugin-entry { align-items: stretch; min-height: 122px; padding: 16px; }
+/* Skill cards reuse the pet card; they have no status badge or second action to leave room for. */
+.skill-library-card.pet-library-card .plugin-entry { align-items: stretch; min-height: 122px; padding: 16px; }
 .skill-library-card .plugin-card-title { display: flex; flex-direction: column; }
 .skill-library-card .plugin-card-title :is(h2, p) { padding-right: 38px; }
 .skill-library-icon { display: grid; place-items: center; align-self: center; flex: 0 0 58px; width: 58px; height: 64px; border-radius: 12px; background: var(--sunk); color: var(--ink); }
