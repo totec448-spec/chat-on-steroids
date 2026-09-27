@@ -177,6 +177,7 @@ function replaceComposerDraft(): void { composerDraftGeneration++; skillPicker?.
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
+let reviewPanel: ReturnType<typeof createFilePanel> | null = null;
 const expandedWorkers = new Set<string>();
 const inputDrafts = new Map<string, string>();
 const newChatTasks = new Map<string, { objective: string; automation: string; loopDelivery: string }>();
@@ -797,6 +798,7 @@ function paintSessions(): void {
     ?.querySelector<HTMLElement>('.project-heading')?.focus({ preventScroll: true });
   agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
   filePanel?.update(selectedLocalProject());
+  reviewPanel?.update(selectedLocalProject());
   workspaceDocks?.sync();
   workspaceTerminal?.update(selectedLocalProject());
   rightWorkspaceTerminal?.update(selectedLocalProject());
@@ -1725,6 +1727,26 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
     head.append(el('span', 'tool-change-count', () => `+${added} −${removed}${approximate ? t(' (approx.)') : ''}`));
   }
   if (summary.metric) head.append(el('span', 'metric', summary.metric));
+  const project = context ? null : selectedLocalProject();
+  const sessionId = context ? null : selectedId;
+  const reviewIndices = call.outcome === 'ok' ? (call.changes ?? []).flatMap((change, index) =>
+    change.reviewAssetId ? [index] : []).slice(0, 8) : [];
+  if (project && sessionId && reviewIndices.length) {
+    const review = el('button', 'tool-open-diff') as HTMLButtonElement;
+    review.type = 'button';
+    review.append(icon('i-git-diff'));
+    ui(review, 'title', () => t('Review this edit'));
+    ui(review, 'aria-label', () => t('Review this edit'));
+    review.addEventListener('click', click => {
+      click.preventDefault();
+      click.stopPropagation();
+      if (selectedId !== sessionId || selectedLocalProject()?.id !== project.id) return;
+      void reviewPanel?.openReview(project.id, sessionId, call.callId, reviewIndices).then(opened => {
+        if (!opened) toast(t('Recorded edit is unavailable.'));
+      });
+    });
+    head.append(review);
+  }
   box.append(head);
 
   // Collapsed calls only need their headline. Large recorded results must not
@@ -4367,6 +4389,7 @@ export function initChat(next: Deps): void {
   filePanel = createFilePanel({
     host: chatHost, mount: docks.body,
     onShow: () => { agentPanel?.hide(); docks.adopt('files'); },
+    onOpenChanges: () => docks.activate('review'),
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); },
     captureAttachment: () => {
       const owner = composerDraftOwner();
@@ -4374,16 +4397,21 @@ export function initChat(next: Deps): void {
     }
   });
   filePanel.update(selectedLocalProject());
-  docks.register('files', 'Files', 'i-folder', mount => {
-    filePanel?.mountAt(mount); void filePanel?.show();
-  }, () => filePanel?.hide(), () => selectedLocalProject() !== null);
-  docks.register('agents', 'Sub-agents', 'i-agents', () => agentPanel?.show(), () => agentPanel?.hide(), () => selectedId !== null);
+  reviewPanel = createFilePanel({
+    host: chatHost, mount: docks.body, reviewOnly: true,
+    onShow: () => docks.adopt('review'),
+    onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); }
+  });
+  reviewPanel.update(selectedLocalProject());
   workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody,
     { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false) });
   workspaceTerminal.update(selectedLocalProject());
   rightWorkspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.body,
     { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync() });
   rightWorkspaceTerminal.update(selectedLocalProject());
+  docks.register('review', 'Review', 'i-git-diff', mount => {
+    reviewPanel?.mountAt(mount); void reviewPanel?.show();
+  }, () => reviewPanel?.hide(), () => selectedLocalProject() !== null);
   docks.registerTerminal({
     show: (mount, createIfEmpty) => rightWorkspaceTerminal?.show(mount, createIfEmpty),
     hide: () => rightWorkspaceTerminal?.hide(), canCreate: () => true,
@@ -4394,6 +4422,10 @@ export function initChat(next: Deps): void {
     show: (mount, createIfEmpty) => workspaceTerminal?.show(mount, createIfEmpty),
     hide: () => workspaceTerminal?.hide()
   });
+  docks.register('files', 'Files', 'i-folder', mount => {
+    filePanel?.mountAt(mount); void filePanel?.show();
+  }, () => filePanel?.hide(), () => selectedLocalProject() !== null);
+  docks.register('agents', 'Sub-agents', 'i-agents', () => agentPanel?.show(), () => agentPanel?.hide(), () => selectedId !== null);
   $('attachImages').addEventListener('click', async () => {
     const owner = composerDraftOwner();
     appendImages(owner, await run(api.chooseFiles()));

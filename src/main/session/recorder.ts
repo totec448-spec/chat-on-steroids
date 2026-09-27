@@ -959,6 +959,7 @@ export async function repairDeterministicAttribution(affected?: ReadonlySet<stri
         for (const { event } of group) {
           if (event.call.args.assetId) assets.set(event.call.args.assetId, 'text/plain');
           if (event.call.result.assetId) assets.set(event.call.result.assetId, 'text/plain');
+          for (const change of event.call.changes ?? []) if (change.reviewAssetId) assets.set(change.reviewAssetId, 'text/plain');
           for (const asset of event.call.assets ?? []) assets.set(asset.id, asset.mimeType);
         }
         for (const [assetId, mimeType] of assets) {
@@ -1379,6 +1380,26 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       if (summary.tone !== 'bad') summary.tone = 'warn';
     }
 
+    // Review belongs to the exact applied operation, not HEAD or the file's later state.
+    // Keep source out of the JSONL row and cap retained snapshots at the recorder owner.
+    const changes = evidence.changes.map(change => ({ ...change }));
+    if (input.outcome === 'ok') {
+      let reviewBytes = 0;
+      for (const review of evidence.reviews.slice(0, 8)) {
+        const change = changes[review.changeIndex];
+        if (!change) continue;
+        const bytes = Buffer.from(JSON.stringify({ before: review.before, after: review.after }), 'utf8');
+        if (bytes.length > 512 * 1024 || reviewBytes + bytes.length > 2 * 1024 * 1024) continue;
+        try {
+          const asset = await writeAsset(sessionId, bytes, 'text/plain');
+          change.reviewAssetId = asset.id;
+          reviewBytes += bytes.length;
+        } catch {
+          // A recording quota must not turn a successful file edit into a failed tool call.
+        }
+      }
+    }
+
     const call: ToolCallRecord = {
       ...(input.nested === true ? { nested: true } : {}),
       ...(target.attribution === 'request_id' && target.conversationId && evidence.processCompletion && evidence.processSessionId && input.tool === 'exec_command'
@@ -1400,7 +1421,7 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       outcome: input.outcome,
       durationMs: input.durationMs,
       summary,
-      ...(evidence.changes.length > 0 ? { changes: evidence.changes } : {}),
+      ...(changes.length > 0 ? { changes } : {}),
       ...(assets.length > 0 ? { assets } : {}),
       ...(input.endsActivity === true ? { endsActivity: true as const } : {})
     };

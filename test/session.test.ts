@@ -48,6 +48,7 @@ import {
   readEvents,
   readActivityEvents,
   readRecentEvents,
+  readToolEditReview,
   readLatestUserMessage,
   turnHasMcpCall,
   conversationHasMcpCallSince,
@@ -107,6 +108,39 @@ const evidence = (patch: Partial<ReturnType<typeof emptyEvidence>> = {}) => ({ .
 // ------------------------------------------------------------------- store
 
 describe('session store', () => {
+  it('keeps an exact tool edit review after later edits, but never invents one for failed or oversized calls', async () => {
+    const conversationId = 'conv-exact-edit-review';
+    const sessionId = await sessionForConversation(conversationId);
+    const changed = evidence({
+      changes: [{ path: '/project/src/main.ts', added: 1, removed: 1, approximate: false }],
+      reviews: [{ changeIndex: 0, before: 'one\n', after: 'two\n' }]
+    });
+    const first = await recordToolCall({ tool: 'apply_patch', args: { patch: 'first' },
+      content: [{ type: 'text', text: 'ok' }], outcome: 'ok', durationMs: 1, startedAt: Date.now(),
+      conversationId, sessionId, evidence: changed });
+    expect(first?.changes?.[0]?.reviewAssetId).toMatch(/^[a-f0-9]{32}\.txt$/);
+    const second = await recordToolCall({ tool: 'apply_patch', args: { patch: 'second' },
+      content: [{ type: 'text', text: 'ok' }], outcome: 'ok', durationMs: 1, startedAt: Date.now() + 1,
+      conversationId, sessionId, evidence: evidence({
+        changes: [{ path: '/project/src/main.ts', added: 1, removed: 1, approximate: false }],
+        reviews: [{ changeIndex: 0, before: 'two\n', after: 'three\n' }]
+      }) });
+    expect(await readToolEditReview(sessionId!, first!.callId, 0)).toMatchObject({ baseText: 'one\n', currentText: 'two\n' });
+    expect(await readToolEditReview(sessionId!, second!.callId, 0)).toMatchObject({ baseText: 'two\n', currentText: 'three\n' });
+    expect(await readToolEditReview(sessionId!, first!.callId, 1)).toBeNull();
+    const failed = await recordToolCall({ tool: 'apply_patch', args: { patch: 'failed' },
+      content: [{ type: 'text', text: 'failed' }], outcome: 'tool_execution_error', durationMs: 1, startedAt: Date.now() + 2,
+      conversationId, sessionId, evidence: changed });
+    expect(failed?.changes?.[0]?.reviewAssetId).toBeUndefined();
+    const huge = await recordToolCall({ tool: 'apply_patch', args: { patch: 'huge' },
+      content: [{ type: 'text', text: 'ok' }], outcome: 'ok', durationMs: 1, startedAt: Date.now() + 3,
+      conversationId, sessionId, evidence: evidence({
+        changes: [{ path: '/project/src/huge.ts', added: 1, removed: 0, approximate: false }],
+        reviews: [{ changeIndex: 0, before: '', after: 'x'.repeat(512 * 1024) }]
+      }) });
+    expect(huge?.changes?.[0]?.reviewAssetId).toBeUndefined();
+  });
+
   it('uses original call time and exact conversation for late attribution health proof', async () => {
     const conversationId = 'health-current';
     const session = await createSession({ title: 'attribution health', conversationId });
