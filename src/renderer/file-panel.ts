@@ -1026,7 +1026,7 @@ export function createFilePanel(options: FilePanelOptions) {
     if (change.status === 'U') {
       stats.title = t('All lines in this untracked file');
       stats.append(el('span', 'is-muted', change.binary ? t('Binary') :
-        change.additions === null ? '—' : t('{0} lines', [change.additions])));
+        change.additions === null ? '—' : change.additions === 1 ? t('1 line') : t('{0} lines', [change.additions])));
       return stats;
     }
     stats.title = gitSnapshot?.comparison ? t('Changes from comparison base') : t('Changes since HEAD');
