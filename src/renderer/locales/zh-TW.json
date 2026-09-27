@@ -1679,6 +1679,13 @@
   "Skill imported into the CoS library": "技能已匯入 CoS 技能庫",
   "All {0} steps done": "全部 {0} 步已完成",
   "{0} of {1} steps done": "已完成 {0}/{1} 步",
+  "Weekly limit": "每週限額",
+  "{0}-hour limit": "{0} 小時限額",
+  "Shared across all models": "所有模型共用",
+  "Estimated context processed per tool call · last {0} weeks": "每次工具呼叫處理的估算上下文 · 最近 {0} 週",
+  "Estimated cost per day, last {0} days": "每日估算費用，最近 {0} 天",
+  "{0} estimated tokens": "估算 {0} 個 Token",
+  "Daily breakdown": "每日明細",
   "Recommended": "推薦",
   "Install": "安裝"
 }

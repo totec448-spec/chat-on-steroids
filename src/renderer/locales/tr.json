@@ -1679,6 +1679,13 @@
   "Skill imported into the CoS library": "Beceri CoS kitaplığına aktarıldı",
   "All {0} steps done": "{0} adımın tümü tamamlandı",
   "{0} of {1} steps done": "{1} adımdan {0} tanesi tamamlandı",
+  "Weekly limit": "Haftalık sınır",
+  "{0}-hour limit": "{0} saatlik sınır",
+  "Shared across all models": "Tüm modeller arasında ortak",
+  "Estimated context processed per tool call · last {0} weeks": "Araç çağrısı başına işlenen tahmini bağlam · son {0} hafta",
+  "Estimated cost per day, last {0} days": "Günlük tahmini maliyet, son {0} gün",
+  "{0} estimated tokens": "{0} tahmini token",
+  "Daily breakdown": "Günlük döküm",
   "Recommended": "Önerilenler",
   "Install": "Yükle"
 }

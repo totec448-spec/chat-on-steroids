@@ -1679,6 +1679,13 @@
   "Skill imported into the CoS library": "Skill in die CoS-Bibliothek importiert",
   "All {0} steps done": "Alle {0} Schritte erledigt",
   "{0} of {1} steps done": "{0} von {1} Schritten erledigt",
+  "Weekly limit": "Wochenlimit",
+  "{0}-hour limit": "{0}-Stunden-Limit",
+  "Shared across all models": "Gilt für alle Modelle gemeinsam",
+  "Estimated context processed per tool call · last {0} weeks": "Geschätzter verarbeiteter Kontext pro Tool-Aufruf · letzte {0} Wochen",
+  "Estimated cost per day, last {0} days": "Geschätzte Kosten pro Tag, letzte {0} Tage",
+  "{0} estimated tokens": "{0} geschätzte Tokens",
+  "Daily breakdown": "Aufschlüsselung pro Tag",
   "Recommended": "Empfohlen",
   "Install": "Installieren"
 }
