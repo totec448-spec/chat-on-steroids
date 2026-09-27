@@ -1,0 +1,1046 @@
+{
+  "content_app_did_not_answer": {
+    "message": "Die App hat nicht geantwortet."
+  },
+  "content_app_did_not_answer_lower": {
+    "message": "die App hat nicht geantwortet"
+  },
+  "content_app_not_running": {
+    "message": "Chat On Steroids läuft auf diesem PC nicht."
+  },
+  "content_auto_compaction": {
+    "message": "Automatisches Kompaktieren"
+  },
+  "content_auto_compaction_blocked_off": {
+    "message": "hier aus: Dieser Chat ist in der App blockiert"
+  },
+  "content_auto_compaction_manual": {
+    "message": "diesen Chat von Hand kompaktieren"
+  },
+  "content_auto_compaction_off": {
+    "message": "Automatisches Kompaktieren aus"
+  },
+  "content_auto_compaction_on": {
+    "message": "Automatisches Kompaktieren an$1"
+  },
+  "content_auto_compaction_threshold_app": {
+    "message": "Schwelle in der App festgelegt"
+  },
+  "content_auto_compaction_worker_off": {
+    "message": "hier aus: Worker-Chats werden nie automatisch kompaktiert"
+  },
+  "content_bootstrap_composer_changed_authorizing": {
+    "message": "das Eingabefeld hat sich während der Freigabe des Starttexts geändert; der Entwurf blieb erhalten und es wurde nichts gesendet"
+  },
+  "content_bootstrap_composer_changed_before_send": {
+    "message": "das Eingabefeld hat sich vor dem Senden des Starttexts geändert; der Entwurf blieb erhalten"
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "ChatGPT hat das Eingabefeld beim Einfügen des Starttexts ersetzt"
+  },
+  "content_bootstrap_composer_unavailable": {
+    "message": "ChatGPT hat nach der Modellauswahl kein nutzbares Eingabefeld mehr angezeigt"
+  },
+  "content_bootstrap_fresh_chat_changed": {
+    "message": "der markierte neue Chat hat sich vor dem Senden des Starttexts geändert; es wurde nichts gesendet"
+  },
+  "content_bootstrap_handoff": {
+    "message": "Die Übergabe-Zusammenfassung, die diese App übernommen hat – nicht von dir getippt"
+  },
+  "content_bootstrap_insert_refused": {
+    "message": "ChatGPT hat den eingefügten Text abgelehnt$1"
+  },
+  "content_bootstrap_missing_target": {
+    "message": "er wurde einem bereits bestehenden Chat angeboten und nennt keinen"
+  },
+  "content_bootstrap_model_unavailable": {
+    "message": "Das gewünschte Modell oder die Denkstufe ist in ChatGPT nicht verfügbar oder konnte nicht bestätigt werden"
+  },
+  "content_bootstrap_project_not_authorized": {
+    "message": "der Befehl hat das Öffnen des Projekts nicht erlaubt; es wurde nichts gesendet"
+  },
+  "content_bootstrap_project_open_failed": {
+    "message": "ChatGPT konnte das Quellprojekt nicht über seinen eigenen Link öffnen; es wurde nichts gesendet"
+  },
+  "content_bootstrap_project_source_changed": {
+    "message": "das Projekt passt nicht mehr zur Quellunterhaltung; es wurde nichts gesendet"
+  },
+  "content_bootstrap_resume_marker_invalid": {
+    "message": "der Starttext zum Fortsetzen hatte keine gültige Fortsetzungsmarke"
+  },
+  "content_bootstrap_send_not_accepted": {
+    "message": "ChatGPT hat das Senden des Starttexts nicht angenommen"
+  },
+  "content_bootstrap_target_changed": {
+    "message": "der Chat, für den diese Nachricht gedacht war, hat sich vor dem Senden geändert; es wurde nichts gesendet"
+  },
+  "content_bootstrap_worker": {
+    "message": "Das ist $1 – die Anweisung dieser App an den Worker, nicht von dir getippt"
+  },
+  "content_bootstrap_wrong_conversation": {
+    "message": "die dafür geöffnete Seite zeigte eine andere Unterhaltung"
+  },
+  "content_browser_disconnected": {
+    "message": "Die Browserverbindung in Chat On Steroids ist getrennt."
+  },
+  "content_cancel": {
+    "message": "Abbrechen"
+  },
+  "content_chat_blocked": {
+    "message": "Chat blockiert"
+  },
+  "content_chat_blocked_tip": {
+    "message": "Dieser Chat ist in der App Chat On Steroids blockiert: Seine Tool-Aufrufe werden abgelehnt, und Goal, Loop und automatisches Kompaktieren sind aus. Zum Freigeben öffnest du in der App den Tab „Chat“, zeigst in der Sitzungsliste auf diesen Chat und klickst auf sein Blockiersymbol."
+  },
+  "content_chat_still_opening": {
+    "message": "dieser Chat wird noch geöffnet – versuch es gleich noch einmal"
+  },
+  "content_chatgpt_message_box_not_ready": {
+    "message": "Das Nachrichtenfeld von ChatGPT ist nicht bereit ($1). Warte, bis die Seite geladen ist, und versuch es erneut."
+  },
+  "content_chatgpt_tool": {
+    "message": "ChatGPT-Tool"
+  },
+  "content_clear": {
+    "message": "Leeren"
+  },
+  "content_compact": {
+    "message": "Kompaktieren"
+  },
+  "content_compact_already_underway": {
+    "message": "In diesem Chat wird bereits kompaktiert. Warte darauf oder brich es ab."
+  },
+  "content_compact_app_opening_fresh": {
+    "message": "Die App versucht, den neuen Chat zu öffnen."
+  },
+  "content_compact_asking": {
+    "message": "Wird angefragt …"
+  },
+  "content_compact_attempt_not_repeated": {
+    "message": "$1. Der gespeicherte Versuch wird nicht zweimal gesendet."
+  },
+  "content_compact_attempt_owned": {
+    "message": "Der gespeicherte Übergabeversuch läuft bereits; die markierte Nachricht in ChatGPT wird abgeglichen."
+  },
+  "content_compact_blocked_unavailable_hint": {
+    "message": "Ein blockierter Chat wird nie kompaktiert oder fortgesetzt: Der Ersatz-Chat liefe ohne seine Tools. Gib ihn zuerst in der App frei."
+  },
+  "content_compact_cancel": {
+    "message": "Kompaktieren abbrechen"
+  },
+  "content_compact_cancel_aria": {
+    "message": "Kompaktieren & fortsetzen abbrechen"
+  },
+  "content_compact_cancel_failed": {
+    "message": "Das Kompaktieren konnte nicht abgebrochen werden."
+  },
+  "content_compact_chat_changed_before_start": {
+    "message": "Dieser Chat hat sich geändert, bevor das Kompaktieren beginnen konnte."
+  },
+  "content_compact_chat_changed_preparing": {
+    "message": "Der Chat hat sich beim Vorbereiten der Übergabe geändert. Es wurde nichts gesendet."
+  },
+  "content_compact_chat_changed_stopping": {
+    "message": "Dieser Chat hat sich geändert, während das Kompaktieren den Durchlauf gestoppt hat."
+  },
+  "content_compact_chat_changed_waiting_results": {
+    "message": "Dieser Chat hat sich geändert, während das Kompaktieren auf Tool-Ergebnisse gewartet hat."
+  },
+  "content_compact_chat_changed_waiting_tools": {
+    "message": "Dieser Chat hat sich geändert, während das Kompaktieren auf lokale Tools gewartet hat."
+  },
+  "content_compact_chatgpt_writing": {
+    "message": "ChatGPT schreibt die Übergabe"
+  },
+  "content_compact_existing_draft": {
+    "message": "In ChatGPT steht schon ein Entwurf; leere das Nachrichtenfeld, bevor du die Übergabe anforderst."
+  },
+  "content_compact_failed": {
+    "message": "Kompaktieren fehlgeschlagen"
+  },
+  "content_compact_failed_request_unconfirmed": {
+    "message": "$1 Die App hat noch nicht bestätigt, dass diese fehlgeschlagene Anfrage abgeschlossen wurde."
+  },
+  "content_compact_fresh_open": {
+    "message": "Der neue Chat ist offen"
+  },
+  "content_compact_handoff_already_submitted": {
+    "message": "Die Übergabe-Anweisung wurde hier bereits gesendet. Sie wird von selbst fertig, oder du brichst sie ab."
+  },
+  "content_compact_handoff_incomplete_detail": {
+    "message": "Die Übergabe-Antwort wurde nicht fertig. Brich das Kompaktieren ab, um zu diesem Chat zurückzukehren."
+  },
+  "content_compact_handoff_problem": {
+    "message": "ChatGPT hat beim Vorbereiten der Übergabe ein Problem gemeldet."
+  },
+  "content_compact_handoff_request_failed": {
+    "message": "ChatGPT konnte nicht um eine Übergabe gebeten werden: $1"
+  },
+  "content_compact_handoff_stopped_detail": {
+    "message": "Die Übergabe-Antwort wurde gestoppt. Brich das Kompaktieren ab, um zu diesem Chat zurückzukehren."
+  },
+  "content_compact_insert_failed": {
+    "message": "Der Browser konnte die Übergabe-Anfrage nicht einfügen ($1). Prüfe, ob das Nachrichtenfeld verfügbar ist, und versuch es erneut."
+  },
+  "content_compact_message_box_changed": {
+    "message": "Das Nachrichtenfeld hat sich geändert, bevor die Übergabe-Anweisung gesendet werden konnte. Sein Entwurf blieb erhalten; es wurde nichts kompaktiert."
+  },
+  "content_compact_message_box_changed_preserved": {
+    "message": "Das Nachrichtenfeld hat sich geändert, bevor die Übergabe gesendet werden konnte. Sein Entwurf blieb erhalten."
+  },
+  "content_compact_missing_handoff_instruction": {
+    "message": "Die App hat die Übergabe-Anweisung nicht gesendet."
+  },
+  "content_compact_missing_token": {
+    "message": "Die App hat kein Kompaktierungs-Token gesendet, daher ließ sich nichts verfolgen."
+  },
+  "content_compact_nothing_yet": {
+    "message": "Noch nichts zu kompaktieren – sende eine Nachricht oder setz ein Goal, dann schreibt es eine."
+  },
+  "content_compact_opening_fresh": {
+    "message": "Übergabe gespeichert, der neue Chat wird geöffnet"
+  },
+  "content_compact_policy_unverified": {
+    "message": "Es ließ sich nicht prüfen, ob dieser Chat kompaktiert werden darf."
+  },
+  "content_compact_results_unconfirmed": {
+    "message": "ChatGPT hat den Empfang der letzten Tool-Ergebnisse nicht bestätigt. Es wurde nichts kompaktiert."
+  },
+  "content_compact_resume_cancelled": {
+    "message": "Fortsetzen abgebrochen"
+  },
+  "content_compact_resume_now": {
+    "message": "Jetzt kompaktieren & fortsetzen"
+  },
+  "content_compact_send_ambiguous": {
+    "message": "Das Ergebnis des Sendens war unklar. Nichts wird doppelt gesendet; brich ausdrücklich ab, falls ChatGPT es nie angenommen hat."
+  },
+  "content_compact_send_not_ready": {
+    "message": "Die Übergabe-Anfrage wurde nicht gesendet, weil die Senden-Schaltfläche oder das Nachrichtenfeld nicht bereit war. Versuch es erneut, wenn die Seite bereit ist."
+  },
+  "content_compact_send_permission_unconfirmed": {
+    "message": "Hier wurde nichts gesendet: Die Sendefreigabe für die Übergabe wurde nicht bestätigt. Die bestehende Anfrage wird nicht doppelt gesendet."
+  },
+  "content_compact_send_state_unverified": {
+    "message": "Der Sendestatus der Übergabe ließ sich nicht prüfen. Es wurde nichts gestoppt."
+  },
+  "content_compact_settling": {
+    "message": "Wird abgeschlossen …"
+  },
+  "content_compact_source_not_loaded": {
+    "message": "Die ursprüngliche Frage ist noch nicht geladen. Es wurde nichts kompaktiert; es wird auf die Quellunterhaltung gewartet."
+  },
+  "content_compact_starting": {
+    "message": "Wird gestartet …"
+  },
+  "content_compact_step_opening": {
+    "message": "Neuen Chat öffnen"
+  },
+  "content_compact_step_preparing": {
+    "message": "Vorbereiten"
+  },
+  "content_compact_step_saving": {
+    "message": "Speichern"
+  },
+  "content_compact_step_writing": {
+    "message": "Übergabe schreiben"
+  },
+  "content_compact_stop_failed": {
+    "message": "ChatGPT hat den laufenden Durchlauf nicht gestoppt. Es wurde nichts kompaktiert."
+  },
+  "content_compact_stopping": {
+    "message": "Wird gestoppt …"
+  },
+  "content_compact_ticket_store_failed": {
+    "message": "Das Kompaktierungs-Ticket konnte nicht gespeichert werden."
+  },
+  "content_compact_tools_still_running": {
+    "message": "Lokale Tools liefen nach der Wartezeit noch. Es wurde nichts kompaktiert."
+  },
+  "content_compact_tools_stop_unverified": {
+    "message": "Es ließ sich nicht prüfen, ob die lokalen Tools gestoppt haben. Es wurde nichts kompaktiert."
+  },
+  "content_compact_unavailable": {
+    "message": "Kompaktieren & fortsetzen nicht verfügbar"
+  },
+  "content_compact_waiting_response": {
+    "message": "Warte auf die Übergabe-Antwort"
+  },
+  "content_compact_waiting_store": {
+    "message": "Die Zusammenfassung ist fertig; es wird gewartet, bis die App sie speichert."
+  },
+  "content_compact_worker_unavailable_hint": {
+    "message": "Worker-Chats bleiben in ihrer bestehenden Unterhaltung und werden nie von Hand kompaktiert oder fortgesetzt."
+  },
+  "content_connector_identity_ambiguous": {
+    "message": "Die Identität des installierten Connectors ist nicht verfügbar oder nicht eindeutig"
+  },
+  "content_connector_refresh_claim_unconfirmed": {
+    "message": "Die Übernahme der Connector-Aktualisierung oder die Zuständigkeit für die Seite wurde nicht bestätigt"
+  },
+  "content_connector_refresh_schema_unchanged": {
+    "message": "Die Aktualisierung wurde angefordert, aber kein geändertes passendes Schema beobachtet"
+  },
+  "content_connector_refresh_unverified": {
+    "message": "Die Connector-Aktualisierung ließ sich nicht prüfen"
+  },
+  "content_connector_schema_no_refresh": {
+    "message": "Das Connector-Schema weicht ab, aber ChatGPT bietet keine Schaltfläche zum Aktualisieren. Erstelle oder veröffentliche diese eigene App neu, um das aktuelle Tool-Schema zu laden."
+  },
+  "content_connector_settings_unreadable": {
+    "message": "Die Connector-Einstellungen ließen sich auf der Seite dieser Anfrage nicht lesen"
+  },
+  "content_connector_settings_unverified": {
+    "message": "Die genauen Connector-Einstellungen ließen sich nicht prüfen"
+  },
+  "content_delivery_attachment_transfer_failed": {
+    "message": "Die Übertragung des Anhangs ist fehlgeschlagen. Die Nachricht wurde nicht gesendet."
+  },
+  "content_delivery_attachment_transfer_incomplete": {
+    "message": "Die Übertragung des Anhangs war unvollständig."
+  },
+  "content_delivery_attachment_upload_unconfirmed": {
+    "message": "Das Hochladen des Anhangs wurde nicht bestätigt. Prüfe den ungesendeten Entwurf und mögliche Dateifehler in ChatGPT, bevor du es erneut versuchst."
+  },
+  "content_delivery_chat_changed": {
+    "message": "Der Chat hat sich vor der direkten Zustellung geändert."
+  },
+  "content_delivery_chat_changed_or_busy": {
+    "message": "Der Chat hat sich geändert oder nicht gestoppt. Die Nachricht wurde nicht gesendet."
+  },
+  "content_delivery_composer_changed": {
+    "message": "Das Eingabefeld von ChatGPT hat sich vor dem Senden geändert"
+  },
+  "content_delivery_composer_stuck": {
+    "message": "ChatGPT hat die Antwort beendet, aber das Eingabefeld hängt noch auf „Stopp“. Die Seite wird wiederhergestellt, bevor die wartende Nachricht zugestellt wird."
+  },
+  "content_delivery_draft_preserved": {
+    "message": "Das Eingabefeld hat sich geändert; dein Entwurf blieb erhalten"
+  },
+  "content_delivery_editor_not_writable": {
+    "message": "Das Eingabefeld von ChatGPT wurde vor dem Senden nicht beschreibbar."
+  },
+  "content_delivery_existing_draft": {
+    "message": "In ChatGPT steht bereits ein ungesendeter Entwurf. Sende oder leere ihn in Chrome, bevor du es erneut versuchst."
+  },
+  "content_delivery_model_unconfirmed": {
+    "message": "Das gewünschte Modell oder die Denkstufe ließ sich nicht bestätigen"
+  },
+  "content_delivery_stop_failed": {
+    "message": "Die laufende Antwort konnte nicht gestoppt werden."
+  },
+  "content_delivery_temporary_chat_unconfirmed": {
+    "message": "Der temporäre Chat wurde nicht bestätigt. Öffne den Helfer-Tab und schließ dort die Einführung zum temporären Chat ab."
+  },
+  "content_delivery_text_not_accepted": {
+    "message": "ChatGPT hat den Text nicht angenommen$1"
+  },
+  "content_delivery_turn_changed": {
+    "message": "Der Durchlauf hat sich vor der direkten Zustellung geändert."
+  },
+  "content_dismiss": {
+    "message": "Schließen"
+  },
+  "content_empty": {
+    "message": "(leer)"
+  },
+  "content_error_compaction_running": {
+    "message": "Gerade wird ein anderer Chat kompaktiert."
+  },
+  "content_error_session_not_recorded": {
+    "message": "Für diesen Chat gibt es noch keine aufgezeichnete lokale Sitzung."
+  },
+  "content_error_turn_still_generating": {
+    "message": "Warte zuerst, bis dieser ChatGPT-Durchlauf fertig ist."
+  },
+  "content_failed": {
+    "message": "Fehlgeschlagen"
+  },
+  "content_goal_add_specific": {
+    "message": "konkretes Goal hinzufügen"
+  },
+  "content_goal_add_specific_hint": {
+    "message": "Schreib, was dieser Chat erreichen soll. Er schreibt dann weiter, bis es erreicht ist, und hört dort auf."
+  },
+  "content_goal_add_to_start": {
+    "message": "Füge ein Goal oder einen Loop hinzu, um diesen Chat zu starten"
+  },
+  "content_goal_answer_never_settled": {
+    "message": "die Antwort hat sich ständig weiter verändert, daher wurde nichts geschrieben"
+  },
+  "content_goal_answering": {
+    "message": "$1 antwortet"
+  },
+  "content_goal_backend_chatgpt_helper": {
+    "message": "ChatGPT-Helfer"
+  },
+  "content_goal_backend_custom_endpoint": {
+    "message": "eigener Endpunkt"
+  },
+  "content_goal_backend_no_answer": {
+    "message": "$1 hat nicht geantwortet"
+  },
+  "content_goal_backend_offline_templates": {
+    "message": "Offline-Vorlagen"
+  },
+  "content_goal_backend_offline_templates_title": {
+    "message": "Offline-Vorlagen"
+  },
+  "content_goal_checking_again": {
+    "message": "Neue Prüfung in $1"
+  },
+  "content_goal_checking_finished": {
+    "message": "Die Prüfung der Antwort ist abgeschlossen"
+  },
+  "content_goal_delivery": {
+    "message": "$1: $2"
+  },
+  "content_goal_delivery_after_turn_finish": {
+    "message": "Nach diesem Durchlauf + Abschluss"
+  },
+  "content_goal_delivery_only_finish": {
+    "message": "Nur Abschluss"
+  },
+  "content_goal_loop_off": {
+    "message": "Goal und Loop aus"
+  },
+  "content_goal_loop_stopped": {
+    "message": "Der Goal-Loop wurde gestoppt"
+  },
+  "content_goal_message_box_in_use": {
+    "message": "das Nachrichtenfeld war belegt, daher wurde nichts gesendet"
+  },
+  "content_goal_mode_aria": {
+    "message": "Goal-Modus"
+  },
+  "content_goal_new_chat_draft_refused": {
+    "message": "ChatGPT hat den Entwurf im neuen Chat nicht ersetzt"
+  },
+  "content_goal_no_api_key_unavailable": {
+    "message": "Kein API-Schlüssel – Goal und Loop nicht verfügbar"
+  },
+  "content_goal_nothing_sent": {
+    "message": "es wurde nichts gesendet"
+  },
+  "content_goal_off_blocked": {
+    "message": "Goal aus – dieser Chat ist in der App blockiert"
+  },
+  "content_goal_off_prime_writes": {
+    "message": "Goal aus – der Prime schreibt in diesen Chat"
+  },
+  "content_goal_on": {
+    "message": "Goal an"
+  },
+  "content_goal_on_chasing": {
+    "message": "Goal an – verfolgt das Ziel dieses Chats"
+  },
+  "content_goal_on_no_api_key": {
+    "message": "Goal an – kein API-Schlüssel"
+  },
+  "content_goal_opening_empty": {
+    "message": "das Modell hat nichts zum Einstieg geschrieben"
+  },
+  "content_goal_opening_on_goal": {
+    "message": "Dieser Chat wird mit seinem Ziel eröffnet"
+  },
+  "content_goal_placeholder": {
+    "message": "Was soll dieser Chat erreichen?"
+  },
+  "content_goal_reached": {
+    "message": "Ziel erreicht"
+  },
+  "content_goal_retrying": {
+    "message": "Goal wird in $1 Sekunden erneut versucht"
+  },
+  "content_goal_save": {
+    "message": "Als Goal speichern"
+  },
+  "content_goal_save_failed": {
+    "message": "das Goal konnte nicht in diesem Chat gespeichert werden"
+  },
+  "content_goal_send_failed": {
+    "message": "ChatGPT hat die Nachricht nicht gesendet"
+  },
+  "content_goal_sending_answer_to": {
+    "message": "Die Antwort wird an $1 gesendet"
+  },
+  "content_goal_sending_to_chatgpt": {
+    "message": "Wird an ChatGPT gesendet"
+  },
+  "content_goal_status_dismiss": {
+    "message": "Goal-Status schließen"
+  },
+  "content_goal_step_reading": {
+    "message": "Chat lesen"
+  },
+  "content_goal_step_sending": {
+    "message": "Senden"
+  },
+  "content_goal_step_settling": {
+    "message": "Antwort wird fertig"
+  },
+  "content_goal_step_writing": {
+    "message": "Antwort schreiben"
+  },
+  "content_goal_wait_recovery_activity": {
+    "message": "Warte nach der Wiederherstellung auf Aktivität"
+  },
+  "content_goal_wait_recovery_reload": {
+    "message": "Warte vor dem Neuladen zur Wiederherstellung"
+  },
+  "content_goal_wait_resumed": {
+    "message": "ChatGPT arbeitet wieder · Warte vor neuem Versuch"
+  },
+  "content_goal_wait_running_tools": {
+    "message": "Warte auf laufende Tools"
+  },
+  "content_goal_wait_tool_inactivity": {
+    "message": "Warte, bis die Tools ruhen"
+  },
+  "content_goal_wait_workers": {
+    "message": "Warte auf die Sub-Agenten dieses Chats"
+  },
+  "content_goal_writing_first_message": {
+    "message": "$1 schreibt die erste Nachricht"
+  },
+  "content_goal_wrote_next_message": {
+    "message": "$1 hat die nächste Nachricht geschrieben"
+  },
+  "content_loop_add_specific": {
+    "message": "konkreten Loop hinzufügen"
+  },
+  "content_loop_add_specific_hint": {
+    "message": "Schreib, was dieser Chat erreichen soll. Er schreibt dann endlos weiter – nur der Loop-Schieber beendet ihn."
+  },
+  "content_loop_continuation_paused": {
+    "message": "Loop-Fortsetzung pausiert"
+  },
+  "content_loop_on_never_stops": {
+    "message": "Loop an – hört nie von selbst auf"
+  },
+  "content_loop_on_no_api_key": {
+    "message": "Loop an – kein API-Schlüssel"
+  },
+  "content_loop_save": {
+    "message": "Als Loop speichern"
+  },
+  "content_meter_status": {
+    "message": "$1/$2 · Auto-Kompaktieren $3"
+  },
+  "content_mode_goal": {
+    "message": "Goal"
+  },
+  "content_mode_goal_hint": {
+    "message": "Antwortet an deiner Stelle, bis das Ziel dieses Chats erreicht ist, und hört dann auf. Geschrieben mit $1."
+  },
+  "content_mode_loop": {
+    "message": "Loop"
+  },
+  "content_mode_loop_hint": {
+    "message": "Antwortet endlos an deiner Stelle – nur dieser Schieber beendet es. Geschrieben mit $1."
+  },
+  "content_mode_note_blocked": {
+    "message": "in der App blockiert"
+  },
+  "content_mode_note_goal": {
+    "message": "antwortet bis zum Ziel"
+  },
+  "content_mode_note_key_required": {
+    "message": "OpenRouter-Schlüssel nötig"
+  },
+  "content_mode_note_loop": {
+    "message": "antwortet endlos"
+  },
+  "content_mode_note_off": {
+    "message": "hier werden keine Antworten geschrieben"
+  },
+  "content_mode_note_prime_writes": {
+    "message": "hier schreibt der Prime"
+  },
+  "content_mode_off": {
+    "message": "Aus"
+  },
+  "content_mode_off_hint": {
+    "message": "Hier wird nichts von selbst geschrieben."
+  },
+  "content_model_generic": {
+    "message": "das Modell"
+  },
+  "content_off": {
+    "message": "aus"
+  },
+  "content_on": {
+    "message": "an"
+  },
+  "content_opened": {
+    "message": "Geöffnet"
+  },
+  "content_opening": {
+    "message": "Wird geöffnet …"
+  },
+  "content_paused": {
+    "message": "Pausiert"
+  },
+  "content_saving": {
+    "message": "Wird gespeichert …"
+  },
+  "content_settings_aria": {
+    "message": "Einstellungen von Chat On Steroids"
+  },
+  "content_stage_handoff_attention": {
+    "message": "Die Übergabe-Antwort braucht deine Aufmerksamkeit"
+  },
+  "content_stage_handoff_stopped": {
+    "message": "Die Übergabe-Antwort wurde gestoppt"
+  },
+  "content_stage_opening_fresh_chat": {
+    "message": "Neuer Chat wird geöffnet"
+  },
+  "content_stage_saving_handoff": {
+    "message": "Übergabe wird gespeichert"
+  },
+  "content_stage_waiting_for_chrome": {
+    "message": "Warte auf Chrome"
+  },
+  "content_task_add": {
+    "message": "Aufgabe hinzufügen"
+  },
+  "content_task_api_key_unavailable": {
+    "message": "Hinterlege zuerst einen OpenRouter-API-Schlüssel in der App."
+  },
+  "content_task_blocked_unavailable": {
+    "message": "Dieser Chat ist in der App blockiert. Gib ihn dort frei, um ihn wieder zu steuern."
+  },
+  "content_task_change_hint": {
+    "message": "Ändere oder leere, was dieser Chat erreichen soll. Er läuft als $1."
+  },
+  "content_task_edit": {
+    "message": "Aufgabe bearbeiten"
+  },
+  "content_task_pick_mode_first": {
+    "message": "Wähl oben zuerst Goal oder Loop – bei „Aus“ wird nichts geschrieben."
+  },
+  "content_task_worker_unavailable": {
+    "message": "Ein Worker-Chat wird bereits von seinem Prime gesteuert."
+  },
+  "content_task_write_hint": {
+    "message": "Schreib, was dieser Chat erreichen soll. Er läuft als $1."
+  },
+  "content_tokens_from": {
+    "message": "von $1 Tokens"
+  },
+  "content_tool_calls_count": {
+    "message": "$1 Tool-Aufrufe"
+  },
+  "content_tool_details_loading": {
+    "message": "Aufgezeichnete Details werden geladen …"
+  },
+  "content_tool_details_unavailable": {
+    "message": "Für diesen Stand der Aktivität sind keine aufgezeichneten Details verfügbar."
+  },
+  "content_tool_more_changed_files": {
+    "message": "$1 weitere geänderte Dateien"
+  },
+  "content_tool_outcome_completed": {
+    "message": "abgeschlossen"
+  },
+  "content_tool_outcome_failed": {
+    "message": "fehlgeschlagen"
+  },
+  "content_tool_outcome_internal_error": {
+    "message": "interner Fehler"
+  },
+  "content_tool_outcome_refused": {
+    "message": "abgelehnt"
+  },
+  "content_tool_outcome_unknown": {
+    "message": "unbekannt"
+  },
+  "content_tool_preview_truncated": {
+    "message": "Vorschau gekürzt, ursprünglich $1 Zeichen."
+  },
+  "content_tool_ran": {
+    "message": "$1 ausgeführt"
+  },
+  "content_tool_recorded_arguments": {
+    "message": "Aufgezeichnete Argumente (geschwärzt)"
+  },
+  "content_tool_recorded_result": {
+    "message": "Aufgezeichnetes Ergebnis (geschwärzte Vorschau)"
+  },
+  "content_turn_auto_continue_stopped": {
+    "message": "Automatisches Weiter hat einen unveränderten stillen Durchlauf gestoppt."
+  },
+  "content_turn_chatgpt_interrupted": {
+    "message": "ChatGPT hat den Durchlauf als unterbrochen markiert"
+  },
+  "content_turn_outcome": {
+    "message": "Durchlauf $1"
+  },
+  "content_turn_replaced_by_user_message": {
+    "message": "eine neue Nutzernachricht hat den unfertigen Durchlauf ersetzt"
+  },
+  "content_turn_stalled_detail": {
+    "message": "zehn Minuten lang keine sichtbare Ausgabe und kein Fortschritt"
+  },
+  "content_turn_stalled_error": {
+    "message": "Zehn Minuten lang kein sichtbarer Fortschritt. Die App konnte nicht bestätigen, dass dieser Durchlauf beendet ist."
+  },
+  "content_turn_started": {
+    "message": "Durchlauf gestartet"
+  },
+  "content_turn_stop_requested": {
+    "message": "Stopp wurde angefordert; die Seite zeigt keine laufende Antwort mehr."
+  },
+  "content_unknown_error": {
+    "message": "unbekannter Fehler"
+  },
+  "content_waiting": {
+    "message": "Warte …"
+  },
+  "content_waiting_current_operation": {
+    "message": "Es wird noch auf den Abschluss des aktuellen Vorgangs gewartet"
+  },
+  "content_waiting_local_tool": {
+    "message": "Warte, bis ein lokales Tool fertig ist"
+  },
+  "content_waiting_local_tools": {
+    "message": "Warte, bis $1 lokale Tools fertig sind"
+  },
+  "content_worker_generic": {
+    "message": "ein Worker"
+  },
+  "content_worker_label": {
+    "message": "Worker"
+  },
+  "content_worker_retired": {
+    "message": "$1 wurde beendet, weil $2. Dieser Chat kann keine lokalen Tools mehr nutzen."
+  },
+  "content_worker_still_running": {
+    "message": "Worker läuft noch: $1"
+  },
+  "content_workers_still_running": {
+    "message": "$1 Worker laufen noch"
+  },
+  "content_workers_summary": {
+    "message": "$1 fertig · $2 laufen"
+  },
+  "content_workers_summary_failed": {
+    "message": "$1 fertig · $2 laufen · $3 fehlgeschlagen"
+  },
+  "content_working": {
+    "message": "arbeitet …"
+  },
+  "content_writing": {
+    "message": "Schreibt …"
+  },
+  "extension_action_title": {
+    "message": "Chat On Steroids"
+  },
+  "extension_description": {
+    "message": "Verbindet ChatGPT mit Chat On Steroids und steuert Browser-Tabs im Hintergrund über DOM, Screenshots und Entwicklertools."
+  },
+  "extension_name": {
+    "message": "Chat On Steroids Begleiter"
+  },
+  "popup_advanced": {
+    "message": "Erweitert"
+  },
+  "popup_attribution_agent_key": {
+    "message": "Agent-Schlüssel"
+  },
+  "popup_attribution_exact_request_id": {
+    "message": "exakte Request-ID"
+  },
+  "popup_attribution_not_placed_in_chat": {
+    "message": "keinem Chat zugeordnet"
+  },
+  "popup_attribution_only_chat_generating": {
+    "message": "der einzige Chat, der gerade antwortet"
+  },
+  "popup_attribution_request_id_not_resolved": {
+    "message": "Request-ID nicht aufgelöst"
+  },
+  "popup_attribution_tool_block_on_page": {
+    "message": "Tool-Block auf der Seite"
+  },
+  "popup_call_details": {
+    "message": "$1 – gefunden $2 · App-Empfang $3 · Zuständig $4 · Tool-Aktivität $5"
+  },
+  "popup_chat_id": {
+    "message": "Chat-ID"
+  },
+  "popup_chatgpt_tab": {
+    "message": "ChatGPT-Tab"
+  },
+  "popup_confirmed": {
+    "message": "bestätigt"
+  },
+  "popup_connect": {
+    "message": "Verbinden"
+  },
+  "popup_copied": {
+    "message": "kopiert"
+  },
+  "popup_copy": {
+    "message": "Kopieren"
+  },
+  "popup_copy_chat_id": {
+    "message": "Chat-ID kopieren"
+  },
+  "popup_copy_current_request_id": {
+    "message": "Aktuelle Request-ID kopieren"
+  },
+  "popup_copy_failed": {
+    "message": "Kopieren fehlgeschlagen"
+  },
+  "popup_count_held": {
+    "message": "$1 zurückgehalten"
+  },
+  "popup_count_held_in_page": {
+    "message": "$1 in der Seite zurückgehalten"
+  },
+  "popup_count_queued": {
+    "message": "$1 in der Warteschlange"
+  },
+  "popup_current_request": {
+    "message": "Aktuelle Anfrage"
+  },
+  "popup_detail_app": {
+    "message": "App"
+  },
+  "popup_detail_app_session": {
+    "message": "App-Sitzung"
+  },
+  "popup_detail_app_value": {
+    "message": "v$1 · Port $2"
+  },
+  "popup_detail_browser_queue_value": {
+    "message": "$1 zurückgehalten · $2 gesamt"
+  },
+  "popup_detail_chat_id": {
+    "message": "Chat-ID"
+  },
+  "popup_detail_delivered": {
+    "message": "zugestellt"
+  },
+  "popup_detail_extension": {
+    "message": "Erweiterung"
+  },
+  "popup_detail_extension_value": {
+    "message": "v$1 · Protokoll $2"
+  },
+  "popup_detail_in_this_browser": {
+    "message": "in diesem Browser"
+  },
+  "popup_detail_last_delivery": {
+    "message": "letzte Zustellung"
+  },
+  "popup_detail_last_delivery_value": {
+    "message": "$1 · $2 · vor $3"
+  },
+  "popup_detail_observed": {
+    "message": "beobachtet"
+  },
+  "popup_detail_observed_value": {
+    "message": "$1 Ereignisse · $2 Aufrufe"
+  },
+  "popup_detail_ownership": {
+    "message": "Zuständigkeit"
+  },
+  "popup_detail_page_sends": {
+    "message": "Sendungen der Seite"
+  },
+  "popup_detail_page_sends_value": {
+    "message": "$1 · $2 fehlgeschlagen"
+  },
+  "popup_detail_recorder": {
+    "message": "Rekorder"
+  },
+  "popup_detail_recorder_value": {
+    "message": "Fiber v$1 · Lauf $2"
+  },
+  "popup_detail_tab": {
+    "message": "Tab"
+  },
+  "popup_detail_tab_value": {
+    "message": "$1 · Epoche $2"
+  },
+  "popup_detail_turn": {
+    "message": "Durchlauf"
+  },
+  "popup_detail_turn_live": {
+    "message": "$1 · live"
+  },
+  "popup_no": {
+    "message": "nein"
+  },
+  "popup_no_record": {
+    "message": "kein Eintrag"
+  },
+  "popup_overwrite_chatgpt": {
+    "message": "ChatGPT überschreiben"
+  },
+  "popup_owner_confirmed": {
+    "message": "Zuständigkeit bestätigt"
+  },
+  "popup_pending": {
+    "message": "ausstehend"
+  },
+  "popup_pipeline_call_fallback_many": {
+    "message": "Die App konnte $1 Aufrufe nicht per Request-ID zuordnen – sie hat auf $2 zurückgegriffen."
+  },
+  "popup_pipeline_call_fallback_one": {
+    "message": "Die App konnte einen Aufruf nicht per Request-ID zuordnen – sie hat auf $1 zurückgegriffen."
+  },
+  "popup_pipeline_delivery_blocked": {
+    "message": "Die Zustellung ist gesperrt, bis die App verbunden und die Protokollkompatibilität bestätigt ist."
+  },
+  "popup_pipeline_delivery_rejected": {
+    "message": "Die App hat die letzte Zustellung abgelehnt ($1)."
+  },
+  "popup_pipeline_extension_blocked": {
+    "message": "Die Erweiterung nimmt die Beobachtungen dieses Tabs nicht an ($1). Lade den ChatGPT-Tab neu."
+  },
+  "popup_pipeline_id_found_waiting_receipt": {
+    "message": "ID im letzten Durchlauf gefunden. Warte auf die Empfangsbestätigung der App."
+  },
+  "popup_pipeline_no_recorder": {
+    "message": "Kein Rekorder in diesem Tab. Lade die Seite neu."
+  },
+  "popup_pipeline_owner_confirmed_no_activity": {
+    "message": "Zuständigkeit der Anfrage bestätigt. Noch keine passende Tool-Aktivität aufgezeichnet."
+  },
+  "popup_pipeline_queued_retrying": {
+    "message": "Hier in der Warteschlange. Die Zustellung an die App wird erneut versucht."
+  },
+  "popup_pipeline_received_waiting_owner": {
+    "message": "Die App hat die ID empfangen. Warte auf die Bestätigung der Zuständigkeit."
+  },
+  "popup_pipeline_request_id_matched_many": {
+    "message": "$1 Request-IDs der aufgezeichneten Tool-Aktivität zugeordnet."
+  },
+  "popup_pipeline_request_id_matched_one": {
+    "message": "1 Request-ID der aufgezeichneten Tool-Aktivität zugeordnet."
+  },
+  "popup_pipeline_waiting_first_message": {
+    "message": "Warte auf die erste Nachricht."
+  },
+  "popup_pipeline_waiting_latest_request_id": {
+    "message": "Chat aufgezeichnet. Warte auf eine Request-ID aus dem letzten Durchlauf."
+  },
+  "popup_pipeline_waiting_session_receipt": {
+    "message": "App erreichbar. Warte auf die Sitzungsbestätigung für diesen Chat."
+  },
+  "popup_reaching_app": {
+    "message": "App wird gesucht"
+  },
+  "popup_recording_this_chat": {
+    "message": "Dieser Chat wird aufgezeichnet"
+  },
+  "popup_request_id": {
+    "message": "Request-ID"
+  },
+  "popup_request_id_found": {
+    "message": "Request-ID gefunden"
+  },
+  "popup_section_augment_chatgpt": {
+    "message": "ChatGPT erweitern"
+  },
+  "popup_section_session_capture": {
+    "message": "Sitzungsaufzeichnung"
+  },
+  "popup_secure_storage_unavailable": {
+    "message": "Sicherer Speicher für Zugangsdaten ist nicht verfügbar. Öffne Chat On Steroids für eine Anleitung."
+  },
+  "popup_sent_to_app": {
+    "message": "An die App gesendet"
+  },
+  "popup_state_app_not_reachable": {
+    "message": "App nicht erreichbar"
+  },
+  "popup_state_app_reachable_port": {
+    "message": "App erreichbar · Port $1"
+  },
+  "popup_state_disconnected": {
+    "message": "Getrennt"
+  },
+  "popup_state_looking_for_app": {
+    "message": "Suche nach der App"
+  },
+  "popup_state_port_connecting": {
+    "message": "Port $1 · verbindet"
+  },
+  "popup_state_version_mismatch": {
+    "message": "Versionen passen nicht zusammen"
+  },
+  "popup_status_answering": {
+    "message": "antwortet"
+  },
+  "popup_status_blocked": {
+    "message": "blockiert"
+  },
+  "popup_status_bound": {
+    "message": "gebunden"
+  },
+  "popup_status_failed": {
+    "message": "fehlgeschlagen"
+  },
+  "popup_status_id_confirmed": {
+    "message": "ID bestätigt"
+  },
+  "popup_status_idle": {
+    "message": "bereit"
+  },
+  "popup_status_new_chat": {
+    "message": "neuer Chat"
+  },
+  "popup_status_none_open": {
+    "message": "keiner offen"
+  },
+  "popup_status_none_yet": {
+    "message": "noch keine"
+  },
+  "popup_status_not_attached": {
+    "message": "nicht verbunden"
+  },
+  "popup_status_ok": {
+    "message": "ok"
+  },
+  "popup_status_reload": {
+    "message": "neu laden"
+  },
+  "popup_status_retired": {
+    "message": "beendet"
+  },
+  "popup_status_tool_matched": {
+    "message": "Tool zugeordnet"
+  },
+  "popup_status_unbound": {
+    "message": "nicht gebunden"
+  },
+  "popup_status_waiting": {
+    "message": "wartet"
+  },
+  "popup_time_hours_short": {
+    "message": "$1 h"
+  },
+  "popup_time_minutes_short": {
+    "message": "$1 min"
+  },
+  "popup_time_seconds_short": {
+    "message": "$1 s"
+  },
+  "popup_timestamps": {
+    "message": "Zeitstempel"
+  },
+  "popup_try_again": {
+    "message": "Erneut versuchen"
+  },
+  "popup_version_mismatch_help": {
+    "message": "App v$1 (Protokoll $2); Begleiter v$3 (Protokoll $4). Öffne die Erweiterungsseite deines Browsers, aktiviere den Entwicklermodus und klicke bei diesem Begleiter auf „Aktualisieren“ bzw. „Neu laden“. Bleibt der Unterschied bestehen, nutze in Chat On Steroids „Erweiterungsordner öffnen“ und lade diesen Ordner. Lade ChatGPT-Tabs neu, sobald ihre laufende Arbeit fertig ist."
+  },
+  "popup_yes": {
+    "message": "ja"
+  }
+}
