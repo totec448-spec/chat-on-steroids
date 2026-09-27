@@ -1142,12 +1142,16 @@ describe('capability gating', () => {
     const instructions: string = initialized.body.result.instructions ?? '';
     expect(instructions).toMatch(/Reuse\s+a sleeping worker for related follow-up work before spawning a replacement/);
     expect(instructions).toContain('Only terminal workers whose context is full need replacing');
+    expect(instructions).toContain('Reports arrive only with tool results; they do not restart an idle prime');
+    expect(instructions).toContain('do not claim delegated verification is complete before reading its report');
 
     const tools = await core('tools/list');
     const agentsDescription = (tools.body.result.tools as Array<{ name: string; description?: string }>).find(
       (tool) => tool.name === 'agents'
     )?.description;
     expect(agentsDescription).toContain('Reuse a suitable sleeping worker with message before spawn');
+    expect(agentsDescription).toContain('status once to collect pending reports before finalizing');
+    expect(agentsDescription).toContain('state that review is pending');
   });
 
   it('rejects action-specific agent fields instead of silently ignoring them', async () => {
