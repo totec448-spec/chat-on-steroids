@@ -678,8 +678,8 @@
                 </div>
                 <div class="step-body">
                   <h3>Add it in ChatGPT</h3>
-                  <h4 class="setup-subheading">A · Enable Developer mode</h4>
-                  <p>In ChatGPT, open Settings → Security and login and turn on Developer mode.</p>
+                  <h4 class="setup-subheading">A · Developer mode (older ChatGPT versions only)</h4>
+                  <p>If your ChatGPT settings still show Developer mode, turn it on under Settings → Security and login. Newer versions of ChatGPT no longer have this switch; then skip this step.</p>
                   <div class="setup-guide" data-setup-guide="developer"></div>
                   <h4 class="setup-subheading">B · Create the Core plugin</h4>
                   <div class="step-actions">
@@ -688,10 +688,10 @@
                     </button>
                   </div>
                   <ol class="setup-instructions">
-                    <li>Open the ChatGPT Plugins page using the button above. Click + at the top right to open New Plugin.</li>
+                    <li>Open the ChatGPT Plugins page using the button above. At the top right, click Add and choose Create MCP App (older versions show a + instead) to open New Plugin.</li>
                     <li>Copy the name and description from the Core card below. Keep the name exactly as shown: CoS recognizes its tool calls by this name, and a renamed plugin's calls are not linked to your chats.</li>
                     <li id="chatgptConn"></li>
-                    <li><strong>Under Authentication, choose No Auth.</strong> Do not paste your API key here.</li>
+                    <li><strong>Under Authentication, choose No authentication.</strong> Do not paste your API key here.</li>
                     <li>Read and accept the notice, then click Create. Keep the tunnel running while ChatGPT connects.</li>
                   </ol>
                   <div class="setup-guide" data-setup-guide="plugin"></div>
