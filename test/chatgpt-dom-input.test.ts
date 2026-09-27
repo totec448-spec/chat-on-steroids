@@ -525,6 +525,55 @@ function upload() {
   return input;
 }
 describe('native image readiness', () => {
+  it.each(['wrong filename', 'multiple actions', 'outside attachments'])('rejects a shell attachment lookalike: %s', variant => {
+    const holder = document.createElement('div'); holder.setAttribute('data-composer-attachments', '');
+    holder.innerHTML = '<div role="button" aria-label="app.webp"><img alt="app.webp"><button aria-label="Remover app.webp"></button></div>';
+    if (variant === 'wrong filename') holder.querySelector('img')!.alt = 'other.webp';
+    if (variant === 'multiple actions') holder.firstElementChild!.append(document.createElement('button'));
+    if (variant === 'outside attachments') holder.removeAttribute('data-composer-attachments');
+    document.querySelector('form')!.append(holder);
+    expect(api.hasComposerAttachments()).toBe(false);
+  });
+  it('recognizes the shell image tile by filename and its unique localized remove action', async () => {
+    const input = upload(); input.id = '_r_image_';
+    const draft = api.captureComposerDraft('Exact app prompt');
+    document.execCommand = command => { if (command === 'delete') box.replaceChildren(); return true; };
+    input.addEventListener('change', () => {
+      const holder = document.createElement('div'); holder.setAttribute('data-composer-attachments', '');
+      holder.innerHTML = '<div role="button" aria-label="app.webp"><img alt="app.webp"><button aria-label="Remover app.webp"></button></div>';
+      holder.querySelector('button')!.addEventListener('click', () => holder.remove());
+      document.querySelector('form')!.append(holder);
+    });
+    expect(await api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }], () => true, draft)).toBe(true);
+    expect(api.hasComposerAttachments()).toBe(true);
+    expect(await draft.clear()).toBe(true);
+    expect(api.hasComposerAttachments()).toBe(false); draft.dispose();
+  });
+  it.each([false, true])('uses the current composer upload kind with dynamic ids (files=%s)', async files => {
+    const input = upload(); input.id = '_r_photo_';
+    if (files) { input.id = '_r_file_'; input.accept = ''; }
+    const media = document.createElement('input'); media.type = 'file'; media.accept = 'image/*,video/*';
+    input.after(media);
+    const foreign = input.cloneNode() as HTMLInputElement; foreign.id = 'upload-photos';
+    document.body.prepend(foreign);
+    const wrong = vi.fn(); foreign.addEventListener('change', wrong); media.addEventListener('change', wrong);
+    input.addEventListener('change', () => {
+      const tile = document.createElement('button'); tile.setAttribute('aria-label', 'Remove file: app.webp');
+      document.querySelector('form')!.append(tile);
+    });
+    const image = { name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' };
+    const originals = files ? [new dom.window.File(['bytes'], image.name, { type: 'image/webp' })] : [];
+    expect(await api.uploadImages(files ? [] : [image], () => true, undefined, originals)).toBe(true);
+    expect(wrong).not.toHaveBeenCalled();
+  });
+  it.each(['duplicate', 'disabled', 'foreign'])('does not dispatch an upload with %s native ownership', async reason => {
+    const input = upload(); const changed = vi.fn(); input.addEventListener('change', changed);
+    if (reason === 'duplicate') input.after(input.cloneNode());
+    if (reason === 'disabled') input.disabled = true;
+    if (reason === 'foreign') document.body.append(input);
+    expect(await api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }])).toBe(false);
+    expect(changed).not.toHaveBeenCalled();
+  });
   it.each(['rename', 'replacement', 'extra file', 'cancel'])('retains exact image upload nodes across %s while processing', async change => {
     const input = upload();
     const tile = document.createElement('button');
