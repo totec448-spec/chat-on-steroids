@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { watch as watchFs, type FSWatcher } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { statSync, watch as watchFs, type FSWatcher } from 'node:fs';
 import type { Stats } from 'node:fs';
 import path from 'node:path';
 import type { ProjectGitChange, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot, ProjectGitStatus } from '../shared/project-git.js';
@@ -69,9 +69,61 @@ function cleanGitEnvironment(): NodeJS.ProcessEnv {
   };
 }
 
+let windowsGit: string | null = null;
+let developerDirectoryCache: string | null = null;
+
+/** Not cached while missing, so installing the Command Line Tools works without a restart. */
+function activeDeveloperDirectory(): string | null {
+  if (developerDirectoryCache) return developerDirectoryCache;
+  try {
+    developerDirectoryCache = execFileSync('/usr/bin/xcode-select', ['-p'], { encoding: 'utf8', timeout: 2_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
+  } catch { /* No active developer directory. */ }
+  return developerDirectoryCache;
+}
+
+/**
+ * The Git executable to spawn.
+ *
+ * On Windows a bare `git` is searched in the child's working directory before PATH, and that
+ * directory is the project: a cloned repository carrying its own `git.exe` would run as soon as
+ * Changes opened. Only absolute PATH entries are considered there.
+ */
+export function gitExecutable(
+  platform: NodeJS.Platform = process.platform,
+  searchPath = process.env['PATH'] ?? process.env['Path'] ?? '',
+  isFile: (candidate: string) => boolean = candidate => { try { return statSync(candidate).isFile(); } catch { return false; } },
+  developerDirectory: () => string | null = activeDeveloperDirectory
+): string {
+  if (platform === 'darwin') {
+    // /usr/bin/git is only a stub without the Command Line Tools, and running it opens the
+    // system "install developer tools" dialog, once per Git read.
+    const first = searchPath.split(':').filter(entry => path.posix.isAbsolute(entry))
+      .map(entry => path.posix.join(entry, 'git')).find(isFile);
+    if (first !== '/usr/bin/git') return 'git';
+    const developer = developerDirectory();
+    if (developer && (isFile(path.posix.join(developer, 'usr/bin/git')) || isFile(path.posix.join(developer, 'Toolchains/XcodeDefault.xctoolchain/usr/bin/git')))) return 'git';
+    throw new Error('Git is not installed. Install the Xcode Command Line Tools to see Git changes.');
+  }
+  if (platform !== 'win32') return 'git';
+  const useCache = searchPath === (process.env['PATH'] ?? process.env['Path'] ?? '');
+  if (useCache && windowsGit) return windowsGit;
+  for (const entry of searchPath.split(';')) {
+    const directory = entry.trim().replace(/^"|"$/g, '');
+    if (!directory || !path.win32.isAbsolute(directory) || /^[\\/](?![\\/])/.test(directory)) continue;
+    for (const name of ['git.exe', 'git.com']) {
+      const candidate = path.win32.join(directory, name);
+      if (!isFile(candidate)) continue;
+      if (useCache) windowsGit = candidate;
+      return candidate;
+    }
+  }
+  throw new Error('Git was not found on PATH');
+}
+
 async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUTPUT_BYTES): Promise<GitResult> {
+  const executable = gitExecutable();
   return new Promise((resolve, reject) => {
-    const child = spawn('git', ['--no-optional-locks', ...args], {
+    const child = spawn(executable, ['--no-optional-locks', ...args], {
       cwd, env: cleanGitEnvironment(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
     });
     const stdout: Buffer[] = [], stderr: Buffer[] = [];

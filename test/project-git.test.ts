@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
-import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from '../src/main/project-git.js';
+import { gitExecutable, ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from '../src/main/project-git.js';
 import { addProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
@@ -252,4 +252,24 @@ it.runIf(process.platform === 'win32')('invalidates a collapsed nested file thro
   } finally {
     watches.close();
   }
+});
+
+it('resolves Git on Windows only from absolute PATH entries, never from the project folder', () => {
+  const present = new Set(['C:\\Program Files\\Git\\cmd\\git.exe', 'git.exe', '.\\git.exe', 'tools\\git.exe']);
+  const isFile = (candidate: string): boolean => present.has(candidate);
+  // Relative and drive-relative entries resolve against the working directory, which is the project.
+  expect(gitExecutable('win32', '.;tools;\\tools;"C:\\Program Files\\Git\\cmd"', isFile)).toBe('C:\\Program Files\\Git\\cmd\\git.exe');
+  expect(() => gitExecutable('win32', '.;tools', isFile)).toThrow('Git was not found on PATH');
+  expect(gitExecutable('darwin', '', () => false)).toBe('git');
+});
+
+it('does not run the macOS git stub when the Command Line Tools are missing', () => {
+  const finderPath = '/usr/bin:/bin:/usr/sbin:/sbin';
+  const stubOnly = (candidate: string): boolean => candidate === '/usr/bin/git';
+  expect(() => gitExecutable('darwin', finderPath, stubOnly, () => null)).toThrow('Command Line Tools');
+  const withTools = (candidate: string): boolean => stubOnly(candidate) || candidate === '/Library/Developer/CommandLineTools/usr/bin/git';
+  expect(gitExecutable('darwin', finderPath, withTools, () => '/Library/Developer/CommandLineTools')).toBe('git');
+  // A Git ahead of the stub on PATH (Homebrew) needs no developer directory.
+  const brew = (candidate: string): boolean => stubOnly(candidate) || candidate === '/opt/homebrew/bin/git';
+  expect(gitExecutable('darwin', `/opt/homebrew/bin:${finderPath}`, brew, () => null)).toBe('git');
 });
