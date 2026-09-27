@@ -12,6 +12,12 @@ export interface ProjectCodeEditor {
   destroy(): void;
 }
 
+export interface ProjectDiffViewer {
+  view: EditorView;
+  language: string;
+  destroy(): void;
+}
+
 const editorTheme = EditorView.theme({
   '&': {
     height: '100%',
@@ -58,7 +64,14 @@ const editorTheme = EditorView.theme({
   },
   '.cm-panels': { backgroundColor: 'var(--card)', color: 'var(--ink)' },
   '.cm-searchMatch': { backgroundColor: 'var(--syntax-search)' },
-  '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'var(--syntax-search-selected)' }
+  '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'var(--syntax-search-selected)' },
+  '.cm-changedLine, .cm-inlineChangedLine': { backgroundColor: 'var(--green-wash)' },
+  '.cm-changedText': { backgroundColor: 'color-mix(in srgb, var(--green) 24%, transparent)' },
+  '.cm-deletedChunk': { backgroundColor: 'var(--red-wash)', color: 'var(--ink)' },
+  '.cm-deletedText': { backgroundColor: 'color-mix(in srgb, var(--red) 24%, transparent)' },
+  '.cm-changedLineGutter': { backgroundColor: 'var(--green)' },
+  '.cm-deletedLineGutter': { backgroundColor: 'var(--red)' },
+  '.cm-collapsedLines': { backgroundColor: 'var(--card)', color: 'var(--soft)', borderColor: 'var(--line)' }
 });
 
 const syntaxTheme = HighlightStyle.define([
@@ -118,4 +131,49 @@ export async function createProjectCodeEditor(options: {
     focus: () => view.focus(),
     destroy: () => view.destroy()
   };
+}
+
+/** Read-only unified diff for either current Git state or one recorded edit. */
+export async function createProjectDiffViewer(options: {
+  parent: HTMLElement;
+  filename: string;
+  baseText: string;
+  currentText: string;
+}): Promise<ProjectDiffViewer> {
+  const { getChunks, unifiedMergeView } = await import('@codemirror/merge');
+  const description = LanguageDescription.matchFilename(languages, options.filename);
+  let support = null;
+  if (description) {
+    try { support = await description.load(); }
+    catch { /* Plain text remains a complete, readable fallback. */ }
+  }
+  const view = new EditorView({
+    doc: options.currentText,
+    parent: options.parent,
+    extensions: [
+      basicSetup,
+      editorTheme,
+      syntaxHighlighting(syntaxTheme),
+      EditorView.lineWrapping,
+      EditorView.editable.of(false),
+      EditorState.readOnly.of(true),
+      ...(support ? [support] : []),
+      unifiedMergeView({
+        original: options.baseText,
+        highlightChanges: true,
+        syntaxHighlightDeletions: true,
+        allowInlineDiffs: true,
+        mergeControls: false,
+        gutter: true,
+        collapseUnchanged: { margin: 3, minSize: 6 }
+      })
+    ]
+  });
+  const firstChange = getChunks(view.state)?.chunks[0];
+  if (firstChange) {
+    view.dispatch({ effects: EditorView.scrollIntoView(
+      Math.min(firstChange.fromB, view.state.doc.length), { y: 'center' }
+    ) });
+  }
+  return { view, language: description?.name ?? 'Plain text', destroy: () => view.destroy() };
 }

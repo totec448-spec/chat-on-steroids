@@ -772,13 +772,23 @@ and nested code-mode calls do not receive or acknowledge these automatic pages.
 `workspace-terminal.ts` and `workspace-terminal-ipc.ts` own human-operated node-pty shells;
 `renderer/workspace-terminal.ts` renders them with xterm and FitAddon. These shells are separate
 from MCP process custody and never consume agent output. `renderer/workspace-docks.ts` places
-the same terminal view in the right or bottom dock. The bottom header button opens that dock;
-Ctrl+backtick toggles its terminal view. Moving or hiding the view never restarts a PTY.
-Each new terminal tab captures the selected approved project's canonical cwd;
-changing chats does not retarget existing shells. No project means no guessed cwd. The live
-Command permission gates spawn/input, and input rechecks the original project path.
+independent Terminal views in the right and bottom docks. The bottom header button and
+Ctrl+backtick toggle its dock; its first opening shows Terminal and starts a shell. When no
+project is selected, main chooses the OS user's home directory as the initial cwd; the renderer
+does not supply a path. Selecting a project later does not retarget that shell. The bottom
+header's X hides the dock but preserves its shells.
+The bottom `+` menu opens another bottom shell. On the right, each shell is one dock tab
+alongside Files, Review and Sub-agents; there is no nested Terminal tab bar. The right
+`+` menu creates a new shell tab, while the Terminal quick action/shortcut selects an
+existing right shell or creates one if none exists. Closing a right shell tab retires that
+exact PTY; hiding either dock preserves its PTYs. Closing the last bottom terminal tab
+also closes the bottom dock.
+Each new terminal tab captures the selected approved project's canonical cwd, or the main-owned
+home cwd when projectless; changing chats does not retarget existing shells. A selected project
+that fails resolution must not fall back to home. The live Command permission gates spawn/input,
+and input rechecks the original project path for project-bound tabs.
 
-Up to eight tabs retain interactive shell state. Hiding the panel preserves processes; closing
+Up to eight tabs across both docks retain interactive shell state. Hiding a panel preserves processes; closing
 a tab, renderer reload/destruction or app shutdown retires them. UUIDs and pending-create tickets
 prevent a late spawn after close. IPC accepts only the current main-frame sender and bounded
 named requests. Output pauses at 256 KiB until xterm parser acknowledgements drain it; scrollback
@@ -2926,21 +2936,47 @@ The Files panel projects the current session's LocalProject through fixed IPC us
 UUID and relative paths. It does not change the main composer or grant additional filesystem
 access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
 and project-root mutation. The renderer's `workspace-docks.ts` owns the right tool dock and
-bottom terminal dock; Files, Sub-agents and Terminal retain their own content and async
-lifetimes. Closing the right dock hides its active tool but retains its tab selection. Only
-the right dock has launcher shortcuts, tool tabs and a `+` tool menu. Files and Sub-agents
-actions open right tabs; Terminal actions create a right terminal tab. The bottom dock owns
-only Terminal and its own tabs. Hiding Files retires its watches without discarding an unsaved
-draft. Hiding either dock preserves PTYs; closing a terminal tab retires its process. A
-projectless terminal uses the main-owned home directory; a selected project still requires
-its exact workspace. The top-right controls order right expansion, bottom toggle and right
-toggle; layout controls grant no new file, terminal or worker authority.
+bottom terminal dock; Files, Review, Sub-agents and each Terminal view retain their own content
+and async lifetimes. Closing the right dock hides its active tool but retains its tab selection.
+The right dock has launcher shortcuts, tool tabs and a `+` tool menu. Its Files, Review,
+Sub-agents and Terminal actions open right tabs; repeated Terminal `+` actions add a shell there.
+With no tabs, the right dock shows only launcher shortcuts; its tab bar and `+` stay hidden.
+The `+` popover must receive real pointer input above any active tool header.
+The bottom dock has no generic shortcut screen or second tool tab strip; Terminal owns its own
+tabs and `+` menu there. Both `+` controls follow the last tab, not the far edge of the bar.
+Hiding Files retires its watches without discarding an unsaved draft. Hiding the bottom dock
+does not retire its PTYs; closing a terminal tab does. Closing the last bottom tab hides that
+dock. The top-right control group orders right expansion (shown only while right is open),
+bottom, then right; the latter two buttons toggle their panels. There is no separate right-dock
+close button. Layout controls grant no new file, terminal or worker authority.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
 Its tab close or Escape closes the pane; a selected worker retains its title and Back button.
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are
 retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.
 Files uses one action toolbar with Refresh; its tab close hides the panel. Its shared
 work slot can grow to host width minus 360 px for chat, without a fixed maximum pixel width.
+`src/main/project-git.ts` is the sole owner of the read-only Review projection. The renderer
+passes only a LocalProject UUID and project-relative path through fixed IPC; main re-resolves the
+approved project/root and Git metadata before reading status or a diff. Git inspection is strictly
+read-only: it strips inherited Git repository/index redirects, uses optional-lock-free bounded
+subprocesses and exposes no stage, commit, reset,
+checkout or push authority. Review projects `M/A/D/R/U`, ancestor-folder markers and
+bounded unified diffs; Files may open it from its toolbar. Files and Review are alternate right
+tabs; Review does not add a second file watcher or expose file-write actions.
+Review also identifies the checked-out branch and offers a searchable, read-only comparison
+against locally known branch refs. Selecting a ref never switches branches or fetches remote
+data. The comparison shows committed changes from the selected ref's merge base to current
+HEAD, scoped to the Local Project; the existing Working tree view separately includes local
+uncommitted and untracked changes. Its list, line counts and file preview must share the same
+comparison identity, and a changed ref/HEAD cannot publish an old diff as current.
+A non-repository, binary file, oversized diff or truncated change set is an
+explicit state rather than a reason to invent content or mutate the worktree.
+
+An exact successful `apply_patch` may also retain a bounded immutable before/after review asset
+beside the session record. That historical review belongs to the recorded tool call, not to HEAD or
+the file's later contents, and it is retrieved only by session/call/change identity. Failed,
+inexact or oversized edits do not gain fabricated review evidence. Current Git Changes and recorded
+edit review therefore share a diff renderer but have separate truth owners.
 Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep
 the previous accepted preview until replacement content is ready; hidden previews stay hidden.
 The horizontal preview separator paints a one-pixel hover line with a three-pixel drag area.

@@ -1,7 +1,9 @@
 import { expect, it, vi } from 'vitest';
 
 const { invoke, expose, getPath } = vi.hoisted(() => ({
-  invoke: vi.fn(async (_channel: string, payload: any) => ({ ok: true, data: payload.files.map((_: unknown, index: number) => ({ id: String(index), name: 'staged', size: 0, mimeType: 'application/octet-stream' })) })),
+  invoke: vi.fn(async (channel: string, payload: any) => ({ ok: true, data: channel === 'sessions:dropFiles'
+    ? payload.files.map((_: unknown, index: number) => ({ id: String(index), name: 'staged', size: 0, mimeType: 'application/octet-stream' }))
+    : null })),
   expose: vi.fn(), getPath: vi.fn((file: any) => file.path ?? '')
 }));
 vi.mock('electron', () => ({
@@ -24,4 +26,12 @@ it('keeps disk paths batched while transporting pathless clipboard bytes one at 
   expect(await api.dropFiles(Array(21).fill({ name: 'clipboard.png', size: 3, arrayBuffer }))).toMatchObject({ ok: false });
   expect(arrayBuffer).not.toHaveBeenCalled();
   expect(invoke).not.toHaveBeenCalled();
+  await api.getProjectGitSnapshot('project-id');
+  await api.getProjectGitDiff('project-id', 'src/main.ts');
+  await api.getToolEditReview('session-id', '00000000-0000-4000-8000-000000000000', 1);
+  expect(invoke).toHaveBeenNthCalledWith(1, 'projectGit:snapshot', { projectId: 'project-id' });
+  expect(invoke).toHaveBeenNthCalledWith(2, 'projectGit:diff', { projectId: 'project-id', path: 'src/main.ts' });
+  expect(invoke).toHaveBeenNthCalledWith(3, 'sessions:toolEditReview', {
+    sessionId: 'session-id', callId: '00000000-0000-4000-8000-000000000000', changeIndex: 1
+  });
 });
