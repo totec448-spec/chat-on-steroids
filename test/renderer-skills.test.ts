@@ -14,7 +14,7 @@ beforeEach(() => {
 afterEach(() => dom.window.close());
 const skill: LibrarySkill = { id: 'review', name: 'Review', description: 'Check changes', path: '/skills/review/SKILL.md', managed: true, scope: 'managed', source: 'managed', allowImplicitInvocation: true };
 const library = (skills = [skill]): SkillLibrary => ({ skills, errors: [], roots: [], includeInstructions: true });
-async function fixture() {
+async function fixture(skills: LibrarySkill[] = [skill]) {
   const { initSkills } = await import('../src/renderer/skills.js');
   const input = document.getElementById('input') as HTMLTextAreaElement;
   const button = document.getElementById('skills')!;
@@ -22,7 +22,7 @@ async function fixture() {
   let owner = 'a:1';
   const drafts = new Map<string, string>();
   const key = () => owner.split(':')[0]!;
-  const list = vi.fn(async () => ({ ok: true as const, data: library() }));
+  const list = vi.fn(async () => ({ ok: true as const, data: library(skills) }));
   const command = vi.fn();
   const picker = initSkills({ input, host, selectedHost: document.getElementById('selected')!, owner: () => owner,
     openButton: button, addButton: document.getElementById('add')!,
@@ -67,6 +67,27 @@ it('never traps Enter when loading, empty or unmatched and does not refetch on e
   f.type('/z'); expect(f.key('Enter')).toBe(false);
   f.type('/zz'); expect(f.key('Enter')).toBe(false);
   expect(f.list).toHaveBeenCalledTimes(1);
+});
+
+it('shows a clear empty result instead of an empty autocomplete surface', async () => {
+  const f = await fixture();
+  f.type('/missing'); await settle();
+  expect(f.host.hidden).toBe(false);
+  expect(f.host.querySelector('[role="status"]')?.textContent).toBe('No matches for “/missing”.');
+  expect(f.key('Enter')).toBe(false);
+});
+
+it('promotes unambiguous typed skill ids into ordered pills', async () => {
+  const grilling: LibrarySkill = { ...skill, id: 'grilling', name: 'Grilling', path: '/skills/grilling/SKILL.md' };
+  const audit: LibrarySkill = { ...skill, id: 'audit', name: 'Audit', path: '/skills/audit/SKILL.md' };
+  const f = await fixture([grilling, audit]);
+  f.type('/grilling'); await settle();
+  expect(f.input.value).toBe('');
+  expect(f.picker.authoredText()).toBe('/grilling\n');
+  f.type('/audit'); await settle();
+  expect(f.input.value).toBe('');
+  expect(f.picker.authoredText()).toBe('/grilling\n/audit\n');
+  expect([...document.querySelectorAll<HTMLElement>('.composer-selected-skill')].map(node => node.dataset.skillId)).toEqual(['grilling', 'audit']);
 });
 
 it('does not apply stale choices after caret movement or a selection', async () => {
