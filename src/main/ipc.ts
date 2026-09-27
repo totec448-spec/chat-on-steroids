@@ -3,7 +3,9 @@ import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { appearanceSchema } from './appearance-schema.js';
 import { mergeAppearance } from '../shared/appearance.js';
 import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js';
-import { listSkills } from './skills.js';
+import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, removeSkill } from './skills.js';
+import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from './skill-github.js';
+import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
 import { noteChatOrigin } from './session/recorder.js';
 import { REASONING_EFFORTS } from '../shared/session.js';
@@ -663,6 +665,42 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return loadPetAsset(id, preview);
   });
   handle('skills:list', () => listSkills());
+  handle('skills:managed', () => listManagedSkills());
+  handle('skills:import', async payload => {
+    const { kind } = z.object({ kind: z.enum(['folder', 'file']) }).strict().parse(payload);
+    const options: Electron.OpenDialogOptions = kind === 'folder'
+      ? { title: 'Import Skill folder', properties: ['openDirectory'] }
+      : { title: 'Import SKILL.md', properties: ['openFile'], filters: [{ name: 'Markdown skills', extensions: ['md'] }] };
+    const owner = getWindow();
+    const selected = owner && !owner.isDestroyed()
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options);
+    if (selected.canceled || !selected.filePaths[0]) return null;
+    if (kind === 'folder') await importSkillPackage(selected.filePaths[0]);
+    else await importSkillFile(selected.filePaths[0]);
+    return listManagedSkills();
+  });
+  handle('skills:githubImport', async payload => {
+    const { url } = z.object({ url: z.string().trim().min(1).max(2048) }).strict().parse(payload);
+    return importGitHubSkill(url);
+  });
+  handle('skills:githubLink', async payload => {
+    const { id, url } = z.object({ id: z.string().regex(SKILL_ID_PATTERN), url: z.string().trim().min(1).max(2048) }).strict().parse(payload);
+    return linkGitHubSkill(id, url);
+  });
+  handle('skills:githubCheck', async payload => {
+    const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    return checkGitHubSkillUpdates(id);
+  });
+  handle('skills:githubUpdate', async payload => {
+    const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    return updateGitHubSkill(id, directory => shell.trashItem(directory));
+  });
+  handle('skills:remove', async payload => {
+    const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    await removeSkill(id, directory => shell.trashItem(directory));
+    return listManagedSkills();
+  });
   handle('skills:library', async payload => {
     const scope = z.object({ sessionId: z.string().min(1).max(80).nullable().optional(), projectId: z.string().uuid().nullable().optional() }).strict().parse(payload ?? {});
     const folder = () => scope.sessionId ? getSessionProject(scope.sessionId)

@@ -65,6 +65,7 @@
         <g id="i-x"><path d="M6 6l12 12M18 6 6 18" /></g>
         <g id="i-star"><path d="M12 3.8l2.5 5.1 5.6.8-4 3.9.9 5.6L12 16.6l-5 2.6.9-5.6-4-3.9 5.6-.8Z" /></g>
         <g id="i-paw"><circle cx="6.5" cy="10" r="1.8" /><circle cx="10" cy="6" r="1.8" /><circle cx="14" cy="6" r="1.8" /><circle cx="17.5" cy="10" r="1.8" /><path d="M12 11.5c-2.6 0-5 3-5 5.2 0 1.6 1.3 2.3 2.6 2.3.9 0 1.6-.5 2.4-.5s1.5.5 2.4.5c1.3 0 2.6-.7 2.6-2.3 0-2.2-2.4-5.2-5-5.2Z" /></g>
+        <g id="i-warning"><path d="M12 4 21 19.5H3Z" /><path d="M12 10v4.5M12 17v.01" /></g>
         <g id="i-more"><circle cx="6" cy="12" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="18" cy="12" r="1.2" /></g>
         <g id="i-ban"><circle cx="12" cy="12" r="8" /><path d="M6.3 6.3 17.7 17.7" /></g>
         <g id="i-play"><path d="M8 5.5 18.5 12 8 18.5Z" /></g>
@@ -104,6 +105,7 @@
         <div class="sidebar-primary" id="sidebarPrimary">
           <button class="btn new-chat" id="newChat" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pencil" /></svg>New chat</button>
           <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>Plugins</button>
+          <button class="btn sidebar-primary-link" id="sidebarSkills" data-sidebar-page="skills" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-skill" /></svg>Skills</button>
           <button class="btn sidebar-primary-link" id="sidebarPets" data-sidebar-page="pets" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-paw" /></svg>Pets</button>
         </div>
       <nav id="tabs" aria-label="Settings navigation" hidden>
@@ -320,6 +322,23 @@
           <details class="plugin-legal"><summary>Legal Notices / Third-party Licenses</summary><p>Catalog illustrations are original Chat On Steroids artwork, Copyright © 2026 Chat On Steroids contributors, licensed under the app’s MIT license. They illustrate independent integrations and are not official product logos or endorsements. Product names belong to their respective owners.</p><p>Installed plugins retain their own licenses. Open a plugin’s details to see its source, version and license. Review the upstream project before installation. Bundled dependency notices and reviewed catalog license texts are included in THIRD-PARTY-NOTICES.txt with the application; external plugins are downloaded separately.</p><button class="btn" id="pluginsLegalOpen" type="button">Open full third-party license texts</button></details>
           </div>
         </section>
+        <section class="panel plugins-panel skills-panel" data-panel="skills">
+          <div class="plugins-content">
+            <header class="plugin-page-head"><div><h1>Skills</h1><p>Reusable instructions for the work you do in Chat On Steroids.</p></div><div class="plugin-search-actions"><label class="plugin-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search" /></svg><input id="skillsSearch" type="search" placeholder="Search skills" aria-label="Search skills" /></label><details class="plugin-menu skill-import-menu"><summary class="btn plugin-add" aria-label="Import a skill" title="Import a skill"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></summary><div class="plugin-menu-actions"><button class="btn" id="skillsImportFolder" type="button">Import folder</button><button class="btn" id="skillsImportFile" type="button">Import SKILL.md</button><button class="btn" id="skillsImportGithub" type="button">Import from GitHub</button></div></details></div></header>
+            <div class="plugin-refresh-guide pet-import-guide"><p>Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.</p></div>
+            <dialog class="plugin-dialog pet-delete-dialog" id="skillGithubDialog" aria-labelledby="skillGithubTitle">
+              <div class="plugin-dialog-head"><h2 id="skillGithubTitle">Import from GitHub</h2><button class="btn" id="skillGithubClose" type="button">Close</button></div>
+              <form id="skillGithubForm" class="plugin-dialog-body">
+                <p id="skillGithubDescription">Paste a public GitHub folder link or a link to its SKILL.md. The complete skill folder will be copied to your CoS library.</p>
+                <label class="plugin-field" for="skillGithubUrl"><span>GitHub URL</span><input id="skillGithubUrl" type="url" required autocomplete="url" spellcheck="false" placeholder="https://github.com/owner/repo/tree/main/skill" /></label>
+                <p id="skillGithubError" class="plugin-error" role="alert" hidden></p>
+                <div class="pet-delete-actions"><button class="btn" id="skillGithubCancel" type="button">Cancel</button><button class="btn btn-solid" id="skillGithubSubmit" type="submit">Import skill</button></div>
+              </form>
+            </dialog>
+            <div class="plugin-section-head"><h2>Installed <span id="skillsCount" class="plugin-count">Loading…</span></h2><button class="btn" id="skillsRefresh" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-retry" /></svg>Refresh</button></div>
+            <div id="skillsInstalled" class="pet-library-grid" aria-live="polite"></div>
+          </div>
+        </section>
         <section class="panel plugins-panel pets-panel" data-panel="pets">
           <div class="plugins-content">
             <header class="plugin-page-head"><div><h1>Pets</h1><p>Your little desktop companions.</p></div><div class="plugin-search-actions"><label class="plugin-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search" /></svg><input id="petsSearch" type="search" placeholder="Search pets" aria-label="Search pets" /></label><button class="btn plugin-add" id="petsImport" type="button" aria-label="Import CoS Pet folder" title="Import CoS Pet folder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button></div></header>
@@ -354,7 +373,7 @@
           <section class="usage-section"><h2>Cost estimate per day</h2>
             <details id="usageFormulaDetails"><summary>Edit cost formula</summary>
             <p id="usageFormula" class="muted"></p>
-            <p class="muted">Automatic baselines use Standard short-context cached-input prices, checked 7 September 2026: <a href="https://developers.openai.com/api/docs/models/gpt-5.6-sol" target="_blank" rel="noopener noreferrer">GPT-5.6 Sol</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-terra" target="_blank" rel="noopener noreferrer">GPT-5.6 Terra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-luna" target="_blank" rel="noopener noreferrer">GPT-5.6 Luna</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-astra" target="_blank" rel="noopener noreferrer">GPT-6 Astra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.5" target="_blank" rel="noopener noreferrer">GPT-5.5</a>. These are editable cost comparisons, not actual bills.</p>
+            <p class="muted">Automatic baselines use Standard short-context cached-input prices, checked 27 September 2026: <a href="https://developers.openai.com/api/docs/models/gpt-5.6-sol" target="_blank" rel="noopener noreferrer">GPT-5.6 Sol</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-terra" target="_blank" rel="noopener noreferrer">GPT-5.6 Terra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-luna" target="_blank" rel="noopener noreferrer">GPT-5.6 Luna</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-astra" target="_blank" rel="noopener noreferrer">GPT-6 Astra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-sol" target="_blank" rel="noopener noreferrer">GPT-6 Sol</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-luna" target="_blank" rel="noopener noreferrer">GPT-6 Luna</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.5" target="_blank" rel="noopener noreferrer">GPT-5.5</a>. These are editable cost comparisons, not actual bills.</p>
             <label class="setting"><span class="setting-text"><b>Context times unique tool calls, divided by</b><em>Changes estimated tokens and costs.</em></span><input id="usageDivisor" aria-label="Usage token divisor" type="number" min="0.01" step="0.01" value="2" /></label>
             <label class="setting"><span class="setting-text"><b>Cached-input cost multiplier</b><em>Applied after each model's cached-input rate.</em></span><input id="usageMultiplier" aria-label="Cached-input cost multiplier" type="number" min="0" step="0.01" value="1.2" /></label>
             <div id="usageRates"></div></details>
