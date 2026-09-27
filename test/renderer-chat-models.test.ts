@@ -119,6 +119,23 @@ it('excludes GPT-5.5 from the composer slider without excluding future observed 
   expect(confirmedComposerModel()).toEqual({ model: 'future', reasoningEffort: 'high' });
 });
 
+it('disambiguates duplicate account model labels by their observed lane', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const models = [
+    { id: 'gpt-5-6', label: '5.6', efforts: ['none'] },
+    { id: 'gpt-5-6-thinking', label: '5.6', efforts: ['medium', 'high'] },
+    { id: 'gpt-5-5-instant', label: '5.5', efforts: ['none'] },
+    { id: 'gpt-5-5-thinking', label: '5.5', efforts: ['medium', 'high'] }
+  ];
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: 2, models } }) } });
+  const { initChatModels, applyChatModels } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  const labels = [...dom.window.document.querySelectorAll<HTMLOptionElement>('#workerModel option')].map(option => option.textContent);
+  expect(labels).toEqual(['5.6 · Instant', '5.6 · Reasoning', '5.5 · Instant', '5.5 · Reasoning']);
+  expect([...dom.window.document.querySelectorAll<HTMLOptionElement>('#workerModel option')].map(option => option.value)).toEqual(models.map(model => model.id));
+});
+
 it('binds composer selection to the selected session across delayed catalog, user edits and A-B-A navigation', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);

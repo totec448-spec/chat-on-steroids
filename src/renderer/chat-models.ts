@@ -105,6 +105,31 @@ function options(select: HTMLSelectElement, choices: Array<{ id: string; label: 
   }
 }
 
+function distinctModelChoices(models: ChatModelCatalog['models']): Array<{ id: string; label: string | (() => string) }> {
+  const sameName = new Map<string, number>();
+  for (const model of models) sameName.set(model.label, (sameName.get(model.label) ?? 0) + 1);
+  const variant = (model: ChatModelCatalog['models'][number]): string | null => {
+    if (model.efforts.length && model.efforts.every(effort => effort === 'none')) return 'Instant';
+    if (model.efforts.length && model.efforts.every(effort => effort !== 'none' && effort !== 'pro')) return 'Reasoning';
+    if (model.efforts.length && model.efforts.every(effort => effort === 'pro')) return 'Pro';
+    return null;
+  };
+  const variantCounts = new Map<string, number>();
+  for (const model of models) {
+    const lane = variant(model);
+    if (lane) {
+      const key = `${model.label}\0${lane}`;
+      variantCounts.set(key, (variantCounts.get(key) ?? 0) + 1);
+    }
+  }
+  return models.map(model => {
+    if (sameName.get(model.label) === 1) return { id: model.id, label: model.label };
+    const lane = variant(model);
+    return { id: model.id, label: lane && variantCounts.get(`${model.label}\0${lane}`) === 1
+      ? () => `${model.label} · ${t(lane)}` : `${model.label} · ${model.id}` };
+  });
+}
+
 function paintPair(modelId: string, effortId: string, modelValue?: string, effortValue?: string): void {
   const model = document.getElementById(modelId) as HTMLSelectElement | null;
   const effort = document.getElementById(effortId) as HTMLSelectElement | null;
@@ -117,7 +142,7 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
     // A saved execution alias is an exact lane request. The family effort union
     // cannot prove which efforts that alias supports. Retain both requested values
     // until the user deliberately selects a family; native selection proves the pair.
-    options(model, [...models, { id: nextModel, label: `${observed.label} · ${nextModel}` }], nextModel);
+    options(model, [...distinctModelChoices(models), { id: nextModel, label: `${observed.label} · ${nextModel}` }], nextModel);
     options(effort, [{ id: nextEffort, label: () => nextEffort ? effortLabel(nextEffort) : t('Keep requested model settings') }], nextEffort);
     return;
   }
@@ -132,7 +157,7 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
   if (supported && !nextEffort) {
     nextEffort = supported.includes('high') ? 'high' : supported[0] ?? '';
   }
-  options(model, models, nextModel);
+  options(model, distinctModelChoices(models), nextModel);
   options(effort, (models.find(item => item.id === model.value)?.efforts ?? []).map(id => ({ id, label: () => effortLabel(id) })), nextEffort);
 }
 
