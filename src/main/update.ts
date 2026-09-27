@@ -96,6 +96,32 @@ export function stagedArtifact(
   return null;
 }
 
+/**
+ * The published file an installation that cannot update itself should download, or null.
+ *
+ * macOS and a Linux `.deb` are told about a release but never replaced from here (see above).
+ * Pointing their "Get update" at the exact file for this machine, instead of the release page,
+ * saves the search for the right one of thirteen assets. The download still happens in the
+ * user's browser, so macOS applies its normal quarantine and Gatekeeper checks to it.
+ */
+export function manualDownloadName(
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+  appImage: string | undefined = process.env.APPIMAGE,
+  packaged: boolean = app.isPackaged
+): string | null {
+  if (!packaged || (arch !== 'x64' && arch !== 'arm64')) return null;
+  if (platform === 'darwin') return `Chat-On-Steroids-macOS-${arch}.dmg`;
+  if (platform === 'linux' && !appImage) return `Chat-On-Steroids-Linux-${arch}.deb`;
+  return null;
+}
+
+/** Where "Get update" sends this installation: its exact file for `version`, else the page. */
+export function manualDownloadUrl(version: string | null, name: string | null = manualDownloadName()): string {
+  const page = `https://github.com/${REPO}/releases/latest`;
+  return version && /^\d+\.\d+\.\d+$/.test(version) && name ? `https://github.com/${REPO}/releases/download/v${version}/${name}` : page;
+}
+
 /** `v2.0.3` -> `2.0.3`, and anything that is not a release tag -> null. */
 export function releaseVersion(tag: unknown): string | null {
   if (typeof tag !== 'string') return null;
