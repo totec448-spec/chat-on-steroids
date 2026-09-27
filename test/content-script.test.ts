@@ -13992,6 +13992,51 @@ describe('the fresh chat the app opened', () => {
     expect(selections).toEqual(confirmed ? [expect.objectContaining({ conversationId: workerChat,
       event: expect.objectContaining({ model: 'gpt-5.6-sol', reasoningEffort: 'high' }) })] : []);
   });
+
+  it('reacquires a home composer replaced after model selection before placing a worker bootstrap', async () => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const workerChat = '23232323-3434-4545-8787-909090909090';
+    let submitted = '';
+    live = await harness('https://chatgpt.com/?clf=cmd-model-remount', {
+      redeem: () => redeemed,
+      ack: () => ({ ok: true })
+    }, (document, dom) => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        submitted = composerText(document);
+        dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+        userTurn(document, 'model-remount-user', 'Worker task after remount', { sent: false });
+      });
+    });
+    const instantTimer = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => globalThis.setTimeout(fn, ms)) as unknown as typeof live.window.setTimeout;
+    (live.window as any).CLF_DOM.selectModelSettings = vi.fn(async () => {
+      const old = live!.document.querySelector('#prompt-textarea')!;
+      const parent = old.parentElement!;
+      const replacement = old.cloneNode(true);
+      old.remove();
+      // The native picker can settle before the Chat surface remounts its editor. Put
+      // the replacement on the next browser task so the old implementation's direct
+      // insert after selectModelSettings deterministically observes composer_missing.
+      live!.window.setTimeout(() => parent.prepend(replacement), 50);
+      return true;
+    });
+    try {
+      release({ ok: true, command: { id: 'cmd-model-remount', type: 'worker', text: 'Worker task after remount',
+        agent: 'worker-1', model: 'gpt-5.6-sol', reasoningEffort: 'high' } });
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await settle(600);
+
+      expect(submitted).toBe('Worker task after remount');
+      expect(live.sent.filter((message) => message.type === 'ack')).toContainEqual(expect.objectContaining({
+        id: 'cmd-model-remount', status: 'sent', conversationId: workerChat
+      }));
+    } finally {
+      live.window.setTimeout = instantTimer;
+    }
+  });
+
   it.each([true, false])('confirms resume selection before Send and journals it only for B (%s)', async confirmed => {
     let release!: (value: unknown) => void;
     const redeemed = new Promise(resolve => { release = resolve; });
@@ -14177,6 +14222,52 @@ describe('the fresh chat the app opened', () => {
         navigationEpoch: expect.any(Number)
       }
     ]);
+  });
+
+  it('carries the exact worker command into first-call correlation before the native user row mounts', async () => {
+    const workerChat = '24242424-3535-4646-8787-989898989898';
+    const requestId = 'f0f00003-1111-4111-8111-111111111111';
+    live = await harness(
+      'https://chatgpt.com/?clf=cmd-early-correlation',
+      {
+        redeem: () => ({
+          ok: true,
+          command: { id: 'cmd-early-correlation', type: 'worker', text: 'Run one harmless probe.', agent: 'worker-1' }
+        }),
+        ack: () => ({ ok: true }),
+        correlate: message => ({ ok: true, data: {
+          ok: true,
+          conversationId: workerChat,
+          confirmed: message.calls.map((call: any) => call.requestId)
+        } })
+      },
+      (document, dom) => {
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+          // The provider request can start from the click before React mounts the native user
+          // row that sendSubmittedText() waits on. Publish that real ordering while the page's
+          // bootstrap receipt is deliberately still unresolved.
+          const page = document.defaultView!;
+          page.setTimeout(() => page.dispatchEvent(new page.MessageEvent('message', {
+            source: page as unknown as Window,
+            origin: 'https://chatgpt.com',
+            data: { type: 'cos-request-origin', conversationId: workerChat, requestIds: [requestId] }
+          })), 0);
+          page.setTimeout(() => {
+            userTurn(document, 'early-correlation-worker-user', 'Run one harmless probe.', { sent: false });
+          }, 50);
+        });
+      }
+    );
+
+    await settle(200);
+
+    expect(live.sent.filter((message) => message.type === 'correlate')).toContainEqual(expect.objectContaining({
+      conversationId: workerChat,
+      agent: 'worker-1',
+      agentCommandId: 'cmd-early-correlation',
+      calls: [expect.objectContaining({ requestId })]
+    }));
   });
 
   /**

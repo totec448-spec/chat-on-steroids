@@ -10,7 +10,7 @@ afterEach(() => { dom?.window.close(); vi.resetModules(); });
 it('covers every current source key with matching placeholders and no duplicate keys', () => {
   const missing = Object.keys(zhCN).filter(key => !Object.hasOwn(zhTW, key));
   expect(missing).toEqual([]);
-  for (const locale of ['es', 'zh-CN', 'zh-TW', 'ja', 'tr', 'fr']) {
+  for (const locale of ['es', 'zh-CN', 'zh-TW', 'ja', 'tr', 'fr', 'pt-PT']) {
     const source = readFileSync(`src/renderer/locales/${locale}.json`, 'utf8');
     const keys = [...source.matchAll(/^\s{2}("(?:[^"\\]|\\.)*")\s*:/gm)].map(match => JSON.parse(match[1]!));
     expect(keys.length).toBe(new Set(keys).size);
@@ -33,7 +33,7 @@ it('restores Traditional Chinese and switches all languages without changing aut
   const button = document.querySelector<HTMLButtonElement>('[data-language="zh-TW"]')!;
   expect(button.textContent).toBe(''); expect(button.getAttribute('aria-pressed')).toBe('true');
   expect(button.getAttribute('aria-label')).toBe('繁體中文'); expect(button.title).toBe('繁體中文');
-  for (const locale of ['es', 'zh-CN', 'ja', 'tr', 'fr', 'en', 'zh-TW'] as const) {
+  for (const locale of ['es', 'zh-CN', 'ja', 'tr', 'fr', 'pt-PT', 'en', 'zh-TW'] as const) {
     setLanguage(locale);
     expect((document.getElementById('uiLanguage') as HTMLSelectElement).value).toBe(locale);
     expect(input.value).toBe('/review\n保留我的草稿 🙂');

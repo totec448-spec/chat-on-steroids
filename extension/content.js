@@ -3756,10 +3756,15 @@
     if (batch.length === 0) return;
     try {
       const projectInput = desktopProjectInput;
+      const pendingWorker = !agent && commandAttempt?.phase === 'dispatching' && commandAttempt.agent && commandAttempt.id
+        ? { agent: commandAttempt.agent, commandId: commandAttempt.id }
+        : null;
       const reply = await ask({
         type: 'correlate',
         conversationId: ownerConversation,
         calls: batch,
+        agent: agent || pendingWorker?.agent || null,
+        agentCommandId: agentCommandId || pendingWorker?.commandId || null,
         projectInput
       }, owns);
       if (!owns()) return;
@@ -10220,7 +10225,8 @@
    * immediately when the composer already exists, otherwise wake the instant React mounts
    * one, with only a bounded timer as the failure deadline.
    */
-  function waitForComposer(timeoutMs = 12_000) {
+  function waitForComposer(timeoutMs = 12_000, stillCurrent = () => true) {
+    if (!stillCurrent()) return Promise.resolve(null);
     const current = CLF_DOM.composer();
     if (current && current.isConnected) return Promise.resolve(current);
     return new Promise((resolve) => {
@@ -10232,6 +10238,7 @@
         resolve(value);
       };
       const check = () => {
+        if (!stillCurrent()) return finish(null);
         const composer = CLF_DOM.composer();
         if (composer && composer.isConnected) finish(composer);
       };
@@ -10387,6 +10394,9 @@
     // attempt was started. If the fallback got there first, `boot` is null and the false path
     // above leaves that winning tab alive.
     if (attempt) attempt.phase = 'claimed';
+    if (attempt && boot.type === 'worker' && typeof boot.agent === 'string' && boot.agent && typeof boot.id === 'string') {
+      attempt.agent = boot.agent;
+    }
     reportClaim(true);
 
     const fail = (why) => {
@@ -10464,6 +10474,15 @@
 
     if ((boot.model || boot.reasoningEffort) && !(await CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget))) {
       return void (await fail('The requested model or reasoning is unavailable or could not be confirmed in ChatGPT'));
+    }
+    // ChatGPT's Chat/Work/model transition can replace the entire home composer after
+    // the picker has already confirmed the requested selection. Do not treat that
+    // transient unmount as a failed bootstrap: reacquire the editing host under the
+    // same route/command fence before inserting authored text. This is deliberately
+    // after selection, because the pre-selection composer is no longer authoritative.
+    if ((boot.model || boot.reasoningEffort) && !(await waitForComposer(12_000, stillOnTarget))) {
+      if (await failIfRetargeted()) return;
+      return void (await fail('ChatGPT never re-exposed a usable composer after model selection'));
     }
     const selectionConfirmedAt = Date.now();
     const publishBootstrapSelection = async (id) => {
@@ -10616,7 +10635,11 @@
     rememberUserSend();
     // The bootstrap's own receipt, which allows for the composer's Markdown escaping — see
     // matchesSubmittedBootstrap. Every other caller keeps the exact comparison.
-    if (!(await sendSubmittedText(() => !attempt?.cancelled && sendingBootstrap(), false, null, null,
+    const authorizeBootstrapSend = () => {
+      if (attempt && boot.type === 'worker') attempt.phase = 'dispatching';
+      return true;
+    };
+    if (!(await sendSubmittedText(() => !attempt?.cancelled && sendingBootstrap(), false, authorizeBootstrapSend, null,
                                   matchesSubmittedBootstrap))) {
       // Once send() was invoked, a missing/cleared draft cannot prove that no click
       // happened. Only the exact pre-click check above may release the dispatch.

@@ -25,9 +25,13 @@
 var CLF_DOM = (() => {
   // @ehkogh/#318: an alternate exchange contains both roles. Keep the native
   // structure intact; the MAIN reader supplies exact message ids on its slots.
+  const LEGACY_TURN = 'section[data-testid^="conversation-turn"]';
   const SHELL_TURN = '[data-app-shell-main-surface] [data-thread-find-target="conversation"] [data-turn-key]';
   const SHELL_UNIT = '[data-content-search-unit-key]';
-  const TURN = `section[data-testid^="conversation-turn"], ${SHELL_TURN}`;
+  // September 2026 search-unit rollout: the user/assistant rows are direct children of a
+  // data-turn-key container rather than section[data-testid] or data-content-search units.
+  const SEARCH_TURN = '[data-chatgpt-search-unit-key]';
+  const TURN = `${LEGACY_TURN}, ${SHELL_TURN}, ${SEARCH_TURN}`;
   const PICKER = '[data-testid="composer-intelligence-picker-content"], [data-model-picker-view]';
   // ChatGPT has used both shapes in the live renderer: the older tool-message span
   // and, as of 2026-08-15, a display-contents row wrapping the visible tool label.
@@ -61,6 +65,12 @@ var CLF_DOM = (() => {
 
   const text = (node, cap = 256_000) =>
     node ? (node.textContent || '').replace(/ /g, ' ').trim().slice(0, cap) : '';
+
+  function searchUnitRole(node) {
+    const key = node?.getAttribute?.('data-chatgpt-search-unit-key') ||
+      node?.getAttribute?.('data-content-search-unit-key') || '';
+    return /:(user|assistant)$/.exec(key)?.[1] || '';
+  }
 
   // Wire framing matches shared/user-prompt.ts; neither reader changes provider text.
   const promptContinuation = value => /^\[\[CLF-(?:HANDOFF|RESUME):[A-Za-z0-9_-]{16,64}\]\]\n\n/.exec(value)?.[0] ?? '';
@@ -410,6 +420,7 @@ var CLF_DOM = (() => {
     'data-turn-id',
     'data-testid',
     'aria-label', 'data-turn-key', 'data-content-search-turn-key', 'data-content-search-unit-key',
+    'data-chatgpt-search-message-ids', 'data-chatgpt-search-unit-key', 'data-chatgpt-selection-message-id',
     'data-clf-fiber-turn', 'data-clf-fiber-message'
   ];
 
@@ -463,10 +474,17 @@ var CLF_DOM = (() => {
     const memo = memoOf(section);
     if (memo && memo.rows) return memo.rows;
     const rows = [];
-    for (const node of [...(section.matches?.(SHELL_UNIT) ? [section] : []), ...section.querySelectorAll(`[data-message-id], ${SHELL_UNIT}`)]) {
+    const directHolder = section.matches?.(`[data-message-id], ${SHELL_UNIT}, [data-chatgpt-search-message-ids], [data-chatgpt-selection-message-id]`);
+    const holders = [
+      ...(directHolder ? [section] : []),
+      ...section.querySelectorAll(`[data-message-id], ${SHELL_UNIT}, [data-chatgpt-search-message-ids], [data-chatgpt-selection-message-id]`)
+    ];
+    const seen = new Set();
+    for (const node of holders) {
       const id = messageIdOf(node);
-      if (!id) continue;
-      const roleAttr = node.getAttribute('data-message-author-role') || shellRole(node);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const roleAttr = node.getAttribute('data-message-author-role') || searchUnitRole(node);
       const readable = roleAttr === 'user' || roleAttr === 'assistant';
       rows.push({ id, roleAttr, text: readable ? messageText(node, roleAttr) : null, node });
     }
@@ -490,7 +508,7 @@ var CLF_DOM = (() => {
     return parts;
   }
 
-  const shellRole = node => /:(user|assistant)$/.exec(node?.getAttribute?.('data-content-search-unit-key') || '')?.[1] || '';
+  const shellRole = searchUnitRole;
   /**
    * A shell exchange's identity, preferring the key that is one.
    *
@@ -505,7 +523,12 @@ var CLF_DOM = (() => {
    * shell that supplies a real one there keeps working unchanged.
    */
   function turnIdOf(section) {
-    if (!section?.matches?.(SHELL_TURN)) return section?.getAttribute?.('data-turn-id') || null;
+    if (!section?.matches?.(SHELL_TURN)) {
+      if (section?.matches?.(SEARCH_TURN)) {
+        return section.closest?.('[data-turn-key]')?.getAttribute?.('data-turn-key') || messageIdOf(section) || null;
+      }
+      return section?.getAttribute?.('data-turn-id') || null;
+    }
     const key = section.getAttribute('data-turn-key');
     if (key && !/^fallback-turn-\d+$/.test(key)) return key;
     return section.querySelector('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key') || null;
@@ -513,6 +536,12 @@ var CLF_DOM = (() => {
   function messageIdOf(node) {
     const explicit = node?.getAttribute?.('data-message-id');
     if (explicit) return explicit;
+    const selected = node?.getAttribute?.('data-chatgpt-selection-message-id') ||
+      node?.querySelector?.('[data-chatgpt-selection-message-id]')?.getAttribute?.('data-chatgpt-selection-message-id');
+    if (selected) return selected;
+    const listed = node?.getAttribute?.('data-chatgpt-search-message-ids') || '';
+    const listedId = listed.trim().split(/\s+/).find(Boolean);
+    if (listedId) return listedId;
     // The slot's layout key is not a message UUID. Only a current same-exchange
     // MAIN stamp can join it to the actual typed item; stale stamps fail closed.
     const section = node?.closest?.(SHELL_TURN), turn = section?.getAttribute('data-clf-fiber-turn');
@@ -526,6 +555,7 @@ var CLF_DOM = (() => {
       let previous = null;
       for (const node of document.querySelectorAll(TURN)) {
         if (node.closest?.(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`)) continue;
+        if (node.matches?.(SEARCH_TURN) && (node.closest?.(LEGACY_TURN) || node.closest?.(SHELL_TURN))) continue;
         const id = turnIdOf(node);
         if (node.matches?.(SHELL_TURN)) {
           const users = [...node.querySelectorAll('[data-content-search-unit-key$=":user"]')].filter(slot => slot.closest('[data-turn-key]') === node);
@@ -534,7 +564,7 @@ var CLF_DOM = (() => {
           if (node.querySelector('[data-chatgpt-agent-turn-start], [data-content-search-unit-key$=":assistant"]')) out.push({ node, nodes: [node], id, role: 'assistant' });
           previous = null; continue;
         }
-        const role = node.getAttribute('data-turn');
+        const role = node.getAttribute('data-turn') || searchUnitRole(node) || null;
         if (previous && id && previous.id === id && previous.role === role) {
           previous.nodes.push(node);
           continue;
@@ -2776,24 +2806,31 @@ var CLF_DOM = (() => {
       // An empty document: the header toggle's own state, stamped by fiber.js on each scan.
       if (document.documentElement.getAttribute('data-clf-temporary-page') === location.pathname) return true;
       return [...document.querySelectorAll('button')].some(button => {
-      if (button.closest(`${OWN_SURFACES}, [data-message-author-role], [data-testid^="conversation-turn-"]`) || !button.getClientRects().length) return false;
-      // The provider renders both icons at once. Only the visible checked glyph proves
-      // the mode; translated labels and the requested URL are not activation receipts.
-      return [...button.querySelectorAll('svg use')].some(use => {
-        const href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
-        if (href.slice(href.lastIndexOf('#')) !== '#chat-temp-checked') return false;
-        for (let node = use.parentElement; node; node = node.parentElement) {
-          const style = getComputedStyle(node);
-          if (node.hidden || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') return false;
-        }
-        return true;
-      });
+        if (button.closest(`${OWN_SURFACES}, [data-message-author-role], [data-testid^="conversation-turn-"]`) || !button.getClientRects().length) return false;
+        // The current toolbar stopped using the checked sprite. The same 20x20 icon is three
+        // paths while Temporary Chat is off and gains this exact fourth path when it is on.
+        // React state above remains primary; this is a measured rendered fallback only.
+        const paths = [...button.querySelectorAll('svg path')];
+        if (paths.length === 4 && /^\s*M16\.8525 7\.06128/.test(paths[0].getAttribute('d') || '') &&
+            /^\s*M9\.99902 2\.25171/.test(paths[3].getAttribute('d') || '')) return true;
+        // The provider renders both icons at once. Only the visible checked glyph proves
+        // the mode; translated labels and the requested URL are not activation receipts.
+        return [...button.querySelectorAll('svg use')].some(use => {
+          const href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
+          if (href.slice(href.lastIndexOf('#')) !== '#chat-temp-checked') return false;
+          for (let node = use.parentElement; node; node = node.parentElement) {
+            const style = getComputedStyle(node);
+            if (node.hidden || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') return false;
+          }
+          return true;
+        });
       });
     }, false),
     confirmTemporaryChatIntroduction: () => {
       const dialog = [...document.querySelectorAll('[role="dialog"]')].find(node =>
-        [...node.querySelectorAll('h1,h2,[role="heading"]')].some(heading => text(heading, 100) === 'Temporary Chat') && /Not in history/.test(text(node, 2000)));
-      const button = dialog && [...dialog.querySelectorAll('button')].find(node => text(node, 100) === 'Continue');
+        [...node.querySelectorAll('h1,h2,[role="heading"]')].some(heading => /^Temporary chat$/i.test(text(heading, 100))) &&
+        /(?:Not in history|won['’]t appear in history)/i.test(text(node, 2000)));
+      const button = dialog && [...dialog.querySelectorAll('button')].find(node => /^Continue$/i.test(text(node, 100)));
       if (button) button.click();
     },
     conversationId,
