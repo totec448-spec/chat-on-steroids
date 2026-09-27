@@ -1687,5 +1687,7 @@
   "{0} estimated tokens": "{0} jetons estimés",
   "Daily breakdown": "Détail par jour",
   "Recommended": "Recommandés",
-  "Install": "Installer"
+  "Install": "Installer",
+  "Less": "Moins",
+  "More": "Plus"
 }

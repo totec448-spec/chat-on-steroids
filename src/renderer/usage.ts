@@ -30,10 +30,15 @@ function usageHint(node: HTMLElement, text: string | (() => string)): void {
   node.addEventListener('focus', show); node.addEventListener('blur', hide);
   node.addEventListener('keydown', event => { if (event.key === 'Escape') hide(); });
 }
+/** Weekday names come from the calendar, never a word list: Monday 21 September 2026 onwards. */
+function weekdayName(weekday: number): string {
+  return new Date(2026, 8, 20 + (weekday === 0 ? 7 : weekday)).toLocaleDateString(currentLanguage(), { weekday: 'long' });
+}
 function paintMessages(): void {
   const through = snapshot?.messages.through ?? Date.now();
   const from = usageWeekStart(weekStart, through);
-  ui($('usageWeekStartLabel'), 'textContent', () => t('Since {0}', [new Date(from).toLocaleDateString(currentLanguage(), { weekday: 'long' })]));
+  const select = $<HTMLSelectElement>('usageWeekStart');
+  select.value = String(weekStart);
   if (!snapshot) return;
   const totals = usageMessageTotals(snapshot.messages, weekStart);
   ui($('usageMessages56'), 'textContent', () => totals.gpt56.toLocaleString(currentLanguage()));
@@ -43,7 +48,7 @@ function paintMessages(): void {
     return t('Local time · {0} → {1}', [format.format(from), format.format(through)]);
   };
   ui($('usageMessagePeriod'), 'textContent', period);
-  ui($('usageWeekStart'), 'title', () => `${t('Change start day')}\n${period()}`);
+  ui(select, 'title', () => `${t('Change start day')}\n${period()}`);
 }
 export async function refreshUsage(): Promise<void> {
   document.getElementById('usageTooltip')?.remove();
@@ -131,11 +136,48 @@ function paintCost(): void {
   const first = daily.find(day => day.tokens > 0)?.date;
   const since = first ? Math.floor((Date.now() - new Date(`${first}T00:00:00`).getTime()) / 86_400_000) + 1 : 0;
   const weeks = Math.min(52, Math.max(12, Math.ceil(since / 7) + 1));
-  heat.style.gridTemplateColumns = `repeat(${weeks}, minmax(0, 1fr))`;
-  for (let ago = weeks * 7 - 1; ago >= 0; ago--) {
-    const date = new Date(); date.setDate(date.getDate() - ago); const key = dateKey(date), tokens = byDay.get(key) ?? 0;
-    const cell = el('span', 'heat-cell'); cell.dataset.level = String(tokens ? Math.max(1, Math.ceil(tokens / peak * 4)) : 0); const hint = () => t("{0}: {1} estimated tokens", [dayLabel(key), Math.round(tokens).toLocaleString()]); usageHint(cell, hint); ui(cell, 'aria-label', hint); heat.append(cell);
+  // A calendar: one column per week starting on Monday, one row per weekday, today in the
+  // last column. Days after today stay as empty slots so the rows keep their weekday.
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const start = new Date(today); start.setDate(start.getDate() - (today.getDay() + 6) % 7 - (weeks - 1) * 7);
+  // One grid: weekday labels in the first column, months in the first row. Squares share
+  // the width, up to a comfortable size, so twelve weeks are not a stamp in a wide card.
+  const grid = el('div', 'heat-grid'); grid.setAttribute('role', 'group');
+  grid.style.gridTemplateColumns = `var(--heat-label) repeat(${weeks}, minmax(0, 1fr))`;
+  grid.style.maxWidth = `calc(var(--heat-label) + ${weeks} * var(--heat-max))`;
+  const place = (node: HTMLElement, row: number, column: string) => { node.style.gridRow = String(row); node.style.gridColumn = column; grid.append(node); };
+  for (let row = 0; row < 7; row += 2) {
+    const label = el('span', 'heat-day'); label.setAttribute('aria-hidden', 'true');
+    ui(label, 'textContent', () => new Date(2026, 8, 21 + row).toLocaleDateString(currentLanguage(), { weekday: 'short' }));
+    place(label, row + 2, '1');
   }
+  let lastMonth = -1;
+  for (let week = 0; week < weeks; week++) {
+    const monday = new Date(start); monday.setDate(start.getDate() + week * 7);
+    if (monday.getMonth() !== lastMonth && week < weeks - 1) {
+      lastMonth = monday.getMonth();
+      // A month cut to its last days at the left edge would collide with the next label.
+      const soon = new Date(monday); soon.setDate(monday.getDate() + 14);
+      if (week > 0 || soon.getMonth() === lastMonth) {
+        const month = el('span', 'heat-month'); month.setAttribute('aria-hidden', 'true');
+        ui(month, 'textContent', () => monday.toLocaleDateString(currentLanguage(), { month: 'short' }));
+        place(month, 1, `${week + 2} / span 3`);
+      }
+    }
+    for (let row = 0; row < 7; row++) {
+      const date = new Date(monday); date.setDate(monday.getDate() + row);
+      if (date > today) { place(el('span', 'heat-cell is-future'), row + 2, String(week + 2)); continue; }
+      const key = dateKey(date), tokens = byDay.get(key) ?? 0;
+      const cell = el('span', 'heat-cell'); cell.dataset.level = String(tokens ? Math.max(1, Math.ceil(tokens / peak * 4)) : 0);
+      const hint = () => t("{0}: {1} estimated tokens", [dayLabel(key), Math.round(tokens).toLocaleString()]); usageHint(cell, hint); ui(cell, 'aria-label', hint);
+      place(cell, row + 2, String(week + 2));
+    }
+  }
+  const legend = el('div', 'heat-legend'); legend.setAttribute('aria-hidden', 'true');
+  legend.append(el('span', '', () => t('Less')));
+  for (let level = 0; level <= 4; level++) { const swatch = el('span', 'heat-cell'); swatch.dataset.level = String(level); legend.append(swatch); }
+  legend.append(el('span', '', () => t('More')));
+  heat.append(grid, legend);
   ui($('usageHeatmapCaption'), 'textContent', () => weeks === 52 ? t("Estimated context processed per tool call · last 52 weeks") : t("Estimated context processed per tool call · last {0} weeks", [weeks]));
   ui($('usageFormula'), 'textContent', () => t("Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.", [formula.divisor, formula.multiplier, snapshot!.contextTokenCap.toLocaleString()]));
   ui($('usageCost'), 'textContent', () => t("{0} estimated equivalent. {1}This is a comparison, not a bill.", [costText(total), total.unpricedTokens ? t("{0} tokens have no rate. ", [Math.round(total.unpricedTokens).toLocaleString()]) : '']));
@@ -156,9 +198,14 @@ function paintCost(): void {
   for (const day of recent) {
     const bar = el('span', 'usage-bar');
     bar.style.height = `${top > 0 ? Math.max(2, Math.round(day.cost / top * 100)) : 2}%`;
+    if (day.cost === top && top > 0) bar.classList.add('is-peak');
     usageHint(bar, () => `${dayLabel(day.date)} · ${costText(day)} · ${t("{0} estimated tokens", [Math.round(day.tokens).toLocaleString()])}`);
     chart.append(bar);
   }
+  // Scale and range at a glance: the peak day's amount on top, the first and last day below.
+  const scale = el('div', 'usage-bars-scale', money.format(top));
+  const axis = el('div', 'usage-bars-axis');
+  if (recent.length) axis.append(el('span', '', () => dayLabel(recent[0]!.date)), el('span', '', () => dayLabel(recent[recent.length - 1]!.date)));
   const breakdown = el('details', 'usage-breakdown');
   breakdown.append(el('summary', '', () => t("Daily breakdown")));
   const table = el('table', 'usage-table'); const head = el('tr');
@@ -166,17 +213,28 @@ function paintCost(): void {
   for (const day of [...daily].reverse()) { const row = el('tr'); row.append(el('td', '', () => dayLabel(day.date)), el('td', '', Math.round(day.tokens).toLocaleString()), el('td', '', costText(day))); table.append(row); }
   if (!snapshot.days.length) { const row = el('tr'); const cell = el('td', 'muted', () => t("No recorded tool calls yet.")); cell.setAttribute('colspan', '3'); row.append(cell); table.append(row); }
   breakdown.append(table);
-  $('usageDays').replaceChildren(modelTable, ...(recent.length ? [chart] : []), breakdown);
+  $('usageDays').replaceChildren(modelTable, ...(recent.length ? [scale, chart, axis] : []), breakdown);
 }
 export function initUsage(): void {
   try {
     const saved = localStorage.getItem(WEEK_START_KEY);
     if (saved !== null && /^[0-6]$/.test(saved)) weekStart = Number(saved);
   } catch { /* The weekday can still be changed in this window. */ }
+  // A real choice of seven days instead of a button that silently cycles through them.
+  const select = $<HTMLSelectElement>('usageWeekStart');
+  select.replaceChildren();
+  for (const weekday of [1, 2, 3, 4, 5, 6, 0]) {
+    const option = document.createElement('option'); option.value = String(weekday);
+    ui(option, 'textContent', () => t('Since {0}', [weekdayName(weekday)]));
+    select.append(option);
+  }
+  ui(select, 'aria-label', () => t('Change start day'));
   paintMessages();
   usageHint($('usageMessagesTitle'), () => t('Counts recorded native messages with verified model selection. Tool injections and messages without model evidence are excluded.'));
-  $('usageWeekStart').addEventListener('click', () => {
-    weekStart = (weekStart + 1) % 7;
+  select.addEventListener('change', () => {
+    const next = Number(select.value);
+    if (!Number.isInteger(next) || next < 0 || next > 6) return;
+    weekStart = next;
     try { localStorage.setItem(WEEK_START_KEY, String(weekStart)); } catch { /* Keep the current in-memory choice. */ }
     paintMessages();
   });

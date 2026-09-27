@@ -1687,5 +1687,7 @@
   "{0} estimated tokens": "估算 {0} 个 Token",
   "Daily breakdown": "每日明细",
   "Recommended": "推荐",
-  "Install": "安装"
+  "Install": "安装",
+  "Less": "少",
+  "More": "多"
 }

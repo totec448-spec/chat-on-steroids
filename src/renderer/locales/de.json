@@ -1687,5 +1687,7 @@
   "{0} estimated tokens": "{0} geschätzte Tokens",
   "Daily breakdown": "Aufschlüsselung pro Tag",
   "Recommended": "Empfohlen",
-  "Install": "Installieren"
+  "Install": "Installieren",
+  "Less": "Weniger",
+  "More": "Mehr"
 }
