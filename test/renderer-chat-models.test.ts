@@ -413,3 +413,31 @@ it.each(['5.6', 'gpt-5.6-sol', 'GPT-5.6 Sol', 'gpt-5-6-thinking'])('keeps saved 
   };
   check(); receive({ state: 'ready', models: [...models].reverse() }); check();
 });
+
+it('offers ChatGPT’s current model only when no account list is readable, and only on an explicit choice (#104)', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  let receive!: (catalog: any) => void;
+  Object.assign(dom.window, { api: {
+    getChatModels: async () => ({ ok: true, data: { state: 'pending', requestedAt: 1, observedAt: null, models: [] } }),
+    onChatModelsChanged: (listener: typeof receive) => { receive = listener; } } });
+  const { initChatModels, applyChatModels, composerSendModel, confirmedComposerModel, ensureComposerModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  const button = () => dom.window.document.querySelector<HTMLButtonElement>('[data-use-current-model]');
+  // Still reading: nothing is offered, and nothing is sent without a choice.
+  expect(button()).toBeNull();
+  expect(composerSendModel()).toBeNull();
+  // A Go/Free account has no picker, so discovery ends without any list.
+  receive({ state: 'unavailable', requestedAt: 1, observedAt: 2, models: [], error: 'ChatGPT’s native model picker could not be read.' });
+  expect(button(), 'offered once no list is readable').not.toBeNull();
+  expect(composerSendModel(), 'never chosen silently').toBeNull();
+  button()!.click();
+  expect(composerSendModel()).toEqual({ model: null, reasoningEffort: null });
+  expect(await ensureComposerModel()).toEqual({ model: null, reasoningEffort: null });
+  expect(confirmedComposerModel(), 'the confirmed-pair contract is unchanged').toBeNull();
+  expect(dom.window.document.getElementById('composerModelLabel')!.textContent).toBe('ChatGPT’s current model');
+  // A readable list takes over again at once.
+  receive({ state: 'ready', requestedAt: 3, observedAt: 4, models: [{ id: 'gpt-6', label: 'GPT-6', efforts: ['high'] }] });
+  expect(composerSendModel()).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
+  expect(button()).toBeNull();
+});

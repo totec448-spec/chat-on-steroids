@@ -1554,5 +1554,9 @@
   "The helper returned an unusable continuation. Nothing was sent. Review the continuation instructions or choose another helper model.": "L’assistant a renvoyé une continuation inutilisable. Rien n’a été envoyé. Vérifiez les instructions de continuation ou choisissez un autre modèle d’assistant.",
   "The provider reported an error while generating the continuation. Check its status or choose another model.": "Le fournisseur a signalé une erreur pendant la génération de la continuation. Vérifiez son état ou choisissez un autre modèle.",
   "PDF exceeds the preview limit": "Le PDF dépasse la limite d’aperçu",
-  "PDF page dimensions exceed the preview limit": "Les dimensions de la page PDF dépassent la limite d’aperçu"
+  "PDF page dimensions exceed the preview limit": "Les dimensions de la page PDF dépassent la limite d’aperçu",
+  "ChatGPT’s current model": "Modèle actuel de ChatGPT",
+  "Sent without choosing a model": "Envoyé sans choisir de modèle",
+  "Use ChatGPT’s current model": "Utiliser le modèle actuel de ChatGPT",
+  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "Votre forfait ChatGPT n’affiche aucun sélecteur de modèle. Envoyer avec le modèle que ChatGPT utilise déjà."
 }
