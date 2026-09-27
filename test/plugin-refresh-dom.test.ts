@@ -99,7 +99,7 @@ function settingsPage(path = '/settings/plugins-settings/plugin_asdk_app_synthet
   Object.defineProperty(win.HTMLElement.prototype, 'getClientRects', { value() { return this.hidden ? [] : [{}]; } });
   win.postMessage = (data: unknown) => queueMicrotask(() => win.dispatchEvent(new win.MessageEvent('message', { data, source: win as unknown as Window, origin: win.location.origin })));
   const connector = { id: 'asdk_app_synthetic', name: 'Chat On Steroids Core', app_metadata: { version_id: 'asdk_app_v_synthetic' }, owners: ['never-copy'],
-    actions: [{ name: tool.name, description: tool.description, description_model: null, params: tool.inputSchema }] };
+    actions: [{ name: tool.name, description: tool.description, description_model: '' as string | null, params: tool.inputSchema }] };
   const owner = { memoizedProps: { connector, link: {}, plugin: {} } };
   const chain = (wrapper: object) => ({ memoizedProps: { children: 'x' }, return: { memoizedProps: wrapper, return: { memoizedProps: { className: 'row' }, return: owner } } });
   const set = (id: string, wrapper: object) => { (win.document.getElementById(id) as any).__reactFiber$fixture = chain(wrapper); };
@@ -140,4 +140,10 @@ it('finds installed rows on the plugins settings page', () => {
   const api = (dom.window as any).CLF_DOM;
   expect(api.pluginInstalledButtons('Chat On Steroids Core')).toHaveLength(1);
   expect(api.pluginInstalledButtons('Chat On Steroids')).toBeNull();
+});
+it('reads the page description when the model description is empty, and prefers a set one', async () => {
+  const { api, connector } = settingsPage();
+  expect((await api.pluginRefreshView('Chat On Steroids Core', [tool])).tools[0].description).toBe(tool.description);
+  connector.actions[0]!.description_model = 'Model-facing declaration.';
+  expect((await api.pluginRefreshView('Chat On Steroids Core', [tool])).tools[0].description).toBe('Model-facing declaration.');
 });

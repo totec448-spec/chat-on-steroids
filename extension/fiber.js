@@ -2368,7 +2368,9 @@
     const externalPlugins = connector.name === 'Chat On Steroids Plugins';
     if ((!connector.actions.length && !externalPlugins) || connector.actions.length > (externalPlugins ? 257 : 16)) return null;
     const budget = { bytes: 280000, nodes: 20000 };
-    const tools = connector.actions.map(action => ({ name: action.name, description: copySchema(action.description_model ?? action.description, budget), inputSchema: copySchema(action.params, budget) }));
+    // Measured 2026-09-27: this page sends `description_model: ""` rather than null, so `??`
+    // read every declaration as empty and no refresh could ever match the published schema.
+    const tools = connector.actions.map(action => ({ name: action.name, description: copySchema(action.description_model || action.description, budget), inputSchema: copySchema(action.params, budget) }));
     if (tools.some(tool => !NAME.test(tool.name) || typeof tool.description !== 'string' || !tool.inputSchema || tool.inputSchema.type !== 'object') ||
         new Set(tools.map(tool => tool.name)).size !== tools.length) return null;
     if (control && control.getAttribute('data-clf-plugin-refresh') !== appId) control.setAttribute('data-clf-plugin-refresh', appId);
