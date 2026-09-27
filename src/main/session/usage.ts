@@ -97,13 +97,28 @@ async function computeOverview(signal?: AbortSignal): Promise<UsageOverview> {
       };
       const events = await readEvents(session.id);
       signal?.throwIfAborted();
+      // A send typed on the page carries no model of its own. The reply that answers it does:
+      // ChatGPT's server stamps it with the model that actually ran. Only that reply, before
+      // the next send, may prove the model — never the picker or a later tool.
+      let unproven: { id: string; time: number } | null = null;
       for (const event of events) {
         // The delivered native row owns model proof. Never borrow the mutable picker,
         // a later tool's model or LEGACY's token-estimation assumptions for this count.
         if (event.kind === 'user_message' && event.messageId && !event.messageId.startsWith('input:') && event.inputDelivery !== 'offered') {
           const model = usageMessageFamily(event.model);
           const time = event.authoredAt ?? event.time;
-          if (model && Number.isFinite(time) && time > 0 && time <= 8.64e15) verified.push({ id: event.messageId, time, model });
+          unproven = null;
+          if (Number.isFinite(time) && time > 0 && time <= 8.64e15) {
+            if (model) verified.push({ id: event.messageId, time, model });
+            else if (!event.model) unproven = { id: event.messageId, time };
+          }
+        } else if (event.kind === 'user_message') {
+          unproven = null;
+        }
+        if (event.kind === 'assistant_message' && unproven && event.resolvedModel) {
+          const model = usageMessageFamily(event.resolvedModel);
+          if (model) verified.push({ ...unproven, model });
+          unproven = null;
         }
         // A code-mode child is local execution evidence, not another model round trip.
         if (event.kind === 'tool_call' && event.call.nested === true) continue;

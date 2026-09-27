@@ -1435,6 +1435,21 @@ describe('activity feed', () => {
     expect(messages.find((row: any) => row.providerMessageId === providers[1])).toMatchObject({ messageId: ids[1] });
   });
 
+  it('records the server-resolved reply model, keeps it across sparse updates and drops malformed values', async () => {
+    await pair();
+    const conversationId = '99999999-8888-7777-6666-555555555552';
+    const result = await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'assistant_message', messageId: 'reply-a', time: Date.now(), text: 'A', state: 'streaming', resolvedModel: 'gpt-5-6-thinking' },
+      { kind: 'assistant_message', messageId: 'reply-b', time: Date.now(), text: 'B', state: 'streaming', resolvedModel: 'gpt-6 <b>pro</b>' }
+    ] } });
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'assistant_message', messageId: 'reply-a', time: Date.now(), text: 'A final', state: 'final' }
+    ] } });
+    const replies = await readEvents(result.body.sessionId, { kinds: ['assistant_message'] });
+    const model = Object.fromEntries(replies.map(event => [event.kind === 'assistant_message' && event.messageId, event.kind === 'assistant_message' ? event.resolvedModel : null]));
+    expect(model).toEqual({ 'reply-a': 'gpt-5-6-thinking', 'reply-b': undefined });
+  });
+
   it('hands back an app-owned render stream plus legacy tool summaries, with no raw tool I/O', async () => {
     await pair();
     const conversationId = '99999999-8888-7777-6666-555555555555';

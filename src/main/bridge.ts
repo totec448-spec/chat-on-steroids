@@ -1182,6 +1182,10 @@ function parseObservations(input: unknown): ChatObservation[] {
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item['providerMessageId'])) {
       observation.providerMessageId = item['providerMessageId'];
     }
+    if (kind === 'assistant_message' && typeof item['resolvedModel'] === 'string' &&
+        /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(item['resolvedModel'])) {
+      observation.resolvedModel = item['resolvedModel'];
+    }
     if (kind === 'native_image') {
       if (typeof item['messageId'] !== 'string' ||
           !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item['messageId']) ||
