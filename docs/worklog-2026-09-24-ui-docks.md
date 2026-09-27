@@ -223,3 +223,20 @@
   UIA/accessibility failures and the MCP parser-recovery assertion; the long broad suite
   was stopped after those failures, so no full-suite pass is claimed. No installed-app
   behavior is claimed.
+
+## Integration with upstream 2.1.16
+
+- Rebased the shell, tools and Review branches in order on upstream `main` at `62fccc4`.
+  Kept upstream's newer renderer behavior and tests, the terminal tab-exit notification,
+  and the read-only Review attribution while resolving the overlapping changes.
+- European Portuguese arrived in upstream after these branches diverged. Added only each
+  branch's own UI labels to that locale: nine shell labels, two bottom-panel labels and
+  the Review/Git labels in the Review branch. The preload IPC test and isolated Electron
+  fixture now model the newer IPC/config contracts without changing production authority.
+- On the final Review branch, 277 focused Git/dock/File/terminal/IPC/locale tests,
+  TypeScript typecheck and the isolated Electron workspace fixture passed. The shell
+  branch's 196 timeline tests and the tools branch's 87 focused tests also passed.
+  Privacy, notices and the production bundle passed. The broad `npm run verify` again
+  reported two Windows UIA/accessibility failures and the MCP parser-recovery assertion;
+  the already-failing long run was stopped, so no full-suite pass is claimed. Source,
+  bundle, package and installed-app evidence remain separate.
