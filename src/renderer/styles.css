@@ -3038,8 +3038,8 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 #attachmentMenu > summary .ico { display: block; width: 20px; height: 20px; }
 .composer-menu > summary:hover, .composer-menu[open] > summary { color: var(--ink); background: var(--hover); }
 .composer-popover { position: absolute; z-index: 30; bottom: calc(100% + 12px); left: 0; width: 224px; padding: 7px; background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 14px; box-shadow: 0 8px 30px #0005; }
-.model-menu .composer-popover { left: 50%; right: auto; translate: -50% 0; width: 260px; }
-.model-menu { width: 164px; flex: 0 0 164px; }
+.model-menu .composer-popover { left: auto; right: 0; width: 260px; }
+.model-menu { width: max-content; max-width: 164px; }
 .model-menu > summary { width: 100%; min-width: 0; justify-content: center; }
 #composerModelLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
 #composerModelLabel > strong { font-weight: 600; }
@@ -3048,7 +3048,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .composer-popover label { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
 .composer-popover select { width: 145px; color: var(--ink); background: var(--sunk); border: 1px solid var(--edge); padding: 6px; border-radius: 7px; }
 .composer-toolbar { gap: 6px; }
-@media (max-width: 760px) { .model-menu { width: 120px; flex-basis: 120px; } }
+@media (max-width: 760px) { .model-menu { max-width: 120px; } }
 
 html[data-theme="dark"] { color-scheme: dark; }
 html[data-theme="light"] { color-scheme: light; }
