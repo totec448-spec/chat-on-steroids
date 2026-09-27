@@ -1224,7 +1224,7 @@
   "In ChatGPT, open Settings → Security and login and turn on Developer mode.": "在 ChatGPT 中打开 Settings → Security and login，开启 Developer mode。",
   "B · Create the Core plugin": "B · 创建 Core 插件",
   "Open the ChatGPT Plugins page using the button above. Click + at the top right to open New Plugin.": "使用上方按钮打开 ChatGPT Plugins 页面。点击右上角的 +，打开 New Plugin。",
-  "Copy the name and description from the Core card below.": "复制下方 Core 卡片中的名称和描述。",
+  "Copy the name and description from the Core card below. Keep the name exactly as shown: CoS recognizes its tool calls by this name, and a renamed plugin's calls are not linked to your chats.": "复制下方 Core 卡片中的名称和描述。请保持名称与显示的完全一致：CoS 通过此名称识别自己的工具调用，改名后的插件调用不会关联到你的对话。",
   "Under Authentication, choose No Auth.": "在 Authentication 中选择 No Auth。",
   "Do not paste your API key here.": "不要在这里粘贴 API 密钥。",
   "Read and accept the notice, then click Create. Keep the tunnel running while ChatGPT connects.": "阅读并接受提示，然后点击 Create。ChatGPT 连接期间，请保持隧道运行。",

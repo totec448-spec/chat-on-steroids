@@ -266,7 +266,7 @@ html:lang(ja) body { font-family: var(--ui-font, -apple-system, BlinkMacSystemFo
 .setup-heading .settings-heading { margin-bottom: 0; padding: 0; }
 .setup-heading .settings-heading p { margin-bottom: 0; }
 .language-tabs { display: inline-flex; flex: none; flex-wrap: wrap; justify-self: start; max-width: 100%; padding: 3px; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
-.language-tabs button { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 36px; padding: 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.language-tabs button { display: inline-flex; align-items: center; justify-content: center; width: 37px; height: 36px; padding: 5px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .language-tabs button:hover { background: var(--hover); color: var(--ink); }
 .language-tabs button[aria-pressed='true'] { background: var(--hover); border-color: var(--line); color: var(--ink); }
 .language-tabs button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
