@@ -7,6 +7,7 @@ import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, rem
 import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from './skill-github.js';
 import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
+import { installRecommendedSkill, listRecommendedSkills } from './recommended-skills.js';
 import { noteChatOrigin } from './session/recorder.js';
 import { REASONING_EFFORTS } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
@@ -666,6 +667,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('skills:list', () => listSkills());
   handle('skills:managed', () => listManagedSkills());
+  handle('skills:recommended', () => listRecommendedSkills());
+  handle('skills:installRecommended', async payload => {
+    const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    return installRecommendedSkill(id);
+  });
   handle('skills:import', async payload => {
     const { kind } = z.object({ kind: z.enum(['folder', 'file']) }).strict().parse(payload);
     const options: Electron.OpenDialogOptions = kind === 'folder'

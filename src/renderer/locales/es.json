@@ -1651,6 +1651,7 @@
   "No pets match your search.": "Ninguna mascota coincide con tu búsqueda.",
   "Pet operation failed": "La operación con la mascota falló",
   "This removes the pet from your local library. You can import it again later.": "Esto quita la mascota de tu biblioteca local. Puedes volver a importarla más tarde.",
+  "Playful status words: show rotating gym jokes instead of “Working”": "Palabras de estado divertidas: mostrar bromas de gimnasio en lugar de «Working»",
   "GitHub URL": "URL de GitHub",
   "https://github.com/owner/repo/tree/main/skill": "https://github.com/owner/repo/tree/main/skill",
   "Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.": "Importa una carpeta, un SKILL.md independiente o una Skill pública de GitHub. Puedes vincular las Skills locales a su fuente de GitHub para buscar actualizaciones; tú decides si instalarlas.",
@@ -1682,5 +1683,7 @@
   "Estimated context processed per tool call · last {0} weeks": "Contexto estimado procesado por llamada a herramienta · últimas {0} semanas",
   "Estimated cost per day, last {0} days": "Coste estimado por día, últimos {0} días",
   "{0} estimated tokens": "{0} tokens estimados",
-  "Daily breakdown": "Desglose diario"
+  "Daily breakdown": "Desglose diario",
+  "Recommended": "Recomendados",
+  "Install": "Instalar"
 }

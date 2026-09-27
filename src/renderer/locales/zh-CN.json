@@ -1651,6 +1651,7 @@
   "No pets match your search.": "没有与搜索匹配的宠物。",
   "Pet operation failed": "宠物操作失败",
   "This removes the pet from your local library. You can import it again later.": "这会将宠物从你的本地库中移除。你可以稍后重新导入。",
+  "Playful status words: show rotating gym jokes instead of “Working”": "趣味状态词：以轮换的健身梗代替“Working”",
   "GitHub URL": "GitHub 网址",
   "https://github.com/owner/repo/tree/main/skill": "https://github.com/owner/repo/tree/main/skill",
   "Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.": "导入文件夹、独立的 SKILL.md 或公开的 GitHub 技能。本地技能可关联 GitHub 来源以检查更新；是否安装由你决定。",
@@ -1682,5 +1683,7 @@
   "Estimated context processed per tool call · last {0} weeks": "每次工具调用处理的估算上下文 · 最近 {0} 周",
   "Estimated cost per day, last {0} days": "每日估算费用，最近 {0} 天",
   "{0} estimated tokens": "估算 {0} 个 Token",
-  "Daily breakdown": "每日明细"
+  "Daily breakdown": "每日明细",
+  "Recommended": "推荐",
+  "Install": "安装"
 }
