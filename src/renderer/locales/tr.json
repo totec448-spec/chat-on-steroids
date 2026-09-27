@@ -1139,7 +1139,7 @@
   "In ChatGPT, open Settings → Security and login and turn on Developer mode.": "ChatGPT'de Settings → Security and login yolunu açıp Developer mode seçeneğini etkinleştirin.",
   "B · Create the Core plugin": "B · Core eklentisini oluşturun",
   "Open the ChatGPT Plugins page using the button above. Click + at the top right to open New Plugin.": "Yukarıdaki düğmeyle ChatGPT Plugins sayfasını açın. New Plugin ekranını açmak için sağ üstteki + düğmesine tıklayın.",
-  "Copy the name and description from the Core card below.": "Aşağıdaki Core kartından adı ve açıklamayı kopyalayın.",
+  "Copy the name and description from the Core card below. Keep the name exactly as shown: CoS recognizes its tool calls by this name, and a renamed plugin's calls are not linked to your chats.": "Aşağıdaki Core kartından adı ve açıklamayı kopyalayın. Adı tam olarak gösterildiği gibi bırakın: CoS araç çağrılarını bu addan tanır; adı değiştirilmiş bir eklentinin çağrıları sohbetlerinize bağlanmaz.",
   "Under Authentication, choose No Auth.": "Authentication altında No Auth seçin.",
   "Do not paste your API key here.": "API anahtarınızı buraya yapıştırmayın.",
   "Read and accept the notice, then click Create. Keep the tunnel running while ChatGPT connects.": "Bildirimi okuyup kabul edin, ardından Create düğmesine tıklayın. ChatGPT bağlanırken tüneli açık tutun.",
