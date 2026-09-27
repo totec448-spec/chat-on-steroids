@@ -25,6 +25,7 @@ app.whenReady().then(async () => {
       window.addEventListener('error', event => window.fixtureErrors.push(event.message));
       window.addEventListener('unhandledrejection', event => window.fixtureErrors.push(String(event.reason)));
       const config={roots:[{name:'demo',path:'C:/demo'}],readOnly:false,
+        commandAllowlist:{enabled:false,mode:'allow',rules:[]},
         capabilities:{browse:true,search:true,read:true,metadata:true,create:true,edit:true,move:true,deleteFile:true,command:true,screen:false,control:false,clipboardRead:false,clipboardWrite:false},
         tunnel:{kind:'openai',tunnelId:'',desktopTunnelId:'',binaryPath:''},
         ui:{minimizeToTray:true,autoConnect:false,privacyScreenshots:false,theme:'dark'},
