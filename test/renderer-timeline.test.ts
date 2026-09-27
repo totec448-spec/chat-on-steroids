@@ -2130,7 +2130,7 @@ it('keeps mixed tool and agent activity in one latest-action disclosure between 
   const timeline = w.document.getElementById('timeline')!;
   const group = timeline.querySelector<HTMLDetailsElement>('.tool-group')!;
   expect(group.open).toBe(false);
-  expect(group.querySelector('.activity-title')!.textContent).toBe('Read README.md');
+  expect(group.querySelector('.activity-title')!.textContent).toBe('Checking the implementation');
   expect(group.querySelector('.agent-communication summary')!.textContent).toContain('Message from worker-2');
   expect(group.querySelector('.agent-avatar')).not.toBeNull();
   expect(group.querySelectorAll('.ev')).toHaveLength(3);
@@ -2140,6 +2140,43 @@ it('keeps mixed tool and agent activity in one latest-action disclosure between 
   ]);
   expect(timeline.querySelectorAll('.tool-group')).toHaveLength(2);
   expect(timeline.children[0]!.className).toContain('ev-progress');
+});
+
+it('folds five consecutive status polls while retaining each exact tool row', async () => {
+  const status = (seq: number): SessionEvent => {
+    const event = toolCall(seq, `status-${seq}`) as Extract<SessionEvent, { kind: 'tool_call' }>;
+    return { ...event, call: { ...event.call, tool: 'agents', summary: { kind: 'agent', tone: 'neutral', title: 'Checked agent status' } } };
+  };
+  const { w, append } = await boot([status(1), status(2), status(3), status(4)]);
+  const timeline = w.document.getElementById('timeline')!;
+  expect(timeline.querySelector('.routine-activity')).toBeNull();
+  await append([status(5)]);
+  const fold = timeline.querySelector<HTMLDetailsElement>('.routine-activity')!;
+  expect(fold.querySelector('.routine-count')!.textContent).toBe('×5');
+  expect(fold.querySelectorAll('.ev-tool_call')).toHaveLength(5);
+  fold.open = true;
+  fold.dispatchEvent(new w.Event('toggle'));
+  await append([status(6)]);
+  expect(timeline.querySelector('.routine-activity')).toBe(fold);
+  expect(fold.open).toBe(true);
+  expect(fold.querySelectorAll('.ev-tool_call')).toHaveLength(6);
+  expect(fold.querySelector('.routine-count')!.textContent).toBe('×6');
+  const failed = status(7) as Extract<SessionEvent, { kind: 'tool_call' }>;
+  await append([{ ...failed, call: { ...failed.call, outcome: 'tool_rejected', summary: { ...failed.call.summary, tone: 'bad' } } }]);
+  expect(fold.querySelectorAll('.ev-tool_call')).toHaveLength(6);
+  expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(7);
+});
+
+it('keeps an artifact action as the activity title rather than its tool tag', async () => {
+  const shell = toolCall(3, 'shell') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  const { w } = await boot([toolCall(2, 'read'), { ...shell, call: {
+    ...shell.call, tool: 'exec_command', summary: { kind: 'run', tone: 'good', title: 'Ran build checks' },
+    changes: [{ path: 'src/app.ts', added: 2, removed: 1, approximate: true }]
+  } }]);
+  const group = w.document.querySelector('.tool-group')!;
+  expect(group.querySelector('.activity-title')!.textContent).toBe('Ran build checks');
+  expect(group.querySelector('.tool-tag')!.textContent).toBe('shell');
+  expect(group.querySelector('.tool-change-count')!.textContent).toContain('approx.');
 });
 
 it('controls the selected session without submitting another user message', async () => {

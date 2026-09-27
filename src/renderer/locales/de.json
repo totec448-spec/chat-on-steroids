@@ -1567,5 +1567,18 @@
   "Toggle right panel": "Rechte Leiste ein-/ausblenden",
   "Toggle bottom panel": "Untere Leiste ein-/ausblenden",
   "Toggle bottom panel (Ctrl+`)": "Untere Leiste ein-/ausblenden (Strg+`)",
-  "Close tab": "Tab schließen"
+  "Close tab": "Tab schließen",
+  "Code": "Code",
+  "est.": "gesch.",
+  "Original assignment": "Ursprüngliche Aufgabe",
+  "Check the build and show what changed.": "Prüfe den Build und zeig, was sich geändert hat.",
+  "Build passed. Here is the updated command:": "Build erfolgreich. Hier ist der aktualisierte Befehl:",
+  "✓ Complete": "✓ Fertig",
+  "Automatically recover unfinished answers": "Unfertige Antworten automatisch wiederherstellen",
+  "Continue an interrupted answer when the app can verify the unfinished turn.": "Setzt eine unterbrochene Antwort fort, wenn die App bestätigen kann, dass der Durchlauf unfertig ist.",
+  "Recovery timing details": "Details zu den Wartezeiten der Wiederherstellung",
+  "Unverified": "Nicht bestätigt",
+  "Failed": "Fehlgeschlagen",
+  "Finished": "Fertig",
+  "Could not copy text.": "Text konnte nicht kopiert werden."
 }
