@@ -1677,6 +1677,13 @@
   "Remove {0}?": "Remover {0}?",
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "Isso move a skill e seus recursos para a Lixeira. Mensagens já preparadas não mudam.",
   "Skill imported into the CoS library": "Skill importada para a biblioteca do CoS",
+  "Weekly limit": "Limite semanal",
+  "{0}-hour limit": "Limite de {0} horas",
+  "Shared across all models": "Compartilhado entre todos os modelos",
+  "Estimated context processed per tool call · last {0} weeks": "Contexto estimado processado por chamada de ferramenta · últimas {0} semanas",
+  "Estimated cost per day, last {0} days": "Custo estimado por dia, últimos {0} dias",
+  "{0} estimated tokens": "{0} tokens estimados",
+  "Daily breakdown": "Detalhamento diário",
   "Recommended": "Recomendadas",
   "Install": "Instalar"
 }
