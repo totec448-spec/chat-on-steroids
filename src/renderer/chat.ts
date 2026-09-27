@@ -2978,7 +2978,12 @@ const TURN_WORK_WORDS = [
   'Pumping tokens', 'Juicing context', 'Bulking output', 'Repping prompts', 'Spotting agents',
   'Loading creatine', 'Chasing gains', 'Flexing neurons', 'TRT mode', 'Testosterone boost',
   'Tren thoughts', 'Deca stack', 'Anavar cutting', 'Dianabol bulking', 'Winstrol drying',
-  'Primobolan polishing', 'Pissing OpenAI off a little more', 'Clauding deez nuts'
+  'Primobolan polishing', 'Pissing OpenAI off a little more', 'Clauding deez nuts',
+  'Warming up the GPUs', 'Deadlifting the context window', 'Carb-loading tokens', 'Doing reps on the repo',
+  'Hitting a new PR', 'Skipping leg day', 'Pre-workout kicking in', 'Protein-shaking the stack trace',
+  'Benching the build', 'Spotting the next token', 'Stretching the attention span', 'Counting macros',
+  'Pumping iron and ideas', 'Cutting the fluff', 'Going beast mode', 'One more set',
+  'Oiling up the prompt', 'Flexing for the mirror', 'Grinding through the backlog', 'Chugging creatine', 'No pain, no merge'
 ] as const;
 
 /** Stable per turn, then advances every five seconds so it reads as authored rather than jittery. */
