@@ -18,6 +18,13 @@ const {BrowserControlBroker}=await import(pathToFileURL(path.join(run,'broker.mj
 const clients=new Set(),requests=new Map(),token=randomUUID();
 const broker=new BrowserControlBroker(()=>{for(const ws of clients)ws.send('browser-control');});
 const manifest=JSON.parse(await fs.readFile(path.join(extensionSource,'manifest.json'),'utf8'));
+// A localized manifest name reaches getManifest() already translated into the browser's UI language.
+const messageKey=/^__MSG_(\w+)__$/.exec(manifest.name)?.[1];
+const manifestNames=new Set([manifest.name]);
+if(messageKey)for(const locale of await fs.readdir(path.join(extensionSource,'_locales'))){
+  const messages=JSON.parse(await fs.readFile(path.join(extensionSource,'_locales',locale,'messages.json'),'utf8'));
+  if(messages[messageKey]?.message)manifestNames.add(messages[messageKey].message);
+}
 const source=await fs.readFile(path.join(extensionSource,'background.js'),'utf8');
 const protocol=Number(/const BRIDGE_PROTOCOL = (\d+)/.exec(source)[1]);
 const alarm=/const RETRY_ALARM = '([^']+)'/.exec(source)[1];
@@ -64,7 +71,7 @@ try {
     for(const target of (await cdp('Target.getTargets')).targetInfos.filter(t=>t.type==='service_worker'&&t.url.endsWith('/background.js'))){
       const workerSession=(await cdp('Target.attachToTarget',{targetId:target.targetId,flatten:true})).sessionId;
       const name=await evaluate(workerSession,'chrome.runtime.getManifest().name');
-      if(name===manifest.name)return {...target,workerSession};
+      if(manifestNames.has(name))return {...target,workerSession};
       await cdp('Target.detachFromTarget',{sessionId:workerSession});
     }
   },'Production worker startup');
