@@ -1675,5 +1675,7 @@
   "Checking GitHub…": "Verificando o GitHub…",
   "Remove {0}?": "Remover {0}?",
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "Isso move a skill e seus recursos para a Lixeira. Mensagens já preparadas não mudam.",
-  "Skill imported into the CoS library": "Skill importada para a biblioteca do CoS"
+  "Skill imported into the CoS library": "Skill importada para a biblioteca do CoS",
+  "Recommended": "Recomendadas",
+  "Install": "Instalar"
 }

@@ -1675,5 +1675,7 @@
   "Checking GitHub…": "GitHub denetleniyor…",
   "Remove {0}?": "{0} kaldırılsın mı?",
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "Beceri ve kaynakları Çöp Kutusu'na taşınır. Önceden hazırlanmış mesajlar değişmez.",
-  "Skill imported into the CoS library": "Beceri CoS kitaplığına aktarıldı"
+  "Skill imported into the CoS library": "Beceri CoS kitaplığına aktarıldı",
+  "Recommended": "Önerilenler",
+  "Install": "Yükle"
 }
