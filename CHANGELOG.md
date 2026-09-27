@@ -21,13 +21,17 @@ A feature update. The app gets a workspace next to your chat, pets on your deskt
 - **Review changes.** See what changed in your project's Git repository, or exactly what one of ChatGPT's edits changed, without leaving the app. You can also compare two branches. Review only reads; it never changes your repository.
 - **The extension updates itself.** After an app update, the extension reloads on its own as soon as no chat is busy. No more trips to `chrome://extensions`.
 - **Download updates in one click.** When a new version is out, the update notice links straight to the right download for your Mac or Linux system.
-- **Desktop pets.** A new Pets page in the sidebar. Turn on Tur Tur Sahur, or import your own pet, and it lives on your desktop, reacting to the work CoS is doing. View → Desktop Pets shows or hides them. Pets are off unless you turn one on. If you had the old pet in the message box showing, it moves to your desktop.
+- **Desktop pets.** A new Pets page in the sidebar. Turn on Tur Tur Sahur, Hammy the hamster or Capy the capybara, or import your own pet, and it lives on your desktop, reacting to the work CoS is doing. View → Desktop Pets shows or hides them. Pets are off unless you turn one on. If you had the old pet in the message box showing, it moves to your desktop.
 - **A Skills library.** A new Skills page lists your skills. Import a folder, a single SKILL.md or a public skill straight from a GitHub link. Linked skills show when their GitHub source has an update, and installing it is your choice.
+- **18 ready-made skills.** The Skills page recommends skills you can install with one click: code review, systematic debugging, security review, clear writing, data analysis, research with sources, translation, project planning and more. Once installed they are yours to edit or remove.
+- **Optional playful status words.** Turn on Playful status words in the Advanced settings and a busy chat shows rotating gym jokes like "Skipping leg day" instead of "Working". Off by default.
 - **German and Brazilian Portuguese.** Pick them in Appearance → Language.
 - **The extension is translated** into German, Spanish, French, Japanese, Turkish and Chinese, following your browser's language.
 
 ### Fixed
 
+- **Web Fetch and other Python plugins install without extra setup.** If the `uv` tool they need is missing, CoS downloads a verified copy for itself instead of failing with "runtime uv is unavailable".
+- **Goal and Loop work again when your saved model is gone.** The step that decides what comes next failed when ChatGPT no longer offered the model saved in Settings; it now uses one that is available.
 - **Setup matches ChatGPT's new settings.** ChatGPT no longer has a Developer mode switch; you now create the app from Plugins → Add → Create MCP App. The setup steps say so.
 - **Attachments work again with ChatGPT's new message box.** Images and files the app sends to ChatGPT were not attached after ChatGPT's latest change.
 - **Image-only answers finish properly.** When ChatGPT answers with just a generated image, the chat no longer looks busy afterwards.
@@ -40,6 +44,10 @@ A feature update. The app gets a workspace next to your chat, pets on your deskt
 
 ### Improved
 
+- **A clearer Usage tab.** Your ChatGPT limits come first, followed by the last 30 days as bars with a detailed breakdown, and an activity heatmap you can widen up to a year.
+- **A friendlier setup.** Numbered steps and a progress bar show how far along you are.
+- **Languages are sorted sensibly.** Appearance → Language and Setup list each language by its own name in alphabetical order, followed by Japanese and Chinese.
+- **Slim scrollbars** are always visible, so long lists and chats show where you are.
 - **Polished activity timeline, worker panel and model menus.**
 - **The sidebar and side panels slide smoothly** when you open or close them, and the message box grows and shrinks smoothly as you type.
 - **Removed lines show in red** next to edited files; only added lines are green.
