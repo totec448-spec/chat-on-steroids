@@ -1651,6 +1651,7 @@
   "No pets match your search.": "Aramanla eşleşen evcil hayvan yok.",
   "Pet operation failed": "Evcil hayvan işlemi başarısız oldu",
   "This removes the pet from your local library. You can import it again later.": "Bu, evcil hayvanı yerel kitaplığından kaldırır. Daha sonra yeniden içe aktarabilirsin.",
+  "Playful status words: show rotating gym jokes instead of “Working”": "Eğlenceli durum sözcükleri: “Working” yerine değişen spor salonu şakaları göster",
   "GitHub URL": "GitHub URL'si",
   "https://github.com/owner/repo/tree/main/skill": "https://github.com/owner/repo/tree/main/skill",
   "Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.": "Bir klasör, tek bir SKILL.md ya da herkese açık bir GitHub becerisi içe aktar. Yerel beceriler güncellemeleri denetlemek için GitHub kaynağına bağlanabilir; güncellemeyi yükleyip yüklememek sana kalmış.",
@@ -1682,5 +1683,7 @@
   "Estimated context processed per tool call · last {0} weeks": "Araç çağrısı başına işlenen tahmini bağlam · son {0} hafta",
   "Estimated cost per day, last {0} days": "Günlük tahmini maliyet, son {0} gün",
   "{0} estimated tokens": "{0} tahmini token",
-  "Daily breakdown": "Günlük döküm"
+  "Daily breakdown": "Günlük döküm",
+  "Recommended": "Önerilenler",
+  "Install": "Yükle"
 }
