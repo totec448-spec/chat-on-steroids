@@ -1675,5 +1675,12 @@
   "Checking GitHub…": "GitHub を確認中…",
   "Remove {0}?": "{0}を削除しますか？",
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "スキルとそのリソースをゴミ箱へ移動します。すでに準備済みのメッセージは変更されません。",
-  "Skill imported into the CoS library": "CoS ライブラリへスキルをインポートしました"
+  "Skill imported into the CoS library": "CoS ライブラリへスキルをインポートしました",
+  "Weekly limit": "週間の上限",
+  "{0}-hour limit": "{0}時間の上限",
+  "Shared across all models": "すべてのモデルで共有",
+  "Estimated context processed per tool call · last {0} weeks": "ツール呼び出しごとの推定処理コンテキスト · 過去{0}週間",
+  "Estimated cost per day, last {0} days": "1日あたりの推定コスト、過去{0}日間",
+  "{0} estimated tokens": "推定 {0} トークン",
+  "Daily breakdown": "日別の内訳"
 }

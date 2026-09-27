@@ -1675,5 +1675,12 @@
   "Checking GitHub…": "GitHub denetleniyor…",
   "Remove {0}?": "{0} kaldırılsın mı?",
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "Beceri ve kaynakları Çöp Kutusu'na taşınır. Önceden hazırlanmış mesajlar değişmez.",
-  "Skill imported into the CoS library": "Beceri CoS kitaplığına aktarıldı"
+  "Skill imported into the CoS library": "Beceri CoS kitaplığına aktarıldı",
+  "Weekly limit": "Haftalık sınır",
+  "{0}-hour limit": "{0} saatlik sınır",
+  "Shared across all models": "Tüm modeller arasında ortak",
+  "Estimated context processed per tool call · last {0} weeks": "Araç çağrısı başına işlenen tahmini bağlam · son {0} hafta",
+  "Estimated cost per day, last {0} days": "Günlük tahmini maliyet, son {0} gün",
+  "{0} estimated tokens": "{0} tahmini token",
+  "Daily breakdown": "Günlük döküm"
 }
