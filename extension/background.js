@@ -178,6 +178,8 @@ const journalPreferences = new Set();
 let delivery = { at: 0, ok: null, events: 0, total: 0, conversationId: null, status: 0, error: null };
 /** Idempotent conversation-close deliveries awaiting an app ACK. */
 let closeOutbox = [];
+/** Successful managed removals awaiting onRemoved; exact document receipts survive MV3 sleep. */
+let tabRemovals = {};
 let closing = false;
 /**
  * Command acknowledgements accepted from a content script but not yet accepted by the app.
@@ -285,6 +287,7 @@ async function loadOnce() {
     'retiredDocuments',
     'terminalDocuments',
     'closeOutbox',
+    'tabRemovals',
     'commandAckOutbox',
     'recoveryMonitoring',
     'discardProtectedTabs',
@@ -303,6 +306,12 @@ async function loadOnce() {
   terminalDocuments =
     live.terminalDocuments && typeof live.terminalDocuments === 'object' ? { ...live.terminalDocuments } : {};
   closeOutbox = Array.isArray(live.closeOutbox) ? live.closeOutbox.slice(-200) : [];
+  tabRemovals = Object.fromEntries(Object.entries(
+    live.tabRemovals && typeof live.tabRemovals === 'object' && !Array.isArray(live.tabRemovals) ? live.tabRemovals : {}
+  ).filter(([key, row]) => row && String(row.tab) === key && Number.isInteger(row.tab) &&
+    typeof row.documentId === 'string' && row.documentId === tabDocuments[key] &&
+    Number.isSafeInteger(row.navigationEpoch) && row.navigationEpoch === tabEpochs[key] &&
+    cleanConversationId(row.conversationId) === tabConversations[key]).slice(-1000));
   // Browser-close durability: a send already accepted by ChatGPT is irreversible. Its final ACK
   // therefore has to survive storage.session being cleared on browser restart. Prefer the local
   // copy, while still accepting the old session copy as an upgrade migration path.
@@ -344,6 +353,7 @@ function persistLive() {
         retiredDocuments,
         terminalDocuments,
         closeOutbox: closeOutbox.slice(-200),
+        tabRemovals,
         commandAckOutbox: commandAckOutbox.slice(-200),
         recoveryMonitoring,
         discardProtectedTabs,
@@ -2425,8 +2435,6 @@ async function applyRequestedBrowserPreferences(request) {
 }
 
 /** Retire idle app-owned documents and redundant copies, preserving exact unsent drafts. */
-/** Tabs this extension removed itself, until their onRemoved reports the close. */
-const selfRemovedTabs = new Set();
 
 async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
   const retired = new Set((Array.isArray(policy.retiredConversations) ? policy.retiredConversations : []).map(cleanConversationId).filter(Boolean));
@@ -2474,17 +2482,22 @@ async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
       const proof = await tabReply(tab.id, { type: 'clf-tab-close-check', conversationId,
         ...(cancelledDecisions.length ? { cancelledDecisions } : {}) }, { documentId: source.documentId });
       if (proof?.safe !== true || proof.conversationId !== conversationId || proof.navigationEpoch !== source.navigationEpoch || !ownsDocument(source)) continue;
-      const latest = await chrome.tabs.get(tab.id);
-      if (latest.pinned || (idlePage && reading(latest)) || latest.pendingUrl || conversationFromUrl(latest.url) !== conversationId || !ownsDocument(source) || journalCountForConversation(conversationId) > 0) continue;
-
       // Tidying is this extension's decision, not the user's: report it as such, so the app does
       // not pause the chat's recovery as if its owner had closed it (2026-09-26: a stopped prime
       // was pruned four times and each close read as "closed deliberately", which blocked its
       // automatic restart for good).
-      const own = typeof selfRemovedTabs === 'undefined' ? null : selfRemovedTabs;
-      own?.add(tab.id);
-      try { await chrome.tabs.remove(tab.id); } catch (error) { own?.delete(tab.id); throw error; }
-      remaining = remaining.filter(other => other.id !== tab.id);
+      // Queue onRemoved behind the actual API result (the Internal host may emit it
+      // before remove resolves). An attempted/rejected removal is not origin proof.
+      const removed = await serializeTab(tab.id, async () => {
+        const latest = await chrome.tabs.get(tab.id);
+        if (latest.pinned || (idlePage && reading(latest)) || latest.pendingUrl || conversationFromUrl(latest.url) !== conversationId || !ownsDocument(source) || journalCountForConversation(conversationId) > 0) return false;
+        await chrome.tabs.remove(tab.id);
+        tabRemovals[String(tab.id)] = { ...source, conversationId };
+        tabRemovals = Object.fromEntries(Object.entries(tabRemovals).slice(-1000));
+        await persistLive();
+        return true;
+      });
+      if (removed) remaining = remaining.filter(other => other.id !== tab.id);
     } catch { /* Missing document, navigation or unreadable draft state is not close permission. */ }
   }
   return remaining;
@@ -2855,7 +2868,11 @@ async function enqueueClose(conversationId, byExtension = false) {
   // Publish the final departure and let the existing maintenance pass revoke its protection.
   // The close itself never grants a replacement tab.
   recoveryMonitoring = true;
-  if (!closeOutbox.some((entry) => entry && entry.conversationId === id)) {
+  const previous = closeOutbox.find((entry) => entry && entry.conversationId === id);
+  if (!previous || (!byExtension && previous.byExtension === true)) {
+    // A later user close must supersede an unacknowledged automatic departure.
+    // Replace the entry so an older in-flight response cannot retire the new fact.
+    closeOutbox = closeOutbox.filter((entry) => entry !== previous);
     closeOutbox.push({ conversationId: id, queuedAt: Date.now(), ...(byExtension ? { byExtension: true } : {}) });
     closeOutbox = closeOutbox.slice(-200);
     await persistLive();
@@ -2880,7 +2897,7 @@ async function drainCloses() {
       if (conversationStillOpen(conversationId)) continue;
       const result = await call('/closed', {
         method: 'POST',
-        // Confirmed removal/navigation is a deliberate departure, never a reload or a lost poll.
+        // Only a proven managed removal is non-manual; legacy/unknown departures stay conservative.
         body: JSON.stringify({ conversationId, manual: entry.byExtension !== true })
       });
       if (!result.ok) {
@@ -3938,10 +3955,18 @@ chrome.tabs.onRemoved.addListener((id) => {
     delete discardProtectedTabs[String(id)];
     void persistLive().catch(() => undefined);
   }
-  const byExtension = selfRemovedTabs.delete(id);
   void serializeTab(id, async () => {
+    await load();
+    const key = String(id), removal = tabRemovals[key];
+    const byExtension = Boolean(removal && removal.documentId === tabDocuments[key] &&
+      removal.navigationEpoch === tabEpochs[key] && removal.conversationId === tabConversations[key]);
     const documentId = await markTerminal(id);
-    return releaseTab(id, null, documentId, null, byExtension);
+    const result = await releaseTab(id, null, documentId, null, byExtension);
+    if (removal && tabRemovals[key] === removal) {
+      delete tabRemovals[key];
+      await persistLive();
+    }
+    return result;
   }).catch(() => undefined);
 });
 
