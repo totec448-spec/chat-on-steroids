@@ -20,6 +20,11 @@ export function paintContextMeter(session: SessionSummary | null, config: Config
   const percent = limit > 0 ? Math.min(100, Math.round(used / limit * 100)) : 0;
   arc.setAttribute('stroke-dasharray', `${pro ? 0 : percent * 0.377} 37.7`);
   const tokens = new Intl.NumberFormat().format(used);
+  const compact = document.getElementById('contextMeterCompact');
+  if (compact) {
+    const short = (value: number) => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 0 }).format(value);
+    ui(compact, 'textContent', () => pro ? `${short(used)} ${t('est.')}` : `${short(used)} / ${short(limit)} ${t('est.')}`);
+  }
   const description = () => [t('Session context · estimated'), pro
     ? t('{0} tokens used', [tokens])
     : t('{0} / {1} tokens · {2}% of configured limit', [tokens, new Intl.NumberFormat().format(limit), percent]),

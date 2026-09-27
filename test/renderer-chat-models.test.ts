@@ -211,6 +211,9 @@ it('uses observed account choices, preserves unverified defaults, and clears inc
   const select = (id: string) => dom.window.document.getElementById(id) as HTMLSelectElement;
   expect(select('workerModel').value).toBe('unseen');
   expect(select('workerModel').selectedOptions[0]!.disabled).toBe(true);
+  expect(select('workerModel').selectedOptions[0]!.textContent).toBe('unseen');
+  expect(dom.window.document.getElementById('workerModelVerification')!.textContent).toBe('Unverified');
+  expect(dom.window.document.getElementById('helperModelVerification')!.hasAttribute('hidden')).toBe(true);
   expect(select('helperModel').value).toBe('first');
   expect([...select('composerModel').options].map(row => row.value)).toEqual(['first', 'second']);
   select('composerModel').value = 'first'; select('composerModel').dispatchEvent(new dom.window.Event('change'));
