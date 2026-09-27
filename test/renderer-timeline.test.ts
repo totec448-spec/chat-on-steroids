@@ -7,7 +7,10 @@ import { prependUserPrompt } from '../src/shared/user-prompt.js';
 import type { Handoff, SessionEvent, SessionSummary } from '../src/shared/session.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import type { LocalProject } from '../src/shared/projects.js';
-vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({ update: vi.fn() }) }));
+vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
+  update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
+  tabs: () => [], newTab: () => null, selectTab: vi.fn(), closeTab: vi.fn()
+}) }));
 vi.mock('../src/renderer/pet.js', () => ({ initPet: () => () => {} }));
 import { positionOf, projectTimeline } from '../src/shared/chronology.js';
 
