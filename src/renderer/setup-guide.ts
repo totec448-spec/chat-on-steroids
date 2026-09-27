@@ -25,18 +25,18 @@ const guides: Record<string, Shot[]> = {
   ],
   developer: [
     { src: new URL('./setup-images/developer-mode.png', import.meta.url).href,
-      title: 'Settings → Security and login → Developer mode. Turn the switch on.', notes: [
+      title: 'Older ChatGPT versions only: Settings → Security and login → Developer mode. Turn the switch on.', notes: [
         { text: '1 · Security and login', at: [16, 65], box: [2, 68.6, 26, 5.8] },
         { text: '2 · Turn Developer mode on', at: [70, 36], box: [88.8, 44.9, 5.7, 3.8] }
       ] }
   ],
   plugin: [
     { src: new URL('./setup-images/plugins-page.png', import.meta.url).href,
-      title: 'Open the ChatGPT Plugins page and click + at the top right.', notes: [
+      title: 'Open the ChatGPT Plugins page, click Add at the top right and choose Create MCP App. Older versions show a + instead.', notes: [
         { text: 'Click + to add your plugin', at: [68, 39], box: [91.3, 12.3, 4.8, 11.8] }
       ] },
     { src: new URL('./setup-images/new-plugin.png', import.meta.url).href, portrait: true,
-      title: 'Copy the Core name and description below. Choose Tunnel, select your tunnel, choose No Auth, accept the notice and click Create.', notes: [
+      title: 'Copy the Core name and description below. Choose Tunnel, select your tunnel, choose No authentication, accept the notice and click Create.', notes: [
         { text: '1 · Choose Tunnel', at: [63, 36.5], box: [72.4, 39.2, 16.2, 3.5] },
         { text: '2 · Pick your tunnel', at: [64, 55], box: [12, 47, 77, 4.7] },
         { text: '3 · No Auth', at: [73, 67], box: [12, 60.8, 77, 4.7] },
