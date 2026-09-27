@@ -806,6 +806,14 @@
                     <input id="recoverAgentTabs" type="checkbox" />
                   </label>
 
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Wait for sub-agents</b>
+                      <em>Before Goal or Loop takes its next step, wait until this chat's own workers have finished. Their reports arrive here, so deciding earlier reads a context that is about to change. Messages you type or queue are sent as usual.</em>
+                    </span>
+                    <input id="waitForSubAgents" type="checkbox" />
+                  </label>
+
                   <div id="swarmList"></div>
                   <div class="step-actions">
                     <button class="btn" id="swarmReset" type="button">Clear swarm</button>
@@ -911,6 +919,23 @@
                   </div>
                 <h2 class="settings-section-title">Continuation prompts</h2>
                 <div class="pane">
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Handoff prompt</b>
+                      <em>Controls what Compact &amp; Resume preserves in the brief. Continuation identity and recovery rules stay fixed.</em>
+                    </span>
+                    <button class="btn" id="handoffPromptEdit" type="button">Edit prompt</button>
+                  </div>
+
+                  <div class="field goal-prompt" id="handoffPromptPanel" hidden>
+                    <label for="handoffPrompt">Handoff prompt</label>
+                    <textarea dir="auto" id="handoffPrompt" rows="14" spellcheck="false"></textarea>
+                    <p class="hint">Saved when you leave the editor. This changes brief content only; Compact &amp; Resume protocol framing remains fixed.</p>
+                    <div class="step-actions">
+                      <button class="btn" id="handoffPromptReset" type="button">Restore default</button>
+                    </div>
+                  </div>
+
                   <div class="setting">
                     <span class="setting-text">
                       <b>Goal prompt, no task</b>

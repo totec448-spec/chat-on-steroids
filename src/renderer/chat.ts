@@ -15,6 +15,7 @@ import type { GoalModel } from '../shared/goal-reasoning.js';
 import { renderGoalReasoning } from './goal-reasoning.js';
 import { preserveTimelineViewport } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
+import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
@@ -62,6 +63,7 @@ import {
   DEFAULT_GOAL_SYSTEM_PROMPT,
   MAX_GOAL_SYSTEM_PROMPT_CHARS
 } from '../shared/goal.js';
+import { DEFAULT_HANDOFF_PROMPT, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, el, filterSettingsSections, icon, run, toast } from './dom.js';
 
@@ -155,6 +157,7 @@ function selectedLocalProject(): LocalProject | null {
 const PROJECT_TASK_PAGE_SIZE = 5;
 const PROJECT_TASK_PAGE_INCREMENT = 8;
 let sidebarOrder: ReturnType<typeof createSidebarOrder> | undefined;
+let sidebarCompletion: ReturnType<typeof createSidebarCompletionState> | undefined;
 function draftKey(): string { return selectedId ?? (selectedProjectId ? `project:${selectedProjectId}` : 'new'); }
 let selectionGeneration = 0;
 // Async file import belongs to one visible composer draft, not just to a session key.
@@ -291,7 +294,7 @@ function pressureOf(id: string): TokenPressure | null {
 /** A short word about a session, drawn as a chip on its row. */
 interface Badge {
   text: string;
-  tone: '' | 'is-active' | 'is-finished' | 'is-failed';
+  tone: '' | 'is-active' | 'is-finished' | 'is-failed' | 'is-unseen';
 }
 
 /** Live word per worker state, in the user's vocabulary rather than the protocol's. */
@@ -323,6 +326,16 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
 /** Keep callback arguments separate from the shared predicate's explicit clock. */
 function sessionWorking(summary: SessionSummary): boolean {
   return sessionWorkingAt(summary, Date.now());
+}
+
+/**
+ * Sidebar rows are intentionally rebuilt when fresh activity arrives. Anchor the spinner to a
+ * wall-clock phase so a new tool repaint does not visually restart an already-running turn.
+ * Keep this period aligned with `.session-status.is-active` in styles.css.
+ */
+const SESSION_SPIN_MS = 900;
+function syncSessionSpinner(indicator: HTMLElement): void {
+  indicator.style.animationDelay = `-${Date.now() % SESSION_SPIN_MS}ms`;
 }
 
 /**
@@ -381,6 +394,7 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   else if (!agent && workerReportedFinish(summary)) badges.push(AGENT_BADGE.sleeping);
   else if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
   else if (agent && agent.role !== 'prime') badges.push(AGENT_BADGE[agent.state]);
+  if (!sessionWorking(summary) && sidebarCompletion?.isUnseen(summary)) badges.push({ text: 'New response', tone: 'is-unseen' });
   return badges;
 }
 
@@ -407,9 +421,12 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   row.addEventListener('pointerenter', showTip);
   row.addEventListener('pointerleave', () => document.getElementById('sessionTooltip')?.remove());
   row.addEventListener('click', () => document.getElementById('sessionTooltip')?.remove());
+  // Unseen is presentation only and is appended last, so every existing lifecycle tone keeps
+  // its previous priority (blocked/active/worker finished/failed).
   const status = badges.find((badge) => badge.tone);
   if (status) {
     const indicator = el('span', `session-status ${status.tone}`);
+    if (status.tone === 'is-active') syncSessionSpinner(indicator);
     ui(indicator, 'title', () => t(status.text));
     ui(indicator, 'aria-label', () => t(status.text));
     top.append(indicator);
@@ -705,7 +722,7 @@ function paintSessions(): void {
     });
     if (project) {
       const create = el('button', 'btn project-new'); create.append(icon('i-pencil')); create.setAttribute('type', 'button'); create.dataset.newProject = id;
-      ui(create, 'title', () => t("New chat in this project")); create.setAttribute('aria-label', create.title);
+      ui(create, 'title', () => t("New chat in this project")); ui(create, 'aria-label', () => t("New chat in this project"));
       create.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); selectNewChat(id); }); heading.append(create);
       const remove = el('button', 'btn project-remove') as HTMLButtonElement;
       remove.type = 'button'; remove.append(icon('i-trash'));
@@ -734,7 +751,7 @@ function paintSessions(): void {
               if (images) imageDrafts.set(draftKey(), images);
               else imageDrafts.delete(draftKey());
               imageDrafts.delete(oldKey);
-              $<HTMLTextAreaElement>('chatInput').placeholder = t('Ask anything…');
+              ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => t('Ask anything…'));
             } else selectedProjectId = null;
           }
           paintSessions(); void refreshInputQueue();
@@ -856,6 +873,16 @@ type GoalDraftPresentation = { stage: string; model: string; text: string; error
 let goalDraftView: GoalDraftPresentation | null = null;
 let goalWaitView: import('../shared/goal.js').GoalWait | null = null;
 let finishGoalDraftView: GoalDraftPresentation | null = null;
+function localizedGoalError(error: string): string {
+  const message = goalErrorMessage(error);
+  const delivery = /^The helper prompt could not be delivered\. (.+)$/.exec(message);
+  if (delivery) return t('The helper prompt could not be delivered. {0}', [delivery[1]!]);
+  const http = /^The continuation provider rejected the request \(HTTP (\d{3})\)\. Check its status and the configured model or endpoint\.$/.exec(message);
+  if (http) return t('The continuation provider rejected the request (HTTP {0}). Check its status and the configured model or endpoint.', [http[1]!]);
+  const code = /^The continuation could not proceed\. Check the app diagnostics for details \(([^)]+)\)\.$/.exec(message);
+  if (code) return t('The continuation could not proceed. Check the app diagnostics for details ({0}).', [code[1]!]);
+  return t(message);
+}
 function paintGoalProgress(): void {
   let row = document.getElementById('goalLifecycle');
   if (!row) { row = el('div', 'queued-input'); row.id = 'goalLifecycle'; row.setAttribute('role', 'status'); $('activeGoalRow').before(row); }
@@ -874,13 +901,13 @@ function paintGoalProgress(): void {
   const labels: Record<string, string> = { saving: t("Saving task…"), saved: t("Task saved · waiting for the next completed answer"),
     preparing: t("Preparing the opening message…"), generating: t("Generating the opening message…"), ready: t("Message ready · awaiting ChatGPT delivery"),
     sending: t("Preparing a continuation…"), answering: t("Generating a continuation…"), queued: t("Opening message queued"),
-    browser: t("Sending opening message to ChatGPT…"), sent: t("Opening message sent"), tool: 'Opening message delivered to the active turn',
+    browser: t("Sending opening message to ChatGPT…"), sent: t("Opening message sent"), tool: t('Opening message delivered to the active turn'),
     failed: t("Task could not continue"), cancelled: t("Opening message cancelled"), paused: t("Automation paused · task text preserved"), 'no-reply': t("Goal reached") };
   if (phase === 'retrying') { text = ''; error = undefined; }
-  labels.retrying = t("Provider busy · retry {0}{1}", [progress?.attempt ?? '', progress?.retryAt ? ' at ' + new Date(progress.retryAt).toLocaleTimeString() : '']);
+  labels.retrying = t("Provider busy · retry {0}{1}", [progress?.attempt ?? '', progress?.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString()]) : '']);
   const mode = $<HTMLSelectElement>('chatAutomation').value === 'loop' ? t('Loop') : t('Goal');
   labels.settling = `${mode} · ${wait?.reason === 'native-busy' ? t('ChatGPT resumed work · waiting before retry') : wait?.reason === 'silence' ? t('Waiting before recovery reload') : wait?.reason === 'quiet' ? t('Waiting for tool inactivity') :
-    wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : t('Answer settling')}`;
+    wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : t('Answer settling')}`;
   // The dock already describes this same silence/listening deadline. Keep the
   // Loop/Goal task controls, but do not present its shared wait as another action.
   const sharedRecoveryWait = phase === 'settling' && wait?.until !== undefined &&
@@ -892,7 +919,7 @@ function paintGoalProgress(): void {
   const busy = ['settling', 'saving', 'preparing', 'generating', 'retrying', 'sending', 'answering', 'browser', 'queued', 'ready'].includes(phase) && !error;
   row.setAttribute('aria-busy', String(busy));
   const marker = el('span', busy ? 'session-status is-working' : 'session-status');
-  const body = el('div', 'queue-label'); body.append(el('span', '', error ? `${labels.failed}: ${goalErrorMessage(error)}` : labels[phase] ?? phase));
+  const body = el('div', 'queue-label'); body.append(el('span', '', error ? `${labels.failed}: ${localizedGoalError(error)}` : labels[phase] ?? phase));
   if (text && ['generating', 'answering', 'preparing'].includes(phase)) { const preview = el('pre', 'goal-live-preview', text.slice(-8000)); body.append(preview); }
   row.replaceChildren(marker, body);
   if (phase === 'settling' && wait?.until) {
@@ -1001,14 +1028,14 @@ function paintTaskPlan(): void {
   if (plan?.stages) paintPreparedPlan();
   else if (plan?.error) {
     const failure = plan.error;
-    const error = el('div', 'muted', () => failure === 'invalid_goal_decision_json' ? t("The planner response could not be read.") : goalErrorMessage(failure));
+    const error = el('div', 'muted', () => failure === 'invalid_goal_decision_json' ? t("The planner response could not be read.") : localizedGoalError(failure));
     error.title = plan.error;
     preview.append(error, el('div', 'muted', () => t("Send again to retry, or cancel the plan.")));
   } else if (plan?.requestId) {
     const progress = plan.progress;
     const label = () => !progress ? t("Creating plan…") : progress.phase === 'retrying' ? t("Provider busy · retry {0}{1}", [progress.attempt ?? '', progress.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString()]) : '']) : progress.phase === 'cancelled' ? t("Plan cancelled") : progress.phase === 'preparing' ? t("Preparing plan…") : progress.phase === 'ready' ? t("Plan ready") : progress.phase === 'failed' ? t("Plan failed") : t("Writing plan…");
     preview.append(el('span', 'muted', label));
-    if (progress?.text || progress?.error) preview.append(el('pre', 'task-progress-text', progress.error ? goalErrorMessage(progress.error) : progress.text));
+    if (progress?.text || progress?.error) preview.append(el('pre', 'task-progress-text', progress.error ? () => localizedGoalError(progress.error!) : progress.text));
   }
   paintTaskActions(); paintDeliveryControls();
 }
@@ -1242,6 +1269,9 @@ async function refreshSessionControls(): Promise<void> {
 async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: number): Promise<boolean> {
   const prepend = olderBefore !== undefined;
   const wanted = selectedId;
+  const selection = selectionGeneration;
+  const observed = wanted === null ? undefined : sessions.find(row => row.id === wanted);
+  const observedCompletion = observed ? { ...observed } : undefined;
   if (wanted !== null && (historyBefore !== null || historyLoading) && detailFor === wanted && !navigate) {
     if (historyLoading) historyRefreshPending = true;
     void refreshSessionControls(); paintDetail(); return false;
@@ -1266,7 +1296,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   const detail = await run(
     api.getSession(wanted, newerFrom !== undefined ? { after: newerFrom, limit: TIMELINE_BATCH_SIZE } : incremental ? { from: detailCursor!, limit: TIMELINE_BATCH_SIZE } : { ...(olderBefore !== undefined ? { before: olderBefore } : historyBefore !== null ? { before: historyBefore } : {}), limit: TIMELINE_BATCH_SIZE })
   );
-  if (generation !== detailLoadGeneration || selectedId !== wanted) return false;
+  if (generation !== detailLoadGeneration || selection !== selectionGeneration || selectedId !== wanted) return false;
   if (!detail) {
     // A failed destination read must not leave another chat displayed indefinitely.
     // run() already presents the read error; keep the destination empty and retryable.
@@ -1308,6 +1338,13 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   totalEvents = detail.total;
   if (opening) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
   paintDetail(!prepend && newerFrom === undefined);
+  // A sidebar completion becomes read only after this exact selection/load has successfully
+  // painted its conversation at the live tail. Keep the completion snapshot from request time:
+  // a newer completion observed while this load is in flight must remain unseen.
+  if (visible && historyBefore === null && generation === detailLoadGeneration && selection === selectionGeneration && selectedId === wanted) {
+    sidebarCompletion?.markSeen(observedCompletion);
+    paintSessions();
+  }
   // A selection opens at the latest message; the previous chat's viewport is not
   // a reading position in this one. Apply only after the current load has rendered.
   if (opening) $('chatBody').scrollTop = $('chatBody').scrollHeight;
@@ -1472,7 +1509,12 @@ export function renderedMarkdown(source: string, capture?: StoredText): HTMLElem
         if (safeExternalLink(url[2] ?? '')) link.setAttribute('href', url[2]!);
         return link.outerHTML;
       }
-      return citations.get(token.raw) ?? (token.raw.startsWith('\uE200filecite\uE202') ? '' : '<span title="The recording does not include this source URL">[source link unavailable]</span>');
+      if (citations.has(token.raw)) return citations.get(token.raw)!;
+      if (token.raw.startsWith('\uE200filecite\uE202')) return '';
+      const missing = document.createElement('span');
+      missing.title = t('The recording does not include this source URL');
+      missing.textContent = t('[source link unavailable]');
+      return missing.outerHTML;
     }
   }] });
   const html = parser.parse(text, { async: false });
@@ -2686,6 +2728,7 @@ function paintRecoveryStatus(): boolean {
       (event.kind === 'user_message' && event.source === 'extension')));
   host.hidden = !recovery || !!advanced || Date.now() - recovery.time > 120000 || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision);
   host.replaceChildren();
+  if (host.hidden) return paintRecoveryVerdict(host, sessionId);
   if (!host.hidden && recovery?.kind === 'progress') {
     const row = el('div', 'recovery-notice');
     row.append(icon('i-pulse'), el('span', 'queue-label', recovery.message.text),
@@ -2695,6 +2738,33 @@ function paintRecoveryStatus(): boolean {
       }));
     host.append(row);
   }
+  return false;
+}
+
+/**
+ * The app's latest verdict about this chat, kept in view until the chat works again.
+ *
+ * A stopped chat used to be explained only by a note in its timeline — "this chat stopped",
+ * "stopped reloading", "could not restart it automatically: …" — which scrolls away, while the
+ * repair line above disappears after two minutes. On 2026-09-26 a prime sat stopped for hours
+ * with every reason written somewhere nobody was looking. The newest app note (never a handoff
+ * note) stays here until a newer question or turn supersedes it, or it is dismissed.
+ */
+function paintRecoveryVerdict(host: HTMLElement, sessionId: string | null): boolean {
+  const verdict = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'note' && !event.continuation) : undefined;
+  if (verdict?.kind !== 'note') return false;
+  const revision = JSON.stringify(['note', verdict.time, verdict.message.text]);
+  const superseded = events.some(event => positionOf(event) > positionOf(verdict) &&
+    (event.kind === 'turn_start' || (event.kind === 'user_message' && event.source === 'extension')));
+  if (superseded || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision)) return false;
+  const row = el('div', 'recovery-notice');
+  row.append(icon('i-pulse'), el('span', 'queue-label', verdict.message.text),
+    dockAction(() => t('Dismiss recovery notice'), 'i-x', () => {
+      if (sessionId) dismissedRecoveryNotices.set(sessionId, revision);
+      host.hidden = true; host.replaceChildren();
+    }));
+  host.append(row);
+  host.hidden = false;
   return false;
 }
 
@@ -2732,19 +2802,53 @@ function badgeSignature(): string {
   return sessions.map((entry) => sessionBadges(entry).map((badge) => badge.text).join(',')).join('|');
 }
 
+/**
+ * How recently a recorded tool call still means "working now" for the caption above.
+ *
+ * Short enough that a finished chat stops claiming to work within a minute and a half, long
+ * enough to survive the gaps between calls of a chat that is thinking between them. The app's
+ * own blind-work stretch uses three minutes before it starts repairing; this is the display
+ * half of the same fact and may be quicker, because being wrong here costs a stale word rather
+ * than an interrupted page.
+ */
+const BLIND_CAPTION_MS = 90_000;
+
 function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?: boolean; ticking?: boolean } {
   if (!deps.state()?.config.ui.developerMode) {
     const summary = sessions.find(entry => entry.id === selectedId);
     if (!summary || detailFor !== selectedId) return { text: '', tone: '' };
     const active = controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledTurnId : null;
     const lastBoundary = [...events].reverse().find(event => event.kind === 'turn_start' || event.kind === 'turn_end');
+    /*
+     * A chat whose page never opened a turn is still working, and this app knows it.
+     *
+     * Every line below needs a turn to describe, and a page that stopped reporting supplies
+     * none — so the caption fell silent, or worse, kept describing the *previous* turn as
+     * "Worked for 12s" while the chat went on editing files. Measured on 2026-09-25: a
+     * conversation resumed after an automatic compaction made 650 exactly attributed tool
+     * calls over two and a half hours without its page reporting a single turn, and the app
+     * said nothing about any of it. The complaint that follows is always the same one — the
+     * chat looks idle, there is no Stop control, and the person sits and waits for something
+     * that is already happening.
+     *
+     * The recorded tool clock is the honest witness the page is not: the app keeps
+     * `lastToolCallAt` from calls the request-id join has already tied to this exact
+     * conversation. A call in the last ninety seconds means work now, whatever the page says.
+     * This only changes what the caption admits — no turn is invented, and nothing here
+     * offers a Stop the app could not carry out.
+     */
+    const blind = !active && summary.lastToolCallAt !== null &&
+      Date.now() - summary.lastToolCallAt < BLIND_CAPTION_MS
+      ? { text: t("Working…"), tone: '' as const, working: true }
+      : null;
     const turnId = active ?? lastBoundary?.turnId;
-    if (!turnId) return { text: '', tone: '' };
+    if (!turnId) return blind ?? { text: '', tone: '' };
     const startedAt = summary.finishTurn?.turnId === turnId ? summary.finishTurn.startedAt
       : events.find(event => event.kind === 'turn_start' && event.turnId === turnId)?.time;
     const endedAt = events.find(event => event.kind === 'turn_end' && event.turnId === turnId)?.time;
-    if (startedAt === undefined) return { text: active ? t("Working…") : '', tone: '', working: !!active };
-    if (!active && endedAt === undefined) return { text: '', tone: '' };
+    if (startedAt === undefined) return active ? { text: t("Working…"), tone: '', working: true } : blind ?? { text: '', tone: '' };
+    if (!active && endedAt === undefined) return blind ?? { text: '', tone: '' };
+    if (blind) return blind;
     const seconds = Math.max(0, Math.floor(((active ? Date.now() : endedAt!) - startedAt) / 1000));
     return { text: t("{0} for {1}{2}s", [active ? t("Working") : t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };
   }
@@ -2908,7 +3012,8 @@ export function chatSettingsPatch(current: Config): {
     },
     compaction: {
       auto: $<HTMLInputElement>('autoCompact').checked,
-      autoTokens: threshold
+      autoTokens: threshold,
+      handoffPrompt: $<HTMLTextAreaElement>('handoffPrompt').value.trim() || DEFAULT_HANDOFF_PROMPT
     },
     multiAgent: {
       defaultModel: $<HTMLSelectElement>('workerModel').value,
@@ -2918,7 +3023,8 @@ export function chatSettingsPatch(current: Config): {
       enabled: $<HTMLInputElement>('homeMaEnabled').checked,
       maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8),
       allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked,
-      recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked
+      recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked,
+      waitForSubAgents: $<HTMLInputElement>('waitForSubAgents').checked
     },
     goal: {
       enabled: current.goal.enabled, mode: current.goal.mode,
@@ -3150,11 +3256,23 @@ function applyGoal(state: AppState, previous?: Config): void {
 }
 
 function wireGoal(save: () => Promise<void>): void {
+  $<HTMLTextAreaElement>('handoffPrompt').maxLength = MAX_HANDOFF_PROMPT_CHARS;
+  $('handoffPromptEdit').addEventListener('click', () => {
+    const panel = $('handoffPromptPanel');
+    panel.hidden = !panel.hidden;
+    $('handoffPromptEdit').textContent = panel.hidden ? 'Edit prompt' : 'Close prompt';
+    if (!panel.hidden) $<HTMLTextAreaElement>('handoffPrompt').focus();
+  });
+  $('handoffPromptReset').addEventListener('click', async () => {
+    $<HTMLTextAreaElement>('handoffPrompt').value = DEFAULT_HANDOFF_PROMPT;
+    await save();
+    toast('Handoff prompt restored to default');
+  });
   $<HTMLTextAreaElement>('goalPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalPromptEdit').addEventListener('click', () => {
     const panel = $('goalPromptPanel');
     panel.hidden = !panel.hidden;
-    $('goalPromptEdit').textContent = t(panel.hidden ? 'Edit prompt' : 'Close prompt');
+    ui($('goalPromptEdit'), 'textContent', () => panel.hidden ? t('Edit prompt') : t('Close prompt'));
     if (!panel.hidden) $<HTMLTextAreaElement>('goalPrompt').focus();
   });
   $('goalPromptReset').addEventListener('click', async () => {
@@ -3166,7 +3284,7 @@ function wireGoal(save: () => Promise<void>): void {
   $('goalObjectivePromptEdit').addEventListener('click', () => {
     const panel = $('goalObjectivePromptPanel');
     panel.hidden = !panel.hidden;
-    $('goalObjectivePromptEdit').textContent = t(panel.hidden ? 'Edit prompt' : 'Close prompt');
+    ui($('goalObjectivePromptEdit'), 'textContent', () => panel.hidden ? t('Edit prompt') : t('Close prompt'));
     if (!panel.hidden) $<HTMLTextAreaElement>('goalObjectivePrompt').focus();
   });
   $('goalObjectivePromptReset').addEventListener('click', async () => {
@@ -3178,7 +3296,7 @@ function wireGoal(save: () => Promise<void>): void {
   $('goalLoopPromptEdit').addEventListener('click', () => {
     const panel = $('goalLoopPromptPanel');
     panel.hidden = !panel.hidden;
-    $('goalLoopPromptEdit').textContent = t(panel.hidden ? 'Edit prompt' : 'Close prompt');
+    ui($('goalLoopPromptEdit'), 'textContent', () => panel.hidden ? t('Edit prompt') : t('Close prompt'));
     if (!panel.hidden) $<HTMLTextAreaElement>('goalLoopPrompt').focus();
   });
   $('goalLoopPromptReset').addEventListener('click', async () => {
@@ -3191,7 +3309,7 @@ function wireGoal(save: () => Promise<void>): void {
   $('goalPick').addEventListener('click', () => {
     const panel = $('goalModels');
     panel.hidden = !panel.hidden;
-    $('goalPick').textContent = t(panel.hidden ? 'Select model' : 'Close');
+    ui($('goalPick'), 'textContent', () => panel.hidden ? t('Select model') : t('Close'));
     if (!panel.hidden && goalModels.length === 0) void loadGoalModels(true);
   });
   $('goalMore').addEventListener('click', () => void loadGoalModels(false));
@@ -3208,7 +3326,7 @@ function wireGoal(save: () => Promise<void>): void {
     paintGoalReasoning(undefined, true);
     paintGoalModels();
     void save();
-    toast(`Goal model set to ${goalModel}`);
+    toast(t('Goal model set to {0}', [goalModel]));
   });
   // On blur, like every other key in this app: not saved keystroke by keystroke, and the
   // field is emptied the moment it has been handed over.
@@ -3292,11 +3410,13 @@ const CHAT_INPUTS = [
   'maWorkers',
   'allowUnattributedCalls',
   'recoverAgentTabs',
+  'waitForSubAgents',
   'autoContinue',
   'goalProvider',
   'goalBaseUrl',
   'goalCustomModel',
   'goalReasoning',
+  'handoffPrompt',
   'goalPrompt',
   'goalObjectivePrompt',
   'goalLoopPrompt'
@@ -3315,6 +3435,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     String(config.compaction.autoTokens),
     previous?.compaction.autoTokens
   );
+  applyChatValue(
+    $<HTMLTextAreaElement>('handoffPrompt'),
+    config.compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
+    previous?.compaction.handoffPrompt
+  );
   applyAutoCompactHint(config);
 
   applyChatValue($<HTMLInputElement>('maWorkers'), String(config.multiAgent.maxWorkers), previous?.multiAgent.maxWorkers);
@@ -3327,6 +3452,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLInputElement>('recoverAgentTabs'),
     config.multiAgent.recoverAgentTabs,
     previous?.multiAgent.recoverAgentTabs
+  );
+  applyChatChecked(
+    $<HTMLInputElement>('waitForSubAgents'),
+    config.multiAgent.waitForSubAgents === true,
+    previous?.multiAgent.waitForSubAgents
   );
 
   applyChatValue($<HTMLSelectElement>('workerModel'), config.multiAgent.defaultModel ?? '', previous?.multiAgent.defaultModel);
@@ -3408,7 +3538,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
   visibleInputIds.add(entry.id);
   if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
-  const status = () => entry.error || (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString()]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
+  const status = () => entry.error ? t(entry.error) : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString()]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
   const files = el('div', 'message-attachments');
   if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
   for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
@@ -3928,6 +4058,7 @@ function selectNewChat(projectId: string | null = null): void {
 }
 
 export function initChat(next: Deps): void {
+  sidebarCompletion = createSidebarCompletionState();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
     ...projectSortEntries(),
     ...sessions.filter(entry => (entry.conversationId || entry.origin?.kind === 'desktop') && entry.origin?.kind !== 'worker')
@@ -4324,7 +4455,7 @@ export function initChat(next: Deps): void {
         ? t('Run cleared — every worker ended')
         : outcome.cleared === 'worker'
           ? t('{0} cleared — its slot is free', [id])
-          : outcome.reason
+          : t(outcome.reason)
     );
   });
 

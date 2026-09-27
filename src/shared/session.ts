@@ -298,6 +298,8 @@ export type SessionEvent =
       inputDelivery?: 'offered' | 'confirmed';
       /** Original app-authored text, excluding transport-only control instructions. */
       authoredText?: string;
+      /** Estimated token weight of the complete native payload actually sent to ChatGPT. */
+      wireTokenEstimate?: number;
       /** Native badge on this exact user message. Missing means unobserved; null means absent. */
       reaction?: string | null;
       attachments?: import('./input.js').InputAttachment[];
@@ -450,7 +452,9 @@ const CONTINUATION_MARKER_ESCAPED = /^\s*(?:\\?\[){2}CLF\\?-(HANDOFF|RESUME)\\?:
  * text first; authored Send instructions and ordinary user-message receipts remain unchanged.
  */
 export function unescapeMarkdown(value: string): string {
-  return value.replace(/\\([!-/:-@[-`{-~])/g, '$1');
+  // A backslash before a line break is the composer's Markdown hard break (see asTyped in
+  // shared/user-prompt.ts); ASCII punctuation is the other escape the page applies.
+  return value.replace(/\\\r?\n/g, '\n').replace(/\\([!-/:-@[-`{-~])/g, '$1');
 }
 
 /** The continuation marker at the head of `text`, as typed or as the composer escaped it. */
@@ -802,12 +806,26 @@ export interface AgentInfo {
   /**
    * Whether this agent can be brought back — by the prime, or by its own next call.
    *
-   * True for every sleeping worker under the context ceiling, and for one that ended for a
+   * True for every ordinary sleeping worker under the context ceiling, and for one that ended for a
    * reason that says nothing about the turn itself (its chat was closed, or it went quiet
    * after that). False for a worker whose tab never opened, one a person cleared, and one
-   * whose chat crossed the ceiling, which is what makes that crossing terminal.
+   * whose chat crossed the ceiling. A worker parked only because of ambiguous silence records
+   * silenceParked; when the recorder also knows the exact unresolved response, it stores that
+   * identity in silenceRecoveryTurnId. Neither field grants new work at the ceiling.
    */
   revivable: boolean;
+  /** Durable reason that this stopped worker released its slot on ambiguous silence, not completion. */
+  silenceParked?: boolean;
+  /**
+   * Exact unresolved server-turn identity retained alongside silenceParked when recorder evidence
+   * has one. This never grants a new-task wake; only exact same-turn recovery may consume it.
+   */
+  silenceRecoveryTurnId?: string | null;
+  /**
+   * Highest durable journal origin that existed when silence parked this worker. Same-turn MCP
+   * recovery accepts only request ownership already present at or before this boundary.
+   */
+  silenceRecoveryRequestOriginMax?: number | null;
   /**
    * Bridge command id of the most recent revival whose user message ChatGPT accepted.
    *
@@ -941,6 +959,10 @@ export const MAX_TOOL_RESULT_TOKENS = 10_000;
 export function eventTokens(event: SessionEvent): number {
   switch (event.kind) {
     case 'user_message':
+      return Math.max(
+        storedTextTokens(event.message),
+        Number.isFinite(event.wireTokenEstimate) ? Math.max(0, Math.floor(event.wireTokenEstimate!)) : 0
+      );
     case 'assistant_message':
     case 'chat_error':
     case 'note':

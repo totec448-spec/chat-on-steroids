@@ -239,6 +239,11 @@ describe('the session-row chat actions', () => {
     expect(chatSource).toContain("ui(indicator, 'aria-label', () => t(status.text))");
   });
 
+  it('uses the configured accent for working and unseen response state', () => {
+    expect(rule('.session-status.is-active, .session-status.is-working')).toContain('border-top-color: var(--accent)');
+    expect(rule('.session-status.is-unseen')).toContain('background: var(--accent)');
+  });
+
   /**
    * The Unattributed row is the one row with no chat to block, and it was the one row with no
    * way to stop what it was showing. The switch that governs it is app-wide by necessity — the
@@ -430,6 +435,8 @@ describe('the settings sheet', () => {
     expect(order.indexOf('goalReasoning')).toBeLessThan(order.indexOf('goalPromptEdit'));
     // Closed until asked for: the catalogue is several hundred long and costs a round trip.
     expect(document.getElementById('goalModels')!.hasAttribute('hidden')).toBe(true);
+    expect(document.getElementById('handoffPromptPanel')!.hasAttribute('hidden')).toBe(true);
+    expect(document.getElementById('handoffPrompt')?.tagName).toBe('TEXTAREA');
     expect(document.getElementById('goalPromptPanel')!.hasAttribute('hidden')).toBe(true);
     expect(document.getElementById('goalPrompt')?.tagName).toBe('TEXTAREA');
   });

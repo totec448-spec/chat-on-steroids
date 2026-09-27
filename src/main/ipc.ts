@@ -49,6 +49,7 @@ import {
   type Config
 } from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
+import { MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema } from './config.js';
 import { bridgePortSelection } from './bridge-ports.js';
@@ -108,6 +109,11 @@ import {
 import { tokenPressure } from '../shared/session.js';
 import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
+import {
+  MAX_COMMAND_ALLOWLIST_RULES,
+  MAX_COMMAND_ALLOWLIST_RULE_CHARS,
+  validateCommandAllowlistRule
+} from '../shared/command-allowlist.js';
 import { openInPreferredBrowser } from './browser.js';
 import { markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
 import {
@@ -132,6 +138,14 @@ const capabilityPatch = z.object(
 const settingsPatch = z.object({
   capabilities: capabilityPatch,
   readOnly: z.boolean(),
+  commandAllowlist: z.object({
+    enabled: z.boolean(),
+    mode: z.enum(['allow', 'deny']).optional().default('allow'),
+    rules: z.array(z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHARS).superRefine((rule, ctx) => {
+      const message = validateCommandAllowlistRule(rule);
+      if (message) ctx.addIssue({ code: 'custom', message });
+    })).max(MAX_COMMAND_ALLOWLIST_RULES)
+  }),
   tunnel: z.object({
     profileId: z.string().max(64).optional(),
     profileEpoch: z.number().int().nonnegative().optional(),
@@ -179,7 +193,8 @@ const settingsPatch = z.object({
     auto: z.boolean(),
     // Floored well above what a fresh chat holds, so a threshold cannot be set somewhere
     // every conversation is already past the moment it opens.
-    autoTokens: z.number().int().min(10_000).max(4_000_000)
+    autoTokens: z.number().int().min(10_000).max(4_000_000),
+    handoffPrompt: z.string().trim().min(1).max(MAX_HANDOFF_PROMPT_CHARS)
   }),
   multiAgent: z.object({
     enabled: z.boolean(),
@@ -187,7 +202,8 @@ const settingsPatch = z.object({
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
     maxWorkers: z.number().int().min(1).max(8),
     allowUnattributedCalls: z.boolean(),
-    recoverAgentTabs: z.boolean()
+    recoverAgentTabs: z.boolean(),
+    waitForSubAgents: z.boolean().optional()
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS) }).strict().optional(),
   goal: z.object({
@@ -253,6 +269,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     throw new Error('Setup profile changed. Edit the tunnel ID in the selected profile again.');
   }
   const pick = <T>(live: T, before: T, next: T): T => (Object.is(before, next) ? live : next);
+  const pickRules = (live: string[], before: string[], next: string[]): string[] =>
+    before.length === next.length && before.every((rule, index) => rule === next[index]) ? live : next;
   const capabilities = Object.fromEntries(
     CAPABILITIES.map((capability) => [
       capability,
@@ -263,6 +281,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     mcp: wanted.mcp ? { instructions: pick(current.mcp.instructions, base.mcp?.instructions ?? '', wanted.mcp.instructions) } : current.mcp,
     capabilities,
     readOnly: pick(current.readOnly, base.readOnly, wanted.readOnly),
+    commandAllowlist: {
+      enabled: pick(current.commandAllowlist.enabled, base.commandAllowlist.enabled, wanted.commandAllowlist.enabled),
+      mode: pick(current.commandAllowlist.mode, base.commandAllowlist.mode, wanted.commandAllowlist.mode),
+      rules: pickRules(current.commandAllowlist.rules, base.commandAllowlist.rules, wanted.commandAllowlist.rules)
+    },
     tunnel: {
       ...current.tunnel,
         pluginsTunnelId: wanted.tunnel.pluginsTunnelId === undefined ? current.tunnel.pluginsTunnelId ?? ''
@@ -313,7 +336,12 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     },
     compaction: {
       auto: pick(current.compaction.auto, base.compaction.auto, wanted.compaction.auto),
-      autoTokens: pick(current.compaction.autoTokens, base.compaction.autoTokens, wanted.compaction.autoTokens)
+      autoTokens: pick(current.compaction.autoTokens, base.compaction.autoTokens, wanted.compaction.autoTokens),
+      handoffPrompt: pick(
+        current.compaction.handoffPrompt,
+        base.compaction.handoffPrompt,
+        wanted.compaction.handoffPrompt
+      )
     },
     multiAgent: {
       defaultModel: pick(current.multiAgent.defaultModel, base.multiAgent.defaultModel, wanted.multiAgent.defaultModel),
@@ -329,6 +357,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.multiAgent.recoverAgentTabs,
         base.multiAgent.recoverAgentTabs,
         wanted.multiAgent.recoverAgentTabs
+      ),
+      waitForSubAgents: pick(
+        current.multiAgent.waitForSubAgents,
+        base.multiAgent.waitForSubAgents,
+        wanted.multiAgent.waitForSubAgents
       )
     },
     goal: {
