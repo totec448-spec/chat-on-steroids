@@ -1651,6 +1651,7 @@
   "No pets match your search.": "沒有符合搜尋的寵物。",
   "Pet operation failed": "寵物操作失敗",
   "This removes the pet from your local library. You can import it again later.": "這會將寵物從你的本機資料庫中移除。你可以稍後重新匯入。",
+  "Playful status words: show rotating gym jokes instead of “Working”": "趣味狀態詞：以輪換的健身梗取代「Working」",
   "GitHub URL": "GitHub 網址",
   "https://github.com/owner/repo/tree/main/skill": "https://github.com/owner/repo/tree/main/skill",
   "Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.": "匯入資料夾、單獨的 SKILL.md，或公開的 GitHub 技能。本機技能可連結 GitHub 來源以檢查更新；是否安裝由你決定。",
@@ -1677,5 +1678,7 @@
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "這會將技能及其資源移至垃圾桶。已準備好的訊息不會改變。",
   "Skill imported into the CoS library": "技能已匯入 CoS 技能庫",
   "All {0} steps done": "全部 {0} 步已完成",
-  "{0} of {1} steps done": "已完成 {0}/{1} 步"
+  "{0} of {1} steps done": "已完成 {0}/{1} 步",
+  "Recommended": "推薦",
+  "Install": "安裝"
 }

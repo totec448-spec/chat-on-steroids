@@ -2973,6 +2973,30 @@ function badgeSignature(): string {
  */
 const BLIND_CAPTION_MS = 90_000;
 
+// Opt-in (Settings → Playful status words). Kept in English: they are wordplay, not labels.
+const TURN_WORK_WORDS = [
+  'Pumping tokens', 'Juicing context', 'Bulking output', 'Repping prompts', 'Spotting agents',
+  'Loading creatine', 'Chasing gains', 'Flexing neurons', 'TRT mode', 'Testosterone boost',
+  'Tren thoughts', 'Deca stack', 'Anavar cutting', 'Dianabol bulking', 'Winstrol drying',
+  'Primobolan polishing', 'Pissing OpenAI off a little more', 'Clauding deez nuts',
+  'Warming up the GPUs', 'Deadlifting the context window', 'Carb-loading tokens', 'Doing reps on the repo',
+  'Hitting a new PR', 'Skipping leg day', 'Pre-workout kicking in', 'Protein-shaking the stack trace',
+  'Benching the build', 'Spotting the next token', 'Stretching the attention span', 'Counting macros',
+  'Pumping iron and ideas', 'Cutting the fluff', 'Going beast mode', 'One more set',
+  'Oiling up the prompt', 'Flexing for the mirror', 'Grinding through the backlog', 'Chugging creatine', 'No pain, no merge'
+] as const;
+
+/** Stable per turn, then advances every five seconds so it reads as authored rather than jittery. */
+function turnWorkWord(turnId: string, elapsedSeconds: number): string {
+  let seed = 0;
+  for (const character of turnId) seed = (seed * 31 + character.charCodeAt(0)) >>> 0;
+  return TURN_WORK_WORDS[(seed + Math.floor(elapsedSeconds / 5)) % TURN_WORK_WORDS.length]!;
+}
+
+function workingLabel(turnId: string, elapsedSeconds: number): string {
+  return deps.state()?.config.ui.playfulStatus === true ? turnWorkWord(turnId, elapsedSeconds) : t("Working");
+}
+
 function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?: boolean; ticking?: boolean } {
   if (!deps.state()?.config.ui.developerMode) {
     const summary = sessions.find(entry => entry.id === selectedId);
@@ -3006,11 +3030,13 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
     const startedAt = summary.finishTurn?.turnId === turnId ? summary.finishTurn.startedAt
       : events.find(event => event.kind === 'turn_start' && event.turnId === turnId)?.time;
     const endedAt = events.find(event => event.kind === 'turn_end' && event.turnId === turnId)?.time;
-    if (startedAt === undefined) return active ? { text: t("Working…"), tone: '', working: true } : blind ?? { text: '', tone: '' };
+    if (startedAt === undefined) return active
+      ? { text: deps.state()?.config.ui.playfulStatus === true ? `${turnWorkWord(turnId, 0)}…` : t("Working…"), tone: '', working: true }
+      : blind ?? { text: '', tone: '' };
     if (!active && endedAt === undefined) return blind ?? { text: '', tone: '' };
     if (blind) return blind;
     const seconds = Math.max(0, Math.floor(((active ? Date.now() : endedAt!) - startedAt) / 1000));
-    return { text: t("{0} for {1}{2}s", [active ? t("Working") : t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };
+    return { text: t("{0} for {1}{2}s", [active ? workingLabel(turnId, seconds) : t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };
   }
   // Recording follows the conversation the browser can see. A tool call arrives over the
   // connector carrying nothing that identifies its caller, so work driven from the phone,

@@ -134,6 +134,8 @@ const api = {
   },
   listSkills: () => call<SkillSummary[]>('skills:list'),
   listManagedSkills: () => call<ManagedSkill[]>('skills:managed'),
+  listRecommendedSkills: () => call<Array<{ id: string; name: string; description: string; installed: boolean }>>('skills:recommended'),
+  installRecommendedSkill: (id: string) => call<ManagedSkill[]>('skills:installRecommended', { id }),
   skillsImport: (kind: 'folder' | 'file') => call<ManagedSkill[] | null>('skills:import', { kind }),
   skillsImportGithub: (url: string) => call<ManagedSkill[]>('skills:githubImport', { url }),
   skillsLinkGithub: (id: string, url: string) => call<ManagedSkill[]>('skills:githubLink', { id, url }),
