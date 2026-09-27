@@ -1,5 +1,6 @@
 import {describe,it,expect} from 'vitest';
 import {PetMachine,clampPosition,readPreference,animationFrame,animationDuration,SPECIAL_COOLDOWN} from '../src/renderer/pet-machine.js';
+import type {PetAnimationManifest} from '../src/shared/pets.js';
 import manifest from '../src/renderer/pet-assets/animations.json';
 const create=()=>new PetMachine({visible:true,x:180,y:300},1000,800,()=>.5);
 const advance=(pet:PetMachine,ms:number)=>{while(ms>0){const dt=Math.min(ms,100);pet.tick(dt);ms-=dt;}};
@@ -23,6 +24,14 @@ describe('Tur Tur Sahur animation owner',()=>{
     pet.poke();expect(pet.nextUpdateIn).toBe(animationDuration('poke'));
     pet.tick(pet.nextUpdateIn);expect(pet.state).toBe('idle');expect(pet.nextUpdateIn).toBe(Infinity);
   });
+  it('uses each imported manifest as the scheduling authority',()=>{
+    const custom=structuredClone(manifest) as unknown as PetAnimationManifest;
+    custom.animations.spawn.ms[0]=937;
+    const pet=new PetMachine({visible:true,x:180,y:300},1000,800,()=>.5,custom);
+    expect(pet.nextUpdateIn).toBe(937);
+    pet.tick(937);
+    expect(pet.frame).toBe(1);
+  });
   it.each(['openai','anthropic'] as const)('deadline-driven %s retains every authored non-looping action frame',kind=>{
     const pet=create();pet.startAction(kind);
     const seen=new Map<string,number[]>();
@@ -40,6 +49,13 @@ describe('Tur Tur Sahur animation owner',()=>{
   it('still bounds an unexpected stall during continuous motion',()=>{
     const pet=create();pet.startAction('openai');pet.tick(60000);
     expect(pet.clock).toBe(100);expect(pet.state).toBe('walk');expect(pet.position.x-180).toBeLessThan(5);
+  });
+  it('maps task transitions to authored reactions without replacing the normal idle loop',()=>{
+    const pet=create();advance(pet,500);
+    pet.react('spawn');expect(pet.state).toBe('spawn');advance(pet,500);expect(pet.state).toBe('idle');
+    pet.react('look');expect(pet.state).toBe('look');advance(pet,800);expect(pet.state).toBe('idle');
+    pet.react('angry');expect(pet.state).toBe('angry');advance(pet,1000);expect(pet.state).toBe('idle');
+    pet.react('celebrate');expect(pet.state).toBe('celebrate');
   });
   it('distinguishes jitter clicks from drags, and rejects foreign pointer events',()=>{
     const pet=create();pet.beginPointer(1,{x:10,y:10});pet.movePointer(9,{x:200,y:10});
