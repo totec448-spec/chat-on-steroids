@@ -2374,7 +2374,10 @@
     if (tools.some(tool => !NAME.test(tool.name) || typeof tool.description !== 'string' || !tool.inputSchema || tool.inputSchema.type !== 'object') ||
         new Set(tools.map(tool => tool.name)).size !== tools.length) return null;
     if (control && control.getAttribute('data-clf-plugin-refresh') !== appId) control.setAttribute('data-clf-plugin-refresh', appId);
-    return { appId, connectorName: connector.name.slice(0, 100), versionId: str(connector.app_metadata?.version_id), tools, refreshAvailable: !!control };
+    // `settled`: the actions arrive in the same response as the connector itself, so an empty
+    // list here is the installed state (a stale Plugins connector), not a list still loading.
+    const tunnelId = typeof connector.tunnel_id === 'string' && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(connector.tunnel_id) ? connector.tunnel_id : null;
+    return { appId, connectorName: connector.name.slice(0, 100), versionId: str(connector.app_metadata?.version_id), tools, refreshAvailable: !!control, tunnelId, settled: true };
   }
 
   function pluginSnapshot() {
