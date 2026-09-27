@@ -98,3 +98,23 @@ export function compactNumber(value: number): string {
   if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}k`;
   return `${(value / 1_000_000).toFixed(1)}M`;
 }
+
+const cardMenuDocuments = new WeakSet<Document>();
+
+/** Closes open card menus on an outside click, on an action inside one, and on Escape. */
+export function initCardMenuDismissal(doc: Document = document): void {
+  if (cardMenuDocuments.has(doc)) return;
+  cardMenuDocuments.add(doc);
+  doc.addEventListener('click', (event) => {
+    const target = event.target as Element | null;
+    const menu = typeof target?.closest === 'function' ? target.closest('.plugin-menu') : null;
+    const action = typeof target?.closest === 'function' ? target.closest('.plugin-menu-actions') : null;
+    for (const open of doc.querySelectorAll<HTMLDetailsElement>('.plugin-menu[open]')) {
+      if (open !== menu || action) open.open = false;
+    }
+  });
+  doc.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    for (const open of doc.querySelectorAll<HTMLDetailsElement>('.plugin-menu[open]')) open.open = false;
+  });
+}
