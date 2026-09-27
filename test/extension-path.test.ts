@@ -200,3 +200,24 @@ it('restores an interrupted in-place update even when the mixed published tree s
   await expect(fs.access(backup)).rejects.toBeDefined();
   await expect(fs.access(stage)).rejects.toBeDefined();
 });
+
+it('offers a newer extension build without touching the folder until an idle extension asks', async () => {
+  base = await makeTempDir('clf-extension-offer-');
+  const resources = path.join(base, 'resources');
+  const bundled = path.join(resources, 'extension');
+  const userData = path.join(base, 'user-data');
+  await fs.mkdir(bundled, { recursive: true });
+  await fs.writeFile(path.join(bundled, 'manifest.json'), JSON.stringify({ version: '9.9.9' }));
+  await fs.writeFile(path.join(bundled, 'build-stamp.txt'), 'bbbbbbbbbbbb\n');
+  Object.defineProperty(process, 'resourcesPath', { configurable: true, writable: true, value: resources });
+  vi.doMock('electron', () => ({ app: { isPackaged: true, getPath: (name: string) => (name === 'userData' ? userData : ''), getAppPath: () => base! } }));
+  const { extensionUpdateOffer, prepareExtensionUpdate, materializedExtensionBuild } = await import('../src/main/extension-path.js');
+  expect(extensionUpdateOffer(null)).toBeNull(); // an unstamped checkout cannot be compared
+  expect(extensionUpdateOffer('bbbbbbbbbbbb')).toBeNull();
+  expect(extensionUpdateOffer('aaaaaaaaaaaa')).toEqual({ build: 'bbbbbbbbbbbb' });
+  // Offering must not replace the folder a live service worker still runs from.
+  expect(materializedExtensionBuild()).toBeNull();
+  expect(prepareExtensionUpdate('bbbbbbbbbbbb')).toBeNull();
+  expect(prepareExtensionUpdate('aaaaaaaaaaaa')).toEqual({ build: 'bbbbbbbbbbbb', ready: true });
+  expect(materializedExtensionBuild()).toBe('bbbbbbbbbbbb');
+});

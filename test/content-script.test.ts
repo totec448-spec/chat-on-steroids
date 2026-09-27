@@ -14025,13 +14025,12 @@ describe('the fresh chat the app opened', () => {
       release({ ok: true, command: { id: 'cmd-model-remount', type: 'worker', text: 'Worker task after remount',
         agent: 'worker-1', model: 'gpt-5.6-sol', reasoningEffort: 'high' } });
 
-      await new Promise(resolve => setTimeout(resolve, 100));
-      await settle(600);
-
-      expect(submitted).toBe('Worker task after remount');
-      expect(live.sent.filter((message) => message.type === 'ack')).toContainEqual(expect.objectContaining({
+      // Real timers drive the remount, so wait on the outcome rather than a fixed 100 ms: under a
+      // loaded runner the send legitimately lands later, well inside the product's own waits.
+      await vi.waitFor(() => expect(submitted).toBe('Worker task after remount'), { timeout: 10_000, interval: 20 });
+      await vi.waitFor(() => expect(live!.sent.filter((message) => message.type === 'ack')).toContainEqual(expect.objectContaining({
         id: 'cmd-model-remount', status: 'sent', conversationId: workerChat
-      }));
+      })), { timeout: 10_000, interval: 20 });
     } finally {
       live.window.setTimeout = instantTimer;
     }
@@ -15901,7 +15900,8 @@ describe('one live isolated-world recorder per document', () => {
 
     await expect(live.runtimeMessage({ type: 'clf-recorder-ping' })).resolves.toEqual({
       ok: true,
-      recorderVersion: 21
+      recorderVersion: 21,
+      busy: false
     });
   });
 

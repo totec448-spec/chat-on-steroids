@@ -1238,7 +1238,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
             if (!accepted) staged.rollback();
             throw error;
           }
-          const { created, becamePrime, runId } = staged;
+          const { created, becamePrime, runId, defaultNotes } = staged;
           if (currentCall()) currentCall()!.caller.runId = runId;
           // Browser tabs are a publication side effect, never part of planning. They become
           // visible only after the exact broker revision above is durable.
@@ -1254,6 +1254,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                   (becamePrime ? `This ${currentCaller().conversationId ? 'conversation' : 'request'} is now the prime agent of run ${runId}. ` : '') +
                   `${created.length} worker(s) matched: ${created.map((info) => `${info.id} (${info.label}, ${info.state}${info.model ? `, model ${info.model}` : ''}${info.reasoningEffort ? `, reasoning ${info.reasoningEffort}` : ''})`).join(', ')}. ` +
                   (invited.length > 0 ? 'New worker chats are opening with their briefs already in them. ' : '') +
+                  (defaultNotes?.length ? `${defaultNotes.join(' ')} ` : '') +
                   (sleeping.length > 0
                     ? `${sleeping.map((worker) => worker.id).join(', ')} already finished that earlier piece and is sleeping in its existing chat; wake it with action=message instead of spawning a duplicate. `
                     : '') +

@@ -18,6 +18,8 @@ it('keeps Prime selection independent and rejects late results after parent navi
   const worker = { id: 'worker-session', title: 'Worker', updatedAt: 1 } as SessionSummary;
   panel.update('prime-session', [worker]); toggle.click();
   expect(host.textContent).toContain('History · 1');
+  // A worker with no conversation or model yet still gets its row (undefined === undefined once threw here).
+  expect(host.querySelectorAll('.agent-panel-row')).toHaveLength(1);
   const opening = panel.open(worker.id);
   expect(openMain).not.toHaveBeenCalled();
   panel.update('another-prime', []);
@@ -80,4 +82,49 @@ it('preserves a readers scroll position during refresh and Escape returns focus'
   body.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   expect(host.querySelector('aside')!.hidden).toBe(true);
   expect(document.activeElement).toBe(toggle);
+});
+
+it('shows the worker task and only a model observed for its current conversation', () => {
+  dom = new JSDOM('<main></main><button></button>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
+  const panel = createAgentPanel({ host, toggle, load: async () => ({ events: [] }), render: () => [], openMain: vi.fn(), working: () => true });
+  panel.update('prime', [{ id: 'worker', title: 'worker-4 · Shared context…', conversationId: 'chat-b',
+    startedAt: Date.now() - 90_000, updatedAt: Date.now(), origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-4', task: 'Audit and verify the build' },
+    selectedModel: { conversationId: 'chat-b', model: 'gpt-5.6-sol', reasoningEffort: 'high', observedAt: Date.now() } } as SessionSummary]);
+  toggle.click();
+  const card = host.querySelector<HTMLElement>('.agent-panel-row')!;
+  expect(card.querySelector('.agent-card-name')!.textContent).toBe('worker-4');
+  expect(card.querySelector('.agent-card-task')!.textContent).toBe('Original assignment: Audit and verify the build');
+  expect(card.querySelector('.agent-card-model')!.textContent).toContain('gpt-5.6-sol');
+  expect(card.dataset.state).toBe('working');
+});
+
+it('uses the exact broker worker state and reused assignment over stale session metadata', () => {
+  dom = new JSDOM('<main></main><button></button>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
+  const panel = createAgentPanel({ host, toggle, load: async () => ({ events: [] }), render: () => [], openMain: vi.fn(),
+    working: () => false, agent: () => ({ state: 'failed', task: 'Review the final package' }) });
+  panel.update('prime', [{ id: 'worker', title: 'worker-2 · Original work', conversationId: 'chat',
+    startedAt: Date.now() - 30_000, updatedAt: Date.now(), endedAt: null,
+    origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-2', task: 'Original work' } } as SessionSummary]);
+  toggle.click();
+  const card = host.querySelector<HTMLElement>('.agent-panel-row')!;
+  expect(card.dataset.state).toBe('failed');
+  expect(card.querySelector('.agent-card-task')!.textContent).toBe('Review the final package');
+  expect(host.textContent).toContain('History · 1');
+});
+
+it('groups a failed broker worker under History even with recent session activity', () => {
+  dom = new JSDOM('<main></main><button></button>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
+  const panel = createAgentPanel({ host, toggle, load: async () => ({ events: [] }), render: () => [], openMain: vi.fn(),
+    working: () => true, agent: () => ({ state: 'failed', task: 'Review the final package' }) });
+  panel.update('prime', [{ id: 'worker', title: 'worker-2', conversationId: 'chat', startedAt: Date.now() - 1000,
+    updatedAt: Date.now(), origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-2', task: 'Review' } } as SessionSummary]);
+  toggle.click();
+  expect(host.textContent).toContain('Active · 0');
+  expect(host.textContent).toContain('History · 1');
 });
