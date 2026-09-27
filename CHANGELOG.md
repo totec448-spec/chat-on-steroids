@@ -30,6 +30,7 @@ A feature update. The app gets a workspace next to your chat, pets on your deskt
 
 ### Fixed
 
+- **Usage counts the messages you type in ChatGPT.** Before, only messages sent from the CoS message box were counted, so the weekly numbers stayed near zero.
 - **Web Fetch and other Python plugins install without extra setup.** If the `uv` tool they need is missing, CoS downloads a verified copy for itself instead of failing with "runtime uv is unavailable".
 - **Goal and Loop work again when your saved model is gone.** The step that decides what comes next failed when ChatGPT no longer offered the model saved in Settings; it now uses one that is available.
 - **Setup matches ChatGPT's new settings.** ChatGPT no longer has a Developer mode switch; you now create the app from Plugins → Add → Create MCP App. The setup steps say so.
@@ -44,7 +45,9 @@ A feature update. The app gets a workspace next to your chat, pets on your deskt
 
 ### Improved
 
-- **A clearer Usage tab.** Your ChatGPT limits come first, followed by the last 30 days as bars with a detailed breakdown, and an activity heatmap you can widen up to a year.
+- **A redesigned Usage tab.** Clear cards, a calendar of your activity with day and month labels, a cost chart with dates, and a simple menu to choose which weekday your week starts on.
+- **One tidy title bar on macOS.** The window buttons, the sidebar button and the View menu now share one row instead of two.
+- **Skill cards show their full description.**
 - **A friendlier setup.** Numbered steps and a progress bar show how far along you are.
 - **Languages are sorted sensibly.** Appearance → Language and Setup list each language by its own name in alphabetical order, followed by Japanese and Chinese.
 - **Slim scrollbars** are always visible, so long lists and chats show where you are.
