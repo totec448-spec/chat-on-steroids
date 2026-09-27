@@ -26,6 +26,8 @@ import { requestBrowserPreferences } from './browser-preferences.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from './session/start-input.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
+import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
+import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
 import { pluginRefreshPublications } from './plugin-refresh.js';
 /**
  * IPC surface.
@@ -525,6 +527,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // live theme switch an old opposite background otherwise flashes behind the renderer while it
     // paints again. This is also the color Electron shows during any later renderer reload/failure.
     getWindow()?.setBackgroundColor(windowBackgroundForTheme(next.ui.theme, next.ui.appearance));
+    refreshPetOverlayAppearance();
     if (
       before.goal.enabled !== next.goal.enabled ||
       // The mode is authority too: a draft started as a gate must not be typed after the user
@@ -625,6 +628,40 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('projects:list', () => listProjects());
+  handle('pets:list', async () => petLibraryState());
+  handle('pets:overlayState', async () => petOverlayControlState());
+  handle('pets:overlayVisible', async payload => {
+    const { visible } = z.object({ visible: z.boolean() }).strict().parse(payload);
+    return setPetOverlayVisible(visible);
+  });
+  handle('pets:import', async () => {
+    const options: Electron.OpenDialogOptions = { title: 'Import CoS Pet folder', properties: ['openDirectory'] };
+    const owner = getWindow();
+    const selected = owner && !owner.isDestroyed()
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options);
+    if (selected.canceled || !selected.filePaths[0]) return null;
+    return importPet(selected.filePaths[0]);
+  });
+  handle('pets:enabled', async payload => {
+    const { id, enabled } = z.object({ id: z.string().min(1).max(100), enabled: z.boolean() }).strict().parse(payload);
+    const state = setPetEnabled(id, enabled);
+    // Enabling shows the overlay, without restoring other pets dismissed for this run.
+    if (enabled) await setPetOverlayVisible(true, false);
+    return state;
+  });
+  handle('pets:favorite', async payload => {
+    const { id, favorite } = z.object({ id: z.string().min(1).max(100), favorite: z.boolean() }).strict().parse(payload);
+    return setPetFavorite(id, favorite);
+  });
+  handle('pets:delete', async payload => {
+    const { id } = z.object({ id: z.string().min(1).max(100) }).strict().parse(payload);
+    return deletePet(id);
+  });
+  handle('pets:asset', async payload => {
+    const { id, preview } = z.object({ id: z.string().min(1).max(100), preview: z.boolean() }).strict().parse(payload);
+    return loadPetAsset(id, preview);
+  });
   handle('skills:list', () => listSkills());
   handle('skills:library', async payload => {
     const scope = z.object({ sessionId: z.string().min(1).max(80).nullable().optional(), projectId: z.string().uuid().nullable().optional() }).strict().parse(payload ?? {});
@@ -1115,6 +1152,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // A blocked worker chat frees its swarm slot now, not on the next 30-second pass: the
     // user pressing Block on a worker is usually about to start something in its place.
     if (blocked) await sweepStaleSwarm().catch(() => undefined);
+    refreshPetOverlayActivities();
     return blockedChatIds();
   });
 

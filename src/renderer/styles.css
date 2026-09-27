@@ -53,7 +53,51 @@
 .plugin-section-head h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin: 0; font-size: calc(16px * var(--text-scale, 1)); font-weight: 650; letter-spacing: -.15px; }
 .plugin-count, .plugin-section-head > .muted { color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; letter-spacing: 0; }
 .plugin-section-head .btn { color: var(--ink); font-size: calc(11.5px * var(--text-scale, 1)); }
-#pluginsInstalled, .plugin-directory, .plugin-catalog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; }
+#pluginsInstalled, .plugin-directory, .plugin-catalog, .pet-library-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; }
+/* Pets library (desktop pets). */
+.pet-library-grid { align-items: stretch; }
+.pet-library-card { height: 100%; }
+.pet-library-card .plugin-entry { height: 100%; min-height: 112px; padding: 15px 82px 38px 16px; cursor: default; }
+.pet-library-card .plugin-entry h2 { padding-right: 0; }
+.pet-library-status { position: absolute; right: 16px; bottom: 14px; }
+.pet-import-guide { justify-content: space-between; column-gap: 48px; margin-top: 20px; }
+.pet-import-guide p { flex: 1 1 auto; max-width: 660px; }
+.pet-import-guide .btn { flex: 0 0 auto; white-space: nowrap; }
+.pet-format-guide-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.pet-format-guide-head p { margin: 0; color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); }
+.pet-format-folder { margin: 12px 0 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.55; user-select: text; }
+.pet-format-folder code { color: var(--ink); font: 11.5px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.pet-format-ai-help { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); user-select: text; }
+.pet-format-ai-help strong { display: block; color: var(--ink); font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; }
+.pet-format-ai-help p { margin: 5px 0 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.55; }
+.pet-format-ai-help code { color: var(--ink); font: 11.5px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.pet-format-content pre { max-height: min(340px, 42dvh); margin: 14px 0 0; padding: 12px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--sunk); color: var(--soft); font: 11.5px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; user-select: text; cursor: text; }
+.pet-delete-dialog { width: min(500px, calc(100vw - 40px)); }
+.pet-delete-identity { display: grid; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 14px; }
+.pet-delete-copy { min-width: 0; }
+.pet-delete-copy h3 { margin: 0 0 4px; overflow: hidden; color: var(--ink); font-size: calc(15px * var(--text-scale, 1)); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.pet-delete-copy p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; margin: 0; overflow: hidden; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; }
+.pet-delete-warning { margin: 20px 0 0; padding-top: 18px; border-top: 1px solid var(--line); color: var(--soft); }
+.pet-delete-actions { display: flex; justify-content: flex-end; gap: 10px; margin: 22px -24px -24px; padding: 16px 24px; border-top: 1px solid var(--line); }
+.pet-delete-actions .btn { min-height: 38px; padding: 8px 14px; }
+.pet-delete-confirm { border: 1px solid #b4262c; background: #b4262c; color: #fff; font-weight: 600; }
+.pet-delete-confirm:hover:not(:disabled) { border-color: #971f25; background: #971f25; color: #fff; }
+.pet-library-preview { display: grid; place-items: center; width: 58px; height: 64px; flex: 0 0 58px; overflow: hidden; border-radius: 12px; background: var(--sunk); }
+.pet-library-preview-frame { display: block; width: 52px; height: 52px; background-repeat: no-repeat; background-position: 100% 0; background-size: 800% 1200%; image-rendering: pixelated; }
+.pet-library-preview-frame.is-animated { animation: pet-library-idle 6.6s step-end infinite; }
+.pet-favorite { position: absolute; top: 9px; right: 44px; z-index: 2; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--pill); background: transparent; color: var(--faint); cursor: pointer; }
+.pet-favorite:hover, .pet-favorite:focus-visible { background: var(--hover); color: var(--ink); }
+.pet-favorite[aria-pressed='true'] { color: var(--ink); }
+.pet-favorite .ico { width: 16px; height: 16px; font-size: 16px; }
+.pet-library-bundled { color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+@keyframes pet-library-idle {
+  0%, 35% { background-position: 57.1429% 0%; }
+  35.01%, 47% { background-position: 71.4286% 0%; }
+  47.01%, 60% { background-position: 85.7143% 0%; }
+  60.01%, 100% { background-position: 100% 0%; }
+}
+@media (prefers-reduced-motion: reduce) { .pet-library-preview-frame.is-animated { animation: none; } }
+.ico.is-filled { fill: currentColor; }
 .plugin-card { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card); transition: background .14s; }
 .plugin-card:hover, .plugin-card:focus-within { background: var(--hover); }
 .plugin-entry { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 88px; padding: 15px 16px; border: 0; border-radius: inherit; background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
@@ -130,7 +174,7 @@
 .plugins-panel :is(button, summary):focus-visible, .plugin-dialog :is(button, summary, input, select):focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 @media (max-width: 860px) {
   .panel.plugins-panel { padding: 32px 24px; }
-  #pluginsInstalled, .plugin-directory { grid-template-columns: minmax(0, 1fr); }
+  #pluginsInstalled, .plugin-directory, .pet-library-grid { grid-template-columns: minmax(0, 1fr); }
   .plugin-page-head h1 { font-size: calc(27px * var(--text-scale, 1)); }
 }
 @media (max-width: 520px) {
@@ -139,6 +183,8 @@
   .plugin-dialog-body, .plugin-dialog-head { padding: 20px; }
   .plugin-connection { align-items: flex-start; flex-direction: column; }
   .plugin-connection > div { flex-basis: auto; }
+  .pet-import-guide, .pet-format-guide-head { align-items: flex-start; flex-direction: column; }
+  .pet-delete-actions { margin-right: -20px; margin-bottom: -20px; margin-left: -20px; padding-inline: 20px; }
 }
 
 :root {
