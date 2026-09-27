@@ -329,7 +329,8 @@ void app.whenReady().then(async () => {
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
   initUvRuntime(userData);
-  try { await initPetLibrary(userData); }
+  // Bundled pet packages: the packaged app's resources, or the repository's pets/ folder in dev.
+  try { await initPetLibrary(userData, app.isPackaged ? path.join(process.resourcesPath, 'pets') : path.join(app.getAppPath(), 'pets')); }
   catch (error) { logWarn(`Pet library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   await restoreChatModels();
   if (windowActivation.isDisabled()) return;
