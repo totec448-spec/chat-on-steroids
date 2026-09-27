@@ -2500,6 +2500,44 @@ function maintain(woken = false) {
   return maintenanceFlight;
 }
 
+/**
+ * Reloads this extension into the newer build the app ships, when nothing would be cut off.
+ *
+ * Chrome keeps running the old service worker after the folder changes, so an app update used to
+ * leave every user on the old extension until they found Reload in chrome://extensions. The app
+ * now offers the newer build in `/status`; this waits until the app runs no tool call, no input
+ * or command is in flight and every ChatGPT page answers that it is idle, then has the app update
+ * the folder and reloads at once. `onInstalled` re-injects the open ChatGPT tabs afterwards.
+ * One attempt per (running build, offered build): an extension loaded from some other folder
+ * would come back as the same old build, and must not reload again and again.
+ */
+let extensionReloadPending = false;
+async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands) {
+  if (extensionReloadPending || !offer || typeof offer.build !== 'string' || !/^[0-9a-f]{12}$/.test(offer.build)) return;
+  await workerStampReady;
+  if (!workerStampValue || workerStampValue === offer.build) return;
+  // A chat with an agent or an active Goal is usually just waiting; only running work counts.
+  if (offer.busy !== false || liveOpenings.size || liveCommands.size) return;
+  const attempt = `${workerStampValue}>${offer.build}`;
+  if ((await chrome.storage.local.get('extensionReloadAttempt')).extensionReloadAttempt === attempt) return;
+  for (const tab of await chrome.tabs.query({ url: CHATGPT_TAB_URLS })) {
+    if (!Number.isInteger(tab.id) || tab.discarded === true) continue;
+    const ping = await tabReply(tab.id, { type: 'clf-recorder-ping' }).catch(() => null);
+    // A page that cannot answer has nothing running here. One that answers without `busy` runs an
+    // older recorder that cannot say, so it is treated as busy.
+    if (ping && ping.busy !== false) return;
+  }
+  extensionReloadPending = true;
+  try {
+    const prepared = await call('/extension/update', { method: 'POST', body: '{}' });
+    if (!prepared.ok || prepared.data?.ready !== true || prepared.data.build !== offer.build) return;
+    await chrome.storage.local.set({ extensionReloadAttempt: attempt });
+    chrome.runtime.reload();
+  } finally {
+    extensionReloadPending = false;
+  }
+}
+
 async function maintainOnce() {
   // The app decides whether there is recovery work; a worker holding no tabs is not a worker
   // with nothing to do, it is the one that has to open the chat the app is owed.
@@ -2523,6 +2561,7 @@ async function maintainOnce() {
   const liveChats = new Set(Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : []);
   const liveOpenings = new Set(Array.isArray(reply.data.inputOpeningIds) ? reply.data.inputOpeningIds : []);
   const liveCommands = new Set(Array.isArray(reply.data.commandIds) ? reply.data.commandIds : []);
+  void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands).catch(() => undefined);
   const renderingWanted = tab => {
     if (intent !== connectionEpoch || !token || disconnected) return false;
     if (liveChats.has(conversationForTab(tab))) return true;

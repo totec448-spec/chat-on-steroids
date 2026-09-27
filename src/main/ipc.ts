@@ -116,7 +116,7 @@ import {
   validateCommandAllowlistRule
 } from '../shared/command-allowlist.js';
 import { openInPreferredBrowser } from './browser.js';
-import { markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
+import { manualDownloadUrl, markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
 import {
   getMacOSDesktopAccess,
   onMacOSDesktopAccessChange,
@@ -848,6 +848,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!markInstallOnQuit()) throw new Error('There is no downloaded update to install yet');
     logInfo('update: install requested; quitting to hand the update over');
     quitToInstall();
+    return true;
+  });
+
+  // "Get update" for an installation that cannot update itself: the exact published file for
+  // this machine and the announced version, opened in the user's browser. The renderer names
+  // nothing; the URL is built here from the checked release and this process's platform.
+  handle('update:download', async () => {
+    await shell.openExternal(manualDownloadUrl(updateStatus().latest));
     return true;
   });
 
