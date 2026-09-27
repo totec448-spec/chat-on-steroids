@@ -2328,6 +2328,9 @@ input[readonly] {
 .tool.is-artifact > summary { padding: 5px 8px; }
 .tool-tag { flex: 0 0 auto; padding: 2px 5px; border-radius: 4px; background: var(--accent-wash); color: var(--accent); font: 600 calc(10px * var(--text-scale, 1)) var(--mono); }
 .tool-change-count { flex: 0 0 auto; color: var(--green); font: 600 calc(10px * var(--text-scale, 1)) var(--mono); }
+/* Let the hover surface breathe beyond the text column without moving its content. */
+.ev-tool_call .tool { margin-inline: -10px; }
+.ev-tool_call .tool > summary { padding-inline: 10px; }
 
 .tool summary b {
   font-weight: 520;
@@ -2375,11 +2378,13 @@ input[readonly] {
   color: var(--red);
 }
 
-.tool .metric .metric-added {
+.tool .metric .metric-added,
+.tool-change-count .metric-added {
   color: var(--green);
 }
 
-.tool .metric .metric-removed {
+.tool .metric .metric-removed,
+.tool-change-count .metric-removed {
   color: var(--red);
 }
 
