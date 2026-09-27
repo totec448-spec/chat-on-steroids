@@ -11,6 +11,37 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## Unreleased
 
+## [2.1.17] — Workspace and self-updating extension
+
+A feature update. The app gets a workspace next to your chat, the extension keeps itself up to date, and CoS speaks German and Brazilian Portuguese.
+
+### New
+
+- **Workspace panels.** Open Files, Terminal, Agents and Review beside your chat, and a Terminal panel along the bottom. Shortcuts: Ctrl+Shift+1–4 for the side panel and Ctrl+` for the bottom Terminal.
+- **Review changes.** See what changed in your project's Git repository, or exactly what one of ChatGPT's edits changed, without leaving the app. You can also compare two branches. Review only reads; it never changes your repository.
+- **The extension updates itself.** After an app update, the extension reloads on its own as soon as no chat is busy. No more trips to `chrome://extensions`.
+- **Download updates in one click.** When a new version is out, the update notice links straight to the right download for your Mac or Linux system.
+- **German and Brazilian Portuguese.** Pick them in Appearance → Language.
+- **The extension is translated** into German, Spanish, French, Japanese, Turkish and Chinese, following your browser's language.
+
+### Fixed
+
+- **Attachments work again with ChatGPT's new message box.** Images and files the app sends to ChatGPT were not attached after ChatGPT's latest change.
+- **Image-only answers finish properly.** When ChatGPT answers with just a generated image, the chat no longer looks busy afterwards.
+- **Workers start even if your saved default model is gone.** If ChatGPT no longer offers the model or thinking level saved in Settings, workers now use one that is available instead of failing.
+- **Worker reports are no longer claimed as delivered too early.** The main chat is told to collect reports it hasn't received yet before it wraps up.
+- **CoS remembers which tabs it closed itself,** even after a browser restart, so a tab you close is never mixed up with one CoS tidied away.
+- **Setup keeps what you typed.** API keys and settings entered during setup are saved when you press Connect.
+- **Messages that were never confirmed are cleared after six hours** instead of lingering in the background.
+- **Desktop control on macOS is more careful.** A click is refused if another window covers that spot, and windows on other Spaces are found more reliably.
+
+### Improved
+
+- **Polished activity timeline, worker panel and model menus.**
+- **Setup explains that renaming the ChatGPT app breaks tool tracking,** so keep the name CoS suggests.
+
+**After updating:** reload the Chat On Steroids extension in `chrome://extensions` one last time, then refresh your open ChatGPT tabs. From this version on, the extension updates itself.
+
 ## [2.1.16] — Fewer stuck chats
 
 A reliability update on top of 2.1.15. It keeps up with ChatGPT's latest changes, and chats get stuck less often. When they do, they recover on their own.
