@@ -9,6 +9,7 @@ import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
 import { initPet } from './pet.js';
 import { initPets } from './pets.js';
+import { initSkillsLibrary } from './skills-library.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
@@ -130,8 +131,11 @@ let setupKeySave: Promise<boolean> = Promise.resolve(true);
 
 // ------------------------------------------------------------------- tabs
 
+let openSkillsLibrary: () => void = () => undefined;
+
 function showTab(name: string): void {
-  const library = name === 'plugins' || name === 'pets';
+  if (name === 'skills') openSkillsLibrary();
+  const library = name === 'plugins' || name === 'skills' || name === 'pets';
   const settings = name !== 'chat' && !library;
   document.querySelector<HTMLElement>('.app')!.dataset.screen = library ? 'library' : settings ? 'settings' : 'chat';
   document.querySelector<HTMLElement>('.sidebar-brand')!.hidden = settings;
@@ -203,6 +207,7 @@ $('sessionList').addEventListener('click', event => {
 $('newChat').addEventListener('click', () => showTab('chat'));
 $('sidebarPlugins').addEventListener('click', () => showTab('plugins'));
 $('sidebarPets').addEventListener('click', () => showTab('pets'));
+$('sidebarSkills').addEventListener('click', () => showTab('skills'));
 $('viewPets').addEventListener('click', () => { ($('viewMenu') as HTMLDetailsElement).open = false; pet.toggle(); });
 api.onPetOverlayOpenOwner(screen => showTab(screen));
 $('addProject').addEventListener('click', () => showTab('chat'));
@@ -2048,6 +2053,7 @@ initSidebarResize();
 initUsage();
 initPlugins(apply);
 initPets(api, pet);
+openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
 initChat({ save: () => save(), state: () => state });
 

@@ -454,3 +454,12 @@ describe('model attribution and equivalent cost', () => {
     expect(rows[0]!.model).toBe('5.6');
   });
 });
+
+it('prices ChatGPT 5.5 IDs as GPT-5.5 and knows the GPT-6 Sol and Luna rates, without guessing plain gpt-6', async () => {
+  const { DEFAULT_USAGE_FORMULA: formula, usageRate } = await import('../src/shared/usage.js');
+  for (const id of ['5.5', 'gpt-5-5', 'gpt-5-5-instant', 'gpt-5-5-thinking']) expect(usageRate(id, formula)).toBe(0.5);
+  expect(usageRate('gpt-6-sol', formula)).toBe(0.2);
+  expect(usageRate('gpt-6-luna', formula)).toBe(0.01);
+  // Which API model ChatGPT's plain GPT-6 corresponds to is not established; it stays user-priced.
+  expect(usageRate('gpt-6', formula)).toBeUndefined();
+});

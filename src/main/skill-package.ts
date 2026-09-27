@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { rawPromises as fs, rawRealpathNative } from './rawfs.js';
 import { isContained } from './sandbox.js';
+import { SKILL_ORIGIN_FILENAME } from '../shared/skills.js';
 
 const MAX_ENTRIES = 4096;
 const MAX_BYTES = 32 * 1024 * 1024;
@@ -11,7 +12,7 @@ const identical = (a: Identity, b: Identity): boolean => a.dev === b.dev && a.in
 const nativeEqual = (a: string, b: string): boolean => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 const realpath = (file: string): Promise<string> => process.platform === 'win32' ? rawRealpathNative(file) : fs.realpath(file);
 
-export async function publishSkillPackage(source: string, root: string, id: string, expectedSkill: Buffer): Promise<void> {
+export async function publishSkillPackage(source: string, root: string, id: string, expectedSkill: Buffer, origin?: Buffer): Promise<void> {
   const sourceReal = await realpath(source);
   const target = path.join(root, id);
   if (!isContained(root, target) || path.dirname(target) !== root) throw new Error('Invalid skill package destination');
@@ -63,6 +64,7 @@ export async function publishSkillPackage(source: string, root: string, id: stri
     for await (const entry of directory) {
       if (++entries > MAX_ENTRIES) throw new Error('Skill package exceeds 4096 entries');
       if (depth === 0 && entry.name === 'SKILL.md') continue;
+      if (depth === 0 && entry.name === SKILL_ORIGIN_FILENAME) throw new Error('Skill packages cannot supply CoS origin metadata');
       const current = path.join(from, entry.name), destination = path.join(to, entry.name);
       const stat = await fs.lstat(current);
       if (stat.isSymbolicLink()) throw new Error('Skill packages cannot contain symbolic links or junctions');
@@ -74,6 +76,20 @@ export async function publishSkillPackage(source: string, root: string, id: stri
   };
   try {
     await copyDirectory(source, target, 0);
+    if (origin) {
+      if (origin.length > 4096 || bytes + origin.length > MAX_BYTES) throw new Error('Skill origin metadata is too large');
+      const metadata = path.join(target, SKILL_ORIGIN_FILENAME);
+      await assertTarget(metadata);
+      const handle = await fs.open(metadata, 'wx', 0o600);
+      try {
+        await handle.writeFile(origin); await handle.sync();
+        createdFiles.push({ file: metadata, identity: await handle.stat() });
+      } catch (error) {
+        createdFiles.push({ file: metadata, identity: await handle.stat() });
+        throw error;
+      } finally { await handle.close(); }
+      bytes += origin.length;
+    }
     // No catalog row exists until all resources are present. Exclusive publication never
     // replaces another tool's SKILL.md, even if it appeared while resources were copied.
     const temp = path.join(target, `.import-${randomUUID()}.tmp`);
