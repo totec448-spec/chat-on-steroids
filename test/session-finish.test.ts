@@ -15,11 +15,12 @@ vi.mock('../src/main/goal.js', async importOriginal => ({ ...await importOrigina
 vi.mock('../src/main/mcp/call-context.js', async (importOriginal) => ({
   ...await importOriginal<object>(), currentCall: () => ({ caller: { ...hooks.caller }, startedAt: hooks.startedAt })
 }));
-const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
+const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSessionStore, createSession, getSession, rebindSession, appendEvent, readRecentEvents, flushSessions, resetSessionStoreForTests, observeSessionModel } = await import('../src/main/session/store.js');
 const { resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { announceSessionFinish: announceTransport, sessionFinishDeadline, settleSessionFinishForTests, requestSessionFinishGoal, sessionFinishWaiting, setFinishNotifier, releaseSessionFinish, sessionFinishHeld, getSessionFinishDraft } = await import('../src/main/session/finish.js');
 const { setGoalSwitchNow, automaticFinishEnabled, snapshotGoalSwitches, restoreGoalSwitches, registerGoalDecisionChat } = await import('../src/main/goal.js');
+const { resetAgentsForTests, spawn, bindConversation, finishAgent, waitingForSubAgents } = await import('../src/main/agents.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 async function announceSessionFinish(sessionId: string, summary: string): Promise<string> {
   const result = await announceTransport(sessionId, summary);
@@ -513,5 +514,57 @@ describe('session finish turn identity', () => {
     const result = await announceSessionFinish(sessionId, 'Wrapping up');
     expect(JSON.stringify(await readRecentEvents(sessionId, 100, { kinds: ['progress'] }))).toContain('discarded');
     expect(result).not.toContain('Stale follow-up must not escape');
+  });
+  it('releases the hold without asking the provider while this chat’s own sub-agents are still working', async () => {
+    const previous = getConfig();
+    try {
+      // The chat's workers report back into this same chat, so deciding the next step now would
+      // read a context that is about to change. The hold is released rather than left held: the
+      // answer may finish, and the reply obligation the pickup tree already tracks is what the
+      // next automatic step will be decided from.
+      await saveConfig({ ...previous, multiAgent: { ...previous.multiAgent, enabled: true, waitForSubAgents: true } });
+      spawn({ workers: [{ task: 'finish the half I cannot' }], caller: { conversationId: hooks.caller.conversationId } });
+      expect(bindConversation('worker-1', 'finish-wait-worker')).toBe(true);
+      expect(waitingForSubAgents(hooks.caller.conversationId)).toBe(true);
+
+      // The model is told the turn stays open; the provider is never asked and nothing is
+      // queued. `announceSessionFinish` returns that hold and `settleFinishForTests` drains the
+      // automatic operation, so the side effects below are the whole decision.
+      expect(await announceSessionFinish(sessionId, 'Handing the rest to my workers')).toContain('HELD:');
+      expect(hooks.followup).not.toHaveBeenCalled();
+      expect(hooks.enqueue).not.toHaveBeenCalled();
+      expect((await getSession(sessionId))?.finishTurn?.released).toBe(true);
+      expect(JSON.stringify(await readRecentEvents(sessionId, 100, { kinds: ['progress'] }))).not.toContain('finish-goal:');
+    } finally { await saveConfig(previous); resetAgentsForTests(); }
+  });
+  it('decides as usual once the last sub-agent has reported', async () => {
+    const previous = getConfig();
+    try {
+      await saveConfig({ ...previous, multiAgent: { ...previous.multiAgent, enabled: true, waitForSubAgents: true } });
+      spawn({ workers: [{ task: 'finish the half I cannot' }], caller: { conversationId: hooks.caller.conversationId } });
+      expect(bindConversation('worker-1', 'finish-wait-worker')).toBe(true);
+      finishAgent({ conversationId: 'finish-wait-worker' }, 'both halves are done');
+      expect(waitingForSubAgents(hooks.caller.conversationId)).toBe(false);
+
+      await announceSessionFinish(sessionId, 'Everything is done');
+      expect(hooks.followup).toHaveBeenCalledTimes(1);
+      expect(hooks.enqueue).toHaveBeenCalledWith(expect.objectContaining({ mode: 'auto' }), expect.anything());
+      expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
+    } finally { await saveConfig(previous); resetAgentsForTests(); }
+  });
+  it('never holds a notice-only finish on a chat with busy sub-agents', async () => {
+    const previous = getConfig();
+    try {
+      await saveConfig({ ...previous, ui: { ...previous.ui, finishAction: 'notify' }, goal: { ...previous.goal, enabled: false },
+        multiAgent: { ...previous.multiAgent, enabled: true, waitForSubAgents: true } });
+      spawn({ workers: [{ task: 'keep the chat busy' }], caller: { conversationId: hooks.caller.conversationId } });
+      expect(bindConversation('worker-1', 'finish-notice-worker')).toBe(true);
+
+      const result = await announceSessionFinish(sessionId, 'Wrapping up with no automation');
+      expect(result).not.toContain('sub-agents');
+      expect(hooks.followup).not.toHaveBeenCalled();
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
+    } finally { await saveConfig(previous); resetAgentsForTests(); }
   });
 });

@@ -52,3 +52,18 @@ so those checks also completed. The enlarged light and narrow dark Portuguese he
 inspected visually and showed no clipping or overlap. The Electron wrapper was interrupted
 after these outputs had been written, so the recorded fixture assertions and screenshots are
 the acceptance evidence rather than a clean wrapper process exit.
+
+## Upstream main refresh — 27 September 2026
+
+Merged current upstream `main` into PR #385. The `chat.ts` overlap with #376 resolves to
+upstream's live `ui(…)` bindings, so the PR introduces no `chat.ts` or `main.ts` delta against
+the new base. Added 104 translations for source strings introduced since the original PR;
+the pt-PT catalog now has all 1,556 current locale keys, with no extras, empty values or
+numbered-placeholder mismatches. The separate pt-BR PR #386 remains additive: its language
+registration, selectors and tests need to retain both locales when it is updated against main.
+
+The renderer language suites passed (26 tests), TypeScript checking passed, `npm run verify`
+passed (5,944 ordinary tests, 119 skips; 6 serialized tests, 20 skips), and `npm run build`
+passed. The first verification attempt stopped before tests because this isolated worktree
+had no installed `@anthropic-ai/mcpb`; `npm ci` restored lockfile dependencies before the
+passing run. No package, installed-app or live-browser result is claimed for this refresh.

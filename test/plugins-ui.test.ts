@@ -181,3 +181,40 @@ it('waits for explicit sign-in and updates the same detail with a cancellable au
   state.plugins[0]!.status = 'ready'; await refreshPlugins();
   expect(document.querySelector('.plugin-auth')).toBeNull();
 });
+
+it('offers OAuth for a custom remote server and opens the new plugin where it can sign in', async () => {
+  initPlugins(); await tick();
+  document.getElementById('pluginsAdd')!.click();
+  [...document.querySelectorAll<HTMLButtonElement>('.plugin-actions button')].find(node => node.textContent === 'Remote MCP URL')!.click();
+  const fields = () => [...document.querySelectorAll<HTMLLabelElement>('.plugin-field')];
+  const labelled = (text: string) => fields().find(node => node.querySelector('span')!.textContent === text)!;
+  const [type, auth] = [labelled('Server type'), labelled('Authentication')].map(node => node.querySelector('select')!);
+  expect(labelled('Authentication').hidden).toBe(false);
+  type!.value = 'npm'; type!.dispatchEvent(new dom.window.Event('change'));
+  expect(labelled('Authentication').hidden, 'OAuth is a remote-only choice').toBe(true);
+  type!.value = 'remote'; type!.dispatchEvent(new dom.window.Event('change'));
+  auth!.value = 'oauth'; auth!.dispatchEvent(new dom.window.Event('change'));
+  expect(labelled('Credential value').hidden, 'no static credential beside a provider sign-in').toBe(true);
+  labelled('Credential value').querySelector('input')!.value = 'left over';
+  labelled('Credential name (optional)').querySelector('input')!.value = 'Authorization';
+  labelled('Package, executable, URL or bundle path').querySelector('input')!.value = 'https://mcp.example.org/mcp';
+  const added = { ...state.plugins[0]!, id: 'two', name: 'Remote', source: { kind: 'remote' as const, url: 'https://mcp.example.org/mcp', auth: 'oauth' as const }, status: 'needs-auth' as const, credentialKeys: [] };
+  api.pluginsInstall!.mockImplementation(async () => ({ ok: true, data: { ...state, plugins: [...state.plugins, added] } }));
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Install and connect')!.click();
+  await tick(); await tick();
+  expect(api.pluginsInstall).toHaveBeenCalledWith({ name: 'My MCP server', source: { kind: 'remote', args: [], url: 'https://mcp.example.org/mcp', auth: 'oauth' }, credentials: {} });
+  expect(document.querySelector('.plugin-auth button'), 'lands on the new plugin with its Sign in').not.toBeNull();
+});
+
+it('keeps a custom remote server without OAuth on its static credential', async () => {
+  initPlugins(); await tick();
+  document.getElementById('pluginsAdd')!.click();
+  [...document.querySelectorAll<HTMLButtonElement>('.plugin-actions button')].find(node => node.textContent === 'Remote MCP URL')!.click();
+  const labelled = (text: string) => [...document.querySelectorAll<HTMLLabelElement>('.plugin-field')].find(node => node.querySelector('span')!.textContent === text)!;
+  labelled('Package, executable, URL or bundle path').querySelector('input')!.value = 'https://mcp.example.org/mcp';
+  labelled('Credential name (optional)').querySelector('input')!.value = 'Authorization';
+  labelled('Credential value').querySelector('input')!.value = 'Bearer x';
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Install and connect')!.click();
+  await tick();
+  expect(api.pluginsInstall).toHaveBeenCalledWith({ name: 'My MCP server', source: { kind: 'remote', args: [], url: 'https://mcp.example.org/mcp' }, credentials: { Authorization: 'Bearer x' } });
+});

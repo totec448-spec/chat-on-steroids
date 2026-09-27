@@ -11,10 +11,21 @@
   'use strict';
   const OBSERVER_VERSION = 2;
   const prior = window.__cosUsageObserver;
-  if (prior?.version === OBSERVER_VERSION && typeof prior.refresh === 'function' && prior.refresh() === true) return;
+  // An extension update re-executes this file in pages that stay open, and the same protocol
+  // version used to keep the *old* code running until the tab was reloaded — measured
+  // 2026-09-26: open tabs kept a request-id reader without the #414 fixes after the update that
+  // shipped them. The service worker asks for a replacement explicitly, and only while the page
+  // is not streaming, so the in-flight response a disposal would cancel does not exist.
+  const replace = window.__cosUsageReplace === true;
+  try { delete window.__cosUsageReplace; } catch { window.__cosUsageReplace = false; }
+  if (!replace && prior?.version === OBSERVER_VERSION && typeof prior.refresh === 'function' && prior.refresh() === true) return;
   // A legacy boolean has no listener/reader disposal handle. A fresh document is
   // required to replace it; stacking another active observer is not a repair.
   if (prior && typeof prior.dispose !== 'function') { window.__cosUsageObserverNeedsReload = true; return; }
+  if (replace && prior) {
+    // Hand the retained request origins to the page before the old reader forgets them.
+    try { window.dispatchEvent(new MessageEvent('message', { data: { type: 'cos-usage-request' }, origin: location.origin, source: window })); } catch { /* Best effort. */ }
+  }
   prior?.dispose();
   let active = true;
   const nativePost = window.postMessage.bind(window);
@@ -146,12 +157,31 @@
       }
       // One complete server event must carry both sides of the join. Retaining an id from a
       // prior frame would turn response order into authority; a contradictory frame abstains.
-      if (conversations.size !== 1) return;
-      const conversationId = conversations.values().next().value;
+      //
+      // The exception, and only within one response: ChatGPT now splits the two sides across
+      // consecutive events. The first event of a `/f/conversation` response is the stream
+      // handoff — it carries `conversation_id` (and `turn_topic_id`) — and the `input_message`
+      // event after it carries the request id with no `conversation_id` at all. So the id seen
+      // in this one response is remembered and used for later events that name none. This does
+      // not turn response order into authority across conversations: one HTTP response is one
+      // conversation, `stream` is per response, and an event naming a *different* conversation —
+      // or more than one — still abstains exactly as before. Measured on the live page and
+      // reported in #393; without it `readOrigin` abstained on every turn.
+      if (conversations.size > 1) return;
+      if (conversations.size === 1) {
+        const seen = conversations.values().next().value;
+        if (stream.conversationId && stream.conversationId !== seen) { stream.conversationId = null; return; }
+        stream.conversationId = seen;
+      }
+      const conversationId = conversations.size === 1 ? conversations.values().next().value : stream.conversationId;
+      if (!conversationId) return;
       // Only server metadata in a complete JSON event owns a request id. A key in
       // quoted model text, tool arguments or an unrelated nested object is not proof.
-      if (body?.conversation_id !== conversationId) return;
-      const requestIds = new Set([body.metadata?.request_id, body.message?.metadata?.request_id]
+      if (conversations.size === 1 && body?.conversation_id !== conversationId) return;
+      // `input_message.metadata` is where the id moved to: the same server metadata, one level
+      // further in, on the event that no longer names its conversation.
+      const requestIds = new Set([body?.metadata?.request_id, body?.message?.metadata?.request_id,
+        body?.input_message?.metadata?.request_id]
         .filter(id => typeof id === 'string' && REQUEST.test(id)));
       return requestIds.size ? { conversationId, requestIds: [...requestIds] } : null;
   }
