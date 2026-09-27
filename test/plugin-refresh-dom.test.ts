@@ -98,7 +98,7 @@ function settingsPage(path = '/settings/plugins-settings/plugin_asdk_app_synthet
   const win = dom.window;
   Object.defineProperty(win.HTMLElement.prototype, 'getClientRects', { value() { return this.hidden ? [] : [{}]; } });
   win.postMessage = (data: unknown) => queueMicrotask(() => win.dispatchEvent(new win.MessageEvent('message', { data, source: win as unknown as Window, origin: win.location.origin })));
-  const connector = { id: 'asdk_app_synthetic', name: 'Chat On Steroids Core', app_metadata: { version_id: 'asdk_app_v_synthetic' }, owners: ['never-copy'],
+  const connector = { id: 'asdk_app_synthetic', name: 'Chat On Steroids Core', tunnel_id: 'tunnel_synthetic01' as unknown, app_metadata: { version_id: 'asdk_app_v_synthetic' }, owners: ['never-copy'],
     actions: [{ name: tool.name, description: tool.description, description_model: '' as string | null, params: tool.inputSchema }] };
   const owner = { memoizedProps: { connector, link: {}, plugin: {} } };
   const chain = (wrapper: object) => ({ memoizedProps: { children: 'x' }, return: { memoizedProps: wrapper, return: { memoizedProps: { className: 'row' }, return: owner } } });
@@ -146,4 +146,12 @@ it('reads the page description when the model description is empty, and prefers 
   expect((await api.pluginRefreshView('Chat On Steroids Core', [tool])).tools[0].description).toBe(tool.description);
   connector.actions[0]!.description_model = 'Model-facing declaration.';
   expect((await api.pluginRefreshView('Chat On Steroids Core', [tool])).tools[0].description).toBe('Model-facing declaration.');
+});
+it('reports the page connector tunnel and a settled empty Plugins list', async () => {
+  const { api, connector } = settingsPage();
+  expect(await api.pluginRefreshView('Chat On Steroids Core', [tool])).toMatchObject({ tunnelId: 'tunnel_synthetic01', settled: true });
+  connector.tunnel_id = { toString: () => 'tunnel_x' };
+  expect((await api.pluginRefreshView('Chat On Steroids Core', [tool])).tunnelId).toBeNull();
+  connector.name = 'Chat On Steroids Plugins'; connector.actions = [];
+  expect(await api.pluginRefreshView('Chat On Steroids Plugins')).toMatchObject({ tools: [], settled: true });
 });

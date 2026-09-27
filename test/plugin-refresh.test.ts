@@ -308,3 +308,17 @@ it('tries a parked schema once more after an app update', async () => {
   expect(retried[0]!.id).not.toBe(request.id);
   expect((await readDurable('plugin-refresh') as any[])[0]).not.toHaveProperty('failures');
 });
+it('enrolls a stale connector by a tunnel this app serves, never by the page alone', async () => {
+  // Measured 2026-09-27: Desktop showed 4 stale tools and Plugins none; names never matched.
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  const stale = [{ name: 'observe', description: 'Old', inputSchema: { type: 'object' } }];
+  const ours = (surface: string, id: string) => surface === 'core' && id === 'tunnel_ours0001';
+  const enroll = (extra: object) => claimPluginRefresh({ id: request.id, appId, connectorName: 'Chat On Steroids Core', tools: stale, ...extra });
+  expect(await enroll({})).toBe(false);
+  expect(await enroll({ tunnelId: 'tunnel_ours0001' })).toBe(false);
+  expect(await enroll({ tunnelId: 'tunnel_foreign01', ownsTunnel: ours })).toBe(false);
+  expect(await claimPluginRefresh({ id: request.id, appId, connectorName: 'Someone Else', tools: stale, tunnelId: 'tunnel_ours0001', ownsTunnel: ours })).toBe(false);
+  expect(await enroll({ tunnelId: 'tunnel_ours0001', ownsTunnel: ours })).toBe(true);
+  expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ appId, attempted: true });
+  expect(await completePluginRefresh({ id: request.id, appId, tools })).toBe(true);
+});

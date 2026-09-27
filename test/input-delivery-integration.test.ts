@@ -1522,6 +1522,21 @@ describe('IPC input delivery and Goal control integration', () => {
     expect((await post('/plugin-refresh', { ...identity, action: 'complete', tools, versionId: 'asdk_app_v_synthetic' })).body.ok).toBe(true);
     resetPluginRefreshForTests();
   });
+  it('accepts a stale connector only by the tunnel id configured for its surface', async () => {
+    const base = defaultConfig();
+    await saveConfig({ ...base, ui: { ...base.ui, autoRefreshPlugins: true }, tunnel: { ...base.tunnel, tunnelId: 'tunnel_core00001', desktopTunnelId: 'tunnel_desk00001' } });
+    const { publishPluginSurface, resetPluginRefreshForTests } = await import('../src/main/plugin-refresh.js');
+    resetPluginRefreshForTests();
+    await writeDurableNow('plugin-refresh', []);
+    const tools = [{ name: 'computer', description: 'Current', inputSchema: { type: 'object', properties: {} } }];
+    publishPluginSurface('desktop', 'Chat On Steroids Desktop', 'test', '', tools);
+    const [request] = (await post('/plugin-refresh', { action: 'pending' })).body.requests;
+    const claim = (tunnelId?: string) => post('/plugin-refresh', { id: request.id, appId: 'asdk_app_desktop', action: 'claim', connectorName: 'Chat On Steroids Desktop', tools: [{ name: 'observe', description: 'Old', inputSchema: { type: 'object' } }], tunnelId });
+    expect((await claim()).body.ok).toBe(false);
+    expect((await claim('tunnel_core00001')).body.ok).toBe(false); // Core's tunnel is not Desktop's
+    expect((await claim('tunnel_desk00001')).body.ok).toBe(true);
+    resetPluginRefreshForTests();
+  });
   it('defaults automatic plugin refresh off and revokes an already offered claim without removing the backend', async () => {
     const plugin = await import('../src/main/plugin-refresh.js');
     plugin.resetPluginRefreshForTests();

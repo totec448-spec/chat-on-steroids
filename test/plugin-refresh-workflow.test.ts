@@ -257,3 +257,17 @@ it('opens the installed list by its path when the App Id is not known yet', asyn
   await (context.run as Function)([{ surface: 'core' }], true);
   expect(create).toHaveBeenCalledExactlyOnceWith(`https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${id}`, true);
 });
+it('refreshes a settled empty Plugins page and passes its tunnel id to the claim', async () => {
+  let refreshed = false;
+  const click = vi.fn(() => { refreshed = true; });
+  const ask = vi.fn(async (_message: Record<string, unknown>) => ({ data: { ok: true } }));
+  const href = `https://chatgpt.com/settings/plugins-settings/plugin_asdk_app_synthetic?cos-plugin-refresh=${id}`;
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, location: { pathname: new URL(href).pathname, href },
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
+      pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', refresh: { click }, tunnelId: 'tunnel_synthetic01', settled: true, tools: refreshed ? tools : [] }) } });
+  vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
+  expect(await (context.run as Function)({ id, appId: null, connectorName: 'Chat On Steroids Plugins', tools })).toBe(true);
+  expect(click).toHaveBeenCalledTimes(1);
+  expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
+  expect(ask.mock.calls[0]?.[0]).toMatchObject({ tunnelId: 'tunnel_synthetic01', tools: [] });
+});

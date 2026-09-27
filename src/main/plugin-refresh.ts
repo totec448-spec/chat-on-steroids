@@ -156,19 +156,34 @@ export function pendingPluginRefreshes(): Promise<PluginRefreshRequest[]> {
   });
 }
 type Identity = { id: string; appId: string };
+/**
+ * The connector's Secure Tunnel, as ChatGPT's plugin page reports it (`connector.tunnel_id`).
+ *
+ * First enrollment otherwise needs the installed tool names to equal the published ones, which a
+ * stale connector — the one case that needs a refresh — never satisfies. Measured 2026-09-27:
+ * Desktop showed 4 of its tools and Plugins none, so neither could ever be enrolled or
+ * refreshed. A tunnel id this app itself serves proves the connector is ours, and it is checked
+ * by the caller against this app's own configuration, never taken from the page alone.
+ */
+type Enrollment = { connectorName: string; tools: unknown; tunnelId?: string; ownsTunnel?: (surface: PluginSurface, tunnelId: string) => boolean };
+function enrolls(row: Row, publication: PluginPublication, input: Enrollment): boolean {
+  if (input.connectorName !== publication.connectorName) return false;
+  if (enrollable(input.tools, publication)) return true;
+  return typeof input.tunnelId === 'string' && input.tunnelId.length > 0 && input.ownsTunnel?.(row.surface, input.tunnelId) === true;
+}
 function exact(current: Row[], identity: Identity): Row | undefined {
   if (!app.safeParse(identity.appId).success) return;
   return current.find(row => row.id === identity.id && publications.get(row.surface)?.schemaId === row.schemaId && (settling.get(row.surface)?.readyAt ?? 0) <= Date.now());
 }
 /** Commit one attempted click before the browser acts. A crash never re-arms it. */
-export function claimPluginRefresh(input: Identity & { connectorName: string; tools: unknown; alreadyCurrent?: boolean }): Promise<boolean> {
+export function claimPluginRefresh(input: Identity & Enrollment & { alreadyCurrent?: boolean }): Promise<boolean> {
   return serial(async () => {
     const current = await rows(); const row = exact(current, input);
     if (!row || row.attempted || row.manual || row.completedSchemaId === row.schemaId || !recognizable(input.tools, row.surface)) return false;
     const publication = publications.get(row.surface)!;
     // Unique-name discovery is initial enrollment only. Stale definitions can still
     // identify the surface; the complete post-refresh declarations must match below.
-    if (row.appId ? row.appId !== input.appId : input.connectorName !== publication.connectorName || !enrollable(input.tools, publication)) return false;
+    if (row.appId ? row.appId !== input.appId : !enrolls(row, publication, input)) return false;
     if (current.some(other => other !== row && other.appId === input.appId)) return false;
     const isCurrent = matches(input.tools, publication.tools, row.surface);
     if (input.alreadyCurrent === true ? !isCurrent : isCurrent) return false;
@@ -188,12 +203,12 @@ export function claimPluginRefresh(input: Identity & { connectorName: string; to
  * reopening its settings page. A later local schema change creates a fresh row and may be tried
  * again normally.
  */
-export function requireManualPluginRefresh(input: Identity & { connectorName: string; tools: unknown; error: string }): Promise<boolean> {
+export function requireManualPluginRefresh(input: Identity & Enrollment & { error: string }): Promise<boolean> {
   return serial(async () => {
     const current = await rows(); const row = exact(current, input);
     if (!row || row.attempted || row.manual || row.completedSchemaId === row.schemaId || !recognizable(input.tools, row.surface)) return false;
     const publication = publications.get(row.surface)!;
-    if (row.appId ? row.appId !== input.appId : input.connectorName !== publication.connectorName || !enrollable(input.tools, publication)) return false;
+    if (row.appId ? row.appId !== input.appId : !enrolls(row, publication, input)) return false;
     if (current.some(other => other !== row && other.appId === input.appId) || matches(input.tools, publication.tools, row.surface)) return false;
     row.appId = input.appId;
     row.manual = true;

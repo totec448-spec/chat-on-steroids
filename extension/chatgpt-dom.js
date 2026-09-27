@@ -2306,7 +2306,8 @@ var CLF_DOM = (() => {
         new Set(snapshot.tools.map(tool => tool.name)).size !== snapshot.tools.length) return null;
     const buttons = [...document.querySelectorAll('button[data-clf-plugin-refresh]')].filter(button => button.getAttribute('data-clf-plugin-refresh') === snapshot.appId && button.getClientRects().length > 0);
     return typeof snapshot.refreshAvailable === 'boolean' && buttons.length === (snapshot.refreshAvailable ? 1 : 0) ? { appId: snapshot.appId, connectorName: snapshot.connectorName, versionId: typeof snapshot.versionId === 'string' ? snapshot.versionId.slice(0, 200) : null,
-      tools: snapshot.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), refresh: buttons[0] || null } : null;
+      tools: snapshot.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), refresh: buttons[0] || null,
+      tunnelId: typeof snapshot.tunnelId === 'string' && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(snapshot.tunnelId) ? snapshot.tunnelId : null, settled: snapshot.settled === true } : null;
   }
   function pluginInstalledButtons(connectorName) {
     return safe(() => {
