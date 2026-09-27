@@ -1675,5 +1675,7 @@
   "Checking GitHub…": "正在檢查 GitHub…",
   "Remove {0}?": "移除 {0}？",
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "這會將技能及其資源移至垃圾桶。已準備好的訊息不會改變。",
-  "Skill imported into the CoS library": "技能已匯入 CoS 技能庫"
+  "Skill imported into the CoS library": "技能已匯入 CoS 技能庫",
+  "All {0} steps done": "全部 {0} 步已完成",
+  "{0} of {1} steps done": "已完成 {0}/{1} 步"
 }
