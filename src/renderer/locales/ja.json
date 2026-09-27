@@ -1679,6 +1679,13 @@
   "Skill imported into the CoS library": "CoS ライブラリへスキルをインポートしました",
   "All {0} steps done": "{0} ステップすべて完了",
   "{0} of {1} steps done": "{1} ステップ中 {0} 完了",
+  "Weekly limit": "週間の上限",
+  "{0}-hour limit": "{0}時間の上限",
+  "Shared across all models": "すべてのモデルで共有",
+  "Estimated context processed per tool call · last {0} weeks": "ツール呼び出しごとの推定処理コンテキスト · 過去{0}週間",
+  "Estimated cost per day, last {0} days": "1日あたりの推定コスト、過去{0}日間",
+  "{0} estimated tokens": "推定 {0} トークン",
+  "Daily breakdown": "日別の内訳",
   "Recommended": "おすすめ",
   "Install": "インストール"
 }
