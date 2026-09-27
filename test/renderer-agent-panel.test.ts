@@ -18,6 +18,8 @@ it('keeps Prime selection independent and rejects late results after parent navi
   const worker = { id: 'worker-session', title: 'Worker', updatedAt: 1 } as SessionSummary;
   panel.update('prime-session', [worker]); toggle.click();
   expect(host.textContent).toContain('History · 1');
+  // A worker with no conversation or model yet still gets its row (undefined === undefined once threw here).
+  expect(host.querySelectorAll('.agent-panel-row')).toHaveLength(1);
   const opening = panel.open(worker.id);
   expect(openMain).not.toHaveBeenCalled();
   panel.update('another-prime', []);

@@ -52,7 +52,8 @@ export function createAgentPanel(options: {
         const identity = worker.origin?.agentId ?? worker.title.split(' · ')[0] ?? worker.title;
         const task = owner?.task?.trim();
         const original = worker.origin?.task || worker.title;
-        const model = worker.selectedModel?.conversationId === worker.conversationId
+        // A worker still opening has no conversation yet; undefined === undefined must not read a model.
+        const model = worker.selectedModel && worker.conversationId && worker.selectedModel.conversationId === worker.conversationId
           ? [worker.selectedModel.model, worker.selectedModel.reasoningEffort].filter(Boolean).join(' · ') : '';
         const elapsedMs = Math.max(0, (active ? Date.now() : worker.endedAt ?? worker.updatedAt) - worker.startedAt);
         const elapsed = elapsedMs < 60_000 ? `${Math.floor(elapsedMs / 1000)}s`
