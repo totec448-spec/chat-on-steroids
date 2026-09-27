@@ -46,14 +46,14 @@ This notice states the project's intended use; it does not certify compliance or
 ## Get started
 
 1. **Install CoS** and approve your project folder in **Settings → Workspace**.
-2. **Connect Core** through **Settings → Setup** and add it in ChatGPT’s Developer mode. [Tunnel setup →](docs/setup.md#tunnel-setup)
+2. **Connect Core** through **Settings → Setup** and add it in ChatGPT under **Plugins → Add → Create MCP App**. [Tunnel setup →](docs/setup.md#tunnel-setup)
 3. **Load the companion extension.** Click **Open extension folder**, then **Load unpacked** in Chrome’s extension settings. Pairing is automatic.
 4. **Choose a model, write your task and send.**
 
 <details>
 <summary>Requirements &amp; installation notes</summary>
 
-Windows 10/11, **macOS 13 Ventura or newer**, or a current desktop Linux. Chrome 116+, current Edge or Brave, plus a ChatGPT account/workspace with Developer mode and custom MCP apps. [Check account availability](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt).
+Windows 10/11, **macOS 13 Ventura or newer**, or a current desktop Linux. Chrome 116+, current Edge or Brave, plus a ChatGPT account/workspace that can create custom MCP apps (availability depends on your plan and workspace policy). [Check account availability](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt).
 
 - **Unsigned beta:** Windows is not publisher-signed; macOS is unsigned and unnotarized. Verify the package against the release checksums.
 - **Linux:** a Secret Service keyring is required. Prefer the DEB; when unprivileged user namespaces are disabled, the AppImage launcher can fall back to <code>--no-sandbox</code>.
