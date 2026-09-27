@@ -232,6 +232,11 @@ it('uses observed account choices, preserves unverified defaults, and clears inc
   expect(dom.window.document.getElementById('workerModelVerification')!.textContent).toBe('Unverified');
   expect(dom.window.document.getElementById('helperModelVerification')!.hasAttribute('hidden')).toBe(true);
   expect(select('helperModel').value).toBe('first');
+  // Selects without the badge still say so in the option itself.
+  applyChatModels({ multiAgent: { defaultModel: 'unseen', defaultReasoning: 'high' }, goal: { helperModel: 'first', helperReasoning: 'ultra' } } as Config);
+  await Promise.resolve();
+  expect(select('helperReasoning').value).toBe('ultra');
+  expect(select('helperReasoning').selectedOptions[0]!.textContent).toBe('ultra · not verified');
   expect([...select('composerModel').options].map(row => row.value)).toEqual(['first', 'second']);
   select('composerModel').value = 'first'; select('composerModel').dispatchEvent(new dom.window.Event('change'));
   expect([...select('composerReasoning').options].map(row => row.value)).toEqual(['high']);
