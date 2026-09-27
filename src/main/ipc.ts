@@ -26,6 +26,7 @@ import { requestBrowserPreferences } from './browser-preferences.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from './session/start-input.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
+import { pluginRefreshPublications } from './plugin-refresh.js';
 /**
  * IPC surface.
  *
@@ -413,6 +414,9 @@ async function buildState(): Promise<AppState> {
   return {
     config,
     status: getStatus(),
+    connectorSchemas: Object.fromEntries(
+      pluginRefreshPublications().map(({ surface, schemaId }) => [surface, schemaId])
+    ),
     platform: hostPlatformInfo(),
     loginStartupAvailable: supportsLoginStartup(process.platform, app.isPackaged),
     secureStorage: await secureStorageStatus(),
@@ -470,7 +474,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     });
     return buildState();
   });
-  registerPluginIpc(handle, getWindow);
   handle('usage:get', () => usageOverview());
   handle('state:get', async () => {
     const state = await buildState();
@@ -1256,6 +1259,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   };
   onStatusChange(pushState);
   onBridgeChange(pushState);
+  registerPluginIpc(handle, getWindow, pushState);
   // Draft stages belong to session controls; state:changed only refreshes settings.
   onGoalChange(() => push('session:changed'));
   handle('tasks:cancel', async payload => cancelTaskRequest(z.object({ requestId: z.string().uuid() }).parse(payload).requestId));
