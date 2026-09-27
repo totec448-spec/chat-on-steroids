@@ -24,6 +24,7 @@ beforeEach(async () => {
   await write('docs/licenses/plugins/inventory.json', '[]');
   await write('docs/licenses/codex/LICENSE', 'Codex license fixture\n');
   await write('docs/licenses/codex/NOTICE', 'Codex notice fixture\n');
+  await write('docs/licenses/phosphor/LICENSE', 'Phosphor license fixture\n');
   for (const name of ['README.md', 'COMPONENT-NOTICES.txt', 'LGPL-3.0.txt', 'GPL-3.0.txt', 'MPL-2.0.txt']) await write(`docs/licenses/native/${name}`, `Fixture ${name}\n`);
 });
 afterEach(async () => { await removeTempDir(root); });
