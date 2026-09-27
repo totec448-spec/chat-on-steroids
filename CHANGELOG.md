@@ -13,7 +13,7 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## [2.1.17] — Workspace and self-updating extension
 
-A feature update. The app gets a workspace next to your chat, the extension keeps itself up to date, and CoS speaks German and Brazilian Portuguese.
+A feature update. The app gets a workspace next to your chat, pets on your desktop, and an extension that keeps itself up to date. CoS now speaks German and Brazilian Portuguese.
 
 ### New
 
@@ -21,11 +21,13 @@ A feature update. The app gets a workspace next to your chat, the extension keep
 - **Review changes.** See what changed in your project's Git repository, or exactly what one of ChatGPT's edits changed, without leaving the app. You can also compare two branches. Review only reads; it never changes your repository.
 - **The extension updates itself.** After an app update, the extension reloads on its own as soon as no chat is busy. No more trips to `chrome://extensions`.
 - **Download updates in one click.** When a new version is out, the update notice links straight to the right download for your Mac or Linux system.
+- **Desktop pets.** A new Pets page in the sidebar. Turn on Tur Tur Sahur, or import your own pet, and it lives on your desktop, reacting to the work CoS is doing. View → Desktop Pets shows or hides them. Pets are off unless you turn one on. If you had the old pet in the message box showing, it moves to your desktop.
 - **German and Brazilian Portuguese.** Pick them in Appearance → Language.
 - **The extension is translated** into German, Spanish, French, Japanese, Turkish and Chinese, following your browser's language.
 
 ### Fixed
 
+- **Setup matches ChatGPT's new settings.** ChatGPT no longer has a Developer mode switch; you now create the app from Plugins → Add → Create MCP App. The setup steps say so.
 - **Attachments work again with ChatGPT's new message box.** Images and files the app sends to ChatGPT were not attached after ChatGPT's latest change.
 - **Image-only answers finish properly.** When ChatGPT answers with just a generated image, the chat no longer looks busy afterwards.
 - **Workers start even if your saved default model is gone.** If ChatGPT no longer offers the model or thinking level saved in Settings, workers now use one that is available instead of failing.
@@ -38,6 +40,9 @@ A feature update. The app gets a workspace next to your chat, the extension keep
 ### Improved
 
 - **Polished activity timeline, worker panel and model menus.**
+- **The sidebar and side panels slide smoothly** when you open or close them.
+- **Removed lines show in red** next to edited files; only added lines are green.
+- **Up-to-date cost estimates in Usage.** Prices were rechecked, GPT-6 Sol and GPT-6 Luna were added, and GPT-5.5 chats now get a price instead of "unpriced".
 - **Setup explains that renaming the ChatGPT app breaks tool tracking,** so keep the name CoS suggests.
 
 **After updating:** reload the Chat On Steroids extension in `chrome://extensions` one last time, then refresh your open ChatGPT tabs. From this version on, the extension updates itself.
