@@ -142,6 +142,13 @@ for (const packageName of readdirSync(path.join(resourcesDir, 'app.asar.unpacked
   if (!expected.has(packageName)) throw new Error(`Packaged wrong-target Sharp payload ${packageName}`);
 }
 
+const koffiPackages = path.join(resourcesDir, 'app.asar.unpacked', 'node_modules', '@koromix');
+const koffiBinaries = existsSync(koffiPackages) ? readdirSync(koffiPackages).filter(name => name.startsWith('koffi-')) : [];
+if (targetPlatform === 'win32') {
+  if (koffiBinaries.length !== 1 || koffiBinaries[0] !== `koffi-win32-${targetArch}`) throw new Error('Missing or foreign Koffi binary in Windows package');
+  required(`app.asar.unpacked/node_modules/@koromix/koffi-win32-${targetArch}/win32_${targetArch}/koffi.node`);
+} else if (koffiBinaries.length) throw new Error('Windows-only Pets binding leaked into another platform');
+
 for (const dependency of ['node-pty', 'tree-sitter', 'tree-sitter-bash']) {
   const prebuilds = path.join(resourcesDir, 'app.asar.unpacked', 'node_modules', dependency, 'prebuilds');
   const directories = readdirSync(prebuilds, { withFileTypes: true })
@@ -193,6 +200,12 @@ const probe = String.raw`
   // when the real main process starts and server imports core/internal. Keep that class of broken
   // package inside the packaging gate rather than discovering it after installation.
   const appRequire = require('node:module').createRequire(base + '/app.asar/package.json');
+  let petFocus = null;
+  if (process.platform === 'win32') {
+    const koffi = appRequire('koffi');
+    const user32 = koffi.load('user32.dll');
+    petFocus = typeof user32.func('uintptr_t __stdcall GetForegroundWindow()')() === 'number';
+  }
   for (const dependency of [
     '@modelcontextprotocol/core/internal',
     '@modelcontextprotocol/server',
@@ -219,7 +232,7 @@ const probe = String.raw`
     terminal.onData((data) => { output += data; });
     terminal.onExit(({ exitCode }) => { clearTimeout(timer); exitCode === 0 ? resolve() : reject(new Error('node-pty child exited ' + exitCode)); });
   });
-  process.stdout.write(JSON.stringify({ version: manifest.version, electron: process.versions.electron, mcp: true, sharp: sharp.versions.sharp, vips: sharp.versions.vips, png: png.length, pty: output.includes('packaged-pty'), tree: tree.rootNode.type, desktop }) + '\n');
+  process.stdout.write(JSON.stringify({ version: manifest.version, electron: process.versions.electron, mcp: true, sharp: sharp.versions.sharp, vips: sharp.versions.vips, png: png.length, pty: output.includes('packaged-pty'), tree: tree.rootNode.type, desktop, petFocus }) + '\n');
   process.exit(0);
 })().catch((error) => process.stderr.write(String(error?.stack || error) + '\n', () => process.exit(1)));`;
 
@@ -234,7 +247,7 @@ if (result.stdout) process.stdout.write(result.stdout);
 if (result.stderr) process.stderr.write(result.stderr);
 if (result.status !== 0) process.exit(result.status ?? 1);
 const runtime = JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));
-if (runtime.version !== expectedVersion || runtime.electron !== expectedElectronVersion || runtime.mcp !== true || !runtime.sharp || !runtime.vips || runtime.png <= 0 || !runtime.pty || runtime.tree !== 'program' || (targetPlatform === 'darwin' && runtime.desktop !== true)) {
+if (runtime.version !== expectedVersion || runtime.electron !== expectedElectronVersion || runtime.mcp !== true || !runtime.sharp || !runtime.vips || runtime.png <= 0 || !runtime.pty || runtime.tree !== 'program' || (targetPlatform === 'darwin' && runtime.desktop !== true) || (targetPlatform === 'win32' && runtime.petFocus !== true)) {
   throw new Error(`Packaged native runtime probe failed: ${JSON.stringify(runtime)}`);
 }
 process.stdout.write(`Packaged ${targetPlatform}-${targetArch} resources and native runtimes verified for ${expectedVersion}.\n`);
