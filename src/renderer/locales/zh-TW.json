@@ -1332,7 +1332,7 @@
   "In ChatGPT, open Settings → Security and login and turn on Developer mode.": "在 ChatGPT 中開啟 Settings → Security and login，開啟 Developer mode。",
   "B · Create the Core plugin": "B · 建立 Core 外掛",
   "Open the ChatGPT Plugins page using the button above. Click + at the top right to open New Plugin.": "使用上方按鈕開啟 ChatGPT Plugins 頁面。點選右上角的 +，開啟 New Plugin。",
-  "Copy the name and description from the Core card below.": "複製下方 Core 卡片中的名稱和描述。",
+  "Copy the name and description from the Core card below. Keep the name exactly as shown: CoS recognizes its tool calls by this name, and a renamed plugin's calls are not linked to your chats.": "複製下方 Core 卡片中的名稱和描述。請保持名稱與顯示的完全一致：CoS 透過此名稱辨識自己的工具呼叫，改名後的外掛呼叫不會關聯到你的對話。",
   "Under Authentication, choose No Auth.": "在 Authentication 中選擇 No Auth。",
   "Do not paste your API key here.": "不要在這裡貼上 API 金鑰。",
   "Read and accept the notice, then click Create. Keep the tunnel running while ChatGPT connects.": "閱讀並接受提示，然後點選 Create。ChatGPT 連線期間，請保持隧道執行。",

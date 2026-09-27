@@ -46,6 +46,8 @@ const { isNewer } = await import('../src/shared/types.js');
 const {
   applyStagedUpdate,
   checkForUpdates,
+  manualDownloadName,
+  manualDownloadUrl,
   markInstallOnQuit,
   releaseVersion,
   resetUpdateForTests,
@@ -120,6 +122,26 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('the file Get update opens for an installation that cannot update itself', () => {
+  it('names the exact macOS disk image or Linux package for this machine', () => {
+    expect(manualDownloadName('darwin', 'arm64', undefined, true)).toBe('Chat-On-Steroids-macOS-arm64.dmg');
+    expect(manualDownloadName('darwin', 'x64', undefined, true)).toBe('Chat-On-Steroids-macOS-x64.dmg');
+    expect(manualDownloadName('linux', 'x64', undefined, true)).toBe('Chat-On-Steroids-Linux-x64.deb');
+    // Installations that update themselves, a dev tree and an unpublished architecture get none.
+    expect(manualDownloadName('linux', 'x64', '/opt/cos.AppImage', true)).toBeNull();
+    expect(manualDownloadName('win32', 'x64', undefined, true)).toBeNull();
+    expect(manualDownloadName('darwin', 'arm64', undefined, false)).toBeNull();
+    expect(manualDownloadName('darwin', 'ia32', undefined, true)).toBeNull();
+  });
+  it('links that file for the announced version, and the release page otherwise', () => {
+    expect(manualDownloadUrl('2.1.17', 'Chat-On-Steroids-macOS-arm64.dmg'))
+      .toBe('https://github.com/totec448-spec/chat-on-steroids/releases/download/v2.1.17/Chat-On-Steroids-macOS-arm64.dmg');
+    expect(manualDownloadUrl(null, 'Chat-On-Steroids-macOS-arm64.dmg')).toBe('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
+    expect(manualDownloadUrl('2.1.17', null)).toBe('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
+    expect(manualDownloadUrl('../evil', 'x.dmg')).toBe('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
+  });
 });
 
 describe('which installations update themselves', () => {
