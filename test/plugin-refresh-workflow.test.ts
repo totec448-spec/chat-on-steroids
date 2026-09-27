@@ -7,11 +7,12 @@ const source = readFileSync(new URL('../extension/content.js', import.meta.url),
 const section = source.slice(source.indexOf('  let pluginRefreshBusy = false;'), source.indexOf('  function catalogPageReady('));
 const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const tools = [{ name: 'read', description: 'Read current.', inputSchema: { type: 'object' } }];
-function workflow(options: { unchanged?: boolean; deny?: boolean; navigateDuringClaim?: boolean; refreshAvailable?: boolean } = {}) {
+function workflow(options: { unchanged?: boolean; deny?: boolean; navigateDuringClaim?: boolean; refreshAvailable?: boolean; href?: string } = {}) {
   let refreshed = false;
   const click = vi.fn(() => { refreshed = true; });
+  const href = options.href ?? `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic`;
   const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1,
-    location: { pathname: '/', href: `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic` },
+    location: { pathname: new URL(href).pathname, href },
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
       pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', refresh: options.refreshAvailable === false ? null : { click }, tools: options.unchanged || refreshed ? tools : [{ ...tools[0], description: 'Old description.' }] }) }
   });
@@ -213,4 +214,46 @@ it('owns the path-routed settings page, so an unreadable card is reported rather
   vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
   expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools })).toBe(false);
   expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['fail']);
+});
+
+// Measured 2026-09-27: every refresh on the path-routed page failed with "card could not be read".
+it.each([pathRouted, `https://chatgpt.com/plugins/plugin_asdk_app_synthetic?cos-plugin-refresh=${id}`])('refreshes on the path-routed page %s', async href => {
+  const h = workflow({ href });
+  expect(await h.run()).toBe(true);
+  expect(h.click).toHaveBeenCalledTimes(1);
+  expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
+});
+it('never refreshes a path-routed page whose route names another app', async () => {
+  const h = workflow({ href: pathRouted.replace('asdk_app_synthetic', 'asdk_app_other') });
+  expect(await h.run()).toBe(false);
+  expect(h.click).not.toHaveBeenCalled();
+});
+it('continues from the installed list on the path-routed settings page', async () => {
+  const listed = `https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${id}`;
+  const assign = vi.fn(), replace = vi.fn(), ask = vi.fn();
+  const location = { pathname: '/settings/plugins-settings', href: listed, assign };
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, location, history: { replaceState: replace },
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
+      pluginInstalledButtons: () => [{ click: () => { location.pathname = '/settings/plugins-settings/plugin_asdk_app_synthetic'; location.href = 'https://chatgpt.com/settings/plugins-settings/plugin_asdk_app_synthetic'; } }],
+      pluginRefreshView: () => ({ appId: 'asdk_app_synthetic' }) }
+  });
+  vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
+  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools })).toBe(true);
+  expect(assign).toHaveBeenCalledExactlyOnceWith(pathRouted);
+  expect(await (context.run as Function)({ id, appId: null, connectorName: 'Chat On Steroids Core', tools })).toBe(true);
+  expect(replace).toHaveBeenCalledExactlyOnceWith(undefined, '', pathRouted);
+  expect(ask).not.toHaveBeenCalled();
+});
+it('opens the installed list by its path when the App Id is not known yet', async () => {
+  // The old `#settings/Plugins` hash without an app now lands on the home page.
+  const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
+  const code = background.slice(background.indexOf('let pluginRefreshFlight = null;'), background.indexOf('async function catalogProbe('));
+  const create = vi.fn(async () => ({ id: 9 }));
+  const context = vm.createContext({ URL, setTimeout, clearTimeout, CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
+    call: async () => ({ ok: true, data: { requests: [{ id, appId: null, surface: 'core' }] } }), createChatTab: create,
+    chrome: { storage: { session: { get: async () => ({}), set: async () => {} } }, tabs: { query: async () => [] } }
+  });
+  vm.runInContext(`${code}\nglobalThis.run = inspectRequestedPluginRefresh;`, context);
+  await (context.run as Function)([{ surface: 'core' }], true);
+  expect(create).toHaveBeenCalledExactlyOnceWith(`https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${id}`, true);
 });
