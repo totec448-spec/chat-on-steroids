@@ -166,3 +166,36 @@ it('automatically checks an installed GitHub skill on page open without installi
   expect(w.document.getElementById('skillUpdateDialog')).not.toBeNull();
   expect(skillsUpdateGithub).not.toHaveBeenCalled();
 });
+
+it('offers recommended skills that are not installed yet and installs one on request', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <details class="plugin-menu"><summary>Import</summary><div class="plugin-menu-actions"><button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button></div></details>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount"></span><div id="skillsInstalled"></div>
+    <section id="skillsRecommendedSection" hidden><span id="skillsRecommendedCount"></span><div id="skillsRecommended"></div></section>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  let skills: ManagedSkill[] = [];
+  const installRecommendedSkill = vi.fn(async (id: string) => {
+    skills = [{ id, name: 'Code review', description: 'Review a change.', path: `/skills/${id}/SKILL.md`, origin: null }];
+    return { ok: true as const, data: skills };
+  });
+  const api = {
+    listManagedSkills: vi.fn(async () => ({ ok: true as const, data: skills })),
+    listRecommendedSkills: vi.fn(async () => ({ ok: true as const, data: [
+      { id: 'code-review', name: 'Code review', description: 'Review a change.', installed: false },
+      { id: 'clear-writing', name: 'Clear writing', description: 'Write clearly.', installed: false }
+    ] })),
+    installRecommendedSkill, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] }))
+  };
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  const open = initSkillsLibrary(api as never); open();
+  await vi.waitFor(() => expect(w.document.querySelectorAll('[data-recommended-skill-id]').length).toBe(2));
+  expect(w.document.getElementById('skillsRecommendedSection')!.hidden).toBe(false);
+  w.document.querySelector<HTMLButtonElement>('[data-recommended-skill-id="code-review"] .skill-recommended-install')!.click();
+  await vi.waitFor(() => expect(w.document.querySelectorAll('[data-recommended-skill-id]').length).toBe(1));
+  expect(installRecommendedSkill).toHaveBeenCalledWith('code-review');
+  expect(w.document.querySelector('[data-skill-id="code-review"]')).not.toBeNull();
+});

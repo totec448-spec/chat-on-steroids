@@ -1675,5 +1675,7 @@
   "Checking GitHub…": "GitHub を確認中…",
   "Remove {0}?": "{0}を削除しますか？",
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "スキルとそのリソースをゴミ箱へ移動します。すでに準備済みのメッセージは変更されません。",
-  "Skill imported into the CoS library": "CoS ライブラリへスキルをインポートしました"
+  "Skill imported into the CoS library": "CoS ライブラリへスキルをインポートしました",
+  "Recommended": "おすすめ",
+  "Install": "インストール"
 }

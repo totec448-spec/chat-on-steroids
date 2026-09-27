@@ -1675,5 +1675,7 @@
   "Checking GitHub…": "正在检查 GitHub…",
   "Remove {0}?": "移除 {0}？",
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "这会将技能及其资源移至回收站。已经准备好的消息不会改变。",
-  "Skill imported into the CoS library": "技能已导入 CoS 技能库"
+  "Skill imported into the CoS library": "技能已导入 CoS 技能库",
+  "Recommended": "推荐",
+  "Install": "安装"
 }
