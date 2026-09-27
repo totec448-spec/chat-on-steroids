@@ -310,9 +310,11 @@ code {
    Only the workspace grows; showing a notice must not create an implicit content row. */
 .app {
   height: 100%; display: grid;
-  grid-template-columns: min(var(--sidebar-width, var(--sidebar-default, 272px)), 50vw) minmax(0, 1fr);
+  /* Two compatible length tracks, so a routine collapse or expand can interpolate. */
+  grid-template-columns: minmax(0, min(var(--sidebar-width, var(--sidebar-default, 272px)), 50vw)) minmax(0, 1fr);
   grid-template-rows: auto auto auto minmax(0, 1fr);
   background: var(--page);
+  transition: grid-template-columns 220ms cubic-bezier(.16, 1, .3, 1);
 }
 .app > header { grid-column: 2; grid-row: 2; }
 .app > .notices { grid-column: 2; grid-row: 3; min-width: 0; }
@@ -337,9 +339,10 @@ code {
 .view-menu-items .btn { display: flex; width: 100%; gap: 10px; padding: 9px 10px; border-radius: 5px; }
 .view-menu-items kbd { margin-left: auto; color: var(--soft); font: inherit; }
 .view-menu-items hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
-.app.is-sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
-.app.is-sidebar-collapsed .sidebar { display: none; }
-.sidebar { position: relative; grid-column: 1; grid-row: 2 / -1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--sunk); border-right: 1px solid transparent; padding: 20px 12px 10px; }
+.app.is-sidebar-collapsed { grid-template-columns: minmax(0, 0px) minmax(0, 1fr); }
+.app.is-resizing-sidebar { transition: none; }
+.app.is-sidebar-collapsed .sidebar { clip-path: inset(0 100% 0 0); opacity: 0; transform: translateX(-14px); visibility: hidden; pointer-events: none; transition: clip-path 180ms ease-in, opacity 150ms ease-in, transform 180ms ease-in, visibility 0s 180ms; }
+.sidebar { position: relative; grid-column: 1; grid-row: 2 / -1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--sunk); border-right: 1px solid transparent; padding: 20px 12px 10px; clip-path: inset(0 -20px 0 0); transition: clip-path 220ms cubic-bezier(.16, 1, .3, 1), opacity 170ms ease-out, transform 220ms cubic-bezier(.16, 1, .3, 1), visibility 0s; }
 /* Round the workspace edge without clipping header menus or changing the grid. */
 .sidebar::before, .sidebar::after { content: ''; position: absolute; left: calc(100% + 1px); top: 0; pointer-events: none; z-index: 4; }
 .sidebar::before {
@@ -1917,9 +1920,12 @@ input[readonly] {
 [data-panel='chat'] {
   padding: 0;
   gap: 0;
-  grid-template-columns: minmax(0, 1fr);
+  /* An empty second track lets the right dock's column grow in rather than jump. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0px);
   grid-template-rows: minmax(0, 1fr);
+  transition: grid-template-columns 220ms cubic-bezier(.16, 1, .3, 1);
 }
+.is-resizing-work-panel { transition: none; }
 
 /* Header, body, footer. The Sessions card is exactly this shape. */
 [data-panel='chat'] .card {
@@ -3578,7 +3584,12 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 
 /* One quiet frame for right-side tools; the tool owners keep their own content state. */
 [data-panel='chat'].has-work-dock { grid-template-columns: minmax(0, 1fr) var(--work-panel-width, minmax(340px, 42%)); }
-.work-dock-right { position: relative; grid-column: 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--page); }
+.work-dock-right { position: relative; grid-column: 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: clip; border-left: 1px solid var(--line); background: var(--page); }
+/* Logical hiding is immediate; keep the outgoing dock painted only for its short exit. */
+.work-dock[hidden].is-closing { display: flex !important; }
+@media (prefers-reduced-motion: reduce) {
+  .app, [data-panel='chat'], .sidebar { transition: none !important; }
+}
 .work-dock-bar { position: relative; z-index: 11; display: flex; align-items: center; gap: 4px; flex: 0 0 38px; min-width: 0; padding: 4px 9px; border-bottom: 1px solid var(--line); }
 .work-dock-tabs { display: flex; align-items: center; flex: 0 1 auto; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .work-dock-tabs::-webkit-scrollbar { display: none; }
