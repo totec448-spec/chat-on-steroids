@@ -118,8 +118,10 @@ export function createWorkspaceDocks(host: HTMLElement) {
     expanded = !expanded; host.classList.toggle('is-work-dock-expanded', expanded); paint();
   });
   document.addEventListener('keydown', event => {
-    if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey || !['3', '4'].includes(event.key)) return;
-    event.preventDefault(); activate(event.key === '3' ? 'files' : 'agents');
+    // With Shift held, `key` is the shifted character (# on US, § on German layouts), never the
+    // digit. `code` names the physical key.
+    if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey || !['Digit3', 'Digit4'].includes(event.code)) return;
+    event.preventDefault(); activate(event.code === 'Digit3' ? 'files' : 'agents');
   });
   document.addEventListener('click', event => { if (add.open && !add.contains(event.target as Node)) add.open = false; });
   tabs.addEventListener('keydown', event => {
