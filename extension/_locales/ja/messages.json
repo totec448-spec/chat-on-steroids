@@ -53,6 +53,9 @@
   "content_bootstrap_missing_target": {
     "message": "既存のチャットに渡されましたが、対象のチャットが指定されていません"
   },
+  "content_bootstrap_composer_unavailable": {
+    "message": "モデル選択後にChatGPTが使用可能な入力欄を再表示しませんでした"
+  },
   "content_bootstrap_model_unavailable": {
     "message": "指定したモデルまたは推論設定を利用できないか、ChatGPT で確認できませんでした"
   },
@@ -283,6 +286,12 @@
   },
   "content_connector_refresh_unverified": {
     "message": "コネクターの更新を確認できませんでした"
+  },
+  "content_connector_schema_no_refresh": {
+    "message": "コネクターのスキーマが異なりますが、ChatGPTに更新ボタンがありません。現在のツールスキーマを読み込むには、このカスタムアプリを再作成するか再公開してください。"
+  },
+  "content_connector_settings_unreadable": {
+    "message": "このリクエストに対応するページでコネクター設定を読み取れませんでした"
   },
   "content_connector_settings_unverified": {
     "message": "コネクターの正確な設定を確認できませんでした"

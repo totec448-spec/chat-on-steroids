@@ -53,6 +53,9 @@
   "content_bootstrap_missing_target": {
     "message": "it was offered to a chat that already exists and it does not name one"
   },
+  "content_bootstrap_composer_unavailable": {
+    "message": "ChatGPT never re-exposed a usable composer after model selection"
+  },
   "content_bootstrap_model_unavailable": {
     "message": "The requested model or reasoning is unavailable or could not be confirmed in ChatGPT"
   },
@@ -283,6 +286,12 @@
   },
   "content_connector_refresh_unverified": {
     "message": "Connector refresh could not be verified"
+  },
+  "content_connector_schema_no_refresh": {
+    "message": "Connector schema differs, but ChatGPT exposes no Refresh control. Recreate or republish this custom app to load the current tool schema."
+  },
+  "content_connector_settings_unreadable": {
+    "message": "The connector settings card could not be read on the page this request owns"
   },
   "content_connector_settings_unverified": {
     "message": "Exact connector settings could not be verified"

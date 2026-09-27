@@ -10961,7 +10961,10 @@
     // after selection, because the pre-selection composer is no longer authoritative.
     if ((boot.model || boot.reasoningEffort) && !(await waitForComposer(12_000, stillOnTarget))) {
       if (await failIfRetargeted()) return;
-      return void (await fail('ChatGPT never re-exposed a usable composer after model selection'));
+      return void (await fail(t(
+        'content_bootstrap_composer_unavailable',
+        'ChatGPT never re-exposed a usable composer after model selection'
+      )));
     }
     const selectionConfirmedAt = Date.now();
     const publishBootstrapSelection = async (id) => {
@@ -12031,7 +12034,10 @@
         // because this document is no longer the one the request belongs to, and a navigation
         // is not the page failing to render a card — blaming it for one would put a false
         // cause in the durable row, which is the opposite of the point.
-        if (current()) await fail('The connector settings card could not be read on the page this request owns');
+        if (current()) await fail(t(
+          'content_connector_settings_unreadable',
+          'The connector settings card could not be read on the page this request owns'
+        ));
         return false;
       }
       if (!current()) return false;
@@ -12049,7 +12055,10 @@
         return (await ask({ type: 'plugin_refresh', action: 'current', id: request.id, appId, connectorName: request.connectorName, tools: view.tools, tunnelId }))?.data?.ok === true && stillCurrent();
       }
       if (!view.refresh || view.refresh.disabled) {
-        const error = 'Connector schema differs, but ChatGPT exposes no Refresh control. Recreate or republish this custom app to load the current tool schema.';
+        const error = t(
+          'content_connector_schema_no_refresh',
+          'Connector schema differs, but ChatGPT exposes no Refresh control. Recreate or republish this custom app to load the current tool schema.'
+        );
         return (await ask({ type: 'plugin_refresh', action: 'manual', id: request.id, appId, connectorName: request.connectorName, tools: view.tools, tunnelId, error }))?.data?.ok === true && stillCurrent();
       }
       const claimed = await ask({ type: 'plugin_refresh', action: 'claim', id: request.id, appId, connectorName: request.connectorName, tools: view.tools, tunnelId });
