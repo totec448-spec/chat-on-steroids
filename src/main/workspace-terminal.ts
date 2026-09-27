@@ -5,24 +5,24 @@ import { projectWorkspace } from './projects.js';
 import { getConfig, effectiveCapabilities } from './config.js';
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
 
-type Entry = { projectId: string; cwd: string; pty: IPty; unacked: number; paused: boolean };
+type Entry = { projectId: string | null; cwd: string; pty: IPty; unacked: number; paused: boolean };
 /** Human-operated shells belong to one renderer lifetime, never an MCP caller or its output queue. */
 export class WorkspaceTerminals {
   private entries = new Map<string, Entry>();
   private pending = new Map<string, symbol>();
-  constructor(private readonly emit: (event: WorkspaceTerminalEvent) => void) {}
+  constructor(private readonly emit: (event: WorkspaceTerminalEvent) => void, private readonly homeCwd: string) {}
 
   private allowed(): void {
     if (!effectiveCapabilities(getConfig()).command) throw new Error('Command execution is disabled in Settings');
   }
 
-  async create(id: string, projectId: string, cols: number, rows: number): Promise<WorkspaceTerminalInfo> {
+  async create(id: string, projectId: string | null, cols: number, rows: number): Promise<WorkspaceTerminalInfo> {
     this.allowed();
     if (this.entries.has(id) || this.pending.has(id)) throw new Error('Terminal already exists');
     if (this.entries.size + this.pending.size >= 8) throw new Error('Close a terminal before opening another (maximum 8)');
     const ticket = Symbol(); this.pending.set(id, ticket);
     try {
-      const { real: cwd } = await projectWorkspace(projectId);
+      const cwd = projectId === null ? this.homeCwd : (await projectWorkspace(projectId)).real;
       this.allowed();
       if (this.pending.get(id) !== ticket) throw new Error('Terminal opening was cancelled');
       const shell = defaultUserShell();
@@ -52,9 +52,9 @@ export class WorkspaceTerminals {
   async write(id: string, data: string): Promise<void> {
     this.allowed();
     const entry = this.entries.get(id); if (!entry) throw new Error('Terminal is closed');
-    const current = await projectWorkspace(entry.projectId);
+    const current = entry.projectId === null ? null : await projectWorkspace(entry.projectId);
     this.allowed();
-    if (this.entries.get(id) !== entry || current.real !== entry.cwd) throw new Error('Terminal project changed');
+    if (this.entries.get(id) !== entry || (current && current.real !== entry.cwd)) throw new Error('Terminal project changed');
     entry.pty.write(data);
   }
   resize(id: string, cols: number, rows: number): void { this.entries.get(id)?.pty.resize(cols, rows); }

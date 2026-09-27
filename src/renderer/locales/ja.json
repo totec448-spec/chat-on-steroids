@@ -1580,5 +1580,7 @@
   "Toggle right panel": "右パネルを切り替え",
   "Toggle bottom panel": "下部パネルを切り替え",
   "Toggle bottom panel (Ctrl+`)": "下部パネルを切り替え (Ctrl+`)",
-  "Close tab": "タブを閉じる"
+  "Close tab": "タブを閉じる",
+  "Bottom panel": "下部パネル",
+  "Hide bottom panel": "下部パネルを隠す"
 }

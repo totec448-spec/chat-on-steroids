@@ -325,6 +325,9 @@ it('keeps one compact toolbar and closes through the Files toggle', async () => 
   expect(host.querySelector('.file-panel-header')).toBeNull();
   expect(host.querySelector('.file-panel-close')).toBeNull();
   expect(host.querySelector('.file-panel-toolbar .file-panel-refresh')).not.toBeNull();
+  expect(host.querySelector('.file-panel-toolbar')?.lastElementChild?.classList.contains('file-panel-refresh')).toBe(true);
+  expect(host.querySelector('.file-panel-toolbar-actions')?.contains(host.querySelector('.file-panel-action'))).toBe(true);
+  expect(host.querySelector('.file-panel-toolbar-actions')?.contains(host.querySelector('.file-panel-refresh'))).toBe(false);
   toggle.click(); await tick();
   expect(host.querySelector<HTMLElement>('.file-panel')!.hidden).toBe(true);
 });
@@ -682,6 +685,19 @@ it('retains an unsaved editor draft through a project A-B-A round trip', async (
   panel.update(projectA); await tick(); await tick();
   expect(host.querySelector<HTMLTextAreaElement>('.test-code-input')?.value).toBe('my unsaved changes');
   expect(host.querySelector<HTMLButtonElement>('.file-editor-save')?.disabled).toBe(false);
+});
+
+it('moves the same Files pane between docks without losing an unsaved editor draft', async () => {
+  const right = document.createElement('div'), bottom = document.createElement('div');
+  host.append(right, bottom);
+  const panel = createFilePanel({ host, mount: right, toggle });
+  panel.update(projectA); await panel.show(); await tick();
+  const input = await editFile(); typeEdit(input, 'dock draft');
+  const pane = right.querySelector('.file-panel');
+  panel.hide(); panel.mountAt(bottom); await panel.show(); await tick();
+  expect(bottom.querySelector('.file-panel')).toBe(pane);
+  expect(bottom.querySelector<HTMLTextAreaElement>('.test-code-input')?.value).toBe('dock draft');
+  expect(bottom.querySelector<HTMLButtonElement>('.file-editor-save')?.disabled).toBe(false);
 });
 
 it('keeps edits typed while a save is pending and ignores a duplicate save', async () => {

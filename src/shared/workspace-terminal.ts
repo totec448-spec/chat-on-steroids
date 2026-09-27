@@ -1,6 +1,6 @@
 export interface WorkspaceTerminalInfo {
   id: string;
-  projectId: string;
+  projectId: string | null;
   cwd: string;
   shell: string;
 }

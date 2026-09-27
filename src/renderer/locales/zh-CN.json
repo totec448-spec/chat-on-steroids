@@ -1580,5 +1580,7 @@
   "Toggle right panel": "切换右侧面板",
   "Toggle bottom panel": "切换底部面板",
   "Toggle bottom panel (Ctrl+`)": "切换底部面板 (Ctrl+`)",
-  "Close tab": "关闭标签页"
+  "Close tab": "关闭标签页",
+  "Bottom panel": "底部面板",
+  "Hide bottom panel": "隐藏底部面板"
 }

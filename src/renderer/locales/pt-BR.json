@@ -1580,5 +1580,7 @@
   "Unverified": "Não verificado",
   "Failed": "Falhou",
   "Finished": "Concluído",
-  "Could not copy text.": "Não foi possível copiar o texto."
+  "Could not copy text.": "Não foi possível copiar o texto.",
+  "Bottom panel": "Painel inferior",
+  "Hide bottom panel": "Ocultar o painel inferior"
 }

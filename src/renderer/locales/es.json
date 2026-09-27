@@ -1580,5 +1580,7 @@
   "Toggle right panel": "Mostrar u ocultar panel derecho",
   "Toggle bottom panel": "Mostrar u ocultar panel inferior",
   "Toggle bottom panel (Ctrl+`)": "Mostrar u ocultar panel inferior (Ctrl+`)",
-  "Close tab": "Cerrar pestaña"
+  "Close tab": "Cerrar pestaña",
+  "Bottom panel": "Panel inferior",
+  "Hide bottom panel": "Ocultar panel inferior"
 }
