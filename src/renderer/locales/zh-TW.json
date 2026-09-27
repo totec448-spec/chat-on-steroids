@@ -1690,5 +1690,7 @@
   "Install": "安裝",
   "Less": "少",
   "More": "多",
-  "{0}K": "{0}千"
+  "{0}K": "{0}千",
+  "Open a chat to see its sub-agents": "開啟一個聊天以查看其子代理",
+  "Open a project to use Files and Review": "開啟一個專案以使用檔案和審查"
 }
