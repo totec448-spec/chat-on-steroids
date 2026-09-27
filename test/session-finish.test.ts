@@ -3,6 +3,10 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { TaskRequestError } from '../src/main/task-request.js';
+
+// Loaded CI runners (Windows especially) can take longer than waitFor's 1 s default to reach
+// the asynchronous follow-up; the conditions themselves are unchanged.
+const WAIT = { timeout: 10_000 };
 const hooks = vi.hoisted(() => ({ caller: { sessionId: '', conversationId: '' }, startedAt: 2000, followup: vi.fn(), enqueue: vi.fn(), hasInput: true, delivered: [] as Array<{ id: string; sessionId: string; text: string; state: string }>, inputListeners: new Set<() => void>() }));
 vi.mock('../src/main/session/input.js', () => ({
   hasEligibleToolInput: async () => hooks.hasInput,
@@ -85,7 +89,7 @@ describe('session finish turn identity', () => {
       return new Promise<string>(resolve => { complete = resolve; });
     });
     await announceTransport(sessionId, 'Wrapping up');
-    await vi.waitFor(() => expect(complete).toBeTypeOf('function'));
+    await vi.waitFor(() => expect(complete).toBeTypeOf('function'), WAIT);
     try {
       expect(getSessionFinishDraft(sessionId, 'turn-one')?.stage).toBe('sending');
       expect(getSessionFinishDraft('another-session', 'turn-one')).toBeNull();
@@ -108,7 +112,7 @@ describe('session finish turn identity', () => {
     let fail!: (error: Error) => void;
     hooks.followup.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
     await announceTransport(sessionId, 'Wrapping up');
-    await vi.waitFor(() => expect(fail).toBeTypeOf('function'));
+    await vi.waitFor(() => expect(fail).toBeTypeOf('function'), WAIT);
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       fail(new TaskRequestError('http_503: busy', true));
@@ -130,7 +134,7 @@ describe('session finish turn identity', () => {
     let settled = false;
     const call = announceTransport(sessionId, 'Ready', sessionFinishDeadline(ingress)).then(value => { settled = true; return value; });
     try {
-      await vi.waitFor(() => expect(hooks.followup).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(hooks.followup).toHaveBeenCalledTimes(1), WAIT);
       await vi.advanceTimersByTimeAsync(1_000);
       expect(settled).toBe(true);
       expect(await call).toContain('HELD:');
@@ -144,7 +148,7 @@ describe('session finish turn identity', () => {
     let fail!: (error: Error) => void;
     hooks.followup.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
     await announceTransport(sessionId, 'Ready');
-    await vi.waitFor(() => expect(fail).toBeTypeOf('function'));
+    await vi.waitFor(() => expect(fail).toBeTypeOf('function'), WAIT);
     vi.useFakeTimers();
     fail(new TaskRequestError('rate_limited: busy', true));
     await vi.advanceTimersByTimeAsync(0);
@@ -166,7 +170,7 @@ describe('session finish turn identity', () => {
     let fail!: (error: Error) => void;
     hooks.followup.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
     await announceTransport(sessionId, 'Ready');
-    await vi.waitFor(() => expect(fail).toBeTypeOf('function'));
+    await vi.waitFor(() => expect(fail).toBeTypeOf('function'), WAIT);
     vi.useFakeTimers();
     fail(new TaskRequestError('http_503: busy', true));
     await vi.advanceTimersByTimeAsync(0);
@@ -212,7 +216,7 @@ describe('session finish turn identity', () => {
       return new Promise<string>(resolve => { complete = resolve; });
     });
     await announceTransport(sessionId, 'Wrapping up');
-    await vi.waitFor(() => expect(complete).toBeTypeOf('function'));
+    await vi.waitFor(() => expect(complete).toBeTypeOf('function'), WAIT);
     try {
       await setGoalSwitchNow(hooks.caller.conversationId, mode === 'goal' ? 'loop' : 'goal', true);
       const revoked = signal.aborted;
@@ -240,7 +244,7 @@ describe('session finish turn identity', () => {
     await expect(requestSessionFinishGoal(sessionId, 'turn-one')).rejects.toThrow('expired');
     hooks.hasInput = false;
     const waiting = announceTransport(sessionId, 'Wait for user input');
-    await vi.waitFor(() => expect(hooks.inputListeners.size).toBe(1));
+    await vi.waitFor(() => expect(hooks.inputListeners.size).toBe(1), WAIT);
     expect(await sessionFinishWaiting(sessionId, 'turn-one', hooks.caller.conversationId)).toBe(true);
     hooks.delivered.push({ id: 'user-priority', sessionId, text: 'First do this', state: 'queued' });
     expect(await sessionFinishWaiting(sessionId, 'turn-one', hooks.caller.conversationId)).toBe(false);
@@ -259,7 +263,7 @@ describe('session finish turn identity', () => {
     let action: Promise<string> | undefined;
     notify.mockImplementationOnce(() => { action = requestSessionFinishGoal(sessionId, 'turn-one'); return true; });
     const call = announceTransport(sessionId, 'Ready');
-    await vi.waitFor(() => expect(action).toBeDefined());
+    await vi.waitFor(() => expect(action).toBeDefined(), WAIT);
     await action;
     expect(hooks.followup).toHaveBeenCalledTimes(1);
     expect(hooks.enqueue).toHaveBeenCalledTimes(1);
@@ -274,7 +278,7 @@ describe('session finish turn identity', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       const call = announceTransport(sessionId, 'Ready');
-      await vi.waitFor(() => expect(hooks.followup).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(hooks.followup).toHaveBeenCalledTimes(1), WAIT);
       await vi.advanceTimersByTimeAsync(25000);
       expect(await call).toContain('later tool call');
       expect(hooks.enqueue).not.toHaveBeenCalled();
@@ -384,7 +388,7 @@ describe('session finish turn identity', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       const result = announceSessionFinish(sessionId, 'Waiting');
-      await vi.waitFor(() => expect(hooks.inputListeners.size).toBe(1));
+      await vi.waitFor(() => expect(hooks.inputListeners.size).toBe(1), WAIT);
       await vi.advanceTimersByTimeAsync(25000);
       expect(await result).toContain('HELD:');
       expect(hooks.followup).toHaveBeenCalledTimes(1);
@@ -396,7 +400,7 @@ describe('session finish turn identity', () => {
   it('waits for input without consuming it and keeps the same turn held', async () => {
     hooks.hasInput = false;
     const result = announceSessionFinish(sessionId, 'Waiting');
-    await vi.waitFor(() => expect(hooks.inputListeners.size).toBe(1));
+    await vi.waitFor(() => expect(hooks.inputListeners.size).toBe(1), WAIT);
     hooks.hasInput = true;
     for (const listener of hooks.inputListeners) listener();
     expect(await result).toContain('HELD:');
@@ -413,11 +417,11 @@ describe('session finish turn identity', () => {
     hooks.hasInput = false;
     const released = vi.fn();
     const result = announceSessionFinish(sessionId, 'Waiting').then(value => { released(); return value; });
-    await vi.waitFor(() => expect(hooks.inputListeners.size).toBe(1));
+    await vi.waitFor(() => expect(hooks.inputListeners.size).toBe(1), WAIT);
     await releaseSessionFinish(sessionId, 'turn-one');
     // A real recorder notification must wake this call; the 25-second transport
     // deadline used to mask a leaked fake notification timer from an earlier test.
-    await vi.waitFor(() => expect(released).toHaveBeenCalledOnce(), { timeout: 2000 });
+    await vi.waitFor(() => expect(released).toHaveBeenCalledOnce(), WAIT);
     expect(await result).toContain('RELEASED:');
     await flushSessions(); resetSessionStoreForTests(); initSessionStore(directory);
     expect(await sessionFinishHeld(sessionId, 'turn-one', hooks.caller.conversationId)).toBe(false);
