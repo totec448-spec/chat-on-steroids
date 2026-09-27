@@ -3023,6 +3023,13 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .heat-cell[data-level='2'] { background: color-mix(in srgb, var(--accent) 50%, var(--card)); }
 .heat-cell[data-level='3'] { background: color-mix(in srgb, var(--accent) 75%, var(--card)); }
 .heat-cell[data-level='4'] { background: var(--accent); }
+.usage-bars { display: flex; align-items: flex-end; gap: 3px; height: 96px; margin: 18px 0 6px; padding-bottom: 1px; border-bottom: 1px solid var(--line); }
+.usage-bar { flex: 1 1 0; min-width: 3px; border-radius: 3px 3px 0 0; background: color-mix(in srgb, var(--accent) 70%, var(--card)); transition: background .12s; }
+.usage-bar:hover { background: var(--accent); }
+.usage-breakdown { margin-top: 14px; }
+.usage-breakdown > summary { cursor: pointer; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); }
+.usage-breakdown > summary:hover { color: var(--ink); }
+.usage-breakdown[open] > summary { margin-bottom: 8px; }
 .usage-table { width: 100%; border-collapse: collapse; font-size: calc(13px * var(--text-scale, 1)); }
 .usage-table th, .usage-table td { text-align: right; border-bottom: 1px solid var(--line); padding: 12px 4px; }
 .usage-table th:first-child, .usage-table td:first-child { text-align: left; }
