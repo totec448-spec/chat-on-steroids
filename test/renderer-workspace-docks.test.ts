@@ -55,3 +55,17 @@ it('does not activate an unavailable view or leave a blank selected tab', () => 
   available = false; docks.sync();
   expect(document.querySelector('.work-dock-empty')!.hasAttribute('hidden')).toBe(false);
 });
+
+it('opens a view from Ctrl+Shift+digit as the browser really reports it', () => {
+  // With Shift held, `key` is the shifted character (# on US, § on German layouts).
+  const { docks } = setup();
+  const files = vi.fn(), agents = vi.fn();
+  docks.register('files', 'Files', 'i-folder', files, vi.fn(), () => true);
+  docks.register('agents', 'Sub-agents', 'i-agents', agents, vi.fn(), () => true);
+  document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: '#', code: 'Digit3', ctrlKey: true, shiftKey: true }));
+  expect(files).toHaveBeenCalledOnce();
+  document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: '$', code: 'Digit4', ctrlKey: true, shiftKey: true }));
+  expect(agents).toHaveBeenCalledOnce();
+  document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: '#', code: 'Digit3', ctrlKey: true, shiftKey: false }));
+  expect(files).toHaveBeenCalledOnce();
+});
