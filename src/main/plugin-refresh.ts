@@ -4,16 +4,27 @@ import { readDurable, writeDurableNow } from './durable.js';
 import { wakeBrowserWork } from './browser-wake.js';
 import { logInfo, logWarn } from './logger.js';
 import { surfaceDefinition } from './mcp/surfaces.js';
+import { APP_VERSION } from './version.js';
 import { PLUGIN_MAX_TOOLS } from './plugins/exposure.js';
 import type { PluginPublication, PluginRefreshRequest, PluginSurface, PluginToolSchema } from '../shared/plugin-refresh.js';
 
 const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
 const LEGACY_PLUGIN_MAX_TOOLS = 64;
-const rowSchema = z.object({ surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), versionId: z.string().max(200).optional(), failures: z.number().int().nonnegative().optional(), parked: z.boolean().optional() });
+const rowSchema = z.object({ surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), versionId: z.string().max(200).optional(), failures: z.number().int().nonnegative().optional(), parked: z.boolean().optional(), parkedBy: z.string().max(40).optional() });
 type Row = z.infer<typeof rowSchema>;
 const publications = new Map<PluginSurface, PluginPublication>();
 const settling = new Map<PluginSurface, { schemaId: string; readyAt: number; timer?: ReturnType<typeof setTimeout> }>();
 export const PLUGIN_REFRESH_DEBOUNCE_MS = 20_000;
+/**
+ * How long a surface's tunnel must have been live before its refresh is handed to the browser.
+ *
+ * Measured 2026-09-27: a Refresh clicked about 4 s after the Desktop tunnel (re)connected never
+ * reached this app (no MCP request at all; 3 of 3 app starts), so ChatGPT kept the old tools and
+ * the attempt was recorded as clicked. Clicks about 20 s after connecting, and at runtime,
+ * arrived every time.
+ */
+export const PLUGIN_REFRESH_TUNNEL_GRACE_MS = 30_000;
+let tunnelGraceMs = PLUGIN_REFRESH_TUNNEL_GRACE_MS;
 /**
  * Pre-claim failures one schema may spend before automatic browser maintenance stops.
  *
@@ -21,7 +32,7 @@ export const PLUGIN_REFRESH_DEBOUNCE_MS = 20_000;
  * always repeats: the settings page has no card this build can read. Measured 2026-09-26, one
  * request pending since 07:24 kept its helper page coming back, and every lost owner record
  * (extension restart, reload that dropped the marker) opened another tab. Parking keeps the
- * reason visible; a new schema or an explicit Restart tries again.
+ * reason visible; a new schema, an explicit Restart or an app update tries again.
  */
 export const PLUGIN_REFRESH_FAILURE_LIMIT = 3;
 let chain: Promise<unknown> = Promise.resolve();
@@ -34,6 +45,13 @@ async function rows(): Promise<Row[]> {
   let repaired = false;
   for (const row of result) if (row.attempted && row.appId === null) {
     row.attempted = false; delete row.error; repaired = true;
+  }
+  // A park records what this build could not do. Every row parked on 2026-09-26/27 failed
+  // because the extension could not read ChatGPT's new plugin page, and without a schema change
+  // or a manual Restart the update that learned to read it would never have been tried.
+  for (const row of result) if (row.parked && row.parkedBy !== APP_VERSION) {
+    row.id = randomUUID(); delete row.parked; delete row.parkedBy; delete row.failures; delete row.error; repaired = true;
+    logInfo(`plugin refresh unparked surface=${row.surface} for app ${APP_VERSION}`);
   }
   if (repaired) await writeDurableNow('plugin-refresh', result);
   return result;
@@ -84,25 +102,34 @@ export function publishPluginSurface(surface: PluginSurface, connectorName: stri
   const changed = previous?.schemaId !== publication.schemaId;
   const restored = !publications.has(surface);
   publications.set(surface, publication);
+  const due = (next: { readyAt: number; timer?: ReturnType<typeof setTimeout> }, delayMs: number) => {
+    if (next.timer) clearTimeout(next.timer);
+    next.timer = undefined;
+    if (delayMs <= 0) { wakeBrowserWork(); return; }
+    next.timer = setTimeout(() => {
+      next.timer = undefined;
+      logInfo(`plugin refresh due surface=${surface} schema=${publication.schemaId.slice(0, 12)} published=${publications.has(surface)}`);
+      if (publications.has(surface)) wakeBrowserWork();
+    }, delayMs);
+    next.timer.unref();
+  };
+  // A surface that just came live is published at once but handed out only after its tunnel grace.
+  const graceUntil = restored ? Date.now() + tunnelGraceMs : 0;
   if (changed) {
     if (previous?.timer) clearTimeout(previous.timer);
-    // Initial enrollment is immediate. Changes to an existing declaration wait for
-    // the last tool-shape edit, including edits that reconnect the endpoint.
-    const next = { schemaId: publication.schemaId, readyAt: previous ? Date.now() + PLUGIN_REFRESH_DEBOUNCE_MS : 0, timer: undefined as ReturnType<typeof setTimeout> | undefined };
+    // Changes to an existing declaration wait for the last tool-shape edit, including edits
+    // that reconnect the endpoint; initial enrollment waits only for the tunnel grace.
+    const readyAt = Math.max(previous ? Date.now() + PLUGIN_REFRESH_DEBOUNCE_MS : 0, graceUntil);
+    const next = { schemaId: publication.schemaId, readyAt, timer: undefined as ReturnType<typeof setTimeout> | undefined };
     settling.set(surface, next);
-    logInfo(`plugin refresh scheduled surface=${surface} schema=${publication.schemaId.slice(0, 12)} delayMs=${previous ? PLUGIN_REFRESH_DEBOUNCE_MS : 0}`);
-    if (previous) {
-      next.timer = setTimeout(() => {
-        next.timer = undefined;
-        logInfo(`plugin refresh due surface=${surface} schema=${publication.schemaId.slice(0, 12)} published=${publications.has(surface)}`);
-        if (publications.has(surface)) wakeBrowserWork();
-      }, PLUGIN_REFRESH_DEBOUNCE_MS);
-      next.timer.unref();
-    } else wakeBrowserWork();
-  } else if (restored && previous.readyAt <= Date.now()) {
-    // A reconnect can outlast the debounce. Its timer intentionally skipped the
-    // absent surface; restoring that same now-due declaration must deliver the wake.
-    wakeBrowserWork();
+    const delayMs = Math.max(0, readyAt - Date.now());
+    logInfo(`plugin refresh scheduled surface=${surface} schema=${publication.schemaId.slice(0, 12)} delayMs=${delayMs}`);
+    due(next, delayMs);
+  } else if (restored) {
+    // A reconnect can outlast the debounce. Its timer intentionally skipped the absent surface;
+    // restoring that same declaration must deliver the wake, after the new tunnel's grace.
+    previous.readyAt = Math.max(previous.readyAt, graceUntil);
+    due(previous, Math.max(0, previous.readyAt - Date.now()));
   }
 }
 export function unpublishPluginSurface(surface: PluginSurface): void { publications.delete(surface); }
@@ -118,6 +145,7 @@ export function rearmPluginRefresh(surface: PluginSurface): Promise<boolean> {
     delete row.error;
     delete row.failures;
     delete row.parked;
+    delete row.parkedBy;
     await writeDurableNow('plugin-refresh', current);
     wakeBrowserWork();
     return true;
@@ -131,7 +159,12 @@ export function pendingPluginRefreshes(): Promise<PluginRefreshRequest[]> {
     for (const publication of publications.values()) {
       const found = current.find(row => row.surface === publication.surface);
       if (found?.schemaId === publication.schemaId) continue;
-      const next: Row = { surface: publication.surface, schemaId: publication.schemaId, id: randomUUID(), appId: found?.appId ?? null, completedSchemaId: found?.completedSchemaId ?? null, attempted: false, manual: false };
+      // A click for `found` that never confirmed its outcome leaves ChatGPT's schema unknown: it may
+      // hold that newer schema, so the older completion no longer says what ChatGPT has. Measured
+      // 2026-09-27: 11 -> 8 tools clicked, app quit before completion, back to 11 was then taken
+      // as already current while ChatGPT showed 8.
+      const unconfirmed = found?.attempted === true && found.completedSchemaId !== found.schemaId;
+      const next: Row = { surface: publication.surface, schemaId: publication.schemaId, id: randomUUID(), appId: found?.appId ?? null, completedSchemaId: unconfirmed ? null : found?.completedSchemaId ?? null, attempted: false, manual: false };
       if (found) current[current.indexOf(found)] = next; else current.push(next);
       changed = true;
     }
@@ -147,19 +180,34 @@ export function pendingPluginRefreshes(): Promise<PluginRefreshRequest[]> {
   });
 }
 type Identity = { id: string; appId: string };
+/**
+ * The connector's Secure Tunnel, as ChatGPT's plugin page reports it (`connector.tunnel_id`).
+ *
+ * First enrollment otherwise needs the installed tool names to equal the published ones, which a
+ * stale connector — the one case that needs a refresh — never satisfies. Measured 2026-09-27:
+ * Desktop showed 4 of its tools and Plugins none, so neither could ever be enrolled or
+ * refreshed. A tunnel id this app itself serves proves the connector is ours, and it is checked
+ * by the caller against this app's own configuration, never taken from the page alone.
+ */
+type Enrollment = { connectorName: string; tools: unknown; tunnelId?: string; ownsTunnel?: (surface: PluginSurface, tunnelId: string) => boolean };
+function enrolls(row: Row, publication: PluginPublication, input: Enrollment): boolean {
+  if (input.connectorName !== publication.connectorName) return false;
+  if (enrollable(input.tools, publication)) return true;
+  return typeof input.tunnelId === 'string' && input.tunnelId.length > 0 && input.ownsTunnel?.(row.surface, input.tunnelId) === true;
+}
 function exact(current: Row[], identity: Identity): Row | undefined {
   if (!app.safeParse(identity.appId).success) return;
   return current.find(row => row.id === identity.id && publications.get(row.surface)?.schemaId === row.schemaId && (settling.get(row.surface)?.readyAt ?? 0) <= Date.now());
 }
 /** Commit one attempted click before the browser acts. A crash never re-arms it. */
-export function claimPluginRefresh(input: Identity & { connectorName: string; tools: unknown; alreadyCurrent?: boolean }): Promise<boolean> {
+export function claimPluginRefresh(input: Identity & Enrollment & { alreadyCurrent?: boolean }): Promise<boolean> {
   return serial(async () => {
     const current = await rows(); const row = exact(current, input);
     if (!row || row.attempted || row.manual || row.completedSchemaId === row.schemaId || !recognizable(input.tools, row.surface)) return false;
     const publication = publications.get(row.surface)!;
     // Unique-name discovery is initial enrollment only. Stale definitions can still
     // identify the surface; the complete post-refresh declarations must match below.
-    if (row.appId ? row.appId !== input.appId : input.connectorName !== publication.connectorName || !enrollable(input.tools, publication)) return false;
+    if (row.appId ? row.appId !== input.appId : !enrolls(row, publication, input)) return false;
     if (current.some(other => other !== row && other.appId === input.appId)) return false;
     const isCurrent = matches(input.tools, publication.tools, row.surface);
     if (input.alreadyCurrent === true ? !isCurrent : isCurrent) return false;
@@ -179,12 +227,12 @@ export function claimPluginRefresh(input: Identity & { connectorName: string; to
  * reopening its settings page. A later local schema change creates a fresh row and may be tried
  * again normally.
  */
-export function requireManualPluginRefresh(input: Identity & { connectorName: string; tools: unknown; error: string }): Promise<boolean> {
+export function requireManualPluginRefresh(input: Identity & Enrollment & { error: string }): Promise<boolean> {
   return serial(async () => {
     const current = await rows(); const row = exact(current, input);
     if (!row || row.attempted || row.manual || row.completedSchemaId === row.schemaId || !recognizable(input.tools, row.surface)) return false;
     const publication = publications.get(row.surface)!;
-    if (row.appId ? row.appId !== input.appId : input.connectorName !== publication.connectorName || !enrollable(input.tools, publication)) return false;
+    if (row.appId ? row.appId !== input.appId : !enrolls(row, publication, input)) return false;
     if (current.some(other => other !== row && other.appId === input.appId) || matches(input.tools, publication.tools, row.surface)) return false;
     row.appId = input.appId;
     row.manual = true;
@@ -213,10 +261,12 @@ export function failPluginRefresh(input: { id: string; error: string }): Promise
     row.error = input.error.slice(0, 200);
     row.failures = (row.failures ?? 0) + 1;
     if (row.failures >= PLUGIN_REFRESH_FAILURE_LIMIT && !row.parked) {
-      row.parked = true;
+      row.parked = true; row.parkedBy = APP_VERSION;
       logWarn(`plugin refresh parked surface=${row.surface} after ${row.failures} failed attempts: ${row.error}`);
     }
     await writeDurableNow('plugin-refresh', current); return true;
   });
 }
+/** Tests that are not about tunnel timing publish surfaces as if their tunnel were long live. */
+export function setPluginRefreshTunnelGraceForTests(ms: number): void { tunnelGraceMs = ms; }
 export function resetPluginRefreshForTests(): void { for (const row of settling.values()) if (row.timer) clearTimeout(row.timer); settling.clear(); publications.clear(); chain = Promise.resolve(); }
