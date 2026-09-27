@@ -22,6 +22,7 @@ A feature update. The app gets a workspace next to your chat, pets on your deskt
 - **The extension updates itself.** After an app update, the extension reloads on its own as soon as no chat is busy. No more trips to `chrome://extensions`.
 - **Download updates in one click.** When a new version is out, the update notice links straight to the right download for your Mac or Linux system.
 - **Desktop pets.** A new Pets page in the sidebar. Turn on Tur Tur Sahur, or import your own pet, and it lives on your desktop, reacting to the work CoS is doing. View → Desktop Pets shows or hides them. Pets are off unless you turn one on. If you had the old pet in the message box showing, it moves to your desktop.
+- **A Skills library.** A new Skills page lists your skills. Import a folder, a single SKILL.md or a public skill straight from a GitHub link. Linked skills show when their GitHub source has an update, and installing it is your choice.
 - **German and Brazilian Portuguese.** Pick them in Appearance → Language.
 - **The extension is translated** into German, Spanish, French, Japanese, Turkish and Chinese, following your browser's language.
 
@@ -40,7 +41,7 @@ A feature update. The app gets a workspace next to your chat, pets on your deskt
 ### Improved
 
 - **Polished activity timeline, worker panel and model menus.**
-- **The sidebar and side panels slide smoothly** when you open or close them.
+- **The sidebar and side panels slide smoothly** when you open or close them, and the message box grows and shrinks smoothly as you type.
 - **Removed lines show in red** next to edited files; only added lines are green.
 - **Up-to-date cost estimates in Usage.** Prices were rechecked, GPT-6 Sol and GPT-6 Luna were added, and GPT-5.5 chats now get a price instead of "unpriced".
 - **Setup explains that renaming the ChatGPT app breaks tool tracking,** so keep the name CoS suggests.
