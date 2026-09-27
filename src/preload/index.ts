@@ -10,6 +10,7 @@ import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
 import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
+import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
 import type { ToolEditReview } from '../shared/session.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
@@ -113,6 +114,24 @@ const api = {
     return () => ipcRenderer.removeListener('plugins:changed', wrapped);
   },
   chooseFiles: () => call<InputAttachment[]>('sessions:files'),
+  petsList: () => call<PetLibraryState>('pets:list'),
+  petsOverlayState: () => call<PetOverlayControlState>('pets:overlayState'),
+  petsSetOverlayVisible: (visible: boolean) => call<PetOverlayControlState>('pets:overlayVisible', { visible }),
+  petsImport: () => call<PetLibraryState | null>('pets:import'),
+  petsSetEnabled: (id: string, enabled: boolean) => call<PetLibraryState>('pets:enabled', { id, enabled }),
+  petsSetFavorite: (id: string, favorite: boolean) => call<PetLibraryState>('pets:favorite', { id, favorite }),
+  petsDelete: (id: string) => call<PetLibraryState>('pets:delete', { id }),
+  petsAsset: (id: string, preview = false) => call<PetRuntimeAsset>('pets:asset', { id, preview }),
+  onPetOverlayStateChanged: (listener: (state: PetOverlayControlState) => void): (() => void) => {
+    const wrapped = (_event: unknown, state: PetOverlayControlState): void => listener(state);
+    ipcRenderer.on('pet-overlay:stateChanged', wrapped);
+    return () => ipcRenderer.removeListener('pet-overlay:stateChanged', wrapped);
+  },
+  onPetOverlayOpenOwner: (listener: (screen: 'chat' | 'pets') => void): (() => void) => {
+    const wrapped = (_event: unknown, screen: 'chat' | 'pets'): void => listener(screen);
+    ipcRenderer.on('pet-overlay:openOwner', wrapped);
+    return () => ipcRenderer.removeListener('pet-overlay:openOwner', wrapped);
+  },
   listSkills: () => call<SkillSummary[]>('skills:list'),
   skillLibrary: (scope: SkillsDraftScope) => call<SkillLibrary>('skills:library', scope),
   dropFiles: async (files: File[]): Promise<Reply<InputAttachment[]>> => {

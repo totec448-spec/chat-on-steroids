@@ -1,6 +1,7 @@
 import manifest from './pet-assets/animations.json';
+import type { PetAnimationManifest, PetAnimationName } from '../shared/pets.js';
 
-export type PetAnimation = keyof typeof manifest.animations;
+export type PetAnimation = PetAnimationName;
 export type PetAction = 'openai' | 'anthropic';
 export interface Point { x: number; y: number }
 export interface PetPreference extends Point { visible: boolean }
@@ -8,6 +9,7 @@ export const PET_SIZE = 160;
 export const PET_KEY = 'cos.ui.turTurPet.v1';
 export const DRAG_DISTANCE = 6;
 export const SPECIAL_COOLDOWN = 45_000;
+export const DEFAULT_PET_MANIFEST = manifest as unknown as PetAnimationManifest;
 export function clampPosition(p: Point, width: number, height: number): Point {
   return { x: Math.round(Math.max(0, Math.min(Number.isFinite(p.x) ? p.x : 0, Math.max(0,width-PET_SIZE)))),
     y: Math.round(Math.max(0, Math.min(Number.isFinite(p.y) ? p.y : 0, Math.max(0,height-PET_SIZE)))) };
@@ -20,17 +22,17 @@ export function readPreference(raw: string | null, width: number, height: number
     return {...clampPosition(value,width,height),visible:value.visible};
   } catch { return fallback; }
 }
-export function animationDuration(name: PetAnimation): number { return manifest.animations[name].ms.reduce((a,b)=>a+b,0); }
-export function animationFrame(name: PetAnimation, elapsed: number, reduced=false): number {
-  const clip = manifest.animations[name];
+export function animationDuration(name: PetAnimation, authored: PetAnimationManifest = DEFAULT_PET_MANIFEST): number { return authored.animations[name].ms.reduce((a,b)=>a+b,0); }
+export function animationFrame(name: PetAnimation, elapsed: number, reduced=false, authored: PetAnimationManifest = DEFAULT_PET_MANIFEST): number {
+  const clip = authored.animations[name];
   if (reduced) return name === 'held' ? 23 : name === 'poke' ? 28 : name === 'angry' ? 32 : 7;
-  let time = clip.loop ? elapsed % animationDuration(name) : Math.min(elapsed,animationDuration(name)-1);
+  let time = clip.loop ? elapsed % animationDuration(name, authored) : Math.min(elapsed,animationDuration(name, authored)-1);
   for(let i=0;i<clip.frames.length;i++) { time -= clip.ms[i]!; if(time<0) return clip.frames[i]!; }
   return clip.frames.at(-1)!;
 }
-function nextFrameIn(name: PetAnimation, elapsed: number): number {
-  const clip=manifest.animations[name];
-  let time=clip.loop?elapsed%animationDuration(name):elapsed;
+function nextFrameIn(name: PetAnimation, elapsed: number, authored: PetAnimationManifest): number {
+  const clip=authored.animations[name];
+  let time=clip.loop?elapsed%animationDuration(name,authored):elapsed;
   for(let i=0;i<clip.frames.length;i++){
     if(!clip.loop && i===clip.frames.length-1)return Infinity;
     if(time<clip.ms[i]!)return clip.ms[i]!-time;
@@ -61,22 +63,22 @@ export class PetMachine {
   private walkDistance = 0;
   private walkDuration = 0;
   private mood = 0;
-  constructor(preference: PetPreference, public width: number, public height: number, private random: ()=>number=Math.random) {
+  constructor(preference: PetPreference, public width: number, public height: number, private random: ()=>number=Math.random, readonly manifest: PetAnimationManifest = DEFAULT_PET_MANIFEST) {
     this.position = clampPosition(preference,width,height); this.walkOrigin = {...this.position};
     this.state = preference.visible ? 'spawn' : 'hidden';
   }
   get visible(): boolean { return this.state !== 'hidden'; }
-  get frame(): number { return this.state==='hidden' ? 7 : animationFrame(this.state,this.elapsed,this.reducedMotion); }
+  get frame(): number { return this.state==='hidden' ? 7 : animationFrame(this.state,this.elapsed,this.reducedMotion,this.manifest); }
   get preference(): PetPreference { return {...this.position,visible:this.visible}; }
   /** Zero needs continuous motion; Infinity is static until an interaction.
    * Otherwise the authored frame, phase or autonomous decision owns the wake. */
   get nextUpdateIn(): number {
     if(this.state==='hidden' || this.pointer && !this.pointer.dragging)return Infinity;
     if(this.state==='walk' || this.scene && ['grab','carry','throw'].includes(this.state))return 0;
-    const frame=this.reducedMotion?Infinity:nextFrameIn(this.state,this.elapsed);
+    const frame=this.reducedMotion?Infinity:nextFrameIn(this.state,this.elapsed,this.manifest);
     if(this.scene)return Math.max(0,Math.min(frame,this.phases[this.scene.phase]!.duration-this.elapsed));
     if(this.state==='held')return frame;
-    if(this.state!=='idle')return Math.max(0,Math.min(frame,animationDuration(this.state)-this.elapsed));
+    if(this.state!=='idle')return Math.max(0,Math.min(frame,animationDuration(this.state,this.manifest)-this.elapsed));
     return this.reducedMotion?Infinity:Math.max(0,Math.min(frame,this.nextDecision-this.clock,this.nextSpecial-this.clock));
   }
   private enter(state: PetAnimation): void { this.state=state; this.elapsed=0; }
@@ -106,6 +108,10 @@ export class PetMachine {
     this.enter(this.clicks.length>=4?'angry':'poke');if(this.clicks.length>=4)this.clicks=[];
     this.nextSpecial=this.clock+SPECIAL_COOLDOWN;
   }
+  react(animation: 'spawn' | 'look' | 'angry' | 'celebrate'): void {
+    if(!this.visible || this.pointer || this.scene || !['idle','look'].includes(this.state))return;
+    this.cancel();this.clicks=[];this.enter(animation);this.nextSpecial=this.clock+SPECIAL_COOLDOWN;
+  }
   startAction(kind:PetAction): boolean {
     if(!this.visible || this.pointer || this.reducedMotion || this.width<420 || this.height<200)return false;
     this.cancel();this.clicks=[];
@@ -118,11 +124,11 @@ export class PetMachine {
     this.scene={kind,phase:0,from:{...this.position},facing:this.facing,
       target:{x:start+80+this.facing*(kind==='openai'?145:100)*stageScale,y:this.position.y+(kind==='openai'?100:90)},bin:{x:start+80+this.facing*225*stageScale,y:this.position.y+137}};
     this.phases=kind==='openai'
-      ? [{animation:'walk',duration:1520,distance:55*stageScale},{animation:'angry',duration:animationDuration('angry')},{animation:'punch',duration:animationDuration('punch')},
-        {animation:'heavy',duration:animationDuration('heavy')},{animation:'celebrate',duration:animationDuration('celebrate')+550}]
-      : [{animation:'walk',duration:1520,distance:55*stageScale},{animation:'grab',duration:animationDuration('grab')},
-        {animation:'carry',duration:1760,distance:75*stageScale},{animation:'throw',duration:animationDuration('throw')+550},
-        {animation:'celebrate',duration:animationDuration('celebrate')}];
+      ? [{animation:'walk',duration:1520,distance:55*stageScale},{animation:'angry',duration:animationDuration('angry',this.manifest)},{animation:'punch',duration:animationDuration('punch',this.manifest)},
+        {animation:'heavy',duration:animationDuration('heavy',this.manifest)},{animation:'celebrate',duration:animationDuration('celebrate',this.manifest)+550}]
+      : [{animation:'walk',duration:1520,distance:55*stageScale},{animation:'grab',duration:animationDuration('grab',this.manifest)},
+        {animation:'carry',duration:1760,distance:75*stageScale},{animation:'throw',duration:animationDuration('throw',this.manifest)+550},
+        {animation:'celebrate',duration:animationDuration('celebrate',this.manifest)}];
     this.enter('walk');this.nextSpecial=this.clock+SPECIAL_COOLDOWN;this.nextKind=kind==='openai'?'anthropic':'openai';return true;
   }
   tick(milliseconds:number): void {
@@ -146,7 +152,7 @@ export class PetMachine {
       this.position=clampPosition({x:this.walkOrigin.x+this.walkDistance*Math.min(1,this.elapsed/this.walkDuration),y:this.position.y},this.width,this.height);
       if(this.elapsed>=this.walkDuration)this.rest();return;
     }
-    if(this.state!=='idle') { if(this.elapsed>=animationDuration(this.state as PetAnimation))this.rest();return; }
+    if(this.state!=='idle') { if(this.elapsed>=animationDuration(this.state as PetAnimation,this.manifest))this.rest();return; }
     if(this.reducedMotion || this.pointer)return;
     if(this.clock>=this.nextSpecial){
       this.nextSpecial=this.clock+SPECIAL_COOLDOWN+this.random()*20_000;
