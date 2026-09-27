@@ -27,6 +27,10 @@ notices.push('='.repeat(80), 'OpenAI Codex — adapted coding instructions and u
 for (const file of ['LICENSE', 'NOTICE']) {
   notices.push(`--- Codex ${file} ---`, await fs.readFile(path.join(root, 'docs/licenses/codex', file), 'utf8'), '');
 }
+notices.push('='.repeat(80), 'Phosphor Icons — interface icons (Regular and Fill weights)',
+  'Source: https://www.npmjs.com/package/@phosphor-icons/core/v/2.1.1',
+  'CoS embeds the SVG paths of the icons it uses in its renderer sprite, scaled to a 24-unit grid.', '');
+notices.push('--- Phosphor LICENSE ---', await fs.readFile(path.join(root, 'docs/licenses/phosphor/LICENSE'), 'utf8'), '');
 let count = 0;
 for (const [relative, entry] of Object.entries(lock.packages).sort(([a], [b]) => a.localeCompare(b))) {
   if (!relative || entry.dev === true) continue;
