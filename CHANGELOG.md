@@ -27,7 +27,7 @@ A reliability update on top of 2.1.15. It keeps up with ChatGPT's latest changes
 - **Workers near their context limit are no longer given up too early.**
 - **Compact & Resume works for large Project chats**, which now get enough time to load.
 - **Compact & Resume is more robust.** A handoff that can never be sent gives up after a few attempts instead of reloading the page forever.
-- **CoS tools update automatically again on ChatGPT's new plugin settings page.** After an update, ChatGPT sometimes kept an old list of CoS tools, and tool calls could go missing. CoS now refreshes the list on the new page too.
+- **Automatic plugin refresh works on ChatGPT's new plugin settings page.** With **Settings → Browser & history → Automatic plugin refresh** turned on, CoS keeps ChatGPT's list of CoS tools up to date again. Before, ChatGPT could keep an old list after an update, and tool calls went missing. It now also works for CoS apps whose tool list in ChatGPT was already out of date.
 - **Goal and Loop settings are saved reliably**, even when you change them while a chat is being compacted and resumed.
 - **The extension keeps working after an update in sandboxed Chrome** (for example Chromium from Snap on Linux).
 
@@ -44,7 +44,7 @@ A reliability update on top of 2.1.15. It keeps up with ChatGPT's latest changes
 - **Fewer "refresh your connectors" reminders.** You're only asked when the tools actually changed, not after every update.
 - **Adding many attachments at once uses much less memory.**
 - **Safer file operations in project folders.**
-- **The app is now available in Portuguese (Portugal).** Pick it in Settings → Language.
+- **The app is now available in Portuguese (Portugal).** Pick it in Appearance → Language.
 - **Keyboard navigation in the chat list:** focus a chat and press Enter or Space to open it.
 - **Answers with many sources display faster.**
 - More of the app is translated into Spanish, French, Japanese, Turkish and Chinese.
