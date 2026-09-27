@@ -1677,6 +1677,8 @@
   "Remove {0}?": "¿Eliminar {0}?",
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "La Skill y sus recursos se moverán a la Papelera. Los mensajes ya preparados no cambiarán.",
   "Skill imported into the CoS library": "Skill importada a la biblioteca de CoS",
+  "All {0} steps done": "Los {0} pasos completados",
+  "{0} of {1} steps done": "{0} de {1} pasos completados",
   "Weekly limit": "Límite semanal",
   "{0}-hour limit": "Límite de {0} horas",
   "Shared across all models": "Compartido entre todos los modelos",
