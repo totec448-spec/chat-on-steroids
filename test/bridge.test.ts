@@ -61,6 +61,7 @@ const {
   pendingCommands,
   queueResume,
   resetBridgeForTests,
+  unattributedIncidentsSettledForTests,
   restoreCommands,
   resumeJobFor,
   setBrowserOpener,
@@ -6755,9 +6756,15 @@ describe('unattributed activity recovery', () => {
     } finally { await writeDurableNow('session-input', []); input.resetInputForTests(); vi.useRealTimers(); }
   });
 
-  /** A finished call whose request id the page never confirmed. Files under Unattributed. */
-  function unattributed(requestId?: string): Promise<unknown> {
-    return recordToolCall({
+  /**
+   * A finished call whose request id the page never confirmed. Files under Unattributed.
+   *
+   * Resolves only after the incident it opened has read its candidates from disk and armed its
+   * due timer. Fake-clock steps do not wait for that real read; on a slow runner the clock could
+   * otherwise pass the due time before the timer existed, and nothing would ever fire it.
+   */
+  async function unattributed(requestId?: string): Promise<unknown> {
+    const recorded = await recordToolCall({
       tool: 'read',
       args: { paths: ['/project/whoever.ts'] },
       content: [{ type: 'text', text: 'ok' }],
@@ -6766,6 +6773,8 @@ describe('unattributed activity recovery', () => {
       startedAt: Date.now(),
       ...(requestId ? { requestId } : {})
     });
+    await unattributedIncidentsSettledForTests();
+    return recorded;
   }
 
   /** An unattributed call that names its server turn: the recorder waits out the evidence grace first. */
@@ -7399,11 +7408,7 @@ describe('unattributed activity recovery', () => {
       await pair(); await events(PRIME, [openTurn(`claim-${kind}`)]);
       const id = `claim-request-${kind}`;
       await unattributedTurn(id); await vi.advanceTimersByTimeAsync(15_000);
-      // The repair is due 15 s after the incident opens. On a slow Windows runner the recorder can
-      // open it a little after this test's clock step, so step on in small increments rather
-      // than failing on the first pass; what is asserted about the handed claim is unchanged.
-      let first = await maintenance();
-      for (let step = 0; !first && step < 8; step++) { await vi.advanceTimersByTimeAsync(5_000); first = await maintenance(); }
+      const first = await maintenance();
       expect(first?.reason).toBe('unattributed');
       await vi.advanceTimersByTimeAsync(1);
       if (kind === 'mcp') await attributed(PRIME, false, Date.now());
