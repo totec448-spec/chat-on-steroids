@@ -274,12 +274,15 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   pending.shift()!({ ok: true, data: current });
   await vi.waitFor(() => expect(calls).toHaveLength(2));
   expect(calls[1].readOnly).toBe(false);
+  // The toggle tells assistive technology which state is saved, not just its colour.
+  expect(w.document.getElementById('readOnlyBtn')?.getAttribute('aria-pressed')).toBe('true');
   expect(calls[1].ui.autoConnect).toBe(false);
 
   current = appState({ ...baseConfig, readOnly: false });
   pending.shift()!({ ok: true, data: current });
   await vi.waitFor(() => expect(calls).toHaveLength(3));
   expect(calls[2].readOnly).toBe(false);
+  expect(w.document.getElementById('readOnlyBtn')?.getAttribute('aria-pressed')).toBe('false');
   expect(calls[2].ui.autoConnect).toBe(true);
 
   current = appState({ ...baseConfig, readOnly: false, ui: { ...baseConfig.ui, autoConnect: true } });
