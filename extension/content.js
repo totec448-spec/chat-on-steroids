@@ -11434,6 +11434,9 @@
   }
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-request-origin') return;
+    // A Goal/Loop helper page records nothing (see emit/flush). Its request origins would
+    // otherwise open an empty "ChatGPT session" for every temporary decision chat.
+    if (temporaryPlannerPage()) return;
     const claimed = typeof event.data.conversationId === 'string' ? event.data.conversationId : '';
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(claimed)) return;
     const raw = Array.isArray(event.data.requestIds) ? event.data.requestIds : [];
