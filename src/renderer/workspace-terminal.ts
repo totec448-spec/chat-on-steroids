@@ -9,13 +9,10 @@ import type { LocalProject } from '../shared/projects.js';
 type Tab = { id: string; projectId: string; title: string; node: HTMLElement; term: Terminal; fit: FitAddon; ready: boolean; exited: boolean; queued: number; writes: Promise<void> };
 
 /** A hidden panel retains its shells; tabs keep the project captured at creation. */
-export function createWorkspaceTerminal() {
+export function createWorkspaceTerminal(toggle: HTMLButtonElement) {
   const app = document.querySelector<HTMLElement>('.app')!;
-  const toggle = el('button', 'btn btn-icon') as HTMLButtonElement;
-  toggle.id = 'terminalToggle'; toggle.type = 'button'; toggle.append(icon('i-terminal'));
-  ui(toggle, 'title', () => t('Toggle terminal (Ctrl+`)')); ui(toggle, 'aria-label', () => t('Toggle terminal'));
-  document.getElementById('headerConnect')!.after(toggle);
   const panel = el('section', 'workspace-terminal'); panel.id = 'workspaceTerminal'; panel.hidden = true;
+  toggle.setAttribute('aria-controls', panel.id);
   ui(panel, 'aria-label', () => t('Terminal'));
   const resize = el('div', 'terminal-resize'); resize.tabIndex = 0; resize.setAttribute('role', 'separator');
   resize.setAttribute('aria-orientation', 'horizontal'); ui(resize, 'aria-label', () => t('Terminal height'));
@@ -26,8 +23,15 @@ export function createWorkspaceTerminal() {
   };
   const add = button('i-plus', 'New terminal'), hide = button('i-x', 'Hide terminal');
   add.id = 'terminalNew'; hide.id = 'terminalHide';
+  const addMenu = el('details', 'work-dock-add') as HTMLDetailsElement;
+  const addTrigger = el('summary'); addTrigger.append(icon('i-plus'));
+  ui(addTrigger, 'title', () => t('New tab')); ui(addTrigger, 'aria-label', () => t('New tab'));
+  const addChoices = el('div', 'work-dock-menu');
+  add.className = 'btn work-dock-menu-item';
+  add.append(el('span', '', () => t('Terminal')));
+  addChoices.append(add); addMenu.append(addTrigger, addChoices);
   const empty = el('button', 'btn terminal-empty', () => t('Open a terminal in this project')) as HTMLButtonElement;
-  empty.type = 'button'; body.append(empty); bar.append(tabsHost, add, hide); panel.append(resize, bar, body); app.append(panel);
+  empty.type = 'button'; body.append(empty); bar.append(tabsHost, addMenu, hide); panel.append(resize, bar, body); app.append(panel);
   const tabs = new Map<string, Tab>();
   const terminalTheme = () => {
     const colors = getComputedStyle(app);
@@ -53,6 +57,7 @@ export function createWorkspaceTerminal() {
   const setOpen = (value: boolean): void => {
     open = value; panel.hidden = !value; app.classList.toggle('has-terminal', value);
     toggle.setAttribute('aria-expanded', String(value));
+    toggle.classList.toggle('is-active', value);
     if (value) requestAnimationFrame(() => { fit(); if (selected) tabs.get(selected)?.term.focus(); });
   };
   const paint = (): void => {
@@ -117,7 +122,9 @@ export function createWorkspaceTerminal() {
     else { tab.exited = true; tab.term.write(`\r\n[${t('Process exited: {0}', [event.exitCode])}]\r\n`); paint(); }
   });
   toggle.addEventListener('click', () => { setOpen(!open); if (open && !tabs.size && project) void create(); });
-  add.addEventListener('click', () => void create()); empty.addEventListener('click', () => void create()); hide.addEventListener('click', () => setOpen(false));
+  add.addEventListener('click', () => { addMenu.open = false; void create(); }); empty.addEventListener('click', () => void create()); hide.addEventListener('click', () => setOpen(false));
+  addMenu.addEventListener('keydown', event => { if (event.key === 'Escape') { addMenu.open = false; addTrigger.focus(); } });
+  document.addEventListener('click', event => { if (addMenu.open && !addMenu.contains(event.target as Node)) addMenu.open = false; });
   let drag: { id: number; y: number; height: number } | null = null;
   resize.addEventListener('pointerdown', event => { if (event.button !== 0) return; drag = { id: event.pointerId, y: event.clientY, height: panel.offsetHeight }; resize.setPointerCapture(event.pointerId); event.preventDefault(); });
   resize.addEventListener('pointermove', event => { if (drag?.id === event.pointerId) setHeight(drag.height + drag.y - event.clientY); });

@@ -2923,12 +2923,16 @@ refresh complete or starts a browser action.
 The Files panel projects the current session's LocalProject through fixed IPC using a project
 UUID and relative paths. It does not change the main composer or grant additional filesystem
 access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
-and project-root mutation. Files and the read-only sub-agent panel share one resizable work slot.
+and project-root mutation. The renderer's `workspace-docks.ts` owns the right work slot,
+its tab strip, launcher and expansion; Files and the read-only sub-agent panel retain their
+own content and async lifetimes. Closing the right dock hides its active tool but retains
+its tab selection. The top-right pair toggles right and bottom workspaces; layout controls
+grant no new file, terminal or worker authority.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
-Its outer toggle or Escape closes the pane; a selected worker retains its title and Back button.
+Its tab close or Escape closes the pane; a selected worker retains its title and Back button.
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are
 retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.
-Files uses one action toolbar with Refresh; the outer Files toggle closes the panel. Its shared
+Files uses one action toolbar with Refresh; its tab close hides the panel. Its shared
 work slot can grow to host width minus 360 px for chat, without a fixed maximum pixel width.
 Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep
 the previous accepted preview until replacement content is ready; hidden previews stay hidden.

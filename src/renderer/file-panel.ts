@@ -12,7 +12,9 @@ import type { ProjectPdfViewer } from './file-pdf-viewer.js';
 
 interface FilePanelOptions {
   host: HTMLElement;
-  toggle: HTMLButtonElement;
+  mount?: HTMLElement;
+  toggle?: HTMLButtonElement;
+  onEscape?: () => void;
   onShow?: () => void;
   onAttach?: (attachment: InputAttachment) => void;
   /** Capture the current composer owner before staging starts, including its draft epoch. */
@@ -199,7 +201,7 @@ function requestFileConfirmation(options: { title: string; message: string; deta
 export function createFilePanel(options: FilePanelOptions) {
   const pane = el('aside', 'file-panel'); pane.hidden = true;
   ui(pane, 'aria-label', () => t('Files'));
-  attachWorkPanelResize(options.host, pane);
+  if (!options.mount) attachWorkPanelResize(options.host, pane);
 
   const refresh = el('button', 'btn btn-icon file-panel-refresh') as HTMLButtonElement;
   refresh.type = 'button'; refresh.append(icon('i-pulse'));
@@ -222,7 +224,7 @@ export function createFilePanel(options: FilePanelOptions) {
   previewResize.setAttribute('aria-orientation', 'horizontal');
   ui(previewResize, 'aria-label', () => t('Resize file preview'));
   body.append(tree, preview);
-  pane.append(toolbar, body); options.host.append(pane);
+  pane.append(toolbar, body); (options.mount ?? options.host).append(pane);
 
   let project: LocalProject | null = null;
   let generation = 0;
@@ -418,8 +420,8 @@ export function createFilePanel(options: FilePanelOptions) {
     generation++;
     destroyPdfViewer();
     pane.hidden = true;
-    options.host.classList.remove('has-file-panel');
-    options.toggle.setAttribute('aria-expanded', 'false');
+    if (!options.mount) options.host.classList.remove('has-file-panel');
+    options.toggle?.setAttribute('aria-expanded', 'false');
     syncWatches();
   }
 
@@ -427,8 +429,8 @@ export function createFilePanel(options: FilePanelOptions) {
     if (!project) return;
     options.onShow?.();
     pane.hidden = false;
-    options.host.classList.add('has-file-panel');
-    options.toggle.setAttribute('aria-expanded', 'true');
+    if (!options.mount) options.host.classList.add('has-file-panel');
+    options.toggle?.setAttribute('aria-expanded', 'true');
     if (!listings.has('')) await loadDirectory('');
     else render();
     const draft = project && retainedDrafts.get(project.id);
@@ -1042,14 +1044,16 @@ export function createFilePanel(options: FilePanelOptions) {
     }
     if (editingPath && event.key === 'Escape') return;
     if (event.key !== 'Escape') return;
-    event.preventDefault(); hide(); options.toggle.focus();
+    event.preventDefault(); hide();
+    if (options.onEscape) options.onEscape(); else options.toggle?.focus();
   });
-  options.toggle.onclick = () => { if (pane.hidden) void show(); else hide(); };
+  if (options.toggle) options.toggle.onclick = () => { if (pane.hidden) void show(); else hide(); };
   window.api.onProjectFilesChanged?.(change => { void handleWatchedChange(change); });
 
   updateActions();
   return {
     hide,
+    show,
     visible: () => !pane.hidden,
     update(next: LocalProject | null): void {
       const changed = project?.id !== next?.id;
@@ -1059,8 +1063,10 @@ export function createFilePanel(options: FilePanelOptions) {
       }
       project = next;
       if (changed) watchSignature = '';
-      options.toggle.hidden = next === null;
-      ui(options.toggle, 'title', () => next ? t('Files · {0}', [next.name]) : t('Files'));
+      if (options.toggle) {
+        options.toggle.hidden = next === null;
+        ui(options.toggle, 'title', () => next ? t('Files · {0}', [next.name]) : t('Files'));
+      }
       if (!changed) {
         if (labelChanged) renderTree();
         return;
