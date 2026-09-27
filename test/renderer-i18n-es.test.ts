@@ -72,7 +72,7 @@ describe('Spanish app interface', () => {
     authored.textContent = 'Save'; document.body.append(authored);
     const action = ui(document.createElement('button'), 'textContent', () => t('Remove {0}', ['<img src=x>']));
     document.body.append(action);
-    for (const locale of ['es', 'zh-CN', 'zh-TW', 'ja', 'en', 'es'] as const) {
+    for (const locale of ['es', 'zh-CN', 'zh-TW', 'ja', 'tr', 'fr', 'pt-BR', 'en', 'es'] as const) {
       setLanguage(locale);
       expect(document.getElementById('chatInput')).toBe(input);
       expect(input.value).toBe('Save\nMi borrador 🙂 <script>literal</script>');

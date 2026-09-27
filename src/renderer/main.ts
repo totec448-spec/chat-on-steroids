@@ -31,7 +31,6 @@ import type { AppState, Capability, ChatBrowser, LogEntry, SurfaceStatus } from 
 import {
   browserExtensionRequired,
   isNewer,
-  RELEASES_PAGE,
   CAPABILITY_DETAILS,
   CAPABILITY_LABELS,
   capabilityTools,
@@ -1856,7 +1855,7 @@ $('wizExpand').addEventListener('click', () => {
   showAllSteps = $('wizard').classList.contains('is-tidy');
   if (state) apply(state);
 });
-$('updateGet').addEventListener('click', () => void run(api.openLink(RELEASES_PAGE)));
+$('updateGet').addEventListener('click', () => void run(api.downloadUpdate()));
 
 /**
  * Install the update that is already downloaded.
