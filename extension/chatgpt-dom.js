@@ -2298,7 +2298,8 @@ var CLF_DOM = (() => {
       const timer = setTimeout(() => finish(null), 1500);
       window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce }, location.origin);
     });
-    const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash);
+    const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash) ||
+      (!location.hash ? /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname) : null);
     if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : snapshot.connectorName !== connectorName) ||
         !Array.isArray(snapshot.tools) || (snapshot.tools.length < 1 && !externalPlugins) || snapshot.tools.length > (externalPlugins ? 257 : 16) || JSON.stringify(snapshot.tools).length > 300000 ||
         snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
@@ -2309,6 +2310,14 @@ var CLF_DOM = (() => {
   }
   function pluginInstalledButtons(connectorName) {
     return safe(() => {
+      // The newer shell lists installed plugins on the /settings/plugins-settings page itself.
+      if (location.pathname === '/settings/plugins-settings' && !location.hash) {
+        const main = document.querySelector('main');
+        if (!main) return null;
+        const rows = [...main.querySelectorAll('button')].filter(button => !button.disabled && button.getClientRects().length > 0 &&
+          [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName));
+        return rows.length ? rows : null;
+      }
       const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => panel.getClientRects().length > 0 &&
         panel.getAttribute('aria-labelledby')?.endsWith('-trigger-Plugins'));
       if (panels.length !== 1) return null;
