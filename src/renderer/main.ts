@@ -1360,6 +1360,17 @@ function apply(next: AppState): void {
     node.classList.toggle('is-done', done.has(name));
     node.classList.toggle('is-current', name === current);
   }
+  // Progress over the steps this setup actually shows (the browser step is hidden when unused).
+  const shown = order.filter(name => !step(name).hidden);
+  const finished = shown.filter(name => done.has(name)).length;
+  const progress = $('setupProgress');
+  progress.setAttribute('aria-valuemax', String(shown.length));
+  progress.setAttribute('aria-valuenow', String(finished));
+  progress.classList.toggle('is-complete', finished === shown.length);
+  ui($('setupProgressText'), 'textContent', () => finished === shown.length
+    ? t('All {0} steps done', [shown.length])
+    : t('{0} of {1} steps done', [finished, shown.length]));
+  $('setupProgressFill').style.width = `${shown.length ? Math.round(finished / shown.length * 100) : 0}%`;
 
   // Setup that is finished should stop reading like a to-do list: the instructions
   // collapse away so the page fits without scrolling, and come back on request.
