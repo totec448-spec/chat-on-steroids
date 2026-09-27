@@ -2330,7 +2330,59 @@
     return result;
   }
 
+  /**
+   * The newer shell moved plugin management out of the settings dialog onto a full page,
+   * `/settings/plugins-settings/plugin_<app>`, and ChatGPT now drops the old `#settings/Plugins`
+   * hash entirely. Measured 2026-09-27: the page has no tab panel, no `reportEntity` card and no
+   * `actions` prop; the connector object (with its `actions`) sits a few Fibers above each
+   * management button, and only the Refresh-tools button's own wrapper carries a `loading`
+   * state besides the row's "Actions" menu trigger (`aria-haspopup`). Delete and Uninstall are
+   * `danger*` coloured; either marker disqualifies a control in any language. Every CoS connector refresh on the new layout failed with "the connector settings
+   * card could not be read", so ChatGPT kept whatever tool list it had before an update.
+   */
+  function pagePluginSnapshot(appId) {
+    const buttons = [...document.querySelectorAll('main button')].slice(0, 200);
+    let connector = null, control = null;
+    for (const button of buttons) {
+      if (!button.getClientRects().length) continue;
+      let fiber = fiberOf(button), loading = false, unsafe = false, owner = null;
+      for (let up = 0; fiber && up < 16; up++, fiber = fiber.return) {
+        const props = fiber.memoizedProps;
+        if (!props || typeof props !== 'object') continue;
+        if (up <= 2) {
+          if (own.call(props, 'loading')) loading = true;
+          if (own.call(props, 'aria-haspopup') || (typeof props.color === 'string' && /danger|destructive/i.test(props.color))) unsafe = true;
+        }
+        if (props.connector && typeof props.connector === 'object') { owner = props.connector; break; }
+      }
+      if (!owner || owner.id !== appId) continue;
+      if (connector && connector !== owner) return null;
+      connector = owner;
+      // Never a destructive control, whatever its wrapper looks like.
+      if (loading && !unsafe && !/\b(?:delete|remove|uninstall|disconnect)\b/i.test(button.textContent || '')) {
+        if (control && control !== button) return null;
+        control = button;
+      }
+    }
+    if (!connector || !Array.isArray(connector.actions) || typeof connector.name !== 'string') return null;
+    const externalPlugins = connector.name === 'Chat On Steroids Plugins';
+    if ((!connector.actions.length && !externalPlugins) || connector.actions.length > (externalPlugins ? 257 : 16)) return null;
+    const budget = { bytes: 280000, nodes: 20000 };
+    // Measured 2026-09-27: this page sends `description_model: ""` rather than null, so `??`
+    // read every declaration as empty and no refresh could ever match the published schema.
+    const tools = connector.actions.map(action => ({ name: action.name, description: copySchema(action.description_model || action.description, budget), inputSchema: copySchema(action.params, budget) }));
+    if (tools.some(tool => !NAME.test(tool.name) || typeof tool.description !== 'string' || !tool.inputSchema || tool.inputSchema.type !== 'object') ||
+        new Set(tools.map(tool => tool.name)).size !== tools.length) return null;
+    if (control && control.getAttribute('data-clf-plugin-refresh') !== appId) control.setAttribute('data-clf-plugin-refresh', appId);
+    // `settled`: the actions arrive in the same response as the connector itself, so an empty
+    // list here is the installed state (a stale Plugins connector), not a list still loading.
+    const tunnelId = typeof connector.tunnel_id === 'string' && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(connector.tunnel_id) ? connector.tunnel_id : null;
+    return { appId, connectorName: connector.name.slice(0, 100), versionId: str(connector.app_metadata?.version_id), tools, refreshAvailable: !!control, tunnelId, settled: true };
+  }
+
   function pluginSnapshot() {
+    const pageRoute = /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname);
+    if (pageRoute && !location.hash) return pagePluginSnapshot(pageRoute[1]);
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash);
     if (!route) return null;
     const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel =>

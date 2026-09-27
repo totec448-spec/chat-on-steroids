@@ -1508,8 +1508,8 @@ describe('IPC input delivery and Goal control integration', () => {
   });
   it('requires an exact plugin claim and matching schema before a refresh completion', async () => {
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: true } });
-    const { publishPluginSurface, resetPluginRefreshForTests } = await import('../src/main/plugin-refresh.js');
-    resetPluginRefreshForTests();
+    const { publishPluginSurface, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests } = await import('../src/main/plugin-refresh.js');
+    resetPluginRefreshForTests(); setPluginRefreshTunnelGraceForTests(0);
     const tools = [{ name: 'read', description: 'Read a file', inputSchema: { type: 'object', properties: {} } }];
     publishPluginSurface('core', 'Chat On Steroids Core', 'test', 'Synthetic instructions', tools);
     const requests = (await post('/plugin-refresh', { action: 'pending' })).body.requests;
@@ -1522,9 +1522,24 @@ describe('IPC input delivery and Goal control integration', () => {
     expect((await post('/plugin-refresh', { ...identity, action: 'complete', tools, versionId: 'asdk_app_v_synthetic' })).body.ok).toBe(true);
     resetPluginRefreshForTests();
   });
+  it('accepts a stale connector only by the tunnel id configured for its surface', async () => {
+    const base = defaultConfig();
+    await saveConfig({ ...base, ui: { ...base.ui, autoRefreshPlugins: true }, tunnel: { ...base.tunnel, tunnelId: 'tunnel_core00001', desktopTunnelId: 'tunnel_desk00001' } });
+    const { publishPluginSurface, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests } = await import('../src/main/plugin-refresh.js');
+    resetPluginRefreshForTests(); setPluginRefreshTunnelGraceForTests(0);
+    await writeDurableNow('plugin-refresh', []);
+    const tools = [{ name: 'computer', description: 'Current', inputSchema: { type: 'object', properties: {} } }];
+    publishPluginSurface('desktop', 'Chat On Steroids Desktop', 'test', '', tools);
+    const [request] = (await post('/plugin-refresh', { action: 'pending' })).body.requests;
+    const claim = (tunnelId?: string) => post('/plugin-refresh', { id: request.id, appId: 'asdk_app_desktop', action: 'claim', connectorName: 'Chat On Steroids Desktop', tools: [{ name: 'observe', description: 'Old', inputSchema: { type: 'object' } }], tunnelId });
+    expect((await claim()).body.ok).toBe(false);
+    expect((await claim('tunnel_core00001')).body.ok).toBe(false); // Core's tunnel is not Desktop's
+    expect((await claim('tunnel_desk00001')).body.ok).toBe(true);
+    resetPluginRefreshForTests();
+  });
   it('defaults automatic plugin refresh off and revokes an already offered claim without removing the backend', async () => {
     const plugin = await import('../src/main/plugin-refresh.js');
-    plugin.resetPluginRefreshForTests();
+    plugin.resetPluginRefreshForTests(); plugin.setPluginRefreshTunnelGraceForTests(0);
     await writeDurableNow('plugin-refresh', []);
     const tools = [{ name: 'read', description: 'Current declaration', inputSchema: { type: 'object', properties: {} } }];
     plugin.publishPluginSurface('core', 'Chat On Steroids Core', 'test', '', tools);
@@ -1544,12 +1559,12 @@ describe('IPC input delivery and Goal control integration', () => {
     await configure(false);
     // A click already accepted while enabled may still report its real result.
     expect((await post('/plugin-refresh', { ...claim, action: 'complete', tools })).body.ok).toBe(true);
-    plugin.resetPluginRefreshForTests();
+    plugin.resetPluginRefreshForTests(); plugin.setPluginRefreshTunnelGraceForTests(0);
   });
   it('accepts a manual plugin-refresh terminal state and removes it from browser pickup', async () => {
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: true } });
-    const { publishPluginSurface, resetPluginRefreshForTests } = await import('../src/main/plugin-refresh.js');
-    resetPluginRefreshForTests();
+    const { publishPluginSurface, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests } = await import('../src/main/plugin-refresh.js');
+    resetPluginRefreshForTests(); setPluginRefreshTunnelGraceForTests(0);
     const tools = [{ name: 'read', description: 'Read current', inputSchema: { type: 'object', properties: {} } }];
     const installed = [{ ...tools[0], description: 'Read old' }];
     publishPluginSurface('core', 'Chat On Steroids Core', 'test', 'Synthetic instructions', tools);
