@@ -271,3 +271,18 @@ it('refreshes a settled empty Plugins page and passes its tunnel id to the claim
   expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
   expect(ask.mock.calls[0]?.[0]).toMatchObject({ tunnelId: 'tunnel_synthetic01', tools: [] });
 });
+it('forwards the page tunnel id from the extension to the app, and only a well-formed one', async () => {
+  // Measured 2026-09-27: the background relay rebuilt the body without it, so the app never saw
+  // the proof and every stale Desktop/Plugins enrollment was refused.
+  const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
+  const handler = background.slice(background.indexOf('  async plugin_refresh('), background.indexOf('  async model_catalog('));
+  const call = vi.fn(async (_route: string, _init: { body: string }) => ({ ok: true, data: { ok: true } }));
+  const context = vm.createContext({ call, ownsDocument: () => true, maintain: () => {}, pluginRefreshMarker: () => id,
+    chrome: { tabs: { get: async () => ({ url: pathRouted }) } } });
+  vm.runInContext(`globalThis.handlers = {\n${handler}\n};`, context);
+  const send = (tunnelId: unknown) => (context.handlers as any).plugin_refresh({ action: 'claim', id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Desktop', tools, tunnelId }, null, { tab: 7 });
+  await send('tunnel_synthetic01');
+  expect(JSON.parse(call.mock.calls[0]![1].body)).toMatchObject({ action: 'claim', tunnelId: 'tunnel_synthetic01' });
+  await send('tunnel_x"; drop');
+  expect(JSON.parse(call.mock.calls[1]![1].body)).not.toHaveProperty('tunnelId');
+});

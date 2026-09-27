@@ -3053,7 +3053,10 @@ const HANDLERS = {
     const tab = await chrome.tabs.get(source.tab);
     if (!ownsDocument(source) || pluginRefreshMarker(tab) !== message.id) return { ok: false };
     if (!['claim', 'current', 'manual', 'complete', 'fail'].includes(message.action)) return { ok: false };
-    const body = JSON.stringify({ action: message.action, id: message.id, appId: message.appId, connectorName: message.connectorName, tools: message.tools, versionId: message.versionId, error: message.error });
+    // `tunnelId` is the connector's own tunnel from ChatGPT's plugin page; the app accepts it as
+    // enrollment proof only when it equals the tunnel it serves for that surface.
+    const tunnelId = typeof message.tunnelId === 'string' && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(message.tunnelId) ? message.tunnelId : undefined;
+    const body = JSON.stringify({ action: message.action, id: message.id, appId: message.appId, connectorName: message.connectorName, tools: message.tools, versionId: message.versionId, error: message.error, tunnelId });
     if (body.length > 310000) return { ok: false };
     const result = await call('/plugin-refresh', { method: 'POST', body });
     if (!ownsDocument(source) || pluginRefreshMarker(await chrome.tabs.get(source.tab)) !== message.id) return { ok: false };
