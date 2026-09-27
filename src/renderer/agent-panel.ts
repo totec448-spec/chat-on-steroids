@@ -1,5 +1,6 @@
 import { ui, t } from './i18n.js';
-import type { SessionSummary, SessionEvent } from '../shared/session.js';
+import type { AgentInfo, SessionSummary, SessionEvent } from '../shared/session.js';
+import { workerReportedFinish } from '../shared/session-activity.js';
 import { el } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 
@@ -12,6 +13,7 @@ export function createAgentPanel(options: {
   render: (events: SessionEvent[], id: string, current: () => boolean) => HTMLElement[];
   openMain: (id: string) => void;
   working: (summary: SessionSummary) => boolean;
+  agent?: (summary: SessionSummary) => Pick<AgentInfo, 'state' | 'task'> | null;
 }) {
   const pane = el('aside', 'agent-panel'); pane.hidden = true;
   ui(pane, 'aria-label', () => t("Sub-agents"));
@@ -34,14 +36,38 @@ export function createAgentPanel(options: {
   }
   function list(): void {
     generation++; selected = null; head.hidden = true; body.replaceChildren();
+    const isActive = (worker: SessionSummary): boolean => {
+      const state = options.agent?.(worker)?.state;
+      return state ? ['invited', 'active', 'detached', 'waking'].includes(state) : options.working(worker);
+    };
     for (const active of [true, false]) {
-      const group = workers.filter(worker => options.working(worker) === active);
+      const group = workers.filter(worker => isActive(worker) === active);
       body.append(el('h3', '', () => `${active ? t("Active") : t("History")} · ${group.length}`));
       if (!group.length) { body.append(el('p', 'meta', () => active ? t("No active sub-agents") : t("No recorded sub-agents"))); continue; }
       for (const worker of group) {
         const row = el('button', 'agent-panel-row'); row.setAttribute('type', 'button');
-        row.append(el('span', 'agent-avatar', worker.origin?.agentId?.replace(/^worker-/, '') ?? '•'), el('span', '', worker.title));
-        row.title = worker.origin?.task || worker.title;
+        const owner = options.agent?.(worker);
+        const state = owner?.state ?? (workerReportedFinish(worker) ? 'sleeping' : active ? 'working' : 'history');
+        row.dataset.state = state;
+        const identity = worker.origin?.agentId ?? worker.title.split(' · ')[0] ?? worker.title;
+        const task = owner?.task?.trim();
+        const original = worker.origin?.task || worker.title;
+        // A worker still opening has no conversation yet; undefined === undefined must not read a model.
+        const model = worker.selectedModel && worker.conversationId && worker.selectedModel.conversationId === worker.conversationId
+          ? [worker.selectedModel.model, worker.selectedModel.reasoningEffort].filter(Boolean).join(' · ') : '';
+        const elapsedMs = Math.max(0, (active ? Date.now() : worker.endedAt ?? worker.updatedAt) - worker.startedAt);
+        const elapsed = elapsedMs < 60_000 ? `${Math.floor(elapsedMs / 1000)}s`
+          : elapsedMs < 3_600_000 ? `${Math.floor(elapsedMs / 60_000)}m` : `${Math.floor(elapsedMs / 3_600_000)}h`;
+        const avatar = el('span', 'agent-avatar', worker.origin?.agentId?.replace(/^worker-/, '') ?? '•');
+        const content = el('span', 'agent-card-content');
+        const heading = el('span', 'agent-card-heading');
+        heading.append(el('span', 'agent-status-dot'), el('strong', 'agent-card-name', identity));
+        if (model) heading.append(el('span', 'agent-card-model', model));
+        const statusLabel: Record<string, string> = { working: 'Working', history: 'History', invited: 'opening', detached: 'no tab' };
+        content.append(heading, el('span', 'agent-card-task', () => task || `${t('Original assignment')}: ${original}`),
+          el('span', 'agent-card-meta', () => `${t(statusLabel[state] ?? state)} · ${elapsed}`));
+        row.append(avatar, content);
+        row.title = task || original;
         row.onclick = () => void open(worker.id); body.append(row);
       }
     }

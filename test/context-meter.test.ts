@@ -26,6 +26,9 @@ it('keeps Pro static and identifies token estimates and compaction exclusion', (
 it('uses configured limits for ordinary models and supports click and Escape', () => {
   const doc = setup('gpt-5.6-sol-high');
   expect(doc.getElementById('contextMeterInfo')?.textContent).toContain('50% of configured limit');
+  // The compact count follows the system locale (100K in English, 100.000 in German).
+  const short = (value: number) => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 0 }).format(value);
+  expect(doc.getElementById('contextMeterCompact')?.textContent).toBe(`${short(100_000)} / ${short(200_000)} est.`);
   initContextMeter();
   const button = doc.getElementById('contextMeterButton')!;
   button.click();

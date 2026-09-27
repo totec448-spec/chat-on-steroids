@@ -1558,5 +1558,18 @@
   "{0} · syncing": "{0} · sincronizando",
   "{0} · {1} failed": "{0} · {1} falharam",
   "{0} · {1} · {2} ago": "{0} · {1} · há {2}",
-  "{0} — found {1} · app receipt {2} · owner {3} · tool activity {4}": "{0} — encontrados {1} · recibo do aplicativo {2} · responsável {3} · atividade de ferramentas {4}"
+  "{0} — found {1} · app receipt {2} · owner {3} · tool activity {4}": "{0} — encontrados {1} · recibo do aplicativo {2} · responsável {3} · atividade de ferramentas {4}",
+  "Code": "Código",
+  "est.": "est.",
+  "Original assignment": "Tarefa original",
+  "Check the build and show what changed.": "Verifique o build e mostre o que mudou.",
+  "Build passed. Here is the updated command:": "O build passou. Aqui está o comando atualizado:",
+  "✓ Complete": "✓ Concluído",
+  "Automatically recover unfinished answers": "Recuperar automaticamente respostas inacabadas",
+  "Continue an interrupted answer when the app can verify the unfinished turn.": "Continua uma resposta interrompida quando o aplicativo consegue confirmar que o turno ficou inacabado.",
+  "Recovery timing details": "Detalhes dos tempos de recuperação",
+  "Unverified": "Não verificado",
+  "Failed": "Falhou",
+  "Finished": "Concluído",
+  "Could not copy text.": "Não foi possível copiar o texto."
 }
