@@ -1,6 +1,7 @@
 import { el, icon } from './dom.js';
 import { t, ui } from './i18n.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
+import { hideSlidingPanel, showSlidingPanel } from './panel-motion.js';
 
 export type DockView = 'review' | 'files' | 'agents' | 'terminal';
 type AdoptableView = Exclude<DockView, 'terminal'>;
@@ -114,14 +115,18 @@ export function createWorkspaceDocks(host: HTMLElement) {
   };
   const paint = (): void => {
     if (active && !available(active)) { hideView(active); active = null; }
-    right.hidden = !rightOpen;
+    if (right.hidden === rightOpen) {
+      if (rightOpen) showSlidingPanel(right, 'right'); else hideSlidingPanel(right, 'right');
+    }
     rightToggle.setAttribute('aria-expanded', String(rightOpen)); rightToggle.classList.toggle('is-active', rightOpen);
     expandToggle.hidden = !rightOpen;
     expandToggle.setAttribute('aria-pressed', String(expanded));
     expandToggle.title = t(expanded ? 'Restore right panel' : 'Expand right panel');
     expandToggle.setAttribute('aria-label', expandToggle.title);
     expandToggle.querySelector('use')?.setAttribute('href', expanded ? '#i-dock-restore' : '#i-dock-expand');
-    bottom.hidden = !bottomOpen;
+    if (bottom.hidden === bottomOpen) {
+      if (bottomOpen) showSlidingPanel(bottom, 'up'); else hideSlidingPanel(bottom, 'up');
+    }
     bottomToggle.setAttribute('aria-expanded', String(bottomOpen)); bottomToggle.classList.toggle('is-active', bottomOpen);
     empty.hidden = active !== null;
     bar.hidden = opened.length === 0;
