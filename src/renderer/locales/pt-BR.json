@@ -1651,6 +1651,7 @@
   "No pets match your search.": "Nenhum pet corresponde à sua busca.",
   "Pet operation failed": "A operação do pet falhou",
   "This removes the pet from your local library. You can import it again later.": "Isso remove o pet da sua biblioteca local. Você pode importá-lo novamente depois.",
+  "Playful status words: show rotating gym jokes instead of “Working”": "Palavras de status divertidas: mostrar piadas de academia no lugar de “Working”",
   "GitHub URL": "URL do GitHub",
   "https://github.com/owner/repo/tree/main/skill": "https://github.com/owner/repo/tree/main/skill",
   "Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.": "Importe uma pasta, um SKILL.md avulso ou uma skill pública do GitHub. Skills locais podem ser vinculadas à fonte no GitHub para verificar atualizações; instalar uma atualização é sempre escolha sua.",
@@ -1677,5 +1678,7 @@
   "This moves the skill and its resources to the Trash. Existing prepared messages will not change.": "Isso move a skill e seus recursos para a Lixeira. Mensagens já preparadas não mudam.",
   "Skill imported into the CoS library": "Skill importada para a biblioteca do CoS",
   "All {0} steps done": "Todas as {0} etapas concluídas",
-  "{0} of {1} steps done": "{0} de {1} etapas concluídas"
+  "{0} of {1} steps done": "{0} de {1} etapas concluídas",
+  "Recommended": "Recomendadas",
+  "Install": "Instalar"
 }

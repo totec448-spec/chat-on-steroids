@@ -45,7 +45,44 @@ export function initSkillsLibrary(api: AppApi): () => void {
     source.title = check?.error ? `${skill.origin.url}\n${check.error}` : skill.origin.url;
   };
 
+  let recommended: Array<{ id: string; name: string; description: string }> = [];
+  const renderRecommended = (): void => {
+    const section = document.getElementById('skillsRecommendedSection');
+    if (!section) return;
+    const installed = new Set(skills.map(skill => skill.id));
+    const query = $<HTMLInputElement>('skillsSearch').value.trim().toLocaleLowerCase();
+    const available = recommended.filter(entry => !installed.has(entry.id) &&
+      `${entry.id} ${entry.name} ${entry.description}`.toLocaleLowerCase().includes(query));
+    section.hidden = available.length === 0;
+    ui($('skillsRecommendedCount'), 'textContent', () => t(available.length === 1 ? '{0} skill' : '{0} skills', [available.length]));
+    const host = $('skillsRecommended');
+    host.replaceChildren();
+    for (const entry of available) {
+      const card = el('article', 'plugin-card pet-library-card skill-library-card');
+      card.dataset.recommendedSkillId = entry.id;
+      const body = el('div', 'plugin-entry pet-library-entry');
+      const artwork = el('div', 'skill-library-icon'); artwork.append(icon('i-skill'));
+      const title = el('div', 'plugin-card-title');
+      title.append(el('h2', '', entry.name), el('p', 'muted', entry.description));
+      const foot = el('div', 'plugin-card-foot');
+      foot.append(el('span', 'skill-library-id', `/${entry.id}`));
+      const install = el('button', 'btn skill-recommended-install', () => t('Install')) as HTMLButtonElement;
+      install.type = 'button';
+      install.addEventListener('click', () => void (async () => {
+        install.disabled = true;
+        try { if (await update(api.installRecommendedSkill(entry.id))) toast(t('Skill imported into the CoS library')); }
+        finally { if (install.isConnected) install.disabled = false; }
+      })());
+      foot.append(install);
+      title.append(foot);
+      body.append(artwork, title);
+      card.append(body);
+      host.append(card);
+    }
+  };
+
   const render = (): void => {
+    renderRecommended();
     const host = $('skillsInstalled');
     const query = $<HTMLInputElement>('skillsSearch').value.trim().toLocaleLowerCase();
     const visible = skills.filter(skill => `${skill.id} ${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query));
@@ -304,5 +341,6 @@ export function initSkillsLibrary(api: AppApi): () => void {
     }
   })());
   void update(api.listManagedSkills());
+  if (typeof api.listRecommendedSkills === 'function') void run(api.listRecommendedSkills()).then(list => { if (list) { recommended = list; renderRecommended(); } });
   return () => refresh(false);
 }
