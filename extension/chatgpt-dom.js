@@ -374,6 +374,9 @@ var CLF_DOM = (() => {
       if (!value) return '';
       value = value.replace(/\s*(?:[-|·]\s*)ChatGPT\s*$/i, '').trim();
       if (!value || /^(?:ChatGPT|New chat)$/i.test(value)) return '';
+      // A project chat reads "ChatGPT - <project>" until ChatGPT names the conversation.
+      // That is the project, not this chat's title.
+      if (/^ChatGPT\s*[-|·–]\s*/i.test(value)) return '';
       return value.slice(0, 200);
     }, '');
   }
