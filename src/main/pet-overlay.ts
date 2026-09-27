@@ -7,6 +7,7 @@ import { highestPetActivityLevel, petActivityForAgent, petActivityForSession, pe
 import { getConfig } from './config.js';
 import { logWarn } from './logger.js';
 import { onPetLibraryChange, petLibraryState } from './pet-library.js';
+import { windowsPetFocus, type PetWindowFocus } from './pet-window-focus.js';
 import { activeSessionId, onSessionChange, sessionIdForConversation } from './session/recorder.js';
 import { getSession } from './session/store.js';
 import { blockedChatIds } from './session/blocked-chats.js';
@@ -26,6 +27,7 @@ let ownerWindow: (() => BrowserWindow | null) | null = null;
 let activateOwner: (() => void) | null = null;
 let overlay: BrowserWindow | null = null;
 let overlayReady = false;
+let overlayFocus: PetWindowFocus | null = null;
 let overlayInteractive: boolean | null = null;
 let globallyVisible = true;
 // Read-only projection of the library owner's publication. Catalog reads validate/decode
@@ -283,6 +285,7 @@ function registerOverlayIpc(): void {
     setInteractive(request.interactive === true, request.regions);
   });
   ipcMain.on('pet-overlay:focusOwner', event => { if (validSender(event.sender.id)) focusOwner(); });
+  ipcMain.on('pet-overlay:releaseFocus', event => { if (validSender(event.sender.id)) overlayFocus?.release(); });
   ipcMain.on('pet-overlay:openLibrary', event => { if (validSender(event.sender.id)) showOwner('pets'); });
   ipcMain.on('pet-overlay:hidePet', (event, id: unknown) => {
     if (!validSender(event.sender.id) || typeof id !== 'string') return;
@@ -336,10 +339,22 @@ async function ensureOverlay(): Promise<BrowserWindow> {
   });
   const gone = (): void => {
     if (overlay !== win) return;
+    overlayFocus?.dispose(); overlayFocus = null;
     stopPointerTracking(); overlayReady = false; overlayInteractive = null; overlay = null; lastSnapshotSent = null; sendControl();
   };
   win.on('closed', gone);
   win.webContents.on('render-process-gone', gone);
+  if (process.platform === 'win32') {
+    try {
+      const focus = await windowsPetFocus(win);
+      // Loading native code may outlive shutdown or replacement of this window.
+      if (overlay !== win || win.isDestroyed()) { focus.dispose(); return win; }
+      overlayFocus = focus;
+    } catch (error) {
+      if (!win.isDestroyed()) win.destroy();
+      throw error;
+    }
+  }
   if (process.env.ELECTRON_RENDERER_URL) {
     const base = process.env.ELECTRON_RENDERER_URL.endsWith('/') ? process.env.ELECTRON_RENDERER_URL : `${process.env.ELECTRON_RENDERER_URL}/`;
     await win.loadURL(new URL('pet-overlay.html', base).toString());
@@ -356,6 +371,7 @@ async function syncVisibility(): Promise<void> {
   }
   try {
     const win = await ensureOverlay();
+    if (overlay !== win || win.isDestroyed()) return;
     if (!shouldShow()) return void syncVisibility();
     sendLibrary(); sendSnapshot();
     if (overlayReady && !win.isVisible()) win.showInactive();
@@ -395,6 +411,7 @@ export async function startPetOverlay(getOwner: () => BrowserWindow | null, requ
 }
 
 export async function shutdownPetOverlay(): Promise<void> {
+  overlayFocus?.dispose(); overlayFocus = null;
   stopPointerTracking();
   if (expiryTimer) clearTimeout(expiryTimer);
   expiryTimer = null;

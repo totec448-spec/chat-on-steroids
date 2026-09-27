@@ -72,11 +72,11 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
   let pointerListener: ((point: PetOverlayPointer) => void) | null = null;
   let boundsListener: ((bounds: PetOverlayBounds) => void) | null = null;
   const setInteractive = vi.fn(), focusOwner = vi.fn(), openActivity = vi.fn(), openLibrary = vi.fn();
-  const hidePet = vi.fn();
+  const hidePet = vi.fn(), releaseFocus = vi.fn();
   const petApi = {
     listPets: () => ok(library),
     petAsset: (id: string) => ok({ id, kind: 'cos' as const, atlasDataUrl: 'data:image/png;base64,YXRsYXM=', manifest: authoredManifest }),
-    hidePet, setInteractive, focusOwner, openLibrary, openActivity,
+    hidePet, setInteractive, focusOwner, releaseFocus, openLibrary, openActivity,
     onSnapshot: (listener: (snapshot: PetOverlaySnapshot) => void) => { snapshotListener = listener; return vi.fn(); },
     onLibraryChanged: () => vi.fn(),
     onPointer: (listener: (point: PetOverlayPointer) => void) => { pointerListener = listener; return vi.fn(); },
@@ -165,6 +165,7 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
   pointer(tur, 'pointerup', 190, 150, 7);
   expect(tur.dataset.state).toBe('landing');
   expect(focusOwner).not.toHaveBeenCalled();
+  expect(releaseFocus).toHaveBeenCalledOnce();
   dom.window.document.dispatchEvent(new dom.window.MouseEvent('mousemove', { clientX: 700, clientY: 700, bubbles: true }));
   expect(setInteractive).toHaveBeenLastCalledWith(false, []);
 
@@ -172,6 +173,15 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
   pointer(tur, 'pointerup', 120, 120, 8);
   expect(tur.dataset.state).toBe('poke');
   expect(focusOwner).toHaveBeenCalledOnce();
+  expect(releaseFocus).toHaveBeenCalledOnce();
+
+  for (const type of ['pointercancel', 'lostpointercapture']) {
+    pointer(tur, 'pointerdown', 120, 120, 9);
+    pointer(tur, 'pointermove', 170, 160, 9);
+    pointer(tur, type, 170, 160, 9);
+    expect(tur.dataset.dragging).toBe('false');
+  }
+  expect(releaseFocus).toHaveBeenCalledTimes(3);
 
   const willow = dom.window.document.querySelector<HTMLElement>('.pet-shell[data-pet-id="willow"]')!;
   willow.dispatchEvent(new dom.window.MouseEvent('contextmenu', { clientX: 320, clientY: 280, bubbles: true }));

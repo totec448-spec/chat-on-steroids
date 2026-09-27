@@ -1,7 +1,7 @@
 /**
  * Stage native dependencies that npm intentionally omits when the host platform/CPU differs
  * from the packaging target. node-pty and both tree-sitter packages carry all supported
- * prebuilds in one npm package; Sharp publishes target-specific optional @img packages.
+ * prebuilds in one npm package; Sharp and Koffi publish target-specific optional packages.
  *
  * electron-builder can therefore package x64 + arm64 from one checkout only after both Sharp
  * platform packages exist on disk. Their exact URL and integrity come from package-lock.json,
@@ -81,7 +81,7 @@ async function syncVerifiedTree(source, destination) {
   return true;
 }
 
-async function stageSharpPackage(lock, packageName, platform, arch) {
+async function stageNativePackage(lock, packageName, platform, arch) {
   const lockEntry = lock.packages?.[`node_modules/${packageName}`];
   if (!lockEntry?.version || !lockEntry.resolved || !lockEntry.integrity) {
     throw new Error(`package-lock.json has no complete ${packageName} entry`);
@@ -90,7 +90,8 @@ async function stageSharpPackage(lock, packageName, platform, arch) {
   const destination = path.join(root, 'node_modules', ...packageName.split('/'));
 
   await mkdir(cacheDir, { recursive: true });
-  const tarball = path.join(cacheDir, `${packageName.replace('@img/', '')}-${lockEntry.version}.tgz`);
+  const cacheName = packageName.replace(/[@/]/g, '-');
+  const tarball = path.join(cacheDir, `${cacheName}-${lockEntry.version}.tgz`);
   await download(lockEntry.resolved, tarball);
 
   const expected = sha512FromIntegrity(lockEntry.integrity);
@@ -100,7 +101,7 @@ async function stageSharpPackage(lock, packageName, platform, arch) {
     throw new Error(`Integrity mismatch for ${packageName}@${lockEntry.version}`);
   }
 
-  const extractDir = path.join(cacheDir, `extract-${packageName.replace('@img/', '')}-${lockEntry.version}`);
+  const extractDir = path.join(cacheDir, `extract-${cacheName}-${lockEntry.version}`);
   await rm(extractDir, { recursive: true, force: true });
   await mkdir(extractDir, { recursive: true });
   execFileSync(tarExecutableForPlatform(), ['-xzf', tarball, '-C', extractDir], { stdio: 'inherit' });
@@ -127,12 +128,12 @@ function requirePrebuild(relative) {
   if (!existsSync(target)) throw new Error(`Required native prebuild is missing: ${relative}`);
 }
 
-async function stageTargetPayload(platform, arch, sharpPackages) {
+async function stageTargetPayload(platform, arch, packages) {
   const payloadRoot = path.join(stagingRoot, platform, arch, 'node_modules');
   await rm(path.join(stagingRoot, platform, arch), { recursive: true, force: true });
   await mkdir(payloadRoot, { recursive: true });
 
-  for (const packageName of sharpPackages) {
+  for (const packageName of packages) {
     const relative = packageName.split('/');
     await cp(path.join(root, 'node_modules', ...relative), path.join(payloadRoot, ...relative), { recursive: true });
   }
@@ -155,9 +156,11 @@ async function stageTargetPayload(platform, arch, sharpPackages) {
 async function main() {
   const { platform, arch } = parseTarget();
   const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
-  const sharpPackages = sharpPackagesFor(platform, arch);
-  for (const packageName of sharpPackages) {
-    await stageSharpPackage(lock, packageName, platform, arch);
+  const packages = sharpPackagesFor(platform, arch);
+  // Only Windows Pets loads the FFI binding. Never ship host/foreign Koffi binaries.
+  if (platform === 'win32') packages.push(`@koromix/koffi-win32-${arch}`);
+  for (const packageName of packages) {
+    await stageNativePackage(lock, packageName, platform, arch);
   }
 
   const prebuildDir = nativePrebuildDir(platform, arch);
@@ -171,7 +174,7 @@ async function main() {
   }
   requirePrebuild(`tree-sitter/prebuilds/${prebuildDir}/tree-sitter.node`);
   requirePrebuild(`tree-sitter-bash/prebuilds/${prebuildDir}/tree-sitter-bash.node`);
-  await stageTargetPayload(platform, arch, sharpPackages);
+  await stageTargetPayload(platform, arch, packages);
   say(`${platform}-${arch} native dependency prebuilds are ready.`);
 }
 
