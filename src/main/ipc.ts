@@ -13,7 +13,7 @@ import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } f
 import { releaseSessionFinish, requestSessionFinishGoal } from './session/finish.js';
 import { GOAL_MARKER_INSTRUCTION } from '../shared/goal-templates.js';
 import { validateInputImages } from './session/input-images.js';
-import { stageInputAttachment, type AttachmentSource } from './session/input-attachments.js';
+import { stageInputAttachment, stageInputAttachments, type AttachmentSource } from './session/input-attachments.js';
 import { recordDeliveredInput, recordedInputImage } from './session/input-history.js';
 import { UI_BASE_ZOOM, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { usageOverview } from './session/usage.js';
@@ -952,9 +952,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
 
   const stageFiles = async (sources: AttachmentSource[]) => {
     const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
-    const result = [];
-    for (const source of sources) result.push(await stageInputAttachment(source, retained));
-    return result;
+    return stageInputAttachments(sources, retained);
   };
   handle('sessions:files', async () => {
     const chosen = await dialog.showOpenDialog({ title: 'Attach files', properties: ['openFile', 'multiSelections'] });
