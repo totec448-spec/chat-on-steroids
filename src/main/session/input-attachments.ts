@@ -23,11 +23,15 @@ function fileFor(id: string): string { return path.join(directory(), z.string().
 let staging: Promise<unknown> = Promise.resolve();
 export type AttachmentSource = string | { text: string } | { name: string; bytes: Uint8Array };
 export function stageInputAttachment(source: AttachmentSource, retained: Set<string>): Promise<InputAttachment> {
-  const next = staging.then(() => stage(source, retained));
+  return stageInputAttachments([source], retained).then((attachments) => attachments[0]!);
+}
+/** Stage one renderer/file-picker batch under one quota/prune snapshot. */
+export function stageInputAttachments(sources: AttachmentSource[], retained: Set<string>): Promise<InputAttachment[]> {
+  const next = staging.then(() => stageBatch(sources, retained));
   staging = next.catch(() => undefined);
   return next;
 }
-async function stage(source: AttachmentSource, retained: Set<string>): Promise<InputAttachment> {
+async function stageBatch(sources: AttachmentSource[], retained: Set<string>): Promise<InputAttachment[]> {
   const dir = directory();
   await fs.mkdir(dir, { recursive: true });
   let used = 0;
@@ -38,6 +42,15 @@ async function stage(source: AttachmentSource, retained: Set<string>): Promise<I
       await fs.unlink(file); await fs.unlink(file + '.json').catch(() => undefined);
     } else used += stat.size;
   }
+  const attachments: InputAttachment[] = [];
+  for (const source of sources) {
+    const staged = await stageOne(source, used);
+    used += staged.size;
+    attachments.push(staged);
+  }
+  return attachments;
+}
+async function stageOne(source: AttachmentSource, used: number): Promise<InputAttachment> {
   const stat = typeof source === 'string' ? await fs.stat(source) : null;
   const size = typeof source === 'string' ? stat!.size : 'text' in source ? Buffer.byteLength(source.text) : source.bytes.byteLength;
   if (stat && !stat.isFile()) throw new Error('Attach files individually; folders cannot be uploaded');
