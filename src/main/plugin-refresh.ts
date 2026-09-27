@@ -4,12 +4,13 @@ import { readDurable, writeDurableNow } from './durable.js';
 import { wakeBrowserWork } from './browser-wake.js';
 import { logInfo, logWarn } from './logger.js';
 import { surfaceDefinition } from './mcp/surfaces.js';
+import { APP_VERSION } from './version.js';
 import { PLUGIN_MAX_TOOLS } from './plugins/exposure.js';
 import type { PluginPublication, PluginRefreshRequest, PluginSurface, PluginToolSchema } from '../shared/plugin-refresh.js';
 
 const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
 const LEGACY_PLUGIN_MAX_TOOLS = 64;
-const rowSchema = z.object({ surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), versionId: z.string().max(200).optional(), failures: z.number().int().nonnegative().optional(), parked: z.boolean().optional() });
+const rowSchema = z.object({ surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), versionId: z.string().max(200).optional(), failures: z.number().int().nonnegative().optional(), parked: z.boolean().optional(), parkedBy: z.string().max(40).optional() });
 type Row = z.infer<typeof rowSchema>;
 const publications = new Map<PluginSurface, PluginPublication>();
 const settling = new Map<PluginSurface, { schemaId: string; readyAt: number; timer?: ReturnType<typeof setTimeout> }>();
@@ -21,7 +22,7 @@ export const PLUGIN_REFRESH_DEBOUNCE_MS = 20_000;
  * always repeats: the settings page has no card this build can read. Measured 2026-09-26, one
  * request pending since 07:24 kept its helper page coming back, and every lost owner record
  * (extension restart, reload that dropped the marker) opened another tab. Parking keeps the
- * reason visible; a new schema or an explicit Restart tries again.
+ * reason visible; a new schema, an explicit Restart or an app update tries again.
  */
 export const PLUGIN_REFRESH_FAILURE_LIMIT = 3;
 let chain: Promise<unknown> = Promise.resolve();
@@ -34,6 +35,13 @@ async function rows(): Promise<Row[]> {
   let repaired = false;
   for (const row of result) if (row.attempted && row.appId === null) {
     row.attempted = false; delete row.error; repaired = true;
+  }
+  // A park records what this build could not do. Every row parked on 2026-09-26/27 failed
+  // because the extension could not read ChatGPT's new plugin page, and without a schema change
+  // or a manual Restart the update that learned to read it would never have been tried.
+  for (const row of result) if (row.parked && row.parkedBy !== APP_VERSION) {
+    row.id = randomUUID(); delete row.parked; delete row.parkedBy; delete row.failures; delete row.error; repaired = true;
+    logInfo(`plugin refresh unparked surface=${row.surface} for app ${APP_VERSION}`);
   }
   if (repaired) await writeDurableNow('plugin-refresh', result);
   return result;
@@ -118,6 +126,7 @@ export function rearmPluginRefresh(surface: PluginSurface): Promise<boolean> {
     delete row.error;
     delete row.failures;
     delete row.parked;
+    delete row.parkedBy;
     await writeDurableNow('plugin-refresh', current);
     wakeBrowserWork();
     return true;
@@ -213,7 +222,7 @@ export function failPluginRefresh(input: { id: string; error: string }): Promise
     row.error = input.error.slice(0, 200);
     row.failures = (row.failures ?? 0) + 1;
     if (row.failures >= PLUGIN_REFRESH_FAILURE_LIMIT && !row.parked) {
-      row.parked = true;
+      row.parked = true; row.parkedBy = APP_VERSION;
       logWarn(`plugin refresh parked surface=${row.surface} after ${row.failures} failed attempts: ${row.error}`);
     }
     await writeDurableNow('plugin-refresh', current); return true;

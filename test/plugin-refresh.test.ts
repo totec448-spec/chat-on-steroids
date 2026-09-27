@@ -4,6 +4,7 @@ vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: wake }));
 import { initDurableStore, resetDurableForTests, readDurable, writeDurableNow } from '../src/main/durable.js';
 import { PLUGIN_REFRESH_FAILURE_LIMIT, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
+import { APP_VERSION } from '../src/main/version.js';
 import { buildServer } from '../src/main/mcp/tools.js';
 import { defaultConfig } from '../src/main/config.js';
 import type { PluginToolSchema } from '../src/shared/plugin-refresh.js';
@@ -291,4 +292,19 @@ it('parks a schema whose page keeps failing before any claim, until Restart', as
   request = (await pendingPluginRefreshes())[0]!;
   expect(request).toBeDefined();
   expect((await readDurable('plugin-refresh') as any[])[0].failures).toBeUndefined();
+});
+it('tries a parked schema once more after an app update', async () => {
+  // Parked by builds that could not read ChatGPT's new plugin page; only the update can.
+  publishPlugins(tools);
+  const request = (await pendingPluginRefreshes())[0]!;
+  for (let attempt = 0; attempt < PLUGIN_REFRESH_FAILURE_LIMIT; attempt++) await failPluginRefresh({ id: request.id, error: 'The connector settings card could not be read' });
+  expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ parked: true, parkedBy: APP_VERSION });
+  expect(await pendingPluginRefreshes()).toEqual([]);
+  const rows = await readDurable('plugin-refresh') as any[];
+  delete rows[0].parkedBy; // parked by 2.1.15, which did not record its version
+  await writeDurableNow('plugin-refresh', rows);
+  const retried = await pendingPluginRefreshes();
+  expect(retried).toHaveLength(1);
+  expect(retried[0]!.id).not.toBe(request.id);
+  expect((await readDurable('plugin-refresh') as any[])[0]).not.toHaveProperty('failures');
 });
