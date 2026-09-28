@@ -9,9 +9,7 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## Unreleased
-
-Draft for 2.1.17 — Workspace and self-updating extension. The release sets the version heading.
+## [2.1.17] — Workspace and self-updating extension
 
 A feature update. The app gets a workspace next to your chat, pets on your desktop, and an extension that keeps itself up to date. CoS now speaks German and Brazilian Portuguese.
 
@@ -38,6 +36,7 @@ A feature update. The app gets a workspace next to your chat, pets on your deskt
 - **Project chats get their real title** instead of "ChatGPT - <project name>".
 - **Chats started from the app are named after your request.** ChatGPT named them after CoS's instructions, so they were all called something like "Coding Agent Instructions". Existing chats get their proper name back too.
 - **Pets respond reliably again** after you hide and show them, and they no longer reread your pet library while the mouse moves.
+- **Dragging pets works on Windows** after you hide and show them, and typing goes back to the window you were using once you let go.
 - **Web Fetch and other Python plugins install without extra setup.** If the `uv` tool they need is missing, CoS downloads a verified copy for itself instead of failing with "runtime uv is unavailable".
 - **Goal and Loop work again when your saved model is gone.** The step that decides what comes next failed when ChatGPT no longer offered the model saved in Settings; it now uses one that is available.
 - **Setup matches ChatGPT's new settings.** ChatGPT no longer has a Developer mode switch; you now create the app from Plugins → Add → Create MCP App. The setup steps and the connection check say so.
