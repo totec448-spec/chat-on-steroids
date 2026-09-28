@@ -8154,6 +8154,46 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(emitted(live.sent, 'turn_start')).toHaveLength(2);
   });
 
+  it('does not close a new turn with the previous answer remounted above its question', async () => {
+    // Live 2026-09-27/28: ChatGPT remounted the previous answer as the next question was sent.
+    // The new generation adopted that finished section, and its end_turn closed the new turn
+    // 5 ms after turn_start, before the tool call and the answer it was waiting for.
+    live = await harness();
+    startGenerating(live.document);
+    userTurn(live.document, 'remount-q1', 'first question');
+    const first = assistantTurn(live.document, 'remount-a1', []);
+    live.hook.observe(); await settle();
+    const firstEnd = { turnId: 'remount-a1', endMessageId: 'remount-a1-final', calls: [], activities: [],
+      messages: [{ messageId: 'remount-a1-final', stable: true, rawText: 'First answer.', renderedHtml: '<p>First answer.</p>' }] };
+    await bindFiberTurns([{ section: first, turn: firstEnd }]);
+    await live.hook.flush(); await settle();
+    stopGenerating(live.document);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+
+    const question = userTurn(live.document, 'remount-q2', 'second question');
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(2);
+    first.remove();
+    const remounted = assistantTurn(live.document, 'remount-a1', []);
+    question.before(remounted);
+    live.hook.observe(); await settle();
+    await bindFiberTurns([{ section: remounted, turn: firstEnd }]);
+    await live.hook.flush(); await settle();
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+
+    const second = assistantTurn(live.document, 'remount-a2', []);
+    live.hook.observe(); await settle();
+    await bindFiberTurns([{ section: remounted, turn: firstEnd }, { section: second, turn: { turnId: 'remount-a2', endMessageId: 'remount-a2-final',
+      calls: [], activities: [], messages: [{ messageId: 'remount-a2-final', stable: true, rawText: 'Second answer.', renderedHtml: '<p>Second answer.</p>' }] } }]);
+    await live.hook.flush(); await settle();
+    const ends = emitted(live.sent, 'turn_end').map(entry => entry.event);
+    expect(ends).toHaveLength(2);
+    expect(ends[1]).toMatchObject({ turnId: emitted(live.sent, 'turn_start')[1]!.event.turnId, outcome: 'completed' });
+  });
+
   it('keeps final ownership when ChatGPT reuses a page turn id after another question', async () => {
     live = await harness();
     startGenerating(live.document);
@@ -10562,6 +10602,24 @@ describe('evidence from the page context', () => {
       data: { type: 'cos-request-origin', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', requestIds: ['wfr_helper'] }
     }));
     await settle();
+    expect(live.sent.filter(message => message.type === 'correlate')).toEqual([]);
+  });
+
+  it('does not correlate Fiber request sightings from a Goal helper temporary chat', async () => {
+    // Live 2026-09-28: two of six Goal decisions still opened an empty "ChatGPT session".
+    // Their request ids came from the Fiber scan, not from the stream-origin message above.
+    live = await harness('https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?temporary-chat=true&cos-input=helper-decision#cos-input=helper-decision');
+    live.reply.set('correlate', () => ({ ok: true, data: { ok: true, confirmed: ['wfr_helper_fiber'] } }));
+    startGenerating(live.document);
+    assistantTurn(live.document, 'helper-live-turn', []);
+    live.hook.observe();
+    await settle();
+    await replyFiber([], [{
+      turnId: 'helper-live-turn', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', messages: [],
+      calls: [{ messageId: 'helper-request-message', tool: 'exec_command', order: 0, answered: false, requestId: 'wfr_helper_fiber', createTime: 1_700_000_001 }]
+    }]);
+    await settle();
+    await live.hook.flush();
     expect(live.sent.filter(message => message.type === 'correlate')).toEqual([]);
   });
 

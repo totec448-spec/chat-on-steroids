@@ -231,6 +231,30 @@ describe('what leaves this machine', () => {
     expect(sent.includes('/project/example')).toBe(false);
   });
 
+  it('tells the helper how many CoS calls a turn made, and nothing about them', async () => {
+    // Live 2026-09-28: the helper saw only "goal-ok" and asked five more times to "actually run"
+    // a command that had run every time.
+    const session = await createSession({ title: 'tool count', conversationId: 'tool-count' });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Run echo goal-ok', chars: 16, truncated: false } });
+    for (const [index, turnId] of ['count-turn', 'count-turn', 'other-turn'].entries()) {
+      await appendEvent(session.id, { time: 110 + index, source: 'mcp', kind: 'tool_call', turnId, call: {
+        callId: `count-call-${index}`, tool: 'exec_command', attribution: 'request_id', requestId: `count-request-${index}`, conversationId: session.conversationId,
+        attributionMethod: 'request_id', outcome: 'ok', durationMs: 1,
+        args: { text: '{"cmd":"echo SECRET_ARGUMENT"}', chars: 30, truncated: false },
+        result: { text: 'SECRET_RESULT', chars: 13, truncated: false },
+        summary: { kind: 'run', tone: 'neutral', title: 'Ran a command' }
+      } });
+    }
+    await appendEvent(session.id, { time: 120, source: 'extension', kind: 'assistant_message', turnId: 'count-turn', messageId: 'count-final', final: true,
+      message: { text: 'goal-ok', chars: 7, truncated: false } });
+    const projected = await goal.conversationMessages(session.id);
+    expect(projected).toEqual([
+      { role: 'user', content: 'Run echo goal-ok' },
+      { role: 'assistant', content: 'goal-ok\n\n[Chat On Steroids: 2 tool calls ran in this turn. Arguments and results are not shown.]' }
+    ]);
+    expect(JSON.stringify(projected)).not.toMatch(/exec_command|SECRET_ARGUMENT|SECRET_RESULT/);
+  });
+
   it('gives decision helpers authored requests without executor guidance in the reference transcript', async () => {
     const { prependUserPrompt } = await import('../src/shared/user-prompt.js');
     const session = await createSession({ title: 'authored helper context', conversationId: 'authored-helper-context' });
