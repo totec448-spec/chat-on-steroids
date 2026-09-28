@@ -129,6 +129,16 @@ describe('the user’s own connector instructions', () => {
     expect(withoutCommands).not.toContain('exec_command runs');
   });
 
+  it('explains the transient ChatGPT safety refusal and offers session_finish to any model', () => {
+    // #555: a benign call was blocked once by ChatGPT and succeeded unchanged on retry.
+    const text = serverInstructions({ ...ctx, exposedFinishTool: true }, 'core', 'win32');
+    expect(text).toContain('"This tool call was blocked by OpenAI because we couldn\'t determine the safety status of the request." comes from ChatGPT before CoS receives the call');
+    expect(text).toContain('retry the identical call once');
+    // #556: the tool is exposed by the finish setting, not by model; Sol users were told "Astra only".
+    expect(text).toContain('Use session_finish only when the user prompt explicitly requests it, with any model.');
+    expect(text).not.toMatch(/Astra only/);
+  });
+
   it('adds nothing at all when empty, not even the heading', () => {
     expect(defaultConfig().mcp.instructions).toBe('');
     for (const surface of ['core', 'desktop'] as const) {
