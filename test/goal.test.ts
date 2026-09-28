@@ -255,6 +255,19 @@ describe('what leaves this machine', () => {
     expect(JSON.stringify(projected)).not.toMatch(/exec_command|SECRET_ARGUMENT|SECRET_RESULT/);
   });
 
+  it('gives the helper the reply a content-reference pointer stands for, not the pointer (#574)', async () => {
+    const session = await createSession({ title: 'pointer replies', conversationId: 'pointer-replies' });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Hi', chars: 2, truncated: false } });
+    const pointer = '::chatgpt-content-reference{index="0" source_message_id="d2b82e00-509e-4a87-aa93-00bcde251680"}';
+    await appendEvent(session.id, { time: 110, source: 'extension', kind: 'assistant_message', messageId: 'pointer-final', final: true,
+      message: { text: pointer, chars: pointer.length, truncated: false },
+      renderedHtml: { text: '<p>Hi! How can I help you today?</p>', chars: 36, truncated: false } });
+    expect(await goal.conversationMessages(session.id)).toEqual([
+      { role: 'user', content: 'Hi' },
+      { role: 'assistant', content: 'Hi! How can I help you today?' }
+    ]);
+  });
+
   it('gives decision helpers authored requests without executor guidance in the reference transcript', async () => {
     const { prependUserPrompt } = await import('../src/shared/user-prompt.js');
     const session = await createSession({ title: 'authored helper context', conversationId: 'authored-helper-context' });

@@ -21,6 +21,7 @@
  *   sessions/<id>/handoffs/<id>.json
  */
 
+import { modelFacingText } from '../../shared/content-reference.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isProModel } from '../../shared/chat-models.js';
 import { constants as fsConstants, promises as fs } from 'node:fs';
@@ -1801,7 +1802,7 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
     return event.kind === 'assistant_message' || event.kind === 'page_tool';
   })) return null;
   return { messageId, turnId: final.turnId ?? null, completedAt, contentSeq: seq,
-    text: final.kind === 'turn_end' ? '' : final.message.text };
+    text: final.kind === 'turn_end' ? '' : modelFacingText(final.message.text, final.renderedHtml) };
 }
 
 /** Recorded local execution, not a native tool label or a request-id sighting alone. */
