@@ -15,7 +15,8 @@ export interface RecommendedSkill {
 }
 
 function skill(id: string, name: string, description: string, body: string): RecommendedSkill {
-  return { id, name, description, markdown: `---\nname: ${name}\ndescription: ${description}\n---\n\n${body.trim()}\n` };
+  // Quoted scalars: a description with ": " is otherwise read as a nested YAML mapping (#561).
+  return { id, name, description, markdown: `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n---\n\n${body.trim()}\n` };
 }
 
 export const RECOMMENDED_SKILLS: readonly RecommendedSkill[] = [
