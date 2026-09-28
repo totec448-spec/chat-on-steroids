@@ -156,7 +156,7 @@ it('shows real Git groups, tree markers, unified diffs, and reconciles metadata 
     changes: [
       { status: 'M', path: 'README.md', additions: 2, deletions: 1, binary: false },
       { status: 'A', path: 'src/staged.ts', additions: 1, deletions: 0, binary: false },
-      { status: 'U', path: 'src/new.ts', additions: 4, deletions: 0, binary: false },
+      { status: 'U', path: 'src/new.ts', additions: 1, deletions: 0, binary: false },
       { status: 'D', path: 'old.ts', additions: 0, deletions: 3, binary: false },
       { status: 'R', path: 'src/main.ts', previousPath: 'src/old-main.ts', additions: 1, deletions: 1, binary: false }
     ]
@@ -189,7 +189,7 @@ it('shows real Git groups, tree markers, unified diffs, and reconciles metadata 
   expect(host.textContent).toContain('Renamed (1)');
   expect(host.textContent).toContain('Untracked (1)');
   expect(host.querySelector('.file-change-row[data-path="src/new.ts"] .file-change-status')?.textContent).toBe('U');
-  expect(host.querySelector('.file-change-row[data-path="src/new.ts"] .file-change-stats')?.textContent).toBe('4 lines');
+  expect(host.querySelector('.file-change-row[data-path="src/new.ts"] .file-change-stats')?.textContent).toBe('1 line');
   expect(host.querySelector('.file-change-row[data-path="src/staged.ts"] .file-change-stats')?.textContent).toContain('+1');
   expect(window.api.watchProjectFiles).toHaveBeenLastCalledWith(projectA.id, ['', 'src']);
   const action = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.file-panel-toolbar button')]
