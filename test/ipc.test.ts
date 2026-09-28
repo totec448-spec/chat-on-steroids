@@ -823,6 +823,33 @@ describe('settings writes from more than one UI', () => {
     expect((await save({ ...current, mcp: { instructions: 'x'.repeat(4001) } }, current)).ok).toBe(false);
     expect(getConfig().mcp.instructions).toBe('');
   });
+  it('starts and stops the local control API only when its switch changes, and keeps it through stale saves', async () => {
+    const controlApi = await import('../src/main/control-api.js');
+    controlApi.initControlApiPath(dir);
+    const endpoint = path.join(dir, 'control-api', 'endpoint.json');
+    try {
+      const base = defaultConfig(); await saveConfig(base);
+      expect((await save({ ...base, controlApi: { enabled: true } }, base)).ok).toBe(true);
+      expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).controlApi).toEqual({ enabled: true });
+      const { port } = JSON.parse(await fs.readFile(endpoint, 'utf8'));
+      expect(controlApi.controlApiPort()).toBe(port);
+      // A save from a form that still shows the old value, and one from a build that has no
+      // such field, both leave the switch and the running listener alone.
+      expect((await save({ ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } }, base)).ok).toBe(true);
+      const legacy = { ...base } as Partial<typeof base>; delete legacy.controlApi;
+      expect((await save(legacy, legacy)).ok).toBe(true);
+      expect(getConfig().controlApi.enabled).toBe(true);
+      expect(controlApi.controlApiPort()).toBe(port);
+      const current = getConfig();
+      expect((await save({ ...current, controlApi: { enabled: false } }, current)).ok).toBe(true);
+      expect(controlApi.controlApiPort()).toBeNull();
+      await expect(fs.access(endpoint)).rejects.toThrow();
+      // Switched off means nothing listens any more, not merely that requests are refused.
+      await expect(fetch(`http://127.0.0.1:${port}/v1/health`)).rejects.toThrow();
+    } finally {
+      await controlApi.stopControlApi();
+    }
+  });
   it('saves helper settings and tab retention through the renderer schema and merge boundary', async () => {
     const base = defaultConfig();
     await saveConfig(base);

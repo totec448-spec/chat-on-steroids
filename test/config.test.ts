@@ -136,6 +136,20 @@ describe('settings migration', () => {
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, startAtLogin: true, autoConnect: false } });
     expect((await loadConfig()).ui).toMatchObject({ startAtLogin: true, autoConnect: false });
   });
+  it('keeps the local control API off for fresh, legacy and malformed configs while preserving explicit opt-in', async () => {
+    expect(defaultConfig().controlApi).toEqual({ enabled: false });
+    const legacy = defaultConfig() as Partial<ReturnType<typeof defaultConfig>>; delete legacy.controlApi;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).controlApi).toEqual({ enabled: false });
+    await saveConfig({ ...defaultConfig(), controlApi: { enabled: true } });
+    expect((await loadConfig()).controlApi.enabled).toBe(true);
+    // A bad value repairs to off without sending the rest of the file through recovery.
+    const malformed = { ...defaultConfig(), readOnly: true, controlApi: { enabled: 'yes' } };
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(malformed), 'utf8');
+    const loaded = await loadConfig();
+    expect(loaded.controlApi.enabled).toBe(false);
+    expect(loaded.readOnly).toBe(true);
+  });
   it('defaults automatic plugin refresh off for fresh and legacy settings while preserving explicit opt-in', async () => {
     expect(defaultConfig().ui.autoRefreshPlugins).toBe(false);
     const legacy = defaultConfig(); delete legacy.ui.autoRefreshPlugins;
