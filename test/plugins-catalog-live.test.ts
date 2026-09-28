@@ -11,7 +11,9 @@ import { makeTempDir, removeTempDir } from './helpers.js';
 
 // Opt-in: actual pinned packages on each CI OS; editor discovery needs no user project.
 // Playwright executes against an ephemeral loopback page, never the user's browser/profile.
-for (const id of ['blender', 'unity', 'playwright']) {
+// Every locally installed catalog entry is here (fetch has its own Python test); heygen and
+// recraft are hosted OAuth services with nothing to install.
+for (const id of ['blender', 'unity', 'playwright', 'memory']) {
   it.runIf(process.env.COS_PLUGIN_LIVE_TEST === '1')(`installs ${id} and verifies its advertised tool preview over stdio`, async () => {
     const directory = await makeTempDir(`cos-catalog-${id}-`);
     // As at app startup: without uv on PATH, installs fall back to the managed copy under userData.
