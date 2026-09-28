@@ -2,6 +2,62 @@ const HEIGHT_EPSILON = 0.5;
 const HEIGHT_DURATION_MS = 220;
 const HEIGHT_EASING = 'cubic-bezier(.16, 1, .3, 1)';
 
+/** Animate the dock's content changes without retaining a fixed resting height.
+ * The inner body measures natural content, never the animated outer shell.
+ * Plan completion already owns its collapse; do not animate its frames twice.
+ */
+export function installComposerDockMotion(dock: HTMLElement): () => void {
+  const body = dock.querySelector<HTMLElement>('.composer-dock-body');
+  if (!body || typeof ResizeObserver !== 'function' || typeof dock.animate !== 'function') return () => undefined;
+  const view = dock.ownerDocument.defaultView;
+  const reducedMotion = view?.matchMedia?.('(prefers-reduced-motion: reduce)') ?? null;
+  let previousHeight = 0;
+  let completingPlan = false;
+  let active: Animation | null = null;
+  let disposed = false;
+
+  const cancel = (): void => {
+    const animation = active;
+    active = null;
+    animation?.cancel();
+  };
+  const observer = new ResizeObserver(() => {
+    if (disposed) return;
+    const style = view?.getComputedStyle(dock);
+    if (dock.hidden || !dock.isConnected || style?.display === 'none') {
+      cancel(); previousHeight = 0; completingPlan = false;
+      return;
+    }
+    const contentHeight = body.getBoundingClientRect().height;
+    const target = contentHeight + (Number.parseFloat(style?.borderTopWidth ?? '0') || 0);
+    const from = active ? dock.getBoundingClientRect().height : previousHeight;
+    cancel();
+    const completing = !!body.querySelector('.agent-plan-shell[data-complete="true"]');
+    // Removal can have the same measured height as the last zero-height plan frame.
+    // Do not let that skipped observer delivery suppress a later panel's entrance.
+    const nativeCollapse = completing || (completingPlan && target <= previousHeight);
+    completingPlan = completing;
+    previousHeight = target;
+    if (nativeCollapse || reducedMotion?.matches || Math.abs(from - target) <= HEIGHT_EPSILON) return;
+    const animation = dock.animate([{ height: `${from}px` }, { height: `${target}px` }], {
+      duration: HEIGHT_DURATION_MS, easing: HEIGHT_EASING
+    });
+    active = animation;
+    void animation.finished.then(() => {
+      if (active === animation) cancel();
+    }, () => { if (active === animation) active = null; });
+  });
+  observer.observe(body);
+  const reduce = (): void => { if (reducedMotion?.matches) cancel(); };
+  reducedMotion?.addEventListener?.('change', reduce);
+  return () => {
+    disposed = true;
+    observer.disconnect();
+    reducedMotion?.removeEventListener?.('change', reduce);
+    cancel();
+  };
+}
+
 /**
  * Smooths changes to the composer's native content-sized height.
  *
