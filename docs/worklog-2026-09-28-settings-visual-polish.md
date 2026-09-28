@@ -38,3 +38,14 @@ tests across 12 files passed. Chromium layout, navigation and native-select focu
 fixtures passed; whitespace checks passed. No new installer was made from this
 branch. Previously delivered integration installer has identical visual files but
 includes separate Pets work and predates the #543/#544 base update.
+
+## CI correction
+
+All three jobs in run 36377007444 failed the same single static-label coverage
+assertion: Back to chat was absent from the catalogs after its Unicode arrow was
+replaced with a separate icon. Reproduced that exact failure locally, renamed the
+obsolete arrow-prefixed key and translation in all nine catalogs, and extended the
+language-switch test to check the live button label and preserved icon in every
+language. All 45 tests in the ten renderer translation suites then passed. This
+changes translations only, not layout or behavior. The earlier 168-test selection
+omitted renderer-i18n.test.ts and therefore did not cover this static-label gate.
