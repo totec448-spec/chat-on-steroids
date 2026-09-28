@@ -8,19 +8,32 @@ import { activeSessionId } from './recorder.js';
 import { blockedChatIds } from './blocked-chats.js';
 import { findSessionByConversation, getSession, listSessionPage, readEvents, readRecentEvents } from './store.js';
 import type { SessionListCursor } from './store.js';
+import type { SessionEventKind, SessionSummary } from '../../shared/session.js';
 
 /**
  * The session list and event pages as clients read them.
  *
  * Both the renderer (IPC) and the local control API serve these, so the enrichment that turns
- * stored summaries into what a client sees lives here once. Everything is a read of an existing
- * owner; nothing here writes.
+ * stored summaries into what a client sees lives here once. Nothing here writes on its own, but
+ * the list first asks `listInputs()`, which repairs and records delivery receipts as it always has.
  */
 
 export const sessionListCursorSchema = z.object({
   updatedAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i)
 });
+
+/** The runtime activity deadline belongs to the bridge, so it is added at read time, never stored. */
+function withActivity(summary: SessionSummary): SessionSummary {
+  const activityExpiresAt = sessionActivityExpiresAt(summary);
+  return activityExpiresAt === undefined ? summary : { ...summary, activityExpiresAt };
+}
+
+/** Null when there is no such session. */
+export async function readSession(id: string): Promise<SessionSummary | null> {
+  const summary = await getSession(id);
+  return summary ? withActivity(summary) : null;
+}
 
 export async function readSessionList(options: { cursor?: SessionListCursor; limit: number }) {
   const config = getConfig();
@@ -39,10 +52,7 @@ export async function readSessionList(options: { cursor?: SessionListCursor; lim
     return parent && parent.id !== summary.id ? { ...summary, origin: { ...summary.origin, fromSessionId: parent.id } } : summary;
   }));
   return {
-    sessions: sessions.map(summary => {
-      const activityExpiresAt = sessionActivityExpiresAt(summary);
-      return activityExpiresAt === undefined ? summary : { ...summary, activityExpiresAt };
-    }),
+    sessions: sessions.map(withActivity),
     total: page.total,
     nextCursor: page.nextCursor,
     activeId: activeSessionId(),
@@ -63,7 +73,7 @@ export async function readSessionList(options: { cursor?: SessionListCursor; lim
 /** Null when there is no such session. */
 export async function readSessionEvents(
   id: string,
-  options: { from?: number; before?: number; after?: number; limit?: number }
+  options: { from?: number; before?: number; after?: number; limit?: number; kinds?: readonly SessionEventKind[] }
 ) {
   const summary = await getSession(id);
   if (!summary) return null;
@@ -75,11 +85,11 @@ export async function readSessionEvents(
   if (options.from === undefined) {
     // Navigation uses immutable origins. `from` alone is a publication cursor
     // for live revisions and must never decide which history page owns a row.
-    const events = await readRecentEvents(id, cap, { before: options.before, after: options.after, orderByOrigin: true });
+    const events = await readRecentEvents(id, cap, { before: options.before, after: options.after, kinds: options.kinds, orderByOrigin: true });
     const nextFrom = events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), 0);
     return { summary, events, total: summary.events, nextFrom };
   }
-  const events = await readEvents(id, { from: options.from, limit: cap });
+  const events = await readEvents(id, { from: options.from, limit: cap, kinds: options.kinds });
   const nextFrom = events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), options.from);
   return { summary, events, total: summary.events, nextFrom };
 }

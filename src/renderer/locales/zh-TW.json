@@ -1741,5 +1741,5 @@
   "Diff unavailable: this edit was not kept": "差異無法使用：這次編輯未保存",
   "Review this edit ({0} of {1} files)": "檢視這次編輯（{1} 個檔案中的 {0} 個）",
   "This reply points to content from another message that was not recorded.": "此回覆指向另一則訊息中未被記錄的內容。",
-  "Local control API: let agents on this computer read app status": "本機控制 API：允許這台電腦上的代理讀取應用程式狀態"
+  "Local control API: let agents on this computer read app status and chats": "本機控制 API：允許這台電腦上的代理讀取應用程式狀態與聊天"
 }
