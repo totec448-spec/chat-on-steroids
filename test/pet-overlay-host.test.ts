@@ -46,6 +46,7 @@ vi.mock('../src/main/pet-library.js', () => ({
     mocks.publish = listener; return () => { mocks.publish = null; };
   }
 }));
+vi.mock('../src/main/pet-window-focus.js', () => ({ windowsPetFocus: vi.fn(async () => ({ release: vi.fn(), dispose: vi.fn() })) }));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ ui: { theme: 'dark' } }) }));
 vi.mock('../src/main/logger.js', () => ({ logWarn: vi.fn() }));
 vi.mock('../src/main/agents.js', () => ({ onSwarmChange: () => vi.fn(), swarmState: () => ({ agents: [] }) }));
@@ -56,6 +57,7 @@ vi.mock('../src/main/session/recorder.js', () => ({
   activeSessionId: () => null, onSessionChange: () => vi.fn(), sessionIdForConversation: () => null
 }));
 import { petOverlayControlState, refreshPetOverlayActivities, setPetOverlayVisible, shutdownPetOverlay, startPetOverlay } from '../src/main/pet-overlay.js';
+import { windowsPetFocus } from '../src/main/pet-window-focus.js';
 
 function state(...ids: string[]): PetLibraryState {
   return { pets: ids.map(id => ({ id, displayName: id, description: '', kind: 'cos', enabled: true, favorite: false })) };
@@ -69,13 +71,14 @@ beforeEach(() => {
   vi.useFakeTimers();
   mocks.read.mockClear(); mocks.cursor.mockClear(); mocks.windows.length = 0;
   mocks.library = state('capy');
+  vi.mocked(windowsPetFocus).mockClear();
 });
 afterEach(async () => { await shutdownPetOverlay(); vi.useRealTimers(); });
 
 it('reads the catalog once; polling, activity, hover and controls use its published projection', async () => {
   await startPetOverlay(() => null, () => undefined);
   const win = mocks.windows[0];
-  expect(win.options.focusable).toBe(false);
+  expect(win.options.focusable).toBe(process.platform === 'win32');
   expect(win.options.skipTaskbar).toBe(true);
   // macOS forwards ignored mouse moves instead of polling. Enter interaction
   // before measuring the native poll shared by all three platforms.
@@ -123,4 +126,30 @@ it('starts empty without an overlay and accepts the first published enabled pet'
   expect(mocks.windows[0].isVisible()).toBe(true);
   await shutdownPetOverlay();
   expect(petOverlayControlState().activeCount).toBe(0);
+});
+
+it.runIf(process.platform === 'win32')('only lets the current overlay release native focus', async () => {
+  await startPetOverlay(() => null, () => undefined);
+  const focus = await vi.mocked(windowsPetFocus).mock.results[0]!.value;
+  mocks.ipc.get('pet-overlay:releaseFocus')!({ sender: { id: -1 } });
+  expect(focus.release).not.toHaveBeenCalled();
+  mocks.ipc.get('pet-overlay:releaseFocus')!({ sender: mocks.windows[0].webContents });
+  expect(focus.release).toHaveBeenCalledOnce();
+  await shutdownPetOverlay();
+  expect(focus.dispose).toHaveBeenCalledOnce();
+  expect(focus.release).toHaveBeenCalledOnce();
+});
+
+it.runIf(process.platform === 'win32')('disposes a native initialization that finishes after shutdown', async () => {
+  const focus = { release: vi.fn(), dispose: vi.fn() };
+  let complete!: (value: typeof focus) => void;
+  vi.mocked(windowsPetFocus).mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+  const starting = startPetOverlay(() => null, () => undefined);
+  await shutdownPetOverlay();
+  complete(focus);
+  await starting;
+  expect(mocks.windows[0].isDestroyed()).toBe(true);
+  expect(mocks.windows[0].isVisible()).toBe(false);
+  expect(focus.dispose).toHaveBeenCalledOnce();
+  expect(focus.release).not.toHaveBeenCalled();
 });
