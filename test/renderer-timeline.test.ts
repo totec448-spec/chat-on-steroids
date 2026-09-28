@@ -2206,10 +2206,11 @@ it('colors removed lines separately from added lines without changing other tool
   expect(rows[0]!.querySelector('summary .metric')?.textContent).toBe('+28 −11');
   expect(rows[0]!.querySelector('summary .metric-added')?.textContent).toBe('+28');
   expect(rows[0]!.querySelector('summary .metric-removed')?.textContent).toBe('−11');
-  // The per-call change count beside the title splits the same way.
-  expect(rows[0]!.querySelector('summary .tool-change-count .metric-added')?.textContent).toBe('+28');
-  expect(rows[0]!.querySelector('summary .tool-change-count .metric-removed')?.textContent).toBe('−11');
+  // The outcome metric already states this delta, so the per-call count beside the title stays out.
+  expect(rows[0]!.querySelector('summary .tool-change-count')).toBeNull();
   expect(rows[1]!.querySelector('summary .metric')?.textContent).toBe('~−7');
+  // A delta metric formatted differently from the count ("~−7" beside "+0 −7") is still one number.
+  expect(rows[1]!.querySelector('summary .tool-change-count')).toBeNull();
   expect(rows[1]!.querySelector('summary .metric-removed')?.textContent).toBe('−7');
   expect(rows[2]!.querySelector('summary .metric')?.textContent).toBe('12 lines');
   expect(rows[2]!.querySelector('summary .metric-added, summary .metric-removed')).toBeNull();
@@ -2270,6 +2271,18 @@ it('folds five consecutive status polls while retaining each exact tool row', as
   await append([{ ...failed, call: { ...failed.call, outcome: 'tool_rejected', summary: { ...failed.call.summary, tone: 'bad' } } }]);
   expect(fold.querySelectorAll('.ev-tool_call')).toHaveLength(6);
   expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(7);
+});
+
+it("shows a created file's line count once when the outcome metric already states it", async () => {
+  const created = toolCall(1, 'created-file') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  created.call.tool = 'apply_patch';
+  created.call.summary = { kind: 'create', tone: 'good', title: 'Created CHANGELOG-0.4.5.txt', metric: '+39' };
+  created.call.changes = [{ path: 'CHANGELOG-0.4.5.txt', added: 39, removed: 0, approximate: false }];
+  const { w } = await boot([created]);
+  const row = w.document.querySelector<HTMLDetailsElement>('details.tool')!;
+  expect(row.querySelectorAll('summary .metric-added')).toHaveLength(1);
+  expect(row.querySelector('summary .tool-change-count')).toBeNull();
+  expect(row.querySelector('summary .metric')?.textContent).toBe('+39');
 });
 
 it('keeps an artifact action as the activity title rather than its tool tag', async () => {

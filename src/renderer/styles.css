@@ -2067,12 +2067,20 @@ input[readonly] {
 .thinking-line {
   display: flex;
   align-items: center;
-  gap: 7px;
-  opacity: 0.76;
+  gap: 8px;
+}
+
+/* Page activity shares the tool row's rhythm: same height, icon column, face and weight, so a
+   mixed run of calls and page steps reads as one aligned list. */
+.meta.is-progress.thinking-line {
+  min-height: 27px;
+  font-size: calc(12.5px * var(--text-scale, 1));
+  font-weight: 450;
+  letter-spacing: 0;
 }
 
 .thinking-ico {
-  --ico: 13px;
+  --ico: 14px;
   flex: 0 0 auto;
   color: var(--faint);
 }
@@ -2263,7 +2271,7 @@ input[readonly] {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 0;
+  padding: 4px 0;
   border-radius: var(--r-md);
   font-size: calc(12.5px * var(--text-scale, 1));
   cursor: pointer;
@@ -2280,16 +2288,19 @@ input[readonly] {
 .tool > summary:focus-visible, .tool-group > summary:focus-visible, .routine-activity > summary:focus-visible {
   outline: none; background: var(--hover); box-shadow: inset 2px 0 var(--accent);
 }
-.tool.is-artifact { border: 1px solid var(--line); background: var(--card); margin: 3px 0; }
-.tool.is-artifact > summary { padding: 5px 8px; }
-.tool-tag { flex: 0 0 auto; padding: 2px 5px; border-radius: 4px; background: var(--accent-wash); color: var(--accent); font: 600 calc(10px * var(--text-scale, 1)) var(--mono); }
+/* Commands and edits read as rows like every other call. A bordered capsule per command turned a
+   run of shell calls into a wall of boxes; the kind icon already says what the row is, so the
+   tag is a quiet label rather than a coloured chip. */
+.tool-tag { flex: 0 0 auto; display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border-radius: 4px; background: color-mix(in srgb, var(--soft) 12%, transparent); color: var(--soft); font: 600 calc(10px * var(--text-scale, 1)) / 1 var(--mono); letter-spacing: .02em; }
+.tool-tag.is-shell { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.tool-tag.is-diff { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
 .tool-change-count { flex: 0 0 auto; color: var(--green); font: 600 calc(10px * var(--text-scale, 1)) var(--mono); }
 /* Let the hover surface breathe beyond the text column without moving its content. */
 .ev-tool_call .tool { margin-inline: -10px; }
 .ev-tool_call .tool > summary { padding-inline: 10px; }
 
 .tool summary b {
-  font-weight: 520;
+  font-weight: 450;
   flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2321,14 +2332,13 @@ input[readonly] {
 }
 
 .tool.tone-good .metric {
-  color: var(--green);
+  color: var(--faint);
 }
 
-.tool.tone-bad {
-  color: var(--red);
-  background: transparent;
-}
-
+/* Success is the norm and stays quiet; a failure marks its icon and outcome, not the whole row.
+   It keeps the open surface every other call gets (a transparent override here dropped it, and
+   the result wells vanished into the page). */
+.tool.tone-bad .tool-ico,
 .tool.tone-bad .metric {
   color: var(--red);
 }
@@ -2397,6 +2407,15 @@ input[readonly] {
 .tool-copy:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
 .tool-copy:disabled { display: none; }
 .tool-output > .pre { margin: 0; border-radius: 0; }
+/* Inside an open call: one surface. Arguments and result are labelled wells, not bordered cards
+   with header bars; Copy shows when the pointer or focus is on the well. Scoped to .tool so
+   message code blocks, which share .tool-output, keep their own frame. */
+.tool .raw { border-top: 0; padding: 2px 10px 10px; gap: 8px; }
+.tool .tool-output { border: 0; border-radius: var(--r-sm); background: var(--page); }
+.tool .tool-output-header { min-height: 24px; padding: 4px 8px 0; border-bottom: 0; background: transparent; }
+.tool .tool-output > .pre { background: transparent; padding: 4px 10px 9px; }
+.tool .tool-copy { opacity: 0; transition: opacity 120ms ease; }
+.tool .tool-output:is(:hover, :focus-within) .tool-copy { opacity: 1; }
 
 .raw-facts {
   font-family: var(--mono);
@@ -2950,7 +2969,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .sess-top { gap: 5px; }
 .sess-top .session-status { order: -1; }
 .tool-group { color: var(--faint); margin: 6px 0; }
-.tool-group > summary { display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; font-size: calc(14px * var(--text-scale, 1)); min-height: 26px; width: fit-content; max-width: 100%; }
+.tool-group > summary { display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; font-size: calc(13px * var(--text-scale, 1)); min-height: 26px; width: fit-content; max-width: 100%; }
 .tool-group > summary::-webkit-details-marker, .agent-communication > summary::-webkit-details-marker { display: none; }
 .activity-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .activity-symbol { display: inline-flex; flex: 0 0 16px; align-items: center; justify-content: center; }
