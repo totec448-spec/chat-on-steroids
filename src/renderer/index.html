@@ -3,11 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <title>Chat On Steroids</title>
+    <link rel="stylesheet" href="./icons.css" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <!-- Icon sprite. Inline so there is no request and no font, and every glyph
-         inherits currentColor. Stroke-based on a 24 grid; every <use> carries a
+    <!-- Interface icons are Phosphor glyphs (icons.css, dom.ts icon()). Only the bespoke
+         product mark stays here, stroke-based on a 24 grid; every <use> carries a
          viewBox or the browser shows the top-left corner of that grid. -->
     <svg class="sprite" aria-hidden="true">
       <defs>
@@ -19,58 +20,12 @@
             d="M5.5 8.5h13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-8L7 20v-3.5H5.5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z"
           />
         </g>
-        <g id="i-bolt" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M215.79,118.17a8,8,0,0,0-5-5.66L153.18,90.9l14.66-73.33a8,8,0,0,0-13.69-7l-112,120a8,8,0,0,0,3,13l57.63,21.61L88.16,238.43a8,8,0,0,0,13.69,7l112-120A8,8,0,0,0,215.79,118.17ZM109.37,214l10.47-52.38a8,8,0,0,0-5-9.06L62,132.71l84.62-90.66L136.16,94.43a8,8,0,0,0,5,9.06l52.8,19.8Z"/></g>
-        <g id="i-skill" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M223.68,66.15,135.68,18h0a15.88,15.88,0,0,0-15.36,0l-88,48.17a16,16,0,0,0-8.32,14v95.64a16,16,0,0,0,8.32,14l88,48.17a15.88,15.88,0,0,0,15.36,0l88-48.17a16,16,0,0,0,8.32-14V80.18A16,16,0,0,0,223.68,66.15ZM128,32h0l80.34,44L128,120,47.66,76ZM40,90l80,43.78v85.79L40,175.82Zm96,129.57V133.82L216,90v85.78Z"/></g>
-        <g id="i-home" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M219.31,108.68l-80-80a16,16,0,0,0-22.62,0l-80,80A15.87,15.87,0,0,0,32,120v96a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V160h32v56a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V120A15.87,15.87,0,0,0,219.31,108.68ZM208,208H160V152a8,8,0,0,0-8-8H104a8,8,0,0,0-8,8v56H48V120l80-80,80,80Z"/></g>
-        <g id="i-steps" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M80,64a8,8,0,0,1,8-8H216a8,8,0,0,1,0,16H88A8,8,0,0,1,80,64Zm136,56H88a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Zm0,64H88a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16ZM44,52A12,12,0,1,0,56,64,12,12,0,0,0,44,52Zm0,64a12,12,0,1,0,12,12A12,12,0,0,0,44,116Zm0,64a12,12,0,1,0,12,12A12,12,0,0,0,44,180Z"/></g>
-        <g id="i-pulse" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M240,128a8,8,0,0,1-8,8H204.94l-37.78,75.58A8,8,0,0,1,160,216h-.4a8,8,0,0,1-7.08-5.14L95.35,60.76,63.28,131.31A8,8,0,0,1,56,136H24a8,8,0,0,1,0-16H50.85L88.72,36.69a8,8,0,0,1,14.76.46l57.51,151,31.85-63.71A8,8,0,0,1,200,120h32A8,8,0,0,1,240,128Z"/></g>
-        <g id="i-folder" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M216,72H131.31L104,44.69A15.86,15.86,0,0,0,92.69,40H40A16,16,0,0,0,24,56V200.62A15.4,15.4,0,0,0,39.38,216H216.89A15.13,15.13,0,0,0,232,200.89V88A16,16,0,0,0,216,72ZM40,56H92.69l16,16H40ZM216,200H40V88H216Z"/></g>
-        <g id="i-file" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Z"/></g>
-        <g id="i-git-diff" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M112,152a8,8,0,0,0-8,8v28.69L66.34,151A8,8,0,0,1,64,145.37V95a32,32,0,1,0-16,0v50.38a23.85,23.85,0,0,0,7,17L92.69,200H64a8,8,0,0,0,0,16h48a8,8,0,0,0,8-8V160A8,8,0,0,0,112,152ZM40,64A16,16,0,1,1,56,80,16,16,0,0,1,40,64Zm168,97V110.63a23.85,23.85,0,0,0-7-17L163.31,56H192a8,8,0,0,0,0-16H144a8,8,0,0,0-8,8V96a8,8,0,0,0,16,0V67.31L189.66,105a8,8,0,0,1,2.34,5.66V161a32,32,0,1,0,16,0Zm-8,47a16,16,0,1,1,16-16A16,16,0,0,1,200,208Z"/></g>
-        <g id="i-image" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40Zm0,16V158.75l-26.07-26.06a16,16,0,0,0-22.63,0l-20,20-44-44a16,16,0,0,0-22.62,0L40,149.37V56ZM40,172l52-52,80,80H40Zm176,28H194.63l-36-36,20-20L216,181.38V200ZM144,100a12,12,0,1,1,12,12A12,12,0,0,1,144,100Z"/></g>
-        <g id="i-plus" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"/></g>
-        <g id="i-eye" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M247.31,124.76c-.35-.79-8.82-19.58-27.65-38.41C194.57,61.26,162.88,48,128,48S61.43,61.26,36.34,86.35C17.51,105.18,9,124,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208s66.57-13.26,91.66-38.34c18.83-18.83,27.3-37.61,27.65-38.4A8,8,0,0,0,247.31,124.76ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.47,133.47,0,0,1,25,128,133.33,133.33,0,0,1,48.07,97.25C70.33,75.19,97.22,64,128,64s57.67,11.19,79.93,33.25A133.46,133.46,0,0,1,231.05,128C223.84,141.46,192.43,192,128,192Zm0-112a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Z"/></g>
-        <g id="i-pencil" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z"/></g>
-        <g id="i-monitor" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M208,40H48A24,24,0,0,0,24,64V176a24,24,0,0,0,24,24H208a24,24,0,0,0,24-24V64A24,24,0,0,0,208,40Zm8,136a8,8,0,0,1-8,8H48a8,8,0,0,1-8-8V64a8,8,0,0,1,8-8H208a8,8,0,0,1,8,8Zm-48,48a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,224Z"/></g>
-        <g id="i-globe" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M128,24h0A104,104,0,1,0,232,128,104.12,104.12,0,0,0,128,24Zm88,104a87.61,87.61,0,0,1-3.33,24H174.16a157.44,157.44,0,0,0,0-48h38.51A87.61,87.61,0,0,1,216,128ZM102,168H154a115.11,115.11,0,0,1-26,45A115.27,115.27,0,0,1,102,168Zm-3.9-16a140.84,140.84,0,0,1,0-48h59.88a140.84,140.84,0,0,1,0,48ZM40,128a87.61,87.61,0,0,1,3.33-24H81.84a157.44,157.44,0,0,0,0,48H43.33A87.61,87.61,0,0,1,40,128ZM154,88H102a115.11,115.11,0,0,1,26-45A115.27,115.27,0,0,1,154,88Zm52.33,0H170.71a135.28,135.28,0,0,0-22.3-45.6A88.29,88.29,0,0,1,206.37,88ZM107.59,42.4A135.28,135.28,0,0,0,85.29,88H49.63A88.29,88.29,0,0,1,107.59,42.4ZM49.63,168H85.29a135.28,135.28,0,0,0,22.3,45.6A88.29,88.29,0,0,1,49.63,168Zm98.78,45.6a135.28,135.28,0,0,0,22.3-45.6h35.66A88.29,88.29,0,0,1,148.41,213.6Z"/></g>
-        <g id="i-target" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M221.87,83.16A104.1,104.1,0,1,1,195.67,49l22.67-22.68a8,8,0,0,1,11.32,11.32l-96,96a8,8,0,0,1-11.32-11.32l27.72-27.72a40,40,0,1,0,17.87,31.09,8,8,0,1,1,16-.9,56,56,0,1,1-22.38-41.65L184.3,60.39a87.88,87.88,0,1,0,23.13,29.67,8,8,0,0,1,14.44-6.9Z"/></g>
-        <g id="i-loop" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M240,56v48a8,8,0,0,1-8,8H184a8,8,0,0,1,0-16H211.4L184.81,71.64l-.25-.24a80,80,0,1,0-1.67,114.78,8,8,0,0,1,11,11.63A95.44,95.44,0,0,1,128,224h-1.32A96,96,0,1,1,195.75,60L224,85.8V56a8,8,0,1,1,16,0Z"/></g>
-        <g id="i-terminal" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M128,128a8,8,0,0,1-3,6.25l-40,32a8,8,0,1,1-10-12.5L107.19,128,75,102.25a8,8,0,1,1,10-12.5l40,32A8,8,0,0,1,128,128Zm48,24H136a8,8,0,0,0,0,16h40a8,8,0,0,0,0-16Zm56-96V200a16,16,0,0,1-16,16H40a16,16,0,0,1-16-16V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56ZM216,200V56H40V200H216Z"/></g>
-        <g id="i-panel-right" transform="translate(24 0) scale(-0.09375 0.09375)" fill="currentColor" stroke="none"><path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40ZM40,56H80V200H40ZM216,200H96V56H216V200Z"/></g>
-        <g id="i-panel-bottom" transform="rotate(-90 12 12) scale(0.09375)" fill="currentColor" stroke="none"><path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40ZM40,56H80V200H40ZM216,200H96V56H216V200Z"/></g>
-        <g id="i-dock-expand" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M216,48V96a8,8,0,0,1-16,0V67.31l-50.34,50.35a8,8,0,0,1-11.32-11.32L188.69,56H160a8,8,0,0,1,0-16h48A8,8,0,0,1,216,48ZM106.34,138.34,56,188.69V160a8,8,0,0,0-16,0v48a8,8,0,0,0,8,8H96a8,8,0,0,0,0-16H67.31l50.35-50.34a8,8,0,0,0-11.32-11.32Z"/></g>
-        <g id="i-dock-restore" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M213.66,53.66,163.31,104H192a8,8,0,0,1,0,16H144a8,8,0,0,1-8-8V64a8,8,0,0,1,16,0V92.69l50.34-50.35a8,8,0,0,1,11.32,11.32ZM112,136H64a8,8,0,0,0,0,16H92.69L42.34,202.34a8,8,0,0,0,11.32,11.32L104,163.31V192a8,8,0,0,0,16,0V144A8,8,0,0,0,112,136Z"/></g>
-        <g id="i-agents" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M244.8,150.4a8,8,0,0,1-11.2-1.6A51.6,51.6,0,0,0,192,128a8,8,0,0,1-7.37-4.89,8,8,0,0,1,0-6.22A8,8,0,0,1,192,112a24,24,0,1,0-23.24-30,8,8,0,1,1-15.5-4A40,40,0,1,1,219,117.51a67.94,67.94,0,0,1,27.43,21.68A8,8,0,0,1,244.8,150.4ZM190.92,212a8,8,0,1,1-13.84,8,57,57,0,0,0-98.16,0,8,8,0,1,1-13.84-8,72.06,72.06,0,0,1,33.74-29.92,48,48,0,1,1,58.36,0A72.06,72.06,0,0,1,190.92,212ZM128,176a32,32,0,1,0-32-32A32,32,0,0,0,128,176ZM72,120a8,8,0,0,0-8-8A24,24,0,1,1,87.24,82a8,8,0,1,0,15.5-4A40,40,0,1,0,37,117.51,67.94,67.94,0,0,0,9.6,139.19a8,8,0,1,0,12.8,9.61A51.6,51.6,0,0,1,64,128,8,8,0,0,0,72,120Z"/></g>
-        <g id="i-power" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M120,128V48a8,8,0,0,1,16,0v80a8,8,0,0,1-16,0Zm60.37-78.7a8,8,0,0,0-8.74,13.4C194.74,77.77,208,101.57,208,128a80,80,0,0,1-160,0c0-26.43,13.26-50.23,36.37-65.3a8,8,0,0,0-8.74-13.4C47.9,67.38,32,96.06,32,128a96,96,0,0,0,192,0C224,96.06,208.1,67.38,180.37,49.3Z"/></g>
-        <g id="i-lock" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M208,80H176V56a48,48,0,0,0-96,0V80H48A16,16,0,0,0,32,96V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V96A16,16,0,0,0,208,80ZM96,56a32,32,0,0,1,64,0V80H96ZM208,208H48V96H208V208Z"/></g>
-        <g id="i-copy" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></g>
-        <g id="i-retry" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M224,128a96,96,0,0,1-94.71,96H128A95.38,95.38,0,0,1,62.1,197.8a8,8,0,0,1,11-11.63A80,80,0,1,0,71.43,71.39a3.07,3.07,0,0,1-.26.25L44.59,96H72a8,8,0,0,1,0,16H24a8,8,0,0,1-8-8V56a8,8,0,0,1,16,0V85.8L60.25,60A96,96,0,0,1,224,128Z"/></g>
-        <g id="i-check" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></g>
-        <g id="i-clock" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm64-88a8,8,0,0,1-8,8H128a8,8,0,0,1-8-8V72a8,8,0,0,1,16,0v48h48A8,8,0,0,1,192,128Z"/></g>
-        <g id="i-chev" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"/></g>
-        <g id="i-back" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z"/></g>
-        <g id="i-out" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M224,104a8,8,0,0,1-16,0V59.32l-66.33,66.34a8,8,0,0,1-11.32-11.32L196.68,48H152a8,8,0,0,1,0-16h64a8,8,0,0,1,8,8Zm-40,24a8,8,0,0,0-8,8v72H48V80h72a8,8,0,0,0,0-16H48A16,16,0,0,0,32,80V208a16,16,0,0,0,16,16H176a16,16,0,0,0,16-16V136A8,8,0,0,0,184,128Z"/></g>
-        <g id="i-trash" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z"/></g>
-        <g id="i-chart" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M224,200h-8V40a8,8,0,0,0-8-8H152a8,8,0,0,0-8,8V80H96a8,8,0,0,0-8,8v40H48a8,8,0,0,0-8,8v64H32a8,8,0,0,0,0,16H224a8,8,0,0,0,0-16ZM160,48h40V200H160ZM104,96h40V200H104ZM56,144H88v56H56Z"/></g>
-        <g id="i-x" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></g>
-        <g id="i-star" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M239.18,97.26A16.38,16.38,0,0,0,224.92,86l-59-4.76L143.14,26.15a16.36,16.36,0,0,0-30.27,0L90.11,81.23,31.08,86a16.46,16.46,0,0,0-9.37,28.86l45,38.83L53,211.75a16.38,16.38,0,0,0,24.5,17.82L128,198.49l50.53,31.08A16.4,16.4,0,0,0,203,211.75l-13.76-58.07,45-38.83A16.43,16.43,0,0,0,239.18,97.26Zm-15.34,5.47-48.7,42a8,8,0,0,0-2.56,7.91l14.88,62.8a.37.37,0,0,1-.17.48c-.18.14-.23.11-.38,0l-54.72-33.65a8,8,0,0,0-8.38,0L69.09,215.94c-.15.09-.19.12-.38,0a.37.37,0,0,1-.17-.48l14.88-62.8a8,8,0,0,0-2.56-7.91l-48.7-42c-.12-.1-.23-.19-.13-.5s.18-.27.33-.29l63.92-5.16A8,8,0,0,0,103,91.86l24.62-59.61c.08-.17.11-.25.35-.25s.27.08.35.25L153,91.86a8,8,0,0,0,6.75,4.92l63.92,5.16c.15,0,.24,0,.33.29S224,102.63,223.84,102.73Z"/></g>
-        <g id="i-star-fill" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M234.29,114.85l-45,38.83L203,211.75a16.4,16.4,0,0,1-24.5,17.82L128,198.49,77.47,229.57A16.4,16.4,0,0,1,53,211.75l13.76-58.07-45-38.83A16.46,16.46,0,0,1,31.08,86l59-4.76,22.76-55.08a16.36,16.36,0,0,1,30.27,0l22.75,55.08,59,4.76a16.46,16.46,0,0,1,9.37,28.86Z"/></g>
-        <g id="i-paw" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M212,80a28,28,0,1,0,28,28A28,28,0,0,0,212,80Zm0,40a12,12,0,1,1,12-12A12,12,0,0,1,212,120ZM72,108a28,28,0,1,0-28,28A28,28,0,0,0,72,108ZM44,120a12,12,0,1,1,12-12A12,12,0,0,1,44,120ZM92,88A28,28,0,1,0,64,60,28,28,0,0,0,92,88Zm0-40A12,12,0,1,1,80,60,12,12,0,0,1,92,48Zm72,40a28,28,0,1,0-28-28A28,28,0,0,0,164,88Zm0-40a12,12,0,1,1-12,12A12,12,0,0,1,164,48Zm23.12,100.86a35.3,35.3,0,0,1-16.87-21.14,44,44,0,0,0-84.5,0A35.25,35.25,0,0,1,69,148.82,40,40,0,0,0,88,224a39.48,39.48,0,0,0,15.52-3.13,64.09,64.09,0,0,1,48.87,0,40,40,0,0,0,34.73-72ZM168,208a24,24,0,0,1-9.45-1.93,80.14,80.14,0,0,0-61.19,0,24,24,0,0,1-20.71-43.26,51.22,51.22,0,0,0,24.46-30.67,28,28,0,0,1,53.78,0,51.27,51.27,0,0,0,24.53,30.71A24,24,0,0,1,168,208Z"/></g>
-        <g id="i-warning" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M236.8,188.09,149.35,36.22h0a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09ZM222.93,203.8a8.5,8.5,0,0,1-7.48,4.2H40.55a8.5,8.5,0,0,1-7.48-4.2,7.59,7.59,0,0,1,0-7.72L120.52,44.21a8.75,8.75,0,0,1,15,0l87.45,151.87A7.59,7.59,0,0,1,222.93,203.8ZM120,144V104a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm20,36a12,12,0,1,1-12-12A12,12,0,0,1,140,180Z"/></g>
-        <g id="i-more" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128Zm56-12a12,12,0,1,0,12,12A12,12,0,0,0,196,116ZM60,116a12,12,0,1,0,12,12A12,12,0,0,0,60,116Z"/></g>
-        <g id="i-ban" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm88,104a87.56,87.56,0,0,1-20.41,56.28L71.72,60.4A88,88,0,0,1,216,128ZM40,128A87.56,87.56,0,0,1,60.41,71.72L184.28,195.6A88,88,0,0,1,40,128Z"/></g>
-        <g id="i-play" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M232.4,114.49,88.32,26.35a16,16,0,0,0-16.2-.3A15.86,15.86,0,0,0,64,39.87V216.13A15.94,15.94,0,0,0,80,232a16.07,16.07,0,0,0,8.36-2.35L232.4,141.51a15.81,15.81,0,0,0,0-27ZM80,215.94V40l143.83,88Z"/></g>
-        <g id="i-key" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M216.57,39.43A80,80,0,0,0,83.91,120.78L28.69,176A15.86,15.86,0,0,0,24,187.31V216a16,16,0,0,0,16,16H72a8,8,0,0,0,8-8V208H96a8,8,0,0,0,8-8V184h16a8,8,0,0,0,5.66-2.34l9.56-9.57A79.73,79.73,0,0,0,160,176h.1A80,80,0,0,0,216.57,39.43ZM224,98.1c-1.09,34.09-29.75,61.86-63.89,61.9H160a63.7,63.7,0,0,1-23.65-4.51,8,8,0,0,0-8.84,1.68L116.69,168H96a8,8,0,0,0-8,8v16H72a8,8,0,0,0-8,8v16H40V187.31l58.83-58.82a8,8,0,0,0,1.68-8.84A63.72,63.72,0,0,1,96,95.92c0-34.14,27.81-62.8,61.9-63.89A64,64,0,0,1,224,98.1ZM192,76a12,12,0,1,1-12-12A12,12,0,0,1,192,76Z"/></g>
-        <g id="i-sun" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M120,40V16a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-16-16A8,8,0,0,0,42.34,53.66Zm0,116.68-16,16a8,8,0,0,0,11.32,11.32l16-16a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l16-16a8,8,0,0,0-11.32-11.32l-16,16A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l16,16a8,8,0,0,0,11.32-11.32ZM48,128a8,8,0,0,0-8-8H16a8,8,0,0,0,0,16H40A8,8,0,0,0,48,128Zm80,80a8,8,0,0,0-8,8v24a8,8,0,0,0,16,0V216A8,8,0,0,0,128,208Zm112-88H216a8,8,0,0,0,0,16h24a8,8,0,0,0,0-16Z"/></g>
-        <g id="i-chat" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24Zm0,192a87.87,87.87,0,0,1-44.06-11.81,8,8,0,0,0-6.54-.67L40,216,52.47,178.6a8,8,0,0,0-.66-6.54A88,88,0,1,1,128,216Z"/></g>
-        <g id="i-search" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"/></g>
-        <g id="i-gear" transform="scale(0.09375)" fill="currentColor" stroke="none"><path d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm88-29.84q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.21,107.21,0,0,0-10.88-26.25,8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.71,107.71,0,0,0-26.25-10.87,8,8,0,0,0-7.06,1.49L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.21,107.21,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.49,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06Zm-16.1-6.5a73.93,73.93,0,0,1,0,8.68,8,8,0,0,0,1.74,5.48l14.19,17.73a91.57,91.57,0,0,1-6.23,15L187,173.11a8,8,0,0,0-5.1,2.64,74.11,74.11,0,0,1-6.14,6.14,8,8,0,0,0-2.64,5.1l-2.51,22.58a91.32,91.32,0,0,1-15,6.23l-17.74-14.19a8,8,0,0,0-5-1.75h-.48a73.93,73.93,0,0,1-8.68,0,8,8,0,0,0-5.48,1.74L100.45,215.8a91.57,91.57,0,0,1-15-6.23L82.89,187a8,8,0,0,0-2.64-5.1,74.11,74.11,0,0,1-6.14-6.14,8,8,0,0,0-5.1-2.64L46.43,170.6a91.32,91.32,0,0,1-6.23-15l14.19-17.74a8,8,0,0,0,1.74-5.48,73.93,73.93,0,0,1,0-8.68,8,8,0,0,0-1.74-5.48L40.2,100.45a91.57,91.57,0,0,1,6.23-15L69,82.89a8,8,0,0,0,5.1-2.64,74.11,74.11,0,0,1,6.14-6.14A8,8,0,0,0,82.89,69L85.4,46.43a91.32,91.32,0,0,1,15-6.23l17.74,14.19a8,8,0,0,0,5.48,1.74,73.93,73.93,0,0,1,8.68,0,8,8,0,0,0,5.48-1.74L155.55,40.2a91.57,91.57,0,0,1,15,6.23L173.11,69a8,8,0,0,0,2.64,5.1,74.11,74.11,0,0,1,6.14,6.14,8,8,0,0,0,5.1,2.64l22.58,2.51a91.32,91.32,0,0,1,6.23,15l-14.19,17.74A8,8,0,0,0,199.87,123.66Z"/></g>
       </defs>
     </svg>
 
     <div class="app" data-screen="chat">
       <div class="app-topbar">
-        <button class="btn" id="sidebarToggle" type="button" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true" title="Toggle sidebar (Ctrl+B)"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /></svg></button>
+        <button class="btn" id="sidebarToggle" type="button" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true" title="Toggle sidebar (Ctrl+B)"><i class="ico ph ph-sidebar-simple" aria-hidden="true"></i></button>
         <details class="view-menu" id="viewMenu"><summary>View</summary><div class="view-menu-items">
           <button class="btn" id="sidebarMenuToggle" type="button">Toggle Sidebar <kbd>Ctrl+B</kbd></button>
           <hr />
@@ -86,26 +41,26 @@
         <button class="btn" id="backToChat" type="button" hidden>← Back to chat</button>
         <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong></div>
         <div class="sidebar-primary" id="sidebarPrimary">
-          <button class="btn new-chat" id="newChat" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pencil" /></svg>New chat</button>
-          <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>Plugins</button>
-          <button class="btn sidebar-primary-link" id="sidebarSkills" data-sidebar-page="skills" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-skill" /></svg>Skills</button>
-          <button class="btn sidebar-primary-link" id="sidebarPets" data-sidebar-page="pets" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-paw" /></svg>Pets</button>
+          <button class="btn new-chat" id="newChat" type="button"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i>New chat</button>
+          <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
+          <button class="btn sidebar-primary-link" id="sidebarSkills" data-sidebar-page="skills" type="button"><i class="ico ph ph-cube" aria-hidden="true"></i>Skills</button>
+          <button class="btn sidebar-primary-link" id="sidebarPets" data-sidebar-page="pets" type="button"><i class="ico ph ph-paw-print" aria-hidden="true"></i>Pets</button>
         </div>
       <nav id="tabs" aria-label="Settings navigation" hidden>
         <button class="is-sel" data-tab="home" type="button">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-home" /></svg>Workspace
+          <i class="ico ph ph-house" aria-hidden="true"></i>Workspace
         </button>
-        <button data-tab="usage" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-chart" /></svg>Usage</button>
+        <button data-tab="usage" type="button"><i class="ico ph ph-chart-line" aria-hidden="true"></i>Usage</button>
 <button data-tab="setup" type="button">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-steps" /></svg>Setup
+          <i class="ico ph ph-list-checks" aria-hidden="true"></i>Setup
           <span class="badge" id="setupBadge" hidden></span>
         </button>
         <button data-tab="settings" type="button">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg>Agents &amp; automation
+          <i class="ico ph ph-robot" aria-hidden="true"></i>Agents &amp; automation
         </button>
-        <button data-tab="appearance" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-sun" /></svg>Appearance</button>
+        <button data-tab="appearance" type="button"><i class="ico ph ph-sun" aria-hidden="true"></i>Appearance</button>
         <button data-tab="activity" type="button">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Activity
+          <i class="ico ph ph-activity" aria-hidden="true"></i>Activity
         </button>
       </nav>
         <section class="sidebar-sessions">
@@ -113,16 +68,16 @@
             <div id="sessionList">
               <details class="sidebar-session-section" id="projectsSection" open>
                 <summary class="sidebar-session-heading">
-                  <span class="sidebar-session-label"><svg class="ico sidebar-section-chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev" /></svg>Projects</span>
-                  <span class="acts"><button class="btn" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button></span>
+                  <span class="sidebar-session-label"><i class="ico sidebar-section-chev ph ph-caret-right" aria-hidden="true"></i>Projects</span>
+                  <span class="acts"><button class="btn" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder"><i class="ico ph ph-plus" aria-hidden="true"></i></button></span>
                 </summary>
                 <div id="projectList"><p class="empty" role="status">Loading projects…</p></div>
                 <p class="empty sidebar-section-empty" id="projectsEmpty" hidden>No projects yet.</p>
               </details>
               <details class="sidebar-session-section" id="chatsSection" open>
                 <summary class="sidebar-session-heading">
-                  <span class="sidebar-session-label"><svg class="ico sidebar-section-chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev" /></svg>Chats</span>
-                  <span class="acts"><button class="btn" id="chatRefresh" type="button" title="Refresh chats" aria-label="Refresh chats"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg></button></span>
+                  <span class="sidebar-session-label"><i class="ico sidebar-section-chev ph ph-caret-right" aria-hidden="true"></i>Chats</span>
+                  <span class="acts"><button class="btn" id="chatRefresh" type="button" title="Refresh chats" aria-label="Refresh chats"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i></button></span>
                 </summary>
                 <div id="chatList"><p class="empty" role="status">Loading chats…</p></div>
                 <p class="empty sidebar-section-empty" id="sessionsEmpty" hidden>No chats outside projects yet.</p>
@@ -132,7 +87,7 @@
         </section>
 
         <div class="sidebar-bottom">
-          <button class="btn" id="workspaceSettings" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg>Settings</button>
+          <button class="btn" id="workspaceSettings" type="button"><i class="ico ph ph-gear-six" aria-hidden="true"></i>Settings</button>
           <div class="connection-anchor">
             <button
               class="sidebar-connection"
@@ -168,7 +123,7 @@
               </div>
               <details class="connection-advanced" id="connectionAdvanced">
                 <summary aria-label="Advanced" title="Advanced">
-                  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg>
+                  <i class="ico ph ph-plus" aria-hidden="true"></i>
                 </summary>
                 <div class="connection-advanced-body">
                   <p class="connection-advanced-alert" id="connectionAdvancedAlert" hidden></p>
@@ -224,7 +179,7 @@
                lives in the tray and is closed to it, so "installs the next time you start it"
                can mean days. This is the press that means now. -->
           <button class="btn btn-install" id="installUpdate" type="button" hidden>
-            <svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>
+            <i class="ico ph ph-lightning" aria-hidden="true"></i>
             <span>Install update</span>
           </button>
         </span>
@@ -235,16 +190,16 @@
            src/main/update.ts. Hidden whenever there is nothing to say. -->
       <div class="notices">
       <div class="notice" id="updateNotice" hidden>
-        <svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>
+        <i class="ico ph ph-lightning" aria-hidden="true"></i>
         <span id="updateText"></span>
         <button class="btn btn-quiet" id="updateGet" type="button" hidden>Get it</button>
         <button class="btn btn-quiet" id="updateInstall" type="button" hidden>Install now</button>
         <button class="btn btn-quiet" id="updateExtension" type="button" hidden>Update extension</button>
       </div>
       <div class="notice" id="pluginRefreshReminder" role="status" hidden>
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-pulse" /></svg>
+        <i class="ico ph ph-activity" aria-hidden="true"></i>
         <span>Chat On Steroids connector tools changed. Refresh the affected connector in ChatGPT; this is separate from the browser extension.</span>
-        <button class="btn btn-icon" id="dismissPluginRefreshReminder" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg></button>
+        <button class="btn btn-icon" id="dismissPluginRefreshReminder" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><i class="ico ph ph-x" aria-hidden="true"></i></button>
       </div>
       </div>
 
@@ -282,8 +237,8 @@
                   <div class="setting setup-profile-setting">
                     <span class="setting-text"><b id="setupProfileLabel">Setup profile</b></span>
                     <div class="setup-profile-controls">
-                      <button class="btn" id="setupProfile" type="button" popovertarget="setupProfileMenu" aria-labelledby="setupProfileLabel setupProfileCurrent"><span id="setupProfileCurrent" translate="no">Default</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4" /></svg></button>
-                      <button class="btn" id="setupProfileAdd" type="button" title="Add profile" aria-label="Add profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button>
+                      <button class="btn" id="setupProfile" type="button" popovertarget="setupProfileMenu" aria-labelledby="setupProfileLabel setupProfileCurrent"><span id="setupProfileCurrent" translate="no">Default</span><i class="ico picker-chevron ph ph-caret-down" aria-hidden="true"></i></button>
+                      <button class="btn" id="setupProfileAdd" type="button" title="Add profile" aria-label="Add profile"><i class="ico ph ph-plus" aria-hidden="true"></i></button>
                     </div>
                     <div id="setupProfileMenu" popover aria-labelledby="setupProfileLabel"></div>
                   </div>
@@ -292,7 +247,7 @@
         </section>
         <section class="panel plugins-panel" data-panel="plugins">
           <div class="plugins-content">
-          <header class="plugin-page-head"><div><h1>Plugins</h1><p>Bring your favorite tools into the conversation.</p></div><div class="plugin-search-actions"><label class="plugin-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search" /></svg><input id="pluginsSearch" type="search" placeholder="Search plugins" aria-label="Search plugins" /></label><button class="btn plugin-add" id="pluginsAdd" type="button" aria-label="Add a plugin" title="Add a plugin"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button></div></header>
+          <header class="plugin-page-head"><div><h1>Plugins</h1><p>Bring your favorite tools into the conversation.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="pluginsSearch" type="search" placeholder="Search plugins" aria-label="Search plugins" /></label><button class="btn plugin-add" id="pluginsAdd" type="button" aria-label="Add a plugin" title="Add a plugin"><i class="ico ph ph-plus" aria-hidden="true"></i></button></div></header>
           <section class="plugin-connection" aria-labelledby="pluginsSetupTitle">
             <div><h2 id="pluginsSetupTitle">Set up plugins before your first use</h2><p id="pluginsSetupHint">Add the Chat On Steroids Plugins connector in ChatGPT once so it can use your installed plugins.</p><span id="pluginsConnectionStatus" role="status">Setup required · connect your plugins</span></div>
             <button class="btn btn-solid" id="pluginsSetupLink" type="button">Set up plugins</button>
@@ -307,7 +262,7 @@
         </section>
         <section class="panel plugins-panel skills-panel" data-panel="skills">
           <div class="plugins-content">
-            <header class="plugin-page-head"><div><h1>Skills</h1><p>Reusable instructions for the work you do in Chat On Steroids.</p></div><div class="plugin-search-actions"><label class="plugin-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search" /></svg><input id="skillsSearch" type="search" placeholder="Search skills" aria-label="Search skills" /></label><details class="plugin-menu skill-import-menu"><summary class="btn plugin-add" aria-label="Import a skill" title="Import a skill"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></summary><div class="plugin-menu-actions"><button class="btn" id="skillsImportFolder" type="button">Import folder</button><button class="btn" id="skillsImportFile" type="button">Import SKILL.md</button><button class="btn" id="skillsImportGithub" type="button">Import from GitHub</button></div></details></div></header>
+            <header class="plugin-page-head"><div><h1>Skills</h1><p>Reusable instructions for the work you do in Chat On Steroids.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="skillsSearch" type="search" placeholder="Search skills" aria-label="Search skills" /></label><details class="plugin-menu skill-import-menu"><summary class="btn plugin-add" aria-label="Import a skill" title="Import a skill"><i class="ico ph ph-plus" aria-hidden="true"></i></summary><div class="plugin-menu-actions"><button class="btn" id="skillsImportFolder" type="button">Import folder</button><button class="btn" id="skillsImportFile" type="button">Import SKILL.md</button><button class="btn" id="skillsImportGithub" type="button">Import from GitHub</button></div></details></div></header>
             <div class="plugin-refresh-guide pet-import-guide"><p>Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.</p></div>
             <dialog class="plugin-dialog pet-delete-dialog" id="skillGithubDialog" aria-labelledby="skillGithubTitle">
               <div class="plugin-dialog-head"><h2 id="skillGithubTitle">Import from GitHub</h2><button class="btn" id="skillGithubClose" type="button">Close</button></div>
@@ -318,7 +273,7 @@
                 <div class="pet-delete-actions"><button class="btn" id="skillGithubCancel" type="button">Cancel</button><button class="btn btn-solid" id="skillGithubSubmit" type="submit">Import skill</button></div>
               </form>
             </dialog>
-            <div class="plugin-section-head"><h2>Installed <span id="skillsCount" class="plugin-count">Loading…</span></h2><button class="btn" id="skillsRefresh" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-retry" /></svg>Refresh</button></div>
+            <div class="plugin-section-head"><h2>Installed <span id="skillsCount" class="plugin-count">Loading…</span></h2><button class="btn" id="skillsRefresh" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button></div>
             <div id="skillsInstalled" class="pet-library-grid" aria-live="polite"></div>
             <section id="skillsRecommendedSection" hidden>
               <div class="plugin-section-head"><h2>Recommended <span id="skillsRecommendedCount" class="plugin-count"></span></h2></div>
@@ -328,7 +283,7 @@
         </section>
         <section class="panel plugins-panel pets-panel" data-panel="pets">
           <div class="plugins-content">
-            <header class="plugin-page-head"><div><h1>Pets</h1><p>Your little desktop companions.</p></div><div class="plugin-search-actions"><label class="plugin-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search" /></svg><input id="petsSearch" type="search" placeholder="Search pets" aria-label="Search pets" /></label><button class="btn plugin-add" id="petsImport" type="button" aria-label="Import CoS Pet folder" title="Import CoS Pet folder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button></div></header>
+            <header class="plugin-page-head"><div><h1>Pets</h1><p>Your little desktop companions.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="petsSearch" type="search" placeholder="Search pets" aria-label="Search pets" /></label><button class="btn plugin-add" id="petsImport" type="button" aria-label="Import CoS Pet folder" title="Import CoS Pet folder"><i class="ico ph ph-plus" aria-hidden="true"></i></button></div></header>
             <div class="plugin-refresh-guide pet-import-guide">
               <p>A compatible pet is a folder with three files.</p>
               <button class="btn" id="petsFormatGuide" type="button">What can I import?</button>
@@ -390,7 +345,7 @@
                 Permissions
                 <span class="acts">
                   <button class="btn" id="readOnlyBtn" type="button" aria-pressed="false">
-                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-lock" /></svg>Read-only
+                    <i class="ico ph ph-lock-key" aria-hidden="true"></i>Read-only
                   </button>
                 </span>
               </h2>
@@ -422,7 +377,7 @@
                 Folders
                 <span class="acts">
                   <button class="btn" id="addFolder" type="button">
-                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>Add
+                    <i class="ico ph ph-plus" aria-hidden="true"></i>Add
                   </button>
                 </span>
               </h2>
@@ -441,7 +396,7 @@
                 Health
                 <span class="acts">
                   <button class="btn" id="runChecks" type="button">
-                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>
+                    <i class="ico ph ph-activity" aria-hidden="true"></i>
                     <span id="runChecksLabel">Run checks</span>
                   </button>
                 </span>
@@ -456,7 +411,7 @@
                   <div class="checks-head">
                     <strong id="checksSummary"></strong>
                     <button class="btn btn-quiet" id="closeChecks" type="button">
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-x" /></svg>
+                      <i class="ico ph ph-x" aria-hidden="true"></i>
                     </button>
                   </div>
                   <ul id="checkList"></ul>
@@ -472,7 +427,7 @@
               <span class="acts">
                 <span class="problems" id="homeProblems" hidden></span>
                 <button class="btn" id="copyLog" type="button">
-                  <svg class="ico" viewBox="0 0 24 24"><use href="#i-copy" /></svg>Copy
+                  <i class="ico ph ph-copy" aria-hidden="true"></i>Copy
                 </button>
               </span>
             </h2>
@@ -554,7 +509,7 @@
               <!-- 1 -->
               <li class="step" data-step="folder">
                 <div class="step-mark">
-                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                  <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Pick a folder to share</h3>
@@ -563,7 +518,7 @@
                   </p>
                   <div class="step-actions">
                     <button class="btn btn-solid" id="wizAddFolder" type="button">
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-folder" /></svg>Choose folder
+                      <i class="ico ph ph-folder" aria-hidden="true"></i>Choose folder
                     </button>
                     <button class="btn" id="wizManageFolders" type="button">Manage folders</button>
                     <span class="chosen" id="wizFolders">None yet</span>
@@ -574,7 +529,7 @@
               <!-- 2 -->
               <li class="step" data-step="tunnel">
                 <div class="step-mark">
-                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                  <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Create a tunnel</h3>
@@ -590,7 +545,7 @@
                       type="button"
                       data-link="https://platform.openai.com/settings/organization/tunnels"
                     >
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open Tunnels
+                      <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open Tunnels
                     </button>
                   </div>
                   <div class="setup-guide" data-setup-guide="tunnel"></div>
@@ -631,7 +586,7 @@
               <!-- 3 -->
               <li class="step" data-step="key">
                 <div class="step-mark">
-                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                  <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Create an API key</h3>
@@ -647,7 +602,7 @@
                       type="button"
                       data-link="https://platform.openai.com/settings/organization/api-keys"
                     >
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open API keys
+                      <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open API keys
                     </button>
                   </div>
                   <div class="setup-guide" data-setup-guide="key"></div>
@@ -665,7 +620,7 @@
               <!-- 4 -->
               <li class="step" data-step="connect">
                 <div class="step-mark">
-                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                  <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Start the tunnel</h3>
@@ -684,7 +639,7 @@
               <!-- 5 -->
               <li class="step" data-step="chatgpt">
                 <div class="step-mark">
-                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                  <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Add it in ChatGPT</h3>
@@ -694,7 +649,7 @@
                   <h4 class="setup-subheading">B · Create the Core plugin</h4>
                   <div class="step-actions">
                     <button class="btn btn-solid" type="button" data-link="https://chatgpt.com/plugins">
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open ChatGPT Plugins
+                      <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open ChatGPT Plugins
                     </button>
                   </div>
                   <ol class="setup-instructions">
@@ -729,7 +684,7 @@
               -->
               <li class="step" data-step="browser">
                 <div class="step-mark">
-                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                  <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Add the Chrome extension</h3>
@@ -747,14 +702,14 @@
                   </p>
                   <div class="step-actions">
                     <button class="btn btn-solid" id="bridgeFolder" type="button">
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-folder" /></svg>Open extension folder
+                      <i class="ico ph ph-folder" aria-hidden="true"></i>Open extension folder
                     </button>
                     <button
                       class="btn"
                       id="bridgeDownload"
                       type="button"
                     >
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Download extension ZIP
+                      <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Download extension ZIP
                     </button>
                     <button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button>
                     <span class="chosen" id="bridgeState"></span>
@@ -766,7 +721,7 @@
 
             <details class="advanced">
               <summary>
-                <svg class="ico sum-chev" viewBox="0 0 24 24"><use href="#i-chev" /></svg>
+                <i class="ico sum-chev ph ph-caret-right" aria-hidden="true"></i>
                 Advanced — method, program, startup
               </summary>
 
@@ -836,7 +791,7 @@
                   <h3 id="handoffHead" hidden>
                     Latest handoff
                     <button class="btn" id="copyHandoff" type="button" hidden>
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-copy" /></svg>Copy
+                      <i class="ico ph ph-copy" aria-hidden="true"></i>Copy
                     </button>
                   </h3>
                   <div id="handoffBox"></div>
@@ -979,7 +934,7 @@
                     <div class="step-actions">
                       <button class="btn" id="goalKeyRemove" type="button">Remove stored key</button>
                       <button class="btn" type="button" data-link="https://openrouter.ai/settings/keys">
-                        <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open OpenRouter keys
+                        <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open OpenRouter keys
                       </button>
                     </div>
                   </div>
@@ -1097,19 +1052,19 @@
               <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" placeholder="Ask anything…"></textarea>
               <div class="composer-toolbar">
                 <details class="composer-menu" id="attachmentMenu">
-                  <summary aria-label="Add attachments" title="Add attachments"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></summary>
+                  <summary aria-label="Add attachments" title="Add attachments"><i class="ico ph ph-plus" aria-hidden="true"></i></summary>
                   <div class="composer-popover">
-                    <button id="attachImages" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-image" /></svg>Add photos &amp; files</button>
-                    <button id="composerFolder" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-folder" /></svg>Share a folder</button>
+                    <button id="attachImages" type="button"><i class="ico ph ph-image" aria-hidden="true"></i>Add photos &amp; files</button>
+                    <button id="composerFolder" type="button"><i class="ico ph ph-folder" aria-hidden="true"></i>Share a folder</button>
                     <div class="composer-skills-row">
-                      <button id="composerSkills" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-skill" /></svg>Skills</button>
-                      <button id="composerAddSkill" type="button" aria-label="Add Skills" title="Add Skills"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button>
+                      <button id="composerSkills" type="button"><i class="ico ph ph-cube" aria-hidden="true"></i>Skills</button>
+                      <button id="composerAddSkill" type="button" aria-label="Add Skills" title="Add Skills"><i class="ico ph ph-plus" aria-hidden="true"></i></button>
                     </div>
                   </div>
                 </details>
                 <div class="composer-options">
                   <details class="composer-menu" id="composerSettings">
-                    <summary aria-label="Chat options" title="Chat options"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg></summary>
+                    <summary aria-label="Chat options" title="Chat options"><i class="ico ph ph-gear-six" aria-hidden="true"></i></summary>
                     <div class="composer-popover">
                       <div class="automation-switch" id="automationSwitch" role="radiogroup" aria-label="Chat mode">
                         <button type="button" role="radio" aria-checked="true" data-mode="off" data-keep-menu="true">Off</button>
@@ -1121,12 +1076,12 @@
                 <div class="session-controls-menu">
                   <label for="sessionObjective">This chat's goal</label>
                   <textarea dir="auto" id="sessionObjective" rows="3" maxlength="16000" placeholder="What should this chat achieve?"></textarea>
-                  <button id="saveSessionObjective" data-keep-menu="true" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check" /></svg><span>Save task</span></button>
+                  <button id="saveSessionObjective" data-keep-menu="true" type="button"><i class="ico ph ph-check" aria-hidden="true"></i><span>Save task</span></button>
                   <select hidden id="sessionObjectiveMode" aria-label="Goal behavior"><option value="goal">Goal · stop when complete</option><option value="loop">Loop · keep going</option></select>
-                  <button id="createPlan" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg><span>Create plan</span></button>
-                  <button id="queueAtFinish" type="button" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-clock" /></svg><span>Queue at Session finish</span></button>
-                  <button id="compactSession" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-copy" /></svg><span>Compact &amp; resume</span></button>
-                  <button id="cancelCompaction" type="button" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg><span>Cancel compaction</span></button>
+                  <button id="createPlan" type="button"><i class="ico ph ph-chat-circle" aria-hidden="true"></i><span>Create plan</span></button>
+                  <button id="queueAtFinish" type="button" hidden><i class="ico ph ph-clock" aria-hidden="true"></i><span>Queue at Session finish</span></button>
+                  <button id="compactSession" type="button"><i class="ico ph ph-copy" aria-hidden="true"></i><span>Compact &amp; resume</span></button>
+                  <button id="cancelCompaction" type="button" hidden><i class="ico ph ph-x" aria-hidden="true"></i><span>Cancel compaction</span></button>
                   <p id="sessionControlStatus" role="status"></p>
                 </div>
               </div>
@@ -1140,9 +1095,9 @@
                 </div>
                 </div>
                 <details class="composer-menu model-menu" id="modelMenu">
-                  <summary><span id="composerModelLabel">Model</span><svg class="ico picker-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg></summary>
+                  <summary><span id="composerModelLabel">Model</span><i class="ico picker-chevron ph ph-caret-down" aria-hidden="true"></i></summary>
                   <div class="composer-popover">
-                    <div class="power-header"><div class="power-caption"><strong id="composerPowerTitle">Choose a level</strong><span id="composerPowerModel">Observed models</span></div><button class="btn model-reload" id="refreshComposerModels" data-keep-menu="true" type="button" title="Reload ChatGPT models" aria-label="Reload ChatGPT models"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5M20 7l-3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+                    <div class="power-header"><div class="power-caption"><strong id="composerPowerTitle">Choose a level</strong><span id="composerPowerModel">Observed models</span></div><button class="btn model-reload" id="refreshComposerModels" data-keep-menu="true" type="button" title="Reload ChatGPT models" aria-label="Reload ChatGPT models"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i></button>
                     </div><p id="composerModelStatus" class="muted" role="status" hidden></p>
                     <div id="composerModelChoices" role="group" aria-label="Model"></div><div id="composerPowerChoices" role="group" aria-label="Thinking effort"></div><label hidden>Model<select id="composerModel" aria-label="ChatGPT model"><option value="" disabled>No observed choices</option></select></label>
                     <label hidden>Reasoning<select id="composerReasoning" aria-label="Reasoning effort"><option value="" disabled>No observed choices</option></select></label>
@@ -1152,13 +1107,13 @@
                 <div class="send-control">
                   <div class="send-options" id="sendOptions" hidden>
                     <div class="delivery-choices" role="radiogroup" aria-label="Message delivery">
-                      <button type="button" role="radio" aria-checked="true" data-delivery="auto"><span id="immediateDeliveryLabel">Send</span><svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
-                      <button type="button" role="radio" aria-checked="false" data-delivery="tool"><span>Inject now</span><svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
-                      <button type="button" role="radio" aria-checked="false" data-delivery="after-turn"><span id="afterTurnLabel">After this turn</span><svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
+                      <button type="button" role="radio" aria-checked="true" data-delivery="auto"><span id="immediateDeliveryLabel">Send</span><i class="ico ph ph-check" aria-hidden="true"></i></button>
+                      <button type="button" role="radio" aria-checked="false" data-delivery="tool"><span>Inject now</span><i class="ico ph ph-check" aria-hidden="true"></i></button>
+                      <button type="button" role="radio" aria-checked="false" data-delivery="after-turn"><span id="afterTurnLabel">After this turn</span><i class="ico ph ph-check" aria-hidden="true"></i></button>
                     </div>
                     <select id="sendMode" aria-label="Message delivery" hidden><option value="auto">Send</option><option value="tool">Inject now</option><option value="after-turn">After this turn</option></select>
                   </div>
-                  <button class="send-button" id="chatSend" type="submit" aria-label="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+                  <button class="send-button" id="chatSend" type="submit" aria-label="Send message"><i class="ph ph-arrow-up send-icon" aria-hidden="true"></i></button>
                 </div>
               </div>
               <p id="composerStatus" role="status" aria-live="polite"></p>
@@ -1180,10 +1135,10 @@
                 </span>
                 <span class="problems" id="logProblems" hidden></span>
                 <button class="btn" id="copyLogJson" type="button">
-                  <svg class="ico" viewBox="0 0 24 24"><use href="#i-copy" /></svg>JSON
+                  <i class="ico ph ph-copy" aria-hidden="true"></i>JSON
                 </button>
                 <button class="btn" id="copyLogText" type="button">
-                  <svg class="ico" viewBox="0 0 24 24"><use href="#i-copy" /></svg>Text
+                  <i class="ico ph ph-copy" aria-hidden="true"></i>Text
                 </button>
               </span>
             </h2>

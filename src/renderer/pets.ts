@@ -225,9 +225,7 @@ export function initPets(api: AppApi, runtime: PetController): void {
       const favorite = document.createElement('button'); favorite.type = 'button'; favorite.className = 'pet-favorite';
       favorite.setAttribute('aria-pressed', String(pet.favorite));
       ui(favorite, 'aria-label', () => t(pet.favorite ? 'Remove {0} from favorites' : 'Favorite {0}', [pet.displayName]));
-      const favoriteGlyph = icon(pet.favorite ? 'i-star-fill' : 'i-star');
-      if (pet.favorite) favoriteGlyph.classList.add('is-filled');
-      favorite.append(favoriteGlyph);
+      favorite.append(icon(pet.favorite ? 'i-star-fill' : 'i-star'));
       favorite.addEventListener('click', () => void mutate(api.petsSetFavorite(pet.id, !pet.favorite)));
 
       const menu = document.createElement('details'); menu.className = 'plugin-menu';

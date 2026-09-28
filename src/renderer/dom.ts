@@ -6,17 +6,79 @@ import { currentLanguage, t, ui } from './i18n.js';
  * built from text, so a session title or a tool argument can never become markup.
  */
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
+/**
+ * The app's icon vocabulary, drawn with the bundled Phosphor font (icons.css).
+ *
+ * Call sites name what an icon means (`i-retry`); this map alone decides which glyph draws it.
+ * `fill:` selects Phosphor's filled family. The dock toggles reuse the sidebar glyph turned
+ * toward the edge they open, so all three panel controls read as one set.
+ */
+const ICONS: Readonly<Record<string, string>> = {
+  'i-agents': 'robot',
+  'i-back': 'arrow-left',
+  'i-ban': 'prohibit',
+  'i-bolt': 'lightning',
+  'i-chart': 'chart-line',
+  'i-chat': 'chat-circle',
+  'i-check': 'check',
+  'i-chev': 'caret-right',
+  'i-clock': 'clock',
+  'i-copy': 'copy',
+  'i-dock-expand': 'corners-out',
+  'i-dock-restore': 'corners-in',
+  'i-eye': 'eye',
+  'i-file': 'file',
+  'i-file-text': 'file-text',
+  'i-folder': 'folder',
+  'i-gear': 'gear-six',
+  'i-git-diff': 'git-diff',
+  'i-globe': 'globe-hemisphere-west',
+  'i-home': 'house',
+  'i-image': 'image',
+  'i-lock': 'lock-key',
+  'i-loop': 'arrows-clockwise',
+  'i-monitor': 'monitor',
+  'i-more': 'dots-three',
+  'i-out': 'arrow-square-out',
+  'i-panel-bottom': 'sidebar-simple ico-turn-bottom',
+  'i-panel-right': 'sidebar-simple ico-turn-right',
+  'i-paw': 'paw-print',
+  'i-pencil': 'pencil-simple',
+  'i-play': 'play',
+  'i-plus': 'plus',
+  'i-power': 'power',
+  'i-pulse': 'activity',
+  'i-retry': 'arrow-clockwise',
+  'i-search': 'magnifying-glass',
+  'i-skill': 'cube',
+  'i-star': 'star',
+  'i-star-fill': 'fill:star',
+  'i-steps': 'list-checks',
+  'i-sun': 'sun',
+  'i-target': 'target',
+  'i-terminal': 'terminal-window',
+  'i-trash': 'trash',
+  'i-warning': 'warning',
+  'i-x': 'x'
+};
 
-/** One icon from the sprite in index.html. */
-export function icon(name: string, className = 'ico'): SVGElement {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('class', className);
-  svg.setAttribute('viewBox', '0 0 24 24');
-  const use = document.createElementNS(SVG_NS, 'use');
-  use.setAttribute('href', `#${name}`);
-  svg.append(use);
-  return svg;
+function iconClasses(name: string): string {
+  const glyph = ICONS[name];
+  if (!glyph) throw new Error(`unknown icon ${name}`);
+  return glyph.startsWith('fill:') ? `ph-fill ph-${glyph.slice(5)}` : `ph ph-${glyph}`;
+}
+
+/** One icon glyph at the shared optical size (`.ico`), hidden from assistive technology. */
+export function icon(name: string, className = 'ico'): HTMLElement {
+  const node = document.createElement('i');
+  node.setAttribute('aria-hidden', 'true');
+  setIcon(node, name, className);
+  return node;
+}
+
+/** Redraws an existing icon, e.g. a toggle whose meaning flipped. */
+export function setIcon(node: Element, name: string, className = 'ico'): void {
+  node.className = `${className} ${iconClasses(name)}`;
 }
 
 export function el(tag: string, className = '', text: string | (() => string) = ''): HTMLElement {
