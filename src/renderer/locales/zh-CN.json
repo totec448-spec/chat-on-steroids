@@ -1731,5 +1731,8 @@
   "Skill is already up to date": "技能已是最新",
   "Skill updated from GitHub": "已从 GitHub 更新技能",
   "ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.": "ChatGPT 已于 {0} 连接，但从未运行过工具。请确认 CoS 应用已在 ChatGPT → 插件 中启用。",
-  "never — check the app in ChatGPT → Plugins": "从未 — 请在 ChatGPT → 插件 中检查应用"
+  "never — check the app in ChatGPT → Plugins": "从未 — 请在 ChatGPT → 插件 中检查应用",
+  "Diff unavailable: this edit was too large to keep": "差异不可用：此次编辑太大，无法保存",
+  "Diff unavailable: this edit was not kept": "差异不可用：此次编辑未保存",
+  "Review this edit ({0} of {1} files)": "查看此次编辑（{1} 个文件中的 {0} 个）"
 }

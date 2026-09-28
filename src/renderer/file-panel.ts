@@ -1307,7 +1307,7 @@ export function createFilePanel(options: FilePanelOptions) {
 
   async function openReview(projectId: string, sessionId: string, callId: string, indices: number[]): Promise<boolean> {
     const projectGeneration = generation;
-    if (project?.id !== projectId || !indices.length || indices.length > 8 ||
+    if (project?.id !== projectId || !indices.length || indices.length > 32 ||
         indices.some(index => !Number.isSafeInteger(index) || index < 0 || index >= 64)) return false;
     if (editingPath && !(await leaveEditorIfNeeded())) return false;
     if (project?.id !== projectId || generation !== projectGeneration) return false;

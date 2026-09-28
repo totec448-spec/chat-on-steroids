@@ -1731,5 +1731,8 @@
   "Skill is already up to date": "A skill já está atualizada",
   "Skill updated from GitHub": "Skill atualizada pelo GitHub",
   "ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.": "O ChatGPT se conectou {0}, mas nunca executou uma ferramenta. Verifique se o app do CoS está ativado em ChatGPT → Plugins.",
-  "never — check the app in ChatGPT → Plugins": "nunca — verifique o app em ChatGPT → Plugins"
+  "never — check the app in ChatGPT → Plugins": "nunca — verifique o app em ChatGPT → Plugins",
+  "Diff unavailable: this edit was too large to keep": "Diff indisponível: esta edição era grande demais para ser guardada",
+  "Diff unavailable: this edit was not kept": "Diff indisponível: esta edição não foi guardada",
+  "Review this edit ({0} of {1} files)": "Revisar esta edição ({0} de {1} arquivos)"
 }
