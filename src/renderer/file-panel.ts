@@ -6,7 +6,7 @@ import type { ProjectGitChange, ProjectGitChanged, ProjectGitDiff, ProjectGitSna
 import { safeExternalLink } from '../shared/external-link.js';
 import { marked } from 'marked';
 import { t, ui } from './i18n.js';
-import { el, icon, run, toast } from './dom.js';
+import { disclosureChevron, el, icon, run, toast } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
 import type { ProjectCodeEditor, ProjectDiffViewer } from './file-code-editor.js';
@@ -258,7 +258,7 @@ export function createFilePanel(options: FilePanelOptions) {
   branchTrigger.type = 'button';
   branchTrigger.setAttribute('aria-haspopup', 'dialog');
   branchTrigger.setAttribute('aria-expanded', 'false');
-  branchTrigger.append(el('span', 'file-branch-trigger-label', () => t('Working tree')), icon('i-chev'));
+  branchTrigger.append(el('span', 'file-branch-trigger-label', () => t('Working tree')), disclosureChevron('ico'));
   const branchStats = el('span', 'file-branch-stats');
   if (options.reviewOnly) changesHeaderContent.append(branchArrow, branchTrigger, branchStats);
   changesHeader.append(changesHeaderContent);

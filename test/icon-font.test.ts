@@ -49,17 +49,18 @@ it('maps exactly the glyphs the renderer draws, at the codepoints the bundled Ph
 });
 
 it('draws every interface icon with the font instead of a hand-drawn SVG', () => {
-  // Allowed SVG is not an icon: the sprite, the product mark, language flags and the context ring.
+  // Allowed SVG: the sprite, the product mark, language flags, the context ring, and the one authored
+  // disclosure chevron, which must rotate around its drawn centre (a font caret sits on a baseline).
   for (const [, tag, rest] of html.matchAll(/(<svg\b[^>]*>)([\s\S]{0,80})/g)) {
-    const allowed = /class="(sprite|language-flag)"/.test(tag!) || /^<use href="#i-mark"/.test(rest!) ||
+    const allowed = /class="(sprite|language-flag|disclosure-chevron\b[^"]*)"/.test(tag!) || /^<use href="#i-mark"/.test(rest!) ||
       /^<circle class="context-track"/.test(rest!.trim());
     expect(allowed, tag).toBe(true);
   }
   const renderer = new URL('../src/renderer/', import.meta.url);
   const drawing = readdirSync(renderer).filter(name => name.endsWith('.ts') &&
     readFileSync(new URL(name, renderer), 'utf8').includes("createElementNS('http://www.w3.org/2000/svg', 'svg')"));
-  // The setup guide draws a connector line across its screenshot, not an icon.
-  expect(drawing).toEqual(['setup-guide.ts']);
+  // dom.ts draws the disclosure chevron; the setup guide draws a connector line across its screenshot.
+  expect(drawing).toEqual(['dom.ts', 'setup-guide.ts']);
 });
 
 it('keeps only the bespoke product mark in the inline sprite', () => {

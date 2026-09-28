@@ -36,8 +36,16 @@ it('restores Turkish and synchronizes both selectors without changing drafts, fo
   input.value = '/review\nİşlenmemiş taslak $& <img src=x> 🙂';
   input.focus(); input.setSelectionRange(2, 9);
   const authored = document.createElement('p'); authored.textContent = 'Settings'; document.body.append(authored);
+  const back = document.getElementById('backToChat')!;
+  const backIcon = back.querySelector('.ph-arrow-left');
+  expect(backIcon).not.toBeNull();
   for (const locale of ['en', 'ja', 'es', 'zh-TW', 'zh-CN', 'fr', 'pt-PT', 'pt-BR', 'de', 'tr'] as const) {
     setLanguage(locale);
+    const label = locale === 'en' ? 'Back to chat'
+      : JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8'))['Back to chat'];
+    expect(label).toBeTruthy();
+    expect(back.textContent?.trim()).toBe(label);
+    expect(back.querySelector('.ph-arrow-left')).toBe(backIcon);
     expect(document.activeElement).toBe(input);
     expect([input.selectionStart, input.selectionEnd]).toEqual([2, 9]);
     expect(input.value).toBe('/review\nİşlenmemiş taslak $& <img src=x> 🙂');
@@ -55,7 +63,7 @@ it('matches both Turkish I pairs when filtering complete settings sections', asy
   window.localStorage.setItem('cos.ui.language', 'tr');
   const { filterSettingsSections } = await import('../src/renderer/dom.js');
   const view = document.createElement('section');
-  view.innerHTML = '<h2 class="settings-section-title">İzinler</h2><div class="pane">IŞIK</div><p id="settingsSearchEmpty"></p>';
+  view.innerHTML = '<h2 class="automation-section-head">İzinler</h2><div class="pane">IŞIK</div><p id="settingsSearchEmpty"></p>';
   for (const query of ['izinler', 'İZİNLER', 'ışık', 'IŞIK']) {
     filterSettingsSections(view, query);
     expect(view.querySelector<HTMLElement>('.pane')!.hidden).toBe(false);
