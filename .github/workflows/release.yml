@@ -350,10 +350,12 @@ jobs:
       - name: Package standalone extension
         run: |
           set -euo pipefail
+          # Same stamp as the packaged app, so a ZIP-loaded extension reports its build (#568).
+          node scripts/write-extension-stamp.mjs
           (cd extension && zip -qr ../release/Chat-On-Steroids-Extension.zip . -x '*.map')
           zip -q release/Chat-On-Steroids-Extension.zip LICENSE
           node -e "const m=require('./extension/manifest.json'),p=require('./package.json');if(m.version!==p.version)throw new Error('Extension '+m.version+' does not match app '+p.version)"
-          for required in manifest.json background.js chatgpt-dom.js content.js fiber.js overlay.css popup.html popup.css popup.js icons/icon16.png icons/icon32.png icons/icon48.png icons/icon128.png LICENSE; do
+          for required in manifest.json build-stamp.txt background.js chatgpt-dom.js content.js fiber.js overlay.css popup.html popup.css popup.js icons/icon16.png icons/icon32.png icons/icon48.png icons/icon128.png LICENSE; do
             unzip -Z1 release/Chat-On-Steroids-Extension.zip | grep -Fxq "$required" || { echo "Extension zip missing $required" >&2; exit 1; }
           done
 
