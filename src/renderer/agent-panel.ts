@@ -1,7 +1,7 @@
 import { ui, t } from './i18n.js';
 import type { AgentInfo, SessionSummary, SessionEvent } from '../shared/session.js';
 import { workerReportedFinish } from '../shared/session-activity.js';
-import { el } from './dom.js';
+import { el, icon } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 
 /** A read-only second pane. Its selection never changes the main chat's composer. */
@@ -21,7 +21,8 @@ export function createAgentPanel(options: {
   ui(pane, 'aria-label', () => t("Sub-agents"));
   if (!options.mount) attachWorkPanelResize(options.host, pane);
   const head = el('div', 'agent-panel-header'); head.hidden = true;
-  const back = el('button', 'btn', '←'); ui(back, 'title', () => t("Back to sub-agents")); back.setAttribute('type', 'button');
+  const back = el('button', 'btn btn-icon agent-back'); back.append(icon('i-back'));
+  ui(back, 'title', () => t("Back to sub-agents")); back.setAttribute('type', 'button');
   ui(back, 'aria-label', () => t("Back to sub-agents"));
   const title = el('strong');
   const body = el('div', 'agent-panel-body');

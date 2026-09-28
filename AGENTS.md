@@ -2969,6 +2969,14 @@ access. Main re-resolves current approved roots and rejects traversal, symbolic 
 and project-root mutation. The renderer's `workspace-docks.ts` owns the right tool dock and
 bottom terminal dock; Files, Review, Sub-agents and each Terminal view retain their own content
 and async lifetimes. Closing the right dock hides its active tool but retains its tab selection.
+Every dock track change (right column, bottom row) goes through `moveWorkDock`, which animates
+resolved pixel tracks (CSS keeps the resting layout). Open/close slide the content whole at its
+resting size and retire the outgoing tool or terminal after the exit; right expand/restore fade
+the chat at its readable width. The bottom dock resizes from its top edge; its handle stays above
+the terminal bar. Dock `+` menus are anchor-positioned and flip at the window edge. Right-dock
+and bottom-terminal tabs share one pill layout with a truncating `.tab-label`, and reorder by
+pointer drag or Ctrl+Shift+Left/Right; the owner's order stays authoritative. Selecting a tab
+updates the existing pills; only tab, order or title changes rebuild them.
 The right dock has launcher shortcuts, tool tabs and a `+` tool menu. Its Files, Review,
 Sub-agents and Terminal actions open right tabs; repeated Terminal `+` actions add a shell there.
 With no tabs, the right dock shows only launcher shortcuts; its tab bar and `+` stay hidden.

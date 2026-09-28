@@ -1,7 +1,8 @@
 import { el, icon, setIcon } from './dom.js';
 import { t, ui } from './i18n.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
-import { hideSlidingPanel, showSlidingPanel } from './panel-motion.js';
+import { moveWorkDock } from './panel-motion.js';
+import { enableTabReorder, reorderKey } from './tab-reorder.js';
 
 export type DockView = 'review' | 'files' | 'agents' | 'terminal';
 type AdoptableView = Exclude<DockView, 'terminal'>;
@@ -77,6 +78,8 @@ export function createWorkspaceDocks(host: HTMLElement) {
   resize.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
     drag = { id: event.pointerId, y: event.clientY, height: bottom.offsetHeight };
+    // Like the right dock's divider: keep the cursor and edge highlight for the whole drag.
+    app.classList.add('is-resizing-bottom-dock');
     resize.setPointerCapture(event.pointerId); event.preventDefault();
   });
   resize.addEventListener('pointermove', event => {
@@ -84,10 +87,10 @@ export function createWorkspaceDocks(host: HTMLElement) {
   });
   resize.addEventListener('pointerup', event => {
     if (drag?.id !== event.pointerId) return;
-    drag = null; setHeight(bottom.offsetHeight, true);
+    drag = null; app.classList.remove('is-resizing-bottom-dock'); setHeight(bottom.offsetHeight, true);
     if (resize.hasPointerCapture(event.pointerId)) resize.releasePointerCapture(event.pointerId);
   });
-  resize.addEventListener('lostpointercapture', () => { drag = null; });
+  resize.addEventListener('lostpointercapture', () => { drag = null; app.classList.remove('is-resizing-bottom-dock'); });
   resize.addEventListener('keydown', event => {
     if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
     event.preventDefault(); setHeight(bottom.offsetHeight + (event.key === 'ArrowUp' ? 24 : -24), true);
@@ -121,25 +124,27 @@ export function createWorkspaceDocks(host: HTMLElement) {
   };
   const paint = (): void => {
     if (active && !available(active)) { hideView(active); active = null; }
-    if (right.hidden === rightOpen) {
-      if (rightOpen) showSlidingPanel(right, 'right'); else hideSlidingPanel(right, 'right');
-    }
     rightToggle.setAttribute('aria-expanded', String(rightOpen)); rightToggle.classList.toggle('is-active', rightOpen);
     expandToggle.hidden = !rightOpen;
     expandToggle.setAttribute('aria-pressed', String(expanded));
     expandToggle.title = t(expanded ? 'Restore right panel' : 'Expand right panel');
     expandToggle.setAttribute('aria-label', expandToggle.title);
     setIcon(expandGlyph, expanded ? 'i-dock-restore' : 'i-dock-expand');
-    if (bottom.hidden === bottomOpen) {
-      if (bottomOpen) showSlidingPanel(bottom, 'up'); else hideSlidingPanel(bottom, 'up');
-    }
     bottomToggle.setAttribute('aria-expanded', String(bottomOpen)); bottomToggle.classList.toggle('is-active', bottomOpen);
     empty.hidden = active !== null;
     bar.hidden = opened.length === 0;
     if (bar.hidden) add.open = false;
     const terminalTabs = rightTerminal?.tabs() ?? [];
-    const signature = `${opened.join(',')}|${active ?? ''}|${terminalTabs.map(tab => `${tab.id}:${tab.title}:${tab.exited}`).join(',')}`;
-    if (signature !== tabSignature) {
+    // Selection alone updates the pills in place; rebuilding them on every click reset hover and
+    // focus and repainted the whole strip. Only a change of tabs, order or titles rebuilds.
+    const signature = `${opened.join(',')}|${terminalTabs.map(tab => `${tab.id}:${tab.title}:${tab.exited}`).join(',')}`;
+    if (signature === tabSignature) {
+      for (const tab of tabs.children as HTMLCollectionOf<HTMLElement>) {
+        const selected = tab.dataset.key === active, pick = tab.querySelector<HTMLButtonElement>('[role=tab]')!;
+        tab.classList.toggle('is-selected', selected);
+        pick.setAttribute('aria-selected', String(selected)); pick.tabIndex = selected ? 0 : -1;
+      }
+    } else {
       const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.work-dock-tab');
       const focusedKey = focused && tabs.contains(focused) ? focused.dataset.key : null;
       const focusedClose = focusedKey && (document.activeElement as HTMLElement).classList.contains('btn-icon');
@@ -151,9 +156,11 @@ export function createWorkspaceDocks(host: HTMLElement) {
         const tab = el('div', `work-dock-tab${active === key ? ' is-selected' : ''}`);
         tab.dataset.key = key;
         if (id) tab.dataset.terminalId = id;
-        const pick = el('button', 'btn', () => terminal
-          ? `${terminal.title}${terminal.exited ? ` · ${t('exited')}` : ''}` : t(view!.label)) as HTMLButtonElement;
-        pick.type = 'button'; pick.setAttribute('role', 'tab'); pick.prepend(icon(id ? 'i-terminal' : view!.glyph));
+        const pick = el('button', 'btn') as HTMLButtonElement;
+        // The label is its own element so a long title truncates instead of running under the close.
+        pick.append(icon(id ? 'i-terminal' : view!.glyph), el('span', 'tab-label', () => terminal
+          ? `${terminal.title}${terminal.exited ? ` · ${t('exited')}` : ''}` : t(view!.label)));
+        pick.type = 'button'; pick.setAttribute('role', 'tab');
         if (terminal) pick.title = terminal.title;
         pick.setAttribute('aria-selected', String(active === key)); pick.tabIndex = active === key ? 0 : -1;
         pick.addEventListener('click', () => activateKey(key));
@@ -180,25 +187,36 @@ export function createWorkspaceDocks(host: HTMLElement) {
     }
     refreshControls();
   };
+  // Every change of the dock's track goes through one move, so open, close, expand and
+  // restore share the drawer motion and interruptions continue from the current frame.
+  const layout = (change: () => void, settled?: () => void): void =>
+    moveWorkDock(host, right, () => { change(); right.hidden = !rightOpen; }, settled);
   const setRightOpen = (value: boolean): void => {
     if (rightOpen === value) { paint(); return; }
-    if (!value && active) hideView(active);
-    rightOpen = value; host.classList.toggle('has-work-dock', value);
-    if (!value) { expanded = false; host.classList.remove('is-work-dock-expanded'); add.open = false; }
+    // The outgoing tool stays mounted while the drawer leaves, then retires as before.
+    const leaving = value ? null : active;
+    layout(() => {
+      rightOpen = value; host.classList.toggle('has-work-dock', value);
+      if (!value) { expanded = false; host.classList.remove('is-work-dock-expanded'); add.open = false; }
+    }, () => { if (leaving && !rightOpen && active === leaving) hideView(leaving); });
     paint();
     if (value && active) showView(active);
   };
   const setBottomOpen = (value: boolean, createIfEmpty = true): void => {
     if (bottomOpen === value) return;
-    bottomOpen = value; app.classList.toggle('has-bottom-dock', value); paint();
-    if (value) bottomTerminal?.show(bottomBody, createIfEmpty); else bottomTerminal?.hide();
+    // The bottom dock rises as a drawer; its terminal is hidden once the drawer has left.
+    moveWorkDock(app, bottom, () => {
+      bottomOpen = value; app.classList.toggle('has-bottom-dock', value); bottom.hidden = !value;
+    }, () => { if (!value && !bottomOpen) bottomTerminal?.hide(); }, 'y');
+    paint();
+    if (value) bottomTerminal?.show(bottomBody, createIfEmpty);
   };
   const activateKey = (key: DockTab): void => {
     if (!available(key)) return;
     if (active && active !== key) hideView(active);
     if (!opened.includes(key)) opened.push(key);
     active = key;
-    if (!rightOpen) { rightOpen = true; host.classList.add('has-work-dock'); }
+    if (!rightOpen) layout(() => { rightOpen = true; host.classList.add('has-work-dock'); });
     paint();
     showView(key);
   };
@@ -216,7 +234,9 @@ export function createWorkspaceDocks(host: HTMLElement) {
   const adopt = (kind: AdoptableView): void => {
     if (active && active !== kind) hideView(active);
     if (!opened.includes(kind)) opened.push(kind);
-    active = kind; rightOpen = true; host.classList.add('has-work-dock'); paint();
+    active = kind;
+    if (!rightOpen) layout(() => { rightOpen = true; host.classList.add('has-work-dock'); });
+    paint();
   };
   const addAction = (kind: DockView, label: string, glyph: string): void => {
     const item = el('button', 'btn work-dock-menu-item', () => t(label)) as HTMLButtonElement;
@@ -245,7 +265,7 @@ export function createWorkspaceDocks(host: HTMLElement) {
   bottomToggle.addEventListener('click', () => setBottomOpen(!bottomOpen));
   expandToggle.addEventListener('click', () => {
     if (!rightOpen) return;
-    expanded = !expanded; host.classList.toggle('is-work-dock-expanded', expanded);
+    layout(() => { expanded = !expanded; host.classList.toggle('is-work-dock-expanded', expanded); });
     paint();
   });
   add.addEventListener('keydown', event => {
@@ -258,7 +278,19 @@ export function createWorkspaceDocks(host: HTMLElement) {
     items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]!.focus();
   });
   document.addEventListener('click', event => { if (add.open && !add.contains(event.target as Node)) add.open = false; });
+  const moveTab = (key: DockTab, index: number): void => {
+    const from = opened.indexOf(key); if (from < 0) return;
+    opened.splice(from, 1); opened.splice(Math.max(0, Math.min(opened.length, index)), 0, key); paint();
+  };
+  enableTabReorder(tabs, { item: '.work-dock-tab', key: node => node.dataset.key, move: (key, index) => moveTab(key as DockTab, index) });
   tabs.addEventListener('keydown', event => {
+    const step = reorderKey(event);
+    if (step && active && opened.length > 1) {
+      event.preventDefault(); event.stopPropagation();
+      moveTab(active, opened.indexOf(active) + step);
+      tabs.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
+      return;
+    }
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !opened.length) return;
     event.preventDefault();
     const index = active ? opened.indexOf(active) : 0;
