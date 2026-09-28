@@ -229,6 +229,18 @@ export function moveChatWorkspace(fromConversationId: string, toConversationId: 
   return true;
 }
 
+/**
+ * Forgets a learned workspace whose folder no longer exists.
+ *
+ * A worker that slept while its temporary folder was deleted would otherwise run its first
+ * command after revival in that deleted folder and fail with "Not found". Request-scoped copies
+ * of the same folder go too, or the next exact call would recover it from them again.
+ */
+export function forgetMissingWorkspace(real: string): void {
+  for (const key of workspaceKeys()) if (workspaces.get(key)?.real === real) workspaces.delete(key);
+  for (const [key, held] of workspaces) if (key.startsWith('request:') && held.real === real) workspaces.delete(key);
+}
+
 /** Drops one conversation-scoped workspace without touching any agent-scoped mirror. */
 export function clearChatWorkspace(conversationId: string | null): boolean {
   if (!conversationId) return false;
