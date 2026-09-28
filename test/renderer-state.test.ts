@@ -561,7 +561,8 @@ it.each(['wizConnect', 'connectionPopoverToggle'])(
 
     expect((doc.getElementById(buttonId) as HTMLButtonElement).disabled).toBe(false);
     (doc.getElementById(buttonId) as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(connect).toHaveBeenCalledOnce());
+    // The Intel macOS release runner needs more than waitFor's default second for this chain.
+    await vi.waitFor(() => expect(connect).toHaveBeenCalledOnce(), { timeout: 10_000 });
     expect(order).toEqual(['settings', 'key', 'connect']);
   }
 );
