@@ -1632,6 +1632,8 @@ through the existing completion path, retaining Goal/Loop eligibility and marked
 Recorder observers and periodic callbacks check the extension runtime synchronously before
 acting. An invalidated runtime retires through the existing stop/cleanup owner; it cannot wait
 for a failed transport call to stop reinserting composer controls removed by its successor.
+Native Send click, form submit and Enter capture use that same listener cleanup owner. A
+retired recorder cannot capture another send; repeated retirement cannot detach its successor.
 Existing maintenance also checks at most 64 live ChatGPT pages once per minute in one background
 flight. It reuses recorder restoration, including the idempotent MAIN helper, without delaying
 repair/input delivery or opening/reloading tabs. Loading, discarded, frozen, navigated and
