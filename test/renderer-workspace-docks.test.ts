@@ -181,3 +181,23 @@ it('opens a view from Ctrl+Shift+digit as the browser really reports it', () => 
   document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: '#', code: 'Digit3', ctrlKey: true, shiftKey: false }));
   expect(files).toHaveBeenCalledOnce();
 });
+
+it('resizes the bottom dock from its top edge with drag feedback', () => {
+  setup();
+  const app = document.querySelector<HTMLElement>('.app')!, bottom = document.getElementById('workDockBottom')!;
+  const handle = bottom.querySelector<HTMLElement>('.terminal-resize')!;
+  expect(handle.parentElement).toBe(bottom);
+  Object.defineProperty(bottom, 'offsetHeight', { configurable: true, get: () => Number.parseFloat(app.style.getPropertyValue('--terminal-height')) });
+  handle.setPointerCapture = vi.fn(); handle.hasPointerCapture = vi.fn(() => true); handle.releasePointerCapture = vi.fn();
+  const pointer = (type: string, clientY: number) => {
+    const event = new window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientY });
+    Object.defineProperty(event, 'pointerId', { value: 7 }); handle.dispatchEvent(event);
+  };
+  pointer('pointerdown', 600);
+  expect(app.classList.contains('is-resizing-bottom-dock')).toBe(true);
+  pointer('pointermove', 520);
+  expect(app.style.getPropertyValue('--terminal-height')).toBe('330px');
+  pointer('pointerup', 520);
+  expect(app.classList.contains('is-resizing-bottom-dock')).toBe(false);
+  expect(handle.getAttribute('aria-valuenow')).toBe('330');
+});
