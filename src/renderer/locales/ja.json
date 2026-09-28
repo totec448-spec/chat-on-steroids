@@ -896,7 +896,6 @@
   "Tunnel → this app": "トンネル → このアプリ",
   "Tunnel uptime": "トンネルの稼働時間",
   "ChatGPT ran a tool": "ChatGPT がツールを実行",
-  "never — check Developer mode": "未実行 · 開発者モードを確認してください",
   "Tunnel client": "トンネルクライアント",
   "Local server": "ローカルサーバー",
   "not running": "停止中",
@@ -1262,7 +1261,6 @@
   "4 · Accept, then Create": "4 · 同意して Create",
   "Setup screenshot": "セットアップのスクリーンショット",
   "Enlarge image": "画像を拡大",
-  "ChatGPT connected {0} but has never run a tool. Check Developer mode in ChatGPT → Settings → Security and login.": "ChatGPT は{0}に接続しましたが、まだツールを実行していません。ChatGPT → Settings → Security and login で Developer mode を確認してください。",
   "Waiting for tool inactivity": "ツールの活動が止まるのを待っています",
   "Waiting for running tools": "実行中のツールを待っています",
   "Waiting for activity after recovery": "復旧後のアクティビティ待ち",
@@ -1711,5 +1709,7 @@
   "No matches for “{0}”.": "「{0}」に一致するものはありません。",
   "No skills available.": "利用できるスキルはありません。",
   "Skill is already up to date": "スキルはすでに最新です",
-  "Skill updated from GitHub": "GitHub からスキルを更新しました"
+  "Skill updated from GitHub": "GitHub からスキルを更新しました",
+  "ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.": "ChatGPT は {0} に接続しましたが、まだツールを実行していません。ChatGPT → プラグインで CoS アプリが有効か確認してください。",
+  "never — check the app in ChatGPT → Plugins": "なし — ChatGPT → プラグインでアプリを確認"
 }

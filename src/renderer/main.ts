@@ -1318,7 +1318,7 @@ function apply(next: AppState): void {
   ui(chatgptNote, 'textContent', () => status.lastRequestAt === null
       ? t("ChatGPT has not called this app yet.")
       : status.lastToolCallAt === null
-        ? t("ChatGPT connected {0} but has never run a tool. Check Developer mode in ChatGPT → Settings → Security and login.", [ago(status.lastRequestAt)])
+        ? t("ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.", [ago(status.lastRequestAt)])
         : unverified.length > 0
           ? // One connector working is not the whole setup. Naming the missing one is the
             // difference between "something is off" and knowing what to go and create.
@@ -1541,7 +1541,7 @@ function facts(next: AppState): HTMLElement[] {
     if (status.lastRequestAt !== null) {
       rows.push([
         'ChatGPT ran a tool',
-        () => status.lastToolCallAt === null ? t("never — check Developer mode") : ago(status.lastToolCallAt),
+        () => status.lastToolCallAt === null ? t("never — check the app in ChatGPT → Plugins") : ago(status.lastToolCallAt),
         status.lastToolCallAt === null
       ]);
     }

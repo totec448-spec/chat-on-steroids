@@ -1003,7 +1003,6 @@
   "Tunnel → this app": "隧道 → 本應用程式",
   "Tunnel uptime": "隧道執行時長",
   "ChatGPT ran a tool": "ChatGPT 工具呼叫",
-  "never — check Developer mode": "從未 — 請檢查開發者模式",
   "Tunnel client": "隧道用戶端",
   "Local server": "本機伺服器",
   "not running": "未執行",
@@ -1370,7 +1369,6 @@
   "4 · Accept, then Create": "4 · 接受提示並建立",
   "Setup screenshot": "設定螢幕擷取畫面",
   "Enlarge image": "放大圖片",
-  "ChatGPT connected {0} but has never run a tool. Check Developer mode in ChatGPT → Settings → Security and login.": "ChatGPT 於 {0} 連線，但尚未執行工具。請在 ChatGPT → Settings → Security and login 中檢查 Developer mode。",
   "Waiting for tool inactivity": "等待工具活動停止",
   "Waiting for running tools": "等待正在執行的工具",
   "Waiting for activity after recovery": "恢復後等待活動",
@@ -1711,5 +1709,7 @@
   "No matches for “{0}”.": "沒有符合「{0}」的結果。",
   "No skills available.": "沒有可用的技能。",
   "Skill is already up to date": "技能已是最新",
-  "Skill updated from GitHub": "已從 GitHub 更新技能"
+  "Skill updated from GitHub": "已從 GitHub 更新技能",
+  "ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.": "ChatGPT 已於 {0} 連線，但從未執行過工具。請確認 CoS 應用程式已在 ChatGPT → 外掛 中啟用。",
+  "never — check the app in ChatGPT → Plugins": "從未 — 請在 ChatGPT → 外掛 中檢查應用程式"
 }
