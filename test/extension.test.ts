@@ -2382,6 +2382,39 @@ describe('extension command delivery', () => {
     expect(fetch.mock.calls.some(([, init]) => String((init as any)?.body ?? '').includes('code'))).toBe(false);
   });
 
+  it('pairs on its own after a fresh load, without the popup or a ChatGPT page (#568)', async () => {
+    // Remove + Load unpacked gives the extension a new id with empty storage. Nothing but the
+    // popup or page traffic used to reach /pair, so the worker sat idle and never connected.
+    const local = new FakeStorageArea();
+    const session = new FakeStorageArea();
+    const paths: string[] = [];
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      paths.push(url.pathname);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', bridge: 14, paired: true });
+      if (url.pathname === '/pair') return response(200, { token: 'fresh-start-token' });
+      return response(200, {});
+    });
+    loadWorker({ local, session, fetch });
+    await vi.waitFor(() => expect(local.data.token).toBe('fresh-start-token'), { timeout: 5_000 });
+    expect(paths).toContain('/pair');
+  });
+
+  it('does not pair on its own after the user disconnected it', async () => {
+    const local = new FakeStorageArea({ port: 8765, disconnected: true });
+    const session = new FakeStorageArea();
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', bridge: 14, paired: false });
+      if (url.pathname === '/pair') return response(200, { token: 'unwanted-token' });
+      return response(200, {});
+    });
+    loadWorker({ local, session, fetch });
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(fetch.mock.calls.some(([input]) => new URL(String(input)).pathname === '/pair')).toBe(false);
+    expect(local.data.token).toBeUndefined();
+  });
+
   it('re-provisions once when the app no longer recognises the stored token', async () => {
     const local = new FakeStorageArea({ port: 8765, token: 'stale-token' });
     const session = new FakeStorageArea();
