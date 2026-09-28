@@ -9,6 +9,12 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## Unreleased
+
+### Improved
+
+- **Reviewing ChatGPT's edits is more dependable.** Every file of a larger edit can now be reviewed, not just the first eight. When a diff couldn't be kept, for example because the file was too large, the edit says so instead of simply showing no Review button. A partly kept edit shows how many of its files you can review.
+
 ## [2.1.18] — Recommended skills install again
 
 A quick fix for 2.1.17.

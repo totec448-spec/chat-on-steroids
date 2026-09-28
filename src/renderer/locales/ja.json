@@ -1731,5 +1731,8 @@
   "Skill is already up to date": "スキルはすでに最新です",
   "Skill updated from GitHub": "GitHub からスキルを更新しました",
   "ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.": "ChatGPT は {0} に接続しましたが、まだツールを実行していません。ChatGPT → プラグインで CoS アプリが有効か確認してください。",
-  "never — check the app in ChatGPT → Plugins": "なし — ChatGPT → プラグインでアプリを確認"
+  "never — check the app in ChatGPT → Plugins": "なし — ChatGPT → プラグインでアプリを確認",
+  "Diff unavailable: this edit was too large to keep": "差分は利用できません：この編集は大きすぎて保存できませんでした",
+  "Diff unavailable: this edit was not kept": "差分は利用できません：この編集は保存されていません",
+  "Review this edit ({0} of {1} files)": "この編集を確認（{1} 件中 {0} ファイル）"
 }

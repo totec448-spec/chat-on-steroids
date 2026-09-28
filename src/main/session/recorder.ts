@@ -131,6 +131,10 @@ interface ProgressRecord {
   contentSeq?: number;
 }
 
+/** Exact per-call edit review: at most this many files, each and all together bounded. */
+const MAX_REVIEW_FILES = 32;
+const MAX_REVIEW_BYTES = 512 * 1024;
+const MAX_REVIEW_CALL_BYTES = 2 * 1024 * 1024;
 const conversations = new Map<string, LiveConversation>();
 /** One full first-sight initialization per ChatGPT conversation at a time. */
 const sessionInitializations = new Map<string, Promise<string | null>>();
@@ -1389,19 +1393,27 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     const changes = evidence.changes.map(change => ({ ...change }));
     if (input.outcome === 'ok') {
       let reviewBytes = 0;
-      for (const review of evidence.reviews.slice(0, 8)) {
+      evidence.reviews.forEach((review, position) => {
+        const change = changes[review.changeIndex];
+        if (change) change.reviewUnavailable = position < MAX_REVIEW_FILES ? undefined : 'not-kept';
+      });
+      for (const review of evidence.reviews.slice(0, MAX_REVIEW_FILES)) {
         const change = changes[review.changeIndex];
         if (!change) continue;
         const bytes = Buffer.from(JSON.stringify({ before: review.before, after: review.after }), 'utf8');
-        if (bytes.length > 512 * 1024 || reviewBytes + bytes.length > 2 * 1024 * 1024) continue;
+        if (bytes.length > MAX_REVIEW_BYTES) { change.reviewUnavailable = 'too-large'; continue; }
+        if (reviewBytes + bytes.length > MAX_REVIEW_CALL_BYTES) { change.reviewUnavailable = 'not-kept'; continue; }
         try {
           const asset = await writeAsset(sessionId, bytes, 'text/plain');
           change.reviewAssetId = asset.id;
+          delete change.reviewUnavailable;
           reviewBytes += bytes.length;
         } catch {
           // A recording quota must not turn a successful file edit into a failed tool call.
+          change.reviewUnavailable = 'not-kept';
         }
       }
+      for (const change of changes) if (change.reviewUnavailable === undefined) delete change.reviewUnavailable;
     }
 
     const call: ToolCallRecord = {

@@ -1731,5 +1731,8 @@
   "Skill is already up to date": "Beceri zaten güncel",
   "Skill updated from GitHub": "Beceri GitHub'dan güncellendi",
   "ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.": "ChatGPT {0} bağlandı ancak henüz hiç araç çalıştırmadı. CoS uygulamasının ChatGPT → Eklentiler altında etkin olduğunu kontrol edin.",
-  "never — check the app in ChatGPT → Plugins": "hiç — ChatGPT → Eklentiler altında uygulamayı kontrol edin"
+  "never — check the app in ChatGPT → Plugins": "hiç — ChatGPT → Eklentiler altında uygulamayı kontrol edin",
+  "Diff unavailable: this edit was too large to keep": "Fark kullanılamıyor: bu düzenleme saklanamayacak kadar büyüktü",
+  "Diff unavailable: this edit was not kept": "Fark kullanılamıyor: bu düzenleme saklanmadı",
+  "Review this edit ({0} of {1} files)": "Bu düzenlemeyi incele ({1} dosyadan {0})"
 }

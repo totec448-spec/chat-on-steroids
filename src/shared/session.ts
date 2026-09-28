@@ -142,6 +142,8 @@ export interface FileChange {
   approximate: boolean;
   /** Immutable before/after text from this exact tool call, stored beside its session log. */
   reviewAssetId?: string;
+  /** Why no review was kept for this change, so the UI can say so instead of offering nothing. */
+  reviewUnavailable?: 'too-large' | 'not-kept';
 }
 
 /** Historical edit evidence, independent of the current Git working tree. */

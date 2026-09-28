@@ -1765,13 +1765,28 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
   const project = context ? null : selectedLocalProject();
   const sessionId = context ? null : selectedId;
   const reviewIndices = call.outcome === 'ok' ? (call.changes ?? []).flatMap((change, index) =>
-    change.reviewAssetId ? [index] : []).slice(0, 8) : [];
+    change.reviewAssetId ? [index] : []).slice(0, 32) : [];
+  const unavailable = call.outcome === 'ok' ? (call.changes ?? []).filter(change => change.reviewUnavailable) : [];
+  if (project && sessionId && !reviewIndices.length && unavailable.length) {
+    // Say why there is nothing to review instead of leaving the row without an action.
+    const missing = el('button', 'tool-open-diff is-unavailable') as HTMLButtonElement;
+    missing.type = 'button'; missing.setAttribute('aria-disabled', 'true');
+    missing.addEventListener('click', click => { click.preventDefault(); click.stopPropagation(); });
+    missing.append(icon('i-git-diff'));
+    const reason = () => unavailable.some(change => change.reviewUnavailable === 'too-large')
+      ? t('Diff unavailable: this edit was too large to keep') : t('Diff unavailable: this edit was not kept');
+    ui(missing, 'title', reason);
+    ui(missing, 'aria-label', reason);
+    head.append(missing);
+  }
   if (project && sessionId && reviewIndices.length) {
     const review = el('button', 'tool-open-diff') as HTMLButtonElement;
     review.type = 'button';
     review.append(icon('i-git-diff'));
-    ui(review, 'title', () => t('Review this edit'));
-    ui(review, 'aria-label', () => t('Review this edit'));
+    const total = reviewIndices.length + unavailable.length;
+    const label = () => unavailable.length ? t('Review this edit ({0} of {1} files)', [reviewIndices.length, total]) : t('Review this edit');
+    ui(review, 'title', label);
+    ui(review, 'aria-label', label);
     review.addEventListener('click', click => {
       click.preventDefault();
       click.stopPropagation();

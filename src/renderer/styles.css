@@ -2341,6 +2341,8 @@ input[readonly] {
 .tool-open-diff { display: grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--soft); cursor: pointer; }
 .tool-open-diff:hover { background: var(--hover); color: var(--ink); }
 .tool-open-diff:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+.tool-open-diff.is-unavailable { opacity: .45; cursor: default; }
+.tool-open-diff.is-unavailable:hover { background: transparent; color: var(--soft); }
 .tool-open-diff .ico { --ico: 14px; --glyph: 14px; }
 /* One Compact & Resume as one row: the name, then one sentence saying where it is or where
    it died, coloured like the tool rows — green landed, red will not, grey in flight. Reuses
