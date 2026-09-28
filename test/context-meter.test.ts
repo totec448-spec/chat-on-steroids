@@ -21,18 +21,23 @@ it('keeps Pro static and identifies token estimates and compaction exclusion', (
   const doc = setup('gpt-6', 'pro');
   expect(doc.getElementById('contextMeterArc')?.getAttribute('stroke-dasharray')).toBe('0 37.7');
   expect(doc.getElementById('contextMeterInfo')?.textContent).toContain('Auto-compaction off for Pro');
-  expect(doc.getElementById('contextMeterInfo')?.textContent).toContain('estimated');
+  expect(doc.getElementById('contextMeterButton')?.getAttribute('aria-label')).toContain('estimated');
+  expect(doc.getElementById('contextTokens')?.textContent).toContain('est.');
 });
 it('uses configured limits for ordinary models and supports click and Escape', () => {
   const doc = setup('gpt-5.6-sol-high');
-  expect(doc.getElementById('contextMeterInfo')?.textContent).toContain('50% of configured limit');
-  // The compact count follows the interface language, like the "est." beside it.
-  expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('100K / 200K est.');
+  expect(doc.getElementById('contextMeterButton')?.getAttribute('aria-label')).toContain('50% of configured limit');
+  expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('50%');
+  doc.getElementById('contextDisplay')!.click();
+  expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('100K / 200K');
+  expect(doc.getElementById('contextTokens')?.textContent).toBe('100K / 200K est.');
+  doc.getElementById('contextDisplay')!.click();
+  expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('50%');
   initContextMeter();
   const button = doc.getElementById('contextMeterButton')!;
   button.click();
   expect(button.getAttribute('aria-expanded')).toBe('true');
-  button.dispatchEvent(new dom!.window.KeyboardEvent('keydown', { key: 'Escape' }));
+  button.dispatchEvent(new dom!.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   expect(button.getAttribute('aria-expanded')).toBe('false');
 });
 
