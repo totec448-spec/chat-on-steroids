@@ -1,5 +1,6 @@
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
+import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
 import { mergeAppearance } from '../shared/appearance.js';
 import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js';
@@ -214,6 +215,7 @@ const settingsPatch = z.object({
     waitForSubAgents: z.boolean().optional()
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS) }).strict().optional(),
+  controlApi: z.object({ enabled: z.boolean() }).strict().optional(),
   goal: z.object({
     impulseMinutes: z.number().int().min(0).max(60).optional(),
     includeToolCalls: z.boolean().optional(),
@@ -287,6 +289,9 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
   ) as Config['capabilities'];
   return {
     mcp: wanted.mcp ? { instructions: pick(current.mcp.instructions, base.mcp?.instructions ?? '', wanted.mcp.instructions) } : current.mcp,
+    controlApi: wanted.controlApi
+      ? { enabled: pick(current.controlApi.enabled, base.controlApi?.enabled ?? false, wanted.controlApi.enabled) }
+      : current.controlApi,
     capabilities,
     readOnly: pick(current.readOnly, base.readOnly, wanted.readOnly),
     commandAllowlist: {
@@ -601,8 +606,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       try { applyLoginStartup(app, next.ui.startAtLogin === true); }
       catch (error) { loginStartupError = error; }
     }
+    // The local control API is independent in the same way: only an actual change starts or
+    // stops it, and a listener that cannot bind never undoes the rest of the save.
+    let controlApiError: unknown;
+    if (before.controlApi.enabled !== next.controlApi.enabled) {
+      try { await (next.controlApi.enabled ? startControlApi() : stopControlApi()); }
+      catch (error) { controlApiError = error; }
+    }
     if (authorityPersistError) throw authorityPersistError;
     if (loginStartupError) throw loginStartupError;
+    if (controlApiError) throw controlApiError;
     return buildState();
   });
 

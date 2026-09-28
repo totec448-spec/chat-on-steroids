@@ -54,6 +54,25 @@ The dropdown is disabled and explains the override; unrelated Settings changes r
 Remove the override from the launch environment and restart CoS to use this selector. The existing
 comma-separated override and port `0` remain available for isolated development/tests.
 
+## Local control API
+
+**Settings → Setup → Advanced → Local control API** (off by default) lets an agent running on
+this computer check on CoS from outside the app. It is meant for an agent's MCP server that
+watches for a hung app. When it is on, CoS writes two files to `control-api/` in its user data
+folder:
+
+- `endpoint.json`: port, process id and version;
+- `token`: a new random bearer token each time the app starts.
+
+It then serves these routes on `127.0.0.1` only:
+
+- `GET /v1/health`: process id, version, uptime, and the routes this build serves;
+- `GET /v1/status`: connection, bridge, plugins, updater and in-flight tool calls.
+
+Requests need `Authorization: Bearer <token>`. Any request with a browser `Origin` is refused.
+Turning the switch off, or quitting, stops the listener and removes both files. A crash can leave
+them behind, so a caller should treat a refused connection as "not running".
+
 ## Permissions and connectors
 
 | Connector | What it adds |

@@ -22,6 +22,10 @@ Chat On Steroids is a permission boundary between ChatGPT and the logged-in OS u
 - Screen/control permissions also enable the companion's background browser tools on Chromium hosts. Chrome grants required debugger/tabs and HTTP(S) host permissions; there is no additional per-tab approval dialog. Read-only disables browser input, navigation, tab creation/closure and page JavaScript. Native screen, mouse/keyboard and clipboard remain desktop-wide on supported Windows/macOS hosts, independent of approved folders and macOS OS consent.
 - MCP servers bind to loopback and use secret tokenized paths. Public reachability comes only from the tunnel you configure.
 - The companion-extension bridge is a separate loopback service and exposes no filesystem, command or settings-mutation route.
+- The optional local control API is off by default. When turned on, it is a loopback-only, read-only status service for a local agent.
+  - Its per-launch token is written to the app's user data folder and never issued over HTTP. Any process that can read that folder can use the API.
+  - It refuses any browser Origin.
+  - It never returns MCP paths, tunnel ids, plugin configuration or credentials.
 - Stored API/bridge credentials use Electron `safeStorage` (DPAPI on Windows, Keychain on macOS, a secure desktop secret store on Linux). Linux `basic_text` is refused; normal Activity logs are redacted, capped and memory-only.
 - Session recording is separate durable local history. It is on for fresh installs and can be disabled.
 
