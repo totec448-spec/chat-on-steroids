@@ -36,6 +36,7 @@ A feature update. The app gets a workspace next to your chat, pets on your deskt
 - **A new message no longer counts as finished right away.** Now and then, a chat marked a message as answered the moment it was sent, before ChatGPT replied. Goal could stop early because of it, and the reply wasn't linked to your message.
 - **ChatGPT's text blocks show properly.** Rewrites and drafts that ChatGPT puts in a text block appear as a titled block instead of raw `:::writing` code.
 - **Project chats get their real title** instead of "ChatGPT - <project name>".
+- **Chats started from the app are named after your request.** ChatGPT named them after CoS's instructions, so they were all called something like "Coding Agent Instructions". Existing chats get their proper name back too.
 - **Pets respond reliably again** after you hide and show them, and they no longer reread your pet library while the mouse moves.
 - **Web Fetch and other Python plugins install without extra setup.** If the `uv` tool they need is missing, CoS downloads a verified copy for itself instead of failing with "runtime uv is unavailable".
 - **Goal and Loop work again when your saved model is gone.** The step that decides what comes next failed when ChatGPT no longer offered the model saved in Settings; it now uses one that is available.

@@ -3216,6 +3216,34 @@ describe('naming the chats this app opened', () => {
     expect((await getSession(opened.sessionId!))?.title).toBe('Actual request');
   });
 
+  it('names a chat this app opened after the request, not after ChatGPT\'s title for the instructions', async () => {
+    // Live: all 21 app-started chats were called "Coding Agent Instructions" or a variant.
+    const conversationId = 'desktop-provider-title';
+    await noteChatOrigin(conversationId, { kind: 'desktop', fromSessionId: null, agentId: null, task: '' });
+    const opened = await recordChatObservations(conversationId, [
+      { kind: 'conversation_title', time: Date.now(), text: 'Coding Agent Instructions' }
+    ]);
+    await upsertMessageEvent(opened.sessionId!, { kind: 'user_message', source: 'app', time: Date.now(),
+      messageId: 'desktop-opening', authoredText: 'Fix the flaky bridge test', message: { text: '[[COS_CONTEXT:10]]\nwire', chars: 23, truncated: false } });
+    expect((await getSession(opened.sessionId!))?.title).toBe('Fix the flaky bridge test');
+    await recordChatObservations(conversationId, [{ kind: 'conversation_title', time: Date.now(), text: 'Coding Agent Anleitung' }]);
+    expect((await getSession(opened.sessionId!))?.title).toBe('Fix the flaky bridge test');
+    await renameSession(opened.sessionId!, 'My own name');
+    expect((await getSession(opened.sessionId!))?.title).toBe('My own name');
+  });
+
+  it('repairs a stored instructions title of an app-opened chat on cold read', async () => {
+    const session = await createSession({ conversationId: 'desktop-stored-provider', title: 'Temporary' });
+    await upsertMessageEvent(session.id, { kind: 'user_message', source: 'app', time: Date.now(),
+      messageId: 'desktop-stored-opening', authoredText: 'Plan the release', message: { text: '[[COS_CONTEXT:10]]\nwire', chars: 23, truncated: false } });
+    await flushSessions(); resetSessionStoreForTests();
+    const metaPath = path.join(sessionsRoot(), session.id, 'meta.json');
+    const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    Object.assign(meta, { title: 'Coding Agent Instructions', titleSource: 'provider', origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } });
+    await fs.writeFile(metaPath, JSON.stringify(meta));
+    expect((await getSession(session.id))?.title).toBe('Plan the release');
+  });
+
   it('repairs a legacy context preview on cold read using durable authored text', async () => {
     const raw = '[[COS_CONTEXT:19268]]\nInternal instructions and AGENTS.md '.repeat(3);
     const session = await createSession({ conversationId: 'legacy-context-preview', title: 'Temporary' });
