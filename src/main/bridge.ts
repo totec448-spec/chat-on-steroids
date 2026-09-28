@@ -1855,7 +1855,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         app: 'chat-on-steroids',
         version: APP_VERSION,
         bridge: BRIDGE_PROTOCOL,
-        compatible: protocolCompatible(req),
+        // Unknown, not incompatible, for a caller that states no protocol (curl in a bug report).
+        compatible: extensionProtocol(req) === null ? null : protocolCompatible(req),
         paired: stored !== null && stored !== BROWSER_DISCONNECTED,
         disconnected: stored === BROWSER_DISCONNECTED
       },

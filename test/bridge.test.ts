@@ -489,6 +489,14 @@ describe('who is allowed to talk to it', () => {
     expect(await companionDiagnostics()).toBeNull();
   });
 
+  it('answers unknown rather than incompatible to a /hello without a protocol header (#568)', async () => {
+    // A plain curl in a bug report read "compatible": false and pointed everyone the wrong way.
+    const plain = await fetch(`${base}/hello`);
+    expect((await plain.json()).compatible).toBeNull();
+    const extension = await request('GET', '/hello', { auth: null });
+    expect(extension.body.compatible).toBe(true);
+  });
+
   it('pushes newly detected incompatible extension versions without granting browser presence', async () => {
     const changed = vi.fn();
     const unsubscribe = onBridgeChange(changed);
