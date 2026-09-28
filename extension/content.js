@@ -12355,7 +12355,11 @@
       if (message.type === 'clf-close-temporary-planner') {
         const users = CLF_DOM.messages().filter(row => row.role === 'user');
         const exact = desktopDecision?.id === message.id && desktopDecision?.owner === message.owner;
-        sendResponse({ safe: temporaryPlannerPage() && location.href.includes(`cos-input=${message.id}`) &&
+        // ChatGPT moves a sent temporary chat to /c/<id>?temporary-chat=true, dropping the
+        // cos-input marker; the exact decision this page still holds proves the same helper.
+        const routedHelper = exact && desktopDecision.temporary === true && /^\/c\/[0-9a-f-]{36}$/i.test(location.pathname) &&
+          new URL(location.href).searchParams.get('temporary-chat') === 'true';
+        sendResponse({ safe: temporaryPlannerPage() && (location.href.includes(`cos-input=${message.id}`) || routedHelper) &&
           !generating && !CLF_DOM.generating() && pendingTools === 0 && !CLF_DOM.hasComposerAttachments() &&
           !(CLF_DOM.composer()?.textContent || '').trim() &&
           (users.length === 0 || (exact && users.length === 1 && matchesSubmittedUser(users[0], desktopDecision.text))) });
