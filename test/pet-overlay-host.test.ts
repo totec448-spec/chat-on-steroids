@@ -128,6 +128,23 @@ it('starts empty without an overlay and accepts the first published enabled pet'
   expect(petOverlayControlState().activeCount).toBe(0);
 });
 
+it('keeps Windows pets when the native focus binding cannot load', async () => {
+  // A quarantined or damaged binding used to destroy the overlay, so no pet appeared at all.
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+  try {
+    vi.mocked(windowsPetFocus).mockRejectedValueOnce(new Error('koffi.node was not found'));
+    await startPetOverlay(() => null, () => undefined);
+    const win = mocks.windows[0];
+    expect(win.isDestroyed()).toBe(false);
+    expect(win.isVisible()).toBe(true);
+    expect(petOverlayControlState().activeCount).toBe(1);
+    expect(() => mocks.ipc.get('pet-overlay:releaseFocus')!({ sender: win.webContents })).not.toThrow();
+  } finally {
+    Object.defineProperty(process, 'platform', platform);
+  }
+});
+
 it.runIf(process.platform === 'win32')('only lets the current overlay release native focus', async () => {
   await startPetOverlay(() => null, () => undefined);
   const focus = await vi.mocked(windowsPetFocus).mock.results[0]!.value;
