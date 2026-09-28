@@ -1734,5 +1734,6 @@
   "never — check the app in ChatGPT → Plugins": "从未 — 请在 ChatGPT → 插件 中检查应用",
   "Diff unavailable: this edit was too large to keep": "差异不可用：此次编辑太大，无法保存",
   "Diff unavailable: this edit was not kept": "差异不可用：此次编辑未保存",
-  "Review this edit ({0} of {1} files)": "查看此次编辑（{1} 个文件中的 {0} 个）"
+  "Review this edit ({0} of {1} files)": "查看此次编辑（{1} 个文件中的 {0} 个）",
+  "This reply points to content from another message that was not recorded.": "此回复指向另一条消息中未被记录的内容。"
 }

@@ -1734,5 +1734,6 @@
   "never — check the app in ChatGPT → Plugins": "jamais — vérifiez l’app dans ChatGPT → Plugins",
   "Diff unavailable: this edit was too large to keep": "Diff indisponible : cette modification était trop volumineuse pour être conservée",
   "Diff unavailable: this edit was not kept": "Diff indisponible : cette modification n’a pas été conservée",
-  "Review this edit ({0} of {1} files)": "Examiner cette modification ({0} fichiers sur {1})"
+  "Review this edit ({0} of {1} files)": "Examiner cette modification ({0} fichiers sur {1})",
+  "This reply points to content from another message that was not recorded.": "Cette réponse renvoie à du contenu d’un autre message qui n’a pas été enregistré."
 }
