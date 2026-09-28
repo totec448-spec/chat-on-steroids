@@ -8,6 +8,9 @@ export default defineConfig({
     // defaults are too tight.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Release packaging only: the shared Intel macOS runner can run the suite 6x slower than a
+    // laptop, and timing-sensitive tests then fail at random. PR CI keeps retries off.
+    retry: Number(process.env.COS_TEST_RETRY) || 0,
     env: {
       // Never let a test bind — or worse, fall through to — the shipped bridge range.
       // The developer's own installed app is usually listening on 8765 while the suite
