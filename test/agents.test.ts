@@ -3587,6 +3587,25 @@ describe('through the MCP endpoint', () => {
     expect(report?.text).not.toContain('ended without ever confirming');
   });
 
+  it('does not call a message unread when it arrived after the worker\'s last step and is still queued for it (#551)', async () => {
+    startSwarm(1);
+    bindConversation('worker-1', 'c-worker-1');
+    // Live 2.1.17 trace: the prime queued the next assignment while the worker was finishing the
+    // previous one. The report said the worker "ended without ever confirming" it, and a
+    // millisecond later the app woke the worker to deliver exactly that message.
+    sendMessage(prime, 'worker-1', 'second assignment: run the canary again');
+    await asChat('c-worker-1', 'finish', { result: 'first assignment done' });
+    const report = offerMessagesForConversation(PRIME_CHAT)?.messages.find((message) =>
+      message.text.includes('[worker-1 reported]')
+    );
+    expect(report?.text).toContain('first assignment done');
+    expect(report?.text).not.toContain('ended without ever confirming');
+    expect(report?.text).not.toContain('may not have read');
+    expect(report?.text).toContain('still queued for it');
+    // And it really is: the unread assignment waits for the worker instead of being dropped.
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')?.pending).toBe(1);
+  });
+
   it('tells the prime how much worker capacity the report just freed, and that the worker is reusable', async () => {
     // A worker that reports is capacity coming back, and the prime is the only party that can
     // spend it. The final report used to end at the result, so "finished" read as an ending
