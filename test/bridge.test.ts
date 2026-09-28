@@ -13576,6 +13576,8 @@ describe('which extension build is running', () => {
     expect(said('b1b1b1b1b1b1') - before.a).toBe(1);
     expect(warned('b1b1b1b1b1b1') - before.w, 'the stale build is named once').toBe(1);
     expect(warned(SHIPPED), 'the shipped build is never called stale').toBe(0);
+    // Expected after every app update and followed by the self-update: information, not a problem.
+    expect(getLog().filter(entry => entry.message.includes('running extension build b1b1b1b1b1b1')).map(entry => entry.level)).toEqual(['info']);
   });
 
   it('refuses work to an out-of-date companion only while an up-to-date one is present', async () => {
