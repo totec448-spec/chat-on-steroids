@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { flushDurable, initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
+import { flushDurable, initDurableStore, readDurable, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import {
   appendEvent,
   createSession,
@@ -432,15 +432,17 @@ describe('request correlation ownership', () => {
       });
       await appendEvent(session.id, toolCall('call-old', 'wfr_old_snapshot', 1));
       await flushDurable(); // saved index contains only the old request
-
-      observeRequestCorrelation({
-        requestId: 'wfr_new_history',
-        conversationId,
-        sessionId: session.id,
-        messageId: 'msg-new',
-        tool: 'read',
-        observedAt: 2
+      // Version 5 acknowledged owners before its debounced snapshot was necessarily current.
+      // Preserve that legacy shape so this test exercises the one-time migration scan rather
+      // than version 6's committed browser-ack boundary.
+      await writeDurableNow('request-correlations', {
+        version: 5,
+        entries: [{
+          requestId: 'wfr_old_snapshot', conversationId, sessionId: session.id,
+          messageId: 'msg-old', tool: 'read', observedAt: 1
+        }]
       });
+
       await appendEvent(session.id, toolCall('call-new', 'wfr_new_history', 2));
       // Lose process memory before the debounced index write catches up. Session JSONL is
       // already durable, so restore must merge it into the older valid snapshot.
@@ -451,6 +453,70 @@ describe('request correlation ownership', () => {
       await restoreRequestCorrelations();
       expect(requestCorrelation('wfr_old_snapshot')?.conversationId).toBe(conversationId);
       expect(requestCorrelation('wfr_new_history')?.conversationId).toBe(conversationId);
+      // The migration scan publishes its result as the committed ledger before returning, so
+      // the next launch starts from it instead of scanning the same history again.
+      const migrated = await readDurable<{ version: number; complete?: boolean; entries: Array<{ requestId: string }> }>('request-correlations');
+      expect(migrated?.version).toBe(6);
+      expect(migrated?.complete).toBe(true);
+      expect(migrated?.entries.map((entry) => entry.requestId).sort()).toEqual(['wfr_new_history', 'wfr_old_snapshot']);
+    } finally {
+      resetCorrelationRegistryForTests();
+      resetSessionStoreForTests();
+      unsetSessionRootForTests();
+      resetDurableForTests();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Every new owner reaches disk before the browser is told it was confirmed, so a complete
+   * version-6 ledger already holds every owner history could offer. Replaying recorded calls
+   * on each launch made opening the app wait on thousands of small session files.
+   */
+  it('trusts a complete version-6 ledger and scans history only when the ledger cannot vouch for itself', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'clf-correlation-complete-'));
+    const owner = (requestId: string, sessionId: string) => ({
+      requestId, conversationId: 'conv-complete', sessionId, messageId: `msg-${requestId}`, tool: 'read', observedAt: 1
+    });
+    try {
+      resetDurableForTests();
+      resetSessionStoreForTests();
+      initDurableStore(dir);
+      initSessionStore(dir);
+      const session = await createSession({ title: 'complete ledger', conversationId: 'conv-complete' });
+      await appendEvent(session.id, {
+        time: 2,
+        source: 'mcp',
+        kind: 'tool_call',
+        call: {
+          callId: 'call-history-only',
+          tool: 'read',
+          attribution: 'request_id',
+          requestId: 'wfr_history_only',
+          conversationId: 'conv-complete',
+          attributionMethod: 'request_id',
+          args: { text: '{}', truncated: false, chars: 2 },
+          result: { text: 'ok', truncated: false, chars: 2 },
+          outcome: 'ok',
+          durationMs: 1,
+          summary: { kind: 'read', tone: 'neutral', title: 'Read history' }
+        }
+      });
+
+      const ledgers = [
+        { scanned: false, value: { version: 6, complete: true, entries: [owner('wfr_committed', session.id)] } },
+        // Without the marker, or with a row this build cannot read, the snapshot does not prove
+        // it is the whole ledger, and recorded history remains the recovery source.
+        { scanned: true, value: { version: 6, entries: [owner('wfr_committed', session.id)] } },
+        { scanned: true, value: { version: 6, complete: true, entries: [owner('wfr_committed', session.id), { requestId: 'wfr_unreadable' }] } }
+      ];
+      for (const ledger of ledgers) {
+        await writeDurableNow('request-correlations', ledger.value);
+        resetCorrelationRegistryForTests();
+        await restoreRequestCorrelations();
+        expect(requestCorrelation('wfr_committed')?.conversationId).toBe('conv-complete');
+        expect(requestCorrelation('wfr_history_only')?.conversationId ?? null).toBe(ledger.scanned ? 'conv-complete' : null);
+      }
     } finally {
       resetCorrelationRegistryForTests();
       resetSessionStoreForTests();
