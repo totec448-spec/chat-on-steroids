@@ -976,6 +976,11 @@ describe('desktop input delivery and helper ownership', () => {
       { section, turn: { turnId: 'routed-final', conversationId: routed, endMessageId: 'routed-message',
         messages: [{ role: 'assistant', messageId: 'routed-message', rawMessageId: 'routed-message', rawText: canonical }] } }]);
     expect(live.sent.filter(message => message.response)).toEqual([expect.objectContaining({ response: canonical })]);
+    // The routed helper page no longer carries cos-input, but it still proves the exact
+    // decision, so the finished helper tab may close instead of staying open indefinitely.
+    await settle();
+    expect(await live.runtimeMessage({ type: 'clf-close-temporary-planner', id: inputId, owner: 'input-owner' })).toEqual({ safe: true });
+    expect(await live.runtimeMessage({ type: 'clf-close-temporary-planner', id: 'another-input', owner: 'input-owner' })).toEqual({ safe: false });
   });
 
 

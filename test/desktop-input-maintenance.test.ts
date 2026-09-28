@@ -646,6 +646,27 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect((await h.desktopInput({ id: firstId, owner: '7:planner:1', lifetime: 'temporary-planner', response: 'Plan complete' }, sender, owner)).ok).toBe(true);
     expect(h.remove).toHaveBeenCalledWith(7);
   });
+  it('closes a helper that ChatGPT moved to /c/<id>?temporary-chat=true after Send', async () => {
+    // Current ChatGPT routes a sent temporary chat, dropping cos-input; the helper stayed open all night.
+    const h = await worker([]);
+    const url = `https://chatgpt.com/c/f0f00020-2222-4222-8222-222222222222?temporary-chat=true`;
+    h.tabs.push({ id: 7, url });
+    const sender = { tab: { id: 7 }, documentId: 'planner', frameId: 0, url };
+    const owner = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+    h.sendMessage.mockResolvedValue({ safe: true } as never);
+    expect((await h.desktopInput({ id: firstId, owner: '7:planner:1', lifetime: 'temporary-planner', response: 'Plan complete' }, sender, owner)).ok).toBe(true);
+    expect(h.remove).toHaveBeenCalledWith(7);
+  });
+  it('keeps an ordinary chat tab even when the page reports it safe', async () => {
+    const h = await worker([]);
+    const url = `https://chatgpt.com/c/f0f00020-2222-4222-8222-222222222222`;
+    h.tabs.push({ id: 7, url });
+    const sender = { tab: { id: 7 }, documentId: 'planner', frameId: 0, url };
+    const owner = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+    h.sendMessage.mockResolvedValue({ safe: true } as never);
+    await h.desktopInput({ id: firstId, owner: '7:planner:1', lifetime: 'temporary-planner', response: 'Plan complete' }, sender, owner);
+    expect(h.remove).not.toHaveBeenCalled();
+  });
   it.each(['draft', 'pinned', 'pinned-during-proof', 'navigation', 'document', 'rejected'])('keeps a temporary helper after answer publication when %s prevents closing', async reason => {
     const h = await worker([]);
     const url = `https://chatgpt.com/?temporary-chat=true&cos-input=${firstId}`;
