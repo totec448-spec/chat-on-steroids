@@ -151,6 +151,12 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
   expect(setInteractive).toHaveBeenLastCalledWith(true, expect.arrayContaining([
     expect.objectContaining({ width: expect.any(Number), height: expect.any(Number) })
   ]));
+  snapshotListener!({ ...runningSnapshot, visible: false });
+  expect(setInteractive).toHaveBeenLastCalledWith(false, []);
+  pointerListener!({ x: Number(petX) + 80, y: Number(petY) + 80 });
+  expect(setInteractive).toHaveBeenLastCalledWith(false, []);
+  snapshotListener!(runningSnapshot);
+  expect(setInteractive).toHaveBeenLastCalledWith(true, expect.any(Array));
   pointer(tur, 'pointerdown', 120, 120, 7);
   pointer(tur, 'pointermove', 190, 150, 7);
   expect(tur.dataset.state).toBe('held');
