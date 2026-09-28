@@ -236,9 +236,9 @@ describe('what leaves this machine', () => {
     // a command that had run every time.
     const session = await createSession({ title: 'tool count', conversationId: 'tool-count' });
     await appendEvent(session.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Run echo goal-ok', chars: 16, truncated: false } });
-    for (const [index, turnId] of ['count-turn', 'count-turn', 'other-turn'].entries()) {
+    for (const [index, [turnId, tool]] of ([['count-turn', 'exec_command'], ['count-turn', 'exec_command'], ['count-turn', 'session_finish'], ['other-turn', 'exec_command']] as const).entries()) {
       await appendEvent(session.id, { time: 110 + index, source: 'mcp', kind: 'tool_call', turnId, call: {
-        callId: `count-call-${index}`, tool: 'exec_command', attribution: 'request_id', requestId: `count-request-${index}`, conversationId: session.conversationId,
+        callId: `count-call-${index}`, tool, attribution: 'request_id', requestId: `count-request-${index}`, conversationId: session.conversationId,
         attributionMethod: 'request_id', outcome: 'ok', durationMs: 1,
         args: { text: '{"cmd":"echo SECRET_ARGUMENT"}', chars: 30, truncated: false },
         result: { text: 'SECRET_RESULT', chars: 13, truncated: false },
