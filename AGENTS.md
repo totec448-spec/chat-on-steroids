@@ -2918,8 +2918,21 @@ apply immediately; Reset appearance restores both palettes and typography withou
 theme, language or setup profile. Text size scales the existing typography hierarchy, including
 code, independently of window zoom. System font retains the locale-specific fallback stack.
 The Appearance sample chat reflects the same semantic color and typography tokens immediately;
-it contains no session data. The composer context ring and compact count remain labeled as local
-estimates. Unverified saved model preferences show their status beside the model select.
+it contains no session data. The composer context dialog and accessible label identify local
+estimates; its toolbar toggles percentage/token values. Compact and Cancel remain the original
+session-scoped actions inside that dialog. Normal/Goal/Loop and Plan use their existing controllers;
+the Goal row opens the objective editor, including before the first message. The mode menu's Goal
+and Loop pencils open that editor without switching automation; Save applies objective and mode,
+then closes the menu. The Plan toolbar toggle only arms planning, even over an existing draft;
+Send/Enter generates. Queued and prepared plan stages show up to three lines. The model menu lists
+every observed model separately and the effort slider only adjusts the selected model. Hidden
+native selects retain send admission; stale selections still require an explicit choice.
+Unverified saved model preferences show their status beside the model select.
+The composer dock measures its natural inner body and animates only transient height changes;
+CSS owns resting height/visibility. The plan's existing green completion owns its own collapse,
+so other dock occupants do not animate a second time. Empty docks retain no border or fixed height.
+The welcome title retains its resting optical center as the draft grows. Real Electron checks
+live in `scripts/verify-composer-ui.cjs` and `scripts/verify-plan-collapse.cjs`.
 Readable foregrounds, secondary text, borders, status colors and accent labels derive from the
 chosen surfaces; sidebar text derives from its own color. Translucency is an in-window tinted
 gradient/blur, not transparency through the native window to other applications.

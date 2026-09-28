@@ -1360,7 +1360,7 @@ it.each(['new-same-key', 'a-b-a', 'opening-adopt-new', 'same-session-send-next',
     (w as any).api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Stage one', 'Stage two'] }));
     const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
     input.value = 'Turn this into a plan';
-    w.document.getElementById('createPlan')!.click();
+    w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
     await vi.waitFor(() => expect(input.value).toBe(''));
   } else {
     (w.document.querySelector('.delivery-retry') as HTMLButtonElement).click();
@@ -2560,7 +2560,7 @@ it('keeps editable stages and sends the original request with the full workflow 
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Build the whole task';
   input.dispatchEvent(new w.Event('input'));
-  w.document.getElementById('createPlan')!.click();
+  w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
   await settle();
   expect(live.sent).toHaveLength(0);
   expect(w.document.getElementById('taskPlanPreview')!.textContent).not.toMatch(/Start plan|Review stages/);
@@ -2591,7 +2591,7 @@ it.each([true, false])('hands plan presentation to queued stages while sending a
   api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: stages }));
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Build the whole task'; input.dispatchEvent(new w.Event('input'));
-  w.document.getElementById('createPlan')!.click();
+  w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
   await settle();
   const preview = w.document.getElementById('taskPlanPreview')!;
   expect(preview.hidden).toBe(false);
@@ -2653,6 +2653,41 @@ it.each(['delivery', 'model', 'refresh-failed', 'enqueue-failed'])('retries the 
     expect(w.document.querySelectorAll('#finishQueue .queued-input')).toHaveLength(3);
   }
   expect(api.requestChatModels).toHaveBeenCalledTimes(failure === 'model' || failure === 'refresh-failed' ? 1 : 0);
+});
+
+it('the Plan toggle only arms planning; Send generates from the draft', async () => {
+  const { w } = await boot([], false);
+  const api = (w as any).api;
+  api.draftTaskPlan = vi.fn(() => new Promise(() => {}));
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  const plan = w.document.getElementById('createPlan') as HTMLButtonElement;
+  input.value = 'Existing draft'; input.dispatchEvent(new w.Event('input'));
+  plan.click(); await settle();
+  expect(api.draftTaskPlan).not.toHaveBeenCalled();
+  expect(plan.getAttribute('aria-pressed')).toBe('true');
+  input.value = ''; input.dispatchEvent(new w.Event('input'));
+  expect(plan.getAttribute('aria-pressed')).toBe('true');
+  input.value = 'Plan this'; input.dispatchEvent(new w.Event('input'));
+  input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', cancelable: true })); await settle();
+  expect(api.draftTaskPlan).toHaveBeenCalledWith('Plan this', expect.anything(), expect.any(String));
+});
+
+it('the mode-menu pencil edits an objective without switching automation until Save', async () => {
+  const { w, live } = await boot([]);
+  const api = (w as any).api;
+  api.setSessionObjective = vi.fn(async () => ({ ok: true, data: {} }));
+  const objective = w.document.getElementById('sessionObjective') as HTMLTextAreaElement;
+  (w.document.querySelector('#automationSwitch [data-edit-mode="goal"]') as HTMLButtonElement).click(); await settle();
+  expect(live.controlCalls).toEqual([]);
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('off');
+  expect(objective.hidden).toBe(false);
+  expect(w.document.activeElement).toBe(objective);
+  expect(w.document.querySelector('label[for="sessionObjective"]')!.textContent).toBe('Goal');
+  objective.value = 'Ship the dashboard'; objective.dispatchEvent(new w.Event('input'));
+  w.document.getElementById('saveSessionObjective')!.click(); await settle();
+  expect(api.setSessionObjective).toHaveBeenCalledWith(summary([]).id, 'Ship the dashboard', 'goal');
+  expect(live.controlCalls).toEqual([]);
+  expect((w.document.getElementById('composerSettings') as HTMLDetailsElement).open).toBe(false);
 });
 
 it('disables empty task actions and confirms saving without the old helper sentence', async () => {
@@ -2793,7 +2828,7 @@ it('blocks an empty stage, deletes it explicitly, and hides the whole dock in se
   api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Write poem', 'Verify lines'] }));
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Rain poem'; input.dispatchEvent(new w.Event('input'));
-  w.document.getElementById('createPlan')!.click(); await settle();
+  w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
   const stage = w.document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit stage 1"]')!;
   stage.value = ''; stage.dispatchEvent(new w.Event('input'));
   expect(stage.getAttribute('aria-invalid')).toBe('true');
@@ -2823,7 +2858,7 @@ it('cancels pending planning without replacing the draft with a late result', as
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Keep this draft';
   const plan = w.document.getElementById('createPlan') as HTMLButtonElement;
-  plan.click(); await settle();
+  plan.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
   const requestId = api.draftTaskPlan.mock.calls[0][2];
   expect(plan.getAttribute('aria-pressed')).toBe('true');
   plan.click();
@@ -2843,7 +2878,7 @@ it('keeps completed stages after clearing or replacing the composer until explic
   api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Build foundation', 'Verify it'] }));
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Build the whole task'; input.dispatchEvent(new w.Event('input'));
-  w.document.getElementById('createPlan')!.click(); await settle();
+  w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
   for (const replacement of ['', 'Unrelated next message', '']) {
     input.value = replacement; input.dispatchEvent(new w.Event('input'));
     expect(w.document.querySelectorAll('.plan-stage')).toHaveLength(2);
@@ -2862,7 +2897,7 @@ it('queues every generated stage in an existing session without Send and preserv
   api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Build foundation', 'Verify it'] }));
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Build the whole task'; input.dispatchEvent(new w.Event('input'));
-  w.document.getElementById('createPlan')!.click(); await settle();
+  w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
   expect(live.sent).toHaveLength(1);
   expect(live.sent[0]).toMatchObject({ sessionId: summary([]).id, text: 'Build foundation', stages: ['Verify it'], mode: 'finish', model: null, reasoningEffort: null, authoredSource: 'objective' });
   expect(input.value).toBe('');
@@ -2897,7 +2932,7 @@ it('retains a rejected queue admission independently of composer edits and retri
   api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['First checkpoint', 'Last checkpoint'] }));
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Plan the remaining checks';
-  w.document.getElementById('createPlan')!.click(); await settle();
+  w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
   input.value = ''; input.dispatchEvent(new w.Event('input'));
   reject({ ok: false, error: 'Queue full' }); await settle();
   expect(w.document.querySelectorAll('.plan-stage')).toHaveLength(2);
@@ -2917,7 +2952,7 @@ it.each([false, true])('clears the planner prompt and starts a new-chat plan wit
   (w as any).api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Build foundation', 'Verify it'] }));
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Original objective';
-  w.document.getElementById('createPlan')!.click(); await settle();
+  w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
   expect(input.value).toBe('');
   input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, cancelable: true }));
   input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', isComposing: true, cancelable: true }));
@@ -2935,7 +2970,7 @@ it('does not erase a new composer draft while completed-plan queue admission is 
   api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['First checkpoint', 'Last checkpoint'] }));
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Planner request';
-  w.document.getElementById('createPlan')!.click(); await settle();
+  w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
   expect(input.value).toBe('');
   input.value = 'My next correction'; input.dispatchEvent(new w.Event('input'));
   await admit(); await settle();
@@ -2951,11 +2986,12 @@ it('clearing the complete planner task cancels generation and restores Create pl
   api.draftTaskPlan = vi.fn(() => new Promise(resolve => { finish = resolve; }));
   api.cancelTaskRequest = vi.fn(async () => ({ ok: true, data: true }));
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
-  input.value = 'Write a poem'; w.document.getElementById('createPlan')!.click(); await settle();
+  input.value = 'Write a poem'; w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
   input.value = ''; input.dispatchEvent(new w.Event('input'));
   expect(api.cancelTaskRequest).toHaveBeenCalled();
   expect(w.document.getElementById('createPlan')!.getAttribute('aria-pressed')).toBe('false');
-  expect(w.document.getElementById('createPlan')!.textContent).toBe('Create plan');
+  expect(w.document.getElementById('createPlan')!.textContent).toBe('Plan');
+  expect(w.document.getElementById('createPlan')!.getAttribute('aria-label')).toBe('Create plan');
   finish({ ok: true, data: ['Old stage', 'Old check'] }); await settle();
   expect(live.sent).toHaveLength(0);
   expect(w.document.querySelectorAll('.plan-stage')).toHaveLength(0);
@@ -3307,7 +3343,7 @@ it('cancels pending plan generation when its own draft changes', async () => {
   api.draftTaskPlan = vi.fn(() => new Promise(resolve => { finish = resolve; }));
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Original plan';
-  w.document.getElementById('createPlan')!.click(); await settle();
+  w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
   const requestId = api.draftTaskPlan.mock.calls[0][2];
   input.value = 'Replacement plan'; input.dispatchEvent(new w.Event('input'));
   expect(api.cancelTaskRequest).toHaveBeenCalledWith(requestId);
@@ -3348,7 +3384,7 @@ it('retains an existing running chat planner across navigation and accepts its r
   api.draftTaskPlan = vi.fn(() => new Promise(resolve => { finish = resolve; }));
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Plan for this running chat'; input.dispatchEvent(new w.Event('input'));
-  w.document.getElementById('createPlan')!.click(); await settle();
+  w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
   const requestId = api.draftTaskPlan.mock.calls[0][2];
   (w.document.querySelector('#sessionList [data-id="second-chat"]') as HTMLElement).click(); await settle();
   input.value = 'Unrelated draft'; input.dispatchEvent(new w.Event('input'));
@@ -3379,7 +3415,7 @@ it('keeps two planner owners independent and ignores a cancelled result after re
   api.draftTaskPlan = vi.fn((text: string) => new Promise(resolve => { pending.set(text, resolve); }));
   api.cancelTaskRequest = vi.fn(async () => ({ ok: true, data: true }));
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
-  const generate = () => w.document.getElementById('createPlan')!.click();
+  const generate = () => { w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); };
   const select = async (id: string) => { (w.document.querySelector(`#sessionList [data-id="${id}"]`) as HTMLElement).click(); await settle(); };
   input.value = 'Plan A'; generate(); await settle();
   const requestA = api.draftTaskPlan.mock.calls[0][2];
@@ -3392,7 +3428,7 @@ it('keeps two planner owners independent and ignores a cancelled result after re
   expect(w.document.getElementById('finishQueue')!.textContent).toContain('A first');
   await select(second.id);
   const requestB = api.draftTaskPlan.mock.calls[1][2];
-  generate(); // Explicitly cancel B; A and navigation did not cancel it.
+  w.document.getElementById('createPlan')!.click(); // Explicitly cancel B; A and navigation did not cancel it.
   expect(api.cancelTaskRequest.mock.calls).toEqual([[requestB]]);
   expect(api.cancelTaskRequest).not.toHaveBeenCalledWith(requestA);
   input.value = 'B replacement'; generate(); await settle();
