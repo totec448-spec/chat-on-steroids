@@ -139,9 +139,10 @@ async function publishPage(conversationId: string, requestId: string, shape: 'li
     }
   }, storage: { onChanged: { addListener() {}, removeListener() {} } } };
   for (const script of scripts) win.eval(script);
-  await vi.waitFor(() => expect(hook).toBeTruthy());
+  // Windows CI under full-suite load can need more than waitFor's default second for this chain.
+  await vi.waitFor(() => expect(hook).toBeTruthy(), { timeout: 10_000 });
   await hook.pullActivity(); await hook.refreshFiber(); await hook.flush();
-  await vi.waitFor(() => expect(requestCorrelation(requestId)?.conversationId).toBe(conversationId));
+  await vi.waitFor(() => expect(requestCorrelation(requestId)?.conversationId).toBe(conversationId), { timeout: 10_000 });
   expect(JSON.stringify(emitted)).not.toContain('PRIVATE_FIXTURE_ARGUMENT');
   await broker.reconcileAgentRequestOwners();
   win.__CLF_CONTENT_RECORDER__.stop(); page.window.close(); pages.delete(page);
