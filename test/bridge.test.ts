@@ -1435,6 +1435,18 @@ describe('activity feed', () => {
     expect(messages.find((row: any) => row.providerMessageId === providers[1])).toMatchObject({ messageId: ids[1] });
   });
 
+  it('records the send-request model on a user message and drops a malformed one', async () => {
+    await pair();
+    const conversationId = '99999999-8888-7777-6666-555555555553';
+    const result = await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'user_message', messageId: 'user-a', time: Date.now(), text: 'A', model: 'gpt-5-6-thinking' },
+      { kind: 'user_message', messageId: 'user-b', time: Date.now(), text: 'B', model: 'gpt 6 <b>' }
+    ] } });
+    const users = await readEvents(result.body.sessionId, { kinds: ['user_message'] });
+    expect(Object.fromEntries(users.map(event => [event.kind === 'user_message' && event.messageId, event.model])))
+      .toEqual({ 'user-a': 'gpt-5-6-thinking', 'user-b': undefined });
+  });
+
   it('records the server-resolved reply model, keeps it across sparse updates and drops malformed values', async () => {
     await pair();
     const conversationId = '99999999-8888-7777-6666-555555555552';

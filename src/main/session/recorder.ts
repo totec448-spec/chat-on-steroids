@@ -2056,6 +2056,7 @@ async function recordSupersededMessages(
           message: await storeText(sessionId, item.text ?? '', MAX_USER_MESSAGE_CHARS),
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
           ...(item.reaction !== undefined ? { reaction: item.reaction } : {}),
+          ...(item.model ? { model: item.model } : {}),
           messageId: item.messageId
         },
         { preferTime: item.authoredTime === true, work: false }
@@ -2168,6 +2169,7 @@ async function recordChatObservationsNow(
           message: await storeText(sessionId, item.text ?? '', MAX_USER_MESSAGE_CHARS),
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
           ...(item.reaction !== undefined ? { reaction: item.reaction } : {}),
+          ...(item.model ? { model: item.model } : {}),
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (!written.changed) continue;
