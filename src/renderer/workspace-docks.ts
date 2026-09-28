@@ -1,4 +1,4 @@
-import { el, icon } from './dom.js';
+import { el, icon, setIcon } from './dom.js';
 import { t, ui } from './i18n.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { hideSlidingPanel, showSlidingPanel } from './panel-motion.js';
@@ -33,7 +33,8 @@ export function createWorkspaceDocks(host: HTMLElement) {
   const bottomToggle = iconButton('i-panel-bottom', 'Toggle bottom panel (Ctrl+`)'); bottomToggle.id = 'terminalToggle';
   const rightToggle = iconButton('i-panel-right', 'Toggle right panel'); rightToggle.id = 'rightDockToggle';
   const expandToggle = el('button', 'btn btn-icon') as HTMLButtonElement;
-  expandToggle.id = 'rightDockExpand'; expandToggle.type = 'button'; expandToggle.append(icon('i-dock-expand'));
+  expandToggle.id = 'rightDockExpand'; expandToggle.type = 'button';
+  const expandGlyph = icon('i-dock-expand'); expandToggle.append(expandGlyph);
   ui(expandToggle, 'title', () => t(expanded ? 'Restore right panel' : 'Expand right panel'));
   ui(expandToggle, 'aria-label', () => t(expanded ? 'Restore right panel' : 'Expand right panel'));
   expandToggle.hidden = true;
@@ -123,7 +124,7 @@ export function createWorkspaceDocks(host: HTMLElement) {
     expandToggle.setAttribute('aria-pressed', String(expanded));
     expandToggle.title = t(expanded ? 'Restore right panel' : 'Expand right panel');
     expandToggle.setAttribute('aria-label', expandToggle.title);
-    expandToggle.querySelector('use')?.setAttribute('href', expanded ? '#i-dock-restore' : '#i-dock-expand');
+    setIcon(expandGlyph, expanded ? 'i-dock-restore' : 'i-dock-expand');
     if (bottom.hidden === bottomOpen) {
       if (bottomOpen) showSlidingPanel(bottom, 'up'); else hideSlidingPanel(bottom, 'up');
     }

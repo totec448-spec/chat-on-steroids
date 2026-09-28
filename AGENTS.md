@@ -2711,6 +2711,13 @@ of appearance controls.
 
 ### Renderer and IPC
 
+Interface icons use one system: the bundled Phosphor font (`renderer/icons.css`, built from
+`@phosphor-icons/web`). Code names an icon by meaning (`icon('i-retry')`) and `dom.ts` `ICONS`
+alone picks its glyph; static markup names the glyph class. `--ico` sizes the layout box and
+`--glyph` the drawing, which stays 17px in compact controls except carets and small dismiss
+marks. Do not add hand-drawn SVG icons; the sprite keeps only the product mark.
+`test/icon-font.test.ts` checks names, package codepoints and stray SVG.
+
 `renderer/pet-machine.ts` owns the optional Tur Tur Sahur companion's gesture,
 animation and autonomous-action state. `renderer/pet.ts` projects it with Pointer
 Events and one visible-window animation clock. The composer launcher and context

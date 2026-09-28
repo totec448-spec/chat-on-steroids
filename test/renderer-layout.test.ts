@@ -78,13 +78,8 @@ it('centers the accessible Chats refresh icon without an extra grid text row', (
   const refresh = document.getElementById('chatRefresh')!;
   expect(refresh.getAttribute('aria-label')).toBe('Refresh chats');
   expect(refresh.children).toHaveLength(1);
-  expect(refresh.firstElementChild?.tagName.toLowerCase()).toBe('svg');
+  expect(refresh.firstElementChild?.matches('i.ico.ph.ph-arrow-clockwise[aria-hidden="true"]')).toBe(true);
   expect(refresh.textContent?.trim()).toBe('');
-});
-
-it('defines the back-arrow glyph used by Review navigation', () => {
-  const back = document.getElementById('i-back');
-  expect(back?.querySelector('path')?.getAttribute('d')).toBeTruthy();
 });
 
 it('keeps dock tabs and Files actions on one horizontally scrollable row without visible scrollbars', () => {

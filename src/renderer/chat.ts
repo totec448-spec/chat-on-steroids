@@ -244,14 +244,7 @@ function attachmentCard(file: InputAttachment, inComposer = false): HTMLElement 
     const tile = el('div', 'composer-image'); tile.append(image); return tile;
   }
   const tile = el('div', 'attachment-card'); tile.title = file.name;
-  const glyph = el('span', 'attachment-icon');
-  glyph.setAttribute('aria-hidden', 'true');
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('width', '24'); svg.setAttribute('height', '24');
-  const lines = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  lines.setAttribute('d', 'M7 3h10a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Zm1 6h8M8 13h8M8 17h5');
-  lines.setAttribute('fill', 'none'); lines.setAttribute('stroke', 'currentColor'); lines.setAttribute('stroke-width', '1.6'); lines.setAttribute('stroke-linecap', 'round');
-  svg.append(lines); glyph.append(svg);
+  const glyph = el('span', 'attachment-icon'); glyph.append(icon('i-file-text'));
   const details = el('div', 'attachment-details');
   details.append(el('div', 'attachment-name', file.name), el('div', 'attachment-kind', () => file.mimeType.startsWith('image/') ? t("Image") : t("File")));
   tile.append(glyph, details); return tile;
@@ -2675,7 +2668,7 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     group.classList.toggle('has-activity-phase', !!observedPhase);
     group.querySelector('.activity-title')!.textContent = label;
     ui(group.querySelector('summary')!, 'title', () => t("{0} actions · {1}", [end - i, label]));
-    const symbol = latestHead?.querySelector('svg, .agent-avatar');
+    const symbol = latestHead?.querySelector('.ico, .agent-avatar');
     group.querySelector('.activity-symbol')!.replaceChildren(...(symbol ? [symbol.cloneNode(true)] : []));
     reconcileChildren(group.lastElementChild!, foldRoutineActivity(rows.slice(i, end)));
     grouped.push(group); i = end;
