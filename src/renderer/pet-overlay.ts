@@ -504,6 +504,9 @@ function interactionRegions(): PetOverlayHitRegion[] {
 }
 
 function setInteractive(next: boolean): void {
+  // Hiding forces native click-through. Reflect that same visibility in our
+  // deduplication state so re-showing beneath a stationary pointer re-arms input.
+  next = next && snapshot?.visible !== false && !disposed;
   const regions = next ? interactionRegions() : [];
   const signature = JSON.stringify([next, regions]);
   if (interactive === next && interactiveSignature === signature) return;
