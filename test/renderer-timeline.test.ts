@@ -1822,6 +1822,31 @@ it('reviews only an exact recorded edit without expanding its tool row or queryi
   expect(app.w.document.querySelector('.review-panel .file-preview-meta')?.textContent).toContain('This edit');
 });
 
+it('says why an edit has no diff and how many files a partial review covers (#563)', async () => {
+  const project: LocalProject = { id: '44444444-4444-4444-8444-444444444444', name: 'Workspace', path: '/workspace', createdAt: T0 };
+  const missing = toolCall(2, 'edit-too-large');
+  const partial = toolCall(3, 'edit-partial');
+  if (missing.kind !== 'tool_call' || partial.kind !== 'tool_call') throw new Error('Expected tool calls');
+  for (const edit of [missing, partial]) {
+    edit.call.tool = 'apply_patch';
+    edit.call.summary = { kind: 'edit', title: 'Edited files', metric: '+2 −2', tone: 'good' };
+  }
+  missing.call.changes = [{ path: '/repo/big.json', added: 1, removed: 1, approximate: false, reviewUnavailable: 'too-large' }];
+  partial.call.changes = [
+    { path: '/repo/src/a.ts', added: 1, removed: 1, approximate: false, reviewAssetId: 'deadbeef.txt' },
+    { path: '/repo/src/b.ts', added: 1, removed: 1, approximate: false, reviewUnavailable: 'not-kept' }
+  ];
+  const app = await boot([missing, partial], true, [], [project]);
+  const [first, second] = [...app.w.document.querySelectorAll<HTMLDetailsElement>('details.tool')];
+  const unavailable = first!.querySelector<HTMLButtonElement>('.tool-open-diff')!;
+  expect(unavailable.classList.contains('is-unavailable')).toBe(true);
+  expect(unavailable.getAttribute('aria-disabled')).toBe('true');
+  expect(unavailable.getAttribute('aria-label')).toBe('Diff unavailable: this edit was too large to keep');
+  unavailable.click(); await settle();
+  expect(first!.open).toBe(false);
+  expect(second!.querySelector('.tool-open-diff')?.getAttribute('aria-label')).toBe('Review this edit (1 of 2 files)');
+});
+
 it('does not offer a project diff shortcut in an unfiled chat', async () => {
   const edit = toolCall(2, 'edit-unfiled');
   if (edit.kind !== 'tool_call') throw new Error('Expected a tool call');
