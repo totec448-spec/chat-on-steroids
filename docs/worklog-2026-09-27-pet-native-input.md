@@ -121,3 +121,14 @@ This is packaging evidence, not a guarantee about installed-app startup speed.
   document Windows focus restoration and the new dependency/packaging checks, and
   leave the full cross-platform suite to CI. Final pre-commit typecheck and the 44
   focused tests passed again. Startup/correlation restoration remains a separate task.
+
+## Rebase after #542 — 2026-09-28
+
+- Rebased onto upstream main 9040557 after #542 merged. The remaining diff contains
+  only Windows activation/focus restoration and its dependency, packaging and tests.
+  Library projection and interaction rearming are already upstream, not proposed again.
+- Compared the final Pets implementation and focus/host tests against pre-rebase
+  3ad6b87: unchanged. Typecheck, all 44 focused tests and diff whitespace checks passed.
+- Native Windows input and installer evidence above comes from the earlier build;
+  neither was repeated for this history-only rebase. New-head cross-platform CI is
+  pending. Acceptance of Koffi/user32 remains a maintainer product/maintenance decision.
