@@ -39,6 +39,19 @@ afterEach(async () => {
   await fs.rm(directory, { recursive: true, force: true });
 });
 
+it('hides repository internals and Finder metadata but keeps ordinary dotfiles', async () => {
+  const projectPath = path.join(approved, 'project');
+  await fs.mkdir(path.join(projectPath, '.git'), { recursive: true });
+  await fs.writeFile(path.join(projectPath, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  await fs.writeFile(path.join(projectPath, '.DS_Store'), 'x');
+  await fs.writeFile(path.join(projectPath, '.gitignore'), 'dist\n');
+  const project = await addProject(projectPath);
+  const names = (await listProjectDirectory(project.id)).entries.map(entry => entry.name);
+  expect(names).toContain('.gitignore');
+  expect(names).not.toContain('.git');
+  expect(names).not.toContain('.DS_Store');
+});
+
 it('lists exactly one project level at a time and previews bounded text', async () => {
   const projectPath = path.join(approved, 'project');
   await fs.writeFile(path.join(projectPath, 'README.md'), '# hello\nworld\n');

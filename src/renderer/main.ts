@@ -1,4 +1,5 @@
 import { ui, uiText, t, initLanguage } from './i18n.js';
+import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
@@ -1317,7 +1318,7 @@ function apply(next: AppState): void {
   ui(chatgptNote, 'textContent', () => status.lastRequestAt === null
       ? t("ChatGPT has not called this app yet.")
       : status.lastToolCallAt === null
-        ? t("ChatGPT connected {0} but has never run a tool. Check Developer mode in ChatGPT → Settings → Security and login.", [ago(status.lastRequestAt)])
+        ? t("ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.", [ago(status.lastRequestAt)])
         : unverified.length > 0
           ? // One connector working is not the whole setup. Naming the missing one is the
             // difference between "something is off" and knowing what to go and create.
@@ -1540,12 +1541,12 @@ function facts(next: AppState): HTMLElement[] {
     if (status.lastRequestAt !== null) {
       rows.push([
         'ChatGPT ran a tool',
-        () => status.lastToolCallAt === null ? t("never — check Developer mode") : ago(status.lastToolCallAt),
+        () => status.lastToolCallAt === null ? t("never — check the app in ChatGPT → Plugins") : ago(status.lastToolCallAt),
         status.lastToolCallAt === null
       ]);
     }
     if (health?.clientVersion) rows.push(['Tunnel client', () => health.clientVersion!]);
-    if (status.localUrl) rows.push(['Local server', () => status.localUrl!.replace(/^https?:\/\//, '')]);
+    if (status.localUrl) rows.push(['Local server', () => displayLocalServer(status.localUrl!)]);
   } else {
     rows.push(['Route to OpenAI', () => t('not running')]);
   }

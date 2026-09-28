@@ -1145,7 +1145,7 @@ export function goalProgressFor(mode: GoalMode, draft?: GoalDraftView | null): {
   const backend = draft?.backend ?? goalBackendFor(mode);
   return {
     backend,
-    model: draft?.model ?? (backend === 'chatgpt' ? settings.helperModel ?? 'gpt-5.6-sol'
+    model: draft?.model ?? (backend === 'chatgpt' ? helperModelLabel()
       : backend === 'templates' ? 'Offline templates' : settings.model),
     provider: settings.provider.kind
   };
@@ -1522,7 +1522,7 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
     clientId,
     turnId: input.turnId,
     stage: 'sending',
-    model: backend === 'chatgpt' ? settings.helperModel ?? 'gpt-5.6-sol' : settings.model,
+    model: backend === 'chatgpt' ? helperModelLabel() : settings.model,
     text: '',
     reply: '',
     error: null,
@@ -1746,6 +1746,9 @@ let helperFallbackLogged = '';
  * in the helper tab. When the observed catalog does not offer it, the helper uses ChatGPT's
  * current selection instead (null), the same rule that keeps worker spawns working (#499).
  */
+/** The helper model as it will actually run, for progress and logs; never a model it will not use. */
+function helperModelLabel(): string { return goalHelperSelection().model ?? "ChatGPT's current selection"; }
+
 export function goalHelperSelection(): { model: string | null; reasoningEffort: ReasoningEffort | null } {
   const settings = getConfig().goal;
   let model: string | null = settings.helperModel ?? 'gpt-5.6-sol';
@@ -1992,7 +1995,7 @@ export async function draftOpeningMessage(
   const key = backend === 'api' ? await goalProviderKey(endpoint.kind) : null;
   // Custom endpoints may be keyless; only OpenRouter fails here without one.
   if (backend === 'api' && !key && endpoint.kind === 'openrouter') return { error: 'no_api_key' };
-  const model = backend === 'chatgpt' ? settings.helperModel ?? 'gpt-5.6-sol' : settings.model;
+  const model = backend === 'chatgpt' ? helperModelLabel() : settings.model;
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
   try {

@@ -1,7 +1,7 @@
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { initContextMeter, paintContextMeter } from '../src/renderer/context-meter.js';
+import { compactTokens, initContextMeter, paintContextMeter } from '../src/renderer/context-meter.js';
 import type { Config } from '../src/shared/types.js';
 import type { SessionSummary } from '../src/shared/session.js';
 
@@ -26,13 +26,31 @@ it('keeps Pro static and identifies token estimates and compaction exclusion', (
 it('uses configured limits for ordinary models and supports click and Escape', () => {
   const doc = setup('gpt-5.6-sol-high');
   expect(doc.getElementById('contextMeterInfo')?.textContent).toContain('50% of configured limit');
-  // The compact count follows the system locale (100K in English, 100.000 in German).
-  const short = (value: number) => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 0 }).format(value);
-  expect(doc.getElementById('contextMeterCompact')?.textContent).toBe(`${short(100_000)} / ${short(200_000)} est.`);
+  // The compact count follows the interface language, like the "est." beside it.
+  expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('100K / 200K est.');
   initContextMeter();
   const button = doc.getElementById('contextMeterButton')!;
   button.click();
   expect(button.getAttribute('aria-expanded')).toBe('true');
   button.dispatchEvent(new dom!.window.KeyboardEvent('keydown', { key: 'Escape' }));
   expect(button.getAttribute('aria-expanded')).toBe('false');
+});
+
+it('abbreviates thousands even where the locale\'s compact notation does not', () => {
+  // German compact notation leaves thousands unabbreviated ("533.333"); the chip needs "533 Tsd.".
+  expect(new Intl.NumberFormat('de', { notation: 'compact' }).format(533_333)).not.toMatch(/Tsd/);
+  expect(compactTokens(533_333, 'en')).toBe('533K');
+  expect(compactTokens(1_200_000, 'en')).toBe('1M');
+  expect(compactTokens(6_992, 'en')).toBe('7K');
+});
+
+it('uses the translated thousands unit in German', async () => {
+  dom = new JSDOM(readFileSync('src/renderer/index.html', 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  try {
+    expect(compactTokens(533_333, 'de')).toBe('533 Tsd.');
+    expect(compactTokens(6_992, 'de')).toBe('6992');
+  } finally { setLanguage('en'); }
 });

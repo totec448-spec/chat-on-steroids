@@ -109,8 +109,13 @@ export function createWorkspaceDocks(host: HTMLElement) {
   const refreshControls = (): void => {
     for (const kind of ['review', 'terminal', 'files', 'agents'] as DockView[]) {
       const enabled = kind === 'terminal' ? rightTerminal?.canCreate() ?? false : views.get(kind)?.available() ?? false;
-      menu.querySelector<HTMLButtonElement>(`[data-view="${kind}"]`)?.toggleAttribute('disabled', !enabled);
-      launch.querySelector<HTMLButtonElement>(`[data-view="${kind}"]`)?.toggleAttribute('disabled', !enabled);
+      // A greyed-out entry says why, instead of leaving the user to guess.
+      const reason = enabled ? '' : kind === 'agents' ? t('Open a chat to see its sub-agents') : t('Open a project to use Files and Review');
+      for (const button of [menu, launch].map(root => root.querySelector<HTMLButtonElement>(`[data-view="${kind}"]`))) {
+        if (!button) continue;
+        button.toggleAttribute('disabled', !enabled);
+        if (reason) button.title = reason; else button.removeAttribute('title');
+      }
     }
   };
   const paint = (): void => {

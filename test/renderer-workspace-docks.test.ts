@@ -43,8 +43,11 @@ it('enables right quick actions and plus-menu entries from live scope, then open
   const quick = document.querySelector<HTMLButtonElement>('#workDockRight .work-dock-quick[data-view=files]')!;
   const menu = document.querySelector<HTMLButtonElement>('#workDockRight .work-dock-menu-item[data-view=files]')!;
   expect(quick.disabled).toBe(true); expect(menu.disabled).toBe(true);
+  // A disabled entry explains itself instead of just greying out.
+  expect(quick.title).toBe('Open a project to use Files and Review'); expect(menu.title).toBe(quick.title);
   available = true; docks.sync();
   expect(quick.disabled).toBe(false); expect(menu.disabled).toBe(false);
+  expect(quick.hasAttribute('title')).toBe(false);
   document.getElementById('rightDockToggle')!.click();
   quick.click(); expect(files).toHaveBeenCalledOnce();
   const right = document.getElementById('workDockRight')!;

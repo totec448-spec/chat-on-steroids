@@ -10,7 +10,7 @@ vi.mock('../src/main/config.js', async original => {
   return { ...real, getConfig: () => ({ ...real.defaultConfig(), goal: { ...real.defaultConfig().goal, ...state.goal } }) };
 });
 
-const { goalHelperSelection } = await import('../src/main/goal.js');
+const { goalHelperSelection, goalProgressFor } = await import('../src/main/goal.js');
 
 beforeEach(() => {
   state.models = [
@@ -37,4 +37,11 @@ it('keeps an offered model but drops a reasoning level it does not have', () => 
 it('changes nothing before the catalog has been observed', () => {
   state.models = []; state.goal = { helperModel: '6', helperReasoning: 'pro' };
   expect(goalHelperSelection()).toEqual({ model: '6', reasoningEffort: 'pro' });
+});
+
+it('names the model the helper will actually use in progress, not the unusable saved one', () => {
+  state.goal = { helperModel: '6', helperReasoning: 'pro' };
+  expect(goalProgressFor('goal').model).toBe("ChatGPT's current selection");
+  state.goal = { helperModel: 'gpt-5.6-sol', helperReasoning: 'high' };
+  expect(goalProgressFor('goal').model).toBe('gpt-5.6-sol');
 });

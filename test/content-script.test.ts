@@ -2527,6 +2527,12 @@ describe('recording authored message text', () => {
     live.hook.observe();
     await settle();
     expect(emitted(live.sent, 'conversation_title')).toHaveLength(1);
+
+    // A project chat carries the project's page title until ChatGPT names the conversation.
+    live.document.title = 'ChatGPT - Homelab Development';
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'conversation_title')).toHaveLength(1);
   });
 
   it('does not persist Show more / Show less controls as part of a user message', async () => {
@@ -10495,6 +10501,17 @@ describe('evidence from the page context', () => {
         calls: [{ requestId, messageId: null, createTime: 1_700_000_001 }]
       })
     ]);
+  });
+
+  it('does not correlate requests from a Goal helper temporary chat', async () => {
+    live = await harness('https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?temporary-chat=true&cos-input=helper-decision#cos-input=helper-decision');
+    live.reply.set('correlate', () => ({ ok: true, data: { ok: true, confirmed: ['wfr_helper'] } }));
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-request-origin', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', requestIds: ['wfr_helper'] }
+    }));
+    await settle();
+    expect(live.sent.filter(message => message.type === 'correlate')).toEqual([]);
   });
 
   it('retains one-shot stream proof through a failed ACK without overlapping or repeating a confirmed request', async () => {

@@ -105,6 +105,8 @@ if (!hasSingleInstanceLock) {
   app.quit();
 }
 
+const BENIGN_RENDERER_ERRORS = new Set(['ResizeObserver loop completed with undelivered notifications.']);
+
 function createWindow(): void {
   const layout = windowLayoutForWorkArea(screen.getPrimaryDisplay().workArea);
   const icon = browserWindowIconPath(process.platform, app.isPackaged, process.resourcesPath);
@@ -178,7 +180,10 @@ function createWindow(): void {
   // Renderer errors are otherwise invisible from here. Only errors, and only the
   // message text — never anything the page was working with.
   window.webContents.on('console-message', (details) => {
-    if (details.level === 'error') logError(`renderer: ${details.message}`);
+    // Chromium's ResizeObserver notice is not a failure: the composer's height animation starts
+    // inside its observer by design, and the deferred notification arrives on the next frame.
+    // Logged as an error it appeared on every send and read like a renderer fault.
+    if (details.level === 'error' && !BENIGN_RENDERER_ERRORS.has(details.message)) logError(`renderer: ${details.message}`);
   });
 
   // Nothing in this app should ever open a second window or navigate away.
