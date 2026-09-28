@@ -13,7 +13,7 @@ let dom: JSDOM;
  */
 const money = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 const usd = (value: number) => money.format(value);
-afterEach(() => { dom?.window.close(); vi.unstubAllGlobals(); vi.resetModules(); });
+afterEach(() => { dom?.window.close(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.resetModules(); });
 
 it('chooses the week start from a weekday menu, keeps exact counts, and restores the weekday after reload', async () => {
   dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
@@ -32,6 +32,11 @@ it('chooses the week start from a weekday menu, keeps exact counts, and restores
   const usage = await import('../src/renderer/usage.js'); usage.initUsage();
   const element = (id: string) => dom.window.document.getElementById(id)!;
   const select = element('usageWeekStart') as HTMLSelectElement;
+  const surface = select.closest('.usage-message-surface')!;
+  expect(element('usageMessageCounts').parentElement).toBe(surface);
+  expect(element('modelUsage').parentElement).toBe(surface);
+  expect(element('refreshUsage').closest('.settings-section-head')).not.toBeNull();
+  expect(surface.contains(element('refreshUsage'))).toBe(false);
   const chosen = () => select.selectedOptions[0]!.textContent;
   const choose = (weekday: number) => { select.value = String(weekday); select.dispatchEvent(new dom.window.Event('change')); };
   // Seven named choices, Monday first, instead of a button that cycles silently.
@@ -201,7 +206,8 @@ it('combines equivalent recorded names in the table while keeping raw rate edits
   expect(models[0]!.model).toBe('5.6');
 });
 
-it('draws token activity as a Monday-first calendar ending today, with labels and a legend', async () => {
+it.each(['2026-09-28', '2026-10-01', '2027-01-01', '2028-02-29'])('draws an annual Monday-first calendar ending %s, with twelve month labels and a legend', async date => {
+  vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(`${date}T12:00:00`));
   dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
   const key = (ago: number) => { const date = new Date(); date.setDate(date.getDate() - ago); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; };
@@ -212,17 +218,18 @@ it('draws token activity as a Monday-first calendar ending today, with labels an
   const usage = await import('../src/renderer/usage.js'); usage.initUsage(); await usage.refreshUsage();
   const heat = dom.window.document.getElementById('usageHeatmap')!;
   const cells = [...heat.querySelectorAll('.heat-grid > .heat-cell')] as HTMLElement[];
-  // Twelve whole weeks; the slot for today sits in the last column at its weekday's row.
-  expect(cells).toHaveLength(12 * 7);
+  // A full annual window, even with only two recorded days.
+  expect(cells).toHaveLength(52 * 7);
   const todayRow = (new Date().getDay() + 6) % 7;
-  const today = cells[11 * 7 + todayRow]!;
+  const today = cells[51 * 7 + todayRow]!;
   expect(today.dataset.level).toBe('4');
-  expect(cells.slice(11 * 7 + todayRow + 1).every(cell => cell.classList.contains('is-future'))).toBe(true);
+  expect(cells.slice(51 * 7 + todayRow + 1).every(cell => cell.classList.contains('is-future'))).toBe(true);
   expect(cells.filter(cell => cell.dataset.level && cell.dataset.level !== '0')).toHaveLength(2);
   const cellAt = (cell: HTMLElement) => [cell.style.gridRow, cell.style.gridColumn];
-  expect(cellAt(today)).toEqual([String(todayRow + 2), '13']);
+  expect(cellAt(today)).toEqual([String(todayRow + 2), '53']);
   expect([...heat.querySelectorAll('.heat-day')].map(label => label.textContent)).toEqual(['Mon', 'Wed', 'Fri', 'Sun']);
-  expect(heat.querySelectorAll('.heat-month').length).toBeGreaterThanOrEqual(2);
+  expect(heat.querySelectorAll('.heat-month')).toHaveLength(12);
+  expect(new Set([...heat.querySelectorAll('.heat-month')].map(label => label.textContent)).size).toBe(12);
   expect(heat.querySelector('.heat-legend')!.textContent).toBe('LessMore');
   // The cost chart states its peak and its date range.
   // Today is the peak day and the newest row of the daily breakdown.
