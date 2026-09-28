@@ -11,7 +11,13 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## Unreleased
 
+### Fixed
+
+- **Project chats keep their real name.** Chats that were once called "ChatGPT - <project name>" get their proper name back, and that label never replaces a chat's name again.
+
 ### Improved
+
+- **Clearer connection checks.** Asking the app whether it is running (for example from a terminal) no longer reports the browser extension as incompatible.
 
 - **Reviewing ChatGPT's edits is more dependable.** Every file of a larger edit can now be reviewed, not just the first eight. When a diff couldn't be kept, for example because the file was too large, the edit says so instead of simply showing no Review button. A partly kept edit shows how many of its files you can review.
 
