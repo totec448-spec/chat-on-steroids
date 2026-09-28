@@ -1978,8 +1978,10 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       try {
         const proof = await tabReply(tab.id, { type: 'clf-close-temporary-planner', id: input.id, owner: input.owner }, { documentId });
         const current = await chrome.tabs.get(tab.id);
-        if (proof?.safe === true && ownsDocument(source) && !current.pinned && !current.pendingUrl && new URL(current.url).searchParams.get('cos-input') === input.id &&
-            new URL(current.url).searchParams.get('temporary-chat') === 'true') await chrome.tabs.remove(tab.id);
+        const currentUrl = new URL(current.url);
+        const helperUrl = currentUrl.searchParams.get('temporary-chat') === 'true' &&
+          (currentUrl.searchParams.get('cos-input') === input.id || /^\/c\/[0-9a-f-]{36}$/i.test(currentUrl.pathname));
+        if (proof?.safe === true && ownsDocument(source) && !current.pinned && !current.pendingUrl && helperUrl) await chrome.tabs.remove(tab.id);
       } catch { /* only the exact still-owned temporary document may close */ }
       continue;
     }
@@ -3177,8 +3179,13 @@ const HANDLERS = {
         if (!current.pinned && !current.pendingUrl && ownsDocument(source) && current.url === tab.url) {
           const proof = await tabReply(source.tab, { type: 'clf-close-temporary-planner', id, owner }, { documentId: source.documentId });
           const latest = await chrome.tabs.get(source.tab);
+          // The page proved it still holds this exact decision; after Send ChatGPT has usually
+          // moved it to /c/<id>?temporary-chat=true, which no longer carries cos-input.
+          const latestUrl = new URL(latest.url);
+          const helperUrl = latestUrl.searchParams.get('cos-input') === id ||
+            (latestUrl.searchParams.get('temporary-chat') === 'true' && /^\/c\/[0-9a-f-]{36}$/i.test(latestUrl.pathname));
           if (proof?.safe === true && ownsDocument(source) && !latest.pinned && !latest.pendingUrl && latest.url === tab.url &&
-              new URL(latest.url).searchParams.get('cos-input') === id) await chrome.tabs.remove(source.tab);
+              helperUrl) await chrome.tabs.remove(source.tab);
         }
       } catch { /* terminal outbox maintenance can retry the same exact safe close */ }
     }
