@@ -13,6 +13,7 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ### Fixed
 
+- **The browser extension connects on its own again.** After removing and loading the extension again, which many did after updating, it stayed disconnected until you happened to click its icon. It now pairs with the app as soon as it starts, keeps trying until the app is running, and reconnects your open ChatGPT tabs.
 - **No false "never confirmed" warning for workers.** When you sent a worker a message while it was finishing its previous task, the report said the worker might not have read it, even though CoS then delivered it right away. The report now says the message is still queued for the worker.
 
 ### Improved
