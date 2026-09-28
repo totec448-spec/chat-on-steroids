@@ -442,6 +442,37 @@ describe('session finish turn identity', () => {
     expect(identities.has('finish:turn-one')).toBe(false);
     expect([...identities].filter(id => id?.startsWith('finish-goal:turn-one:'))).toHaveLength(1);
   });
+  it('decides again after a delivered continuation was worked through with tools only (#558)', async () => {
+    // Live report: after one automatic Goal continuation the executor worked only through MCP,
+    // and every later session_finish answered "context is unchanged" and held the turn forever.
+    const recordTool = (tool: string, time: number, result = 'ok') => appendEvent(sessionId, {
+      source: 'mcp', kind: 'tool_call', turnId: 'turn-one', time,
+      call: { callId: randomUUID(), tool, attribution: 'request_id', requestId: `r-${time}`, conversationId: hooks.caller.conversationId,
+        attributionMethod: 'request_id', args: { text: '{"cmd":"PRIVATE_ARGUMENT"}', chars: 26, truncated: false },
+        result: { text: `PRIVATE_RESULT ${result}`, chars: 20, truncated: false }, outcome: 'ok', durationMs: 1,
+        summary: { title: tool, tone: 'neutral', kind: 'other' } }
+    });
+    await appendEvent(sessionId, { source: 'extension', kind: 'user_message', time: 1100, messageId: 'u-558', message: { text: 'Audit the project', chars: 17, truncated: false } });
+    await appendEvent(sessionId, { source: 'extension', kind: 'assistant_message', turnId: 'turn-one', time: 1200, messageId: 'a-558', final: false,
+      message: { text: 'Auditing the project now.', chars: 25, truncated: false } });
+    await recordTool('exec_command', 1300);
+    await announceSessionFinish(sessionId, 'First pass done');
+    expect(hooks.followup).toHaveBeenCalledTimes(1);
+    await recordTool('session_finish', 2100, 'HELD');
+    await announceSessionFinish(sessionId, 'Waiting for the continuation');
+    expect(hooks.followup).toHaveBeenCalledTimes(1);
+    // The continuation arrives through the tool outbox and is worked through with tools only.
+    await recordTool('exec_command', 2300);
+    await recordTool('apply_patch', 2400);
+    await announceSessionFinish(sessionId, 'Second pass done');
+    expect(hooks.followup).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(hooks.followup.mock.calls[1]?.[2])).not.toMatch(/PRIVATE_|exec_command|apply_patch/);
+    // Hold calls alone are still not work.
+    await recordTool('session_finish', 2600, 'HELD');
+    await announceSessionFinish(sessionId, 'Empty wait');
+    expect(hooks.followup).toHaveBeenCalledTimes(2);
+  });
+
   it('does not repeat for tool-only work even with legacy opt-in, but reconsiders delivered app input', async () => {
     const recordTool = (tool: string, result: string) => appendEvent(sessionId, {
       source: 'mcp', kind: 'tool_call', turnId: 'turn-one', time: 2200,
