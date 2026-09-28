@@ -25,11 +25,11 @@ it('orders expansion, bottom and right controls; toggles panels and shows expans
   expect(right.querySelector<HTMLElement>('.work-dock-bar')!.hidden).toBe(true);
   expect(right.querySelector<HTMLElement>('.work-dock-empty')!.hidden).toBe(false);
   expect(controls[0]!.hidden).toBe(false);
-  expect(controls[0]!.querySelector('use')?.getAttribute('href')).toBe('#i-dock-expand');
+  expect(controls[0]!.querySelector('.ico')?.classList.contains('ph-corners-out')).toBe(true);
   expect(right.querySelector('.work-dock-bar > .btn-icon')).toBeNull();
   host.style.setProperty('--work-panel-width', '410px');
   controls[0]!.click(); expect(host.classList.contains('is-work-dock-expanded')).toBe(true);
-  expect(controls[0]!.querySelector('use')?.getAttribute('href')).toBe('#i-dock-restore');
+  expect(controls[0]!.querySelector('.ico')?.className).toBe('ico ph ph-corners-in');
   controls[0]!.click(); expect(host.classList.contains('is-work-dock-expanded')).toBe(false);
   expect(host.style.getPropertyValue('--work-panel-width')).toBe('410px');
   controls[2]!.click(); expect(right.hidden).toBe(true); expect(controls[0]!.hidden).toBe(true);
