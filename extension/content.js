@@ -309,6 +309,10 @@
    * Bounded, because a tab left open for days keeps reporting the same transcript.
    */
   const seenMessages = new Map(); // occurrence -> last observed native reaction
+  // User message id -> the model its send request named (usage.js). Bounded; newest wins.
+  const sendModels = new Map();
+  // User messages already reported, so a late send-model report can complete them in place.
+  const reportedUserMessages = new Map();
   let reportedConversationTitle = '';
   let reportedModelSelection = '';
   let bootstrapModelRestoreBusy = false;
@@ -2176,7 +2180,9 @@
         // is pending. A canonical user-authored marker remains literal text.
         if (!source.canonical && /^\\?\[\\?\[COS\\?_CONTEXT\\?:\d{1,6}\\?\]\\?\]/.test(source.text) && CLF_DOM.userPromptText(source.text) === null) continue;
         const text = source.text;
-        const key = occurrenceKey(message.id, text);
+        const sentModel = sendModels.get(message.id);
+        // As in the Fiber path: the model is part of the occurrence, so a late report re-emits.
+        const key = occurrenceKey(message.id, text + (sentModel ? `\u0000${sentModel}` : ''));
         const reaction = CLF_DOM.userMessageReaction(message);
         // Dedupe answers "have we journalled this row?"; authoredNow answers "did this row
         // cross the send boundary?" The boundary is intentionally evaluated first. Fiber can
@@ -2212,8 +2218,12 @@
           ...(source.attachments?.length ? { attachments: source.attachments } : {}),
           messageId: message.id,
           turnId: message.turnId || undefined,
+          ...(sentModel ? { model: sentModel } : {}),
           ...(justAuthored ? { authoredNow: true } : {})
         });
+        reportedUserMessages.delete(message.id);
+        reportedUserMessages.set(message.id, { text, createTime: null, conversationId: CLF_DOM.conversationId(), model: sentModel || null });
+        if (reportedUserMessages.size > 256) reportedUserMessages.delete(reportedUserMessages.keys().next().value);
       } else if (message.role === 'assistant') {
         // Assistant identity/content comes exclusively from the MAIN-world Fiber scan now.
         // Keeping this DOM fallback would recreate two competing message sources and is the
@@ -11441,10 +11451,6 @@
     }
     flushStreamRequestOrigins();
   }
-  // User message id -> the model its send request named (usage.js). Bounded; newest wins.
-  const sendModels = new Map();
-  // User messages already reported, so a late send-model report can complete them in place.
-  const reportedUserMessages = new Map();
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-send-model') return;
     const model = typeof event.data.model === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(event.data.model) ? event.data.model : null;

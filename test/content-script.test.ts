@@ -2743,6 +2743,31 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     expect(emitted(live.sent, 'user_message').map(entry => entry.event).filter(event => event.messageId === other).at(-1)?.model).toBe('gpt-6-astra');
   });
 
+  it('adds the send-request model to a user message read from the page DOM, early or late', async () => {
+    // The live shell reports typed messages through the DOM path, not the Fiber path.
+    live = await harness();
+    const domUser = (id: string, text: string) => {
+      const section = live!.document.createElement('section');
+      section.setAttribute('data-testid', 'conversation-turn-9'); section.setAttribute('data-turn', 'user'); section.setAttribute('data-turn-id', `turn-${id}`);
+      const message = live!.document.createElement('div');
+      message.setAttribute('data-message-id', id); message.setAttribute('data-message-author-role', 'user');
+      const body = live!.document.createElement('div'); body.className = 'whitespace-pre-wrap'; body.textContent = text;
+      message.append(body); section.append(message);
+      (live!.document.querySelector('main') ?? live!.document.body).append(section);
+    };
+    const report = (id: string, model: string) => live!.window.dispatchEvent(new live!.window.MessageEvent('message', {
+      source: live!.window as unknown as Window, origin: 'https://chatgpt.com', data: { type: 'cos-send-model', model, messageIds: [id] } }));
+    const modelOf = (id: string) => emitted(live!.sent, 'user_message').map(entry => entry.event).filter(event => event.messageId === id).at(-1)?.model;
+    const early = '432c4b99-96d6-445c-b45e-7a8cebb893fd', late = '532c4b99-96d6-445c-b45e-7a8cebb893fe';
+    report(early, 'gpt-5-6-thinking');
+    domUser(early, 'Typed first'); live.hook.observe(); await live.hook.flush(); await settle();
+    expect(modelOf(early)).toBe('gpt-5-6-thinking');
+    domUser(late, 'Typed second'); live.hook.observe(); await live.hook.flush(); await settle();
+    expect(modelOf(late)).toBeUndefined();
+    report(late, 'gpt-6-astra'); live.hook.observe(); await live.hook.flush(); await settle();
+    expect(modelOf(late)).toBe('gpt-6-astra');
+  });
+
   it('records the first unstable assistant interim before any MCP request id exists', async () => {
     live = await harness();
     startGenerating(live.document);
