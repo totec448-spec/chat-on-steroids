@@ -19,3 +19,22 @@ it('keeps ordinary text and falls back safely without a usable capture', () => {
   expect(hasContentReference(`Use \`${pointer}\` in docs`)).toBe(false);
   expect(plainTextOfHtml('<p>a&#39;b &#x41; &nbsp;c</p><script>x()</script>')).toBe("a'b A  c");
 });
+
+it('handles directives ChatGPT adds later without a new fix per name', async () => {
+  const { hasProviderDirective, withoutProviderDirectives, resolvedCapture } = await import('../src/shared/content-reference.js');
+  // An unknown leaf directive: the page's rendering wins, otherwise the line is dropped.
+  const leaf = 'Here you go:\n::chatgpt-entity{type="place" id="42"}\nDone.';
+  expect(hasProviderDirective(leaf)).toBe(true);
+  expect(modelFacingText(leaf, { text: '<p>Here you go:</p><p>Berlin</p><p>Done.</p>' })).toBe('Here you go:\nBerlin\nDone.');
+  expect(withoutProviderDirectives(leaf)).toBe('Here you go:\n\nDone.');
+  // An unknown container keeps its inner text when nothing better is recorded.
+  const container = ':::canvas{title="Plan"}\nStep one\nStep two\n:::';
+  expect(hasProviderDirective(container)).toBe(true);
+  expect(modelFacingText(container)).toBe('Step one\nStep two');
+  // A capture that still shows raw directives is not a resolution.
+  expect(resolvedCapture({ text: '<p>::chatgpt-entity{id="1"}</p>' })).toBe(false);
+  // Not directives: the writing card (drawn by the app), emoji shortcodes, prose with colons.
+  expect(hasProviderDirective(':::writing{title="x"}\nText\n:::')).toBe(false);
+  expect(hasProviderDirective('Great :smile: work')).toBe(false);
+  expect(hasProviderDirective('Note: the ratio is 3::1 here')).toBe(false);
+});

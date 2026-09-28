@@ -1,15 +1,38 @@
 /**
- * ChatGPT can answer with `::chatgpt-content-reference{index="0" source_message_id="…"}` on a line
- * of its own: a pointer to another message's content that its page shows in place (#574). For some
- * accounts every reply arrives this way, so anything that reads the reply as text (Goal's context,
- * a worker's final report) would see only the pointer. The recorded capture of the message is the
- * page's own rendering and holds the resolved content.
+ * ChatGPT's own Markdown directives, which its page renders and plain Markdown does not.
+ *
+ * `::chatgpt-content-reference{index="0" source_message_id="…"}` points at another message's
+ * content (#574); for some accounts every reply arrives that way. `:::writing{…}` is a card the
+ * renderer draws itself. Any other directive is unknown to this app, and ChatGPT keeps adding them
+ * per account, so instead of shipping one fix per new name: a leaf directive line or an unknown
+ * container is replaced by the page's own recorded rendering, and dropped from text otherwise.
  */
-const POINTER_LINE = /^[ \t]*::chatgpt-content-reference\{[^}\n]*\}[ \t]*$/gm;
+const LEAF_DIRECTIVE = /^[ \t]*::[a-z][\w-]*(?:\{[^}\n]*\})?[ \t]*$/gim;
+const CONTAINER_OPEN = /^[ \t]*:::(?!writing\b)[a-z][\w-]*(?:\{[^}\n]*\})?[ \t]*$/gim;
+const CONTAINER_CLOSE = /^[ \t]*:::[ \t]*$/gm;
+const ANY_DIRECTIVE_TEXT = /(^|\n)[ \t]*:{2,3}[a-z][\w-]*(?:\{[^}\n]*\})?[ \t]*(?=\n|$)/i;
+
+/** True when the text carries a directive this app cannot render itself. */
+export function hasProviderDirective(text: string): boolean {
+  LEAF_DIRECTIVE.lastIndex = 0; CONTAINER_OPEN.lastIndex = 0;
+  return LEAF_DIRECTIVE.test(text) || CONTAINER_OPEN.test(text);
+}
+
+/** The text without unknown directive lines; an unknown container keeps its inner text. */
+export function withoutProviderDirectives(text: string): string {
+  const hadContainer = (CONTAINER_OPEN.lastIndex = 0, CONTAINER_OPEN.test(text));
+  let result = text.replace(LEAF_DIRECTIVE, '').replace(CONTAINER_OPEN, '');
+  if (hadContainer) result = result.replace(CONTAINER_CLOSE, '');
+  return result.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** A recorded page rendering that shows content, not the same raw directives. */
+export function resolvedCapture(capture?: { text: string; truncated?: boolean } | null): capture is { text: string; truncated?: boolean } {
+  return !!capture?.text && !capture.truncated && !ANY_DIRECTIVE_TEXT.test(plainTextOfHtml(capture.text));
+}
 
 export function hasContentReference(text: string): boolean {
-  POINTER_LINE.lastIndex = 0;
-  return POINTER_LINE.test(text);
+  return hasProviderDirective(text);
 }
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'" };
@@ -31,13 +54,12 @@ export function plainTextOfHtml(html: string): string {
     .trim();
 }
 
-/** The reply as a model should read it: the resolved content when the raw text is only pointers. */
+/** The reply as a model should read it: the page's resolved content when directives replaced it. */
 export function modelFacingText(text: string, capture?: { text: string; truncated?: boolean } | null): string {
-  if (!hasContentReference(text)) return text;
-  const rest = text.replace(POINTER_LINE, '').trim();
-  if (capture?.text && !capture.truncated && !capture.text.includes('::chatgpt-content-reference')) {
+  if (!hasProviderDirective(text)) return text;
+  if (resolvedCapture(capture)) {
     const resolved = plainTextOfHtml(capture.text);
     if (resolved) return resolved;
   }
-  return rest || '[This reply points to content from another message that was not recorded.]';
+  return withoutProviderDirectives(text) || '[This reply points to content from another message that was not recorded.]';
 }
