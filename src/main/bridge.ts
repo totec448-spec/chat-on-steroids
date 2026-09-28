@@ -933,10 +933,12 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
     // somewhere else. Said once per announcement, and only when both ends reported a stamp.
     const shipped = shippedExtensionBuild();
     if (shipped && stamp && stamp !== shipped) {
-      logWarn(
+      // Expected after every app update: the extension updates itself once no chat is busy.
+      // Only an extension loaded from some other folder stays behind and needs a manual reload.
+      logInfo(
         `bridge: the browser is running extension build ${stamp}, but this app ships ${shipped}. ` +
-          'Chrome keeps a service worker alive across a folder change, so reload the extension at ' +
-          'chrome://extensions to pick up the shipped code.'
+          'It updates itself once no chat is busy. If it stays on the old build, Chrome loaded it from a ' +
+          'different folder: load the CoS extension folder again at chrome://extensions.'
       );
     }
     // Even an incompatible peer reports its version before the protocol fence.
