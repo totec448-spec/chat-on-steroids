@@ -208,7 +208,7 @@ export function createFilePanel(options: FilePanelOptions) {
   if (!options.mount) attachWorkPanelResize(options.host, pane);
 
   const refresh = el('button', 'btn btn-icon file-panel-refresh') as HTMLButtonElement;
-  refresh.type = 'button'; refresh.append(icon('i-pulse'));
+  refresh.type = 'button'; refresh.append(icon('i-retry'));
   ui(refresh, 'title', () => t('Refresh files')); ui(refresh, 'aria-label', () => t('Refresh files'));
 
   const toolbar = el('div', 'file-panel-toolbar');
@@ -654,7 +654,7 @@ export function createFilePanel(options: FilePanelOptions) {
     if (entry.kind === 'directory') row.setAttribute('aria-expanded', String(expanded.has(entry.path)));
     const disclosure = el('span', `file-tree-disclosure${entry.kind === 'directory' && expanded.has(entry.path) ? ' is-open' : ''}`);
     disclosure.setAttribute('aria-hidden', 'true');
-    row.append(disclosure, icon(entry.kind === 'directory' ? 'i-folder' : entry.kind === 'file' ? 'i-file' : 'i-ban', 'file-tree-icon'));
+    row.append(disclosure, icon(entry.kind === 'directory' ? 'i-folder' : entry.kind === 'file' ? 'i-file' : 'i-ban', 'ico file-tree-icon'));
     row.append(el('span', 'file-tree-name', entry.name));
     const gitChange = entry.kind === 'file' ? treeGitStatus(entry.path) : undefined;
     const descendants = entry.kind === 'directory' ? directoryCounts.get(entry.path) : undefined;
@@ -698,7 +698,7 @@ export function createFilePanel(options: FilePanelOptions) {
     root.dataset.path = ''; root.dataset.kind = 'root';
     root.setAttribute('aria-level', '1'); root.setAttribute('aria-selected', String(selection.path === ''));
     root.tabIndex = selection.path === '' ? 0 : -1;
-    root.append(icon('i-folder', 'file-tree-icon'), el('strong', 'file-tree-name', project.name));
+    root.append(icon('i-folder', 'ico file-tree-icon'), el('strong', 'file-tree-name', project.name));
     const directoryCounts = changedDirectoryCounts();
     if (gitSnapshot?.state === 'ready' && gitSnapshot.changes.length) {
       const status = folderGitStatus(new Set(gitSnapshot.changes.map(change => change.status)));

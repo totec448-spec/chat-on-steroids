@@ -1919,7 +1919,7 @@ it.each([false, true])('dismisses retired delivery errors in selected-chat=%s wi
   const retry = queue.querySelector<HTMLButtonElement>('[aria-label="Retry delivery"]')!;
   expect(retry.classList.contains('delivery-retry')).toBe(true);
   expect(retry.textContent).toBe('');
-  expect(retry.querySelector('use')?.getAttribute('href')).toBe('#i-retry');
+  expect(retry.querySelector('.ico.ph-arrow-clockwise')).not.toBeNull();
   expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).not.toBe('Cancel delivery');
   (queue.querySelector('[title="Dismiss delivery notice"]') as HTMLButtonElement).click();
   await app.append([]);

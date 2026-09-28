@@ -57,7 +57,7 @@ it('restores a temporarily hidden active pet through the View toggle', async () 
 
 it('keeps Pets in the sidebar and Desktop Pets in the View menu', () => {
   const page = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'));
-  expect(page.window.document.querySelector('#sidebarPets use[href="#i-paw"]')).not.toBeNull();
+  expect(page.window.document.querySelector('#sidebarPets .ico.ph-paw-print')).not.toBeNull();
   expect(page.window.document.querySelector('#viewMenu #viewPets')).not.toBeNull();
   page.window.close();
 });

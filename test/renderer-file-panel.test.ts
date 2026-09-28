@@ -202,7 +202,7 @@ it('shows real Git groups, tree markers, unified diffs, and reconciles metadata 
   host.querySelector<HTMLButtonElement>('.file-change-row[data-path="README.md"]')!.click(); await tick(); await tick();
   expect(host.querySelector('.file-changes-header-title')?.textContent).toBe('Diff');
   expect(document.activeElement).toBe(host.querySelector('.file-changes-back'));
-  expect(host.querySelector('.file-changes-back use')?.getAttribute('href')).toBe('#i-back');
+  expect(host.querySelector('.file-changes-back .ico.ph-arrow-left')).not.toBeNull();
   try {
     setLanguage('es');
     expect(host.querySelector('.file-changes-header-title')?.textContent).toBe('Diferencias');
@@ -385,7 +385,7 @@ it('reviews the exact edit independently of current Git changes and returns to F
   expect(host.querySelector<HTMLElement>('.file-changes-list')?.hidden).toBe(true);
   expect(host.querySelector('.file-panel-body')?.classList.contains('is-diff-open')).toBe(true);
   expect(host.querySelector<HTMLButtonElement>('.file-changes-back')?.getAttribute('aria-label')).toBe('Back to files');
-  expect(host.querySelector<HTMLButtonElement>('[title="Previous edited file"] use')?.getAttribute('href')).toBe('#i-back');
+  expect(host.querySelector('[title="Previous edited file"] .ico.ph-arrow-left')).not.toBeNull();
   expect(host.querySelector('.test-diff-viewer')?.textContent).toBe('before\n---\nafter');
   expect((window.api.getProjectGitDiff as any)).not.toHaveBeenCalled();
   expect(review).toHaveBeenCalledWith('session-id', 'call-id', 0);
