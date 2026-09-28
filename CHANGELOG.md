@@ -31,9 +31,13 @@ A feature update. The app gets a workspace next to your chat, pets on your deskt
 ### Fixed
 
 - **Usage counts the messages you type in ChatGPT.** Before, only messages sent from the CoS message box were counted, so the weekly numbers stayed near zero.
+- **Goal and Loop no longer leave helper tabs behind.** The temporary chats they use to decide the next step now close when they are done, and they no longer show up in your chat list.
+- **ChatGPT's text blocks show properly.** Rewrites and drafts that ChatGPT puts in a text block appear as a titled block instead of raw `:::writing` code.
+- **Project chats get their real title** instead of "ChatGPT - <project name>".
+- **Pets respond reliably again** after you hide and show them, and they no longer reread your pet library while the mouse moves.
 - **Web Fetch and other Python plugins install without extra setup.** If the `uv` tool they need is missing, CoS downloads a verified copy for itself instead of failing with "runtime uv is unavailable".
 - **Goal and Loop work again when your saved model is gone.** The step that decides what comes next failed when ChatGPT no longer offered the model saved in Settings; it now uses one that is available.
-- **Setup matches ChatGPT's new settings.** ChatGPT no longer has a Developer mode switch; you now create the app from Plugins → Add → Create MCP App. The setup steps say so.
+- **Setup matches ChatGPT's new settings.** ChatGPT no longer has a Developer mode switch; you now create the app from Plugins → Add → Create MCP App. The setup steps and the connection check say so.
 - **Attachments work again with ChatGPT's new message box.** Images and files the app sends to ChatGPT were not attached after ChatGPT's latest change.
 - **Image-only answers finish properly.** When ChatGPT answers with just a generated image, the chat no longer looks busy afterwards.
 - **Workers start even if your saved default model is gone.** If ChatGPT no longer offers the model or thinking level saved in Settings, workers now use one that is available instead of failing.
@@ -45,6 +49,13 @@ A feature update. The app gets a workspace next to your chat, pets on your deskt
 
 ### Improved
 
+- **New icons throughout the app,** drawn from one consistent icon set.
+- **Faster start with a long chat history.** CoS no longer rereads every recorded chat when it starts.
+- **Your connection key stays private.** The Workspace health card no longer shows the local server's secret key, so screenshots of it are safe to share.
+- **Long folder paths fit.** Settings no longer scroll sideways when a shared folder has a long path.
+- **Greyed-out panels explain themselves:** Files and Review need a project, Sub-agents an open chat.
+- **The Files panel hides `.git` and `.DS_Store`,** like other editors.
+- **Pets and Skills are fully translated,** and the context counter next to the message box reads well in every language.
 - **A redesigned Usage tab.** Clear cards, a calendar of your activity with day and month labels, a cost chart with dates, and a simple menu to choose which weekday your week starts on.
 - **One tidy title bar on macOS.** The window buttons, the sidebar button and the View menu now share one row instead of two.
 - **Skill cards show their full description.**
