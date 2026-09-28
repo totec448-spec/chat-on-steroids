@@ -152,6 +152,21 @@ describe('MAIN-world usage projection', () => {
    * and no attribution repair reload afterwards. Long agentic turns also stopped being cut off as
    * `stalled`, because their tool calls finally counted as progress on the turn that made them.
    */
+  it('reports the model a user message was sent to from the send request, and nothing else', async () => {
+    const h = harness(), messageId = '2bd27eea-290d-444c-bc46-1487f143d603';
+    // Shape measured on the live page, 2026-09-28: POST /backend-api/f/conversation.
+    const body = JSON.stringify({ action: 'next', model: 'gpt-5-6-thinking', thinking_effort: 'high', conversation_id: null,
+      messages: [{ id: messageId, author: { role: 'user' }, content: { content_type: 'text', parts: ['private prompt'] } }] });
+    await h.feedSse([`data: ${JSON.stringify({ conversation_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' })}\n\n`], { method: 'POST', body });
+    const reports = h.posts.filter(row => row.type === 'cos-send-model');
+    expect(reports).toEqual([{ type: 'cos-send-model', model: 'gpt-5-6-thinking', messageIds: [messageId], observedAt: expect.any(Number) }]);
+    expect(JSON.stringify(h.posts)).not.toContain('private prompt');
+    // A malformed model or a non-user message proves nothing.
+    await h.feedSse([], { method: 'POST', body: JSON.stringify({ model: 'gpt 6 <b>', messages: [{ id: messageId, author: { role: 'user' } }] }) });
+    await h.feedSse([], { method: 'POST', body: JSON.stringify({ model: 'gpt-6', messages: [{ id: messageId, author: { role: 'assistant' } }] }) });
+    expect(h.posts.filter(row => row.type === 'cos-send-model')).toHaveLength(1);
+  });
+
   it('joins a request id in input_message to the conversation the same response named', async () => {
     const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     const request_id = '11111111-2222-4333-8444-555555555555';

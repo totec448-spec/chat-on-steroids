@@ -4326,7 +4326,11 @@
         const message = item.value;
         if (message.role === 'user') {
           if (!message.createTime && !message.attachments?.length && renderedUserTexts.get(message.messageId) === message.rawText) continue;
-          const key = occurrenceKey(message.messageId, message.rawText + (message.attachments?.length ? JSON.stringify(message.attachments) : ''));
+          const sentModel = sendModels.get(message.messageId);
+          // The model is part of the occurrence, so a send-model report that lands after the
+          // first sighting re-emits the same message with it.
+          const key = occurrenceKey(message.messageId, message.rawText + (message.attachments?.length ? JSON.stringify(message.attachments) : '') +
+            (sentModel ? `\u0000${sentModel}` : ''));
           if (message.createTime) {
             if (userAuthoredTimesReported.get(key) === message.createTime) continue;
             userAuthoredTimesReported.set(key, message.createTime);
@@ -4340,8 +4344,13 @@
             messageId: message.messageId,
             text: message.rawText,
             ...(message.attachments?.length ? { attachments: message.attachments } : {}),
+            ...(sentModel ? { model: sentModel } : {}),
             ...(message.createTime ? { time: message.createTime, authoredTime: true, authoredAt: message.createTime } : {})
           });
+          reportedUserMessages.delete(message.messageId);
+          reportedUserMessages.set(message.messageId, { text: message.rawText, createTime: message.createTime || null,
+            conversationId: CLF_DOM.conversationId(), model: sentModel || null });
+          if (reportedUserMessages.size > 256) reportedUserMessages.delete(reportedUserMessages.keys().next().value);
           continue;
         }
         // `endMessageId` identifies the one public assistant message that actually ended the
@@ -11432,6 +11441,29 @@
     }
     flushStreamRequestOrigins();
   }
+  // User message id -> the model its send request named (usage.js). Bounded; newest wins.
+  const sendModels = new Map();
+  // User messages already reported, so a late send-model report can complete them in place.
+  const reportedUserMessages = new Map();
+  window.addEventListener('message', (event) => {
+    if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-send-model') return;
+    const model = typeof event.data.model === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(event.data.model) ? event.data.model : null;
+    const ids = Array.isArray(event.data.messageIds) ? event.data.messageIds.slice(0, 8) : [];
+    if (!model) return;
+    for (const id of ids) {
+      if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) continue;
+      sendModels.delete(id); sendModels.set(id, model);
+      if (sendModels.size > 256) sendModels.delete(sendModels.keys().next().value);
+      // Only within the conversation it was reported in: a report that arrives after the user
+      // moved to another chat must not file the message there.
+      const reported = reportedUserMessages.get(id);
+      if (reported && reported.model !== model && reported.conversationId === CLF_DOM.conversationId()) {
+        reported.model = model;
+        emit({ kind: 'user_message', messageId: id, text: reported.text, model,
+          ...(reported.createTime ? { time: reported.createTime, authoredTime: true, authoredAt: reported.createTime } : {}) });
+      }
+    }
+  });
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-request-origin') return;
     // A Goal/Loop helper page records nothing (see emit/flush). Its request origins would
