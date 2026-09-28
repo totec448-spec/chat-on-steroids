@@ -345,15 +345,17 @@ async function ensureOverlay(): Promise<BrowserWindow> {
   win.on('closed', gone);
   win.webContents.on('render-process-gone', gone);
   if (process.platform === 'win32') {
+    let focus: PetWindowFocus | null = null;
     try {
-      const focus = await windowsPetFocus(win);
-      // Loading native code may outlive shutdown or replacement of this window.
-      if (overlay !== win || win.isDestroyed()) { focus.dispose(); return win; }
-      overlayFocus = focus;
+      focus = await windowsPetFocus(win);
     } catch (error) {
-      if (!win.isDestroyed()) win.destroy();
-      throw error;
+      // Returning focus after a drag is a convenience. A binding that cannot load (quarantined
+      // or damaged install) must not take the pets themselves away.
+      logWarn(`pet overlay: focus return after dragging is unavailable: ${error instanceof Error ? error.message : String(error)}`);
     }
+    // Loading native code may outlive shutdown or replacement of this window.
+    if (overlay !== win || win.isDestroyed()) { focus?.dispose(); return win; }
+    overlayFocus = focus;
   }
   if (process.env.ELECTRON_RENDERER_URL) {
     const base = process.env.ELECTRON_RENDERER_URL.endsWith('/') ? process.env.ELECTRON_RENDERER_URL : `${process.env.ELECTRON_RENDERER_URL}/`;
