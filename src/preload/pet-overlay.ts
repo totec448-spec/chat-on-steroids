@@ -11,6 +11,7 @@ const api = {
   setInteractive: (interactive: boolean, regions: PetOverlayHitRegion[] = []): void =>
     ipcRenderer.send('pet-overlay:interactive', { interactive: interactive === true, regions }),
   focusOwner: (): void => ipcRenderer.send('pet-overlay:focusOwner'),
+  releaseFocus: (): void => ipcRenderer.send('pet-overlay:releaseFocus'),
   openLibrary: (): void => ipcRenderer.send('pet-overlay:openLibrary'),
   openActivity: (sessionId: string): void => ipcRenderer.send('pet-overlay:openActivity', { sessionId }),
   onSnapshot: (listener: (snapshot: PetOverlaySnapshot) => void): (() => void) => {

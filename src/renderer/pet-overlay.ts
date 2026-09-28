@@ -317,17 +317,22 @@ function createView(record: PetRecord, atlasUrl: string, manifest: PetAnimationM
     updateInteraction(pointer);
     scheduleWake();
     if (clicked) api.focusOwner();
+    else api.releaseFocus();
   });
-  shell.addEventListener('pointercancel', event => {
+  const cancelPointer = (event: PointerEvent): void => {
     if (machine.pointer?.id !== event.pointerId) return;
     if (canAnimate()) advance(performance.now());
     machine.endPointer(event.pointerId, true);
     shell.dataset.dragging = 'false';
+    try { shell.releasePointerCapture(event.pointerId); } catch { /* already released */ }
     persistPosition(view);
     paintView(view);
     updateInteraction(pointer);
     scheduleWake();
-  });
+    api.releaseFocus();
+  };
+  shell.addEventListener('pointercancel', cancelPointer);
+  shell.addEventListener('lostpointercapture', cancelPointer);
   shell.addEventListener('contextmenu', event => {
     event.preventDefault();
     openMenu(view, event.clientX, event.clientY);

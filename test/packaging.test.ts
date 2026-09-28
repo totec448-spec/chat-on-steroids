@@ -39,6 +39,17 @@ function yamlFile(relative: string): any {
 }
 
 describe('cross-platform packaging targets', () => {
+  it('stages only the target Windows Pets FFI and probes the packaged binding', () => {
+    const config = yamlFile('electron-builder.yml');
+    expect(config.files).toContain('!node_modules/@koromix/koffi-*/**/*');
+    expect(config.files).toContain('!node_modules/koffi/build/**/*');
+    expect(config.asarUnpack).toContain('**/node_modules/@koromix/koffi-*/**');
+    const staging = readFileSync(path.join(root, 'scripts/prepare-packaging-native.mjs'), 'utf8');
+    expect(staging).toContain("if (platform === 'win32') packages.push(`@koromix/koffi-win32-${arch}`)");
+    const smoke = readFileSync(path.join(root, 'scripts/smoke-packaged-runtime.mjs'), 'utf8');
+    expect(smoke).toContain("appRequire('koffi')");
+    expect(smoke).toContain('runtime.petFocus !== true');
+  });
   it('normalizes supported OS spellings and rejects unsupported targets', () => {
     expect(normalizePlatform('windows')).toBe('win32');
     expect(normalizePlatform('macos')).toBe('darwin');
