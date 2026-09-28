@@ -26,17 +26,30 @@ export function automaticTitle(summary: SessionSummary, first?: Extract<SessionE
   if (summary.origin && summary.origin.kind !== 'desktop') return false;
   if (summary.titleSource) return summary.titleSource !== 'manual';
   if (summary.title === 'ChatGPT session' || legacyContextTitle(summary)) return true;
+  if (summary.origin?.kind === 'desktop' && summary.title === 'New chat') return true;
   if (!first) return false;
   return [first.authoredText, userPromptText(first.message.text), first.message.text].some(text =>
     text != null && [80, 120].some(length => [text.slice(0, length).trim(), text.trim().slice(0, length), text.trim().slice(0, length).trim()].includes(summary.title)));
+}
+
+/**
+ * ChatGPT names a chat from its first message. In a chat this app opened, that message is the
+ * CoS instructions around the user's request, so every such chat was called some variant of
+ * "Coding Agent Instructions". There the user's own request names the chat instead.
+ */
+export function providerTitleIgnored(summary: SessionSummary): boolean {
+  return summary.origin?.kind === 'desktop';
 }
 
 /** Rebuild only a preview. Provider/manual/origin titles keep their authority. */
 export function refreshUserTitle(summary: SessionSummary, events: Iterable<SessionEvent>): boolean {
   const first = firstTitleMessage(events);
   if (!first && !legacyContextTitle(summary)) return false;
-  if (summary.titleSource === 'provider' || !automaticTitle(summary, first)) return false;
-  const title = first ? userTitle(first.message.text, first.authoredText) || 'ChatGPT session' : 'ChatGPT session';
+  if ((summary.titleSource === 'provider' && !providerTitleIgnored(summary)) || !automaticTitle(summary, first)) return false;
+  const authored = first ? userTitle(first.message.text, first.authoredText) : '';
+  // Without a readable request, a provider title is still better than a placeholder.
+  if (!authored && summary.titleSource === 'provider') return false;
+  const title = authored || 'ChatGPT session';
   const changed = summary.title !== title || summary.titleSource !== 'fallback';
   summary.title = title;
   summary.titleSource = 'fallback';
