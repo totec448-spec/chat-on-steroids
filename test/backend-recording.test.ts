@@ -112,6 +112,21 @@ it('exact evidence bypasses a blocked canonical transcript write without inventi
   } finally { release.resolve(); await transcript; spy.mockRestore(); }
 });
 
+it('commits a newly proved owner to disk before request evidence is acknowledged', async () => {
+  const id = await sessionForConversation('conv-committed');
+  const ledger = path.join(dir, 'state', 'request-correlations.json');
+  const evidence = (requestId: string) => [{ kind: 'tool_evidence' as const, time: Date.now(), fiberConversationId: 'conv-committed', calls: [{ requestId, messageId: 'tool', tool: 'read', order: 0, answered: false }] }];
+  expect(await recordRequestEvidence('conv-committed', evidence('committed-proof'))).toBe(id);
+  // No flush: the ordinary snapshot is debounced, so only the acknowledgement barrier can have written this.
+  const saved = JSON.parse(await fs.readFile(ledger, 'utf8'));
+  expect(saved).toMatchObject({ version: 6, complete: true });
+  expect(saved.entries.map((entry: { requestId: string }) => entry.requestId)).toEqual(['committed-proof']);
+  // Re-proving a known owner adds nothing, so it does not rewrite the ledger.
+  const write = vi.spyOn(fs, 'rename');
+  expect(await recordRequestEvidence('conv-committed', evidence('committed-proof'))).toBe(id);
+  expect(write).not.toHaveBeenCalled();
+});
+
 it('concurrent headerless calls share one initialized unattributed bucket', async () => {
   await Promise.all(Array.from({ length: 8 }, () => recordToolCall(call())));
   const { indexedSessions } = await import('../src/main/session/store.js');
