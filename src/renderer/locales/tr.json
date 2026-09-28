@@ -1734,5 +1734,6 @@
   "never — check the app in ChatGPT → Plugins": "hiç — ChatGPT → Eklentiler altında uygulamayı kontrol edin",
   "Diff unavailable: this edit was too large to keep": "Fark kullanılamıyor: bu düzenleme saklanamayacak kadar büyüktü",
   "Diff unavailable: this edit was not kept": "Fark kullanılamıyor: bu düzenleme saklanmadı",
-  "Review this edit ({0} of {1} files)": "Bu düzenlemeyi incele ({1} dosyadan {0})"
+  "Review this edit ({0} of {1} files)": "Bu düzenlemeyi incele ({1} dosyadan {0})",
+  "This reply points to content from another message that was not recorded.": "Bu yanıt, kaydedilmemiş başka bir mesajdaki içeriğe işaret ediyor."
 }
