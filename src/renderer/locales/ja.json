@@ -1741,5 +1741,5 @@
   "Diff unavailable: this edit was not kept": "差分は利用できません：この編集は保存されていません",
   "Review this edit ({0} of {1} files)": "この編集を確認（{1} 件中 {0} ファイル）",
   "This reply points to content from another message that was not recorded.": "この返信は、記録されていない別のメッセージの内容を参照しています。",
-  "Local control API: let agents on this computer read app status": "ローカル制御API：このコンピューター上のエージェントにアプリの状態の読み取りを許可"
+  "Local control API: let agents on this computer read app status and chats": "ローカル制御API：このコンピューター上のエージェントにアプリの状態とチャットの読み取りを許可"
 }

@@ -140,9 +140,13 @@ describe('local control API listener', () => {
     const large = 'x'.repeat(1024 * 1024);
     const oversized = { ...auth, 'content-type': 'application/json', 'content-length': String(large.length) };
     expect((await request(port, '/v1/status', { headers: oversized, body: large })).status).toBe(413);
-    expect((await request(port, '/v1/sessions', { headers: auth })).status).toBe(404);
+    expect((await request(port, '/v1/nothing', { headers: auth })).status).toBe(404);
+    expect((await request(port, '/v1/sessions/not-a-session-id-at-all!', { headers: auth })).status).toBe(404);
     const health = await request(port, '/v1/health', { headers: auth });
-    expect(health.body).toMatchObject({ protocol: 1, routes: ['/v1/health', '/v1/status'] });
+    expect(health.body).toMatchObject({
+      protocol: 1,
+      routes: ['/v1/health', '/v1/status', '/v1/sessions', '/v1/sessions/{id}', '/v1/sessions/{id}/events', '/v1/inputs', '/v1/agents', '/v1/log']
+    });
   });
 
   it('serves status from the live owners without a secret path or token', async () => {
@@ -156,6 +160,15 @@ describe('local control API listener', () => {
       toolCalls: { running: 0, inFlightMcpRequests: 0 }
     });
     expect(JSON.stringify(status.body)).not.toContain(token);
+  });
+
+  it('answers a failure in the owner behind a route with a plain 500 that names nothing', async () => {
+    await controlApi.startControlApi();
+    const { port, token } = await readEndpoint();
+    // This suite never initialises the session store, so the owner behind the route throws.
+    const failure = await request(port, '/v1/sessions', { headers: { authorization: `Bearer ${token}` } });
+    expect(failure.status).toBe(500);
+    expect(failure.body).toEqual({ error: 'internal_error' });
   });
 
   // Terminal for this module instance, so it runs last in the file.

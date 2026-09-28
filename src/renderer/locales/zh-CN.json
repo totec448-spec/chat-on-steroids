@@ -1741,5 +1741,5 @@
   "Diff unavailable: this edit was not kept": "差异不可用：此次编辑未保存",
   "Review this edit ({0} of {1} files)": "查看此次编辑（{1} 个文件中的 {0} 个）",
   "This reply points to content from another message that was not recorded.": "此回复指向另一条消息中未被记录的内容。",
-  "Local control API: let agents on this computer read app status": "本地控制 API：允许本机上的智能体读取应用状态"
+  "Local control API: let agents on this computer read app status and chats": "本地控制 API：允许本机上的智能体读取应用状态和聊天"
 }
