@@ -1,3 +1,4 @@
+import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
 import { ui, t } from './i18n.js';
@@ -1580,26 +1581,17 @@ const WRITING_BLOCK: TokenizerAndRendererExtension = {
   }
 };
 
-/**
- * `::chatgpt-content-reference{index="0" source_message_id="…"}` on a line of its own: ChatGPT points
- * at another message's content and its page shows that content in place (#574). The raw text has
- * only the pointer, so the page's own rendering of this message is the one faithful source.
- */
-const CONTENT_REFERENCE = /^[ \t]*::chatgpt-content-reference\{[^}\n]*\}[ \t]*$/gm;
-
 export function renderedMarkdown(source: string, capture?: StoredText): HTMLElement {
   // Fiber's canonical text can be complete while a background provider tab still
   // paints its first words. Render this revision directly; captured DOM HTML is
   // never evidence that it contains the current message revision.
   let text = withoutMessageReaction(source).slice(0, MAX_RENDERED_HTML_CHARS);
-  if (text.search(CONTENT_REFERENCE) >= 0) {
-    const pointerless = text.replace(CONTENT_REFERENCE, '').trim();
-    // Only a capture that resolved the pointer presents this message; one still showing the raw
-    // directive (or cut short) says nothing more than the text does.
-    if (capture?.text && !capture.truncated && !capture.text.includes('::chatgpt-content-reference')) {
-      return renderedMessage(capture, pointerless);
-    }
-    text = pointerless || t('This reply points to content from another message that was not recorded.');
+  // A ChatGPT directive this app cannot draw (#574 and whatever ChatGPT adds next): the page's own
+  // recorded rendering is the faithful presentation; without one, the directive lines are dropped.
+  if (hasProviderDirective(text)) {
+    const plain = withoutProviderDirectives(text);
+    if (resolvedCapture(capture)) return renderedMessage(capture, plain);
+    text = plain || t('This reply points to content from another message that was not recorded.');
   }
   const citations = text.includes('\uE200') ? citationLabels(text, capture) : new Map<string, string>();
   // An inline tokenizer leaves literal citation examples inside code spans/fences intact.
