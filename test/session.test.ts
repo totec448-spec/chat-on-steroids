@@ -3270,6 +3270,28 @@ describe('naming the chats this app opened', () => {
     expect((await getSession(session.id))?.title).toBe('Plan the release');
   });
 
+  it('never takes a project page title as the chat name and repairs one already stored', async () => {
+    const conversationId = 'project-page-title';
+    const opened = await recordChatObservations(conversationId, [
+      { kind: 'user_message', time: Date.now(), text: 'Fix the homelab backup', messageId: 'project-user' }
+    ]);
+    await recordChatObservations(conversationId, [{ kind: 'conversation_title', time: Date.now(), text: 'ChatGPT - Homelab Development' }]);
+    expect((await getSession(opened.sessionId!))?.title).toBe('Fix the homelab backup');
+    await recordChatObservations(conversationId, [{ kind: 'conversation_title', time: Date.now(), text: 'Homelab Backup Fix' }]);
+    expect((await getSession(opened.sessionId!))?.title).toBe('Homelab Backup Fix');
+
+    // Stored by a build before the filter: repaired on the next cold read.
+    const stored = await createSession({ conversationId: 'stored-project-title', title: 'Temporary' });
+    await upsertMessageEvent(stored.id, { kind: 'user_message', source: 'app', time: Date.now(),
+      messageId: 'stored-project-user', authoredText: 'Plan the NAS migration', message: { text: 'Plan the NAS migration', chars: 22, truncated: false } });
+    await flushSessions(); resetSessionStoreForTests();
+    const metaPath = path.join(sessionsRoot(), stored.id, 'meta.json');
+    const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    Object.assign(meta, { title: 'ChatGPT - Homelab Development', titleSource: 'provider' });
+    await fs.writeFile(metaPath, JSON.stringify(meta));
+    expect((await getSession(stored.id))?.title).toBe('Plan the NAS migration');
+  });
+
   it('repairs a legacy context preview on cold read using durable authored text', async () => {
     const raw = '[[COS_CONTEXT:19268]]\nInternal instructions and AGENTS.md '.repeat(3);
     const session = await createSession({ conversationId: 'legacy-context-preview', title: 'Temporary' });
