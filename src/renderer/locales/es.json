@@ -813,7 +813,6 @@
   "Tunnel → this app": "Túnel → esta aplicación",
   "Tunnel uptime": "Tiempo de actividad del túnel",
   "ChatGPT ran a tool": "ChatGPT ejecutó una herramienta",
-  "never — check Developer mode": "nunca — revisa el modo de desarrollador",
   "Tunnel client": "Cliente del túnel",
   "Local server": "Servidor local",
   "not running": "sin ejecutar",
@@ -1177,7 +1176,6 @@
   "4 · Accept, then Create": "4 · Acepta y luego crea",
   "Setup screenshot": "Captura de configuración",
   "Enlarge image": "Ampliar imagen",
-  "ChatGPT connected {0} but has never run a tool. Check Developer mode in ChatGPT → Settings → Security and login.": "ChatGPT se conectó {0}, pero nunca ha ejecutado una herramienta. Revisa el modo de desarrollador en ChatGPT → Ajustes → Seguridad e inicio de sesión.",
   "Waiting for tool inactivity": "Esperando a que cese la actividad de las herramientas",
   "Waiting for running tools": "Esperando las herramientas en ejecución",
   "Waiting for activity after recovery": "Esperando actividad después de la recuperación",
@@ -1711,5 +1709,7 @@
   "No matches for “{0}”.": "No hay resultados para «{0}».",
   "No skills available.": "No hay Skills disponibles.",
   "Skill is already up to date": "La Skill ya está actualizada",
-  "Skill updated from GitHub": "Skill actualizada desde GitHub"
+  "Skill updated from GitHub": "Skill actualizada desde GitHub",
+  "ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.": "ChatGPT se conectó {0}, pero nunca ha ejecutado una herramienta. Comprueba que la app de CoS esté activada en ChatGPT → Complementos.",
+  "never — check the app in ChatGPT → Plugins": "nunca: revisa la app en ChatGPT → Complementos"
 }

@@ -813,7 +813,6 @@
   "Tunnel → this app": "Tünel → bu uygulama",
   "Tunnel uptime": "Tünelin açık kalma süresi",
   "ChatGPT ran a tool": "ChatGPT bir araç çalıştırdı",
-  "never — check Developer mode": "hiç — Developer mode ayarını kontrol edin",
   "Tunnel client": "Tünel istemcisi",
   "Local server": "Yerel sunucu",
   "not running": "çalışmıyor",
@@ -1177,7 +1176,6 @@
   "4 · Accept, then Create": "4 · Kabul edip Create düğmesine tıklayın",
   "Setup screenshot": "Kurulum ekran görüntüsü",
   "Enlarge image": "Görseli büyüt",
-  "ChatGPT connected {0} but has never run a tool. Check Developer mode in ChatGPT → Settings → Security and login.": "ChatGPT {0} bağlandı, ancak hiç araç çalıştırmadı. ChatGPT → Settings → Security and login yolundaki Developer mode ayarını kontrol edin.",
   "Waiting for tool inactivity": "Araç etkinliğinin durması bekleniyor",
   "Waiting for running tools": "Çalışan araçlar bekleniyor",
   "Waiting for activity after recovery": "Kurtarma sonrası etkinlik bekleniyor",
@@ -1711,5 +1709,7 @@
   "No matches for “{0}”.": "“{0}” için sonuç yok.",
   "No skills available.": "Kullanılabilir beceri yok.",
   "Skill is already up to date": "Beceri zaten güncel",
-  "Skill updated from GitHub": "Beceri GitHub'dan güncellendi"
+  "Skill updated from GitHub": "Beceri GitHub'dan güncellendi",
+  "ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.": "ChatGPT {0} bağlandı ancak henüz hiç araç çalıştırmadı. CoS uygulamasının ChatGPT → Eklentiler altında etkin olduğunu kontrol edin.",
+  "never — check the app in ChatGPT → Plugins": "hiç — ChatGPT → Eklentiler altında uygulamayı kontrol edin"
 }
