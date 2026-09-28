@@ -2717,6 +2717,27 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     expect(revisions.map(entry => entry.resolvedModel)).toEqual([undefined, 'gpt-5-6-thinking', undefined]);
   });
 
+  it('adds the model from the send request to the user message, also when it arrives after the message', async () => {
+    live = await harness();
+    const messageId = '2bd27eea-290d-444c-bc46-1487f143d603', other = '3cd27eea-290d-444c-bc46-1487f143d604';
+    const report = (id: string, model: string) => live!.window.dispatchEvent(new live!.window.MessageEvent('message', {
+      source: live!.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-send-model', model, messageIds: [id] } }));
+    const bind = async (id: string, turnId: string, text: string) => {
+      const section = userTurn(live!.document, turnId, text, { sent: false });
+      await bindFiberTurns([{ section, turn: { turnId, messages: [{ role: 'user', stable: true, messageId: id, rawMessageId: id, rawText: text, createTime: 1_787_165_100_000 }] } }]);
+      await live!.hook.flush(); await settle();
+    };
+    report(messageId, 'gpt-5-6-thinking');
+    await bind(messageId, 'model-first-turn', 'First question');
+    expect(emitted(live.sent, 'user_message').map(entry => entry.event).filter(event => event.messageId === messageId).at(-1)?.model).toBe('gpt-5-6-thinking');
+
+    await bind(other, 'model-late-turn', 'Second question');
+    expect(emitted(live.sent, 'user_message').map(entry => entry.event).filter(event => event.messageId === other).at(-1)?.model).toBeUndefined();
+    report(other, 'gpt-6-astra'); live.hook.observe(); await live.hook.flush(); await settle();
+    expect(emitted(live.sent, 'user_message').map(entry => entry.event).filter(event => event.messageId === other).at(-1)?.model).toBe('gpt-6-astra');
+  });
+
   it('records the first unstable assistant interim before any MCP request id exists', async () => {
     live = await harness();
     startGenerating(live.document);

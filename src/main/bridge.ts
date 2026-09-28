@@ -1159,6 +1159,10 @@ function parseObservations(input: unknown): ChatObservation[] {
     // with the page-side assistant bound so the bridge does not silently become the next
     // truncation point after Fiber/content.js accepted the whole message.
     if (typeof item['text'] === 'string') observation.text = item['text'].slice(0, 256_000);
+    // The model the page's own send request named for this message: count proof for Usage.
+    if (kind === 'user_message' && typeof item['model'] === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(item['model'])) {
+      observation.model = item['model'];
+    }
     if (kind === 'user_message' && typeof item['messageId'] === 'string') {
       if (item['reaction'] === null) observation.reaction = null;
       else {

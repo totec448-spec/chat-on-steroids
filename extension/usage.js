@@ -297,6 +297,29 @@
     });
     window.WebSocket = observedWebSocket;
   }
+  /**
+   * The model a user message was sent to, read from the send request itself.
+   *
+   * ChatGPT's current turn view carries no model at all, so neither the page nor the reply can
+   * say which model a typed message used. `POST /backend-api/f/conversation` names both: the
+   * request's `model` and the id of the user message it delivers. Only those two values leave
+   * this function, and only for a well-formed body.
+   */
+  function noteSendModel(args, observedAt) {
+    try {
+      const init = args[1];
+      const method = String((init && init.method) || (args[0] && typeof args[0] === 'object' && args[0].method) || 'GET').toUpperCase();
+      if (method !== 'POST' || !init || typeof init.body !== 'string' || init.body.length > 2_000_000) return;
+      const url = new URL(typeof args[0] === 'string' ? args[0] : args[0] instanceof URL ? args[0].href : args[0].url, location.origin);
+      if (url.origin !== location.origin || !/^\/backend-api\/(?:f\/)?conversation$/.test(url.pathname)) return;
+      const body = JSON.parse(init.body);
+      const model = typeof body?.model === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(body.model) ? body.model : null;
+      const messageIds = (Array.isArray(body?.messages) ? body.messages : []).slice(0, 8)
+        .filter(message => message?.author?.role === 'user' && typeof message.id === 'string' && CONVERSATION.test(message.id))
+        .map(message => message.id);
+      if (model && messageIds.length) post({ type: 'cos-send-model', model, messageIds, observedAt }, location.origin);
+    } catch { /* A body this reader does not understand proves nothing. */ }
+  }
   const inspectedResponses = new WeakSet();
   const installFetchObserver = () => {
     if (!active || window.fetch === observedFetch || typeof window.fetch !== 'function') return;
@@ -306,6 +329,7 @@
     observedFetch = function (...args) {
       // Request order fences late responses, not accounts. No account identity is inferred.
       const observedAt = Date.now(), order = ++requestOrder;
+      noteSendModel(args, observedAt);
       const result = downstreamFetch.apply(this, args);
       if (!active) return result;
       void result.then((response) => {
