@@ -115,7 +115,8 @@ function oneLine(value: string, limit: number): string {
 
 function simpleScalar(value: string): string | null {
   value = value.trim();
-  if (!value || SIMPLE_SCALAR_UNSAFE.test(value)) return null;
+  if (!value) return null;
+  // Quoted scalars may contain ": "; only a plain scalar is ambiguous with a nested mapping.
   if (value.startsWith('"') || value.endsWith('"')) {
     if (!(value.startsWith('"') && value.endsWith('"'))) return null;
     try {
@@ -127,7 +128,7 @@ function simpleScalar(value: string): string | null {
     if (!(value.startsWith("'") && value.endsWith("'"))) return null;
     return value.slice(1, -1).replace(/''/g, "'");
   }
-  return value;
+  return SIMPLE_SCALAR_UNSAFE.test(value) ? null : value;
 }
 
 function markdownBodyAndMetadata(text: string): { lines: string[]; name: string | null; description: string | null } {
