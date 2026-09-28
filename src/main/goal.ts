@@ -58,6 +58,7 @@ import { logInfo, logWarn } from './logger.js';
 import { getSecret } from './secrets.js';
 import { findSessionByConversation, getSession, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
 import { foldProgress } from '../shared/session.js';
+import { modelFacingText } from '../shared/content-reference.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 
 /** A finish-only preference has authority only while the finish tool is available. */
@@ -2473,7 +2474,7 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
         ? { role: 'user', origin: 'automatic', content: '[Automatic continuation; not a new human requirement]\n' + content }
         : { role: 'user', content };
     } else if ((event.kind === 'assistant_message' && (event.final || event.messageId)) || (event.kind === 'progress' && event.source === 'extension')) {
-      const content = clip(event.message.text);
+      const content = clip(event.kind === 'assistant_message' ? modelFacingText(event.message.text, event.renderedHtml) : event.message.text);
       if (content) next = { role: 'assistant', content };
     }
     if (!next) continue;
