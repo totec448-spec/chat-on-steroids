@@ -75,6 +75,8 @@ const MAX_LISTED_SESSIONS = 200;
 const MAX_SCANNED_SESSIONS = 5_000;
 /** Keep the uncapped authoritative scan fast without opening thousands of files at once. */
 const ATTACHMENT_CATALOG_READ_CONCURRENCY = 64;
+/** Small shard reads are latency-bound on Windows; keep parallelism bounded to avoid I/O bursts. */
+const CANONICAL_SHARD_READ_CONCURRENCY = 8;
 
 let root = '';
 /**
@@ -630,20 +632,27 @@ async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void):
   // history remains readable from messages.json.
   const shards = path.join(sessionDir(id), 'messages');
   try {
-    const names = await fs.readdir(shards);
-    for (const name of names) {
-      if (!/^[0-9a-f]{64}\.json$/.test(name)) continue;
-      try {
-        const raw = await fs.readFile(path.join(shards, name), 'utf8');
-        if (Buffer.byteLength(raw, 'utf8') > MAX_CANONICAL_MESSAGE_BYTES) continue;
-        const event = JSON.parse(raw) as CanonicalEvent;
-        const key = messageKey(event);
-        if (!key) continue;
-        const expectedName = `${createHash('sha256').update(key).digest('hex')}.json`;
-        if (expectedName !== name) continue;
-        out.set(key, event);
-      } catch {
-        logWarn(`session ${id}: ignored unreadable canonical message shard ${name}`);
+    const names = (await fs.readdir(shards)).filter(name => /^[0-9a-f]{64}\.json$/.test(name));
+    // Reading thousands of tiny shards serially made the one-time correlation migration spend
+    // tens of seconds in Windows filesystem latency. Eight bounded reads overlap that latency
+    // without opening every shard file at once or changing validation/publication order.
+    for (let offset = 0; offset < names.length; offset += CANONICAL_SHARD_READ_CONCURRENCY) {
+      const batch = await Promise.all(names.slice(offset, offset + CANONICAL_SHARD_READ_CONCURRENCY).map(async name => {
+        try {
+          const raw = await fs.readFile(path.join(shards, name), 'utf8');
+          if (Buffer.byteLength(raw, 'utf8') > MAX_CANONICAL_MESSAGE_BYTES) return null;
+          const event = JSON.parse(raw) as CanonicalEvent;
+          const key = messageKey(event);
+          if (!key) return null;
+          const expectedName = `${createHash('sha256').update(key).digest('hex')}.json`;
+          return expectedName === name ? [key, event] as const : null;
+        } catch {
+          logWarn(`session ${id}: ignored unreadable canonical message shard ${name}`);
+          return null;
+        }
+      }));
+      for (const entry of batch) {
+        if (entry) out.set(entry[0], entry[1]);
       }
     }
   } catch (err) {
