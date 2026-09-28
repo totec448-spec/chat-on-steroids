@@ -1898,9 +1898,12 @@
     if (!latest) return null;
     // Any node of the logical turn, not just the first. ChatGPT splits one answer across
     // sibling sections, and a new sibling appended to a section that was already there is
-    // still this generation writing.
+    // still this generation writing. A new node above this generation's own question is not:
+    // ChatGPT can remount the previous answer right after Send, and adopting it closed the
+    // new turn within milliseconds with that answer's end_turn.
+    const remountAbove = !unwitnessedGeneration && ownsQuestion && turns.indexOf(latest) < question;
     for (const node of latest.nodes || [latest.node]) {
-      if (!node || priorSections.has(node)) continue;
+      if (!node || priorSections.has(node) || remountAbove) continue;
       genNode = node;
       return latest;
     }
@@ -3811,6 +3814,9 @@
     const owns = () => alive && epoch === ownerEpoch && conversationId === ownerConversation &&
       CLF_DOM.conversationId() === ownerConversation && (!current || current());
     if (!owns()) return;
+    // A Goal/Loop helper page records nothing. Confirming its requests would open an empty
+    // "ChatGPT session" for the decision chat, whichever path (Fiber or stream) saw them.
+    if (temporaryPlannerPage()) return;
     if (!Array.isArray(calls) || calls.length === 0 || !ownerConversation) return;
     const byRequest = new Map();
     for (const call of calls) {

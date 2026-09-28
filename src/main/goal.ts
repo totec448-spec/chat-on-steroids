@@ -28,7 +28,8 @@
  * ## What is sent
  *
  * Authored user messages, ChatGPT commentary and final answers, in order, plus
- * the Compact & Resume bootstrap that the replacement chat actually received. No tool calls,
+ * the Compact & Resume bootstrap that the replacement chat actually received. Of tool calls
+ * only a count per turn, so work that ran is not mistaken for a claim: no tool names,
  * no arguments, no results, no file contents. The goal model is deciding whether the user's
  * request has been satisfied, and the conversation is the only evidence it needs for that;
  * the rest is this machine's business and does not leave it.
@@ -143,6 +144,8 @@ export function goalProviderKey(kind: GoalProviderKind): Promise<string | null> 
 
 /** How many messages of history the goal model is given, newest kept. */
 const MAX_CONTEXT_MESSAGES = 120;
+/** Recent CoS calls read to count per turn; a busy turn can make hundreds. */
+const MAX_TOOL_CALLS_COUNTED = 500;
 /** …and how many characters of them, so one 200k-character answer cannot be the whole prompt. */
 const MAX_CONTEXT_CHARS = 120_000;
 /** The per-message cut. Long enough to carry an answer's substance, short enough to fit many. */
@@ -2435,13 +2438,21 @@ async function committedResumeHandoffId(
 export async function conversationMessages(sessionId: string, deliveredInput: readonly string[] = [], excludedInputIds: ReadonlySet<string> = new Set()): Promise<ChatMessage[]> {
   const recentLimit = MAX_CONTEXT_MESSAGES * 2;
   const { listInputs } = await import('./session/input.js');
-  const [recent, userReferences, inputs] = await Promise.all([
+  const [recent, userReferences, inputs, toolCalls] = await Promise.all([
     readRecentEvents(sessionId, recentLimit, {
       kinds: ['user_message', 'assistant_message', 'progress']
     }),
     readRecentEvents(sessionId, MAX_CONTEXT_MESSAGES, { kinds: ['user_message'] }),
-    listInputs()
+    listInputs(),
+    readRecentEvents(sessionId, MAX_TOOL_CALLS_COUNTED, { kinds: ['tool_call'] })
   ]);
+  // Only how many CoS calls each turn made. Without it the helper cannot tell "ran the
+  // command" from "said it did" and keeps asking for the same work again.
+  const callsByTurn = new Map<string, number>();
+  for (const call of toolCalls) {
+    if (call.kind === 'tool_call' && call.source === 'mcp' && call.turnId) callsByTurn.set(call.turnId, (callsByTurn.get(call.turnId) ?? 0) + 1);
+  }
+  const lastAnswerOfTurn = new Map<string, number>();
   const automaticIds = new Set(inputs.filter(input => input.sessionId === sessionId && input.finishOwner).map(input => input.id));
   // Assistant traffic must not evict the user's middle corrections before selection.
   const events = [...new Map([...recent, ...userReferences].map(event => [event.seq, event])).values()]
@@ -2476,6 +2487,12 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
       if (key) byStableMessage.set(key, ordered.length);
       ordered.push(next);
     }
+    const turn = next.role === 'assistant' && 'turnId' in event && typeof event.turnId === 'string' ? event.turnId : null;
+    if (turn && callsByTurn.has(turn)) lastAnswerOfTurn.set(turn, Math.max(lastAnswerOfTurn.get(turn) ?? -1, existingAt ?? ordered.length - 1));
+  }
+  for (const [turn, at] of lastAnswerOfTurn) {
+    const count = callsByTurn.get(turn)!;
+    ordered[at] = { ...ordered[at]!, content: `${ordered[at]!.content}\n\n[Chat On Steroids: ${count} tool call${count === 1 ? '' : 's'} ran in this turn. Arguments and results are not shown.]` };
   }
   for (const text of deliveredInput.slice(-5)) {
     const content = clip(userPromptText(text) ?? text, MAX_USER_MESSAGE_CHARS);
