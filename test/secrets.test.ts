@@ -89,6 +89,20 @@ describe('secret store', () => {
     expect(secureStorageCiphertextIsProtected(v10, 'darwin')).toBe(true);
   });
 
+  it('stores and returns API keys without invisible characters a paste can carry (#577)', async () => {
+    // A soft hyphen or NEL survives trim(); OpenRouter reads "Bearer \u00ADsk-…" as a missing header.
+    await setSecret('openRouterApiKey', '\u00ADsk-or-test\u0085 ');
+    expect(await getSecret('openRouterApiKey')).toBe('sk-or-test');
+    await setSecret('customProviderApiKey', '\u200Bsk-custom\uFEFF');
+    expect(await getSecret('customProviderApiKey')).toBe('sk-custom');
+    // A key stored before this check is healed when read.
+    await fs.writeFile(path.join(dir, 'secrets.bin'), Buffer.from(JSON.stringify({ openRouterApiKey: '\u00ADsk-or-legacy', bridgeToken: 'bridge-token' }), 'utf8'));
+    resetSecretsCacheForTests();
+    expect(await getSecret('openRouterApiKey')).toBe('sk-or-legacy');
+    // Only API keys are cleaned; other secrets keep their exact bytes.
+    expect(await getSecret('bridgeToken')).toBe('bridge-token');
+  });
+
   it('serializes concurrent writes so one credential cannot erase another', async () => {
     await Promise.all([
       setSecret('bridgeToken', 'bridge-token-456'),
