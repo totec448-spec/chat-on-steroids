@@ -41,7 +41,7 @@ import {
   WRITE_CAPABILITIES
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
-import { $, ago, el, icon, run, shortAgo, toast } from './dom.js';
+import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom.js';
 import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatView } from './chat.js';
 
 declare global {
@@ -254,7 +254,7 @@ function groupShell(id: string, title: string, iconId: string, box: HTMLInputEle
   main.type = 'button';
   const text = el('span');
   text.append(el('b', '', () => t(title)), el('em', 'group-count'));
-  main.append(icon('i-chev', 'ico chev'), icon(iconId), text);
+  main.append(disclosureChevron('ico chev'), icon(iconId), text);
   main.addEventListener('click', () => {
     openGroup = openGroup === id ? null : id;
     paintGroups();
@@ -417,7 +417,7 @@ function buildGroups(): void {
   // The only multi-agent exposure control there is. Chat settings used to carry a second
   // checkbox for the same flag, which this one had to mirror by hand.
   enabled.addEventListener('change', () => void save());
-  const agents = groupShell('agents', 'Sub-agents', 'i-bolt', enabled);
+  const agents = groupShell('agents', 'Sub-agents', 'i-agents', enabled);
 
   const tools = el('div', 'tools');
   const agentTools: Array<[string, string]> = [

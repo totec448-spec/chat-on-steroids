@@ -76,6 +76,25 @@ export function icon(name: string, className = 'ico'): HTMLElement {
   return node;
 }
 
+/**
+ * A disclosure indicator with geometry that rotates around its actual visual center.
+ *
+ * Font carets sit on a text baseline, so their ink appears to jump while rotating even
+ * when the element's box stays put. Keep every animated disclosure on this authored SVG;
+ * directional action icons continue to use the Phosphor icon helper.
+ */
+export function disclosureChevron(className = ''): SVGSVGElement {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  node.setAttribute('class', `disclosure-chevron${className ? ` ${className}` : ''}`);
+  node.setAttribute('viewBox', '0 0 16 16');
+  node.setAttribute('aria-hidden', 'true');
+  node.setAttribute('focusable', 'false');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M6 3.5 10.5 8 6 12.5');
+  node.append(path);
+  return node;
+}
+
 /** Redraws an existing icon, e.g. a toggle whose meaning flipped. */
 export function setIcon(node: Element, name: string, className = 'ico'): void {
   node.className = `${className} ${iconClasses(name)}`;
@@ -96,7 +115,7 @@ export function filterSettingsSections(view: HTMLElement, search: string): void 
   const fold = (text: string) => text.toLocaleLowerCase(currentLanguage());
   const query = fold(search.trim());
   let matches = 0;
-  for (const heading of view.querySelectorAll<HTMLElement>('.settings-section-title')) {
+  for (const heading of view.querySelectorAll<HTMLElement>('.automation-section-head')) {
     const pane = heading.nextElementSibling as HTMLElement | null;
     if (!pane?.classList.contains('pane')) continue;
     const visible = !query || fold(`${heading.textContent} ${pane.textContent}`).includes(query);
