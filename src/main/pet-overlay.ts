@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { BrowserWindow, ipcMain, screen } from 'electron';
 import { defaultAppearance } from '../shared/appearance.js';
-import type { PetActivity, PetOverlayBounds, PetOverlayControlState, PetOverlayHitRegion, PetOverlayPointer, PetOverlaySnapshot } from '../shared/pets.js';
+import type { PetActivity, PetLibraryState, PetOverlayBounds, PetOverlayControlState, PetOverlayHitRegion, PetOverlayPointer, PetOverlaySnapshot } from '../shared/pets.js';
 import { highestPetActivityLevel, petActivityForAgent, petActivityForSession, petTaskSessionId } from '../shared/pet-activity.js';
 import { getConfig } from './config.js';
 import { logWarn } from './logger.js';
@@ -28,6 +28,9 @@ let overlay: BrowserWindow | null = null;
 let overlayReady = false;
 let overlayInteractive: boolean | null = null;
 let globallyVisible = true;
+// Read-only projection of the library owner's publication. Catalog reads validate/decode
+// packages; pointer sampling and visibility checks must never perform that disk/image work.
+let library: PetLibraryState = { pets: [] };
 const dismissedPetIds = new Set<string>();
 let activities: PetActivity[] = [];
 let pointerTimer: NodeJS.Timeout | null = null;
@@ -42,8 +45,8 @@ let stopSwarm: (() => void) | null = null;
 let lastSnapshotSent: string | null = null;
 let lastControlSent: PetOverlayControlState | null = null;
 
-function activePets(): number { return petLibraryState().pets.filter(pet => pet.enabled).length; }
-function shouldShow(): boolean { return globallyVisible && petLibraryState().pets.some(pet => pet.enabled && !dismissedPetIds.has(pet.id)); }
+function activePets(): number { return library.pets.filter(pet => pet.enabled).length; }
+function shouldShow(): boolean { return globallyVisible && library.pets.some(pet => pet.enabled && !dismissedPetIds.has(pet.id)); }
 
 export function petOverlayControlState(): PetOverlayControlState {
   return { visible: shouldShow(), ready: !shouldShow() || overlayReady, activeCount: activePets(), activityCount: activities.length };
@@ -82,7 +85,7 @@ function sendSnapshot(force = false): void {
   overlay.webContents.send('pet-overlay:snapshot', next);
 }
 function sendLibrary(): void {
-  if (overlay && !overlay.isDestroyed() && overlayReady) overlay.webContents.send('pet-overlay:libraryChanged', petLibraryState());
+  if (overlay && !overlay.isDestroyed() && overlayReady) overlay.webContents.send('pet-overlay:libraryChanged', library);
 }
 function bounds(): PetOverlayBounds {
   const display = screen.getPrimaryDisplay();
@@ -283,7 +286,7 @@ function registerOverlayIpc(): void {
   ipcMain.on('pet-overlay:openLibrary', event => { if (validSender(event.sender.id)) showOwner('pets'); });
   ipcMain.on('pet-overlay:hidePet', (event, id: unknown) => {
     if (!validSender(event.sender.id) || typeof id !== 'string') return;
-    if (!petLibraryState().pets.some(pet => pet.id === id && pet.enabled)) return;
+    if (!library.pets.some(pet => pet.id === id && pet.enabled)) return;
     dismissedPetIds.add(id);
     void syncVisibility();
   });
@@ -367,9 +370,11 @@ export function refreshPetOverlayAppearance(): void { sendSnapshot(); }
 
 export async function startPetOverlay(getOwner: () => BrowserWindow | null, requestOwner: () => void): Promise<void> {
   if (started) return;
+  library = petLibraryState();
   started = true; ownerWindow = getOwner; activateOwner = requestOwner;
   registerOverlayIpc();
   stopLibrary = onPetLibraryChange(state => {
+    library = state;
     const active = new Set(state.pets.filter(pet => pet.enabled).map(pet => pet.id));
     for (const id of dismissedPetIds) if (!active.has(id)) dismissedPetIds.delete(id);
     sendLibrary();
@@ -398,6 +403,7 @@ export async function shutdownPetOverlay(): Promise<void> {
   const win = overlay; overlay = null; overlayReady = false; overlayInteractive = null;
   if (win && !win.isDestroyed()) win.destroy();
   dismissedPetIds.clear();
+  library = { pets: [] };
   lastSnapshotSent = null; lastControlSent = null;
   ownerWindow = null; activateOwner = null; started = false;
 }
