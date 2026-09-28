@@ -3,6 +3,7 @@
  * status projection can never carry a secret an owner happens to hold.
  */
 
+import { randomBytes } from 'node:crypto';
 import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -168,7 +169,9 @@ describe('local control API listener', () => {
 });
 
 describe('status projection', () => {
-  const secretPath = 'Zx8Qm2vT9kLpR4sWn7YbC1dFg6HjK3aE5uIo0PqRsTu';
+  // Built at run time: a literal here reads as a leaked key to secret scanners.
+  const secretPath = randomBytes(32).toString('base64url');
+  const pluginConfigSecret = `config-${randomBytes(9).toString('hex')}`;
   const connection: ConnectionStatus = {
     state: 'connected',
     detail: 'Connected',
@@ -200,7 +203,7 @@ describe('status projection', () => {
       id: 'p1',
       name: 'Plugin',
       source: { kind: 'stdio', command: 'C:\\private\\tool.exe', args: ['--token', 'plugin-secret-value'] },
-      config: { apiKey: 'plugin-config-secret' },
+      config: { apiKey: pluginConfigSecret },
       credentialKeys: ['apiKey'],
       version: '1.0.0',
       license: 'MIT',
@@ -224,7 +227,7 @@ describe('status projection', () => {
       toolCalls: { running: 1, settling: 0, inFlight: 1, inFlightMcpRequests: 2 }
     });
     const text = JSON.stringify(projected);
-    for (const secret of [secretPath, 'plugin-secret-value', 'plugin-config-secret', 'C:\\\\private', `sk-${'a'.repeat(24)}`]) {
+    for (const secret of [secretPath, 'plugin-secret-value', pluginConfigSecret, 'C:\\\\private', `sk-${'a'.repeat(24)}`]) {
       expect(text).not.toContain(secret);
     }
     expect(projected.connection.surfaces).toEqual([
