@@ -131,39 +131,36 @@ function paintCost(): void {
   }
   const heat = $('usageHeatmap'); heat.replaceChildren();
   const byDay = new Map(daily.map(day => [day.date, day.tokens])); const peak = Math.max(1, ...daily.map(day => day.tokens));
-  // Start at the first recorded day (at least 12 and at most 52 weeks) so a new workspace
-  // is not a year of empty squares.
-  const first = daily.find(day => day.tokens > 0)?.date;
-  const since = first ? Math.floor((Date.now() - new Date(`${first}T00:00:00`).getTime()) / 86_400_000) + 1 : 0;
-  const weeks = Math.min(52, Math.max(12, Math.ceil(since / 7) + 1));
+  // Keep a stable annual window even with sparse history; activity must not change the axis.
+  const weeks = 52;
   // A calendar: one column per week starting on Monday, one row per weekday, today in the
   // last column. Days after today stay as empty slots so the rows keep their weekday.
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const start = new Date(today); start.setDate(start.getDate() - (today.getDay() + 6) % 7 - (weeks - 1) * 7);
-  // One grid: weekday labels in the first column, months in the first row. Squares share
-  // the width, up to a comfortable size, so twelve weeks are not a stamp in a wide card.
+  // Weekday labels and months share the cell grid. CSS owns its responsive width.
   const grid = el('div', 'heat-grid'); grid.setAttribute('role', 'group');
   grid.style.gridTemplateColumns = `var(--heat-label) repeat(${weeks}, minmax(0, 1fr))`;
-  grid.style.maxWidth = `calc(var(--heat-label) + ${weeks} * var(--heat-max))`;
   const place = (node: HTMLElement, row: number, column: string) => { node.style.gridRow = String(row); node.style.gridColumn = column; grid.append(node); };
   for (let row = 0; row < 7; row += 2) {
     const label = el('span', 'heat-day'); label.setAttribute('aria-hidden', 'true');
     ui(label, 'textContent', () => new Date(2026, 8, 21 + row).toLocaleDateString(currentLanguage(), { weekday: 'short' }));
     place(label, row + 2, '1');
   }
-  let lastMonth = -1;
+  // Label each of the twelve months, including a month starting in the current week.
+  // Use UTC calendar ordinals only for day distances, avoiding local DST hour shifts.
+  const ordinal = (date: Date) => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000;
+  for (let offset = 11; offset >= 0; offset--) {
+    const date = new Date(today.getFullYear(), today.getMonth() - offset, 1);
+    const week = Math.max(0, Math.floor((ordinal(date) - ordinal(start)) / 7));
+    const month = el('span', 'heat-month'); month.setAttribute('aria-hidden', 'true');
+    ui(month, 'textContent', () => date.toLocaleDateString(currentLanguage(), { month: 'short' }));
+    // Reserve at least three columns for the final label without adding implicit grid tracks.
+    const column = Math.min(week, weeks - 3);
+    if (column !== week) month.classList.add('is-end');
+    place(month, 1, `${column + 2} / span 3`);
+  }
   for (let week = 0; week < weeks; week++) {
     const monday = new Date(start); monday.setDate(start.getDate() + week * 7);
-    if (monday.getMonth() !== lastMonth && week < weeks - 1) {
-      lastMonth = monday.getMonth();
-      // A month cut to its last days at the left edge would collide with the next label.
-      const soon = new Date(monday); soon.setDate(monday.getDate() + 14);
-      if (week > 0 || soon.getMonth() === lastMonth) {
-        const month = el('span', 'heat-month'); month.setAttribute('aria-hidden', 'true');
-        ui(month, 'textContent', () => monday.toLocaleDateString(currentLanguage(), { month: 'short' }));
-        place(month, 1, `${week + 2} / span 3`);
-      }
-    }
     for (let row = 0; row < 7; row++) {
       const date = new Date(monday); date.setDate(monday.getDate() + row);
       if (date > today) { place(el('span', 'heat-cell is-future'), row + 2, String(week + 2)); continue; }
@@ -178,7 +175,7 @@ function paintCost(): void {
   for (let level = 0; level <= 4; level++) { const swatch = el('span', 'heat-cell'); swatch.dataset.level = String(level); legend.append(swatch); }
   legend.append(el('span', '', () => t('More')));
   heat.append(grid, legend);
-  ui($('usageHeatmapCaption'), 'textContent', () => weeks === 52 ? t("Estimated context processed per tool call · last 52 weeks") : t("Estimated context processed per tool call · last {0} weeks", [weeks]));
+  ui($('usageHeatmapCaption'), 'textContent', () => t("Estimated context processed per tool call · last 52 weeks"));
   ui($('usageFormula'), 'textContent', () => t("Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.", [formula.divisor, formula.multiplier, snapshot!.contextTokenCap.toLocaleString()]));
   ui($('usageCost'), 'textContent', () => t("{0} estimated equivalent. {1}This is a comparison, not a bill.", [costText(total), total.unpricedTokens ? t("{0} tokens have no rate. ", [Math.round(total.unpricedTokens).toLocaleString()]) : '']));
   const modelTable = el('table', 'usage-table'); const modelHead = el('tr');
@@ -213,7 +210,13 @@ function paintCost(): void {
   for (const day of [...daily].reverse()) { const row = el('tr'); row.append(el('td', '', () => dayLabel(day.date)), el('td', '', Math.round(day.tokens).toLocaleString()), el('td', '', costText(day))); table.append(row); }
   if (!snapshot.days.length) { const row = el('tr'); const cell = el('td', 'muted', () => t("No recorded tool calls yet.")); cell.setAttribute('colspan', '3'); row.append(cell); table.append(row); }
   breakdown.append(table);
-  $('usageDays').replaceChildren(modelTable, ...(recent.length ? [scale, chart, axis] : []), breakdown);
+  const modelSection = el('section', 'usage-days-model');
+  modelSection.append(el('h3', 'usage-cost-subhead', () => t('By model')), modelTable);
+  const daySection = el('section', 'usage-days-daily');
+  daySection.append(el('h3', 'usage-cost-subhead', () => t('By day')));
+  if (recent.length) daySection.append(scale, chart, axis);
+  daySection.append(breakdown);
+  $('usageDays').replaceChildren(modelSection, daySection);
 }
 export function initUsage(): void {
   try {
