@@ -4203,15 +4203,30 @@ it('anchors the worked line to your message when the page reports an empty turn 
   expect(lines[0]!.nextElementSibling?.textContent).toContain('quinto arquivo');
 });
 
-it('names an activity group after its latest real action, not a thinking note around it', async () => {
+it('names an activity group after ChatGPT’s recap of the round, else after its latest real action', async () => {
+  // ChatGPT closes each round of work with a recap in the past tense, and its last one describes the
+  // block as ChatGPT titles it. A note still in progress is not a recap.
   const note = (seq: number, label: string): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'page_tool', messageId: `note-${seq}`, label });
   const { w } = await boot([note(1, 'Planning the check'), toolCall(2, 'call-a'), toolCall(3, 'call-b'), note(4, 'Executed exact command check')]);
+  const group = w.document.querySelector<HTMLDetailsElement>('#timeline details.tool-group')!;
+  expect(group.querySelector('.activity-title')!.textContent).toBe('Executed exact command check');
+  expect(group.querySelector('.activity-symbol .ph-check-circle')).not.toBeNull();
+  // The recap heads the group rather than repeating inside it; the calls and the note stay listed.
+  const inside = [...group.querySelectorAll<HTMLElement>('.tool-group-body .thinking-line')].map(line => line.textContent);
+  expect(inside).toEqual(['Planning the check']);
+  expect(group.querySelectorAll('.tool-group-body .ev-tool_call')).toHaveLength(2);
+});
+
+it('keeps naming a group without a recap after its latest real action, and the globe for web search', async () => {
+  const note = (seq: number, label: string): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'page_tool', messageId: `note-${seq}`, label });
+  const { w } = await boot([note(1, 'Searched 3 websites'), toolCall(2, 'call-a'), toolCall(3, 'call-b')]);
   const group = w.document.querySelector<HTMLDetailsElement>('#timeline details.tool-group')!;
   const lastTool = [...w.document.querySelectorAll<HTMLElement>('#timeline .ev-tool_call')].at(-1)!;
   const toolTitle = lastTool.querySelector('.tool > summary b')?.textContent ?? lastTool.querySelector('.tool > summary span')?.textContent;
   expect(toolTitle).toBeTruthy();
   expect(group.querySelector('.activity-title')!.textContent).toBe(toolTitle);
-  expect(group.querySelector('.activity-title')!.textContent).not.toBe('Executed exact command check');
+  const search = group.querySelector<HTMLElement>('.thinking-line[data-step="search"]')!;
+  expect(search.querySelector('.ph-globe-hemisphere-west')).not.toBeNull();
 });
 
 it('offers a way back to the end of the chat that clears any reserved space', async () => {
