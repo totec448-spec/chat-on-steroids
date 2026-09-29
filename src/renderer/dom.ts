@@ -7,6 +7,25 @@ import { currentLanguage, t, ui } from './i18n.js';
  */
 
 /**
+ * Safe event listener helper that logs errors instead of throwing when element not found.
+ * Useful during app startup when DOM elements may not be ready yet.
+ */
+export function on<K extends keyof HTMLElementEventMap>(
+  id: string,
+  event: K,
+  handler: (this: HTMLElement, ev: HTMLElementEventMap[K]) => void,
+  options?: boolean | AddEventListenerOptions
+): boolean {
+  const element = document.getElementById(id);
+  if (!element) {
+    console.error(`Cannot add ${event} listener: element with id "${id}" not found`);
+    return false;
+  }
+  element.addEventListener(event, handler, options);
+  return true;
+}
+
+/**
  * The app's icon vocabulary, drawn with the bundled Phosphor font (icons.css).
  *
  * Call sites name what an icon means (`i-retry`); this map alone decides which glyph draws it.
