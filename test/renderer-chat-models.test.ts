@@ -186,7 +186,9 @@ it('renders the two observed Pro generations separately and sends their exact se
   expect(dom.window.document.getElementById('contextMeterInfo')!.textContent).toContain('Auto-compaction off for Pro');
   expect(dom.window.document.getElementById('contextMeterArc')!.getAttribute('stroke-dasharray')).toBe('0 37.7');
   expect(dom.window.document.getElementById('composerModelLabel')!.textContent).toBe('GPT-6 Pro');
-  expect(dom.window.document.querySelector('#composerPowerChoices input')!.getAttribute('aria-valuetext')).toBe('Pro');
+  // Pro-only model: one effort, so no slider; the menu names it instead.
+  expect(dom.window.document.querySelector('#composerPowerChoices input')).toBeNull();
+  expect(dom.window.document.getElementById('composerPowerModel')!.textContent).toBe('Pro');
   expect(confirmedComposerModel()).toEqual({ model: 'gpt-6-pro', reasoningEffort: 'pro' });
   dom.window.document.querySelector<HTMLButtonElement>('[data-model="gpt-5.6-sol"]')!.click();
   expect(dom.window.document.getElementById('contextThreshold')!.textContent).toBe('400K');
@@ -310,7 +312,9 @@ it('keeps model provider order and restricts the slider to the selected model’
   initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
   const doc = dom.window.document;
   expect([...doc.querySelectorAll<HTMLElement>('[data-model]')].map(row => row.dataset.model)).toEqual(['astra', 'old', 'sol']);
-  expect(doc.querySelector<HTMLInputElement>('#composerPowerChoices input')!.disabled).toBe(true);
+  // A single effort (Instant) is not a choice: no slider, the effort is named instead.
+  expect(doc.querySelector('#composerPowerChoices input')).toBeNull();
+  expect(doc.getElementById('composerPowerModel')!.textContent).toBe('High');
   const header = doc.querySelector('.power-header')!;
   expect(header.querySelector('.power-icon') === null).toBe(true);
   expect(header.querySelector('#composerPowerTitle')).not.toBeNull();
@@ -322,7 +326,8 @@ it('keeps model provider order and restricts the slider to the selected model’
     slider.value = String(index); slider.dispatchEvent(new dom.window.Event('input'));
     expect(confirmedComposerModel()).toEqual({ model: 'sol', reasoningEffort });
   }
-  expect(doc.querySelector('.power-track')!.getAttribute('style')).toContain('--power-position: 100%');
+  expect(doc.querySelector('.power-track')!.getAttribute('style')).toContain('--power-fraction: 1');
+  expect(doc.querySelectorAll('.power-track .power-stop')).toHaveLength(5);
   const effort = doc.getElementById('composerReasoning') as HTMLSelectElement;
   const injected = doc.createElement('option'); injected.value = 'ultra'; effort.append(injected); effort.value = 'ultra';
   expect(confirmedComposerModel()).toBeNull();
@@ -342,10 +347,12 @@ it('offers GPT-5.6 Pro and GPT-6 Pro with distinct observed model identities', a
   expect(slider.max).toBe('4');
   for (const model of ['5.6', '6']) {
     dom.window.document.querySelector<HTMLButtonElement>(`[data-model="${model}"]`)!.click();
-    const effortSlider = dom.window.document.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
-    effortSlider.value = effortSlider.max; effortSlider.dispatchEvent(new dom.window.Event('input'));
+    const effortSlider = dom.window.document.querySelector<HTMLInputElement>('#composerPowerChoices input');
+    if (effortSlider) { effortSlider.value = effortSlider.max; effortSlider.dispatchEvent(new dom.window.Event('input')); }
     expect(confirmedComposerModel()).toEqual({ model, reasoningEffort: 'pro' });
-    expect(effortSlider.getAttribute('aria-valuetext')).toBe('Pro');
+    // GPT-5.6 Sol has five efforts and a slider; GPT-6 Pro has only Pro and none.
+    if (model === '5.6') expect(effortSlider!.getAttribute('aria-valuetext')).toBe('Pro');
+    else expect(effortSlider).toBeNull();
     expect(dom.window.document.getElementById('composerModelLabel')!.textContent).toBe(`GPT-${model} Pro`);
   }
 });
@@ -375,8 +382,12 @@ it('keeps the trigger consistent with send admission during reload and a removed
   applyChatModels(config); await Promise.resolve();
   expect(confirmedComposerModel()).toBeNull();
   expect(label.textContent).toBe('Select model');
-  const slider = dom.window.document.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
-  slider.dispatchEvent(new dom.window.Event('input'));
+  // The only remaining effort still needs one explicit confirmation, now a button, not a slider.
+  expect(dom.window.document.querySelector('#composerPowerChoices input')).toBeNull();
+  const confirm = dom.window.document.querySelector<HTMLButtonElement>('#composerPowerChoices .power-single')!;
+  expect(confirm.textContent).toBe('Use effort: Medium');
+  confirm.click();
+  expect(dom.window.document.querySelector('#composerPowerChoices .power-single')).toBeNull();
   expect(confirmedComposerModel()).toEqual({ model: 'sol', reasoningEffort: 'medium' });
   expect(label.textContent).toBe('GPT-5.6 Sol · Medium');
   expect(label.title).toBe(label.textContent);
@@ -468,4 +479,34 @@ it('offers ChatGPT’s current model only when no account list is readable, and 
   receive({ state: 'ready', requestedAt: 3, observedAt: 4, models: [{ id: 'gpt-6', label: 'GPT-6', efforts: ['high'] }] });
   expect(composerSendModel()).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
   expect(button()).toBeNull();
+});
+
+it('glides the effort thumb, picks the nearest effort, settles on release and steps by keys', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const models = [{ id: 'think', label: 'GPT-5.6 Thinking', efforts: ['medium', 'high', 'xhigh'] }];
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: Date.now(), models } }) } });
+  const { initChatModels, applyChatModels, confirmedComposerModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  const doc = dom.window.document;
+  const slider = doc.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
+  const track = doc.querySelector<HTMLElement>('.power-track')!;
+  expect(slider.step).toBe('any');
+  expect(doc.querySelectorAll('.power-track .power-stop')).toHaveLength(3);
+  // Mid-drag: the fill follows the pointer exactly, the effort is the nearest stop.
+  slider.value = '1.4'; slider.dispatchEvent(new dom.window.Event('input'));
+  expect(track.style.getPropertyValue('--power-fraction')).toBe('0.7');
+  expect(confirmedComposerModel()).toEqual({ model: 'think', reasoningEffort: 'high' });
+  // Release: the thumb settles on that stop.
+  slider.dispatchEvent(new dom.window.Event('change'));
+  expect(slider.value).toBe('1');
+  expect(track.style.getPropertyValue('--power-fraction')).toBe('0.5');
+  // Keys move one whole effort at a time and stop at the ends.
+  slider.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  expect(confirmedComposerModel()).toEqual({ model: 'think', reasoningEffort: 'xhigh' });
+  slider.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  expect(confirmedComposerModel()).toEqual({ model: 'think', reasoningEffort: 'xhigh' });
+  slider.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home' }));
+  expect(confirmedComposerModel()).toEqual({ model: 'think', reasoningEffort: 'medium' });
+  expect(slider.getAttribute('aria-valuetext')).toBe('Medium');
 });
