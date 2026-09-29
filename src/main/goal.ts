@@ -43,7 +43,7 @@
  */
 
 import { requestBrowserDecision, authorizeBrowserHelperRetry } from './session/input.js';
-import { goalErrorMessage } from '../shared/goal-errors.js';
+import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
 import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt.js';
 import { planProgressText, type TaskProgressUpdate } from '../shared/task-progress.js';
 import { TaskRequestError } from './task-request.js';
@@ -342,6 +342,7 @@ export interface GoalDraftView {
   error: string | null;
   /** Plain explanation for both browser and desktop presentation. */
   message?: string;
+  messageKey?: string | null;
   /**
    * Whether this failure is one the same request could still answer.
    *
@@ -1177,7 +1178,7 @@ function view(draft: GoalDraft): GoalDraftView {
     // is history, and a page that polls again must not find a message to type a second time.
     reply: draft.stage === 'ready' && !draft.acknowledged ? draft.reply : '',
     error: draft.error,
-    ...(draft.error ? { message: goalErrorMessage(draft.error) } : {}),
+    ...(draft.error ? { message: goalErrorMessage(draft.error), messageKey: goalErrorKey(draft.error) } : {}),
     retryable: draft.stage === 'failed' && retryableGoalFailure(draft.error ?? '')
   };
 }

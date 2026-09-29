@@ -39,7 +39,7 @@
     "message": "ChatGPT replaced the composer while inserting the bootstrap"
   },
   "content_bootstrap_composer_unavailable": {
-    "message": "ChatGPT never exposed a usable composer for bootstrap"
+    "message": "ChatGPT never re-exposed a usable composer after model selection"
   },
   "content_bootstrap_fresh_chat_changed": {
     "message": "the marked fresh chat changed before bootstrap send; nothing was sent"
@@ -52,9 +52,6 @@
   },
   "content_bootstrap_missing_target": {
     "message": "it was offered to a chat that already exists and it does not name one"
-  },
-  "content_bootstrap_composer_unavailable": {
-    "message": "ChatGPT never re-exposed a usable composer after model selection"
   },
   "content_bootstrap_model_unavailable": {
     "message": "The requested model or reasoning is unavailable or could not be confirmed in ChatGPT"
@@ -1045,5 +1042,110 @@
   },
   "popup_yes": {
     "message": "yes"
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "No MCP tool call was recorded in the last response, so the app cannot tell whether the tool connection was lost. Automatic continuation is paused; Loop remains enabled. Check the tunnel and Core connector before continuing."
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "There is no pending continuation for this answer. It may already have been handled or replaced by newer work. Check the latest chat activity before trying again."
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "The task and Goal/Loop instructions are too long to send to the helper. Shorten the task or the custom continuation instructions in Settings."
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "The helper wrote a continuation that is too long to send. Ask for shorter continuation instructions or choose another helper model in Settings."
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "The provider returned an oversized response. Choose another continuation model or ask for shorter replies."
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "The provider response exceeded the size limit. Choose another continuation model or ask for shorter replies."
+  },
+  "content_goal_error_no_api_key": {
+    "message": "No API key is configured for the continuation provider. Add one in Settings, or select the ChatGPT continuation source."
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "The continuation provider rejected the API credentials. Check its API key and access permissions in Settings."
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "The continuation provider account has no credit available. Add credit or choose another continuation source in Settings."
+  },
+  "content_goal_error_unknown_model": {
+    "message": "The continuation provider could not find the selected model. Refresh its model list and choose an available model in Settings."
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "The custom continuation endpoint is invalid. Check its URL in Settings; use HTTPS or a local HTTP endpoint."
+  },
+  "content_goal_error_rate_limited": {
+    "message": "The continuation provider is rate-limiting requests. Wait for the displayed retry, or choose another continuation model."
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "The continuation request timed out or was cancelled. Check the helper chat or provider status before trying again."
+  },
+  "content_goal_error_request_failed": {
+    "message": "The continuation request failed. Check the selected helper or API endpoint and the app diagnostics before trying again."
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "A helper request is already pending. Let it finish or cancel that request before starting another."
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "The helper request was cancelled. Start it again when you want to continue."
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "The helper prompt could not be delivered to ChatGPT. Open the helper chat and check its composer or visible error before trying again."
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "The app could not confirm whether ChatGPT received the helper prompt. Check the helper chat before retrying to avoid sending it twice."
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "Another browser tab is handling this continuation. Check that tab for progress."
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "The app has not confirmed a final answer eligible for automatic continuation. Check the source chat for ongoing work or an error."
+  },
+  "content_goal_error_astra_finish_only": {
+    "message": "This chat continues through the finish tool. A final browser answer does not trigger another message with the current setting."
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "Goal/Loop is off for this chat. Turn it on to allow continuation."
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "Workers cannot run their own Goal/Loop. Enable continuation in the parent chat instead."
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "This chat was replaced by Compact & Resume. Continue in its successor chat."
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "This chat is blocked in the app. Unblock it there before enabling continuation."
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "The app has no recorded history for this chat. Enable recording and send a message before using automatic continuation."
+  },
+  "content_goal_error_no_conversation": {
+    "message": "No recorded conversation is available to continue. Send a task first."
+  },
+  "content_goal_error_no_objective": {
+    "message": "No task was provided. Enter a task before starting Goal/Loop."
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "The helper did not produce an opening message. Make the task more specific and try again."
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "The helper kept choosing to stop instead of writing a Loop continuation. Review the Loop instructions or choose another helper model."
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "The answer is missing the completion marker required by offline Goal templates. Check the template instructions or choose another continuation source."
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "The app could not save the pending continuation. Check free disk space and the app diagnostics."
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "The app could not save the delivery confirmation. Check free disk space; check the chat before manually resending."
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "The app could not save the Goal/Loop setting. Check free disk space and try saving it again."
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "The app could not save the task. Check free disk space and try saving it again."
   }
 }
