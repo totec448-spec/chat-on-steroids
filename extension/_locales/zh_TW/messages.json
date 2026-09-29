@@ -39,7 +39,7 @@
     "message": "ChatGPT 在插入啟動引導訊息時替換了輸入框"
   },
   "content_bootstrap_composer_unavailable": {
-    "message": "ChatGPT 始終未提供可用於啟動引導的輸入框"
+    "message": "選擇模型後，ChatGPT 未重新顯示可用的輸入框"
   },
   "content_bootstrap_fresh_chat_changed": {
     "message": "傳送啟動引導訊息前，已標記的新聊天發生變化；未傳送任何內容"
@@ -52,9 +52,6 @@
   },
   "content_bootstrap_missing_target": {
     "message": "它被提供給既有聊天，但未指定目標聊天"
-  },
-  "content_bootstrap_composer_unavailable": {
-    "message": "選擇模型後，ChatGPT 未重新顯示可用的輸入框"
   },
   "content_bootstrap_model_unavailable": {
     "message": "要求的模型或推理層級無法使用，或無法在 ChatGPT 中確認"
@@ -1045,5 +1042,110 @@
   },
   "popup_yes": {
     "message": "是"
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "上一則回覆中沒有記錄到 MCP 工具呼叫，因此應用程式無法判斷工具連線是否中斷。自動續接已暫停；Loop 仍保持啟用。繼續前請檢查隧道與 Core 連接器。"
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "此回答沒有待處理的續接。它可能已處理，或已被較新的工作取代。重試前請先檢查最新的聊天活動。"
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "任務與 Goal/Loop 指示太長，無法傳送給輔助工具。請縮短任務，或縮短設定中的自訂續接指示。"
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "輔助工具產生的續接內容太長，無法傳送。請要求更精簡的續接指示，或在設定中選擇其他輔助模型。"
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "供應商傳回的回應過大。請選擇其他續接模型，或要求更短的回覆。"
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "供應商回應超過大小限制。請選擇其他續接模型，或要求更短的回覆。"
+  },
+  "content_goal_error_no_api_key": {
+    "message": "未設定續接供應商的 API 金鑰。請在設定中新增，或選擇 ChatGPT 續接來源。"
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "續接供應商拒絕了 API 憑證。請在設定中檢查 API 金鑰和存取權限。"
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "續接供應商帳戶沒有可用額度。請加值，或在設定中選擇其他續接來源。"
+  },
+  "content_goal_error_unknown_model": {
+    "message": "續接供應商找不到所選模型。請重新整理模型清單，並在設定中選擇可用模型。"
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "自訂續接端點無效。請在設定中檢查其 URL；請使用 HTTPS 或本機 HTTP 端點。"
+  },
+  "content_goal_error_rate_limited": {
+    "message": "續接供應商正在限制請求頻率。請等待顯示的重試時間，或選擇其他續接模型。"
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "續接請求逾時或已取消。重試前請檢查輔助聊天或供應商狀態。"
+  },
+  "content_goal_error_request_failed": {
+    "message": "續接請求失敗。重試前請檢查所選輔助工具或 API 端點，以及應用程式診斷。"
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "已有一個輔助請求正在等待處理。請讓它完成，或先取消該請求再開始另一個。"
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "輔助請求已取消。想繼續時請重新啟動。"
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "無法將輔助提示傳送到 ChatGPT。重試前請開啟輔助聊天，檢查其輸入框或可見錯誤。"
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "應用程式無法確認 ChatGPT 是否收到輔助提示。重試前請先檢查輔助聊天，以避免重複傳送。"
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "另一個瀏覽器分頁正在處理這次續接。請到該分頁查看進度。"
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "應用程式尚未確認有可供自動續接的最終回答。請檢查來源聊天是否仍在進行工作或發生錯誤。"
+  },
+  "content_goal_error_astra_finish_only": {
+    "message": "此聊天會透過結束工具續接。依目前設定，瀏覽器中的最終回答不會觸發另一則訊息。"
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "此聊天的 Goal/Loop 已關閉。開啟後即可允許續接。"
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "子代理無法執行自己的 Goal/Loop。請改在父聊天中啟用續接。"
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "此聊天已由 Compact & Resume 取代。請在其後續聊天中繼續。"
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "此聊天已在應用程式中被封鎖。請先在應用程式中解除封鎖，再啟用續接。"
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "應用程式沒有此聊天的已記錄歷史。請啟用記錄並先傳送一則訊息，再使用自動續接。"
+  },
+  "content_goal_error_no_conversation": {
+    "message": "沒有可繼續的已記錄對話。請先傳送任務。"
+  },
+  "content_goal_error_no_objective": {
+    "message": "尚未提供任務。請先輸入任務再啟動 Goal/Loop。"
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "輔助工具未產生開場訊息。請讓任務更具體後再試一次。"
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "輔助工具持續選擇停止，而不是產生 Loop 續接內容。請檢查 Loop 指示，或選擇其他輔助模型。"
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "回答缺少離線 Goal 範本要求的完成標記。請檢查範本指示，或選擇其他續接來源。"
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "應用程式無法儲存待處理的續接。請檢查可用磁碟空間和應用程式診斷。"
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "應用程式無法儲存傳送確認。請檢查可用磁碟空間；手動重新傳送前先檢查聊天。"
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "應用程式無法儲存 Goal/Loop 設定。請檢查可用磁碟空間後再試一次。"
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "應用程式無法儲存任務。請檢查可用磁碟空間後再試一次。"
   }
 }

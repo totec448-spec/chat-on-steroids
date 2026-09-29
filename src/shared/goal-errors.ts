@@ -37,6 +37,25 @@ const explanations: Readonly<Record<string, string>> = {
   goal_objective_not_durable: 'The app could not save the task. Check free disk space and try saving it again.'
 };
 
+/**
+ * The catalog key of a fixed explanation, so pages without the app catalog can show it in the
+ * user's language. Null when the explanation carries dynamic detail and must stay as sent.
+ */
+export function goalErrorKey(error: string): string | null {
+  let raw = error.trim();
+  let wrapped = false;
+  for (let depth = 0; depth < 4 && raw.startsWith('request_failed:'); depth += 1) {
+    raw = raw.slice('request_failed:'.length).trim();
+    wrapped = true;
+  }
+  const code = raw.split(':', 1)[0]!;
+  if (code === 'goal_browser_send_failed' && raw.includes(':')) return null;
+  if (Object.hasOwn(explanations, code)) return code;
+  if (/^(?:invalid_goal_decision_(?:json|schema)|malformed_(?:completion_response|stream_record)|empty_reply|control_tokens_only|unsafe_control_tokens)$/.test(code)) return null;
+  if (/^provider_(?:completion|stream)_error$/.test(code) || /^http_\d{3}$/.test(code)) return null;
+  return wrapped ? 'request_failed' : null;
+}
+
 export function goalErrorMessage(error: string): string {
   let raw = error.trim();
   let wrapped = false;

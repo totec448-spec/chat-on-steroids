@@ -13167,6 +13167,7 @@ describe('the goal loop over the bridge', () => {
       expect(opened.body).toEqual({
         error: 'rate_limited: Provider returned error',
         message: 'The continuation provider is rate-limiting requests. Wait for the displayed retry, or choose another continuation model.',
+        messageKey: 'rate_limited',
         retryable: true
       });
     } finally {
