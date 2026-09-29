@@ -1,4 +1,8 @@
 {
+  "Copy answer": "复制回答",
+  "Export as Markdown": "导出为 Markdown",
+  "This answer": "此回答",
+  "Whole session": "整个会话",
   "Normal": "普通",
   "Show percentage": "显示百分比",
   "Show token values": "显示 token 数值",
