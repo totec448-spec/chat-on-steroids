@@ -46,9 +46,29 @@ export function projectPageTitle(title: string): boolean {
   return /^ChatGPT\s*[-|·–]\s*\S/i.test(title.trim());
 }
 
+/**
+ * 2.1.14 and 2.1.15 recorded Plan's temporary helper chat as an ordinary session, named after the
+ * planner instructions ChatGPT echoed as its title. Such a session holds no message of the user.
+ */
+const PLANNER_TITLE = 'You are a task planner, not the executor';
+
 /** Rebuild only a preview. Provider/manual/origin titles keep their authority. */
 export function refreshUserTitle(summary: SessionSummary, events: Iterable<SessionEvent>): boolean {
   const first = firstTitleMessage(events);
+  // A leftover Plan helper is hidden like every other helper chat, never deleted.
+  if (!first && !summary.origin && summary.title.startsWith(PLANNER_TITLE)) {
+    summary.origin = { kind: 'helper', fromSessionId: null, agentId: null, task: '' };
+    return true;
+  }
+  // A project page title with no request to name the chat by: the project's name is still more
+  // honest than "ChatGPT - <project>", which is the page, not the chat.
+  if (!first && projectPageTitle(summary.title) && summary.titleSource !== 'manual' && (!summary.origin || summary.origin.kind === 'desktop')) {
+    const project = summary.title.trim().replace(/^ChatGPT\s*[-|·–]\s*/i, '').slice(0, 80).trim();
+    if (!project) return false;
+    summary.title = project;
+    summary.titleSource = 'fallback';
+    return true;
+  }
   if (!first && !legacyContextTitle(summary)) return false;
   // A stored provider title yields to the request only when it was never really the chat's name.
   const replaceable = providerTitleIgnored(summary) || projectPageTitle(summary.title);
