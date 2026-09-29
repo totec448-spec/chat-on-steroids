@@ -124,13 +124,14 @@ Write-Output 'WINDOWS_INPUT_PROBE_OK'
       const file = path.join(dir, 'probe.ps1');
       writeFileSync(file, script + assertions, 'utf8');
       const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], {
-        encoding: 'utf8', timeout: 25_000, windowsHide: true
+        // Compiles C# in a cold PowerShell; under the full CI suite that has exceeded 25 s.
+        encoding: 'utf8', timeout: 90_000, windowsHide: true
       });
-      expect(result.error, result.stderr).toBeUndefined();
+      expect(result.error, `${result.error?.message ?? ''} ${result.signal ?? ''} ${result.stderr}`).toBeUndefined();
       expect(result.status, result.stderr + result.stdout).toBe(0);
       expect(result.stdout).toContain('WINDOWS_INPUT_PROBE_OK');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 100_000);
 });
