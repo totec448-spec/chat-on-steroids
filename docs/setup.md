@@ -57,9 +57,11 @@ comma-separated override and port `0` remain available for isolated development/
 ## Local control API
 
 **Settings → Setup → Advanced → Local control API** (off by default) lets an agent running on
-this computer check on CoS from outside the app. It is meant for an agent's MCP server that
-watches for a hung app. When it is on, CoS writes two files to `control-api/` in its user data
-folder:
+this computer check on CoS, and read its chats, from outside the app. It is meant for an agent's
+MCP server that watches for a hung app. **Turning it on lets any process that can read your user
+data folder read your chat history**, including messages, tool arguments and results, and queued
+messages. Known credential shapes are masked and long text is cut, but nothing else is filtered.
+When it is on, CoS writes two files to `control-api/` in its user data folder:
 
 - `endpoint.json`: port, process id and version;
 - `token`: a new random bearer token each time the app starts.
@@ -67,7 +69,12 @@ folder:
 It then serves these routes on `127.0.0.1` only:
 
 - `GET /v1/health`: process id, version, uptime, and the routes this build serves;
-- `GET /v1/status`: connection, bridge, plugins, updater and in-flight tool calls.
+- `GET /v1/status`: connection, bridge, plugins, updater and in-flight tool calls;
+- `GET /v1/sessions` (up to 50 per page, `cursor`) and `GET /v1/sessions/{id}` (`live=1` adds the chat's live state): recorded chats;
+- `GET /v1/sessions/{id}/events` (up to 100 per page, `kinds`, `before`/`after` by each event's `position`, or `from` by `seq` to follow a chat live): messages, tool calls and turns, with message text cut at 4,000 characters and tool text at 2,000;
+- `GET /v1/inputs` (`state`, `limit`): the message outbox;
+- `GET /v1/agents`: the multi-agent run;
+- `GET /v1/log` (`limit`, `level`, `since`, inclusive): the in-memory Activity log.
 
 Requests need `Authorization: Bearer <token>`. Any request with a browser `Origin` is refused.
 Turning the switch off, or quitting, stops the listener and removes both files. A crash can leave

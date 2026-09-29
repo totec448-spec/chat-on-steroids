@@ -3,6 +3,7 @@
  * status projection can never carry a secret an owner happens to hold.
  */
 
+import { randomBytes } from 'node:crypto';
 import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -139,9 +140,13 @@ describe('local control API listener', () => {
     const large = 'x'.repeat(1024 * 1024);
     const oversized = { ...auth, 'content-type': 'application/json', 'content-length': String(large.length) };
     expect((await request(port, '/v1/status', { headers: oversized, body: large })).status).toBe(413);
-    expect((await request(port, '/v1/sessions', { headers: auth })).status).toBe(404);
+    expect((await request(port, '/v1/nothing', { headers: auth })).status).toBe(404);
+    expect((await request(port, '/v1/sessions/not-a-session-id-at-all!', { headers: auth })).status).toBe(404);
     const health = await request(port, '/v1/health', { headers: auth });
-    expect(health.body).toMatchObject({ protocol: 1, routes: ['/v1/health', '/v1/status'] });
+    expect(health.body).toMatchObject({
+      protocol: 1,
+      routes: ['/v1/health', '/v1/status', '/v1/sessions', '/v1/sessions/{id}', '/v1/sessions/{id}/events', '/v1/inputs', '/v1/agents', '/v1/log']
+    });
   });
 
   it('serves status from the live owners without a secret path or token', async () => {
@@ -157,6 +162,15 @@ describe('local control API listener', () => {
     expect(JSON.stringify(status.body)).not.toContain(token);
   });
 
+  it('answers a failure in the owner behind a route with a plain 500 that names nothing', async () => {
+    await controlApi.startControlApi();
+    const { port, token } = await readEndpoint();
+    // This suite never initialises the session store, so the owner behind the route throws.
+    const failure = await request(port, '/v1/sessions', { headers: { authorization: `Bearer ${token}` } });
+    expect(failure.status).toBe(500);
+    expect(failure.body).toEqual({ error: 'internal_error' });
+  });
+
   // Terminal for this module instance, so it runs last in the file.
   it('does not reopen once shutdown has begun, and removes its files', async () => {
     await controlApi.startControlApi();
@@ -168,7 +182,9 @@ describe('local control API listener', () => {
 });
 
 describe('status projection', () => {
-  const secretPath = 'Zx8Qm2vT9kLpR4sWn7YbC1dFg6HjK3aE5uIo0PqRsTu';
+  // Built at run time: a literal here reads as a leaked key to secret scanners.
+  const secretPath = randomBytes(32).toString('base64url');
+  const pluginConfigSecret = `config-${randomBytes(9).toString('hex')}`;
   const connection: ConnectionStatus = {
     state: 'connected',
     detail: 'Connected',
@@ -200,7 +216,7 @@ describe('status projection', () => {
       id: 'p1',
       name: 'Plugin',
       source: { kind: 'stdio', command: 'C:\\private\\tool.exe', args: ['--token', 'plugin-secret-value'] },
-      config: { apiKey: 'plugin-config-secret' },
+      config: { apiKey: pluginConfigSecret },
       credentialKeys: ['apiKey'],
       version: '1.0.0',
       license: 'MIT',
@@ -224,7 +240,7 @@ describe('status projection', () => {
       toolCalls: { running: 1, settling: 0, inFlight: 1, inFlightMcpRequests: 2 }
     });
     const text = JSON.stringify(projected);
-    for (const secret of [secretPath, 'plugin-secret-value', 'plugin-config-secret', 'C:\\\\private', `sk-${'a'.repeat(24)}`]) {
+    for (const secret of [secretPath, 'plugin-secret-value', pluginConfigSecret, 'C:\\\\private', `sk-${'a'.repeat(24)}`]) {
       expect(text).not.toContain(secret);
     }
     expect(projected.connection.surfaces).toEqual([

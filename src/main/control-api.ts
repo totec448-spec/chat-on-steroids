@@ -13,6 +13,7 @@ import {
 import type { PluginSnapshot } from '../shared/plugins.js';
 import type { BridgeStatus, ConnectionStatus, UpdateStatus } from '../shared/types.js';
 import { bridgeStatus } from './bridge.js';
+import { RequestError, serveRead } from './control-reads.js';
 import { getStatus } from './connection.js';
 import { logInfo, logWarn, redact } from './logger.js';
 import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, settlingToolCalls } from './mcp/call-context.js';
@@ -209,7 +210,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, token
     return reply(res, 413, { error: 'body_not_allowed' });
   }
 
-  const route = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+  const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+  const route = url.pathname;
   if (route === '/v1/health') {
     const uptime = process.uptime();
     const body: ControlApiHealth = {
@@ -237,6 +239,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, token
       }
     });
     return reply(res, 200, body);
+  }
+  try {
+    const body = await serveRead(route, url.searchParams);
+    if (body !== undefined) return reply(res, 200, body);
+  } catch (error) {
+    if (error instanceof RequestError) return reply(res, error.status, { error: error.code, ...(error.detail ? { detail: error.detail } : {}) });
+    throw error;
   }
   return reply(res, 404, { error: 'not_found' });
 }

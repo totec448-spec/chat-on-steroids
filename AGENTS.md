@@ -220,7 +220,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | App shell | `src/main/index.ts`, `window-lifecycle.ts`, `window-layout.ts`, `window-icon.ts`, `tray-image.ts`, `shutdown.ts`: bootstrap, activation, geometry, tray and bounded exit. |
 | Config/security | `src/main/config.ts`, `platform.ts`, `secrets.ts`, `sandbox.ts`, `redaction.ts`; `src/shared/types.ts`, `capabilities.ts`: permission and host projection, secrets, approved paths. |
 | Publication | `src/main/connection.ts`, `mcp/server.ts`, `mcp/surfaces.ts`, `tunnel/{index,health,locate}.ts`, `diagnostics.ts`: endpoint/tunnel generation and truthful status. |
-| Local control API | `src/main/control-api.ts`, `src/shared/control-api.ts`: opt-in loopback listener, per-launch token, allowlisted read-only projections of other owners. Owns no fact. |
+| Local control API | `src/main/control-api.ts`, `src/main/control-reads.ts`, `src/shared/control-api.ts`: opt-in loopback listener, per-launch token, allowlisted read-only projections of other owners. Owns no fact. The session list and event page it serves come from `session/read-model.ts`, the same functions the renderer's IPC handlers call. |
 | Tool dispatch | `src/main/mcp/{tools,kernel,inbound,call-context,tool-declarations}.ts`, `tools-core.ts`, `tools-desktop.ts`, `tools-plugins.ts`: declarations, exact caller, live guards and evidence. |
 | Code composition | `src/main/mcp/code-mode-{tool,runtime,worker}.ts`: surface-scoped `exec`, QuickJS admission, limits and explicit emissions. |
 | Instructions/plan | `src/main/mcp/{instructions,coding-instructions,plan-tool}.ts`, `src/shared/agent-plan.ts`, `src/renderer/agent-plan.ts`: executor contract and displayed progress plan. |
@@ -3105,13 +3105,38 @@ browser attachment in both status and diagnosis. Stale connect/disconnect result
 a newer endpoint. Secret paths/tokens are not public diagnostics.
 
 The local control API (`control-api.ts`, Settings → Setup → Advanced, off by default) serves
-`/v1/health` (which also lists the routes this build serves) and `/v1/status` to a trusted local
-caller, typically an agent's MCP server watching the app from outside its process. It binds 127.0.0.1 on an ephemeral port
+`/v1/health` (which also lists the routes this build serves), `/v1/status` and the read routes
+below to a trusted local caller, typically an agent's MCP server watching the app from outside
+its process. It binds 127.0.0.1 on an ephemeral port
 and writes a per-launch token to `userData/control-api/`. The token is never issued over HTTP.
 It refuses any Origin, requires its own Host, and accepts GET only without a body. Status is an
 allowlisted projection of the connection, bridge, plugin, updater and call-context owners.
 Local and public URLs, tunnel ids and plugin sources/config never appear; free text passes
-`redact()`. It holds no timer, retry or recovery authority. Start and stop are serialized; a
+`redact()`. It holds no timer, retry or recovery authority.
+
+The read routes (`control-reads.ts`) are `GET /v1/sessions`, `/v1/sessions/{id}`,
+`/v1/sessions/{id}/events`, `/v1/inputs`, `/v1/agents` and `/v1/log`. Each asks the owner that
+already feeds the renderer (`session/read-model.ts`, `listInputs`, `swarmState`, `getLog`) and
+projects the answer through an allowlist, so a field an owner grows later stays private until
+it is named there. An event kind added later is published by name only; the kind, input-state
+and log-level tables are exhaustive by type. Message, tool argument/result, outbox and log text
+has known credential shapes masked (`redactSecretText`: API keys, GitHub/Slack/AWS/Google
+tokens, bearer and basic headers, JWTs, URL passwords, private keys, MCP endpoint paths) before
+it is cut to a fixed size, and carries the stored length and a `truncated` flag; the stored
+record is never changed. That is a list of shapes, not a guarantee: other secrets typed into a
+chat pass through, which is why the switch and the token matter. A user message shows what the
+user wrote (`authoredText`), not the framed text the app delivered. Asset ids, request ids and
+outbox owners, delivery-only prompt text, attachment paths and recovery bookkeeping do not
+appear. Unknown, repeated or malformed query parameters are refused with 400, page sizes are
+capped, session ids match only in their generated lowercase spelling (a differently cased
+spelling would open the same journal under a second name on a case-insensitive filesystem),
+and at most two journal reads run at once (503 `busy` otherwise). Events carry `position`; the
+`before` and `after` cursors take it, since a revised message keeps its first position but gets
+a new `seq`. Two things run the app's own bookkeeping and so are not pure reads: `listInputs()`,
+which `/v1/inputs` and `/v1/sessions` call, repairs delivery receipts and materializes queued
+follow-up rows exactly as when the renderer polls it; and `/v1/sessions/{id}?live=1`, which
+calls `sessionControlsFor`, can load the session into memory and seal a torn last line of its
+journal. The live state is therefore asked for, not attached to every read. Start and stop are serialized; a
 settings change starts or stops it only when the switch changes. Shutdown stops it in the
 admission/drain phase and does not let a late save reopen it.
 
