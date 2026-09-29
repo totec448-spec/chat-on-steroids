@@ -561,6 +561,7 @@ describe('who is allowed to talk to it', () => {
     expect(reply.status).toBe(204);
     expect(reply.headers['access-control-allow-origin']).toBe(EXTENSION_ORIGIN);
     expect(reply.headers['access-control-allow-private-network']).toBe('true');
+    expect(reply.headers['access-control-allow-headers']).toContain('x-extension-build');
   });
 
   it('refuses a preflight that arrives without an Origin', async () => {
