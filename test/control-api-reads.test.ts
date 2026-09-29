@@ -176,8 +176,13 @@ describe('read routes', () => {
 
   it('do not resolve a differently cased spelling of a session id', async () => {
     // A case-insensitive filesystem would otherwise open the same journal under a second name.
+    // Session ids are random lowercase hex, so about one in 43 has no letter at all and upper-cases to
+    // itself. Use one that has a letter, or the check would pass or fail by chance.
+    let cased = sessionId;
+    for (let attempt = 0; cased.toUpperCase() === cased && attempt < 50; attempt++) cased = (await createSession({ title: 'Cased' })).id;
+    expect(cased.toUpperCase()).not.toBe(cased);
     const before = (await call('/v1/sessions?limit=50')).body.total;
-    for (const route of [`/v1/sessions/${sessionId.toUpperCase()}`, `/v1/sessions/${sessionId.toUpperCase()}/events`]) {
+    for (const route of [`/v1/sessions/${cased.toUpperCase()}`, `/v1/sessions/${cased.toUpperCase()}/events`]) {
       const response = await call(route);
       expect(response.status, route).toBe(404);
       expect(response.body.error).toBe('not_found');
