@@ -2786,7 +2786,10 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
       group.addEventListener('toggle', () => { if (group!.open) openTools.add(key); else openTools.delete(key); });
       group.open = openTools.has(key) || rows.slice(i, end).some((row) => row.querySelector('details[open]')); groups.set(key, group);
     }
-    const latest = rows[end - 1]!;
+    // Name the group after its latest real action ("Ran npm test"), not after a thinking note
+    // ChatGPT wrote around it; the note still names a group that holds nothing else.
+    const members = rows.slice(i, end);
+    const latest = [...members].reverse().find(row => row.matches('.ev-tool_call, .ev-agent_message')) ?? rows[end - 1]!;
     const latestHead = latest.querySelector('.tool > summary, .agent-communication > summary, .thinking-line');
     const observedPhase = rows[i - 1]?.matches('.ev-progress')
       ? rows[i - 1]!.querySelector('.is-progress')?.textContent?.trim() : '';
