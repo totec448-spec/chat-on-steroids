@@ -2919,7 +2919,10 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .app[data-screen='settings'] .is-session > h2,
 .app[data-screen='settings'] .is-session > .subhead,
 .app[data-screen='settings'] #chatFoot { display: none; }
-.app[data-screen='settings'] [data-panel='chat'] .is-session { display: flex; flex-direction: column; }
+/* Agents & automation is a view of the chat card, not a panel of its own. The card is positioned
+   for the chat's composer and overlays, which Settings hides; positioned, it painted over the
+   sidebar's rounded workspace corner. Here it is a plain block like every other settings page. */
+.app[data-screen='settings'] [data-panel='chat'] .is-session { position: static; display: flex; flex-direction: column; }
 .settings-heading .eyebrow { display: none; }
 .settings-heading h1 { font-size: calc(26px * var(--text-scale, 1)); font-weight: 450; margin-top: 0; }
 .settings-heading p { font-size: calc(13px * var(--text-scale, 1)); color: var(--faint); margin: 8px 0 18px; }
