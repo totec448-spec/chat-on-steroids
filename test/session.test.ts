@@ -3292,6 +3292,29 @@ describe('naming the chats this app opened', () => {
     expect((await getSession(stored.id))?.title).toBe('Plan the NAS migration');
   });
 
+  it('hides a leftover Plan helper and names a message-less project page chat after its project', async () => {
+    const legacy = async (conversationId: string, patch: Record<string, unknown>) => {
+      const session = await createSession({ conversationId, title: 'Temporary' });
+      await flushSessions(); resetSessionStoreForTests();
+      const metaPath = path.join(sessionsRoot(), session.id, 'meta.json');
+      const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+      Object.assign(meta, patch); delete meta.origin;
+      await fs.writeFile(metaPath, JSON.stringify(meta));
+      return { id: session.id, metaPath };
+    };
+    const planner = await legacy('legacy-planner', { title: 'You are a task planner, not the executor. Produce 2 to 12 substantial workflow stages', titleSource: 'provider' });
+    const project = await legacy('tools-only-project', { title: 'ChatGPT - Homelab Development' });
+    const manual = await legacy('manual-project-name', { title: 'ChatGPT - My own name', titleSource: 'manual' });
+    expect((await getSession(planner.id))?.origin?.kind).toBe('helper');
+    expect((await getSession(project.id))?.title).toBe('Homelab Development');
+    expect((await getSession(manual.id))?.title).toBe('ChatGPT - My own name');
+    const listed = (await listSessions()).map(row => row.id);
+    expect(listed).not.toContain(planner.id);
+    expect(listed).toContain(project.id);
+    // Hidden, never deleted: the recording stays on disk.
+    await expect(fs.stat(planner.metaPath)).resolves.toBeTruthy();
+  });
+
   it('repairs a legacy context preview on cold read using durable authored text', async () => {
     const raw = '[[COS_CONTEXT:19268]]\nInternal instructions and AGENTS.md '.repeat(3);
     const session = await createSession({ conversationId: 'legacy-context-preview', title: 'Temporary' });
