@@ -104,7 +104,8 @@ app.whenReady().then(async () => {
     await until('document.querySelectorAll("#workspaceTerminal .terminal-tab").length===1');
     assert.equal((await js(`window.api.terminalWrite(${JSON.stringify(extraBottom)}, 'echo nope\\r')`)).ok, false);
     await click('#workspaceTerminal .terminal-panel-close');
-    assert.equal(await js('document.getElementById("workspaceTerminal").hidden'), true);
+    // The bottom dock hides its terminal once the closing drawer has left.
+    await until('document.getElementById("workspaceTerminal").hidden');
     await js(`window.api.terminalWrite(${JSON.stringify(first)}, "Write-Output ('HIDDEN_'+$proof)\\r")`);
     await until(`outputs[${JSON.stringify(first)}]?.includes('HIDDEN_persisted')`);
     await js("document.getElementById('rightDockToggle').click()");
