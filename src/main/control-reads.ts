@@ -5,6 +5,7 @@ import type {
   ControlApiEvents,
   ControlApiInput,
   ControlApiInputs,
+  ControlApiLive,
   ControlApiLog,
   ControlApiSession,
   ControlApiSessionDetail,
@@ -18,6 +19,7 @@ import type { LogEntry } from '../shared/types.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { swarmState } from './agents.js';
 import { sessionControlsFor } from './bridge.js';
+import type { SessionControlsView } from './bridge.js';
 import { getLog, logWarn } from './logger.js';
 import { redactSecretText } from './redaction.js';
 import { listInputs } from './session/input.js';
@@ -49,6 +51,8 @@ const SUMMARY_CAP = 300;
 const CHANGES_CAP = 20;
 const CHANGE_PATH_CAP = 200;
 const MAX_EVENTS = 100;
+/** A chat holds a handful of waits at once; the cap only bounds what a bad owner could hand over. */
+const MAX_RECOVERY = 10;
 
 /**
  * Event pages and live session state can read a whole journal, however small the page. A burst
@@ -200,6 +204,48 @@ async function sessionList(params: URLSearchParams): Promise<ControlApiSessionLi
   };
 }
 
+/**
+ * What the app is doing, or waiting for, in one chat: the same view the renderer polls, cut down
+ * to the fields that are a flag, a number, the running turn's id or one of a fixed set of words.
+ * Drafts, the goal's objective, the plan, and the continuation's token and ids are free text or
+ * handles and stay in the app; the one message a job can carry is redacted and cut like any
+ * other free text here.
+ */
+export function projectLive(controls: SessionControlsView): ControlApiLive {
+  const { job, goalWait } = controls;
+  return {
+    activeTurnId: controls.activeTurnId,
+    stopPending: controls.stopPending === true,
+    automation: controls.automation,
+    blocked: controls.blocked,
+    canSendDirectly: controls.canSendDirectly === true,
+    canInject: controls.canInject === true,
+    queueAtFinish: controls.queueAtFinish === true,
+    finishHeld: controls.finishHeld,
+    finishWaiting: controls.finishWaiting === true,
+    goalWait: goalWait ? { reason: goalWait.reason, until: goalWait.until ?? null } : null,
+    recovery: (controls.recovery ?? []).slice(0, MAX_RECOVERY).map((wait) => ({
+      kind: wait.kind,
+      deadline: wait.deadline,
+      visibleAt: wait.visibleAt ?? null,
+      next: wait.next ?? null,
+      reload: wait.reload === true,
+      generating: wait.generating === true
+    })),
+    job: job
+      ? {
+          stage: job.stage,
+          startedAt: job.startedAt,
+          automatic: job.automatic,
+          busy: job.busy,
+          sourceSend: job.sourceSend.state,
+          destinationSend: job.destinationSend.state,
+          error: job.error ? line(job.error, SUMMARY_CAP) : null
+        }
+      : null
+  };
+}
+
 async function sessionDetail(id: string, params: URLSearchParams): Promise<ControlApiSessionDetail> {
   const query = parseQuery(params, { live: z.literal('1').optional() });
   return heavy(async () => {
@@ -213,15 +259,14 @@ async function sessionDetail(id: string, params: URLSearchParams): Promise<Contr
     // cannot be read right now, leaves `live` null; the session itself was already read.
     try {
       const controls = await sessionControlsFor(id);
-      return {
-        session,
-        live: {
-          activeTurnId: controls.activeTurnId,
-          stopPending: controls.stopPending === true,
-          automation: controls.automation,
-          blocked: controls.blocked
-        }
-      };
+      // A compaction can move the session to a new chat while its live state is being worked out,
+      // and then the session describes one chat and part of the state another. The chat has to be
+      // the one the session was read with, both before and after.
+      const after = await readSession(id);
+      if (controls.conversationId !== summary.conversationId || after?.conversationId !== summary.conversationId) {
+        return { session, live: null };
+      }
+      return { session, live: projectLive(controls) };
     } catch (error) {
       if (error instanceof Error && !/^(session_not_recorded|conversation_superseded|conversation_changed)$/.test(error.message)) {
         logWarn('control API: live state unavailable for a session: ' + error.message);

@@ -70,7 +70,7 @@ It then serves these routes on `127.0.0.1` only:
 
 - `GET /v1/health`: process id, version, uptime, and the routes this build serves;
 - `GET /v1/status`: connection, bridge, plugins, updater and in-flight tool calls;
-- `GET /v1/sessions` (up to 50 per page, `cursor`) and `GET /v1/sessions/{id}` (`live=1` adds the chat's live state): recorded chats;
+- `GET /v1/sessions` (up to 50 per page, `cursor`) and `GET /v1/sessions/{id}` (`live=1` adds what the app is doing or waiting for in that chat: the running turn, the deadlines it is holding and the compaction it is in or has just finished): recorded chats;
 - `GET /v1/sessions/{id}/events` (up to 100 per page, `kinds`, `before`/`after` by each event's `position`, or `from` by `seq` to follow a chat live): messages, tool calls and turns, with message text cut at 4,000 characters and tool text at 2,000;
 - `GET /v1/inputs` (`state`, `limit`): the message outbox;
 - `GET /v1/agents`: the multi-agent run;

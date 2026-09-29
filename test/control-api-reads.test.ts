@@ -8,6 +8,7 @@ import { promises as fs } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { ResumeJobView, SessionControlsView } from '../src/main/bridge.js';
 import type { SessionEvent, ToolCallRecord } from '../src/shared/session.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -34,6 +35,8 @@ const { logInfo, logWarn, logError } = await import('../src/main/logger.js');
 const { redactSecretText } = await import('../src/main/redaction.js');
 const { prependUserPrompt } = await import('../src/shared/user-prompt.js');
 const controlApi = await import('../src/main/control-api.js');
+const bridgeModule = await import('../src/main/bridge.js');
+const readModelModule = await import('../src/main/session/read-model.js');
 const reads = await import('../src/main/control-reads.js');
 
 let dir: string;
@@ -203,6 +206,125 @@ describe('read routes', () => {
   });
 });
 
+describe('projectLive', () => {
+  const controls = (over: Partial<SessionControlsView> = {}): SessionControlsView => ({
+    sessionId: 's-1',
+    conversationId: 'c-1',
+    plan: null,
+    automation: 'off',
+    objective: '',
+    activeTurnId: null,
+    finishHeld: false,
+    blocked: '',
+    job: null,
+    ...over
+  });
+  const job = (over: Partial<ResumeJobView> = {}): ResumeJobView => ({
+    sessionId: 's-1',
+    token: 'SENTINEL-TOKEN',
+    stage: 'handoff-pending',
+    startedAt: 1_000,
+    automatic: false,
+    busy: true,
+    handoffId: 'SENTINEL-HANDOFF',
+    sourceSend: { state: 'not-attempted', messageId: 'SENTINEL-SOURCE-MESSAGE' },
+    destinationSend: { state: 'not-attempted', conversationId: 'SENTINEL-DESTINATION-CHAT', messageId: 'SENTINEL-DESTINATION-MESSAGE' },
+    error: null,
+    ...over
+  });
+  const KINDS = [
+    'unattributed', 'unattributed-wait', 'assistant-error', 'tab-recovery', 'thinking-failed',
+    'native-busy', 'silence', 'post-reload', 'pickup'
+  ] as const;
+
+  it('publishes exactly the named fields, and false or null for what the owner leaves out', () => {
+    const idle = reads.projectLive(controls());
+    expect(Object.keys(idle).sort()).toEqual([
+      'activeTurnId', 'automation', 'blocked', 'canInject', 'canSendDirectly', 'finishHeld', 'finishWaiting', 'goalWait',
+      'job', 'queueAtFinish', 'recovery', 'stopPending'
+    ]);
+    expect(idle).toEqual({
+      activeTurnId: null, stopPending: false, automation: 'off', blocked: '', canSendDirectly: false, canInject: false,
+      queueAtFinish: false, finishHeld: false, finishWaiting: false, goalWait: null, recovery: [], job: null
+    });
+
+    const busy = reads.projectLive(controls({
+      activeTurnId: 'turn-9', stopPending: true, automation: 'loop', blocked: 'blocked', canSendDirectly: true, canInject: true,
+      queueAtFinish: true, finishHeld: true, finishWaiting: true
+    }));
+    expect(busy).toMatchObject({
+      activeTurnId: 'turn-9', stopPending: true, automation: 'loop', blocked: 'blocked', canSendDirectly: true, canInject: true,
+      queueAtFinish: true, finishHeld: true, finishWaiting: true
+    });
+  });
+
+  it('reports each flag from its own field and no other', () => {
+    const FLAGS = ['stopPending', 'canSendDirectly', 'canInject', 'queueAtFinish', 'finishHeld', 'finishWaiting'] as const;
+    for (const flag of FLAGS) {
+      const only = reads.projectLive(controls({ [flag]: true } as Partial<SessionControlsView>));
+      for (const other of FLAGS) expect(only[other], `${flag} set, reading ${other}`).toBe(other === flag);
+    }
+  });
+
+  it('carries a job through each stage and send state, without its token or handles', () => {
+    for (const stage of ['handoff-pending', 'opening', 'waiting-for-browser', 'done', 'failed'] as const) {
+      const busy = stage !== 'done' && stage !== 'failed';
+      expect(reads.projectLive(controls({ job: job({ stage, busy, automatic: true }) })).job).toEqual({
+        stage, startedAt: 1_000, automatic: true, busy, sourceSend: 'not-attempted', destinationSend: 'not-attempted', error: null
+      });
+    }
+    for (const state of ['not-attempted', 'attempted-unresolved', 'dispatched-unresolved', 'sent'] as const) {
+      const projected = reads.projectLive(controls({
+        job: job({ sourceSend: { state, messageId: 'SENTINEL-SOURCE-MESSAGE' }, destinationSend: { state, conversationId: null, messageId: null } })
+      })).job;
+      expect(projected).toMatchObject({ sourceSend: state, destinationSend: state });
+    }
+    expect(Object.keys(reads.projectLive(controls({ job: job() })).job!).sort()).toEqual([
+      'automatic', 'busy', 'destinationSend', 'error', 'sourceSend', 'stage', 'startedAt'
+    ]);
+  });
+
+  it('redacts and cuts a job error like any other free text', () => {
+    const reason = `The browser refused: ${apiKey} ${'x'.repeat(2_000)}`;
+    const { error } = reads.projectLive(controls({ job: job({ stage: 'failed', busy: false, error: reason }) })).job!;
+    expect(error).not.toContain(apiKey);
+    expect(error).toContain('[redacted]');
+    expect(error!.length).toBeLessThanOrEqual(300);
+  });
+
+  it('keeps drafts, the objective, the plan and every handle out of the answer', () => {
+    const hidden = {
+      objective: 'SENTINEL-OBJECTIVE',
+      plan: { steps: ['SENTINEL-PLAN'] },
+      goalDraft: { stage: 'ready', model: 'SENTINEL-MODEL', text: 'SENTINEL-DRAFT', error: 'SENTINEL-DRAFT-ERROR' },
+      finishGoalDraft: { stage: 'ready', model: 'SENTINEL-MODEL', text: 'SENTINEL-FINISH-DRAFT', error: null },
+      conversationId: 'SENTINEL-CONVERSATION',
+      sessionId: 'SENTINEL-SESSION'
+    } as unknown as Partial<SessionControlsView>;
+    const json = JSON.stringify(reads.projectLive(controls({ ...hidden, job: job() })));
+    expect(json).not.toMatch(/SENTINEL/);
+  });
+
+  it('keeps every kind of wait, its deadline and what it leads to, and bounds how many', () => {
+    const waits = KINDS.map((kind, index) => ({ kind, deadline: 5_000 + index }));
+    expect(reads.projectLive(controls({ recovery: waits })).recovery).toEqual(
+      waits.map(({ kind, deadline }) => ({ kind, deadline, visibleAt: null, next: null, reload: false, generating: false }))
+    );
+    expect(reads.projectLive(controls({
+      recovery: [{ kind: 'pickup', deadline: 9_000, visibleAt: 8_970, next: 'continue', reload: true, generating: true }]
+    })).recovery).toEqual([{ kind: 'pickup', deadline: 9_000, visibleAt: 8_970, next: 'continue', reload: true, generating: true }]);
+    const many = Array.from({ length: 40 }, (_, index) => ({ kind: 'silence' as const, deadline: index }));
+    expect(reads.projectLive(controls({ recovery: many })).recovery).toHaveLength(10);
+  });
+
+  it('says why a goal has not moved yet, with the deadline only when there is one', () => {
+    for (const reason of ['tools', 'workers', 'quiet', 'silence', 'listening', 'native-busy', 'settling'] as const) {
+      expect(reads.projectLive(controls({ goalWait: { reason } })).goalWait).toEqual({ reason, until: null });
+    }
+    expect(reads.projectLive(controls({ goalWait: { reason: 'quiet', until: 12_345 } })).goalWait).toEqual({ reason: 'quiet', until: 12_345 });
+  });
+});
+
 describe('sessions', () => {
   it('publishes exactly the named fields, with the title redacted', async () => {
     const { body } = await call(`/v1/sessions/${sessionId}`);
@@ -224,8 +346,86 @@ describe('sessions', () => {
     const attached = await call(`/v1/sessions/${liveSessionId}?live=1`);
     expect(attached.status).toBe(200);
     expect(attached.body.session.conversationId).toBe('chat-live-1');
-    expect(attached.body.live).toEqual({ activeTurnId: null, stopPending: false, automation: 'off', blocked: '' });
+    expect(attached.body.live).toEqual({
+      activeTurnId: null,
+      stopPending: false,
+      automation: 'off',
+      blocked: '',
+      canSendDirectly: false,
+      canInject: false,
+      queueAtFinish: false,
+      finishHeld: false,
+      finishWaiting: false,
+      goalWait: null,
+      recovery: [],
+      job: null
+    });
     expect(Object.keys((await call(`/v1/sessions/${liveSessionId}`)).body)).toEqual(['session']);
+  });
+
+  it('reports the compaction a chat is in, as the app itself sees it', async () => {
+    const continuation = await import('../src/main/session/continuation.js');
+    try {
+      const opened = await continuation.openContinuationNow(liveSessionId, 'chat-live-1');
+      const { body } = await call(`/v1/sessions/${liveSessionId}?live=1`);
+      expect(body.live.job).toEqual({
+        stage: 'handoff-pending',
+        startedAt: expect.any(Number),
+        automatic: false,
+        busy: true,
+        sourceSend: 'not-attempted',
+        destinationSend: 'not-attempted',
+        error: null
+      });
+      // The token is the ticket's own handle.
+      expect(JSON.stringify(body)).not.toContain(opened.token);
+    } finally {
+      continuation.resetContinuationsForTests();
+    }
+    expect((await call(`/v1/sessions/${liveSessionId}?live=1`)).body.live.job).toBeNull();
+  });
+
+  it('does not join a session and live state that describe two different chats', async () => {
+    // A compaction moved the session to another chat after the session was read.
+    const moved = vi.spyOn(bridgeModule, 'sessionControlsFor').mockResolvedValue({
+      sessionId: liveSessionId, conversationId: 'chat-elsewhere', plan: null, automation: 'off', objective: '',
+      activeTurnId: null, finishHeld: false, blocked: '', job: null
+    });
+    try {
+      const { status, body } = await call(`/v1/sessions/${liveSessionId}?live=1`);
+      expect(status).toBe(200);
+      expect(body.session.conversationId).toBe('chat-live-1');
+      expect(body.live).toBeNull();
+    } finally {
+      moved.mockRestore();
+    }
+    expect((await call(`/v1/sessions/${liveSessionId}?live=1`)).body.live).not.toBeNull();
+  });
+
+  it('does not join live state that was worked out while the session moved to another chat', async () => {
+    const readTheSession = readModelModule.readSession;
+    const workOutControls = bridgeModule.sessionControlsFor;
+    let moved = false;
+    const controls = vi.spyOn(bridgeModule, 'sessionControlsFor').mockImplementation(async (id) => {
+      const view = await workOutControls(id);
+      // The move lands after the controls were worked out, and before the session is read again.
+      moved = true;
+      return view;
+    });
+    const session = vi.spyOn(readModelModule, 'readSession').mockImplementation(async (id) => {
+      const summary = await readTheSession(id);
+      return moved && summary ? { ...summary, conversationId: 'chat-elsewhere' } : summary;
+    });
+    try {
+      const { status, body } = await call(`/v1/sessions/${liveSessionId}?live=1`);
+      expect(status).toBe(200);
+      expect(body.session.conversationId).toBe('chat-live-1');
+      expect(body.live).toBeNull();
+    } finally {
+      controls.mockRestore();
+      session.mockRestore();
+    }
+    expect((await call(`/v1/sessions/${liveSessionId}?live=1`)).body.live).not.toBeNull();
   });
 
   it('lists newest first and walks every session once with a cursor', async () => {
