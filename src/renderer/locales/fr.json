@@ -1743,6 +1743,7 @@
   "Review this edit ({0} of {1} files)": "Examiner cette modification ({0} fichiers sur {1})",
   "This reply points to content from another message that was not recorded.": "Cette réponse renvoie à du contenu d’un autre message qui n’a pas été enregistré.",
   "Local control API: let agents on this computer read app status and chats": "API de contrôle locale : permettre aux agents de cet ordinateur de lire l’état de l’app et les chats",
+  "Allow actions: let local agents send and cancel messages": "Autoriser les actions : les agents locaux peuvent envoyer et annuler des messages",
   "Use effort: {0}": "Utiliser le niveau : {0}",
   "This chat (estimate)": "Ce chat (estimation)",
   "Context limit": "Limite de contexte",

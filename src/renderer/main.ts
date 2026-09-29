@@ -606,7 +606,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       theme: over.theme ?? previous.ui.theme,
       appearance: over.appearance ?? previous.ui.appearance
     },
-    controlApi: { enabled: $<HTMLInputElement>('controlApiEnabled').checked },
+    controlApi: { enabled: $<HTMLInputElement>('controlApiEnabled').checked, allowActions: $<HTMLInputElement>('controlApiAllowActions').checked },
     ...chatPatch
   };
   requestedSettings = patch;
@@ -639,7 +639,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     sessions: previous.sessions,
     compaction: previous.compaction,
     mcp: previous.mcp ?? { instructions: '' },
-    controlApi: previous.controlApi ?? { enabled: false },
+    controlApi: previous.controlApi ?? { enabled: false, allowActions: false },
     multiAgent: previous.multiAgent,
     goal: previous.goal
   };
@@ -662,6 +662,14 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     // snapshots keep their original base so main's three-way merge cannot retry this rejection.
     if (state && (!requestedSettings || requestedSettings.ui.browserBridgePort === patch.ui.browserBridgePort)) {
       $<HTMLSelectElement>('browserBridgePort').value = String(state.config.ui.browserBridgePort ?? 'auto');
+    }
+    // The same for the control API switches: a box that stayed ticked after a failed save would
+    // send its value again with the next unrelated save, and grant what was never saved.
+    if (state && (!requestedSettings || requestedSettings.controlApi?.allowActions === patch.controlApi?.allowActions)) {
+      $<HTMLInputElement>('controlApiAllowActions').checked = state.config.controlApi?.allowActions === true;
+    }
+    if (state && (!requestedSettings || requestedSettings.controlApi?.enabled === patch.controlApi?.enabled)) {
+      $<HTMLInputElement>('controlApiEnabled').checked = state.config.controlApi?.enabled === true;
     }
   }
 }
@@ -1250,6 +1258,9 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked($<HTMLInputElement>('playfulStatus'), config.ui.playfulStatus === true, previousState?.config.ui.playfulStatus);
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
+  applyChecked($<HTMLInputElement>('controlApiAllowActions'), config.controlApi?.allowActions === true, previousState?.config.controlApi?.allowActions);
+  // Actions need the API itself, so the switch stays off and disabled until it is on.
+  $<HTMLInputElement>('controlApiAllowActions').disabled = config.controlApi?.enabled !== true;
   applyChecked(
     $<HTMLInputElement>('minimizeToTray'),
     config.ui.minimizeToTray,
@@ -2027,6 +2038,7 @@ for (const id of [
   'developerMode',
   'playfulStatus',
   'controlApiEnabled',
+  'controlApiAllowActions',
   'privacyScreenshots',
   'tunnelKind',
   'tunnelId',

@@ -137,18 +137,45 @@ describe('settings migration', () => {
     expect((await loadConfig()).ui).toMatchObject({ startAtLogin: true, autoConnect: false });
   });
   it('keeps the local control API off for fresh, legacy and malformed configs while preserving explicit opt-in', async () => {
-    expect(defaultConfig().controlApi).toEqual({ enabled: false });
+    expect(defaultConfig().controlApi).toEqual({ enabled: false, allowActions: false });
     const legacy = defaultConfig() as Partial<ReturnType<typeof defaultConfig>>; delete legacy.controlApi;
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
-    expect((await loadConfig()).controlApi).toEqual({ enabled: false });
-    await saveConfig({ ...defaultConfig(), controlApi: { enabled: true } });
+    expect((await loadConfig()).controlApi).toEqual({ enabled: false, allowActions: false });
+    // A config written when the API only had one switch has no allowActions and gets it off.
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), controlApi: { enabled: true } }), 'utf8');
+    expect((await loadConfig()).controlApi).toEqual({ enabled: true, allowActions: false });
+    await saveConfig({ ...defaultConfig(), controlApi: { enabled: true, allowActions: false } });
     expect((await loadConfig()).controlApi.enabled).toBe(true);
-    // A bad value repairs to off without sending the rest of the file through recovery.
-    const malformed = { ...defaultConfig(), readOnly: true, controlApi: { enabled: 'yes' } };
+    // A bad value repairs to off without sending the rest of the file through recovery, which would
+    // make it read-only: `readOnly: false` surviving is the proof that it did not.
+    const malformed = { ...defaultConfig(), readOnly: false, controlApi: { enabled: 'yes' } };
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(malformed), 'utf8');
     const loaded = await loadConfig();
     expect(loaded.controlApi.enabled).toBe(false);
-    expect(loaded.readOnly).toBe(true);
+    expect(loaded.readOnly).toBe(false);
+  });
+  it('grants message actions only with the API on, and repairs each switch on its own', async () => {
+    const load = async (controlApi: unknown) => {
+      await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), readOnly: false, controlApi }), 'utf8');
+      return loadConfig();
+    };
+    expect((await load({ enabled: true, allowActions: true })).controlApi).toEqual({ enabled: true, allowActions: true });
+    // Actions never outlive the API: a hand-edited pair loads as off.
+    expect((await load({ enabled: false, allowActions: true })).controlApi).toEqual({ enabled: false, allowActions: false });
+    // A bad allowActions cannot switch the API itself off, and a bad enabled takes both down.
+    expect((await load({ enabled: true, allowActions: 'yes' })).controlApi).toEqual({ enabled: true, allowActions: false });
+    expect((await load({ enabled: 'yes', allowActions: true })).controlApi).toEqual({ enabled: false, allowActions: false });
+    expect((await load({ allowActions: true })).controlApi).toEqual({ enabled: false, allowActions: false });
+    // Something that is not an object at all repairs the same way, and the rest of the file is kept.
+    for (const notAnObject of [null, [], 'yes', 7, true]) {
+      const loaded = await load(notAnObject);
+      expect(loaded.controlApi, JSON.stringify(notAnObject)).toEqual({ enabled: false, allowActions: false });
+      expect(loaded.readOnly, JSON.stringify(notAnObject)).toBe(false);
+    }
+    const kept = await load({ enabled: true, allowActions: 'yes' });
+    expect(kept.readOnly).toBe(false);
+    await saveConfig({ ...defaultConfig(), controlApi: { enabled: false, allowActions: true } });
+    expect((await loadConfig()).controlApi).toEqual({ enabled: false, allowActions: false });
   });
   it('defaults automatic plugin refresh off for fresh and legacy settings while preserving explicit opt-in', async () => {
     expect(defaultConfig().ui.autoRefreshPlugins).toBe(false);
