@@ -77,6 +77,9 @@ import { $, ago, clockTime, compactNumber, disclosureChevron, el, filterSettings
 
 const api = window.api;
 
+/** ChatGPT's own web search ("Searched 3 websites", "Searching the web"), as opposed to its recaps. */
+const NATIVE_SEARCH = /^(?:search(?:ed|ing)|brows(?:ed|ing))\b/i;
+
 /** Sprite id per tool-call family. Deliberately reuses the existing icon set. */
 const KIND_ICON: Record<ActivitySummary['kind'], string> = {
   edit: 'i-pencil',
@@ -2419,8 +2422,12 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
     case 'progress':
       return el('p', 'meta is-progress', event.message.text);
     case 'page_tool': {
+      // A web search keeps the globe. Any other native step is ChatGPT's note on a round of work,
+      // marked done; written in the past ("Created and verified the file") it is the round's recap.
+      const search = NATIVE_SEARCH.test(event.label);
       const line = el('p', 'meta is-progress thinking-line');
-      line.append(icon('i-globe', 'ico thinking-ico'), el('span', '', event.label));
+      line.dataset.step = search ? 'search' : NATIVE_STEP_NOW.test(event.label) ? 'note' : 'recap';
+      line.append(icon(search ? 'i-globe' : 'i-check-circle', 'ico thinking-ico'), el('span', '', event.label));
       return line;
     }
     case 'turn_start':
@@ -3065,10 +3072,14 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
       group.addEventListener('toggle', () => { if (group!.open) openTools.add(key); else openTools.delete(key); });
       group.open = openTools.has(key) || rows.slice(i, end).some((row) => row.querySelector('details[open]')); groups.set(key, group);
     }
-    // Name the group after its latest real action ("Ran npm test"), not after a thinking note
-    // ChatGPT wrote around it; the note still names a group that holds nothing else.
+    // Name the group after ChatGPT's recap of the round when it wrote one ("Inspected downloads and
+    // updated the plan"): ChatGPT closes each round of work with one, and its last one describes the
+    // whole block, as ChatGPT titles the block itself. The recap then heads the group instead of
+    // repeating inside it. Without a recap, the group is named after its latest real action ("Ran
+    // npm test"), not after a loose note written around it.
     const members = rows.slice(i, end);
-    const latest = [...members].reverse().find(row => row.matches('.ev-tool_call, .ev-agent_message')) ?? rows[end - 1]!;
+    const recap = [...members].reverse().find(row => row.querySelector('.thinking-line[data-step="recap"]'));
+    const latest = recap ?? [...members].reverse().find(row => row.matches('.ev-tool_call, .ev-agent_message')) ?? rows[end - 1]!;
     const latestHead = latest.querySelector('.tool > summary, .agent-communication > summary, .thinking-line');
     const observedPhase = rows[i - 1]?.matches('.ev-progress')
       ? rows[i - 1]!.querySelector('.is-progress')?.textContent?.trim() : '';
@@ -3076,10 +3087,11 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
       || latestHead?.querySelector('span:not(.agent-avatar)')?.textContent || t("Activity");
     group.classList.toggle('has-activity-phase', !!observedPhase);
     group.querySelector('.activity-title')!.textContent = label;
-    ui(group.querySelector('summary')!, 'title', () => t("{0} actions · {1}", [end - i, label]));
+    const listed = members.filter(row => row !== recap || observedPhase);
+    ui(group.querySelector('summary')!, 'title', () => t("{0} actions · {1}", [listed.length, label]));
     const symbol = latestHead?.querySelector('.ico, .agent-avatar');
     group.querySelector('.activity-symbol')!.replaceChildren(...(symbol ? [symbol.cloneNode(true)] : []));
-    reconcileChildren(group.lastElementChild!, foldRoutineActivity(rows.slice(i, end)));
+    reconcileChildren(group.lastElementChild!, foldRoutineActivity(listed));
     grouped.push(group); i = end;
   }
   for (const key of groups.keys()) if (!retained.has(key)) groups.delete(key);
@@ -3414,7 +3426,11 @@ function liveActivity(): { text: string; icon: string; working: boolean; since?:
     if (!newest || event.time >= newest.time) newest = event;
   }
   if (newest?.kind === 'assistant_message' && proseMoving(newest)) return null;
-  if (newest?.kind === 'page_tool' && NATIVE_STEP_NOW.test(newest.label)) return { text: newest.label, icon: 'i-globe', working: true, since: newest.time };
+  // A search in progress is a step; any other headline ChatGPT writes as it goes is its thinking,
+  // shown as thinking with its words.
+  if (newest?.kind === 'page_tool' && NATIVE_STEP_NOW.test(newest.label)) return NATIVE_SEARCH.test(newest.label)
+    ? { text: newest.label, icon: 'i-globe', working: true, since: newest.time }
+    : { ...thinking, text: newest.label };
   return thinking;
 }
 
