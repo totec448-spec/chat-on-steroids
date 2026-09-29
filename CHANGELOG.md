@@ -9,6 +9,39 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.21] — Korean, a new message box and answers you can take with you
+
+A big update: CoS now speaks Korean, the message box has been redesigned, and every answer can be copied or saved as Markdown. It also fixes a handful of annoyances found in testing.
+
+### New
+
+- **Korean.** The app is now available in Korean (한국어), the 11th language. Pick it in Appearance or with the flags in Setup.
+- **A clearer message box.** Normal, Goal and Loop now sit in one mode menu, each with a short description of what it does. Plan is its own button. The context ring opens a small panel that shows, one per line, how big the chat is, your limit, how full it is and when it compacts, together with the Compact & resume action. The model menu lists every model; the thinking-effort slider glides smoothly, and Instant models, which have nothing to choose, show no slider at all.
+- **Copy and export answers.** Under every finished answer you can copy it or save it as a Markdown file. You can also save the whole chat.
+- **See how long each answer took.** A quiet line under each of your messages shows "Working for 12s" while ChatGPT works and "Worked for 1m 12s" once it is done.
+- **For agents on this computer: a local interface.** It is off by default. When you turn it on in Settings → Setup → Advanced, tools running on this computer can read whether the app is healthy, what its chats are doing and what the app is waiting for. Keys and passwords are masked. A second switch, also off by default, lets them send a message to a chat or cancel one that has not gone out yet. They never interrupt an answer unless they ask to.
+
+### Improved
+
+- **Smoother side and bottom panels.** Panels slide in and out instead of jumping, tabs look the same in both panels and can be reordered by dragging, and long tab names no longer run under the close button.
+- **Lighter tool calls in the chat.** Commands and edits no longer sit in heavy boxes, so a long run of steps is easier to read. A collapsed group of steps is named after what actually ran, not after a note ChatGPT wrote around it.
+- **Small polish.** The toolbar lines up at any zoom level, the Agents & automation page has the same rounded corner as the others, and the German interface says "komprimieren" throughout.
+
+### Fixed
+
+- **Goal says why it stopped.** When Goal could not write its next message for good, for example because the OpenRouter account ran out of credit, it kept showing "Answer settling" in the app and on the ChatGPT page. It now shows that the goal loop stopped, and why, in your language on the ChatGPT page too.
+- **Loop no longer loses track of a long answer.** Right after a Loop message was sent, the new turn could be marked finished within a fraction of a second, so the work that followed had no owner and Loop never sent its next message. The new turn now stays open until its own answer ends.
+- **Recovery messages are sent, not left in the text box.** After a reload, ChatGPT sometimes rebuilt its text box just before Send, and the automatic recovery message stayed there until you sent it yourself. It is now sent.
+- **Two browsers, one new chat.** With the extension in two browsers, a new chat could open as a blank tab in one browser while the other browser sent the message. A new chat now stays in one browser.
+- **"Working…" no longer lingers.** A finished chat kept saying "Working…" for up to 90 seconds after its answer. It now stops as soon as the turn ends.
+- **The chat stays at the newest answer.** Opening the terminal or a side panel, or typing a long message, made the chat area smaller and pushed the latest answer out of view. If you were at the end, you now stay there.
+- **The terminal panel can be resized again.** Its drag handle was hidden under the top bar.
+- **Workers whose folder was deleted.** A worker that woke up after its working folder had been deleted failed its first command. It now falls back or asks for a folder instead.
+- **Old leftovers leave your chat list.** Versions 2.1.14 and 2.1.15 listed Plan's helper chats as "You are a task planner…"; they are now hidden (not deleted). Chats named after a ChatGPT project page ("ChatGPT - …") get a proper name.
+- **The extension connects with restricted site access.** If Chrome was set to allow the extension only on click or on specific sites, it could not connect to the app.
+
+**Updating from 2.1.18 or older?** If the extension doesn't connect, click its icon once; from 2.1.19 on it connects by itself.
+
 ## [2.1.20] — Cleaner replies and working OpenRouter keys
 
 A quality update. Replies from every ChatGPT account show properly, OpenRouter keys work however they were pasted, and CoS copes with new ChatGPT formats on its own.
