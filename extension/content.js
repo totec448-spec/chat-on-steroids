@@ -11858,6 +11858,12 @@
         ));
       const sendingTarget = submittedSendLifetime(target, forEpoch);
       draft = CLF_DOM.captureComposerDraft(input.text, () => sendAttempted ? sendingTarget() : onTarget());
+      // #744: a recovery's own text survives a composer remount before Send is authorized. The
+      // lease may follow it once; after authorization a lost editor stays a failure.
+      let authorizing = false;
+      const draftCurrent = () => draft.current() ||
+        (input.recovery === true && !authorizing && !sendAttempted && !(input.images || []).length &&
+          !(input.attachments || []).length && draft.rebind() && draft.current());
       const files = [];
       for (const attachment of input.attachments || []) {
         const parts = [];
@@ -11883,7 +11889,7 @@
         'Attachment upload was not confirmed. Check the unsent draft and any file error in ChatGPT before trying again.'
       ));
       await Promise.resolve();
-      if (!onTarget() || !draft.current() || sendText(CLF_DOM.composer()?.textContent) !== sendText(input.text)) return fail(t(
+      if (!onTarget() || !draftCurrent() || sendText(CLF_DOM.composer()?.textContent) !== sendText(input.text)) return fail(t(
         'content_delivery_draft_preserved',
         'The composer changed; your draft was preserved'
       ));
@@ -11903,9 +11909,10 @@
       // comparison never matched, and that first turn got no ACK, no turn start and no turn end
       // for Goal or Loop to act on. The bootstrap comparison is exact either way (raw, then one
       // unescape); a person's own sends keep the raw comparison in matchesUserSendReceipt.
-      if (!(await sendSubmittedText(sendingTarget, false, async sendCurrent => {
+      const nativeSend = () => sendSubmittedText(sendingTarget, false, async sendCurrent => {
         // Preserve the outbox's revocable claim until the actual native Send is ready.
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current())) return false;
+        authorizing = true;
         const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
         if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) return false;
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current())) return false;
@@ -11919,7 +11926,10 @@
         // may replace it before this async operation resumes; do not rediscover it.
         receipt = { conversation, user: { id: user.id } };
         return true;
-      }, matchesSubmittedBootstrap))) return false;
+      }, matchesSubmittedBootstrap);
+      // #744: one retry when the editor was replaced before anything asked to send it.
+      if (!(await nativeSend()) &&
+          !(!authorizing && !sendAttempted && !receipt && !draft.current() && draftCurrent() && await nativeSend())) return false;
       if (!receipt || !sendingTarget()) return false;
       // Native Send listeners refresh the receipt; pin only that witnessed object.
       const witnessedSendReceipt = userSendReceipt;
