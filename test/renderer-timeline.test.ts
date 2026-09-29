@@ -4015,3 +4015,34 @@ it('uses a playful work word when it is turned on in Settings', async () => {
   const { w } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }], true, [], [], { playfulStatus: true });
   expect(w.document.getElementById('chatState')!.textContent).toMatch(PLAYFUL_WORDS);
 });
+
+it('offers copy and Markdown export under the answer of a completed turn only', async () => {
+  const ask: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'extension', turnId: 'done-turn', messageId: 'ask', message: text('Write hello.txt') };
+  const reply: SessionEvent = { kind: 'assistant_message', seq: 2, time: T0 + 1_000, source: 'extension', turnId: 'done-turn', messageId: 'reply', message: text('Created **hello.txt**.'), final: true, state: 'final' };
+  const { w, append } = await boot([ask, reply]);
+  const api = (w as any).api;
+  api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'copied' } }));
+  // Still open: the answer may yet change, so it offers nothing.
+  expect(w.document.querySelector('.answer-actions')).toBeNull();
+
+  await append([{ seq: 3, time: T0 + 2_000, source: 'extension', kind: 'turn_end', turnId: 'done-turn', outcome: 'completed' }]);
+  const actions = w.document.querySelector('.ev-assistant_message .said .answer-actions');
+  expect(actions).not.toBeNull();
+  expect(w.document.querySelectorAll('.answer-actions')).toHaveLength(1);
+
+  (actions!.querySelector('button.answer-action') as HTMLButtonElement).click(); await settle();
+  expect(api.exportMarkdown).toHaveBeenCalledWith({ id: summary([]).id, scope: 'answer', turnId: 'done-turn', target: 'clipboard' });
+  expect(actions!.querySelector('button.answer-action')!.classList.contains('is-done')).toBe(true);
+
+  api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'saved', name: 'chat.md' } }));
+  const choices = [...actions!.querySelectorAll<HTMLButtonElement>('.answer-export-choice')];
+  expect(choices.map(choice => choice.textContent)).toEqual(['This answer', 'Whole session']);
+  choices[1]!.click(); await settle();
+  expect(api.exportMarkdown).toHaveBeenCalledWith({ id: summary([]).id, scope: 'session', turnId: undefined, target: 'file' });
+});
+
+it('does not offer copy or export after an interrupted turn', async () => {
+  const reply: SessionEvent = { kind: 'assistant_message', seq: 1, time: T0, source: 'extension', turnId: 'cut-turn', messageId: 'cut', message: text('Half an answer'), final: true, state: 'final' };
+  const { w } = await boot([reply, { seq: 2, time: T0 + 1_000, source: 'extension', kind: 'turn_end', turnId: 'cut-turn', outcome: 'interrupted' }]);
+  expect(w.document.querySelector('.answer-actions')).toBeNull();
+});

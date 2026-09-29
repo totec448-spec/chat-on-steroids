@@ -105,6 +105,7 @@ import {
   readToolEditReview
 } from './session/store.js';
 import { activeSessionId, forgetSession, onSessionChange } from './session/recorder.js';
+import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatBlocked } from './session/blocked-chats.js';
 import {
   clearAgent,
@@ -965,6 +966,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { text } = z.object({ text: z.string().max(1_000_000) }).parse(payload);
     await clipboard.writeText(text);
     return true;
+  });
+
+  // Copy or save a completed turn's answer, or the session transcript, as Markdown. Main reads
+  // the full text of answers that were cut in the log, so neither comes out truncated.
+  handle('sessions:exportMarkdown', async (payload) => {
+    const request = z.object({
+      id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+      scope: z.enum(['answer', 'session']),
+      turnId: z.string().min(1).max(200).optional(),
+      target: z.enum(['clipboard', 'file'])
+    }).parse(payload);
+    return exportSessionMarkdown(request, getWindow());
   });
 
   // The Install button. The renderer decides nothing about what is installed - it cannot

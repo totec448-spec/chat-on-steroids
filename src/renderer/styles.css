@@ -2091,6 +2091,27 @@ input[readonly] {
 }
 
 .said { padding: 8px 0; border-radius: 0; background: transparent; }
+/* Copy and export under a completed turn's answer: quiet until pointed at, like the answer's own
+   text. The export menu is anchored to its button and flips at the window edge; it enters like the
+   composer menus and fades out while ::details-content keeps it painted. */
+.answer-actions { display: flex; align-items: center; gap: 2px; margin: 8px 0 0 -6px; }
+.answer-action { display: grid; place-items: center; width: 28px; height: 28px; padding: 6px; border: 0; border-radius: 7px; background: transparent; color: var(--faint); cursor: pointer; list-style: none; }
+.answer-action::-webkit-details-marker { display: none; }
+.answer-action .ico { --ico: 16px; --glyph: 16px; }
+.answer-action:hover, .answer-export[open] > .answer-action { background: var(--hover); color: var(--ink); }
+.answer-action:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+.answer-action.is-done { color: var(--green); }
+.answer-export { anchor-scope: --answer-export; }
+.answer-export > summary { anchor-name: --answer-export; }
+.answer-export::details-content { transition: content-visibility 120ms allow-discrete; }
+.answer-export[open]::details-content { transition: none; }
+.answer-export-menu { position: fixed; z-index: 40; position-anchor: --answer-export; position-area: bottom span-right; margin-top: 6px; position-try-fallbacks: flip-block, flip-inline; display: grid; gap: 2px; min-width: 170px; padding: 5px; border: 1px solid var(--edge); border-radius: 10px; background: var(--card); box-shadow: 0 8px 28px #0003; opacity: 0; transform: translateY(4px); transition: opacity 120ms ease-in, transform 120ms ease-in; pointer-events: none; }
+.answer-export[open] > .answer-export-menu { opacity: 1; transform: none; transition: none; pointer-events: auto; animation: surface-in 140ms ease-out; }
+.answer-export-choice { display: flex; align-items: center; width: 100%; padding: 8px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: calc(12.5px * var(--text-scale, 1)); text-align: left; cursor: pointer; }
+.answer-export-choice:hover, .answer-export-choice:focus-visible { background: var(--hover); outline: none; }
+@media (prefers-reduced-motion: reduce) {
+  .answer-export::details-content, .answer-export-menu { transition: none; transform: none; animation: none !important; }
+}
 
 .said.is-user { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; padding: 0; margin: 4px 0 4px auto; max-width: 82%; width: fit-content; }
 /* Reserve once, before native reaction metadata arrives. Badge changes never
