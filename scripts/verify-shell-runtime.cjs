@@ -47,8 +47,15 @@ globalThis.pairedShellCall = pairedShellCall;
 globalThis.liveShellMapping = liveShellMapping;
 globalThis.fixture = fixture; globalThis.usageSource = usageSource;`, { loader: 'ts', target: 'es2022' }).code;
 
-const executable = path.join(process.env.LOCALAPPDATA, 'ms-playwright/chromium-1243/chrome-win64/chrome.exe');
-assert(fs.existsSync(executable));
+// Any Chromium works; it runs headless with its own throwaway profile. COS_CHROME overrides the search.
+const executable = [
+  process.env.COS_CHROME,
+  process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'ms-playwright/chromium-1243/chrome-win64/chrome.exe'),
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'
+].find(candidate => candidate && fs.existsSync(candidate));
+assert(executable, 'No Chromium found; set COS_CHROME to a Chrome or Chromium executable.');
 const profile = path.join(output, 'profile');
 fs.rmSync(path.join(profile, 'DevToolsActivePort'), { force: true });
 const browser = spawn(executable, [`--user-data-dir=${profile}`, '--headless=new', '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--disable-background-networking', 'about:blank'], { windowsHide: true, stdio: 'ignore' });

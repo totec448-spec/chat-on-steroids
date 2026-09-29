@@ -11,8 +11,15 @@ const { app, BrowserWindow } = require('electron');
 app.whenReady().then(async () => {
   const root = path.join(__dirname, '..'), output = path.join(root, 'outputs/goal-progress');
   fs.mkdirSync(output, { recursive: true });
-  const code = require('esbuild').buildSync({ entryPoints: [path.join(root, 'src/renderer/chat.ts')],
-    bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'chat' }).outputFiles[0].text;
+  const code = (await require('esbuild').build({ entryPoints: [path.join(root, 'src/renderer/chat.ts')],
+    bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'chat', logLevel: 'error',
+    // Module CSS (xterm) is not needed: the page inlines the production stylesheet below.
+    loader: { '.css': 'empty' },
+    // Vite's `?url` asset imports (the PDF worker) have no meaning here; the checks never render a PDF.
+    plugins: [{ name: 'vite-url-stub', setup(build) {
+      build.onResolve({ filter: /\?url$/ }, args => ({ path: args.path, namespace: 'vite-url-stub' }));
+      build.onLoad({ filter: /.*/, namespace: 'vite-url-stub' }, () => ({ contents: 'export default ""', loader: 'js' }));
+    } }] })).outputFiles[0].text;
   const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
   const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*>/g, '')
@@ -53,7 +60,7 @@ app.whenReady().then(async () => {
   win.setContentSize(1100, 760); win.webContents.setZoomFactor(1);
   const generated = await win.webContents.executeJavaScript(`(async()=>{
     controls.goalWait=null;controls.goalDraft={stage:'answering',model:'fixture',text:'Continue with the remaining verification and report the result.',error:null};
-    chat.chatVisible(true);await frame();await frame();return document.getElementById('goalLifecycle').textContent;
+    chat.chatVisible(false);chat.chatVisible(true);await frame();await frame();await frame();return document.getElementById('goalLifecycle').textContent;
   })()`);
   assert.ok(generated.includes('Generating a continuation') && generated.includes('remaining verification'), generated);
   fs.writeFileSync(path.join(output, 'generating.png'), (await win.webContents.capturePage()).toPNG());

@@ -32,7 +32,6 @@ app.whenReady().then(async () => {
     for (const button of menu.querySelectorAll('#automationSwitch [data-mode]'))
       button.setAttribute('aria-checked', String(button.dataset.mode === 'loop'));
     menu.querySelector('label[for="sessionObjective"]').textContent = 'Loop instructions';
-    menu.querySelector('#cancelCompaction').hidden = true;
     composer.append(menu); host.append(composer); document.body.append(host);
   })()`);
   win.showInactive();

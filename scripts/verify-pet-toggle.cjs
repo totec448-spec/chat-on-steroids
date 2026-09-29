@@ -15,16 +15,15 @@ const checkFocus = process.argv.includes('--check-focus');
 const externalKeyboard = process.argv.includes('--external-keyboard');
 const runFile = promisify(execFile);
 const root = path.resolve(__dirname, '..');
+const { defaultConfig, merge } = require('./fixtures/app-defaults.cjs');
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'cos-pet-toggle-'));
 fs.mkdirSync(path.join(userData, 'state'));
 fs.writeFileSync(path.join(userData, 'state/pet-library.json'), JSON.stringify({ version: 1, enabled: [], favorites: [] }));
-fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({
-  roots: [], readOnly: true, capabilities: {},
-  tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
-  ui: { minimizeToTray: false, autoConnect: false, autoContinue: false, backgroundChats: false },
-  multiAgent: { enabled: false, allowUnattributedCalls: false, recoverAgentTabs: false },
-  goal: { enabled: false }
-}));
+// Start from the app's own defaults so the config is valid and not reset on load.
+fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify(merge(defaultConfig(), {
+  readOnly: true, ui: { minimizeToTray: false, autoConnect: false },
+  multiAgent: { enabled: false, recoverAgentTabs: false }, goal: { enabled: false }
+})));
 app.setName('CoS Pet Toggle Probe');
 app.setPath('userData', userData);
 app.setAppPath(root);
@@ -163,6 +162,9 @@ async function drag(id) {
     return;
   }
   pointer = { x: area.x + x, y: area.y + y };
+  // macOS forwards mouse moves through the click-through overlay instead of polling the cursor
+  // (FORWARDS_IGNORED_MOUSE_MOVES in pet-overlay.ts), so deliver the move the system would forward.
+  overlay.webContents.sendInputEvent({ type: 'mouseMove', x, y });
   await until(() => !ignored, `interactive ${id}`);
   overlay.webContents.sendInputEvent({ type: 'mouseMove', x, y });
   overlay.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', x, y, clickCount: 1 });
@@ -170,15 +172,22 @@ async function drag(id) {
   pointer = { x: area.x + x - 80, y: area.y + y - 40 };
   overlay.webContents.sendInputEvent({ type: 'mouseMove', x: x - 80, y: y - 40, movementX: -80, movementY: -40 });
   overlay.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', x: x - 80, y: y - 40, clickCount: 1 });
-  await sleep(80);
-  const moved = await petRect(id);
+  // The machine moves on pointermove; the view paints on its next animation frame, which can
+  // take longer than a fixed pause when the pet has just been enabled.
+  let moved = null;
+  for (const end = Date.now() + 2000; Date.now() < end; await sleep(40)) {
+    moved = await petRect(id);
+    if (moved && Math.abs(moved.x - rect.x + 80) < 3) break;
+  }
   assert.ok(moved && Math.abs(moved.x - rect.x + 80) < 3, `${id} did not drag: ${JSON.stringify({ rect, moved })}`);
   console.log(JSON.stringify({ dragged: id, dx: moved.x - rect.x, dy: moved.y - rect.y }));
   pointer = { x: area.x + 5, y: area.y + 5 };
   await until(() => ignored, 'click-through after leaving pet');
 }
 app.on('browser-window-created', (_event, win) => {
-  if (win.getTitle() === 'Pets') {
+  // The overlay's title only arrives with its page. It is the one window created after the owner:
+  // the library starts with no pet enabled, so nothing else opens a window here.
+  if (win.getTitle() === 'Pets' || (owner && win !== owner && !overlay)) {
     overlay = win;
     const ignore = win.setIgnoreMouseEvents.bind(win);
     win.setIgnoreMouseEvents = (value, options) => { ignored = value; return ignore(value, options); };
@@ -198,11 +207,15 @@ app.on('browser-window-created', (_event, win) => {
         await enable('capy', true);
         await drag('capy');
         owner.focus();
+        // macOS only focuses the frontmost app, so the owner may not hold focus while this runs in
+        // the background. Showing pets must never take focus, and must not take it from the owner.
+        const ownerFocused = owner.isFocused();
         await owner.webContents.executeJavaScript('window.api.petsSetOverlayVisible(false)');
         assert.equal(overlay.isVisible(), false);
         await owner.webContents.executeJavaScript('window.api.petsSetOverlayVisible(true)');
         assert.equal(overlay.isVisible(), true);
-        assert.equal(owner.isFocused(), true, 'Showing pets must not steal foreground focus');
+        assert.equal(overlay.isFocused(), false, 'Showing pets must not focus the overlay');
+        if (ownerFocused) assert.equal(owner.isFocused(), true, 'Showing pets must not steal foreground focus');
         await drag('capy');
         await enable('hammy', true);
         await until(async () => !!await petRect('hammy'), 'both pets');

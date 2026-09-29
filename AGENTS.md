@@ -2745,8 +2745,8 @@ changes retire scene props synchronously. Reduced motion disables autonomous
 travel/actions while keeping static click feedback. Company targets are plain DOM
 text; bat, bin and hit effects carry no company logos. `pet-assets/animations.json`
 maps 96 local character frames with contact/release timing. Asset production and
-regeneration are documented in `docs/pet/PRODUCTION.md`; pet unit/DOM tests and
-`scripts/verify-pet-electron.cjs` cover this owner without provider conversations.
+regeneration are documented in `docs/pet/PRODUCTION.md`; pet unit/DOM tests, `scripts/verify-pet-overlay-electron.cjs` and `scripts/verify-pet-toggle.cjs`
+cover this owner without provider conversations.
 `scripts/verify-pet-performance.cjs` measures the production pet in isolated
 Electron with unchanged artwork, process CPU deltas and actual animation wakes.
 
@@ -3318,6 +3318,9 @@ Discover current suites with `rg --files test`; do not maintain a stale suite co
 both ends of every changed protocol: app↔extension, content↔MAIN, main↔preload↔renderer,
 schema↔handler↔recorder and durable write↔restore. Run the nearest suites, adjacent boundary
 tests and `npm run verify` for production edits. Build/package when that layer can differ.
+Renderer, layout and pet changes also run `npm run verify:ui`: those checks are not part of
+`npm test`, start from the app's own default config (`scripts/fixtures/app-defaults.cjs`) and
+rotted unnoticed for weeks before the runner existed.
 
 ```sh
 npm run dev
@@ -3327,6 +3330,7 @@ npm run verify:privacy
 npm run verify:notices
 npm run verify
 npm run build
+npm run verify:ui                  # after build: every real-Electron UI check in scripts/verify-*.cjs
 npm run dist                       # current OS, x64 + arm64
 npm run dist:dir:mac:x64            # example unpacked target on a matching host
 ```
