@@ -1,4 +1,7 @@
 {
+  "Previous source": "이전 출처",
+  "Next source": "다음 출처",
+  "{0} more sources were not recorded with this reply.": "이 답변에는 다른 출처 {0}개가 기록되지 않았습니다.",
   "Copy answer": "답변 복사",
   "Export as Markdown": "Markdown으로 내보내기",
   "This answer": "이 답변",
