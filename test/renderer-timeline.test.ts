@@ -2438,6 +2438,30 @@ it('says a chat is working when its page reports no turn but its tools keep arri
   expect(note.textContent).toBe('Worked for 5s');
 });
 
+it('says a chat worked as soon as its page reports the end after its last tool call', async () => {
+  // A normal turn: tools run, then the page reports the end. The last call is recent, but the
+  // reported end is newer, so nothing is unaccounted for and the caption must not wait out
+  // the blind window.
+  const start = Date.now() - 40_000;
+  const turn: SessionEvent[] = [
+    { seq: 1, time: start, source: 'extension', kind: 'turn_start', turnId: 'page-turn' },
+    { seq: 2, time: start + 38_000, source: 'extension', kind: 'turn_end', turnId: 'page-turn', outcome: 'completed' }
+  ];
+  const row = { ...summary(turn), lastToolCallAt: start + 33_000 as number | null };
+  const { w, append } = await boot(turn, true, [], [], { sessions: [row] });
+  (w as any).api.getSessionControls = (id: string) => Promise.resolve({ ok: true,
+    data: { sessionId: id, automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
+  const note = w.document.getElementById('chatState')!;
+  await append([]);
+  expect(note.textContent).toBe('Worked for 38s');
+  expect(note.classList.contains('is-working')).toBe(false);
+
+  // A call after that reported end is still work the page has not accounted for.
+  row.lastToolCallAt = start + 39_000;
+  await append([]);
+  expect(note.textContent).toBe('Working…');
+});
+
 it('stops directly from the empty composer without a second Stop menu action', async () => {
   const { w } = await boot([]);
   const stop = vi.fn(async () => ({ ok: true, data: {} }));
