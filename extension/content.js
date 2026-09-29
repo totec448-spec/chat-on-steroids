@@ -10080,6 +10080,13 @@
         setGoalPhase('');
         return;
       }
+      // Another tab showing this chat owns the turn's draft, and the app shows that draft only
+      // there. Keep the claim so this page does not ask again, and show no run of its own:
+      // a stopped card here said the loop had ended while the owning tab went on working.
+      if (failure.error === 'goal_owned_elsewhere') {
+        setGoalPhase('');
+        return;
+      }
       // The app still has this chat working — its record of the turn is open, or a local
       // tool ran within the last minute — so the end this page saw was not the answer. Not
       // a failure, and not a released claim either: the obligation is filed app-side, and
