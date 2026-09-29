@@ -4083,3 +4083,81 @@ it('does not offer copy or export after an interrupted turn', async () => {
   const { w } = await boot([reply, { seq: 2, time: T0 + 1_000, source: 'extension', kind: 'turn_end', turnId: 'cut-turn', outcome: 'interrupted' }]);
   expect(w.document.querySelector('.answer-actions')).toBeNull();
 });
+
+it('opens each turn with how long it has worked, live while running and still once ended', async () => {
+  const start: SessionEvent = { seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'long-turn' };
+  const ask: SessionEvent = { kind: 'user_message', seq: 2, origin: 2, time: T0 + 100, source: 'extension', turnId: 'long-turn', messageId: 'q', message: text('Check the sites') };
+  const note: SessionEvent = { kind: 'assistant_message', seq: 3, time: T0 + 2_000, source: 'extension', turnId: 'long-turn', messageId: 'c', message: text('Checking both.'), final: true, state: 'final' };
+  const reply: SessionEvent = { kind: 'assistant_message', seq: 4, time: T0 + 70_000, source: 'extension', turnId: 'long-turn', messageId: 'r', message: text('Both sites return 200 OK.'), final: true, state: 'final' };
+  const { w, append } = await boot([start, ask, note, reply]);
+  (w as any).api.getSessionControls = (id: string) => Promise.resolve({ ok: true,
+    data: { sessionId: id, automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
+  await append([{ seq: 5, time: T0 + 72_000, source: 'extension', kind: 'turn_end', turnId: 'long-turn', outcome: 'completed' }]);
+  const lines = [...w.document.querySelectorAll<HTMLElement>('#timeline .turn-worked')];
+  expect(lines.map(line => line.textContent)).toEqual(['Worked for 1m 11s']);
+  // At the top of the turn: after your message, before its first reply.
+  expect(lines[0]!.previousElementSibling?.matches('.ev-user_message')).toBe(true);
+  expect(lines[0]!.nextElementSibling?.textContent).toContain('Checking both.');
+  // The header no longer repeats it.
+  expect(w.document.getElementById('chatState')!.classList.contains('is-mirrored')).toBe(true);
+});
+
+it('keeps a still worked line on earlier turns while the latest turn has its own', async () => {
+  const turn = (id: string, at: number, seq: number): SessionEvent[] => [
+    { seq, time: at, source: 'extension', kind: 'turn_start', turnId: id },
+    { kind: 'user_message', seq: seq + 1, origin: seq + 1, time: at + 10, source: 'extension', turnId: id, messageId: `q-${id}`, message: text(`Ask ${id}`) },
+    { kind: 'assistant_message', seq: seq + 2, time: at + 5_000, source: 'extension', turnId: id, messageId: `r-${id}`, message: text(`Answer ${id}`), final: true, state: 'final' },
+    { seq: seq + 3, time: at + 9_000, source: 'extension', kind: 'turn_end', turnId: id, outcome: 'completed' }
+  ];
+  const { w, append } = await boot([...turn('first', T0, 1), ...turn('second', T0 + 60_000, 5)]);
+  (w as any).api.getSessionControls = (id: string) => Promise.resolve({ ok: true,
+    data: { sessionId: id, automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
+  await append([]);
+  const lines = [...w.document.querySelectorAll<HTMLElement>('#timeline .turn-worked')];
+  expect(lines.map(line => line.textContent)).toEqual(['Worked for 8s', 'Worked for 8s']);
+  expect(lines.map(line => line.nextElementSibling?.textContent ?? '')).toEqual([expect.stringContaining('Answer first'), expect.stringContaining('Answer second')]);
+});
+
+it('shows the running turn working at its top while it works', async () => {
+  const running: SessionEvent[] = [
+    { seq: 1, time: Date.now() - 12_000, source: 'extension', kind: 'turn_start', turnId: 'held-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: Date.now() - 11_900, source: 'extension', turnId: 'held-turn', messageId: 'q-live', message: text('Build it') },
+    { kind: 'assistant_message', seq: 3, time: Date.now() - 9_000, source: 'extension', turnId: 'held-turn', messageId: 'c-live', message: text('Starting the build.'), final: true, state: 'final' }
+  ];
+  const { w } = await boot(running);
+  const line = w.document.querySelector<HTMLElement>('#timeline .turn-status')!;
+  expect(line.textContent).toMatch(/^Working for /);
+  expect(line.classList.contains('is-working')).toBe(true);
+  expect(line.previousElementSibling?.matches('.ev-user_message')).toBe(true);
+});
+
+it('shows a just-started turn working right after your message, never in the header first', async () => {
+  // The controls report a running turn before any of its rows reached the timeline.
+  const { w } = await boot([]);
+  const line = w.document.querySelector<HTMLElement>('.turn-status')!;
+  expect(line.textContent).toMatch(/^Working/);
+  expect(line.classList.contains('is-working')).toBe(true);
+  expect(line.previousElementSibling?.id).toBe('inputQueue');
+  expect(w.document.getElementById('chatState')!.classList.contains('is-mirrored')).toBe(true);
+});
+
+it('anchors the worked line to your message when the page reports an empty turn and untagged work', async () => {
+  // Measured in a live session: the page opened and closed an empty turn right after the message,
+  // then every row of the real work arrived with no turn id at all.
+  const asked = T0;
+  const rows: SessionEvent[] = [
+    { kind: 'user_message', seq: 1, origin: 1, time: asked, source: 'extension', turnId: 'message-scope-id', messageId: 'ask-5', message: text('Legal, mais uma vez') },
+    { seq: 2, time: asked + 200, source: 'extension', kind: 'turn_start', turnId: 'ghost-turn' },
+    { seq: 3, time: asked + 300, source: 'extension', kind: 'turn_end', turnId: 'ghost-turn', outcome: 'completed' },
+    { kind: 'assistant_message', seq: 4, time: asked + 2_000, source: 'extension', messageId: 'plan-5', message: text('Claro. Vou repetir em um quinto arquivo.'), final: true, state: 'final' },
+    { kind: 'assistant_message', seq: 5, time: asked + 21_000, source: 'extension', messageId: 'done-5', message: text('Feito novamente.'), final: true, state: 'final' }
+  ];
+  const { w, append } = await boot(rows);
+  (w as any).api.getSessionControls = (id: string) => Promise.resolve({ ok: true,
+    data: { sessionId: id, automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
+  await append([]);
+  const lines = [...w.document.querySelectorAll<HTMLElement>('#timeline .turn-worked')];
+  expect(lines.map(line => line.textContent)).toEqual(['Worked for 21s']);
+  expect(lines[0]!.previousElementSibling?.matches('.ev-user_message')).toBe(true);
+  expect(lines[0]!.nextElementSibling?.textContent).toContain('quinto arquivo');
+});

@@ -2906,6 +2906,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   const duplicateErrors = duplicateChatErrors(events);
   // Completed turns and the answer message that carries their copy/export actions.
   const anchors = answerAnchors(events);
+  const workedSeconds = exchangeDurations(events);
   for (const item of timelineItems(shown)) {
     if (item.kind === 'event' && duplicateErrors.has(item.event.seq)) continue;
     appendRetiredInputs(item.kind === 'event' ? item.event.time : item.block.time);
@@ -2921,6 +2922,7 @@ function paintDetail(followBottom = historyBefore === null): void {
     const cached = rowCache.get(key);
     if (cached && cached.sig === sig) {
       cached.row.dataset.activityBoundary = activityBoundary;
+      if (item.kind === 'event' && item.event.kind === 'user_message') cached.row.dataset.askedAt = String(item.event.time);
       if (item.kind === 'event' && item.event.kind === 'user_message') {
         paintMessageReaction(cached.row.querySelector<HTMLElement>('.said.is-user')!, item.event.reaction);
       }
@@ -2931,6 +2933,7 @@ function paintDetail(followBottom = historyBefore === null): void {
     const row = item.kind === 'compaction' ? compactionRow(item.block, cached?.row) : eventRow(item.event);
     if (answerTurn) row.querySelector('.said')?.append(answerActions(answerTurn));
     row.dataset.timelineKey = key;
+    if (item.kind === 'event' && item.event.kind === 'user_message') row.dataset.askedAt = String(item.event.time);
     row.dataset.activityBoundary = activityBoundary;
     paintInputReceipt(row, item);
     rowCache.set(key, { sig, row });
@@ -2938,6 +2941,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   }
   appendRetiredInputs(Infinity);
   for (const key of rowCache.keys()) if (!keep.has(key)) rowCache.delete(key);
+  placeTurnLines(timelineRows, workedSeconds);
   reconcileChildren($('timeline'), groupImageRows(groupToolRows(timelineRows)));
   paintPendingInputs();
   $('timelineEmpty').hidden = selectedId !== null || timelineRows.length > 0 || $('inputQueue').childElementCount > 0;
@@ -3053,6 +3057,94 @@ function paintRecoveryVerdict(host: HTMLElement, sessionId: string | null): bool
   return false;
 }
 
+/**
+ * Each turn opens with how long it has worked, as in Codex: "Working for 12s" live on the turn in
+ * progress, "Worked for 17s" once the page reports its end. The live line mirrors the status caption
+ * (same text, same clock) and the header no longer repeats it; earlier completed turns keep a still
+ * line. Nothing folds. A running turn with no row on screen yet (just sent, or a page that reports no
+ * turn) shows its line right after your pending message, where the turn will begin, so the line is
+ * born in place instead of appearing in the header and moving. A finished turn with no row on screen
+ * (an empty chat, a folded Compact & Resume) keeps the caption in the header.
+ */
+const turnStatusLine = turnLine('turn-worked turn-status');
+
+/** A turn line: the text sits in its own span so the working shimmer spans the words, not the rule. */
+function turnLine(className: string): HTMLElement {
+  const line = el('div', className);
+  line.append(el('span', 'turn-worked-label'));
+  return line;
+}
+const workedLines = new Map<string, HTMLElement>();
+
+/**
+ * How long each of your messages was worked on, keyed by the message's time: from it to the last
+ * end the page reported before your next message (a completed turn end or ChatGPT's final answer,
+ * whichever came later). Anchored to your messages rather than ChatGPT's turn ids, which a page
+ * can report empty or leave off the rows that did the work.
+ */
+function exchangeDurations(list: readonly SessionEvent[]): Map<number, number> {
+  const asks = list.filter(event => event.kind === 'user_message').map(event => event.time).sort((a, b) => a - b);
+  const durations = new Map<number, number>();
+  asks.forEach((asked, index) => {
+    const next = asks[index + 1] ?? Number.POSITIVE_INFINITY;
+    let ended = -1;
+    for (const event of list) {
+      if (event.time < asked || event.time >= next) continue;
+      if ((event.kind === 'turn_end' && event.outcome === 'completed') || (event.kind === 'assistant_message' && event.final)) {
+        ended = Math.max(ended, event.time);
+      }
+    }
+    if (ended >= asked) durations.set(asked, Math.floor((ended - asked) / 1000));
+  });
+  return durations;
+}
+
+function workedLine(asked: number, seconds: number): HTMLElement {
+  const line = workedLines.get(String(asked)) ?? turnLine('turn-worked');
+  ui(line.firstElementChild as HTMLElement, 'textContent', () => t("{0} for {1}{2}s", [t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]));
+  workedLines.set(String(asked), line);
+  return line;
+}
+
+/**
+ * Opens each of your messages' work with its line, right after the message: the last one shows the
+ * live caption while the chat works, earlier ones how long they worked. A message still in the
+ * outbox (or work with no message of yours on screen) has the live line parked after the outbox.
+ */
+function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, number>): void {
+  const status = deps.state()?.config.ui.developerMode ? null : stateLine();
+  const working = status?.working === true;
+  const asks = rows.map((row, index) => ({ row, index, asked: Number(row.dataset.askedAt) }))
+    .filter(entry => entry.row.matches('.ev-user_message') && Number.isFinite(entry.asked));
+  const pending = !!$('inputQueue').querySelector('.pending-message');
+  const used = new Set<string>();
+  // Insert from the end so earlier indices stay valid.
+  for (let i = asks.length - 1; i >= 0; i--) {
+    const { index, asked } = asks[i]!;
+    const latest = i === asks.length - 1;
+    if (latest && working && !pending) { rows.splice(index + 1, 0, turnStatusLine); continue; }
+    const seconds = workedSeconds.get(asked);
+    if (seconds === undefined || (latest && working)) continue;
+    rows.splice(index + 1, 0, workedLine(asked, seconds)); used.add(String(asked));
+  }
+  for (const key of workedLines.keys()) if (!used.has(key)) workedLines.delete(key);
+  const inTimeline = rows.includes(turnStatusLine);
+  if (!inTimeline) parkTurnStatus(working);
+  if (working && status) paintTurnStatus(status);
+  $('chatState').classList.toggle('is-mirrored', !deps.state()?.config.ui.developerMode);
+}
+
+/** A running turn with no row yet: its line waits right after your pending message. */
+function parkTurnStatus(working: boolean): void {
+  if (working) $('inputQueue').after(turnStatusLine);
+  else if (!turnStatusLine.closest('#timeline')) turnStatusLine.remove();
+}
+
+function paintTurnStatus(status: ReturnType<typeof stateLine>): void {
+  ui(turnStatusLine.firstElementChild as HTMLElement, 'textContent', () => stateLine().text);
+  turnStatusLine.classList.toggle('is-working', status.working === true);
+}
+
 /** One line under the header saying what is happening right now. */
 function paintStateLine(): void {
   window.clearTimeout(durationTimer);
@@ -3063,6 +3155,13 @@ function paintStateLine(): void {
   note.className = `subhead-note${tone ? ` ${tone}` : ''}`;
   // Running state and timer ownership cannot depend on a translated label.
   note.classList.toggle('is-working', working === true);
+  // When the turn's own line is on screen it carries this, and the header does not repeat it. A turn
+  // that starts before its first row parks the line now, so it never shows in the header first.
+  const developer = deps.state()?.config.ui.developerMode;
+  if (!developer && !turnStatusLine.closest('#timeline')) parkTurnStatus(working === true);
+  if (!developer && working === true) paintTurnStatus({ text: note.textContent ?? '', tone, working, ticking });
+  // The turn lines carry the caption outside developer mode; the header keeps developer detail.
+  note.classList.toggle('is-mirrored', !developer);
   const recovering = paintRecoveryStatus();
   const goalWaiting = controlledSessionId === selectedId && controlledSelection === selectionGeneration && !!goalWaitView;
   if (goalWaiting) paintGoalProgress();
