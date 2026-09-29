@@ -221,7 +221,16 @@ export interface ControlApiInput {
   deliveredSessionId: string | null;
   conversationId: string | null;
   state: string;
+  /**
+   * What the row proves about delivery. `sent`: the receipt exists. `not_sent`: terminal and
+   * Send was never authorized. `unconfirmed`: Send may have reached ChatGPT; never resent.
+   * `pending`: not yet handed out.
+   */
+  delivery: 'sent' | 'not_sent' | 'unconfirmed' | 'pending';
   mode: string;
+  transportIntent: string | null;
+  /** Filed by the app itself, such as a recovery pickup, rather than sent by a person or agent. */
+  automatic: boolean;
   purpose: string | null;
   createdAt: number;
   dueAt: number;
