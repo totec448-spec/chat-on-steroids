@@ -750,6 +750,55 @@ describe('desktop input delivery and helper ownership', () => {
     }
   });
 
+  /**
+   * #744: after a reload, React replaced the composer between insertion and Send and kept the
+   * recovery's exact text. The lease was tied to the old node, Send was never pressed, and the
+   * message sat in ChatGPT until the user sent it by hand. One rebind is allowed before anything
+   * asked to send; a different text, a plain input or an already authorized send still fails.
+   */
+  it.each(['recovery', 'other text', 'plain input', 'after authorization'] as const)(
+    'follows a remounted composer once before Send authorization (%s)', async kind => {
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: async message => {
+        if (message.authorize && kind === 'after authorization') await held;
+        return { ok: true, data: message.authorize || message.ack || message.fail
+          ? { ok: true } : { input: claimed(kind === 'plain input' ? {} : { recovery: true }) } };
+      }
+    }, () => undefined, false, true);
+    const button = live.document.querySelector<HTMLButtonElement>('[data-testid="send-button"]')!;
+    if (kind !== 'after authorization') button.disabled = true;
+    const sends = watchSend(live.document);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'remount-question', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    const accepting = live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA });
+    await settle();
+    expect(composerText(live.document)).toBe(text);
+    expect(sends()).toBe(0);
+    const composer = live.document.querySelector('#prompt-textarea')!;
+    const replacement = composer.cloneNode(true) as Element;
+    if (kind === 'other text') replacement.textContent = 'A sentence I was still writing';
+    composer.replaceWith(replacement);
+    button.disabled = false;
+    release();
+    const result = await accepting;
+    await settle();
+    const authorizations = live.sent.filter(message => message.type === 'desktop_input' && message.authorize);
+    if (kind === 'recovery') {
+      expect(result).toEqual({ ok: true });
+      expect(sends()).toBe(1);
+      expect(authorizations).toHaveLength(1);
+    } else {
+      expect(result).toEqual({ ok: false });
+      expect(sends()).toBe(0);
+      expect(authorizations).toHaveLength(kind === 'after authorization' ? 1 : 0);
+    }
+    if (kind === 'other text') expect(composerText(live.document)).toBe('A sentence I was still writing');
+  });
+
   it('keeps a helper claim revocable until its delayed Send is ready', async () => {
     let authorized = true;
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
