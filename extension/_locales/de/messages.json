@@ -9,25 +9,25 @@
     "message": "Chat On Steroids läuft auf diesem PC nicht."
   },
   "content_auto_compaction": {
-    "message": "Automatisches Kompaktieren"
+    "message": "Automatisches Komprimieren"
   },
   "content_auto_compaction_blocked_off": {
     "message": "hier aus: Dieser Chat ist in der App blockiert"
   },
   "content_auto_compaction_manual": {
-    "message": "diesen Chat von Hand kompaktieren"
+    "message": "diesen Chat von Hand komprimieren"
   },
   "content_auto_compaction_off": {
-    "message": "Automatisches Kompaktieren aus"
+    "message": "Automatisches Komprimieren aus"
   },
   "content_auto_compaction_on": {
-    "message": "Automatisches Kompaktieren an$1"
+    "message": "Automatisches Komprimieren an$1"
   },
   "content_auto_compaction_threshold_app": {
     "message": "Schwelle in der App festgelegt"
   },
   "content_auto_compaction_worker_off": {
-    "message": "hier aus: Worker-Chats werden nie automatisch kompaktiert"
+    "message": "hier aus: Worker-Chats werden nie automatisch komprimiert"
   },
   "content_bootstrap_composer_changed_authorizing": {
     "message": "das Eingabefeld hat sich während der Freigabe des Starttexts geändert; der Entwurf blieb erhalten und es wurde nichts gesendet"
@@ -90,7 +90,7 @@
     "message": "Chat blockiert"
   },
   "content_chat_blocked_tip": {
-    "message": "Dieser Chat ist in der App Chat On Steroids blockiert: Seine Tool-Aufrufe werden abgelehnt, und Goal, Loop und automatisches Kompaktieren sind aus. Zum Freigeben öffnest du in der App den Tab „Chat“, zeigst in der Sitzungsliste auf diesen Chat und klickst auf sein Blockiersymbol."
+    "message": "Dieser Chat ist in der App Chat On Steroids blockiert: Seine Tool-Aufrufe werden abgelehnt, und Goal, Loop und automatisches Komprimieren sind aus. Zum Freigeben öffnest du in der App den Tab „Chat“, zeigst in der Sitzungsliste auf diesen Chat und klickst auf sein Blockiersymbol."
   },
   "content_chat_still_opening": {
     "message": "dieser Chat wird noch geöffnet – versuch es gleich noch einmal"
@@ -105,10 +105,10 @@
     "message": "Leeren"
   },
   "content_compact": {
-    "message": "Kompaktieren"
+    "message": "Komprimieren"
   },
   "content_compact_already_underway": {
-    "message": "In diesem Chat wird bereits kompaktiert. Warte darauf oder brich es ab."
+    "message": "In diesem Chat wird bereits komprimiert. Warte darauf oder brich es ab."
   },
   "content_compact_app_opening_fresh": {
     "message": "Die App versucht, den neuen Chat zu öffnen."
@@ -123,31 +123,31 @@
     "message": "Der gespeicherte Übergabeversuch läuft bereits; die markierte Nachricht in ChatGPT wird abgeglichen."
   },
   "content_compact_blocked_unavailable_hint": {
-    "message": "Ein blockierter Chat wird nie kompaktiert oder fortgesetzt: Der Ersatz-Chat liefe ohne seine Tools. Gib ihn zuerst in der App frei."
+    "message": "Ein blockierter Chat wird nie komprimiert oder fortgesetzt: Der Ersatz-Chat liefe ohne seine Tools. Gib ihn zuerst in der App frei."
   },
   "content_compact_cancel": {
-    "message": "Kompaktieren abbrechen"
+    "message": "Komprimieren abbrechen"
   },
   "content_compact_cancel_aria": {
-    "message": "Kompaktieren & fortsetzen abbrechen"
+    "message": "Komprimieren & fortsetzen abbrechen"
   },
   "content_compact_cancel_failed": {
-    "message": "Das Kompaktieren konnte nicht abgebrochen werden."
+    "message": "Das Komprimieren konnte nicht abgebrochen werden."
   },
   "content_compact_chat_changed_before_start": {
-    "message": "Dieser Chat hat sich geändert, bevor das Kompaktieren beginnen konnte."
+    "message": "Dieser Chat hat sich geändert, bevor das Komprimieren beginnen konnte."
   },
   "content_compact_chat_changed_preparing": {
     "message": "Der Chat hat sich beim Vorbereiten der Übergabe geändert. Es wurde nichts gesendet."
   },
   "content_compact_chat_changed_stopping": {
-    "message": "Dieser Chat hat sich geändert, während das Kompaktieren den Durchlauf gestoppt hat."
+    "message": "Dieser Chat hat sich geändert, während das Komprimieren den Durchlauf gestoppt hat."
   },
   "content_compact_chat_changed_waiting_results": {
-    "message": "Dieser Chat hat sich geändert, während das Kompaktieren auf Tool-Ergebnisse gewartet hat."
+    "message": "Dieser Chat hat sich geändert, während das Komprimieren auf Tool-Ergebnisse gewartet hat."
   },
   "content_compact_chat_changed_waiting_tools": {
-    "message": "Dieser Chat hat sich geändert, während das Kompaktieren auf lokale Tools gewartet hat."
+    "message": "Dieser Chat hat sich geändert, während das Komprimieren auf lokale Tools gewartet hat."
   },
   "content_compact_chatgpt_writing": {
     "message": "ChatGPT schreibt die Übergabe"
@@ -156,7 +156,7 @@
     "message": "In ChatGPT steht schon ein Entwurf; leere das Nachrichtenfeld, bevor du die Übergabe anforderst."
   },
   "content_compact_failed": {
-    "message": "Kompaktieren fehlgeschlagen"
+    "message": "Komprimieren fehlgeschlagen"
   },
   "content_compact_failed_request_unconfirmed": {
     "message": "$1 Die App hat noch nicht bestätigt, dass diese fehlgeschlagene Anfrage abgeschlossen wurde."
@@ -168,7 +168,7 @@
     "message": "Die Übergabe-Anweisung wurde hier bereits gesendet. Sie wird von selbst fertig, oder du brichst sie ab."
   },
   "content_compact_handoff_incomplete_detail": {
-    "message": "Die Übergabe-Antwort wurde nicht fertig. Brich das Kompaktieren ab, um zu diesem Chat zurückzukehren."
+    "message": "Die Übergabe-Antwort wurde nicht fertig. Brich das Komprimieren ab, um zu diesem Chat zurückzukehren."
   },
   "content_compact_handoff_problem": {
     "message": "ChatGPT hat beim Vorbereiten der Übergabe ein Problem gemeldet."
@@ -177,13 +177,13 @@
     "message": "ChatGPT konnte nicht um eine Übergabe gebeten werden: $1"
   },
   "content_compact_handoff_stopped_detail": {
-    "message": "Die Übergabe-Antwort wurde gestoppt. Brich das Kompaktieren ab, um zu diesem Chat zurückzukehren."
+    "message": "Die Übergabe-Antwort wurde gestoppt. Brich das Komprimieren ab, um zu diesem Chat zurückzukehren."
   },
   "content_compact_insert_failed": {
     "message": "Der Browser konnte die Übergabe-Anfrage nicht einfügen ($1). Prüfe, ob das Nachrichtenfeld verfügbar ist, und versuch es erneut."
   },
   "content_compact_message_box_changed": {
-    "message": "Das Nachrichtenfeld hat sich geändert, bevor die Übergabe-Anweisung gesendet werden konnte. Sein Entwurf blieb erhalten; es wurde nichts kompaktiert."
+    "message": "Das Nachrichtenfeld hat sich geändert, bevor die Übergabe-Anweisung gesendet werden konnte. Sein Entwurf blieb erhalten; es wurde nichts komprimiert."
   },
   "content_compact_message_box_changed_preserved": {
     "message": "Das Nachrichtenfeld hat sich geändert, bevor die Übergabe gesendet werden konnte. Sein Entwurf blieb erhalten."
@@ -192,25 +192,25 @@
     "message": "Die App hat die Übergabe-Anweisung nicht gesendet."
   },
   "content_compact_missing_token": {
-    "message": "Die App hat kein Kompaktierungs-Token gesendet, daher ließ sich nichts verfolgen."
+    "message": "Die App hat kein Komprimierungs-Token gesendet, daher ließ sich nichts verfolgen."
   },
   "content_compact_nothing_yet": {
-    "message": "Noch nichts zu kompaktieren – sende eine Nachricht oder setz ein Goal, dann schreibt es eine."
+    "message": "Noch nichts zu komprimieren – sende eine Nachricht oder setz ein Goal, dann schreibt es eine."
   },
   "content_compact_opening_fresh": {
     "message": "Übergabe gespeichert, der neue Chat wird geöffnet"
   },
   "content_compact_policy_unverified": {
-    "message": "Es ließ sich nicht prüfen, ob dieser Chat kompaktiert werden darf."
+    "message": "Es ließ sich nicht prüfen, ob dieser Chat komprimiert werden darf."
   },
   "content_compact_results_unconfirmed": {
-    "message": "ChatGPT hat den Empfang der letzten Tool-Ergebnisse nicht bestätigt. Es wurde nichts kompaktiert."
+    "message": "ChatGPT hat den Empfang der letzten Tool-Ergebnisse nicht bestätigt. Es wurde nichts komprimiert."
   },
   "content_compact_resume_cancelled": {
     "message": "Fortsetzen abgebrochen"
   },
   "content_compact_resume_now": {
-    "message": "Jetzt kompaktieren & fortsetzen"
+    "message": "Jetzt komprimieren & fortsetzen"
   },
   "content_compact_send_ambiguous": {
     "message": "Das Ergebnis des Sendens war unklar. Nichts wird doppelt gesendet; brich ausdrücklich ab, falls ChatGPT es nie angenommen hat."
@@ -228,7 +228,7 @@
     "message": "Wird abgeschlossen …"
   },
   "content_compact_source_not_loaded": {
-    "message": "Die ursprüngliche Frage ist noch nicht geladen. Es wurde nichts kompaktiert; es wird auf die Quellunterhaltung gewartet."
+    "message": "Die ursprüngliche Frage ist noch nicht geladen. Es wurde nichts komprimiert; es wird auf die Quellunterhaltung gewartet."
   },
   "content_compact_starting": {
     "message": "Wird gestartet …"
@@ -246,22 +246,22 @@
     "message": "Übergabe schreiben"
   },
   "content_compact_stop_failed": {
-    "message": "ChatGPT hat den laufenden Durchlauf nicht gestoppt. Es wurde nichts kompaktiert."
+    "message": "ChatGPT hat den laufenden Durchlauf nicht gestoppt. Es wurde nichts komprimiert."
   },
   "content_compact_stopping": {
     "message": "Wird gestoppt …"
   },
   "content_compact_ticket_store_failed": {
-    "message": "Das Kompaktierungs-Ticket konnte nicht gespeichert werden."
+    "message": "Das Komprimierungs-Ticket konnte nicht gespeichert werden."
   },
   "content_compact_tools_still_running": {
-    "message": "Lokale Tools liefen nach der Wartezeit noch. Es wurde nichts kompaktiert."
+    "message": "Lokale Tools liefen nach der Wartezeit noch. Es wurde nichts komprimiert."
   },
   "content_compact_tools_stop_unverified": {
-    "message": "Es ließ sich nicht prüfen, ob die lokalen Tools gestoppt haben. Es wurde nichts kompaktiert."
+    "message": "Es ließ sich nicht prüfen, ob die lokalen Tools gestoppt haben. Es wurde nichts komprimiert."
   },
   "content_compact_unavailable": {
-    "message": "Kompaktieren & fortsetzen nicht verfügbar"
+    "message": "Komprimieren & fortsetzen nicht verfügbar"
   },
   "content_compact_waiting_response": {
     "message": "Warte auf die Übergabe-Antwort"
@@ -270,7 +270,7 @@
     "message": "Die Zusammenfassung ist fertig; es wird gewartet, bis die App sie speichert."
   },
   "content_compact_worker_unavailable_hint": {
-    "message": "Worker-Chats bleiben in ihrer bestehenden Unterhaltung und werden nie von Hand kompaktiert oder fortgesetzt."
+    "message": "Worker-Chats bleiben in ihrer bestehenden Unterhaltung und werden nie von Hand komprimiert oder fortgesetzt."
   },
   "content_connector_identity_ambiguous": {
     "message": "Die Identität des installierten Connectors ist nicht verfügbar oder nicht eindeutig"
@@ -345,7 +345,7 @@
     "message": "(leer)"
   },
   "content_error_compaction_running": {
-    "message": "Gerade wird ein anderer Chat kompaktiert."
+    "message": "Gerade wird ein anderer Chat komprimiert."
   },
   "content_error_session_not_recorded": {
     "message": "Für diesen Chat gibt es noch keine aufgezeichnete lokale Sitzung."
@@ -525,7 +525,7 @@
     "message": "Als Loop speichern"
   },
   "content_meter_status": {
-    "message": "$1/$2 · Auto-Kompaktieren $3"
+    "message": "$1/$2 · Auto-Komprimieren $3"
   },
   "content_mode_goal": {
     "message": "Goal"
