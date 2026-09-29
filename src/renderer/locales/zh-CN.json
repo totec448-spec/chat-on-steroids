@@ -9,9 +9,6 @@
   "One request, without automatic continuation.": "单次请求，不自动继续。",
   "Continue until this objective is satisfied.": "继续执行，直到达成此目标。",
   "Keep working within the brief until paused.": "在任务范围内继续工作，直到暂停。",
-  "Current conversation": "当前对话",
-  "Local estimate": "本地估算",
-  "Auto-compaction threshold": "自动压缩阈值",
   "By model": "按模型",
   "By day": "按日期",
   "Code": "代码",
@@ -1746,5 +1743,9 @@
   "Review this edit ({0} of {1} files)": "查看此次编辑（{1} 个文件中的 {0} 个）",
   "This reply points to content from another message that was not recorded.": "此回复指向另一条消息中未被记录的内容。",
   "Local control API: let agents on this computer read app status and chats": "本地控制 API：允许本机上的智能体读取应用状态和聊天",
-  "Use effort: {0}": "使用此强度：{0}"
+  "Use effort: {0}": "使用此强度：{0}",
+  "This chat (estimate)": "此对话（估算）",
+  "Context limit": "上下文上限",
+  "Filled": "已用",
+  "Compacts automatically at": "自动压缩起点"
 }

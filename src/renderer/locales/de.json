@@ -9,9 +9,6 @@
   "One request, without automatic continuation.": "Eine Anfrage ohne automatische Fortsetzung.",
   "Continue until this objective is satisfied.": "Fortfahren, bis dieses Ziel erreicht ist.",
   "Keep working within the brief until paused.": "Innerhalb des Auftrags weiterarbeiten, bis pausiert wird.",
-  "Current conversation": "Aktuelle Unterhaltung",
-  "Local estimate": "Lokale Schätzung",
-  "Auto-compaction threshold": "Schwelle für automatische Komprimierung",
   "By model": "Nach Modell",
   "By day": "Nach Tag",
   "Auto": "Automatisch",
@@ -1746,5 +1743,9 @@
   "Review this edit ({0} of {1} files)": "Diese Bearbeitung prüfen ({0} von {1} Dateien)",
   "This reply points to content from another message that was not recorded.": "Diese Antwort verweist auf Inhalt aus einer anderen Nachricht, der nicht aufgezeichnet wurde.",
   "Local control API: let agents on this computer read app status and chats": "Lokale Steuerungs-API: Agenten auf diesem Computer dürfen App-Status und Chats lesen",
-  "Use effort: {0}": "Stufe verwenden: {0}"
+  "Use effort: {0}": "Stufe verwenden: {0}",
+  "This chat (estimate)": "Dieser Chat (geschätzt)",
+  "Context limit": "Kontextlimit",
+  "Filled": "Belegt",
+  "Compacts automatically at": "Automatisch kompaktieren ab"
 }

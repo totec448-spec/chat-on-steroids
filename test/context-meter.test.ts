@@ -22,7 +22,11 @@ it('keeps Pro static and identifies token estimates and compaction exclusion', (
   expect(doc.getElementById('contextMeterArc')?.getAttribute('stroke-dasharray')).toBe('0 37.7');
   expect(doc.getElementById('contextMeterInfo')?.textContent).toContain('Auto-compaction off for Pro');
   expect(doc.getElementById('contextMeterButton')?.getAttribute('aria-label')).toContain('estimated');
-  expect(doc.getElementById('contextTokens')?.textContent).toContain('est.');
+  expect(doc.getElementById('contextTokens')?.textContent).toBe('100K');
+  // Pro has no configured limit or share: the rows say so instead of showing a number.
+  expect(doc.getElementById('contextLimit')?.textContent).toBe('—');
+  expect(doc.getElementById('contextPercent')?.textContent).toBe('—');
+  expect([...doc.querySelectorAll('.context-data dt')].map(row => row.textContent)).toEqual(['This chat (estimate)', 'Context limit', 'Filled', 'Compacts automatically at']);
 });
 it('uses configured limits for ordinary models and supports click and Escape', () => {
   const doc = setup('gpt-5.6-sol-high');
@@ -30,7 +34,8 @@ it('uses configured limits for ordinary models and supports click and Escape', (
   expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('50%');
   doc.getElementById('contextDisplay')!.click();
   expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('100K / 200K');
-  expect(doc.getElementById('contextTokens')?.textContent).toBe('100K / 200K est.');
+  expect(doc.getElementById('contextTokens')?.textContent).toBe('100K');
+  expect(doc.getElementById('contextLimit')?.textContent).toBe('200K');
   doc.getElementById('contextDisplay')!.click();
   expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('50%');
   initContextMeter();

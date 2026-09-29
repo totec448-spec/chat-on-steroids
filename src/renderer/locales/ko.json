@@ -9,9 +9,6 @@
   "One request, without automatic continuation.": "자동 연속 작업 없이 요청 한 번만 수행합니다.",
   "Continue until this objective is satisfied.": "이 목표가 충족될 때까지 계속합니다.",
   "Keep working within the brief until paused.": "일시 중지될 때까지 이 지시 범위 내에서 계속 작업합니다.",
-  "Current conversation": "현재 대화",
-  "Local estimate": "로컬 추정치",
-  "Auto-compaction threshold": "자동 압축 기준",
   "By model": "모델별",
   "By day": "일별",
   "Auto": "자동",
@@ -1746,5 +1743,9 @@
   "Review this edit ({0} of {1} files)": "이 편집 검토 ({1}개 파일 중 {0}개)",
   "This reply points to content from another message that was not recorded.": "이 응답이 기록되지 않은 다른 메시지의 내용을 참조하고 있습니다.",
   "Local control API: let agents on this computer read app status and chats": "로컬 제어 API: 이 컴퓨터의 에이전트가 앱 상태와 채팅을 읽을 수 있도록 허용",
-  "Use effort: {0}": "이 강도 사용: {0}"
+  "Use effort: {0}": "이 강도 사용: {0}",
+  "This chat (estimate)": "이 채팅(추정)",
+  "Context limit": "컨텍스트 한도",
+  "Filled": "사용률",
+  "Compacts automatically at": "자동 압축 시작"
 }
