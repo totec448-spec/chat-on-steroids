@@ -24,7 +24,8 @@ import { updateStatus } from './update.js';
 import { APP_VERSION } from './version.js';
 
 /**
- * The local control API: an opt-in, read-only loopback listener for a trusted local caller.
+ * The local control API: an opt-in loopback listener for a trusted local caller. It reads by
+ * default; a second switch lets it send and cancel messages through the outbox.
  *
  * Its caller is typically an MCP server an agent launched to watch this app from outside its
  * process. It is deliberately not a fourth MCP surface: those are published through tunnels and
@@ -37,7 +38,10 @@ import { APP_VERSION } from './version.js';
  *     this user's userData, which it could already read in full
  *   · any request carrying an Origin is refused, so no web page or extension can reach it, and
  *     the Host must be this listener's own loopback address (no DNS rebinding)
- *   · GET only, no request bodies, a request rate cap charged after authentication
+ *   · reads are GET only with no request body, under a rate cap charged after authentication
+ *   · actions (POST) need a second switch, `controlApi.allowActions`. Without it every action
+ *     route answers the same refusal before any body is read. With it, a small JSON body is
+ *     read under a byte cap and a timeout, and actions run one at a time under a lower rate cap
  *
  * It owns no fact. Every response is a projection of an existing owner, built with an allowlist
  * so secret-bearing fields (MCP path tokens in local/public URLs, tunnel ids, plugin sources
