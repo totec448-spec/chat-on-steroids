@@ -41,7 +41,19 @@ Release CI builds and smoke-tests every platform/architecture on a native runner
 
 ## Pull requests
 
-Explain the root cause, the smallest behavior change that fixes it, and exactly how you validated it. Packaging/runtime changes should include a packaged-runtime smoke check where relevant.
+This project is maintained by one person, so review time is the scarce part. A PR is reviewed only when **CI and the "PR checklist" check are green**. The checklist runs automatically on every PR and on every edit of its description; its log says exactly what is missing. Use the pull request template and it passes by itself.
+
+What every PR needs:
+
+1. **An issue.** Link it (`Fixes #123` or `Refs #123`). For anything beyond a small fix, agree on the behavior in the issue before writing code.
+2. **Why and what.** The root cause or user problem, and the behavior change, in a few sentences each.
+3. **A test that fails without the change.** Name it in the PR. Only when a test is truly impossible, write `No test: <reason>`.
+4. **Screenshots for interface changes.** Before and after, with placeholder data. Run `npm run verify:ui`.
+5. **One topic, small.** At most 600 changed lines outside tests and translations. Split larger work, or state `Large change: <reason>` and expect a slower review.
+6. **Clean contents.** Nothing unrelated: no worklogs, notes, logs, formatting-only edits or generated output. Rebase on `main` when it conflicts.
+7. **Green checks.** `npm run verify` passes on your machine. Say which OS you ran it on. Packaging/runtime changes also need a packaged-runtime smoke check.
+
+A PR that stays red for two weeks without activity may be closed; it can be reopened at any time.
 
 ## Credit and attribution
 

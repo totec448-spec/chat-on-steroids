@@ -1,12 +1,27 @@
+<!-- CI checks this description. A PR that fails "PR checklist" or CI is not reviewed. See CONTRIBUTING.md. -->
+
+Fixes #
+
+## Why
+
+<!-- The root cause, or the user problem this solves. -->
+
 ## What changed
 
-Describe the root cause and the smallest behavior change that fixes it.
+<!-- The behavior change, in a few sentences. One topic per PR. -->
 
-## Validation
+## Test
 
-- [ ] Added or updated a deterministic regression test where behavior changed.
-- [ ] `npm run verify` passes.
-- [ ] Packaging/runtime smoke was run when the change can differ after bundling.
-- [ ] No unrelated formatting, generated output, local debugging notes, or private data is included.
-- [ ] Screenshots, logs and examples use placeholders instead of real usernames, paths, chat text, IDs or credentials.
-- [ ] Security-sensitive details are being handled privately instead of disclosed here.
+<!-- Name the test you added or changed and confirm it fails without your change.
+     If a test is truly impossible, write: No test: <reason> -->
+
+## Screenshots
+
+<!-- Required when the interface changes: before and after, with placeholder data. Otherwise delete this section. -->
+
+## Checklist
+
+- [ ] `npm run verify` passes on my machine (OS: ).
+- [ ] For interface changes: `npm run verify:ui` passes.
+- [ ] The branch is up to date with `main`, and the PR contains nothing unrelated (no notes, logs or formatting-only changes).
+- [ ] Screenshots, logs and examples contain no real names, paths, chat text, IDs or credentials.
