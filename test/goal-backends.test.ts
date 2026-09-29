@@ -129,7 +129,9 @@ async function recording(conversationId: string, text: string): Promise<string> 
   return session.id;
 }
 async function settled(id: string) {
-  await vi.waitFor(() => expect(goal.goalViewFor(id)?.stage).not.toMatch(/^(sending|answering)$/));
+  // The chatgpt backend walks a simulated browser round trip; one second (the default) was too
+  // short for it under the full suite on the Windows runner.
+  await vi.waitFor(() => expect(goal.goalViewFor(id)?.stage).not.toMatch(/^(sending|answering)$/), { timeout: 10_000, interval: 25 });
   return goal.goalViewFor(id)!;
 }
 describe('Goal decision backends', () => {
