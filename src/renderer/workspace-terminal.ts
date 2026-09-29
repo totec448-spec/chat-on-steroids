@@ -4,6 +4,7 @@ import '@xterm/xterm/css/xterm.css';
 import { el, icon, toast } from './dom.js';
 import { t, ui } from './i18n.js';
 import { onAppearanceChanged } from './appearance.js';
+import { enableTabReorder, reorderKey } from './tab-reorder.js';
 import type { LocalProject } from '../shared/projects.js';
 
 type Tab = { id: string; title: string; node: HTMLElement; term: Terminal; fit: FitAddon; ready: boolean; exited: boolean; queued: number; writes: Promise<void> };
@@ -68,13 +69,23 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     paint(); fit();
     if (!tabs.size) options.onEmpty?.();
   };
+  let tabSignature = '';
   const paint = (): void => {
-    if (!options.dockedTabs) tabsHost.replaceChildren();
+    for (const tab of tabs.values()) tab.node.hidden = tab.id !== selected;
+    // Selection alone updates the pills in place; only a change of tabs, order or titles rebuilds.
+    const signature = [...tabs.values()].map(tab => `${tab.id}:${tab.title}:${tab.exited}`).join(',');
+    if (!options.dockedTabs && signature === tabSignature) {
+      for (const wrapper of tabsHost.children as HTMLCollectionOf<HTMLElement>) {
+        const current = wrapper.dataset.id === selected;
+        wrapper.classList.toggle('is-selected', current);
+        wrapper.querySelector('.btn')!.setAttribute('aria-pressed', String(current));
+      }
+    } else if (!options.dockedTabs) { tabSignature = signature; tabsHost.replaceChildren(); }
     for (const tab of tabs.values()) {
-      tab.node.hidden = tab.id !== selected;
-      if (options.dockedTabs) continue;
-      const wrapper = el('div', `terminal-tab${tab.id === selected ? ' is-selected' : ''}`);
-      const pick = el('button', 'btn', () => `${tab.title}${tab.exited ? ` · ${t('exited')}` : ''}`) as HTMLButtonElement;
+      if (options.dockedTabs || tabsHost.childElementCount === tabs.size) continue;
+      const wrapper = el('div', `terminal-tab${tab.id === selected ? ' is-selected' : ''}`); wrapper.dataset.id = tab.id;
+      const pick = el('button', 'btn') as HTMLButtonElement;
+      pick.append(icon('i-terminal'), el('span', 'tab-label', () => `${tab.title}${tab.exited ? ` · ${t('exited')}` : ''}`));
       pick.type = 'button'; pick.title = tab.title;
       pick.setAttribute('aria-pressed', String(tab.id === selected));
       pick.addEventListener('click', () => { selected = tab.id; paint(); fit(); tab.term.focus(); });
@@ -130,6 +141,22 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     if ('data' in event) tab.term.write(event.data, () => { void window.api.terminalAck(event.id, event.data.length); });
     else { tab.exited = true; tab.term.write(`\r\n[${t('Process exited: {0}', [event.exitCode])}]\r\n`); paint(); options.onTabsChanged?.(); }
   });
+  // Tab order is the map's insertion order; moving a tab rebuilds it in the new order.
+  const moveTab = (id: string, index: number): void => {
+    const order = [...tabs.values()], from = order.findIndex(tab => tab.id === id); if (from < 0) return;
+    const [tab] = order.splice(from, 1); order.splice(Math.max(0, Math.min(order.length, index)), 0, tab!);
+    tabs.clear(); for (const entry of order) tabs.set(entry.id, entry);
+    paint(); options.onTabsChanged?.();
+  };
+  if (!options.dockedTabs) {
+    enableTabReorder(tabsHost, { item: '.terminal-tab', key: node => node.dataset.id, move: moveTab });
+    tabsHost.addEventListener('keydown', event => {
+      const step = reorderKey(event); if (!step || !selected || tabs.size < 2) return;
+      event.preventDefault(); event.stopPropagation();
+      moveTab(selected, [...tabs.keys()].indexOf(selected) + step);
+      tabsHost.querySelector<HTMLButtonElement>('.terminal-tab.is-selected > .btn:first-child')?.focus();
+    });
+  }
   add.addEventListener('click', () => { addMenu.open = false; void create(); }); empty.addEventListener('click', () => void create());
   addMenu.addEventListener('keydown', event => { if (event.key === 'Escape') { addMenu.open = false; addTrigger.focus(); } });
   document.addEventListener('click', event => { if (addMenu.open && !addMenu.contains(event.target as Node)) addMenu.open = false; });
