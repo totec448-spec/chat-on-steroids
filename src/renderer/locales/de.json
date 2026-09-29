@@ -1745,5 +1745,6 @@
   "Diff unavailable: this edit was not kept": "Diff nicht verfügbar: Diese Bearbeitung wurde nicht gespeichert",
   "Review this edit ({0} of {1} files)": "Diese Bearbeitung prüfen ({0} von {1} Dateien)",
   "This reply points to content from another message that was not recorded.": "Diese Antwort verweist auf Inhalt aus einer anderen Nachricht, der nicht aufgezeichnet wurde.",
-  "Local control API: let agents on this computer read app status and chats": "Lokale Steuerungs-API: Agenten auf diesem Computer dürfen App-Status und Chats lesen"
+  "Local control API: let agents on this computer read app status and chats": "Lokale Steuerungs-API: Agenten auf diesem Computer dürfen App-Status und Chats lesen",
+  "Use effort: {0}": "Stufe verwenden: {0}"
 }
