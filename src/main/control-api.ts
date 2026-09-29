@@ -49,6 +49,17 @@ const ENDPOINT_FILE = 'endpoint.json';
 const RATE_LIMIT = 600;
 /** How long in-flight requests get to finish once the listener stops. */
 const DRAIN_MS = 2_000;
+/** How long a read waits for the owner it asked before the caller is told it is stuck. */
+const READ_DEADLINE_MS = 15_000;
+let readDeadlineMs = READ_DEADLINE_MS;
+/** Reads that have started and not finished, answered or not. A watcher polls a handful at a time. */
+const MAX_UNFINISHED_READS = 8;
+let unfinishedReads = 0;
+
+/** Test seam: the deadline is long enough that a test could not wait for it. */
+export function setReadDeadlineForTests(ms?: number): void {
+  readDeadlineMs = ms ?? READ_DEADLINE_MS;
+}
 
 let directory: string | null = null;
 let server: http.Server | null = null;
@@ -225,29 +236,55 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, token
     };
     return reply(res, 200, body);
   }
-  if (route === '/v1/status') {
-    const body = projectStatus({
-      connection: getStatus(),
-      bridge: await bridgeStatus(),
-      plugins: pluginManager.snapshot(),
-      update: updateStatus(),
-      toolCalls: {
-        running: runningToolCalls(null),
-        settling: settlingToolCalls(null),
-        inFlight: inFlightToolCalls(null),
-        inFlightMcpRequests: inFlightMcpRequests()
-      }
-    });
-    return reply(res, 200, body);
-  }
   try {
-    const body = await serveRead(route, url.searchParams);
+    const body = await withReadDeadline(() => read(route, url.searchParams));
     if (body !== undefined) return reply(res, 200, body);
   } catch (error) {
     if (error instanceof RequestError) return reply(res, error.status, { error: error.code, ...(error.detail ? { detail: error.detail } : {}) });
     throw error;
   }
   return reply(res, 404, { error: 'not_found' });
+}
+
+/** Every read that asks an owner something. `/v1/health` asks nobody and is answered before this. */
+async function read(route: string, params: URLSearchParams): Promise<unknown> {
+  if (route !== '/v1/status') return serveRead(route, params);
+  return projectStatus({
+    connection: getStatus(),
+    bridge: await bridgeStatus(),
+    plugins: pluginManager.snapshot(),
+    update: updateStatus(),
+    toolCalls: {
+      running: runningToolCalls(null),
+      settling: settlingToolCalls(null),
+      inFlight: inFlightToolCalls(null),
+      inFlightMcpRequests: inFlightMcpRequests()
+    }
+  });
+}
+
+/**
+ * A read that waits on an owner that is stuck would never answer, and a stuck app is the case a
+ * watcher most needs an answer from. Past the deadline the caller is told so, and `/v1/health`
+ * still answers. The read itself is not cancelled: it is left to finish or fail on its own, and it
+ * keeps its place among the few that may be unfinished at once until it does. Answering early
+ * therefore cannot let a watcher that keeps polling pile up stuck reads behind the owner: once
+ * they fill the places, the next read is refused at once. One timer per request, cleared when
+ * the request is answered.
+ */
+function withReadDeadline<T>(start: () => Promise<T>): Promise<T> {
+  if (unfinishedReads >= MAX_UNFINISHED_READS) {
+    return Promise.reject(new RequestError(503, 'busy', 'too many reads are waiting on the app; retry shortly'));
+  }
+  unfinishedReads += 1;
+  const work = start();
+  const finished = () => { unfinishedReads -= 1; };
+  work.then(finished, finished);
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new RequestError(504, 'timeout', 'the app did not answer in time; /v1/health may still answer')), readDeadlineMs);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
 export interface StatusSources {
