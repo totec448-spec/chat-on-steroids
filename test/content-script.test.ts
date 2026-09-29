@@ -8011,6 +8011,13 @@ describe('a stop button that goes missing while the turn is still running', () =
         recoverable: true
       })
     );
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({
+      assistantError: true
+    });
+    notice.remove();
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({
+      assistantError: false
+    });
   });
 
   /**
