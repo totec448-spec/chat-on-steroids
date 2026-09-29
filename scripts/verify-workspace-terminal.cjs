@@ -4,6 +4,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
+// PowerShell on Windows, the login shell elsewhere. Every command prints a marker the checks wait for.
+const WINDOWS = process.platform === 'win32';
+const SHELL = WINDOWS ? 'powershell' : path.basename(process.env.SHELL || '/bin/bash');
+// The tab shows the terminal's title. PowerShell keeps its name; zsh and bash replace it with their
+// own title (user@host:dir) once the prompt draws, so elsewhere any label will do.
+const TAB_LABEL = WINDOWS ? `.includes(${JSON.stringify(SHELL)})` : '.trim().length>0';
+const sh = WINDOWS ? {
+  home: "Write-Output ('HOME_'+(Get-Location).Path)",
+  proof: "$proof='persisted'; cd child; Write-Output ('PROOF_'+$proof+'_'+(Split-Path (Get-Location) -Leaf))",
+  show: label => `Write-Output ('${label}_'+$proof)`,
+  plain: text => `Write-Output ${text}`,
+  second: "Write-Output ('SECOND_'+(Split-Path (Get-Location) -Leaf)); Start-Sleep -Seconds 30",
+  interrupt: "Write-Output ('INTERRUPT'+'_OK')"
+} : {
+  home: 'echo "HOME_$PWD"',
+  proof: 'proof=persisted; cd child; echo "PROOF_${proof}_$(basename "$PWD")"',
+  show: label => `echo "${label}_$proof"`,
+  plain: text => `echo ${text}`,
+  second: 'echo "SECOND_$(basename "$PWD")"; sleep 30',
+  interrupt: 'echo "INTERRUPT""_OK"'
+};
 const output = path.join(root, 'outputs/terminal-acceptance');
 fs.mkdirSync(output, { recursive: true });
 app.setPath('userData', path.join(output, 'runtime'));
@@ -67,6 +88,8 @@ app.whenReady().then(async () => {
   } }] });
   const js = code => win.webContents.executeJavaScript(code);
   const click = async selector => {
+    // Docks slide in (panel-motion.ts); measure the target at rest, not mid-drawer.
+    await js('Promise.race([Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().endTime !== Infinity).map(animation => animation.finished.catch(() => undefined))), new Promise(resolve => setTimeout(resolve, 1500))])');
     const point = await js(`(()=>{const node=document.querySelector(${JSON.stringify(selector)});const rect=node.getBoundingClientRect();const x=Math.round(rect.left+rect.width/2),y=Math.round(rect.top+rect.height/2);return {x,y,target:document.elementFromPoint(x,y)?.outerHTML.slice(0,120)}})()`);
     win.webContents.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
     win.webContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
@@ -76,20 +99,23 @@ app.whenReady().then(async () => {
   try {
     await server.listen(); await win.loadURL(server.resolvedUrls.local[0] + 'fixture.html'); await until('window.ready');
     await js("window.setTerminalProject(null);document.getElementById('terminalToggle').click()");
-    await until('ids.length===1 && document.querySelector("#workspaceTerminal .terminal-tab").textContent.includes("powershell")');
+    await until(`ids.length===1 && document.querySelector("#workspaceTerminal .terminal-tab").textContent${TAB_LABEL}`);
     const homeId = await js('ids[0]');
     assert.equal(await js('document.querySelector("#workspaceTerminal .terminal-screen").title'), app.getPath('home'));
-    await js(`window.api.terminalWrite(${JSON.stringify(homeId)}, "Write-Output ('HOME_'+(Get-Location).Path)\\r")`);
+    await js(`window.api.terminalWrite(${JSON.stringify(homeId)}, ${JSON.stringify(sh.home + '\r')})`);
     await until(`outputs[${JSON.stringify(homeId)}]?.includes('HOME_')`);
     await js("document.querySelector('#workspaceTerminal .terminal-tab .btn-icon').click()");
     await until('document.getElementById("workDockBottom").hidden');
     assert.equal((await js(`window.api.terminalWrite(${JSON.stringify(homeId)}, 'echo closed\\r')`)).ok, false);
     await js(`window.setTerminalProject(${JSON.stringify(project)});window.ids=[];document.getElementById('terminalToggle').click()`);
-    await until('ids.length===1 && document.querySelector(".terminal-tab").textContent.includes("powershell")');
+    await until(`ids.length===1 && document.querySelector(".terminal-tab").textContent${TAB_LABEL}`);
     const first = await js('ids[0]');
     assert.equal(await js('!document.getElementById("workspaceTerminal").hidden && !document.getElementById("workDockBottom").hidden'), true);
-    // Type via actual Chromium input into xterm, through the production preload and IPC.
-    win.webContents.insertText("$proof='persisted'; cd child; Write-Output ('PROOF_'+$proof+'_'+(Split-Path (Get-Location) -Leaf))");
+    // Type via actual Chromium input into xterm, through the production preload and IPC. The drawer
+    // animates in first; opening a terminal must leave the keyboard in it.
+    await js('Promise.race([Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().endTime !== Infinity).map(animation => animation.finished.catch(() => undefined))), new Promise(resolve => setTimeout(resolve, 1500))])');
+    await until(`!!document.activeElement?.closest('#workspaceTerminal .xterm')`);
+    win.webContents.insertText(sh.proof);
     win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' }); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
     await until(`outputs[${JSON.stringify(first)}]?.includes('PROOF_persisted_child')`);
     assert.ok(await js(`(()=>{const tab=document.querySelector('#workspaceTerminal .terminal-tab').getBoundingClientRect();const plus=document.querySelector('#workspaceTerminal .work-dock-add summary').getBoundingClientRect();return plus.left-tab.right<=12&&plus.left>=tab.right})()`));
@@ -106,21 +132,21 @@ app.whenReady().then(async () => {
     await click('#workspaceTerminal .terminal-panel-close');
     // The bottom dock hides its terminal once the closing drawer has left.
     await until('document.getElementById("workspaceTerminal").hidden');
-    await js(`window.api.terminalWrite(${JSON.stringify(first)}, "Write-Output ('HIDDEN_'+$proof)\\r")`);
+    await js(`window.api.terminalWrite(${JSON.stringify(first)}, ${JSON.stringify(sh.show('HIDDEN') + '\r')})`);
     await until(`outputs[${JSON.stringify(first)}]?.includes('HIDDEN_persisted')`);
     await js("document.getElementById('rightDockToggle').click()");
     assert.equal(await js("document.querySelector('#workDockRight .work-dock-bar').hidden && !document.querySelector('#workDockRight .work-dock-empty').hidden"), true);
     await click('#workDockRight .work-dock-quick[data-view=terminal]');
-    await until('ids.length===3 && document.querySelector("#workDockRight .work-dock-tab[data-terminal-id]").textContent.includes("powershell")');
+    await until(`ids.length===3 && document.querySelector("#workDockRight .work-dock-tab[data-terminal-id]").textContent${TAB_LABEL}`);
     assert.equal(await js("document.querySelectorAll('#workDockRight [role=tab]').length"), 1);
     assert.equal(await js("document.querySelector('#workspaceTerminalRight .terminal-bar') === null"), true);
     assert.equal(await js('document.getElementById("workDockBottom").hidden'), true);
-    await js(`window.api.terminalWrite(${JSON.stringify(first)}, "Write-Output ('BOTTOM_'+$proof)\\r")`);
+    await js(`window.api.terminalWrite(${JSON.stringify(first)}, ${JSON.stringify(sh.show('BOTTOM') + '\r')})`);
     await until(`outputs[${JSON.stringify(first)}]?.includes('BOTTOM_persisted')`);
     const second = await js('ids[2]');
     await js("document.getElementById('rightDockToggle').click()");
     assert.equal(await js('document.getElementById("workDockRight").hidden'), true);
-    await js(`window.api.terminalWrite(${JSON.stringify(second)}, "Write-Output RIGHT_HIDDEN_OK\\r")`);
+    await js(`window.api.terminalWrite(${JSON.stringify(second)}, ${JSON.stringify(sh.plain('RIGHT_HIDDEN_OK') + '\r')})`);
     await until(`outputs[${JSON.stringify(second)}]?.includes('RIGHT_HIDDEN_OK')`);
     await js("document.getElementById('rightDockToggle').click()");
     assert.equal(await js('ids.length===3 && !document.getElementById("workDockRight").hidden && document.querySelectorAll("#workDockRight .work-dock-tab[data-terminal-id]").length===1'), true);
@@ -143,12 +169,14 @@ app.whenReady().then(async () => {
       assert.equal(await js(`getComputedStyle(document.getElementById('connectionPopover')).backgroundColor`),
         await js(`getComputedStyle(document.querySelector('.sidebar')).backgroundColor`));
     }
-    await js(`window.api.terminalWrite(${JSON.stringify(second)}, "Write-Output ('SECOND_'+(Split-Path (Get-Location) -Leaf)); Start-Sleep -Seconds 30\\r")`);
+    await js(`window.api.terminalWrite(${JSON.stringify(second)}, ${JSON.stringify(sh.second + '\r')})`);
     await until(`outputs[${JSON.stringify(second)}]?.includes('SECOND_project')`);
-    const promptsBeforeInterrupt = await js(`(outputs[${JSON.stringify(second)}].match(/PS C:/g) || []).length`);
+    // PowerShell prints a fresh "PS C:" prompt after Ctrl+C; elsewhere the marker below arriving
+    // long before the 30 s sleep ends is the proof that the interrupt landed.
+    const promptsBeforeInterrupt = WINDOWS ? await js(`(outputs[${JSON.stringify(second)}].match(/PS C:/g) || []).length`) : 0;
     await js(`window.api.terminalWrite(${JSON.stringify(second)}, "\\u0003")`);
-    await until(`(outputs[${JSON.stringify(second)}].match(/PS C:/g) || []).length > ${promptsBeforeInterrupt}`);
-    await js(`window.api.terminalWrite(${JSON.stringify(second)}, "Write-Output ('INTERRUPT'+'_OK')\\r")`);
+    if (WINDOWS) await until(`(outputs[${JSON.stringify(second)}].match(/PS C:/g) || []).length > ${promptsBeforeInterrupt}`);
+    await js(`window.api.terminalWrite(${JSON.stringify(second)}, ${JSON.stringify(sh.interrupt + '\r')})`);
     await until(`outputs[${JSON.stringify(second)}]?.includes('INTERRUPT_OK')`);
     win.setSize(830, 700); await new Promise(resolve => setTimeout(resolve, 300));
     const geometry = await js(`(()=>{const p=document.getElementById('workspaceTerminal').getBoundingClientRect();return {width:p.width,height:p.height,fits:p.right<=innerWidth+1&&p.bottom<=innerHeight+1}})()`);

@@ -11,6 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
+const { fixtureConfigSource } = require('./fixtures/app-defaults.cjs');
 const output = path.join(root, 'outputs/sidebar-setup');
 app.setPath('userData', path.join(output, 'runtime'));
 app.whenReady().then(async () => {
@@ -18,7 +19,8 @@ app.whenReady().then(async () => {
   const fixture = `
     if (new URL(location.href).searchParams.has('reset')) localStorage.removeItem('chat-on-steroids.sidebar-order');
     localStorage.removeItem('cos.ui.language');
-    const config = {
+    ${fixtureConfigSource()}
+    const config = fixtureConfig({
       roots: [{name:'demo',path:'C:/demo'}], readOnly:true,
       capabilities: {browse:true,search:true,read:true,metadata:true,create:false,edit:false,move:false,deleteFile:false,command:false,screen:false,control:false,clipboardRead:false,clipboardWrite:false},
       tunnel: {kind:'openai',tunnelId:'',desktopTunnelId:'',binaryPath:''},
@@ -26,7 +28,7 @@ app.whenReady().then(async () => {
       sessions: {record:true,retainDays:30,advisoryTokens:300000,limitTokens:400000}, compaction:{auto:true,autoTokens:300000},
       multiAgent:{enabled:false,maxWorkers:2,allowUnattributedCalls:false,recoverAgentTabs:false},
       goal:{enabled:false,model:'fixture',reasoning:'default',prompt:'Fixture'}
-    };
+    });
     const state = {config,hasApiKey:false,hasGoalKey:false,resolvedBinary:null,bundledTunnelVersion:null,
       status:{state:'disconnected',detail:'',publicUrl:null,localUrl:null,handshakeAt:null,lastRequestAt:null,lastToolCallAt:null,health:null,surfaces:[]},
       bridge:{running:false,port:0,paired:false,present:false,lastSeenAt:null,extensionVersion:null},
@@ -106,9 +108,9 @@ app.whenReady().then(async () => {
     const geometry = await js(`(() => { const group=document.querySelector('.project-group');
       const title=group.querySelector('.project-name').getBoundingClientRect(), chat=group.querySelector('.sess-top b').getBoundingClientRect();
       return {title:title.left,chat:chat.left,count:group.querySelectorAll(':scope > .sess').length,color:getComputedStyle(document.getElementById('newChat')).color,
-        icon:document.querySelector('#newChat use').getAttribute('href')}; })()`);
+        icon:[...document.querySelector('#newChat i.ico').classList].find(name => name.startsWith('ph-') && name !== 'ph')}; })()`);
     assert.equal(geometry.count,5); assert.ok(Math.abs(geometry.title-geometry.chat)<1,JSON.stringify(geometry));
-    assert.equal(geometry.color,'rgb(255, 255, 255)'); assert.equal(geometry.icon,'#i-pencil');
+    assert.equal(geometry.color,'rgb(255, 255, 255)'); assert.equal(geometry.icon,'ph-pencil-simple');
     await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     await new Promise(r=>setTimeout(r,200));
     const points=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>{const r=row.getBoundingClientRect();return {x:Math.round(r.left+35),y:Math.round(r.top+r.height/2)}})`);
@@ -170,7 +172,8 @@ app.whenReady().then(async () => {
       });
       return {width:menu.width, right:menu.right, triggerWidth:trigger.width, triggerRight:trigger.right, rows};
     })()`);
-    assert.ok(compactProfiles.width >= compactProfiles.triggerWidth && compactProfiles.width <= 190, JSON.stringify(compactProfiles));
+    // settings.css sizes the menu at min(260px, 100vw - 32px) since the 2026-09-28 Settings polish.
+    assert.ok(compactProfiles.width >= compactProfiles.triggerWidth && compactProfiles.width <= 260, JSON.stringify(compactProfiles));
     assert.ok(Math.abs(compactProfiles.right - compactProfiles.triggerRight) <= 1, JSON.stringify(compactProfiles));
     for (const row of compactProfiles.rows) {
       assert.ok(compactProfiles.right - row.removeRight <= 12, JSON.stringify(compactProfiles));

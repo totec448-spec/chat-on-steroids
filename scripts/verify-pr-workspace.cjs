@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
+const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require('./fixtures/app-defaults.cjs');
 const output = path.join(root, 'outputs/pr-workspace');
 app.setPath('userData', path.join(output, 'runtime'));
 fs.mkdirSync(output, { recursive: true });
@@ -22,16 +23,17 @@ app.whenReady().then(async () => {
     const fixture = `
       localStorage.clear();
       window.fixtureErrors=[];
-      window.addEventListener('error', event => window.fixtureErrors.push(event.message));
+      window.addEventListener('error', event => { if (!${JSON.stringify(BENIGN_RENDERER_ERRORS)}.includes(event.message)) window.fixtureErrors.push(event.message); });
       window.addEventListener('unhandledrejection', event => window.fixtureErrors.push(String(event.reason)));
-      const config={roots:[{name:'demo',path:'C:/demo'}],readOnly:false,
+      ${fixtureConfigSource()}
+    const config = fixtureConfig({roots:[{name:'demo',path:'C:/demo'}],readOnly:false,
         commandAllowlist:{enabled:false,mode:'allow',rules:[]},
         capabilities:{browse:true,search:true,read:true,metadata:true,create:true,edit:true,move:true,deleteFile:true,command:true,screen:false,control:false,clipboardRead:false,clipboardWrite:false},
         tunnel:{kind:'openai',tunnelId:'',desktopTunnelId:'',binaryPath:''},
         ui:{minimizeToTray:true,autoConnect:false,privacyScreenshots:false,theme:'dark'},
         sessions:{record:true,retainDays:30,advisoryTokens:300000,limitTokens:400000},compaction:{auto:true,autoTokens:300000},
         multiAgent:{enabled:false,maxWorkers:2,allowUnattributedCalls:false,recoverAgentTabs:false},
-        goal:{enabled:false,model:'fixture',reasoning:'default',prompt:'Fixture'}};
+        goal:{enabled:false,model:'fixture',reasoning:'default',prompt:'Fixture'}});
       const state={config,hasApiKey:false,hasGoalKey:false,resolvedBinary:null,bundledTunnelVersion:null,
         status:{state:'disconnected',detail:'',publicUrl:null,localUrl:null,handshakeAt:null,lastRequestAt:null,lastToolCallAt:null,health:null,surfaces:[]},
         bridge:{running:true,port:8765,paired:true,present:true,lastSeenAt:Date.now(),extensionVersion:'2.1.13'},
@@ -282,7 +284,8 @@ app.whenReady().then(async () => {
     assert.equal(setup.display,'grid'); await screenshot('setup-spanish-aligned');
     await js(`document.getElementById('backToChat').click();const input=document.getElementById('chatInput');input.value='/';input.setSelectionRange(1,1);input.dispatchEvent(new Event('input',{bubbles:true}));`);
     await until('!document.getElementById("skillPicker").hidden && document.querySelector(".skill-choice")');
-    assert.equal(await js('document.getElementById("sidebarSkills")'),null);
+    // The Skills library has its own sidebar entry since 2026-09-27; slash commands still work beside it.
+    assert.ok(await js('!!document.getElementById("sidebarSkills")'));
     assert.equal(await js('document.querySelector(".skill-add")'),null);
     await screenshot('slash-commands-skills');
     await js(`document.getElementById('composerAddSkill').closest('details').open=true`);
