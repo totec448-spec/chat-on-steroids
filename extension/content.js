@@ -614,6 +614,16 @@
    * or the Stop control genuinely going away.
    */
   let fiberTerminalMessageId = null;
+  /*
+   * #746: native finals that were already settled before the current generation began. ChatGPT
+   * can briefly hand a new answer's section the previous turn's React branch; its `end_turn`
+   * then closed the new turn about 100 ms after turn_start, and hours of work had no owner.
+   * A final this document already knew when it opened a turn, or one that already ended a turn,
+   * ends no later turn. Adopted turns (reload, late ownership) open nothing here and keep their
+   * own final.
+   */
+  const knownFinals = new Set();
+  const settledFinals = new Set();
 
   /** App-owned render events, including calls ChatGPT never gave a native row. */
   const streamBySeq = new Map();
@@ -2596,6 +2606,7 @@
       // state the resume exists to keep, since recorder.ts empties `progress`, `pageTools`
       // and the pending sightings on every turn_start.
       emit({ kind: 'turn_start', turnId });
+      for (const known of knownFinals) settledFinals.add(known);
 
       // The compaction binding is made here and only here: the first generation to open
     }
@@ -4450,13 +4461,19 @@
     // button. If the final assistant message says `end_turn:true`, close the exact local
     // generation even if a stale Stop control remains mounted. Final message/activity
     // revisions above have already been emitted, so do not trigger a second Fiber final pass.
+    for (const seen of answer.turns) if (seen?.endMessageId) knownFinals.add(seen.endMessageId);
+    for (const bounded of [knownFinals, settledFinals]) {
+      while (bounded.size > 2000) bounded.delete(bounded.values().next().value);
+    }
     if (
       generating &&
       activeTurnIndex >= 0 &&
       activeLocalTurnId === turnId &&
-      Boolean(answer.turns[activeTurnIndex]?.endMessageId)
+      Boolean(answer.turns[activeTurnIndex]?.endMessageId) &&
+      !settledFinals.has(answer.turns[activeTurnIndex].endMessageId)
     ) {
       fiberTerminalMessageId = answer.turns[activeTurnIndex].endMessageId;
+      settledFinals.add(fiberTerminalMessageId);
       const ended = generationTurn();
       if (ended) {
         // Native completion resolves transport uncertainty even when its old
