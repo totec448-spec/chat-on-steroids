@@ -27,14 +27,19 @@ try {
 }
 Write-Output 'CAPTURE_RUNTIME_VERIFIED'
 `, 'utf8');
+      // Add-Type compiles C# in a cold PowerShell. Alone that takes seconds; under the full CI
+      // suite on a Windows runner it has taken longer than 15 s, and the kill then read only as
+      // "Command failed". Correctness is under test here, not speed.
       const { stdout } = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', script], {
         windowsHide: true,
-        timeout: 15_000,
+        timeout: 90_000,
         maxBuffer: 32_768
+      }).catch((error: NodeJS.ErrnoException & { killed?: boolean; signal?: string; stderr?: string }) => {
+        throw new Error(`capture probe ${error.killed ? `was killed after the timeout (${error.signal})` : 'failed'}: ${error.stderr || error.message}`);
       });
       expect(stdout.trim()).toBe('CAPTURE_RUNTIME_VERIFIED');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  }, 20_000);
+  }, 100_000);
 });
