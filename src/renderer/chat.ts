@@ -28,6 +28,7 @@ import { installComposerDockMotion, installComposerHeightMotion } from './compos
 import { sanitizeHtmlTree } from './sanitize-html.js';
 import { isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
+import { answerAnchors } from '../shared/markdown-export.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
 import { injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
@@ -69,7 +70,7 @@ import {
 } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_PROMPT, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
-import { $, ago, clockTime, compactNumber, disclosureChevron, el, filterSettingsSections, icon, run, toast } from './dom.js';
+import { $, ago, clockTime, compactNumber, disclosureChevron, el, filterSettingsSections, icon, run, setIcon, toast } from './dom.js';
 
 const api = window.api;
 
@@ -2215,6 +2216,58 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
   }
 }
 
+/**
+ * Copy and Markdown export under the answer of a turn the page reported as completed. Main
+ * builds the text from the log, reading back answers that were cut there, so a long answer
+ * copies and exports whole; the timeline only decides where the actions appear.
+ */
+function answerActions(turnId: string): HTMLElement {
+  const bar = el('div', 'answer-actions');
+  const sessionId = selectedId;
+  const exportTo = async (scope: 'answer' | 'session', target: 'clipboard' | 'file') => {
+    if (!sessionId || selectedId !== sessionId) return null;
+    return run(api.exportMarkdown({ id: sessionId, scope, turnId: scope === 'answer' ? turnId : undefined, target }));
+  };
+  const copy = el('button', 'answer-action') as HTMLButtonElement;
+  copy.type = 'button';
+  const copyGlyph = icon('i-copy');
+  copy.append(copyGlyph);
+  ui(copy, 'title', () => t('Copy answer')); ui(copy, 'aria-label', () => t('Copy answer'));
+  let copiedTimer: number | undefined;
+  copy.addEventListener('click', async () => {
+    const result = await exportTo('answer', 'clipboard');
+    if (result?.done !== 'copied') return;
+    setIcon(copyGlyph, 'i-check'); copy.classList.add('is-done');
+    window.clearTimeout(copiedTimer);
+    copiedTimer = window.setTimeout(() => { setIcon(copyGlyph, 'i-copy'); copy.classList.remove('is-done'); }, 1500);
+  });
+  const menu = document.createElement('details');
+  menu.className = 'answer-export';
+  const trigger = el('summary', 'answer-action');
+  trigger.append(icon('i-export'));
+  ui(trigger, 'title', () => t('Export as Markdown')); ui(trigger, 'aria-label', () => t('Export as Markdown'));
+  const choices = el('div', 'answer-export-menu');
+  for (const [scope, label] of [['answer', 'This answer'], ['session', 'Whole session']] as const) {
+    const choice = el('button', 'answer-export-choice', () => t(label)) as HTMLButtonElement;
+    choice.type = 'button';
+    choice.addEventListener('click', async () => {
+      menu.open = false;
+      const result = await exportTo(scope, 'file');
+      if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
+    });
+    choices.append(choice);
+  }
+  menu.append(trigger, choices);
+  const close = (event: Event) => { if (menu.open && !menu.contains(event.target as Node)) menu.open = false; };
+  menu.addEventListener('toggle', () => {
+    if (menu.open) document.addEventListener('pointerdown', close, true);
+    else document.removeEventListener('pointerdown', close, true);
+  });
+  menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; trigger.focus(); } });
+  bar.append(copy, menu);
+  return bar;
+}
+
 function eventRow(event: SessionEvent): HTMLElement {
   const row = el('div', `ev ev-${event.kind}`);
   if (event.kind === 'assistant_message' && !withoutMessageReaction(event.message.text).trim()) row.hidden = true;
@@ -2848,6 +2901,8 @@ function paintDetail(followBottom = historyBefore === null): void {
     }
   };
   const duplicateErrors = duplicateChatErrors(events);
+  // Completed turns and the answer message that carries their copy/export actions.
+  const anchors = answerAnchors(events);
   for (const item of timelineItems(shown)) {
     if (item.kind === 'event' && duplicateErrors.has(item.event.seq)) continue;
     appendRetiredInputs(item.kind === 'event' ? item.event.time : item.block.time);
@@ -2855,8 +2910,10 @@ function paintDetail(followBottom = historyBefore === null): void {
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && item.event.source === 'app' && item.event.kind === 'progress' && item.event.progressId?.startsWith('browser-repair:')) continue;
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && ['session_start', 'session_end', 'turn_start', 'turn_end', 'note'].includes(item.event.kind)) continue;
     const key = itemKey(item);
+    const answerTurn = item.kind === 'event' && item.event.kind === 'assistant_message' && item.event.turnId &&
+      anchors.get(item.event.turnId) === item.event.seq ? item.event.turnId : null;
     const sig = itemSignature(item) + (item.kind === 'event' && item.event.kind === 'chat_error'
-      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '');
+      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn ? '\u0000answer' : '');
     keep.add(key);
     const cached = rowCache.get(key);
     if (cached && cached.sig === sig) {
@@ -2869,6 +2926,7 @@ function paintDetail(followBottom = historyBefore === null): void {
       continue;
     }
     const row = item.kind === 'compaction' ? compactionRow(item.block, cached?.row) : eventRow(item.event);
+    if (answerTurn) row.querySelector('.said')?.append(answerActions(answerTurn));
     row.dataset.timelineKey = key;
     row.dataset.activityBoundary = activityBoundary;
     paintInputReceipt(row, item);
