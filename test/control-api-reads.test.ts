@@ -7,7 +7,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ResumeJobView, SessionControlsView } from '../src/main/bridge.js';
 import type { SessionEvent, ToolCallRecord } from '../src/shared/session.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -36,6 +36,7 @@ const { redactSecretText } = await import('../src/main/redaction.js');
 const { prependUserPrompt } = await import('../src/shared/user-prompt.js');
 const controlApi = await import('../src/main/control-api.js');
 const bridgeModule = await import('../src/main/bridge.js');
+const inputModule = await import('../src/main/session/input.js');
 const readModelModule = await import('../src/main/session/read-model.js');
 const reads = await import('../src/main/control-reads.js');
 
@@ -795,5 +796,116 @@ describe('secret redaction', () => {
       'user@example.test'
     ];
     for (const text of untouched) expect(redactSecretText(text)).toBe(text);
+  });
+});
+
+describe('the deadline on reads', () => {
+  const held: Array<() => void> = [];
+  // An owner that never answers, until the test lets it fail.
+  const stuck = () => new Promise<never>((_, reject) => held.push(() => reject(new Error('finished late'))));
+  const release = async () => {
+    for (const fail of held.splice(0)) fail();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  };
+  const events = () => `/v1/sessions/${sessionId}/events`;
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+
+  beforeEach(() => {
+    unhandled.length = 0;
+    process.on('unhandledRejection', onUnhandled);
+    controlApi.setReadDeadlineForTests(150);
+  });
+  afterEach(async () => {
+    await release();
+    process.off('unhandledRejection', onUnhandled);
+    controlApi.setReadDeadlineForTests();
+    vi.restoreAllMocks();
+  });
+
+  it('answers 504 when an owner never does, and health still answers meanwhile', async () => {
+    vi.spyOn(inputModule, 'listInputs').mockImplementation(stuck);
+    const started = Date.now();
+    const reply = await call('/v1/inputs');
+    expect(reply).toEqual({ status: 504, body: { error: 'timeout', detail: expect.any(String) } });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect((await call('/v1/health')).status).toBe(200);
+  });
+
+  it('covers the status route as well', async () => {
+    vi.spyOn(bridgeModule, 'bridgeStatus').mockImplementation(stuck);
+    expect(await call('/v1/status')).toMatchObject({ status: 504, body: { error: 'timeout' } });
+  });
+
+  it('leaves no rejection behind when the stuck read fails after it was answered', async () => {
+    vi.spyOn(inputModule, 'listInputs').mockImplementation(stuck);
+    expect((await call('/v1/inputs')).status).toBe(504);
+    await release();
+    expect(unhandled).toEqual([]);
+  });
+
+  it('keeps a stuck journal read in its place until it ends, so answering early cannot pile them up', async () => {
+    const stuckPage = vi.spyOn(readModelModule, 'readSessionEvents').mockImplementation(stuck);
+    const first = await Promise.all([call(events()), call(events())]);
+    expect(first.map((reply) => reply.status)).toEqual([504, 504]);
+    // Both places are still taken: the reads were answered, not finished.
+    expect(await call(events())).toMatchObject({ status: 503, body: { error: 'busy' } });
+    // The reads that follow are meant to finish, so they get a deadline no runner will reach.
+    controlApi.setReadDeadlineForTests(5_000);
+    expect((await call('/v1/inputs')).status).toBe(200);
+    await release();
+    stuckPage.mockRestore();
+    expect((await call(events())).status).toBe(200);
+  });
+
+  it('refuses new reads at once when enough are stuck, so polling cannot queue work behind an owner', async () => {
+    const owner = vi.spyOn(inputModule, 'listInputs').mockImplementation(stuck);
+    const answered = await Promise.all(Array.from({ length: 8 }, () => call('/v1/inputs')));
+    expect(answered.map((reply) => reply.status)).toEqual(Array(8).fill(504));
+    // Every place is held by a read that was answered but has not finished. A 503 and not a 504:
+    // these were turned away, not left to wait for the deadline.
+    expect(await call('/v1/inputs')).toMatchObject({ status: 503, body: { error: 'busy' } });
+    expect(await call('/v1/log')).toMatchObject({ status: 503, body: { error: 'busy' } });
+    expect(owner).toHaveBeenCalledTimes(8);
+    expect((await call('/v1/health')).status).toBe(200);
+    await release();
+    owner.mockRestore();
+    controlApi.setReadDeadlineForTests(5_000);
+    expect((await call('/v1/inputs')).status).toBe(200);
+  });
+
+  it('holds one timer per read and clears it once the request is answered, whatever its outcome', async () => {
+    controlApi.setReadDeadlineForTests(60_000);
+    const set = vi.spyOn(globalThis, 'setTimeout');
+    const cleared = vi.spyOn(globalThis, 'clearTimeout');
+    const owner = vi.spyOn(inputModule, 'listInputs');
+    const cases: Array<[string, number]> = [
+      ['/v1/inputs', 200],
+      ['/v1/sessions/2026-01-01-deadbeef', 404],
+      ['/v1/inputs?limit=0', 400],
+      ['/v1/log', 200]
+    ];
+    for (const [route, status] of cases) {
+      set.mockClear();
+      cleared.mockClear();
+      expect((await call(route)).status, route).toBe(status);
+      const mine = set.mock.calls.flatMap((args, index) => (args[1] === 60_000 ? [set.mock.results[index]!.value] : []));
+      expect(mine, route).toHaveLength(1);
+      expect(cleared.mock.calls.map((args) => args[0]), route).toContain(mine[0]);
+    }
+    // An owner that fails outright still leaves no timer behind.
+    owner.mockRejectedValueOnce(new Error('the outbox failed'));
+    set.mockClear();
+    cleared.mockClear();
+    expect((await call('/v1/inputs')).status).toBe(500);
+    const failed = set.mock.calls.flatMap((args, index) => (args[1] === 60_000 ? [set.mock.results[index]!.value] : []));
+    expect(failed).toHaveLength(1);
+    expect(cleared.mock.calls.map((args) => args[0])).toContain(failed[0]);
+  });
+
+  it('does not touch a read that finishes in time', async () => {
+    controlApi.setReadDeadlineForTests(5_000);
+    expect((await call('/v1/inputs')).status).toBe(200);
+    expect((await call(events())).status).toBe(200);
   });
 });

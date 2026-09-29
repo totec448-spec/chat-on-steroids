@@ -77,6 +77,7 @@ It then serves these routes on `127.0.0.1` only:
 - `GET /v1/log` (`limit`, `level`, `since`, inclusive): the in-memory Activity log.
 
 Requests need `Authorization: Bearer <token>`. Any request with a browser `Origin` is refused.
+A read that waits on something the app cannot answer within 15 seconds gets `504 timeout`, and `/v1/health` keeps answering (within the same rate limit), so a caller can tell an app that is waiting from one that is not running. An app frozen outright answers nothing.
 Turning the switch off, or quitting, stops the listener and removes both files. A crash can leave
 them behind, so a caller should treat a refused connection as "not running".
 

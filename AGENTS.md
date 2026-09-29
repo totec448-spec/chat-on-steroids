@@ -3112,7 +3112,8 @@ and writes a per-launch token to `userData/control-api/`. The token is never iss
 It refuses any Origin, requires its own Host, and accepts GET only without a body. Status is an
 allowlisted projection of the connection, bridge, plugin, updater and call-context owners.
 Local and public URLs, tunnel ids and plugin sources/config never appear; free text passes
-`redact()`. It holds no timer, retry or recovery authority.
+`redact()`. It holds no background timer, retry or recovery authority; the one timer it uses is
+one per read, cleared when the request is answered.
 
 The read routes (`control-reads.ts`) are `GET /v1/sessions`, `/v1/sessions/{id}`,
 `/v1/sessions/{id}/events`, `/v1/inputs`, `/v1/agents` and `/v1/log`. Each asks the owner that
@@ -3130,7 +3131,16 @@ outbox owners, delivery-only prompt text, attachment paths and recovery bookkeep
 the deadlines `live` reports) do not appear. Unknown, repeated or malformed query parameters are refused with 400, page sizes are
 capped, session ids match only in their generated lowercase spelling (a differently cased
 spelling would open the same journal under a second name on a case-insensitive filesystem),
-and at most two journal reads run at once (503 `busy` otherwise). Events carry `position`; the
+and at most two journal reads run at once (503 `busy` otherwise). A read that asks an owner and
+gets no answer in 15 seconds is answered 504 `timeout`, so a watcher is not left hanging on an
+owner that is waiting; `/v1/health` asks no owner and still answers, within the same token check
+and rate limit. That helps only while the
+main process is running: a blocked one answers nothing, health included, and `/v1/agents` and
+`/v1/log` are synchronous and cannot time out. The read is not cancelled and keeps its place
+until it actually ends, among at most eight reads that have started and not finished (the two
+journal reads are part of them). When those are all stuck the next read is refused at once with
+503 `busy`, so answering early cannot let a polling watcher queue more work behind a stuck
+owner. Events carry `position`; the
 `before` and `after` cursors take it, since a revised message keeps its first position but gets
 a new `seq`. Two things run the app's own bookkeeping and so are not pure reads: `listInputs()`,
 which `/v1/inputs`, `/v1/sessions` and `/v1/sessions/{id}?live=1` all reach (the last through
