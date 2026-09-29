@@ -2206,10 +2206,11 @@ it('colors removed lines separately from added lines without changing other tool
   expect(rows[0]!.querySelector('summary .metric')?.textContent).toBe('+28 −11');
   expect(rows[0]!.querySelector('summary .metric-added')?.textContent).toBe('+28');
   expect(rows[0]!.querySelector('summary .metric-removed')?.textContent).toBe('−11');
-  // The per-call change count beside the title splits the same way.
-  expect(rows[0]!.querySelector('summary .tool-change-count .metric-added')?.textContent).toBe('+28');
-  expect(rows[0]!.querySelector('summary .tool-change-count .metric-removed')?.textContent).toBe('−11');
+  // The outcome metric already states this delta, so the per-call count beside the title stays out.
+  expect(rows[0]!.querySelector('summary .tool-change-count')).toBeNull();
   expect(rows[1]!.querySelector('summary .metric')?.textContent).toBe('~−7');
+  // A delta metric formatted differently from the count ("~−7" beside "+0 −7") is still one number.
+  expect(rows[1]!.querySelector('summary .tool-change-count')).toBeNull();
   expect(rows[1]!.querySelector('summary .metric-removed')?.textContent).toBe('−7');
   expect(rows[2]!.querySelector('summary .metric')?.textContent).toBe('12 lines');
   expect(rows[2]!.querySelector('summary .metric-added, summary .metric-removed')).toBeNull();
@@ -2270,6 +2271,18 @@ it('folds five consecutive status polls while retaining each exact tool row', as
   await append([{ ...failed, call: { ...failed.call, outcome: 'tool_rejected', summary: { ...failed.call.summary, tone: 'bad' } } }]);
   expect(fold.querySelectorAll('.ev-tool_call')).toHaveLength(6);
   expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(7);
+});
+
+it("shows a created file's line count once when the outcome metric already states it", async () => {
+  const created = toolCall(1, 'created-file') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  created.call.tool = 'apply_patch';
+  created.call.summary = { kind: 'create', tone: 'good', title: 'Created CHANGELOG-0.4.5.txt', metric: '+39' };
+  created.call.changes = [{ path: 'CHANGELOG-0.4.5.txt', added: 39, removed: 0, approximate: false }];
+  const { w } = await boot([created]);
+  const row = w.document.querySelector<HTMLDetailsElement>('details.tool')!;
+  expect(row.querySelectorAll('summary .metric-added')).toHaveLength(1);
+  expect(row.querySelector('summary .tool-change-count')).toBeNull();
+  expect(row.querySelector('summary .metric')?.textContent).toBe('+39');
 });
 
 it('keeps an artifact action as the activity title rather than its tool tag', async () => {
@@ -2436,6 +2449,30 @@ it('says a chat is working when its page reports no turn but its tools keep arri
   row.lastToolCallAt = Date.now() - 10 * 60_000;
   await append([]);
   expect(note.textContent).toBe('Worked for 5s');
+});
+
+it('says a chat worked as soon as its page reports the end after its last tool call', async () => {
+  // A normal turn: tools run, then the page reports the end. The last call is recent, but the
+  // reported end is newer, so nothing is unaccounted for and the caption must not wait out
+  // the blind window.
+  const start = Date.now() - 40_000;
+  const turn: SessionEvent[] = [
+    { seq: 1, time: start, source: 'extension', kind: 'turn_start', turnId: 'page-turn' },
+    { seq: 2, time: start + 38_000, source: 'extension', kind: 'turn_end', turnId: 'page-turn', outcome: 'completed' }
+  ];
+  const row = { ...summary(turn), lastToolCallAt: start + 33_000 as number | null };
+  const { w, append } = await boot(turn, true, [], [], { sessions: [row] });
+  (w as any).api.getSessionControls = (id: string) => Promise.resolve({ ok: true,
+    data: { sessionId: id, automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
+  const note = w.document.getElementById('chatState')!;
+  await append([]);
+  expect(note.textContent).toBe('Worked for 38s');
+  expect(note.classList.contains('is-working')).toBe(false);
+
+  // A call after that reported end is still work the page has not accounted for.
+  row.lastToolCallAt = start + 39_000;
+  await append([]);
+  expect(note.textContent).toBe('Working…');
 });
 
 it('stops directly from the empty composer without a second Stop menu action', async () => {
@@ -4014,4 +4051,35 @@ it('keeps the plain Working label unless playful status words are turned on', as
 it('uses a playful work word when it is turned on in Settings', async () => {
   const { w } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }], true, [], [], { playfulStatus: true });
   expect(w.document.getElementById('chatState')!.textContent).toMatch(PLAYFUL_WORDS);
+});
+
+it('offers copy and Markdown export under the answer of a completed turn only', async () => {
+  const ask: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'extension', turnId: 'done-turn', messageId: 'ask', message: text('Write hello.txt') };
+  const reply: SessionEvent = { kind: 'assistant_message', seq: 2, time: T0 + 1_000, source: 'extension', turnId: 'done-turn', messageId: 'reply', message: text('Created **hello.txt**.'), final: true, state: 'final' };
+  const { w, append } = await boot([ask, reply]);
+  const api = (w as any).api;
+  api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'copied' } }));
+  // Still open: the answer may yet change, so it offers nothing.
+  expect(w.document.querySelector('.answer-actions')).toBeNull();
+
+  await append([{ seq: 3, time: T0 + 2_000, source: 'extension', kind: 'turn_end', turnId: 'done-turn', outcome: 'completed' }]);
+  const actions = w.document.querySelector('.ev-assistant_message .said .answer-actions');
+  expect(actions).not.toBeNull();
+  expect(w.document.querySelectorAll('.answer-actions')).toHaveLength(1);
+
+  (actions!.querySelector('button.answer-action') as HTMLButtonElement).click(); await settle();
+  expect(api.exportMarkdown).toHaveBeenCalledWith({ id: summary([]).id, scope: 'answer', turnId: 'done-turn', target: 'clipboard' });
+  expect(actions!.querySelector('button.answer-action')!.classList.contains('is-done')).toBe(true);
+
+  api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'saved', name: 'chat.md' } }));
+  const choices = [...actions!.querySelectorAll<HTMLButtonElement>('.answer-export-choice')];
+  expect(choices.map(choice => choice.textContent)).toEqual(['This answer', 'Whole session']);
+  choices[1]!.click(); await settle();
+  expect(api.exportMarkdown).toHaveBeenCalledWith({ id: summary([]).id, scope: 'session', turnId: undefined, target: 'file' });
+});
+
+it('does not offer copy or export after an interrupted turn', async () => {
+  const reply: SessionEvent = { kind: 'assistant_message', seq: 1, time: T0, source: 'extension', turnId: 'cut-turn', messageId: 'cut', message: text('Half an answer'), final: true, state: 'final' };
+  const { w } = await boot([reply, { seq: 2, time: T0 + 1_000, source: 'extension', kind: 'turn_end', turnId: 'cut-turn', outcome: 'interrupted' }]);
+  expect(w.document.querySelector('.answer-actions')).toBeNull();
 });

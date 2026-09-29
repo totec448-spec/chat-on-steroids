@@ -36,16 +36,15 @@
 .ph { font-family: 'CoS Phosphor' !important; }
 .ph-fill { font-family: 'CoS Phosphor Fill' !important; }
 
-/* The dock toggles turn the sidebar glyph toward the edge they open. */
-.ph.ico-turn-right { transform: scaleX(-1); }
-.ph.ico-turn-bottom { transform: rotate(-90deg); }
 
 .ph.ph-activity::before { content: '\e000'; }
 .ph.ph-arrow-clockwise::before { content: '\e036'; }
 .ph.ph-arrow-left::before { content: '\e058'; }
+.ph.ph-arrow-right::before { content: '\e06c'; }
 .ph.ph-arrow-square-out::before { content: '\e5de'; }
 .ph.ph-arrow-up::before { content: '\e08e'; }
 .ph.ph-arrows-clockwise::before { content: '\e094'; }
+.ph.ph-caret-left::before { content: '\e138'; }
 .ph.ph-caret-right::before { content: '\e13a'; }
 .ph.ph-chart-line::before { content: '\e154'; }
 .ph.ph-chat-circle::before { content: '\e168'; }
@@ -56,6 +55,7 @@
 .ph.ph-corners-out::before { content: '\e1d0'; }
 .ph.ph-cube::before { content: '\e1da'; }
 .ph.ph-dots-three::before { content: '\e1fe'; }
+.ph.ph-download-simple::before { content: '\e20c'; }
 .ph.ph-eye::before { content: '\e220'; }
 .ph.ph-file::before { content: '\e230'; }
 .ph.ph-file-text::before { content: '\e23a'; }
@@ -69,6 +69,8 @@
 .ph.ph-list-checks::before { content: '\eadc'; }
 .ph.ph-lock-key::before { content: '\e2fe'; }
 .ph.ph-magnifying-glass::before { content: '\e30c'; }
+.ph.ph-magnifying-glass-minus::before { content: '\e30e'; }
+.ph.ph-magnifying-glass-plus::before { content: '\e310'; }
 .ph.ph-monitor::before { content: '\e32e'; }
 .ph.ph-paw-print::before { content: '\e648'; }
 .ph.ph-pencil-simple::before { content: '\e3b4'; }
@@ -87,4 +89,6 @@
 .ph.ph-warning::before { content: '\e4e0'; }
 .ph.ph-x::before { content: '\e4f6'; }
 
+.ph-fill.ph-square-half::before { content: '\e462'; }
+.ph-fill.ph-square-half-bottom::before { content: '\eb16'; }
 .ph-fill.ph-star::before { content: '\e46a'; }

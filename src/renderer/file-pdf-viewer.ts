@@ -1,6 +1,7 @@
 import { GlobalWorkerOptions, getDocument, type PDFDocumentLoadingTask, type PDFDocumentProxy, type RenderTask } from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { t, ui } from './i18n.js';
+import { icon } from './dom.js';
 
 export interface ProjectPdfViewer {
   destroy(): void;
@@ -25,13 +26,14 @@ function decodeBase64(value: string): Uint8Array {
   return bytes;
 }
 
-function button(label: string, text: string): HTMLButtonElement {
+/** `glyph` is an icon name from the shared vocabulary, or plain text for a worded control. */
+function button(label: string, glyph: string): HTMLButtonElement {
   const control = document.createElement('button');
   control.type = 'button';
   control.className = 'file-pdf-control';
   ui(control, 'aria-label', () => t(label));
   ui(control, 'title', () => t(label));
-  control.textContent = text;
+  if (glyph.startsWith('i-')) control.append(icon(glyph)); else control.textContent = glyph;
   return control;
 }
 
@@ -48,17 +50,17 @@ export async function createProjectPdfViewer(options: ProjectPdfViewerOptions): 
   ui(root, 'aria-label', () => t('PDF preview: {0}', [options.filename]));
   const toolbar = document.createElement('div');
   toolbar.className = 'file-pdf-toolbar';
-  const previous = button('Previous page', '‹');
+  const previous = button('Previous page', 'i-page-previous');
   const page = document.createElement('span');
   page.className = 'file-pdf-page';
   page.setAttribute('aria-live', 'polite');
-  const next = button('Next page', '›');
+  const next = button('Next page', 'i-page-next');
   const spacer = document.createElement('span');
   spacer.className = 'file-pdf-toolbar-spacer';
-  const zoomOut = button('Zoom out', '−');
+  const zoomOut = button('Zoom out', 'i-zoom-out');
   const fit = button('Fit to width', 'Fit');
   ui(fit, 'textContent', () => t('Fit'));
-  const zoomIn = button('Zoom in', '+');
+  const zoomIn = button('Zoom in', 'i-zoom-in');
   toolbar.append(previous, page, next, spacer, zoomOut, fit, zoomIn);
 
   const viewport = document.createElement('div');

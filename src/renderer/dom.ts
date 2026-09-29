@@ -10,22 +10,23 @@ import { currentLanguage, t, ui } from './i18n.js';
  * The app's icon vocabulary, drawn with the bundled Phosphor font (icons.css).
  *
  * Call sites name what an icon means (`i-retry`); this map alone decides which glyph draws it.
- * `fill:` selects Phosphor's filled family. The dock toggles reuse the sidebar glyph turned
- * toward the edge they open, so all three panel controls read as one set.
+ * `fill:` selects Phosphor's filled family. The dock toggles use the filled half-square that
+ * shows the edge they open: drawn upright (no rotation), it stays crisp at fractional scales.
  */
 const ICONS: Readonly<Record<string, string>> = {
   'i-agents': 'robot',
+  'i-arrow-right': 'arrow-right',
   'i-back': 'arrow-left',
   'i-ban': 'prohibit',
   'i-bolt': 'lightning',
   'i-chart': 'chart-line',
   'i-chat': 'chat-circle',
   'i-check': 'check',
-  'i-chev': 'caret-right',
   'i-clock': 'clock',
   'i-copy': 'copy',
   'i-dock-expand': 'corners-out',
   'i-dock-restore': 'corners-in',
+  'i-export': 'download-simple',
   'i-eye': 'eye',
   'i-file': 'file',
   'i-file-text': 'file-text',
@@ -40,9 +41,11 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-monitor': 'monitor',
   'i-more': 'dots-three',
   'i-out': 'arrow-square-out',
-  'i-panel-bottom': 'sidebar-simple ico-turn-bottom',
-  'i-panel-right': 'sidebar-simple ico-turn-right',
+  'i-panel-bottom': 'fill:square-half-bottom',
+  'i-panel-right': 'fill:square-half',
   'i-paw': 'paw-print',
+  'i-page-next': 'caret-right',
+  'i-page-previous': 'caret-left',
   'i-pencil': 'pencil-simple',
   'i-play': 'play',
   'i-plus': 'plus',
@@ -57,6 +60,8 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-sun': 'sun',
   'i-target': 'target',
   'i-terminal': 'terminal-window',
+  'i-zoom-in': 'magnifying-glass-plus',
+  'i-zoom-out': 'magnifying-glass-minus',
   'i-trash': 'trash',
   'i-warning': 'warning',
   'i-x': 'x'

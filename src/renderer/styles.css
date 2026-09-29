@@ -1866,12 +1866,10 @@ input[readonly] {
 [data-panel='chat'] {
   padding: 0;
   gap: 0;
-  /* An empty second track lets the right dock's column grow in rather than jump. */
+  /* The right dock's track is animated by moveWorkDock from resolved pixels; CSS owns rest. */
   grid-template-columns: minmax(0, 1fr) minmax(0, 0px);
   grid-template-rows: minmax(0, 1fr);
-  transition: grid-template-columns 220ms cubic-bezier(.16, 1, .3, 1);
 }
-.is-resizing-work-panel { transition: none; }
 
 /* Header, body, footer. The Sessions card is exactly this shape. */
 [data-panel='chat'] .card {
@@ -2067,12 +2065,20 @@ input[readonly] {
 .thinking-line {
   display: flex;
   align-items: center;
-  gap: 7px;
-  opacity: 0.76;
+  gap: 8px;
+}
+
+/* Page activity shares the tool row's rhythm: same height, icon column, face and weight, so a
+   mixed run of calls and page steps reads as one aligned list. */
+.meta.is-progress.thinking-line {
+  min-height: 27px;
+  font-size: calc(12.5px * var(--text-scale, 1));
+  font-weight: 450;
+  letter-spacing: 0;
 }
 
 .thinking-ico {
-  --ico: 13px;
+  --ico: 14px;
   flex: 0 0 auto;
   color: var(--faint);
 }
@@ -2091,6 +2097,27 @@ input[readonly] {
 }
 
 .said { padding: 8px 0; border-radius: 0; background: transparent; }
+/* Copy and export under a completed turn's answer: quiet until pointed at, like the answer's own
+   text. The export menu is anchored to its button and flips at the window edge; it enters like the
+   composer menus and fades out while ::details-content keeps it painted. */
+.answer-actions { display: flex; align-items: center; gap: 2px; margin: 8px 0 0 -6px; }
+.answer-action { display: grid; place-items: center; width: 28px; height: 28px; padding: 6px; border: 0; border-radius: 7px; background: transparent; color: var(--faint); cursor: pointer; list-style: none; }
+.answer-action::-webkit-details-marker { display: none; }
+.answer-action .ico { --ico: 16px; --glyph: 16px; }
+.answer-action:hover, .answer-export[open] > .answer-action { background: var(--hover); color: var(--ink); }
+.answer-action:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+.answer-action.is-done { color: var(--green); }
+.answer-export { anchor-scope: --answer-export; }
+.answer-export > summary { anchor-name: --answer-export; }
+.answer-export::details-content { transition: content-visibility 120ms allow-discrete; }
+.answer-export[open]::details-content { transition: none; }
+.answer-export-menu { position: fixed; z-index: 40; position-anchor: --answer-export; position-area: bottom span-right; margin-top: 6px; position-try-fallbacks: flip-block, flip-inline; display: grid; gap: 2px; min-width: 170px; padding: 5px; border: 1px solid var(--edge); border-radius: 10px; background: var(--card); box-shadow: 0 8px 28px #0003; opacity: 0; transform: translateY(4px); transition: opacity 120ms ease-in, transform 120ms ease-in; pointer-events: none; }
+.answer-export[open] > .answer-export-menu { opacity: 1; transform: none; transition: none; pointer-events: auto; animation: surface-in 140ms ease-out; }
+.answer-export-choice { display: flex; align-items: center; width: 100%; padding: 8px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: calc(12.5px * var(--text-scale, 1)); text-align: left; cursor: pointer; }
+.answer-export-choice:hover, .answer-export-choice:focus-visible { background: var(--hover); outline: none; }
+@media (prefers-reduced-motion: reduce) {
+  .answer-export::details-content, .answer-export-menu { transition: none; transform: none; animation: none !important; }
+}
 
 .said.is-user { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; padding: 0; margin: 4px 0 4px auto; max-width: 82%; width: fit-content; }
 /* Reserve once, before native reaction metadata arrives. Badge changes never
@@ -2263,7 +2290,7 @@ input[readonly] {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 0;
+  padding: 4px 0;
   border-radius: var(--r-md);
   font-size: calc(12.5px * var(--text-scale, 1));
   cursor: pointer;
@@ -2280,16 +2307,19 @@ input[readonly] {
 .tool > summary:focus-visible, .tool-group > summary:focus-visible, .routine-activity > summary:focus-visible {
   outline: none; background: var(--hover); box-shadow: inset 2px 0 var(--accent);
 }
-.tool.is-artifact { border: 1px solid var(--line); background: var(--card); margin: 3px 0; }
-.tool.is-artifact > summary { padding: 5px 8px; }
-.tool-tag { flex: 0 0 auto; padding: 2px 5px; border-radius: 4px; background: var(--accent-wash); color: var(--accent); font: 600 calc(10px * var(--text-scale, 1)) var(--mono); }
+/* Commands and edits read as rows like every other call. A bordered capsule per command turned a
+   run of shell calls into a wall of boxes; the kind icon already says what the row is, so the
+   tag is a quiet label rather than a coloured chip. */
+.tool-tag { flex: 0 0 auto; display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border-radius: 4px; background: color-mix(in srgb, var(--soft) 12%, transparent); color: var(--soft); font: 600 calc(10px * var(--text-scale, 1)) / 1 var(--mono); letter-spacing: .02em; }
+.tool-tag.is-shell { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.tool-tag.is-diff { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
 .tool-change-count { flex: 0 0 auto; color: var(--green); font: 600 calc(10px * var(--text-scale, 1)) var(--mono); }
 /* Let the hover surface breathe beyond the text column without moving its content. */
 .ev-tool_call .tool { margin-inline: -10px; }
 .ev-tool_call .tool > summary { padding-inline: 10px; }
 
 .tool summary b {
-  font-weight: 520;
+  font-weight: 450;
   flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2321,14 +2351,13 @@ input[readonly] {
 }
 
 .tool.tone-good .metric {
-  color: var(--green);
+  color: var(--faint);
 }
 
-.tool.tone-bad {
-  color: var(--red);
-  background: transparent;
-}
-
+/* Success is the norm and stays quiet; a failure marks its icon and outcome, not the whole row.
+   It keeps the open surface every other call gets (a transparent override here dropped it, and
+   the result wells vanished into the page). */
+.tool.tone-bad .tool-ico,
 .tool.tone-bad .metric {
   color: var(--red);
 }
@@ -2397,6 +2426,15 @@ input[readonly] {
 .tool-copy:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
 .tool-copy:disabled { display: none; }
 .tool-output > .pre { margin: 0; border-radius: 0; }
+/* Inside an open call: one surface. Arguments and result are labelled wells, not bordered cards
+   with header bars; Copy shows when the pointer or focus is on the well. Scoped to .tool so
+   message code blocks, which share .tool-output, keep their own frame. */
+.tool .raw { border-top: 0; padding: 2px 10px 10px; gap: 8px; }
+.tool .tool-output { border: 0; border-radius: var(--r-sm); background: var(--page); }
+.tool .tool-output-header { min-height: 24px; padding: 4px 8px 0; border-bottom: 0; background: transparent; }
+.tool .tool-output > .pre { background: transparent; padding: 4px 10px 9px; }
+.tool .tool-copy { opacity: 0; transition: opacity 120ms ease; }
+.tool .tool-output:is(:hover, :focus-within) .tool-copy { opacity: 1; }
 
 .raw-facts {
   font-family: var(--mono);
@@ -2919,7 +2957,10 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .app[data-screen='settings'] .is-session > h2,
 .app[data-screen='settings'] .is-session > .subhead,
 .app[data-screen='settings'] #chatFoot { display: none; }
-.app[data-screen='settings'] [data-panel='chat'] .is-session { display: flex; flex-direction: column; }
+/* Agents & automation is a view of the chat card, not a panel of its own. The card is positioned
+   for the chat's composer and overlays, which Settings hides; positioned, it painted over the
+   sidebar's rounded workspace corner. Here it is a plain block like every other settings page. */
+.app[data-screen='settings'] [data-panel='chat'] .is-session { position: static; display: flex; flex-direction: column; }
 .settings-heading .eyebrow { display: none; }
 .settings-heading h1 { font-size: calc(26px * var(--text-scale, 1)); font-weight: 450; margin-top: 0; }
 .settings-heading p { font-size: calc(13px * var(--text-scale, 1)); color: var(--faint); margin: 8px 0 18px; }
@@ -2950,7 +2991,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .sess-top { gap: 5px; }
 .sess-top .session-status { order: -1; }
 .tool-group { color: var(--faint); margin: 6px 0; }
-.tool-group > summary { display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; font-size: calc(14px * var(--text-scale, 1)); min-height: 26px; width: fit-content; max-width: 100%; }
+.tool-group > summary { display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; font-size: calc(13px * var(--text-scale, 1)); min-height: 26px; width: fit-content; max-width: 100%; }
 .tool-group > summary::-webkit-details-marker, .agent-communication > summary::-webkit-details-marker { display: none; }
 .activity-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .activity-symbol { display: inline-flex; flex: 0 0 16px; align-items: center; justify-content: center; }
@@ -2982,7 +3023,10 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .composer-menu > summary { display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; border-radius: 8px; padding: 7px 8px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
 .composer-menu > summary::-webkit-details-marker { display: none; }
 #attachmentMenu > summary { width: 36px; height: 36px; padding: 0; justify-content: center; }
-#attachmentMenu > summary .ico { display: block; --ico: 20px; --glyph: 20px; }
+/* Drawn at the toolbar's 17px glyph size so its baseline rounds like its neighbours (a 20px glyph
+   landed 1-2 device pixels lower at fractional scales such as 75% zoom on a 125% display), then
+   scaled about its centre to the intended 20px. */
+#attachmentMenu > summary .ico { display: block; --ico: 17px; --glyph: 17px; transform: scale(calc(20 / 17)); }
 .composer-menu > summary:hover, .composer-menu[open] > summary { color: var(--ink); background: var(--hover); }
 .composer-popover { position: absolute; z-index: 30; bottom: calc(100% + 12px); left: 0; width: 224px; padding: 7px; background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 14px; box-shadow: 0 8px 30px #0005; }
 .model-menu .composer-popover { left: auto; right: 0; width: 300px; max-width: calc(100vw - 32px); max-height: 70vh; overflow-y: auto; padding: 8px; }
@@ -3201,6 +3245,9 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .agent-panel-header { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
 .agent-panel-header strong { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 550; }
 .agent-panel-header .btn { padding: 6px 10px; }
+.agent-panel-header .agent-back { display: grid; place-items: center; width: 28px; height: 28px; padding: 6px; border-radius: 7px; color: var(--soft); }
+.agent-panel-header .agent-back:hover { background: var(--hover); color: var(--ink); }
+.agent-back .ico { --ico: 16px; --glyph: 16px; }
 .agent-panel-body { min-height: 0; overflow-y: auto; padding: 24px; }
 .agent-panel-body h3 { color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); font-weight: 450; margin: 12px 0 18px; }
 .agent-panel-row { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px; margin: 6px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
@@ -3250,12 +3297,12 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .work-panel-resize { position: absolute; z-index: 8; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; touch-action: none; }
 .work-panel-resize:hover, .work-panel-resize:focus-visible, .is-resizing-work-panel .work-panel-resize { background: linear-gradient(var(--accent-edge), var(--accent-edge)) center / 1px 100% no-repeat; outline: none; }
 .is-resizing-work-panel, .is-resizing-work-panel * { cursor: col-resize !important; user-select: none !important; }
-.file-panel-refresh { margin-left: auto; width: 30px; height: 30px; padding: 6px; }
+.file-panel-refresh { margin-left: auto; width: 28px; height: 28px; padding: 6px; }
 .file-panel-toolbar { display: flex; align-items: center; gap: 2px; min-width: 0; min-height: 42px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .file-panel-toolbar-actions { display: flex; flex: 1 1 auto; flex-wrap: nowrap; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .file-panel-toolbar-actions::-webkit-scrollbar { display: none; }
 .file-panel-toolbar-actions > button { flex: 0 0 auto; }
-.file-panel-toolbar > .file-panel-refresh { flex: 0 0 30px; }
+.file-panel-toolbar > .file-panel-refresh { flex: 0 0 28px; }
 .file-panel-action { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 6px 7px; color: var(--soft); font-size: calc(10.5px * var(--text-scale, 1)); white-space: nowrap; }
 .file-panel-action:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
 .file-panel-action:disabled { opacity: .35; cursor: default; }
@@ -3291,13 +3338,14 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-changes-header-content > * { flex: 0 0 auto; }
 .review-panel .file-changes-header-content { overflow-x: auto; scrollbar-width: none; }
 .review-panel .file-changes-header-content::-webkit-scrollbar { display: none; }
-.review-panel .file-changes-header .file-panel-refresh { flex: 0 0 30px; margin-left: 0; }
+.review-panel .file-changes-header .file-panel-refresh { flex: 0 0 28px; margin-left: 0; }
 .file-changes-back { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--soft); font: inherit; font-size: calc(11px * var(--text-scale, 1)); cursor: pointer; }
 .file-changes-back:hover { color: var(--ink); background: var(--hover); }
 .file-changes-back:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
 .file-changes-back .ico { --ico: 14px; --glyph: 14px; }
 .file-changes-header-title { color: var(--ink); font-size: calc(11px * var(--text-scale, 1)); font-weight: 650; }
-.file-branch-arrow { color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
+.file-branch-arrow { display: inline-flex; align-items: center; color: var(--faint); }
+.file-branch-arrow .ico, .ico.file-change-arrow { --ico: 12px; --glyph: 12px; }
 .file-branch-trigger { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; max-width: 190px; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--soft); font: inherit; font-size: calc(11px * var(--text-scale, 1)); cursor: pointer; }
 .file-branch-trigger:hover, .file-branch-trigger[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
 .file-branch-trigger:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
@@ -3307,7 +3355,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-branch-stats .is-added { color: var(--green); }
 .file-branch-stats .is-deleted { color: var(--red); }
 .file-branch-arrow[hidden], .file-branch-trigger[hidden], .file-branch-stats[hidden] { display: none; }
-.file-branch-menu { position: fixed; z-index: 1000; width: min(292px, calc(100vw - 16px)); max-height: 260px; display: flex; flex-direction: column; gap: 5px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); box-shadow: var(--lift); }
+.file-branch-menu { transform-origin: top left; animation: surface-drop 140ms ease-out; position: fixed; z-index: 1000; width: min(292px, calc(100vw - 16px)); max-height: 260px; display: flex; flex-direction: column; gap: 5px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); box-shadow: var(--lift); }
 .file-branch-search { width: 100%; min-height: 30px; padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--r-xs); background: var(--sunk); color: var(--ink); font: inherit; font-size: calc(11px * var(--text-scale, 1)); }
 .file-branch-search:focus-visible { outline: 1px solid var(--accent-edge); }
 .file-branch-items { min-height: 0; overflow-y: auto; }
@@ -3398,6 +3446,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-pdf-toolbar { flex: 0 0 auto; min-height: 34px; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--line); background: var(--page); }
 .file-pdf-control { min-width: 26px; height: 26px; padding: 0 7px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--soft); font: inherit; font-size: calc(11px * var(--text-scale, 1)); cursor: pointer; }
 .file-pdf-control:hover:not(:disabled), .file-pdf-control.is-active { background: var(--hover); color: var(--ink); }
+.file-pdf-control .ico { --ico: 16px; --glyph: 16px; }
 .file-pdf-control:disabled { opacity: .35; cursor: default; }
 .file-pdf-control:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 .file-pdf-page { min-width: 46px; color: var(--soft); font-size: calc(10px * var(--text-scale, 1)); text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -3499,7 +3548,10 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 
 .context-meter { position: relative; flex: 0 0 auto; }
 #contextMeterButton { display: flex; align-items: center; gap: 5px; height: 32px; padding: 0 5px; border: 0; border-radius: 8px; background: transparent; color: var(--soft); cursor: pointer; }
-#contextMeterCompact { font: calc(10px * var(--text-scale, 1)) var(--mono); white-space: nowrap; }
+/* A toolbar label like Mode, Plan and Model: same face and size, with tabular digits so the value
+   does not shift as it changes. The 10px monospace of the old token chip broke the row's line. */
+#contextMeterButton { font: inherit; }
+#contextMeterCompact { font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; white-space: nowrap; }
 #contextMeterButton:hover { background: var(--hover); }
 #contextMeterButton svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; transform: rotate(-90deg); }
 .context-track { opacity: .35; }
@@ -3533,13 +3585,14 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 
 .workspace-terminal { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--page); }
 .workspace-terminal[hidden] { display: none; }
-.terminal-resize { position: absolute; left: 0; right: 0; top: -4px; height: 8px; z-index: 2; cursor: ns-resize; touch-action: none; }
-.terminal-resize:hover, .terminal-resize:focus-visible, .terminal-resize:active { background: linear-gradient(var(--accent-edge), var(--accent-edge)) center / 100% 1px no-repeat; outline: none; }
+/* Above the terminal bar (z-index 10); it only overlaps the bar's top padding. */
+.terminal-resize { position: absolute; left: 0; right: 0; top: -4px; height: 8px; z-index: 12; cursor: ns-resize; touch-action: none; }
+.terminal-resize:hover, .terminal-resize:focus-visible, .is-resizing-bottom-dock .terminal-resize { background: linear-gradient(var(--accent-edge), var(--accent-edge)) center / 100% 1px no-repeat; outline: none; }
+.is-resizing-bottom-dock, .is-resizing-bottom-dock * { cursor: ns-resize !important; user-select: none !important; }
 .terminal-bar { position: relative; z-index: 10; display: flex; align-items: center; gap: 5px; flex: 0 0 36px; padding: 4px 10px; }
-.terminal-tabs { display: flex; gap: 4px; min-width: 0; flex: 0 1 auto; overflow-x: auto; }
-.terminal-tab { display: flex; align-items: center; flex: 0 0 auto; border-radius: 7px; }
-.terminal-tab.is-selected { background: var(--hover); }
-.terminal-tab > .btn:first-child { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; padding: 5px 8px; }
+.terminal-tabs { display: flex; align-items: center; gap: 4px; min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: none; }
+.terminal-tabs::-webkit-scrollbar { display: none; }
+.terminal-tab:is(.is-selected, :hover, :focus-within) { background: var(--hover); }
 .terminal-bar .btn-icon { width: 26px; height: 26px; padding: 5px; }
 .terminal-panel-close { margin-left: auto; flex: none; }
 .terminal-body { flex: 1; min-height: 0; min-width: 0; position: relative; }
@@ -3554,25 +3607,65 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .work-dock-right { position: relative; grid-column: 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: clip; border-left: 1px solid var(--line); background: var(--page); }
 /* Logical hiding is immediate; keep the outgoing dock painted only for its short exit. */
 .app[data-screen='chat'] .work-dock[hidden].is-closing { display: flex !important; }
+/* While a track moves, the dock is a drawer: its content keeps its resting size on the
+   leading edge and slides with it (see moveWorkDock). */
+.work-dock-right.is-moving { z-index: 2; }
+.work-dock-right.is-sliding > :is(.work-dock-bar, .work-dock-body) { width: calc(var(--work-dock-motion-size) - 1px); align-self: flex-start; }
+.work-dock-bottom.is-moving { overflow: clip; }
+.work-dock-bottom.is-sliding > .work-dock-body { flex: none; height: calc(var(--work-dock-motion-size) - 1px); }
+/* Expand/restore: the chat keeps its readable width and fades under the dock instead of wrapping. */
+.is-dock-handover > .is-session { width: var(--chat-motion-width); justify-self: start; }
 @media (prefers-reduced-motion: reduce) {
   .app, [data-panel='chat'], .sidebar { transition: none !important; }
 }
 .work-dock-bar { position: relative; z-index: 11; display: flex; align-items: center; gap: 4px; flex: 0 0 38px; min-width: 0; padding: 4px 9px; border-bottom: 1px solid var(--line); }
 .work-dock-tabs { display: flex; align-items: center; flex: 0 1 auto; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .work-dock-tabs::-webkit-scrollbar { display: none; }
-.work-dock-tab { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; max-width: 180px; border-radius: 7px; }
 .work-dock-tab:is(.is-selected, :hover, :focus-within) { background: var(--hover); }
-.work-dock-tab > .btn:first-child { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 5px 8px; font-size: calc(11px * var(--text-scale, 1)); white-space: nowrap; }
-.work-dock-tab .ico { --ico: 13px; }
-.work-dock-tab > .btn:last-child { padding: 5px; color: var(--faint); }
 .work-dock-bar > .btn, .work-dock-add > summary { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; padding: 5px; border-radius: 7px; color: var(--soft); }
 .work-dock-bar :is(.btn, summary):hover { background: var(--hover); color: var(--ink); }
 .work-dock-bar .work-dock-tab > .btn:hover:not(:disabled) { background: transparent; }
 .work-dock-tab > .btn:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
-.work-dock-add { position: relative; flex: 0 0 auto; }
+/* Tab pills (right dock and bottom terminal): icon, truncating label and close always fit.
+   Many tabs shrink toward a minimum before the strip scrolls. */
+:is(.work-dock-tab, .terminal-tab) { display: flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 84px; max-width: 200px; height: 28px; padding-right: 4px; border-radius: 7px; }
+:is(.work-dock-tab, .terminal-tab) > .btn:first-child { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; height: 100%; padding: 0 4px 0 9px; background: transparent; font-size: calc(11px * var(--text-scale, 1)); white-space: nowrap; }
+:is(.work-dock-tab, .terminal-tab) .tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+:is(.work-dock-tab, .terminal-tab) > .btn:first-child > .ico { --ico: 13px; flex: none; }
+:is(.work-dock-tab, .terminal-tab) > .btn.btn-icon { flex: none; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border-radius: 5px; color: var(--faint); }
+:is(.work-dock-tab, .terminal-tab) > .btn.btn-icon .ico { --ico: 12px; }
+.work-dock-bar .work-dock-tab > .btn.btn-icon:hover:not(:disabled), .terminal-tab > .btn.btn-icon:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--ink) 9%, transparent); }
+.terminal-tab > .btn:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+/* Reordering: the dragged pill rides above its neighbours, which slide aside (tab-reorder.ts). */
+:is(.work-dock-tabs, .terminal-tabs).is-reordering { cursor: grabbing; }
+:is(.work-dock-tab, .terminal-tab).is-dragging { position: relative; z-index: 1; background: color-mix(in srgb, var(--page) 84%, var(--ink)); pointer-events: none; }
+.work-dock-add { flex: 0 0 auto; anchor-scope: --work-dock-add; }
+.work-dock-add > summary { anchor-name: --work-dock-add; }
 .work-dock-add > summary { list-style: none; cursor: pointer; }
 .work-dock-add > summary::-webkit-details-marker { display: none; }
-.work-dock-menu { position: absolute; right: 0; top: calc(100% + 7px); width: 190px; padding: 5px; border: 1px solid var(--edge); border-radius: 10px; background: var(--card); box-shadow: 0 8px 28px #0003; }
+/* The + follows the last tab: open toward the interior and flip at the window edge. Fixed
+   positioning makes the viewport the containing block (the 36px bar is too short for any
+   fallback to fit) and escapes the dock's clipping; the bar's z-index still lifts it. */
+.work-dock-menu { position: fixed; position-anchor: --work-dock-add; position-area: bottom span-right; margin-top: 7px; position-try-fallbacks: flip-inline; width: 190px; padding: 5px; border: 1px solid var(--edge); border-radius: 10px; background: var(--card); box-shadow: 0 8px 28px #0003; }
+/* Same motion as the composer menus, mirrored for a menu that drops below its button: enter with
+   surface-in, leave with a short fade while ::details-content keeps it painted. Only visibility
+   transitions on ::details-content; transforming it would move the absolute menu's containing block. */
+@keyframes surface-drop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.work-dock-add::details-content { transition: content-visibility 120ms allow-discrete; }
+.work-dock-add[open]::details-content { transition: none; }
+.work-dock-add > .work-dock-menu { transform-origin: top left; opacity: 0; transform: translateY(-4px); transition: opacity 120ms ease-in, transform 120ms ease-in; }
+.work-dock-add[open] > .work-dock-menu { opacity: 1; transform: none; transition: none; animation: surface-drop 140ms ease-out; }
+.work-dock-add:not([open]) > .work-dock-menu { pointer-events: none; }
+.work-dock-add[open] > summary { background: var(--hover); color: var(--ink); }
+/* Dock toolbar icon controls (+, hide bottom panel, refresh) share one square: 28px, a 16px glyph
+   on whole pixels, true centring and one hover. The 17px glyph in a 15px box sat 0.5-1.5px off
+   centre, and the bottom bar's + had no hover at all. */
+:is(.work-dock-add > summary, .terminal-bar .terminal-panel-close, .file-panel-refresh.btn-icon) { display: grid; place-items: center; width: 28px; height: 28px; padding: 6px; border-radius: 7px; color: var(--soft); }
+:is(.work-dock-add > summary, .terminal-bar .terminal-panel-close, .file-panel-refresh.btn-icon) > .ico { --ico: 16px; --glyph: 16px; }
+:is(.work-dock-add > summary, .terminal-bar .terminal-panel-close, .file-panel-refresh.btn-icon):hover { background: var(--hover); color: var(--ink); }
+@media (prefers-reduced-motion: reduce) {
+  .work-dock-add::details-content, .work-dock-add > .work-dock-menu, .file-branch-menu { transition: none; transform: none; animation: none !important; }
+}
 .work-dock-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; text-align: left; font-size: calc(12px * var(--text-scale, 1)); }
 .work-dock-menu-item:hover, .work-dock-menu-item:focus-visible { background: var(--hover); }
 .work-dock-body { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
@@ -3584,17 +3677,21 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .work-dock-quick span { flex: 1; color: var(--ink); }
 .work-dock-quick kbd { color: var(--faint); font: inherit; font-size: calc(10px * var(--text-scale, 1)); }
 .header-dock-controls { display: flex; align-items: center; gap: 4px; }
-.header-dock-controls > .btn { width: 28px; height: 28px; padding: 5px; border-radius: 7px; color: var(--soft); }
+.header-dock-controls > .btn { display: grid; place-items: center; width: 28px; height: 28px; padding: 5px; border-radius: 7px; color: var(--soft); }
+/* The shared 17px glyph in a 15px box sat at x.5 and blurred, worst on rotated glyphs. The dock
+   controls draw upright glyphs at 18px in an 18px box on whole pixels; the filled half-squares
+   keep solid edges even at 125% scaling, where one-pixel strokes cannot land on the grid. */
+.header-dock-controls > .btn .ico { --ico: 18px; --glyph: 18px; }
 .header-dock-controls > .btn:hover { background: var(--hover); color: var(--ink); }
 .app.has-bottom-dock { grid-template-rows: env(titlebar-area-height, 28px) auto auto minmax(0, 1fr) var(--terminal-height, 250px); }
-.work-dock-bottom { grid-column: 2; grid-row: 5; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: var(--page); }
+.work-dock-bottom { position: relative; grid-column: 2; grid-row: 5; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: var(--page); }
 .work-dock-body > .workspace-terminal { flex: 1; width: 100%; min-width: 0; min-height: 0; }
 .app[data-screen='settings'].has-bottom-dock { grid-template-rows: auto auto auto minmax(0, 1fr); }
 .app[data-screen='settings'] .work-dock { display: none; }
 .app[data-screen='settings'] [data-panel='chat'].has-work-dock { grid-template-columns: minmax(0, 1fr); }
 .app[data-screen='settings'] .work-panel-resize { display: none; }
 [data-panel='chat'].is-work-dock-expanded { grid-template-columns: 0 minmax(0, 1fr); }
-.is-work-dock-expanded > .is-session, .is-work-dock-expanded .work-panel-resize { display: none; }
+.is-work-dock-expanded:not(.is-dock-handover) > .is-session, .is-work-dock-expanded .work-panel-resize { display: none; }
 .app[data-screen='settings'] .header-dock-controls { display: none; }
 @media (max-width: 850px) {
   [data-panel='chat'].has-work-dock { grid-template-columns: 0 minmax(0, 1fr); }
