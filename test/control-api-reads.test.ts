@@ -30,7 +30,7 @@ const { initConfigPath } = await import('../src/main/config.js');
 const { initSecretsPath } = await import('../src/main/secrets.js');
 const { initDurableStore, flushDurable } = await import('../src/main/durable.js');
 const { appendEvent, createSession, initSessionStore, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
-const { cancelInput, enqueueInput } = await import('../src/main/session/input.js');
+const { cancelInput, deliveryProof, enqueueInput } = await import('../src/main/session/input.js');
 const { logInfo, logWarn, logError } = await import('../src/main/logger.js');
 const { redactSecretText } = await import('../src/main/redaction.js');
 const { prependUserPrompt } = await import('../src/shared/user-prompt.js');
@@ -649,10 +649,11 @@ describe('input outbox', () => {
     expect(row.text.chars).toBeGreaterThan(4_000);
     expect(JSON.stringify(all.body)).not.toContain(apiKey);
     expect(Object.keys(row).sort()).toEqual([
-      'attachments', 'cancelledByUser', 'conversationId', 'createdAt', 'deliveredAt', 'deliveredSessionId', 'dueAt', 'error', 'id',
-      'images', 'messageId', 'mode', 'model', 'offeredAt', 'purpose', 'queueOrder', 'reasoningEffort', 'requiresAuthorization',
-      'sendAuthorizedAt', 'sessionId', 'state', 'text'
+      'attachments', 'automatic', 'cancelledByUser', 'conversationId', 'createdAt', 'deliveredAt', 'deliveredSessionId', 'delivery',
+      'dueAt', 'error', 'id', 'images', 'messageId', 'mode', 'model', 'offeredAt', 'purpose', 'queueOrder', 'reasoningEffort',
+      'requiresAuthorization', 'sendAuthorizedAt', 'sessionId', 'state', 'text', 'transportIntent'
     ]);
+    expect(row.delivery).toBe('pending');
 
     expect((await call(`/v1/inputs?state=${row.state}`)).body.inputs.map((input: { id: string }) => input.id)).toContain(queued.id);
     expect(await cancelInput(queued.id)).toBe(true);
@@ -691,6 +692,49 @@ describe('input outbox', () => {
     expect(ids(reads.selectInputs(rows, { limit: 2 }))).toEqual(['a', 'c']);
     expect(reads.selectInputs(rows, { limit: 2 }).total).toBe(4);
     expect(ids(reads.selectInputs(rows, { state: ['sent', 'cancelled'], limit: 10 }))).toEqual(['b', 'e']);
+  });
+});
+
+describe('delivery proof', () => {
+  const row = (over: object) => ({ id: randomUUID(), sessionId: 'abc12345', text: 'hi', mode: 'auto', dueAt: 1, model: null,
+    reasoningEffort: null, state: 'queued', owner: null, createdAt: 1, conversationId: null, ...over }) as never;
+
+  it.each([
+    ['queued', { state: 'queued' }, 'pending'],
+    ['a browser claim still awaiting authorization', { state: 'browser', offeredAt: 5, requiresAuthorization: true }, 'pending'],
+    ['a browser claim whose Send was authorized', { state: 'browser', offeredAt: 5, requiresAuthorization: true, sendAuthorizedAt: 6 }, 'unconfirmed'],
+    ['a legacy claim that never asked for authorization', { state: 'browser', offeredAt: 5 }, 'unconfirmed'],
+    ['a tool result handed out and not yet settled', { state: 'tool', offeredAt: 5, owner: 'req-1' }, 'unconfirmed'],
+    ['sent with a receipt', { state: 'sent', offeredAt: 5, sendAuthorizedAt: 6, deliveredAt: 7, messageId: 'm1' }, 'sent'],
+    ['a row marked sent that holds no receipt', { state: 'sent' }, 'unconfirmed'],
+    ['a row marked sent whose Send was authorized but holds no receipt', { state: 'sent', offeredAt: 5, sendAuthorizedAt: 6 }, 'unconfirmed'],
+    ['a tool result settled by its exact request', { state: 'sent', offeredAt: 5, deliveredAt: 5, messageId: 'input:x' }, 'sent'],
+    ['cancelled before Send was authorized', { state: 'cancelled', offeredAt: 5, requiresAuthorization: true, cancelledByUser: true }, 'not_sent'],
+    ['cancelled while still queued', { state: 'cancelled', cancelledByUser: true }, 'not_sent'],
+    ['failed before it was ever claimed', { state: 'failed', error: 'Not sent: the browser did not pick up this message.' }, 'not_sent'],
+    ['retired after Send was authorized with no receipt', { state: 'cancelled', offeredAt: 5, requiresAuthorization: true, sendAuthorizedAt: 6,
+      error: 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.' }, 'unconfirmed'],
+    ['cancelled locally after Send was authorized', { state: 'cancelled', offeredAt: 5, requiresAuthorization: true, sendAuthorizedAt: 6, cancelledByUser: true }, 'unconfirmed'],
+    ['cancelled, then confirmed by a late receipt', { state: 'cancelled', offeredAt: 5, requiresAuthorization: true, sendAuthorizedAt: 6, deliveredAt: 9, messageId: 'm2' }, 'sent'],
+    ['failed after Send was authorized', { state: 'failed', offeredAt: 5, requiresAuthorization: true, sendAuthorizedAt: 6 }, 'unconfirmed']
+  ])('%s is %s', (_name, fields, expected) => {
+    expect(deliveryProof(row(fields))).toBe(expected);
+  });
+
+  it('never takes a turn id on the row as proof that the message was delivered', () => {
+    const withTurns = { state: 'failed', completedTurnId: 't1', queuedTurn: { conversationId: 'c', turnId: 't1' }, silenceBoundary: { turnId: 't1' }, directTurn: { id: 't1' },
+      offeredAt: 5, requiresAuthorization: true, sendAuthorizedAt: 6 };
+    expect(deliveryProof(row(withTurns))).toBe('unconfirmed');
+    expect(deliveryProof(row({ ...withTurns, sendAuthorizedAt: undefined }))).toBe('not_sent');
+  });
+
+  it('marks a recovery pickup as filed by the app', () => {
+    expect(reads.projectInput(row({ recovery: { questionId: 'q' } })).automatic).toBe(true);
+    expect(reads.projectInput(row({})).automatic).toBe(false);
+    // A silence boundary can ride a message a person typed, so it alone does not make a row automatic.
+    expect(reads.projectInput(row({ silenceBoundary: { turnId: 't', conversationId: 'c', workSeq: 1 } })).automatic).toBe(false);
+    expect(reads.projectInput(row({ finishOwner: { turnId: 't', periodic: false } })).automatic).toBe(true);
+    expect(reads.projectInput(row({ transportIntent: 'tool', state: 'tool', offeredAt: 5 }))).toMatchObject({ transportIntent: 'tool', delivery: 'unconfirmed' });
   });
 });
 

@@ -76,6 +76,16 @@ It then serves these routes on `127.0.0.1` only:
 - `GET /v1/agents`: the multi-agent run;
 - `GET /v1/log` (`limit`, `level`, `since`, inclusive): the in-memory Activity log.
 
+With a second switch, **Allow actions: let local agents send and cancel messages** (off by default,
+off whenever the API is off, and left off when you turn the API back on), it also serves:
+
+- `POST /v1/inputs` with `{ "id": "<new lowercase UUID>", "sessionId": "...", "text": "..." }` (up to 64,000 characters) sends a message to an existing chat through the same outbox as the composer. Like the composer it connects CoS and opens the chat in your browser. It answers 202 once the message is stored; whether ChatGPT received it is read later from `GET /v1/inputs` (`delivery`: `sent`, `not_sent`, `unconfirmed` or `pending`). Repeating an id returns the same message and does not send it again, but the outbox keeps only the last 50 finished messages (fewer when they are very large), so use a new UUID for each message. After a timeout, read `GET /v1/inputs` before sending again. A chat takes one message at a time, and if ChatGPT is writing an answer that the send would stop, the request is refused unless it also says `"interrupt": true`. Worker and helper chats cannot be sent to;
+- `POST /v1/inputs/{id}/cancel` withdraws a message that has not been handed to ChatGPT. It refuses a message that was delivered, one whose Send was already authorized (it may be in ChatGPT), the first message of a new chat, a message paired with another, and a message of a worker or helper chat.
+
+**Anyone who can read your user data folder and has this switch on can write into your chats, and
+a model that reads those messages can act under the permissions you have granted.**
+With the switch off, these routes all answer 403 and nothing changes.
+
 Requests need `Authorization: Bearer <token>`. Any request with a browser `Origin` is refused.
 A read that waits on something the app cannot answer within 15 seconds gets `504 timeout`, and `/v1/health` keeps answering (within the same rate limit), so a caller can tell an app that is waiting from one that is not running. An app frozen outright answers nothing.
 Turning the switch off, or quitting, stops the listener and removes both files. A crash can leave

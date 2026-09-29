@@ -210,7 +210,7 @@ const settingsPatch = z.object({
     waitForSubAgents: z.boolean().optional()
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS) }).strict().optional(),
-  controlApi: z.object({ enabled: z.boolean() }).strict().optional(),
+  controlApi: z.object({ enabled: z.boolean(), allowActions: z.boolean().optional() }).strict().optional(),
   goal: z.object({
     impulseMinutes: z.number().int().min(0).max(60).optional(),
     includeToolCalls: z.boolean().optional(),
@@ -266,7 +266,7 @@ type SettingsSnapshot = z.infer<typeof settingsPatch>;
  * unchanged between `base` and `wanted` was not edited by this renderer save and therefore keeps
  * the current main-process value. A field that differs was deliberately edited here and wins.
  */
-function mergeSettings(current: Config, base: SettingsSnapshot, wanted: SettingsSnapshot): SettingsSnapshot {
+function mergeSettings(current: Config, base: SettingsSnapshot, wanted: SettingsSnapshot): Omit<SettingsSnapshot, 'controlApi'> & { controlApi: Config['controlApi'] } {
   const tunnelEdited = (['tunnelId', 'desktopTunnelId', 'pluginsTunnelId'] as const)
     .some(key => (base.tunnel[key] ?? '') !== (wanted.tunnel[key] ?? ''));
   if (tunnelEdited && ((base.tunnel.profileId ?? 'default') !== (current.tunnel.profileId ?? 'default') ||
@@ -282,11 +282,19 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       pick(current.capabilities[capability], base.capabilities[capability], wanted.capabilities[capability])
     ])
   ) as Config['capabilities'];
+  // The two switches merge independently, and actions never outlive the API. A form that omits
+  // `allowActions` leaves it as it is.
+  let controlApi = current.controlApi;
+  if (wanted.controlApi) {
+    const enabled = pick(current.controlApi.enabled, base.controlApi?.enabled ?? false, wanted.controlApi.enabled);
+    const allowActions = wanted.controlApi.allowActions === undefined
+      ? current.controlApi.allowActions
+      : pick(current.controlApi.allowActions, base.controlApi?.allowActions ?? false, wanted.controlApi.allowActions);
+    controlApi = { enabled, allowActions: enabled && allowActions === true };
+  }
   return {
     mcp: wanted.mcp ? { instructions: pick(current.mcp.instructions, base.mcp?.instructions ?? '', wanted.mcp.instructions) } : current.mcp,
-    controlApi: wanted.controlApi
-      ? { enabled: pick(current.controlApi.enabled, base.controlApi?.enabled ?? false, wanted.controlApi.enabled) }
-      : current.controlApi,
+    controlApi,
     capabilities,
     readOnly: pick(current.readOnly, base.readOnly, wanted.readOnly),
     commandAllowlist: {
@@ -607,6 +615,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (before.controlApi.enabled !== next.controlApi.enabled) {
       try { await (next.controlApi.enabled ? startControlApi() : stopControlApi()); }
       catch (error) { controlApiError = error; }
+    }
+    // The listener reads this switch on every request, so a flip needs no restart; it is logged.
+    if (before.controlApi.allowActions !== next.controlApi.allowActions) {
+      logInfo('control API: actions ' + (next.controlApi.allowActions ? 'allowed' : 'refused'));
     }
     if (authorityPersistError) throw authorityPersistError;
     if (loginStartupError) throw loginStartupError;
