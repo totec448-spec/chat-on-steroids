@@ -8243,6 +8243,80 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(ends[1]).toMatchObject({ turnId: emitted(live.sent, 'turn_start')[1]!.event.turnId, outcome: 'completed' });
   });
 
+  it('does not close a new turn with the previous answer remounted below its question (#746)', async () => {
+    // #746, live on 2.1.20: a Loop continuation's turn was closed 112 ms after turn_start and the
+    // next two hours of work had no owner. The finished previous answer, remounted where the new
+    // answer belongs, must not end the new turn either.
+    live = await harness();
+    startGenerating(live.document);
+    userTurn(live.document, 'remount-q1', 'first question');
+    const first = assistantTurn(live.document, 'remount-a1', []);
+    live.hook.observe(); await settle();
+    const firstEnd = { turnId: 'remount-a1', endMessageId: 'remount-a1-final', calls: [], activities: [],
+      messages: [{ messageId: 'remount-a1-final', stable: true, rawText: 'First answer.', renderedHtml: '<p>First answer.</p>' }] };
+    await bindFiberTurns([{ section: first, turn: firstEnd }]);
+    await live.hook.flush(); await settle();
+    stopGenerating(live.document);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+
+    const question = userTurn(live.document, 'remount-q2', 'second question');
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(2);
+    first.remove();
+    const remounted = assistantTurn(live.document, 'remount-a1', []);
+    question.after(remounted);
+    live.hook.observe(); await settle();
+    await bindFiberTurns([{ section: remounted, turn: firstEnd }]);
+    await live.hook.flush(); await settle();
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+
+    const second = assistantTurn(live.document, 'remount-a2', []);
+    live.hook.observe(); await settle();
+    await bindFiberTurns([{ section: remounted, turn: firstEnd }, { section: second, turn: { turnId: 'remount-a2', endMessageId: 'remount-a2-final',
+      calls: [], activities: [], messages: [{ messageId: 'remount-a2-final', stable: true, rawText: 'Second answer.', renderedHtml: '<p>Second answer.</p>' }] } }]);
+    await live.hook.flush(); await settle();
+    const ends = emitted(live.sent, 'turn_end').map(entry => entry.event);
+    expect(ends).toHaveLength(2);
+    expect(ends[1]).toMatchObject({ turnId: emitted(live.sent, 'turn_start')[1]!.event.turnId, outcome: 'completed' });
+  });
+
+  it('does not close a new turn with a stale descriptor of the previous final (#746)', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    userTurn(live.document, 'stale-q1', 'first question');
+    const first = assistantTurn(live.document, 'stale-a1', []);
+    live.hook.observe(); await settle();
+    const firstEnd = { turnId: 'stale-a1', endMessageId: 'stale-a1-final', calls: [], activities: [],
+      messages: [{ messageId: 'stale-a1-final', stable: true, rawText: 'First answer.', renderedHtml: '<p>First answer.</p>' }] };
+    await bindFiberTurns([{ section: first, turn: firstEnd }]);
+    await live.hook.flush(); await settle();
+    stopGenerating(live.document);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+
+    userTurn(live.document, 'stale-q2', 'second question');
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(2);
+    // The new answer's section mounts while React still hands it the previous turn's branch.
+    const second = assistantTurn(live.document, 'stale-a2', []);
+    live.hook.observe(); await settle();
+    await bindFiberTurns([{ section: first, turn: firstEnd }, { section: second, turn: firstEnd }]);
+    await live.hook.flush(); await settle();
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_end'), 'the previous final closed the new turn').toHaveLength(1);
+
+    await bindFiberTurns([{ section: first, turn: firstEnd }, { section: second, turn: { turnId: 'stale-a2', endMessageId: 'stale-a2-final',
+      calls: [], activities: [], messages: [{ messageId: 'stale-a2-final', stable: true, rawText: 'Second answer.', renderedHtml: '<p>Second answer.</p>' }] } }]);
+    await live.hook.flush(); await settle();
+    const ends = emitted(live.sent, 'turn_end').map(entry => entry.event);
+    expect(ends).toHaveLength(2);
+    expect(ends[1]).toMatchObject({ turnId: emitted(live.sent, 'turn_start')[1]!.event.turnId, outcome: 'completed' });
+  });
+
   it('keeps final ownership when ChatGPT reuses a page turn id after another question', async () => {
     live = await harness();
     startGenerating(live.document);
