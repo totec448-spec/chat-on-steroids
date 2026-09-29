@@ -3305,12 +3305,16 @@ describe('naming the chats this app opened', () => {
     const planner = await legacy('legacy-planner', { title: 'You are a task planner, not the executor. Produce 2 to 12 substantial workflow stages', titleSource: 'provider' });
     const project = await legacy('tools-only-project', { title: 'ChatGPT - Homelab Development' });
     const manual = await legacy('manual-project-name', { title: 'ChatGPT - My own name', titleSource: 'manual' });
+    // The chat list is read first, as in the app: it must already be repaired, without any of these
+    // sessions having been opened.
+    const listed = await listSessions();
+    expect(listed.map(row => row.id)).not.toContain(planner.id);
+    expect(listed.find(row => row.id === project.id)?.title).toBe('Homelab Development');
+    expect(listed.find(row => row.id === manual.id)?.title).toBe('ChatGPT - My own name');
     expect((await getSession(planner.id))?.origin?.kind).toBe('helper');
-    expect((await getSession(project.id))?.title).toBe('Homelab Development');
-    expect((await getSession(manual.id))?.title).toBe('ChatGPT - My own name');
-    const listed = (await listSessions()).map(row => row.id);
-    expect(listed).not.toContain(planner.id);
-    expect(listed).toContain(project.id);
+    // Repaired once, on disk: the next cold start serves the fixed labels from the fast path.
+    expect(JSON.parse(await fs.readFile(project.metaPath, 'utf8')).title).toBe('Homelab Development');
+    expect(JSON.parse(await fs.readFile(planner.metaPath, 'utf8')).origin?.kind).toBe('helper');
     // Hidden, never deleted: the recording stays on disk.
     await expect(fs.stat(planner.metaPath)).resolves.toBeTruthy();
   });

@@ -52,6 +52,12 @@ export function projectPageTitle(title: string): boolean {
  */
 const PLANNER_TITLE = 'You are a task planner, not the executor';
 
+/** A stored label an older build left that `refreshUserTitle` repairs; the list must not serve it as is. */
+export function legacyLabelPending(summary: SessionSummary): boolean {
+  if (!summary.origin && summary.title.startsWith(PLANNER_TITLE)) return true;
+  return projectPageTitle(summary.title) && summary.titleSource !== 'manual' && (!summary.origin || summary.origin.kind === 'desktop');
+}
+
 /** Rebuild only a preview. Provider/manual/origin titles keep their authority. */
 export function refreshUserTitle(summary: SessionSummary, events: Iterable<SessionEvent>): boolean {
   const first = firstTitleMessage(events);
