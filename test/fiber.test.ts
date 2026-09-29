@@ -257,6 +257,7 @@ interface TurnEvidence {
     stable: boolean;
     order: number;
     createTime?: number | null;
+    references?: Array<{ index: number; sources: Array<{ title: string; url: string; source?: string; date?: number; snippet?: string }> }>;
     rawText: string;
     renderedHtml: string;
   }>;
@@ -282,7 +283,7 @@ interface TurnFixture {
   viewItems?: any[];
   viewStatus?: string;
   /** A visible `.markdown` block: its text, or markup when the test is about the markup. */
-  rendered?: Array<string | { html: string; nativeId?: string; fiberProps?: Record<string, unknown>; fiber?: Fiber; staleMessageStamp?: string }>;
+  rendered?: Array<string | { html: string; nativeId?: string; fiberProps?: Record<string, unknown>; fiber?: Fiber; staleMessageStamp?: string; pillFibers?: Fiber[] }>;
   activities?: Array<{ label: string; fiber: Fiber; staleThoughtStamp?: string; v5?: boolean }>;
   images?: Array<{ assetId: string; clones?: number }>;
   staleStamp?: string;
@@ -379,6 +380,9 @@ async function scan(
         if (entry.fiberProps) (block as unknown as Record<string, unknown>)['__reactFiber$qlrmvxwbkkq'] = chain(entry.fiberProps);
         if (entry.fiber) (block as unknown as Record<string, unknown>)['__reactFiber$qlrmvxwbkkq'] = entry.fiber;
         if (entry.staleMessageStamp) block.setAttribute('data-clf-fiber-message', entry.staleMessageStamp);
+        [...block.querySelectorAll('a[data-testid="chatgpt-citation"]')].forEach((pill, at) => {
+          if (entry.pillFibers?.[at]) (pill as unknown as Record<string, unknown>)['__reactFiber$qlrmvxwbkkq'] = entry.pillFibers[at];
+        });
       }
       section.append(block);
     }
@@ -961,6 +965,32 @@ describe('the calls a turn says it made', () => {
     const result = await scan([], [{ id: 'model-turn', messages: [resolved, fallback, hostile], conversationProps: { conversationId: THREAD } }]);
     const byId = Object.fromEntries(result.turns[0]!.messages.map((row: any) => [row.rawText, row.resolvedModel]));
     expect(byId).toEqual({ Answer: 'gpt-5-6-thinking', 'Answer two': 'gpt-6-pro', 'Answer three': undefined });
+  });
+
+  it('carries the sources behind each citation pill, by the reply and reference index its props name', async () => {
+    // Live shape: the pill's props hold the list its card pages through; a component above it holds
+    // the pill's reference and the reply's references, whose position is the directive's index.
+    const cited = authored('cited', 'Cited answer');
+    const reference = { type: 'grouped_webpages' };
+    const turnContext = { messageId: 'cited', contentReferences: [{ type: 'sources_footnote' }, reference] };
+    const sources = [
+      { kind: 'primary', label: 'Example News', title: 'A report', url: 'https://news.example.com/report', pubDate: 1790553600.5, snippet: '  A short   summary. ' },
+      { kind: 'supporting', label: 'Example Scans', title: 'Project details', url: 'https://scans.example.org/project', pubDate: undefined, snippet: null },
+      { kind: 'supporting', label: 'Hostile', title: 'Script', url: 'javascript:alert(1)' }
+    ];
+    const pill = chain({ reference, turnContext }, 1, null);
+    const withSources: Fiber = { memoizedProps: { sources, attributes: { label: 'Example News' } }, return: pill };
+    const rendered = [{ html: '<p>A claim. <span><a data-testid="chatgpt-citation" href="https://news.example.com/report">Example News</a></span></p>', nativeId: 'cited',
+      pillFibers: [chain(null, 3, withSources)] }];
+    const result = await scan([], [{ id: 'cite-turn', messages: [cited], rendered, conversationProps: { conversationId: THREAD } }]);
+    expect(result.turns[0]!.messages.find(message => message.rawMessageId === 'cited')?.references).toEqual([{ index: 1, sources: [
+      { title: 'A report', url: 'https://news.example.com/report', source: 'Example News', date: 1790553600500, snippet: 'A short summary.' },
+      { title: 'Project details', url: 'https://scans.example.org/project', source: 'Example Scans' }
+    ] }]);
+    // A pill whose props name another reply, or no reference of it, is not this reply's source.
+    const foreign = await scan([], [{ id: 'cite-turn', messages: [cited], conversationProps: { conversationId: THREAD },
+      rendered: [{ ...rendered[0]!, pillFibers: [chain(null, 3, { memoizedProps: { sources }, return: chain({ reference: {}, turnContext }, 1, null) })] }] }]);
+    expect(foreign.turns[0]!.messages.find(message => message.rawMessageId === 'cited')?.references).toBeUndefined();
   });
 
   it.each(['exact', 'missing-scope', 'foreign', 'conflicting-scope', 'unknown', 'wrong-type', 'wrong-prefix', 'conflicting-id', 'private', 'tool', 'duplicate'])('joins typed preambles at native Fiber depths (%s)', async mode => {

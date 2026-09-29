@@ -10,6 +10,7 @@ import { isDeliberateEffort, isProModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { injectedUserMessage, recordedRequestTurn, responseTurnId, type TimelineTurns } from '../shared/chronology.js';
 import type { SessionSummary } from '../shared/session.js';
+import { messageReferences } from '../shared/session.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, type InputActivity } from './session/input.js';
 import { pluginRefreshPublications, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
@@ -1215,6 +1216,10 @@ function parseObservations(input: unknown): ChatObservation[] {
     if ((kind === 'assistant_message' || (kind === 'turn_end' && item['outcome'] === 'completed')) && typeof item['providerMessageId'] === 'string' &&
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item['providerMessageId'])) {
       observation.providerMessageId = item['providerMessageId'];
+    }
+    if (kind === 'assistant_message') {
+      const references = messageReferences(item['references']);
+      if (references) observation.references = references;
     }
     if (kind === 'assistant_message' && typeof item['resolvedModel'] === 'string' &&
         /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(item['resolvedModel'])) {

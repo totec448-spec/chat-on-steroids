@@ -2771,6 +2771,29 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     expect(revisions.map(entry => entry.resolvedModel)).toEqual([undefined, 'gpt-5-6-thinking', undefined]);
   });
 
+  it('passes a reply’s cited sources on, re-emits when they arrive, and drops malformed ones', async () => {
+    live = await harness();
+    const section = assistantTurn(live.document, 'cited-turn', []);
+    const message = {
+      messageId: 'assistant:working:exchange:1787165100127', rawMessageId: 'provider-cited',
+      role: 'assistant', stable: true, createTime: 1_787_165_100_127,
+      rawText: 'Cited answer.', renderedHtml: '<p>Cited answer.</p>'
+    };
+    const good = [{ index: 0, sources: [{ title: 'A paper', url: 'https://arxiv.org/abs/2609.00001', source: 'arXiv', date: 1790553600000, snippet: 'A summary.' }, { title: 'Hostile', url: 'javascript:alert(1)' }] }];
+    const bad = [{ index: -1, sources: [{ title: 'x', url: 'https://example.org' }] }, { index: 1, sources: [{ url: 'data:text/html,x' }] }];
+    for (const references of [undefined, good, bad]) {
+      await bindFiberTurns([{ section, turn: { turnId: 'cited-turn', messages: [{ ...message, ...(references ? { references } : {}) }] } }]);
+      await live.hook.flush();
+      await settle();
+    }
+    const revisions = emitted(live.sent, 'assistant_message').map(entry => entry.event);
+    expect(revisions.map(entry => entry.references)).toEqual([
+      undefined,
+      [{ index: 0, sources: [{ title: 'A paper', url: 'https://arxiv.org/abs/2609.00001', source: 'arXiv', date: 1790553600000, snippet: 'A summary.' }] }],
+      undefined
+    ]);
+  });
+
   it('adds the model from the send request to the user message, also when it arrives after the message', async () => {
     live = await harness();
     const messageId = '2bd27eea-290d-444c-bc46-1487f143d603', other = '3cd27eea-290d-444c-bc46-1487f143d604';
