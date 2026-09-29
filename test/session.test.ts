@@ -3319,6 +3319,31 @@ describe('naming the chats this app opened', () => {
     await expect(fs.stat(planner.metaPath)).resolves.toBeTruthy();
   });
 
+  it('repairs those labels on recordings shaped like the real ones from September', async () => {
+    // Real leftovers carry a user message: a Plan helper's is the planner instructions themselves,
+    // and an old project page chat has an ordinary request but no stored title source.
+    const legacy = async (conversationId: string, message: string, patch: Record<string, unknown>) => {
+      const session = await createSession({ conversationId, title: 'Temporary' });
+      await upsertMessageEvent(session.id, { kind: 'user_message', source: 'extension', time: Date.now(),
+        messageId: `${conversationId}-user`, message: { text: message, chars: message.length, truncated: false } });
+      await flushSessions(); resetSessionStoreForTests();
+      const metaPath = path.join(sessionsRoot(), session.id, 'meta.json');
+      const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+      Object.assign(meta, patch); delete meta.origin;
+      if (!('titleSource' in patch)) delete meta.titleSource;
+      await fs.writeFile(metaPath, JSON.stringify(meta));
+      return { id: session.id, metaPath };
+    };
+    const instructions = 'You are a task planner, not the executor. Produce 2 to 12 substantial workflow stages.';
+    const planner = await legacy('sept-planner', instructions, { title: 'You are a task planner, not the executor', titleSource: 'provider' });
+    const project = await legacy('sept-project-page', 'Check the desktop and browser automation', { title: 'ChatGPT - Homelab Development' });
+    const listed = await listSessions();
+    expect(listed.map(row => row.id)).not.toContain(planner.id);
+    expect(listed.find(row => row.id === project.id)?.title).toBe('Check the desktop and browser automation');
+    expect(JSON.parse(await fs.readFile(planner.metaPath, 'utf8')).origin?.kind).toBe('helper');
+    expect(JSON.parse(await fs.readFile(project.metaPath, 'utf8')).title).toBe('Check the desktop and browser automation');
+  });
+
   it('repairs a legacy context preview on cold read using durable authored text', async () => {
     const raw = '[[COS_CONTEXT:19268]]\nInternal instructions and AGENTS.md '.repeat(3);
     const session = await createSession({ conversationId: 'legacy-context-preview', title: 'Temporary' });

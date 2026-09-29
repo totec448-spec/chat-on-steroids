@@ -61,8 +61,10 @@ export function legacyLabelPending(summary: SessionSummary): boolean {
 /** Rebuild only a preview. Provider/manual/origin titles keep their authority. */
 export function refreshUserTitle(summary: SessionSummary, events: Iterable<SessionEvent>): boolean {
   const first = firstTitleMessage(events);
-  // A leftover Plan helper is hidden like every other helper chat, never deleted.
-  if (!first && !summary.origin && summary.title.startsWith(PLANNER_TITLE)) {
+  // A leftover Plan helper is hidden like every other helper chat, never deleted. Its only
+  // "user" message is the planner instructions themselves; its title is often the same text.
+  const planner = first ? first.message.text.trimStart().startsWith(PLANNER_TITLE) : summary.title.startsWith(PLANNER_TITLE);
+  if (!summary.origin && planner) {
     summary.origin = { kind: 'helper', fromSessionId: null, agentId: null, task: '' };
     return true;
   }
@@ -77,8 +79,11 @@ export function refreshUserTitle(summary: SessionSummary, events: Iterable<Sessi
   }
   if (!first && !legacyContextTitle(summary)) return false;
   // A stored provider title yields to the request only when it was never really the chat's name.
-  const replaceable = providerTitleIgnored(summary) || projectPageTitle(summary.title);
-  if ((summary.titleSource === 'provider' && !replaceable) || !automaticTitle(summary, first)) return false;
+  const projectPage = projectPageTitle(summary.title);
+  const replaceable = providerTitleIgnored(summary) || projectPage;
+  // A project page title never was the chat's name, whatever build stored it; only a title the
+  // user typed is kept.
+  if ((summary.titleSource === 'provider' && !replaceable) || (!automaticTitle(summary, first) && !(projectPage && summary.titleSource !== 'manual'))) return false;
   const authored = first ? userTitle(first.message.text, first.authoredText) : '';
   // Without a readable request, a provider title is still better than a placeholder.
   if (!authored && summary.titleSource === 'provider') return false;
