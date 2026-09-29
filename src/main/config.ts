@@ -262,8 +262,8 @@ const capabilitiesSchema = z
  */
 export const MAX_MCP_INSTRUCTIONS_CHARS = 4000;
 const DEFAULT_MCP = { instructions: '' } as const;
-/** Off for fresh installs and for every config written before the switch existed. */
-const DEFAULT_CONTROL_API = { enabled: false } as const;
+/** Off for fresh installs and for every config written before the switches existed. */
+const DEFAULT_CONTROL_API = { enabled: false, allowActions: false } as const;
 const DEFAULT_COMMAND_ALLOWLIST = { enabled: false, mode: 'allow', rules: [] } as const;
 const commandAllowlistRuleSchema = z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHARS).superRefine((rule, ctx) => {
   const message = validateCommandAllowlistRule(rule);
@@ -477,10 +477,16 @@ const configSchema = z.object({
     .optional()
     .default({ ...DEFAULT_MCP })
     .catch({ ...DEFAULT_MCP }),
-  // A malformed value falls back to off rather than to conservative recovery: the switch can
+  // A malformed value falls back to off rather than to conservative recovery: the switches can
   // only ever widen access, so "off" is the safe repair and the rest of the file stays valid.
+  // Each field repairs on its own, so a bad `allowActions` cannot switch the API itself off, and
+  // actions never outlive the API: a hand-edited `{ enabled: false, allowActions: true }` loads as off.
   controlApi: z
-    .object({ enabled: z.boolean().optional().default(DEFAULT_CONTROL_API.enabled) })
+    .object({
+      enabled: z.boolean().optional().default(DEFAULT_CONTROL_API.enabled).catch(DEFAULT_CONTROL_API.enabled),
+      allowActions: z.boolean().optional().default(DEFAULT_CONTROL_API.allowActions).catch(DEFAULT_CONTROL_API.allowActions)
+    })
+    .transform((value) => ({ enabled: value.enabled, allowActions: value.enabled && value.allowActions }))
     .optional()
     .default({ ...DEFAULT_CONTROL_API })
     .catch({ ...DEFAULT_CONTROL_API })

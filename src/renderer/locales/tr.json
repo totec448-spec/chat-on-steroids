@@ -1743,6 +1743,7 @@
   "Review this edit ({0} of {1} files)": "Bu düzenlemeyi incele ({1} dosyadan {0})",
   "This reply points to content from another message that was not recorded.": "Bu yanıt, kaydedilmemiş başka bir mesajdaki içeriğe işaret ediyor.",
   "Local control API: let agents on this computer read app status and chats": "Yerel kontrol API'si: bu bilgisayardaki ajanların uygulama durumunu ve sohbetleri okumasına izin ver",
+  "Allow actions: let local agents send and cancel messages": "Eylemlere izin ver: yerel ajanlar mesaj gönderebilir ve iptal edebilir",
   "Use effort: {0}": "Bu seviyeyi kullan: {0}",
   "This chat (estimate)": "Bu sohbet (tahmini)",
   "Context limit": "Bağlam sınırı",

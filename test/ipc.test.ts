@@ -830,7 +830,7 @@ describe('settings writes from more than one UI', () => {
     try {
       const base = defaultConfig(); await saveConfig(base);
       expect((await save({ ...base, controlApi: { enabled: true } }, base)).ok).toBe(true);
-      expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).controlApi).toEqual({ enabled: true });
+      expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).controlApi).toEqual({ enabled: true, allowActions: false });
       const { port } = JSON.parse(await fs.readFile(endpoint, 'utf8'));
       expect(controlApi.controlApiPort()).toBe(port);
       // A save from a form that still shows the old value, and one from a build that has no
@@ -846,6 +846,46 @@ describe('settings writes from more than one UI', () => {
       await expect(fs.access(endpoint)).rejects.toThrow();
       // Switched off means nothing listens any more, not merely that requests are refused.
       await expect(fetch(`http://127.0.0.1:${port}/v1/health`)).rejects.toThrow();
+    } finally {
+      await controlApi.stopControlApi();
+    }
+  });
+  it('keeps message actions behind the API switch and merges the two switches independently', async () => {
+    const controlApi = await import('../src/main/control-api.js');
+    controlApi.initControlApiPath(dir);
+    try {
+      const base = defaultConfig(); await saveConfig(base);
+      // Actions cannot be granted while the API is off.
+      expect((await save({ ...base, controlApi: { enabled: false, allowActions: true } }, base)).ok).toBe(true);
+      expect(getConfig().controlApi).toEqual({ enabled: false, allowActions: false });
+      const off = getConfig();
+      expect((await save({ ...off, controlApi: { enabled: true, allowActions: true } }, off)).ok).toBe(true);
+      expect(getConfig().controlApi).toEqual({ enabled: true, allowActions: true });
+      expect(controlApi.controlApiPort()).not.toBeNull();
+      // A form from a build with no allowActions field, and a stale form still showing it off,
+      // both leave a grant that was made after they were loaded.
+      const granted = getConfig();
+      expect((await save({ ...granted, controlApi: { enabled: true } }, granted)).ok).toBe(true);
+      expect(getConfig().controlApi.allowActions).toBe(true);
+      const stale = { ...granted, controlApi: { enabled: true, allowActions: false } };
+      expect((await save(stale, stale)).ok).toBe(true);
+      expect(getConfig().controlApi.allowActions).toBe(true);
+      // Turning the API off revokes the grant and stops the listener; turning it back on does
+      // not bring the grant back.
+      const running = getConfig();
+      expect((await save({ ...running, controlApi: { enabled: false, allowActions: true } }, running)).ok).toBe(true);
+      expect(getConfig().controlApi).toEqual({ enabled: false, allowActions: false });
+      expect(controlApi.controlApiPort()).toBeNull();
+      const stopped = getConfig();
+      expect((await save({ ...stopped, controlApi: { enabled: true } }, stopped)).ok).toBe(true);
+      expect(getConfig().controlApi).toEqual({ enabled: true, allowActions: false });
+      // The grant can be withdrawn on its own without stopping the listener.
+      const again = getConfig();
+      expect((await save({ ...again, controlApi: { enabled: true, allowActions: true } }, again)).ok).toBe(true);
+      const withdraw = getConfig();
+      expect((await save({ ...withdraw, controlApi: { enabled: true, allowActions: false } }, withdraw)).ok).toBe(true);
+      expect(getConfig().controlApi).toEqual({ enabled: true, allowActions: false });
+      expect(controlApi.controlApiPort()).not.toBeNull();
     } finally {
       await controlApi.stopControlApi();
     }

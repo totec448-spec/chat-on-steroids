@@ -241,6 +241,27 @@ let chain: Promise<unknown> = Promise.resolve();
 // available. Restart discards this evidence and repeats the stable message id.
 const offered = new Map<string, number>();
 const terminal = (row: InputEntry): boolean => ['sent', 'cancelled', 'failed'].includes(row.state);
+/** Native Send was never authorized: the row was not claimed, or its claim still awaited authorization. */
+const neverAuthorized = (row: InputEntry): boolean => row.sendAuthorizedAt === undefined &&
+  (row.offeredAt === undefined || row.requiresAuthorization === true);
+
+export type DeliveryProof = 'sent' | 'not_sent' | 'unconfirmed' | 'pending';
+/**
+ * What the row itself proves about delivery, and nothing more. `sent` needs the receipt
+ * (`deliveredAt`, which a late ACK can add to a row already cancelled). `not_sent` needs a
+ * terminal row whose Send was never authorized. Any other terminal row, and any claim whose
+ * Send was authorized or whose tool result was handed out, may have reached ChatGPT, so it is
+ * `unconfirmed` and is never resent. Turn ids on the row (`completedTurnId`, `queuedTurn`,
+ * `silenceBoundary`, `directTurn`) name the source turn, not the message, and prove nothing.
+ */
+export function deliveryProof(row: Readonly<InputEntry>): DeliveryProof {
+  if (row.deliveredAt !== undefined) return 'sent';
+  // `sent` says the page or the exact request confirmed it, so a row with that state and no
+  // receipt is a gap in the record, not proof that nothing was sent.
+  if (row.state === 'sent') return 'unconfirmed';
+  if (terminal(row)) return neverAuthorized(row) ? 'not_sent' : 'unconfirmed';
+  return row.state === 'queued' || (row.state === 'browser' && neverAuthorized(row)) ? 'pending' : 'unconfirmed';
+}
 const preparable = (row: InputEntry): boolean => row.state === 'queued' ||
   (row.state === 'browser' && row.requiresAuthorization === true && row.sendAuthorizedAt === undefined);
 const needsHistory = (row: InputEntry): boolean => row.purpose !== 'decision' && !row.historyRecorded &&
@@ -630,8 +651,7 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
     // An explicit reviewed resend may replace a proven pre-send failure in the same
     // local chat. An ambiguous native Send still owns its receipt; never replay it.
     const retryOpening = !!(input.sessionId && requestedSession?.origin?.kind === 'desktop' && !requestedSession.conversationId &&
-      previousOpening && terminal(previousOpening) && previousOpening.sendAuthorizedAt === undefined &&
-      (previousOpening.offeredAt === undefined || previousOpening.requiresAuthorization === true));
+      previousOpening && terminal(previousOpening) && neverAuthorized(previousOpening));
     const requestedMode = input.mode;
     let toolImages: InputImage[] | undefined;
     let injectionOwner: { conversationId: string; turnId: string } | undefined;
@@ -784,8 +804,7 @@ export function cancelInput(id: string): Promise<boolean> {
 async function removeWithdrawnOpening(row: InputEntry, current: InputEntry[]): Promise<void> {
   if (!row.opening || !row.sessionId || row.state !== 'cancelled' ||
       !(row.cancelledByUser || row.error === 'Not sent: this delivery was cancelled before Send was authorized.') ||
-      row.sendAuthorizedAt !== undefined || row.deliveredAt !== undefined || row.messageId || row.conversationId ||
-      (row.offeredAt !== undefined && row.requiresAuthorization !== true) ||
+      !neverAuthorized(row) || row.deliveredAt !== undefined || row.messageId || row.conversationId ||
       current.some(other => other.id !== row.id && other.sessionId === row.sessionId && !terminal(other))) return;
   const session = await getSession(row.sessionId);
   if (!session || session.origin?.kind !== 'desktop' || session.conversationId || session.chatIds?.length !== 0 || session.events !== 0) return;

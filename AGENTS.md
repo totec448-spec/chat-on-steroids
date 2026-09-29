@@ -111,7 +111,8 @@ losing the project, history, workers or queued instructions when a chat grows to
 There are four cooperating planes. Core, Desktop and Plugins are three logical MCP surfaces on
 the local MCP listener; the browser bridge is a separate loopback service with separate auth.
 The optional local control API (§18) is a third loopback listener for a trusted local caller; it
-projects state and is not a plane of its own.
+projects state, and with a second switch calls two existing owners (the outbox's send and cancel).
+It is not a plane of its own.
 
 ```text
 ChatGPT model                         ChatGPT browser page
@@ -220,7 +221,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | App shell | `src/main/index.ts`, `window-lifecycle.ts`, `window-layout.ts`, `window-icon.ts`, `tray-image.ts`, `shutdown.ts`: bootstrap, activation, geometry, tray and bounded exit. |
 | Config/security | `src/main/config.ts`, `platform.ts`, `secrets.ts`, `sandbox.ts`, `redaction.ts`; `src/shared/types.ts`, `capabilities.ts`: permission and host projection, secrets, approved paths. |
 | Publication | `src/main/connection.ts`, `mcp/server.ts`, `mcp/surfaces.ts`, `tunnel/{index,health,locate}.ts`, `diagnostics.ts`: endpoint/tunnel generation and truthful status. |
-| Local control API | `src/main/control-api.ts`, `src/main/control-reads.ts`, `src/shared/control-api.ts`: opt-in loopback listener, per-launch token, allowlisted read-only projections of other owners. Owns no fact. The session list and event page it serves come from `session/read-model.ts`, the same functions the renderer's IPC handlers call. |
+| Local control API | `src/main/control-api.ts`, `src/main/control-reads.ts`, `src/main/control-actions.ts`, `src/shared/control-api.ts`: opt-in loopback listener, per-launch token, allowlisted read-only projections of other owners, and (behind `controlApi.allowActions`) send and cancel through the outbox. Owns no fact. The session list and event page it serves come from `session/read-model.ts`, the same functions the renderer's IPC handlers call. |
 | Tool dispatch | `src/main/mcp/{tools,kernel,inbound,call-context,tool-declarations}.ts`, `tools-core.ts`, `tools-desktop.ts`, `tools-plugins.ts`: declarations, exact caller, live guards and evidence. |
 | Code composition | `src/main/mcp/code-mode-{tool,runtime,worker}.ts`: surface-scoped `exec`, QuickJS admission, limits and explicit emissions. |
 | Instructions/plan | `src/main/mcp/{instructions,coding-instructions,plan-tool}.ts`, `src/shared/agent-plan.ts`, `src/renderer/agent-plan.ts`: executor contract and displayed progress plan. |
@@ -3109,7 +3110,7 @@ The local control API (`control-api.ts`, Settings → Setup → Advanced, off by
 below to a trusted local caller, typically an agent's MCP server watching the app from outside
 its process. It binds 127.0.0.1 on an ephemeral port
 and writes a per-launch token to `userData/control-api/`. The token is never issued over HTTP.
-It refuses any Origin, requires its own Host, and accepts GET only without a body. Status is an
+It refuses any Origin and requires its own Host. Reads are GET only, without a body. Status is an
 allowlisted projection of the connection, bridge, plugin, updater and call-context owners.
 Local and public URLs, tunnel ids and plugin sources/config never appear; free text passes
 `redact()`. It holds no background timer, retry or recovery authority; the one timer it uses is
@@ -3158,6 +3159,56 @@ published. If a compaction moves the session to another chat while the read runs
 null instead of describing a different chat than `session`. Start and stop are serialized; a
 settings change starts or stops it only when the switch changes. Shutdown stops it in the
 admission/drain phase and does not let a late save reopen it.
+
+The action routes (`control-actions.ts`) are `POST /v1/inputs` (send a message to an existing chat)
+and `POST /v1/inputs/{id}/cancel`. They need a second switch, `controlApi.allowActions`, off by
+default, which never outlives `enabled`: the config schema enforces it on load and on every write
+(`enabled:false` stores `allowActions:false`, and each field repairs on its own), and the settings
+merge mirrors it. Turning the API off revokes actions, and turning it back on leaves them off. The
+listener reads the switch on every request, so a flip needs no restart, and `/v1/health` reports
+`actions.enabled`. It tells an action apart by method and path alone, before any body is read or
+id looked up, so with the switch off every action route answers the same 403 `actions_disabled`
+with `Connection: close`, never invites a body with `100 Continue`, and changes nothing. A client
+that keeps uploading a large body without reading the answer may see its connection reset instead
+of that status; the request was still refused. A target that is not plain origin-form (a backslash,
+a leading `//`) is a 400 `invalid_target` for every method. With the switch on, a body needs
+`application/json`, a numeric `Content-Length` within 512 KiB (no `Transfer-Encoding` or
+`Content-Encoding`), delivery within 5 s, and valid UTF-8 and JSON; an empty body is allowed where
+none is needed (cancel). Actions run one at a time under their own 30-per-minute limit that
+refused requests do not spend, with at most four waiting (503 `busy` beyond that). One that outlives
+20 s is answered 504. If it had not started, it is turned away and will not run later; if it was
+running, it may still finish, so a caller reads `GET /v1/inputs` before repeating it.
+
+There is no new send path. A send builds the same `InputArgs` the composer builds for an ordinary
+message (`mode:'auto'`, no model or effort, no attachments, no stages, no automation; the caller
+supplies only `id`, `sessionId`, `text` up to 64,000 characters, and `interrupt`) and calls
+`sendDesktopInput`, which also connects the app and opens the chat in the browser, exactly as a
+send from the composer does. The message can therefore reach ChatGPT, and a model that reads it
+can act under the capabilities the user has granted. A row sent this way is `automatic:false`,
+like one typed in the app. Worker and helper chats and chats with no ChatGPT chat yet are refused,
+and a send that would stop the answer being written needs `interrupt:true`; because the outbox
+decides that itself when it admits the row, a row it marked as interrupting after the caller's check
+is withdrawn and refused. The caller's lowercase UUID is the outbox id: a repeat returns the
+existing row (200, `replayed:true`) and never reaches `enqueueInput`, and the same id with a
+different session or text is a 409. Replay lasts as long as the outbox keeps the row, which is the
+last 50 terminal rows and at most 2 MB, so a caller uses a new UUID for each message. A chat takes
+one message at a time (409 `busy`). The reply is admission, not delivery (202); delivery is read
+from `GET /v1/inputs`, where `delivery` comes from `deliveryProof` in `session/input.ts`, the one
+owner of that verdict: `sent` only with a receipt (`deliveredAt`, which a late ACK can add to a row
+already cancelled), `not_sent` only for a terminal row whose Send was never authorized,
+`unconfirmed` for every other row that may have reached ChatGPT, and `pending` before it is handed
+out. Time, text, turn ids on the row and recorder sequence ranges are never evidence, and an
+unconfirmed row is never resent by this API.
+
+Cancel is narrower than the app's own cancel. It reads the row first and refuses, without asking
+the owner, a `sent` or `tool` row, a claim whose Send was authorized (it may already be in ChatGPT,
+and cancelling it would free the chat for a second copy), a new chat's opening row (cancelling it
+deletes the chat reserved for it), a row paired with another, and a row of a worker or helper chat.
+For a `queued` or claimed-but-unauthorized row it asks `cancelDesktopInput` and answers
+`cancelled:true` only if the row is provably `not_sent` afterwards; if Send was authorized in
+between, the answer is 409 `delivery_unconfirmed`. Any message the app itself would let its user
+cancel under those limits can be cancelled, including one typed in the app and one the app filed.
+It never calls `stopSessionTurn`: an outbox cancel and a native Stop are separate ledgers.
 
 Disconnect immediately publishes `disconnecting` and coalesces repeated clicks into one
 transition. MCP drain protects only complete requests admitted to the adapter: idle TCP,

@@ -325,8 +325,13 @@ export interface McpSettings {
 
 /** The opt-in local control API for an agent watching this app (`src/main/control-api.ts`). */
 export interface ControlApiSettings {
-  /** Serve the read-only loopback API and write its token to userData. Off unless the user turns it on. */
+  /** Serve the loopback API and write its token to userData. Off unless the user turns it on. */
   enabled: boolean;
+  /**
+   * Also let a caller with the token send and cancel messages through the outbox. Off unless the
+   * user turns it on, and never on while `enabled` is off: turning the API off revokes it.
+   */
+  allowActions: boolean;
 }
 
 export interface Config {
