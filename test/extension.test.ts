@@ -1046,7 +1046,7 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       expect(trace.indexOf('scan')).toBeGreaterThan(trace.indexOf('handout'));
       expect(trace.indexOf('claim')).toBeGreaterThan(trace.indexOf('scan'));
       if (mode === 'unresolved') {
-        if (reason === 'compaction') expect(worker.tabsReload).not.toHaveBeenCalled();
+        if (reason === 'compaction' || reason === 'assistant-error') expect(worker.tabsReload).not.toHaveBeenCalled();
         else expect(worker.tabsReload).toHaveBeenCalledExactlyOnceWith(21);
         expect(trace).toContain('repaired');
       } else {
@@ -4657,8 +4657,10 @@ it.each([
 
 /**
  * #393, 2026-09-26: an attribution refresh reloaded a page in the middle of its stream, and the
- * turn was lost ("Resume stream unavailable"). Only that reason stands down for a streaming page;
- * silence and error recovery exist for pages that look busy and are not, and keep reloading.
+ * turn was lost ("Resume stream unavailable"). A later live incident showed the same destructive
+ * edge for interrupted-response recovery: reloading a still-responsive conversation can replace
+ * the transport error with "Could not load this ChatGPT conversation". Preserve a responsive
+ * document for assistant-error; a genuinely unreachable document can still be reloaded.
  */
 it.each([
   ['unattributed', { ok: true, draft: false, streaming: true }, 0],
@@ -4666,6 +4668,9 @@ it.each([
   ['unattributed', null, 1],
   ['blind', { ok: true, draft: false, streaming: true }, 0],
   ['blind', { ok: true, draft: false, streaming: false }, 1],
+  ['assistant-error', { ok: true, draft: false, streaming: true }, 0],
+  ['assistant-error', { ok: true, draft: false, streaming: false }, 0],
+  ['assistant-error', null, 1],
   ['silence', { ok: true, draft: false, streaming: true }, 1]
 ])('for reason %s and page status %j reloads %i time(s)', async (reason, status, reloads) => {
   const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -4684,7 +4689,12 @@ it.each([
   await repair([{ conversationId, token: `stream-${reason}`, reason, suspended: false }], {});
   expect(reload).toHaveBeenCalledTimes(reloads);
   const reported = call.mock.calls.map((args: unknown[]) => String(args[0]));
-  expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(1 - reloads);
+  if (reason === 'assistant-error' && status?.ok === true) {
+    expect(reported.some((url) => url.includes('repaired=') && url.includes('repairAction=preserved'))).toBe(true);
+    expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(0);
+  } else {
+    expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(1 - reloads);
+  }
 });
 
 /**
