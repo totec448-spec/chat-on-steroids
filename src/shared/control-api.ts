@@ -20,6 +20,12 @@ export const CONTROL_API_ROUTES = [
   '/v1/log'
 ] as const;
 
+/**
+ * Routes that change something. They are served only while the user has also switched on
+ * `controlApi.allowActions`, and are listed apart from `CONTROL_API_ROUTES` for that reason.
+ */
+export const CONTROL_API_ACTION_ROUTES = ['POST /v1/inputs', 'POST /v1/inputs/{id}/cancel'] as const;
+
 /** Written to `userData/control-api/endpoint.json` while the listener is up. */
 export interface ControlApiEndpoint {
   protocol: number;
@@ -33,6 +39,8 @@ export interface ControlApiHealth {
   ok: true;
   protocol: number;
   routes: string[];
+  /** Whether the action routes are being served right now, and which ones this build has. */
+  actions: { enabled: boolean; routes: string[] };
   pid: number;
   appVersion: string;
   /** When this app process started. */
@@ -288,4 +296,17 @@ export interface ControlApiLog {
   entries: Array<{ time: number; level: string; message: string; agent?: string; truncated?: true }>;
   /** Entries the in-memory ring holds, before the filters. */
   ringSize: number;
+}
+
+export interface ControlApiSendResult {
+  /** The outbox row. It is admitted, not delivered: `input.delivery` says what is known. */
+  input: ControlApiInput;
+  /** True when this id was already in the outbox, so nothing was sent again. */
+  replayed: boolean;
+}
+
+export interface ControlApiCancelResult {
+  input: ControlApiInput;
+  /** False when the row was already cancelled or failed. `input.delivery` says whether it may have been sent. */
+  cancelled: boolean;
 }
