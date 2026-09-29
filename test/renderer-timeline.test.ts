@@ -4161,3 +4161,14 @@ it('anchors the worked line to your message when the page reports an empty turn 
   expect(lines[0]!.previousElementSibling?.matches('.ev-user_message')).toBe(true);
   expect(lines[0]!.nextElementSibling?.textContent).toContain('quinto arquivo');
 });
+
+it('names an activity group after its latest real action, not a thinking note around it', async () => {
+  const note = (seq: number, label: string): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'page_tool', messageId: `note-${seq}`, label });
+  const { w } = await boot([note(1, 'Planning the check'), toolCall(2, 'call-a'), toolCall(3, 'call-b'), note(4, 'Executed exact command check')]);
+  const group = w.document.querySelector<HTMLDetailsElement>('#timeline details.tool-group')!;
+  const lastTool = [...w.document.querySelectorAll<HTMLElement>('#timeline .ev-tool_call')].at(-1)!;
+  const toolTitle = lastTool.querySelector('.tool > summary b')?.textContent ?? lastTool.querySelector('.tool > summary span')?.textContent;
+  expect(toolTitle).toBeTruthy();
+  expect(group.querySelector('.activity-title')!.textContent).toBe(toolTitle);
+  expect(group.querySelector('.activity-title')!.textContent).not.toBe('Executed exact command check');
+});
