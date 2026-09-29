@@ -2021,6 +2021,14 @@ input[readonly] {
 #timeline:has(+ #inputQueue > .pending-message) { padding-bottom: 0; }
 /* Reserve follows recorded AND pending messages, never separates their bubbles. */
 #timelineContent { padding-bottom: var(--timeline-scroll-reserve, 0px); }
+/* Back to the end: a quiet round button pinned to the bottom of the chat, shown only when content
+   lies below. A zero-height sticky dock keeps it out of the content's flow. */
+.jump-latest-dock { position: sticky; bottom: 14px; z-index: 5; height: 0; display: flex; justify-content: center; pointer-events: none; }
+.jump-latest { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; transform: translateY(calc(-100% + 8px)); border: 1px solid var(--edge); border-radius: 50%; background: var(--card); color: var(--soft); box-shadow: 0 4px 16px #0003; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity 160ms ease, transform 160ms ease; }
+.jump-latest.is-shown { opacity: 1; pointer-events: auto; transform: translateY(-100%); }
+.jump-latest:hover { color: var(--ink); background: var(--hover); }
+.jump-latest .ico { --ico: 16px; --glyph: 16px; }
+@media (prefers-reduced-motion: reduce) { .jump-latest { transition: none; } }
 
 .ev {
   display: grid;

@@ -1747,6 +1747,89 @@ const openTools = new Set<string>();
  */
 const rowCache = new Map<string, { sig: string; row: HTMLElement }>();
 
+/*
+ * Sending and following, as ChatGPT, Claude and Codex do. A sent message rides to the top of the
+ * view and its answer grows in the reserved space beneath it, so nothing moves while it streams;
+ * an answer taller than the view is read from the top rather than chased. Scrolling by the reader
+ * releases the hold, and a button brings them back to the end whenever content lies below.
+ */
+const SEND_TOP_GAP = 16, JUMP_DISTANCE = 150, SEND_GLIDE_MS = 700;
+const USER_MESSAGE_KEY = 'message:user_message\u0000';
+let sendAnchor: { key: string; inputId: string; messageId?: string; before: Set<string>; session: string | null; seen: boolean; smoothUntil: number } | null = null;
+/** The reader scrolled away from a held message: they are reading, not following the end. */
+let readingAfterSend = false;
+
+function userMessageKeys(): Set<string> {
+  const keys = new Set<string>();
+  for (const row of $('timelineContent').querySelectorAll<HTMLElement>('[data-timeline-key]')) {
+    if (row.dataset.timelineKey!.startsWith(USER_MESSAGE_KEY)) keys.add(row.dataset.timelineKey!);
+  }
+  return keys;
+}
+
+function scrollPane(pane: HTMLElement, top: number, smooth: boolean): void {
+  if (typeof pane.scrollTo === 'function') pane.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' });
+  else pane.scrollTop = top;
+}
+
+/** Keeps the sent message at the top of the view, reserving room below it for the answer. */
+function holdSentMessage(): boolean {
+  const anchor = sendAnchor;
+  if (!anchor) return false;
+  if (anchor.session !== selectedId) { sendAnchor = null; return false; }
+  const pane = $('chatBody'), content = $('timelineContent');
+  const rows = [...content.querySelectorAll<HTMLElement>('[data-timeline-key]')];
+  let row = rows.find(node => node.dataset.timelineKey === anchor.key);
+  // ChatGPT records the sent message under its own id, without the input id, and the pending row
+  // leaves. Follow the recorded row: by the id the input learned, else as the user message that
+  // was not in the chat when this one was sent.
+  anchor.messageId ??= pendingComposerInputs.find(entry => entry.id === anchor.inputId)?.messageId;
+  if (!row) {
+    const key = anchor.messageId && `${USER_MESSAGE_KEY}${anchor.messageId}`;
+    row = (key && rows.find(node => node.dataset.timelineKey === key)) ||
+      rows.findLast(node => node.dataset.timelineKey!.startsWith(USER_MESSAGE_KEY) && !anchor.before.has(node.dataset.timelineKey!));
+    if (row) anchor.key = row.dataset.timelineKey!;
+  }
+  if (!row || !row.getClientRects().length) return false;
+  // The glide starts when the message appears, which for one queued behind a running turn is
+  // well after it was sent.
+  if (!anchor.seen) { anchor.seen = true; anchor.smoothUntil = Date.now() + SEND_GLIDE_MS; }
+  // Measure where the row rests, not where its entrance animation has shifted it for now.
+  const transform = getComputedStyle(row).transform;
+  const shift = transform && transform !== 'none' && typeof DOMMatrixReadOnly === 'function' ? new DOMMatrixReadOnly(transform).m42 : 0;
+  const top = Math.max(0, pane.scrollTop + row.getBoundingClientRect().top - shift - pane.getBoundingClientRect().top - SEND_TOP_GAP);
+  // Size the reserve from the content alone, and never drop it first: removing it even for a
+  // measurement shrinks the scroll range and the browser clamps the view mid-animation.
+  const current = Number.parseFloat(content.style.getPropertyValue('--timeline-scroll-reserve')) || 0;
+  const reserve = Math.max(0, Math.ceil(top + pane.clientHeight - (pane.scrollHeight - current)));
+  if (reserve !== current) {
+    if (reserve > 0) content.style.setProperty('--timeline-scroll-reserve', `${reserve}px`);
+    else content.style.removeProperty('--timeline-scroll-reserve');
+  }
+  if (Math.abs(pane.scrollTop - top) > 0.5) scrollPane(pane, top, Date.now() < anchor.smoothUntil);
+  paintJumpLatest();
+  return true;
+}
+
+/** Distance from the view's bottom to the last real content, ignoring the reserved space. */
+function distanceFromTail(): number {
+  const pane = $('chatBody');
+  const reserve = Number.parseFloat($('timelineContent').style.getPropertyValue('--timeline-scroll-reserve')) || 0;
+  return pane.scrollHeight - reserve - pane.clientHeight - pane.scrollTop;
+}
+
+function paintJumpLatest(): void {
+  const jump = document.getElementById('jumpLatest');
+  if (jump) jump.classList.toggle('is-shown', !!selectedId && distanceFromTail() > JUMP_DISTANCE);
+}
+
+function jumpToLatest(): void {
+  sendAnchor = null; readingAfterSend = false;
+  const pane = $('chatBody');
+  $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
+  scrollPane(pane, pane.scrollHeight, true);
+}
+
 function forgetTimelineRows(): void {
   openTools.clear();
   rowCache.clear();
@@ -2876,7 +2959,9 @@ function paintDetail(followBottom = historyBefore === null): void {
   // Preserve the visible logical row when late transcript revisions change the
   // height above it; retaining absolute scrollTop would move the reader's content.
   const pane = $('chatBody');
-  const restoreViewport = preserveTimelineViewport(pane, $('timelineContent'), followBottom);
+  // Released by the reader, the reserve still fills the view to its bottom; that is a reading
+  // position, not the end to follow.
+  const restoreViewport = preserveTimelineViewport(pane, $('timelineContent'), followBottom && !readingAfterSend);
   const timelineRows: HTMLElement[] = [];
   const keep = new Set<string>();
   let activityBoundary = '';
@@ -2948,7 +3033,8 @@ function paintDetail(followBottom = historyBefore === null): void {
   reconcileChildren($('timeline'), groupImageRows(groupToolRows(timelineRows)));
   paintPendingInputs();
   $('timelineEmpty').hidden = selectedId !== null || timelineRows.length > 0 || $('inputQueue').childElementCount > 0;
-  restoreViewport();
+  if (!holdSentMessage()) restoreViewport();
+  paintJumpLatest();
 
   const facts: string[] = [];
   if (summary) {
@@ -4075,6 +4161,7 @@ function paintPendingInputs(): void {
   });
   // Helper controls have their own owner and are refreshed by the queue read below.
   reconcileChildren(host, [...next, ...host.querySelectorAll<HTMLElement>(':scope > .queued-input')]);
+  holdSentMessage();
 }
 async function refreshInputQueue(): Promise<void> {
   const request = ++inputQueueGeneration;
@@ -4352,6 +4439,7 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
   skillPicker?.restore();
   imageDrafts.delete(key); paintComposerImages();
   if (sessionId === null) pendingNewInput = { id, generation };
+  if (mode !== 'finish') { sendAnchor = { key: `input:${id}`, inputId: id, before: userMessageKeys(), session: selectedId, seen: false, smoothUntil: 0 }; readingAfterSend = false; }
   void refreshInputQueue();
   paintDeliveryControls();
   try {
@@ -4831,6 +4919,34 @@ export function initChat(next: Deps): void {
     }
   });
   initContextMeter();
+  {
+    // Only the reader's own scrolling releases the send hold: the wheel, touch, scrolling keys and
+    // the scrollbar itself. Clicking content (a tool group, a call's details, a link) never does,
+    // nor does a key that acts on a focused control (Space toggling a disclosure), nor
+    // programmatic scrolling.
+    const pane = $('chatBody');
+    let intent = 0;
+    const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
+    pane.addEventListener('wheel', () => { intent = Date.now(); }, { passive: true });
+    pane.addEventListener('touchmove', () => { intent = Date.now(); }, { passive: true });
+    pane.addEventListener('keydown', event => {
+      if (scrollKeys.has(event.key) && !(event.target as Element).closest('summary, button, a, input, textarea, select, [contenteditable]')) intent = Date.now();
+    });
+    pane.addEventListener('pointerdown', event => { if (event.target === pane) intent = Date.now(); }, { passive: true });
+    pane.addEventListener('scroll', () => {
+      if (Date.now() - intent < 300) {
+        if (sendAnchor) { sendAnchor = null; readingAfterSend = true; }
+        if (readingAfterSend && distanceFromTail() <= 1) readingAfterSend = false;
+      }
+      paintJumpLatest();
+    }, { passive: true });
+    const dock = el('div', 'jump-latest-dock');
+    const jump = el('button', 'jump-latest') as HTMLButtonElement;
+    jump.id = 'jumpLatest'; jump.type = 'button'; jump.append(icon('i-arrow-down'));
+    ui(jump, 'title', () => t('Jump to latest')); ui(jump, 'aria-label', () => t('Jump to latest'));
+    jump.addEventListener('click', jumpToLatest);
+    dock.append(jump); pane.append(dock);
+  }
   $('createPlan').addEventListener('click', () => {
     // The toolbar toggle only arms planning; Send/Enter generates from the draft.
     if (taskPlans.has(draftKey())) cancelTaskPlan();
@@ -4908,8 +5024,16 @@ export function initChat(next: Deps): void {
   $('timeline').addEventListener('click', event => {
     // Disclosure changes deliberately change geometry. Padding retained for an
     // earlier reconciliation is not part of the collapsed headline's height.
-    if ((event.target as Element).closest('summary')) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
+    // A held sent message keeps its padding: the hold measures it again once the disclosure moved.
+    if (!sendAnchor && (event.target as Element).closest('summary')) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
   });
+  // Opening a disclosure or resizing the window changes geometry between repaints. Observing the
+  // content and the pane corrects the hold after layout and before paint, so the held message never
+  // shows a clamped frame.
+  if (typeof ResizeObserver === 'function') {
+    const observer = new ResizeObserver(() => { holdSentMessage(); });
+    observer.observe($('timelineContent')); observer.observe($('chatBody'));
+  } else $('timeline').addEventListener('toggle', () => { holdSentMessage(); }, true);
 
   $('chatView').addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-view]');

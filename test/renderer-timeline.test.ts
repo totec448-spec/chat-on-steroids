@@ -4172,3 +4172,15 @@ it('names an activity group after its latest real action, not a thinking note ar
   expect(group.querySelector('.activity-title')!.textContent).toBe(toolTitle);
   expect(group.querySelector('.activity-title')!.textContent).not.toBe('Executed exact command check');
 });
+
+it('offers a way back to the end of the chat that clears any reserved space', async () => {
+  const { w } = await boot([]);
+  const jump = w.document.getElementById('jumpLatest') as HTMLButtonElement;
+  expect(jump).not.toBeNull();
+  expect(jump.getAttribute('aria-label')).toBe('Jump to latest');
+  expect(jump.closest('#chatBody')).not.toBeNull();
+  const content = w.document.getElementById('timelineContent')!;
+  content.style.setProperty('--timeline-scroll-reserve', '300px');
+  jump.click();
+  expect(content.style.getPropertyValue('--timeline-scroll-reserve')).toBe('');
+});

@@ -39,6 +39,7 @@
 
 .ph.ph-activity::before { content: '\e000'; }
 .ph.ph-arrow-clockwise::before { content: '\e036'; }
+.ph.ph-arrow-down::before { content: '\e03e'; }
 .ph.ph-arrow-left::before { content: '\e058'; }
 .ph.ph-arrow-right::before { content: '\e06c'; }
 .ph.ph-arrow-square-out::before { content: '\e5de'; }
