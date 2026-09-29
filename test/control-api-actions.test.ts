@@ -86,6 +86,8 @@ interface Reply {
   raw: string;
   headers: http.IncomingHttpHeaders;
   continued: boolean;
+  /** The server closed the connection before a whole answer arrived. */
+  reset: boolean;
 }
 
 function call(
@@ -110,11 +112,15 @@ function call(
         const raw = Buffer.concat(chunks).toString('utf8');
         let body: unknown = raw;
         try { body = raw ? JSON.parse(raw) : null; } catch { /* keep text */ }
-        resolve({ status: res.statusCode ?? 0, body, raw, headers: res.headers, continued });
+        resolve({ status: res.statusCode ?? 0, body, raw, headers: res.headers, continued, reset: false });
       });
     });
-    // A refused request may be cut off before its body is read; the answer is what matters.
-    req.on('error', (error) => { if (!(error as NodeJS.ErrnoException).code?.startsWith('ECONN')) reject(error); });
+    // A refused request may be cut off before its body is read. That is an answer too, and it has
+    // to settle this promise: an ECONNRESET closes the socket, so the idle timeout below never fires.
+    req.on('error', (error) => {
+      if ((error as NodeJS.ErrnoException).code?.startsWith('ECONN')) resolve({ status: 0, body: null, raw: '', headers: {}, continued, reset: true });
+      else reject(error);
+    });
     req.setTimeout(10_000, () => req.destroy(new Error('the test request timed out')));
     if (expectsContinue) {
       req.on('continue', () => { continued = true; req.end(options.body); });
@@ -294,7 +300,10 @@ describe('the request body', () => {
       const huge = await call('POST', '/v1/inputs', { body: '{}', headers: { 'content-length': String(600 * 1024) } });
       expect(huge.status).toBe(413);
       expect(huge.headers.connection).toBe('close');
-      expect((await call('POST', '/v1/inputs', { body: JSON.stringify(sendBody({ text: 'x'.repeat(520 * 1024) })) })).status).toBe(413);
+      // This caller keeps uploading after the refusal, so it may see its connection reset instead of
+      // the 413, as `readBody` documents. Windows does this whenever the refused bytes are unread.
+      const uploading = await call('POST', '/v1/inputs', { body: JSON.stringify(sendBody({ text: 'x'.repeat(520 * 1024) })) });
+      expect([413, 'reset']).toContain(uploading.reset ? 'reset' : uploading.status);
 
       const chunked = await new Promise<number>((resolve, reject) => {
         const req = http.request({ hostname: '127.0.0.1', port, path: '/v1/inputs', method: 'POST',
@@ -373,7 +382,7 @@ describe('the request body', () => {
         res.resume();
         res.on('end', () => resolve(res.statusCode ?? 0));
       });
-      req.on('error', (error) => { if (!(error as NodeJS.ErrnoException).code?.startsWith('ECONN')) reject(error); });
+      req.on('error', (error) => { if ((error as NodeJS.ErrnoException).code?.startsWith('ECONN')) resolve(0); else reject(error); });
       req.write('{"id":');
     });
     expect(status).toBe(408);
