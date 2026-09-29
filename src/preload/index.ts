@@ -204,6 +204,8 @@ const api = {
   getLogText: () => call<string>('log:text'),
   getLogJson: () => call<string>('log:json'),
   writeClipboard: (text: string) => call<boolean>('clipboard:write', { text }),
+  exportMarkdown: (request: { id: string; scope: 'answer' | 'session'; turnId?: string; target: 'clipboard' | 'file' }) =>
+    call<{ done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' }>('sessions:exportMarkdown', request),
   openLink: (url: string) => call<boolean>('link:open', { url }),
   // Applies the update this app has already downloaded and verified: the app quits, the
   // installer runs, and the app comes back as the new version. It takes no argument because

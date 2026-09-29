@@ -26,6 +26,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-copy': 'copy',
   'i-dock-expand': 'corners-out',
   'i-dock-restore': 'corners-in',
+  'i-export': 'download-simple',
   'i-eye': 'eye',
   'i-file': 'file',
   'i-file-text': 'file-text',

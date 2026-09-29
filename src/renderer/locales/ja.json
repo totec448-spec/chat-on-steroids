@@ -1,4 +1,8 @@
 {
+  "Copy answer": "回答をコピー",
+  "Export as Markdown": "Markdown としてエクスポート",
+  "This answer": "この回答",
+  "Whole session": "セッション全体",
   "Normal": "通常",
   "Show percentage": "パーセントを表示",
   "Show token values": "トークン数を表示",
