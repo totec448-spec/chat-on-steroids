@@ -3203,7 +3203,9 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .power-caption strong { font-size: calc(12px * var(--text-scale, 1)); font-weight: 400; color: var(--soft); }
 .power-caption span { font-size: calc(12px * var(--text-scale, 1)); color: var(--ink); }
 #composerPowerChoices:not(:empty) { padding: 0 12px 14px; }
-.power-track { position: relative; height: 5px; margin: 10px 0 16px; border-radius: 999px; background: linear-gradient(to right, var(--accent) var(--power-position, 0%), var(--edge) var(--power-position, 0%)); }
+.power-track { --power-thumb: 16px; --power-at: calc(var(--power-thumb) / 2 + (100% - var(--power-thumb)) * var(--power-fraction, 0)); position: relative; height: 5px; margin: 10px 0 16px; border-radius: 999px; background: linear-gradient(to right, var(--accent) var(--power-at), var(--edge) var(--power-at)); }
+.power-stop { position: absolute; top: 50%; left: calc(var(--power-thumb) / 2 + (100% - var(--power-thumb)) * var(--power-stop)); width: 3px; height: 3px; border-radius: 50%; background: var(--soft); opacity: .7; transform: translate(-50%, -50%); pointer-events: none; }
+.power-single { width: 100%; justify-content: center; }
 .effort-endpoints { display: flex; justify-content: space-between; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
 #composerPowerChoices input { position: absolute; inset: -10px 0 auto; appearance: none; width: 100%; height: 24px; border: 0; padding: 0; margin: 0; background: transparent; cursor: pointer; }
 #composerPowerChoices input:disabled { cursor: default; }

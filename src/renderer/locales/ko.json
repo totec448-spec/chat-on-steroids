@@ -1745,5 +1745,6 @@
   "Diff unavailable: this edit was not kept": "Diff를 사용할 수 없음: 이 편집 내용이 보존되지 않았습니다",
   "Review this edit ({0} of {1} files)": "이 편집 검토 ({1}개 파일 중 {0}개)",
   "This reply points to content from another message that was not recorded.": "이 응답이 기록되지 않은 다른 메시지의 내용을 참조하고 있습니다.",
-  "Local control API: let agents on this computer read app status and chats": "로컬 제어 API: 이 컴퓨터의 에이전트가 앱 상태와 채팅을 읽을 수 있도록 허용"
+  "Local control API: let agents on this computer read app status and chats": "로컬 제어 API: 이 컴퓨터의 에이전트가 앱 상태와 채팅을 읽을 수 있도록 허용",
+  "Use effort: {0}": "이 강도 사용: {0}"
 }

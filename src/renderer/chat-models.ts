@@ -221,35 +221,77 @@ function paintComposerChoices(): void {
   const current = supported.findIndex(power => power === effort.value);
   if (subtitle) ui(subtitle, 'textContent', () => current < 0 ? t('Previous selection unavailable') : effortLabel(effort.value));
   if (!supported.length) return;
-  const track = el('div', 'power-track');
-  const slider = document.createElement('input'); slider.type = 'range'; slider.min = '0'; slider.max = String(supported.length - 1); slider.step = '1';
-  slider.value = String(Math.max(0, current));
-  slider.disabled = supported.length === 1 && current >= 0;
-  ui(slider, 'aria-label', () => t('Thinking effort'));
-  const show = () => {
-    const power = supported[Number(slider.value)]!;
-    if (subtitle) ui(subtitle, 'textContent', () => effortLabel(power));
-    ui(slider, 'aria-valuetext', () => effortLabel(power));
-    track.style.setProperty('--power-position', `${supported.length > 1 ? Number(slider.value) / (supported.length - 1) * 100 : 100}%`);
-    return power;
-  };
-  if (current >= 0) show();
-  else {
-    ui(slider, 'aria-valuetext', () => t('Choose an available model and effort'));
-  }
-  const choose = () => {
+  const choose = (power: ReasoningEffort | string): void => {
     if (composerContext) composerContext.edited = true;
-    effort.value = show();
+    effort.value = power;
+    if (subtitle) ui(subtitle, 'textContent', () => effortLabel(power));
     paintComposerLabel();
     models.dataset.signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
   };
-  slider.oninput = choose;
-  slider.onclick = () => { if (!supported.some(power => power === effort.value)) choose(); };
+  // One effort (an Instant model) is not a choice: no slider, just its name. A stale saved
+  // effort still needs one explicit confirmation before Send may use this model.
+  if (supported.length === 1) {
+    if (current >= 0) return;
+    const only = supported[0]!;
+    const use = el('button', 'btn power-single', () => t('Use effort: {0}', [effortLabel(only)])) as HTMLButtonElement;
+    use.type = 'button'; use.dataset.keepMenu = 'true';
+    use.addEventListener('click', event => { event.stopPropagation(); choose(only); use.remove(); });
+    powers.append(use);
+    return;
+  }
+  const last = supported.length - 1;
+  const track = el('div', 'power-track');
+  // The thumb follows the pointer continuously and settles on the nearest effort when released;
+  // keys and the stored choice stay whole steps. The fill ends under the thumb's centre.
+  const slider = document.createElement('input'); slider.type = 'range'; slider.min = '0'; slider.max = String(last); slider.step = 'any';
+  ui(slider, 'aria-label', () => t('Thinking effort'));
+  const nearest = (): number => Math.max(0, Math.min(last, Math.round(Number(slider.value))));
+  const paintPosition = (value: number): void => { track.style.setProperty('--power-fraction', String(value / last)); };
+  const announce = (index: number): void => { ui(slider, 'aria-valuetext', () => effortLabel(supported[index]!)); };
+  for (let index = 0; index <= last; index++) {
+    const stop = el('span', 'power-stop'); stop.style.setProperty('--power-stop', String(index / last)); track.append(stop);
+  }
+  let shown = Math.max(0, current);
+  slider.value = String(shown);
+  paintPosition(shown);
+  if (current >= 0) announce(shown);
+  else ui(slider, 'aria-valuetext', () => t('Choose an available model and effort'));
+  const pick = (index: number): void => {
+    announce(index);
+    if (index !== shown || effort.value !== supported[index]) { shown = index; choose(supported[index]!); }
+  };
+  // Test DOMs and hidden windows may lack animation frames; settling then just lands at once.
+  const frame = (callback: FrameRequestCallback): number => typeof requestAnimationFrame === 'function' ? requestAnimationFrame(callback) : (callback(performance.now() + 1000), 0);
+  const cancelFrame = (id: number): void => { if (id && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(id); };
+  let settling = 0;
+  const settle = (): void => {
+    cancelFrame(settling);
+    const from = Number(slider.value), to = nearest(), started = performance.now();
+    pick(to);
+    const step = (now: number): void => {
+      const progress = Math.min(1, (now - started) / 140), eased = 1 - (1 - progress) ** 3;
+      const value = from + (to - from) * eased;
+      slider.value = String(value); paintPosition(value);
+      if (progress < 1) settling = frame(step);
+    };
+    settling = frame(step);
+  };
+  slider.addEventListener('input', () => { cancelFrame(settling); paintPosition(Number(slider.value)); pick(nearest()); });
+  slider.addEventListener('change', settle);
+  slider.addEventListener('pointerup', settle);
+  slider.addEventListener('keydown', event => {
+    const moves: Record<string, number> = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -1, PageUp: 1, Home: -last, End: last };
+    const move = moves[event.key];
+    if (move === undefined) return;
+    event.preventDefault();
+    slider.value = String(Math.max(0, Math.min(last, nearest() + move)));
+    settle();
+  });
   // Keep the range node alive through pointer/keyboard adjustment; hidden selects remain
   // the existing send authority, and no separate model selection state is introduced.
   track.append(slider);
   const endpoints = el('div', 'effort-endpoints');
-  endpoints.append(el('span', '', () => effortLabel(supported[0]!)), el('span', '', () => effortLabel(supported.at(-1)!)));
+  endpoints.append(el('span', '', () => effortLabel(supported[0]!)), el('span', '', () => effortLabel(supported[last]!)));
   powers.append(track, endpoints);
 }
 
