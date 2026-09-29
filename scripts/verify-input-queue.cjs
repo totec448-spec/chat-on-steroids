@@ -4,23 +4,25 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
+const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require('./fixtures/app-defaults.cjs');
 const output = process.argv[2] ? path.resolve(root, process.argv[2]) : path.join(root, '.tmp/message-send-20260918/ui');
 app.setPath('userData', path.join(output, 'runtime'));
 
 app.whenReady().then(async () => {
   const { createServer } = await import('vite');
   const fixture = `
-    addEventListener('error', event => window.fixtureError = event.message);
+    addEventListener('error', event => { if (!${JSON.stringify(BENIGN_RENDERER_ERRORS)}.includes(event.message)) window.fixtureError = event.message; });
     addEventListener('unhandledrejection', event => window.fixtureError = String(event.reason?.stack ?? event.reason));
     const ok = data => Promise.resolve({ok:true,data});
-    const config = {
+    ${fixtureConfigSource()}
+    const config = fixtureConfig({
       roots:[{name:'fixture',path:'C:/fixture'}],readOnly:true,capabilities:{browse:true,search:true,read:true,metadata:true},
       tunnel:{kind:'openai',tunnelId:'',desktopTunnelId:'',binaryPath:''},
       ui:{theme:'dark',autoConnect:false,minimizeToTray:true,privacyScreenshots:false},
       sessions:{record:true,retainDays:30,advisoryTokens:300000,limitTokens:400000},
       compaction:{auto:false,autoTokens:300000},multiAgent:{enabled:false,maxWorkers:2},
       goal:{enabled:false,model:'fixture',reasoning:'default',prompt:'Fixture'}
-    };
+    });
     const state={config,hasApiKey:false,hasGoalKey:false,resolvedBinary:null,bundledTunnelVersion:null,
       status:{state:'disconnected',detail:'',publicUrl:null,localUrl:null,health:null,surfaces:[]},
       bridge:{running:false,paired:false,present:false,port:0},update:{current:'fixture',stage:'idle'}};

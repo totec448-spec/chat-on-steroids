@@ -46,16 +46,19 @@ app.whenReady().then(async () => {
     for (let i = 0; i < 100 && !await js('!!window.fixtureReady'); i++) await new Promise(resolve => setTimeout(resolve, 25));
     assert.equal(await js('!!window.fixtureReady'), true, 'Fixture loads the production Usage module');
     assert.deepEqual(await js(`[document.getElementById('usageMessages56').textContent,document.getElementById('usageMessages6').textContent]`), ['35', '16']);
-    assert.equal(await js(`document.querySelector('.settings-heading').nextElementSibling.id`), 'usageSummary', 'Usage opens directly with the summary');
+    assert.equal(await js(`document.getElementById('usageSummary').previousElementSibling.className`), 'settings-page-head', 'Usage opens directly with the summary');
     assert.equal(await js(`document.querySelector('.usage-panel').lastElementChild.contains(document.getElementById('usageMessageCounts'))`), true, 'Message counts belong to the bottom section');
     assert.equal(await js(`document.getElementById('usageStatus').getBoundingClientRect().height`), 0, 'Successful loading leaves no status gap');
     const capture = async (name, bottom = true) => {
       await js(bottom ? `document.querySelector('.usage-messages').scrollIntoView({block:'end'})` : `document.querySelector('.usage-panel').scrollTop=0`);
       const bounds = await js(`(() => {
         const section=document.querySelector('.usage-messages'), button=document.getElementById('usageWeekStart');
-        const a=section.getBoundingClientRect(), b=button.getBoundingClientRect(), rows=document.getElementById('usageMessageCounts').getBoundingClientRect();
+        const a=section.getBoundingClientRect(), b=button.getBoundingClientRect(), counts=[...document.getElementById('usageMessageCounts').children].map(n=>n.getBoundingClientRect());
+        const limits=[...document.querySelectorAll('#usageLimits .usage-limit')].map(n=>n.getBoundingClientRect());
+        // Since the 2026-09-27 redesign the weekday control shares the counts row: it must not cover a count and must stay above the limit rows.
+        const clear=counts.every(r=>r.right<=b.left+1||r.left>=b.right-1||r.bottom<=b.top+1||r.top>=b.bottom-1) && limits.every(r=>b.bottom<=r.top+1);
         return {fits:section.scrollWidth<=section.clientWidth, buttonInside:b.left>=a.left-1&&b.right<=a.right+1,
-          buttonHeight:b.height, buttonAboveRows:b.bottom<=rows.top+1,
+          buttonHeight:b.height, buttonAboveRows:clear,
           width:innerWidth, section:[a.left,a.right], button:[b.left,b.right]};
       })()`);
       await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
@@ -64,14 +67,22 @@ app.whenReady().then(async () => {
       console.log(name, bounds);
       assert.equal(bounds.fits, true, name + ': no horizontal overflow');
       assert.equal(bounds.buttonInside, true, name + ': weekday button remains inside its section');
-      assert.ok(bounds.buttonHeight >= 42, name + ': weekday button has a usable hit target');
-      assert.equal(bounds.buttonAboveRows, true, name + ': weekday control sits above the model rows');
+      // The 2026-09-27 Usage redesign sizes Settings controls at 36px (settings.css .usage-week-start).
+      assert.ok(bounds.buttonHeight >= 36, name + ': weekday button has a usable hit target');
+      assert.equal(bounds.buttonAboveRows, true, name + ': weekday control covers no count and sits above the limit rows');
     };
     await capture('wide-dark-top', false);
     await capture('wide-dark');
     await js(`document.getElementById('usageWeekStart').focus()`);
-    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Space' });
-    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Space' });
+    // Since the 2026-09-27 redesign this is a real select of seven days (Monday … Sunday),
+    // operated from the keyboard alone.
+    const key = async code => { win.webContents.sendInputEvent({ type: 'keyDown', keyCode: code }); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: code }); await new Promise(r => setTimeout(r, 150)); };
+    // A native picker only opens in a shown window; showInactive keeps focus where the user has it.
+    win.showInactive(); win.webContents.focus(); await new Promise(r => setTimeout(r, 300));
+    await js(`document.getElementById('usageWeekStart').focus()`);
+    // Arrow down opens the picker on the current day (Saturday); the next one moves to Sunday.
+    await key('Down'); await key('Down'); await key('Return');
+    assert.equal(await js(`document.getElementById('usageWeekStart').value`), '0', 'Native keyboard selection picks Sunday');
     assert.equal(await js(`document.getElementById('usageMessages6').textContent`), '4', 'Native keyboard activation selects Sunday');
     assert.equal(await js(`localStorage.getItem('cos.usage.weekStart')`), '0');
     win.setSize(560, 850); win.webContents.setZoomFactor(1.25);

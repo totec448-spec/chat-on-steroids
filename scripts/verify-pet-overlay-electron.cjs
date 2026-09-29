@@ -9,21 +9,22 @@ const assert = require('node:assert/strict');
 const sharp = require('sharp');
 
 const root = path.resolve(__dirname, '..');
+const { defaultConfig, merge } = require('./fixtures/app-defaults.cjs');
 const reuseAt = process.argv.indexOf('--reuse');
 const reusing = reuseAt >= 0;
 const userData = reusing ? path.resolve(process.argv[reuseAt + 1]) : fs.mkdtempSync(path.join(os.tmpdir(), 'cos-pets-render-'));
 if (!reusing) {
   fs.mkdirSync(path.join(userData, 'state'));
   fs.writeFileSync(path.join(userData, 'state', 'pet-library.json'), JSON.stringify({
-    version: 1, enabled: ['tur-tur-sahur'], favorites: []
+    version: 1, enabled: ['capy'], favorites: []
   }));
-  fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({
-    roots: [], readOnly: true, capabilities: {},
-    tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: false, autoConnect: false, theme: 'dark', autoContinue: false, backgroundChats: false },
-    multiAgent: { enabled: false, allowUnattributedCalls: false, recoverAgentTabs: false },
+  // Start from the app's own defaults so the config is valid and not reset on load.
+  fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify(merge(defaultConfig(), {
+    readOnly: true,
+    ui: { minimizeToTray: false, autoConnect: false, theme: 'dark' },
+    multiAgent: { enabled: false, recoverAgentTabs: false },
     goal: { enabled: false }
-  }));
+  })));
 }
 app.setName('CoS Pets Render Probe');
 app.setPath('userData', userData);
@@ -46,8 +47,13 @@ app.on('web-contents-created', (_event, contents) => {
     callback({ redirectURL: `http://127.0.0.1:${provider.address().port}/` });
   });
 });
+// The overlay's title comes from its page, so it may still be empty when the window is created.
 app.on('browser-window-created', (_event, win) => {
-  if (win.getTitle() !== 'Pets' || found) return;
+  if (win.getTitle() === 'Pets') return attachOverlay(win);
+  win.webContents.on('page-title-updated', (_titleEvent, title) => { if (title === 'Pets') attachOverlay(win); });
+});
+function attachOverlay(win) {
+  if (found) return;
   found = true;
   const nativeShapes = [];
   const setShape = win.setShape.bind(win);
@@ -58,7 +64,9 @@ app.on('browser-window-created', (_event, win) => {
     ignoredMouseCalls.push({ ignore, forward: options?.forward === true });
     return setIgnoreMouseEvents(ignore, options);
   };
-  win.webContents.once('did-finish-load', () => {
+  // The title can arrive after the load already finished; run the checks either way.
+  const whenLoaded = run => (win.webContents.isLoading() ? win.webContents.once('did-finish-load', run) : run());
+  whenLoaded(() => {
     setTimeout(async () => {
       try {
         const geometry = await win.webContents.executeJavaScript(`(() => {
@@ -233,7 +241,7 @@ app.on('browser-window-created', (_event, win) => {
           await new Promise(resolve => setTimeout(resolve, 100));
           const moved = await win.webContents.executeJavaScript(`(() => {
             const rect = document.querySelector('.pet-shell').getBoundingClientRect();
-            return { x: rect.x, y: rect.y, saved: localStorage.getItem('cos.ui.petDesktop.tur-tur-sahur.v1') };
+            return { x: rect.x, y: rect.y, saved: localStorage.getItem('cos.ui.petDesktop.capy.v1') };
           })()`);
           assert.ok(Math.abs(moved.x - 333) < 2 && Math.abs(moved.y - 444) < 2,
             `Native pointer drag did not move the pet: ${JSON.stringify(moved)}`);
@@ -250,7 +258,8 @@ app.on('browser-window-created', (_event, win) => {
           return { rect: rect?.toJSON(), region: bar && getComputedStyle(bar).webkitAppRegion,
             hit: hit?.className ?? null, hitRegion: hit && getComputedStyle(hit).webkitAppRegion, point };
         })()`);
-        assert.ok(titlebar.rect?.height >= 28, `The titlebar needs a real drag row: ${JSON.stringify(titlebar)}`);
+        assert.ok(titlebar.rect?.height >= 27.5, // fractional scaling measures 28px as 27.998
+          `The titlebar needs a real drag row: ${JSON.stringify(titlebar)}`);
         assert.equal(titlebar.region, 'drag', `The titlebar lost its native drag region: ${JSON.stringify(titlebar)}`);
         assert.ok(String(titlebar.hit).includes('app-topbar'), `The drag point is covered: ${JSON.stringify(titlebar)}`);
         console.log(`titlebar=${JSON.stringify(titlebar)}`);
@@ -301,7 +310,7 @@ app.on('browser-window-created', (_event, win) => {
           window.api.petsOverlayState()
         ])`);
         assert.equal(hidden[0].ok, true);
-        assert.equal(hidden[0].data.pets.find(pet => pet.id === 'tur-tur-sahur')?.enabled, true,
+        assert.equal(hidden[0].data.pets.find(pet => pet.id === 'capy')?.enabled, true,
           'Hide pet must leave the clicked library member Active.');
         assert.equal(hidden[1].ok, true);
         assert.equal(hidden[1].data.visible, false);
@@ -331,5 +340,5 @@ app.on('browser-window-created', (_event, win) => {
       } catch (error) { console.error(error); app.exit(1); }
     }, 700);
   });
-});
+}
 provider.listen(0, '127.0.0.1', () => require(path.join(root, 'out/main/index.js')));

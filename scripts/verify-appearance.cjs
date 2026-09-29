@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
+const { fixtureConfigSource } = require('./fixtures/app-defaults.cjs');
 const output = path.join(root, 'outputs/appearance');
 app.setPath('userData', path.join(output, 'runtime'));
 app.whenReady().then(async () => {
@@ -11,7 +12,8 @@ app.whenReady().then(async () => {
   const fixture = `
     localStorage.removeItem('chat-on-steroids.sidebar-order');
     localStorage.removeItem('cos.ui.language');
-    const config = {
+    ${fixtureConfigSource()}
+    const config = fixtureConfig({
       roots: [{name:'demo',path:'C:/demo'}], readOnly:true,
       capabilities: {browse:true,search:true,read:true,metadata:true,create:false,edit:false,move:false,deleteFile:false,command:false,screen:false,control:false,clipboardRead:false,clipboardWrite:false},
       tunnel: {kind:'openai',tunnelId:'',desktopTunnelId:'',binaryPath:''},
@@ -19,7 +21,7 @@ app.whenReady().then(async () => {
       sessions: {record:true,retainDays:30,advisoryTokens:300000,limitTokens:400000}, compaction:{auto:true,autoTokens:300000},
       multiAgent:{enabled:false,maxWorkers:2,allowUnattributedCalls:false,recoverAgentTabs:false},
       goal:{enabled:false,model:'fixture',reasoning:'default',prompt:'Fixture'}
-    };
+    });
     const state = {config,hasApiKey:false,hasGoalKey:false,resolvedBinary:null,bundledTunnelVersion:null,
       status:{state:'disconnected',detail:'',publicUrl:null,localUrl:null,handshakeAt:null,lastRequestAt:null,lastToolCallAt:null,health:null,surfaces:[]},
       bridge:{running:false,port:0,paired:false,present:false,lastSeenAt:null,extensionVersion:null},

@@ -4,20 +4,22 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
+const { fixtureConfigSource } = require('./fixtures/app-defaults.cjs');
 const output = path.join(root, 'outputs/disconnect-ui');
 app.setPath('userData', path.join(output, 'runtime'));
 app.whenReady().then(async () => {
   const { createServer } = await import('vite');
   const fixture = `
     localStorage.removeItem('cos.ui.language');
-    const config = {
+    ${fixtureConfigSource()}
+    const config = fixtureConfig({
       roots:[{name:'fixture',path:'C:/fixture'}],readOnly:true,
       capabilities:{browse:true,search:true,read:true,metadata:true},
       tunnel:{kind:'manual',tunnelId:'',desktopTunnelId:'',binaryPath:''},
       ui:{theme:'dark',autoConnect:false},sessions:{record:true,retainDays:30,advisoryTokens:300000,limitTokens:400000},
       compaction:{auto:false,autoTokens:300000},multiAgent:{enabled:false,maxWorkers:2},
       goal:{enabled:false,model:'fixture',reasoning:'default',prompt:'Fixture'}
-    };
+    });
     const state = {config,hasApiKey:false,hasGoalKey:false,resolvedBinary:null,bundledTunnelVersion:null,
       status:{state:'connected',detail:'',publicUrl:null,localUrl:null,handshakeAt:null,lastRequestAt:null,lastToolCallAt:null,health:null,surfaces:[]},
       bridge:{running:false,port:0,paired:false,present:false,lastSeenAt:null,extensionVersion:null},
