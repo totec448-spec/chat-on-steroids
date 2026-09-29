@@ -2122,8 +2122,40 @@ input[readonly] {
   animation: turn-sheen 4.2s ease-in-out infinite;
 }
 @keyframes turn-sheen { from { background-position: 130% 0; } to { background-position: -130% 0; } }
+/* What the turn does right now: the last row of its work. A running step keeps the activity rows'
+   rhythm and wears the icon its finished row will, in the accent and breathing, its words
+   shimmering like the Working line and its own clock faint. Thinking is not a step, so it does not
+   look like one: ChatGPT's own sign, a white dot that breathes, beside heavier words and set apart
+   from the rows above. A new state fades in where the last one was; a long one truncates rather than wrapping. */
+.turn-now[hidden] { display: none; }
+.turn-now-icon { flex: none; display: grid; place-items: center; width: 14px; height: 14px; color: var(--accent); animation: turn-now-breathe 1.6s ease-in-out infinite; }
+.turn-now-icon .ico { --ico: 14px; }
+.turn-now-body { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+/* Every state holds the same slot, set apart from the rows above, so a change of state never moves it. */
+.meta.is-progress.thinking-line.turn-now { margin-top: 14px; }
+.meta.is-progress.thinking-line.turn-now.is-thinking { gap: 10px; font-weight: 500; }
+.turn-now.is-thinking .turn-now-icon { width: 14px; height: 14px; animation: none; }
+.turn-now.is-thinking .turn-now-icon::before {
+  content: ''; width: 12px; height: 12px; border-radius: 50%; background: var(--ink);
+  animation: turn-now-dot 1.5s ease-in-out infinite;
+}
+@keyframes turn-now-breathe { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes turn-now-dot { 0%, 100% { transform: scale(.6); } 50% { transform: scale(1); } }
+.turn-now-text {
+  min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  color: transparent;
+  background: linear-gradient(100deg, var(--soft) 38%, var(--ink) 50%, var(--soft) 62%) 0 0 / 260% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  animation: turn-sheen 4.2s ease-in-out infinite;
+}
+.turn-now-time { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.turn-now-time:empty { display: none; }
+.turn-now.is-new { animation: turn-now-in 220ms ease-out; }
+@keyframes turn-now-in { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .turn-status.is-working .turn-worked-label { animation: none; color: var(--soft); background: none; }
+  .turn-now.is-new, .turn-now-icon, .turn-now.is-thinking .turn-now-icon::before { animation: none; }
+  .turn-now-text { animation: none; color: var(--soft); background: none; }
 }
 /* The status now opens each turn in the timeline; the header shows it only in developer mode. */
 .subhead-note.is-mirrored { display: none; }

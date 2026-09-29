@@ -29,7 +29,7 @@ app.whenReady().then(async () => {
     window.api=new Proxy({getState:()=>ok(state),getLog:()=>ok([]),listProjects:()=>ok([]),
       listSessions:()=>ok({sessions:[summary],activeId:null,pressure:[],blocked:[]}),
       getSession:()=>ok({summary,events:structuredClone(window.rows),total:2,nextFrom:100}),
-      getSessionControls:()=>ok({automation:'off',blocked:'',job:null}),listInputs:()=>ok([]),listPausedHelpers:()=>ok([]),
+      getSessionControls:()=>ok({automation:'off',blocked:'',job:null}),listInputs:()=>ok([]),runningTools:()=>ok([]),listPausedHelpers:()=>ok([]),
       onSessionChanged:fn=>{window.changed=fn;return ()=>{}},getSwarm:()=>ok({running:false,agents:[]}),
       getChatModels:()=>ok({state:'unknown',models:[]})},{get:(target,key)=>key in target?target[key]:()=>ok(null)});
     window.reaction=(value)=>{question.reaction=value;question.seq++;window.changed({sessionIds:[summary.id]})};

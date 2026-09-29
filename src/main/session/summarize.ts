@@ -147,6 +147,21 @@ const UNDONE: Record<string, string> = {
   Requested: 'request'
 };
 
+/**
+ * Past tense → progressive, for the caption of a call still running. The title is built from the
+ * call's arguments alone, before any evidence exists, so it names the subject and not the result.
+ */
+const ONGOING: Record<string, string> = {
+  Edited: 'Editing', Applied: 'Applying', Rewrote: 'Rewriting', Appended: 'Appending', Created: 'Creating',
+  Saved: 'Saving', Interrupted: 'Interrupting', Filled: 'Filling', Wrote: 'Writing', Moved: 'Moving',
+  Deleted: 'Deleting', Read: 'Reading', Viewed: 'Viewing', Inspected: 'Inspecting', Listed: 'Listing',
+  Searched: 'Searching', Checked: 'Checking', Ran: 'Running', Launched: 'Launching', Started: 'Starting',
+  Stopped: 'Stopping', Opened: 'Opening', Looked: 'Looking', Waited: 'Waiting', Clicked: 'Clicking',
+  'Double-clicked': 'Double-clicking', Dragged: 'Dragging', Scrolled: 'Scrolling', Typed: 'Typing',
+  Pressed: 'Pressing', Focused: 'Focusing', Acted: 'Acting', Replaced: 'Replacing', Loaded: 'Loading',
+  Messaged: 'Messaging', Reported: 'Reporting', Requested: 'Requesting', Updated: 'Updating', Cleared: 'Clearing'
+};
+
 /** Whole titles that do not begin with a verb. */
 const UNDONE_WHOLE: Record<string, string> = {};
 
@@ -173,6 +188,19 @@ export interface SummaryInput {
   durationMs: number;
   /** First line of the result, used only where nothing better exists. */
   resultHead?: string;
+}
+
+/** What a call is doing while it runs: "Reading src/x.ts", "Running npm test", and its kind. */
+export function summarizeRunningCall(tool: string, args: unknown, evidence: CallEvidence): { title: string; kind: ActivitySummary['kind'] } {
+  let summary: ActivitySummary;
+  try {
+    summary = build(tool, record(args), evidence, [], { tool, args, evidence, outcome: 'ok', durationMs: 0 });
+  } catch {
+    return { title: `Running ${tool}`, kind: 'other' };
+  }
+  const space = summary.title.indexOf(' ');
+  const verb = ONGOING[space === -1 ? summary.title : summary.title.slice(0, space)];
+  return { title: verb ? `${verb}${space === -1 ? '' : summary.title.slice(space)}` : `Running ${tool}`, kind: summary.kind };
 }
 
 /**

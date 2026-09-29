@@ -41,7 +41,7 @@ app.whenReady().then(async () => {
         total:live.events.length,nextFrom:(live.events.at(-1)?.seq??-1)+1}),
       getSessionControls:()=>ok({sessionId:session.id,activeTurnId:'fixture-turn',canInject:true,automation:'off',objective:'',...live.controls}),
       getChatModels:()=>ok({state:'ready',observedAt:Date.now(),models:[{id:'gpt-5.6-sol',label:'GPT-5.6 Sol',efforts:['high']}]}),
-      listInputs:()=>ok(structuredClone(live.inputs)),listPausedHelpers:()=>ok([]),
+      listInputs:()=>ok(structuredClone(live.inputs)),runningTools:()=>ok([]),listPausedHelpers:()=>ok([]),
       onSessionChanged:fn=>{live.notify=fn;return ()=>{}},chooseFiles:()=>ok(live.files),
       stopSessionTurn:(id,turnId)=>{live.stops.push({id,turnId});return ok({})},
       editQueuedInput:(id,text)=>{const row=live.inputs.find(r=>r.id===id);if(!row||row.state!=='queued')return ok(false);row.text=text.trim();return ok(true)},
