@@ -1042,5 +1042,110 @@
   },
   "popup_yes": {
     "message": "ja"
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "In der letzten Antwort wurde kein MCP-Tool-Aufruf aufgezeichnet, daher kann die App nicht erkennen, ob die Verbindung zu den Tools verloren ging. Die automatische Fortsetzung ist pausiert; Loop bleibt aktiv. Prüfe den Tunnel und den Core-Connector, bevor du weitermachst."
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "Für diese Antwort gibt es keine ausstehende Fortsetzung. Sie wurde vielleicht schon erledigt oder durch neuere Arbeit ersetzt. Prüfe die letzte Chat-Aktivität, bevor du es erneut versuchst."
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "Die Aufgabe und die Goal-/Loop-Anweisungen sind zu lang für den Helfer. Kürze die Aufgabe oder die eigenen Fortsetzungsanweisungen in den Einstellungen."
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "Der Helfer hat eine Fortsetzung geschrieben, die zu lang zum Senden ist. Verlange kürzere Fortsetzungsanweisungen oder wähle in den Einstellungen ein anderes Helfer-Modell."
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "Der Anbieter hat eine zu große Antwort geliefert. Wähle ein anderes Modell für die Fortsetzung oder verlange kürzere Antworten."
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "Die Antwort des Anbieters hat das Größenlimit überschritten. Wähle ein anderes Modell für die Fortsetzung oder verlange kürzere Antworten."
+  },
+  "content_goal_error_no_api_key": {
+    "message": "Für den Anbieter der Fortsetzung ist kein API-Schlüssel eingerichtet. Füge in den Einstellungen einen hinzu oder wähle ChatGPT als Quelle für die Fortsetzung."
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "Der Anbieter der Fortsetzung hat die API-Zugangsdaten abgelehnt. Prüfe den API-Schlüssel und die Zugriffsrechte in den Einstellungen."
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "Das Konto beim Anbieter der Fortsetzung hat kein Guthaben. Lade Guthaben auf oder wähle in den Einstellungen eine andere Quelle für die Fortsetzung."
+  },
+  "content_goal_error_unknown_model": {
+    "message": "Der Anbieter der Fortsetzung hat das gewählte Modell nicht gefunden. Aktualisiere seine Modellliste und wähle in den Einstellungen ein verfügbares Modell."
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "Der eigene Endpunkt für die Fortsetzung ist ungültig. Prüfe die URL in den Einstellungen; nutze HTTPS oder einen lokalen HTTP-Endpunkt."
+  },
+  "content_goal_error_rate_limited": {
+    "message": "Der Anbieter der Fortsetzung drosselt die Anfragen. Warte auf den angezeigten neuen Versuch oder wähle ein anderes Modell für die Fortsetzung."
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "Die Anfrage für die Fortsetzung hat zu lange gedauert oder wurde abgebrochen. Prüfe den Helfer-Chat oder den Status des Anbieters, bevor du es erneut versuchst."
+  },
+  "content_goal_error_request_failed": {
+    "message": "Die Anfrage für die Fortsetzung ist fehlgeschlagen. Prüfe den gewählten Helfer oder API-Endpunkt und die Diagnose der App, bevor du es erneut versuchst."
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "Eine Anfrage an den Helfer läuft bereits. Lass sie fertig werden oder brich sie ab, bevor du eine neue startest."
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "Die Anfrage an den Helfer wurde abgebrochen. Starte sie erneut, wenn du weitermachen willst."
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "Der Prompt an den Helfer konnte ChatGPT nicht zugestellt werden. Öffne den Helfer-Chat und prüfe das Eingabefeld oder den angezeigten Fehler, bevor du es erneut versuchst."
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "Die App konnte nicht bestätigen, ob ChatGPT den Prompt des Helfers erhalten hat. Prüfe den Helfer-Chat, bevor du es erneut versuchst, damit nichts doppelt gesendet wird."
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "Ein anderer Browser-Tab kümmert sich um diese Fortsetzung. Den Fortschritt siehst du in diesem Tab."
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "Die App hat noch keine fertige Antwort bestätigt, die automatisch fortgesetzt werden kann. Prüfe den Ausgangs-Chat auf laufende Arbeit oder einen Fehler."
+  },
+  "content_goal_error_astra_finish_only": {
+    "message": "Dieser Chat setzt über das Abschluss-Tool fort. Mit der aktuellen Einstellung löst eine fertige Antwort im Browser keine weitere Nachricht aus."
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "Goal/Loop ist für diesen Chat aus. Schalte es ein, um die Fortsetzung zu erlauben."
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "Worker können kein eigenes Goal/Loop ausführen. Aktiviere die Fortsetzung stattdessen im übergeordneten Chat."
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "Dieser Chat wurde durch Komprimieren & Fortsetzen ersetzt. Mach im Nachfolge-Chat weiter."
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "Dieser Chat ist in der App blockiert. Gib ihn dort frei, bevor du die Fortsetzung aktivierst."
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "Die App hat für diesen Chat keinen aufgezeichneten Verlauf. Aktiviere die Aufzeichnung und sende eine Nachricht, bevor du die automatische Fortsetzung nutzt."
+  },
+  "content_goal_error_no_conversation": {
+    "message": "Es gibt keine aufgezeichnete Unterhaltung zum Fortsetzen. Sende zuerst eine Aufgabe."
+  },
+  "content_goal_error_no_objective": {
+    "message": "Es wurde keine Aufgabe angegeben. Gib eine Aufgabe ein, bevor du Goal/Loop startest."
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "Der Helfer hat keine erste Nachricht erzeugt. Formuliere die Aufgabe genauer und versuche es erneut."
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "Der Helfer hat immer wieder angehalten, statt eine Loop-Fortsetzung zu schreiben. Prüfe die Loop-Anweisungen oder wähle ein anderes Helfer-Modell."
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "Der Antwort fehlt der Abschlussmarker, den die Offline-Vorlagen für Goal brauchen. Prüfe die Anweisungen der Vorlage oder wähle eine andere Quelle für die Fortsetzung."
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "Die App konnte die ausstehende Fortsetzung nicht speichern. Prüfe den freien Speicherplatz und die Diagnose der App."
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "Die App konnte die Zustellbestätigung nicht speichern. Prüfe den freien Speicherplatz und den Chat, bevor du manuell erneut sendest."
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "Die App konnte die Goal-/Loop-Einstellung nicht speichern. Prüfe den freien Speicherplatz und speichere erneut."
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "Die App konnte die Aufgabe nicht speichern. Prüfe den freien Speicherplatz und speichere erneut."
   }
 }

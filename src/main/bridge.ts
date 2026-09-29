@@ -2,7 +2,7 @@ import { conversationProgress } from './session/progress.js';
 import { messageReaction } from '../shared/message-reaction.js';
 import { browserControl } from './browser-control.js';
 import type { BrowserResult } from '../shared/browser-control.js';
-import { goalErrorMessage } from '../shared/goal-errors.js';
+import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
 import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt.js';
 import { prepareSessionPrompt } from './session/prompt.js';
 import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
@@ -842,7 +842,7 @@ export async function unpair(): Promise<void> {
 /** Goal wire errors keep their code/retry policy and add a user-facing explanation. */
 function goalJson(res: http.ServerResponse, status: number, body: unknown, origin: string | null): void {
   if (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' && !('message' in body)) {
-    body = { ...body, message: goalErrorMessage(body.error) };
+    body = { ...body, message: goalErrorMessage(body.error), messageKey: goalErrorKey(body.error) };
   }
   json(res, status, body, origin);
 }

@@ -39,7 +39,7 @@
     "message": "ChatGPT, başlangıç metni eklenirken mesaj alanını değiştirdi"
   },
   "content_bootstrap_composer_unavailable": {
-    "message": "ChatGPT başlangıç için kullanılabilir bir mesaj alanı göstermedi"
+    "message": "Model seçiminden sonra ChatGPT kullanılabilir bir ileti alanını yeniden göstermedi"
   },
   "content_bootstrap_fresh_chat_changed": {
     "message": "işaretlenen yeni sohbet başlangıç mesajı gönderilmeden önce değişti; hiçbir şey gönderilmedi"
@@ -52,9 +52,6 @@
   },
   "content_bootstrap_missing_target": {
     "message": "mevcut bir sohbete sunuldu ve hedef sohbet belirtilmedi"
-  },
-  "content_bootstrap_composer_unavailable": {
-    "message": "Model seçiminden sonra ChatGPT kullanılabilir bir ileti alanını yeniden göstermedi"
   },
   "content_bootstrap_model_unavailable": {
     "message": "İstenen model veya akıl yürütme kullanılamıyor ya da ChatGPT içinde doğrulanamadı"
@@ -1045,5 +1042,110 @@
   },
   "popup_yes": {
     "message": "evet"
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "Son yanıtta MCP araç çağrısı kaydedilmedi; bu nedenle uygulama araç bağlantısının kesilip kesilmediğini belirleyemiyor. Otomatik devam duraklatıldı; Döngü etkin kalır. Devam etmeden önce tüneli ve Core bağlayıcısını kontrol edin."
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "Bu yanıt için bekleyen bir devam yok. Zaten işlenmiş veya daha yeni bir çalışma tarafından değiştirilmiş olabilir. Yeniden denemeden önce en son sohbet etkinliğini kontrol edin."
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "Görev ve Hedef/Döngü talimatları yardımcıya gönderilemeyecek kadar uzun. Ayarlar'daki görevi veya özel devam talimatlarını kısaltın."
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "Yardımcı, gönderilemeyecek kadar uzun bir devam yazdı. Daha kısa devam talimatları isteyin veya Ayarlar'da başka bir yardımcı model seçin."
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "Sağlayıcı aşırı büyük bir yanıt döndürdü. Başka bir devam modeli seçin veya daha kısa yanıtlar isteyin."
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "Sağlayıcı yanıtı boyut sınırını aştı. Başka bir devam modeli seçin veya daha kısa yanıtlar isteyin."
+  },
+  "content_goal_error_no_api_key": {
+    "message": "Devam sağlayıcısı için API anahtarı yapılandırılmamış. Ayarlar'da bir anahtar ekleyin veya ChatGPT devam kaynağını seçin."
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "Devam sağlayıcısı API kimlik bilgilerini reddetti. Ayarlar'da API anahtarını ve erişim izinlerini kontrol edin."
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "Devam sağlayıcısı hesabında kullanılabilir kredi yok. Kredi ekleyin veya Ayarlar'da başka bir devam kaynağı seçin."
+  },
+  "content_goal_error_unknown_model": {
+    "message": "Devam sağlayıcısı seçili modeli bulamadı. Model listesini yenileyin ve Ayarlar'da kullanılabilir bir model seçin."
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "Özel devam uç noktası geçersiz. URL'sini Ayarlar'da kontrol edin; HTTPS veya yerel bir HTTP uç noktası kullanın."
+  },
+  "content_goal_error_rate_limited": {
+    "message": "Devam sağlayıcısı istek hızını sınırlıyor. Gösterilen yeniden denemeyi bekleyin veya başka bir devam modeli seçin."
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "Devam isteği zaman aşımına uğradı veya iptal edildi. Yeniden denemeden önce yardımcı sohbetini veya sağlayıcı durumunu kontrol edin."
+  },
+  "content_goal_error_request_failed": {
+    "message": "Devam isteği başarısız oldu. Yeniden denemeden önce seçili yardımcıyı veya API uç noktasını ve uygulama tanılamalarını kontrol edin."
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "Başka bir yardımcı isteği zaten bekliyor. Yeni bir istek başlatmadan önce tamamlanmasını bekleyin veya iptal edin."
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "Yardımcı isteği iptal edildi. Devam etmek istediğinizde yeniden başlatın."
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "Yardımcı istemi ChatGPT'ye iletilemedi. Yeniden denemeden önce yardımcı sohbetini açın ve mesaj alanını veya görünen hatayı kontrol edin."
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "Uygulama, ChatGPT'nin yardımcı istemini alıp almadığını doğrulayamadı. İki kez göndermemek için yeniden denemeden önce yardımcı sohbetini kontrol edin."
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "Bu devam işlemini başka bir tarayıcı sekmesi yürütüyor. İlerleme için o sekmeyi kontrol edin."
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "Uygulama, otomatik devam için uygun bir nihai yanıtı henüz doğrulamadı. Kaynak sohbette devam eden çalışma veya hata olup olmadığını kontrol edin."
+  },
+  "content_goal_error_astra_finish_only": {
+    "message": "Bu sohbet bitiş aracı üzerinden devam ediyor. Geçerli ayarla tarayıcıdaki nihai yanıt başka bir mesaj tetiklemez."
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "Bu sohbet için Hedef/Döngü kapalı. Devama izin vermek için açın."
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "Yardımcı ajanlar kendi Hedef/Döngü işlemlerini çalıştıramaz. Bunun yerine üst sohbette devamı etkinleştirin."
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "Bu sohbet Sıkıştır ve sürdür ile değiştirildi. Ardıl sohbette devam edin."
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "Bu sohbet uygulamada engellenmiş. Devamı etkinleştirmeden önce engeli kaldırın."
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "Uygulamada bu sohbet için kayıtlı geçmiş yok. Otomatik devamı kullanmadan önce kaydı etkinleştirip bir mesaj gönderin."
+  },
+  "content_goal_error_no_conversation": {
+    "message": "Devam ettirilecek kayıtlı konuşma yok. Önce bir görev gönderin."
+  },
+  "content_goal_error_no_objective": {
+    "message": "Görev belirtilmedi. Hedef/Döngü'yü başlatmadan önce bir görev girin."
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "Yardımcı bir açılış mesajı üretmedi. Görevi daha belirgin hale getirip yeniden deneyin."
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "Yardımcı, Döngü devamı yazmak yerine durmayı seçmeye devam etti. Döngü talimatlarını gözden geçirin veya başka bir yardımcı model seçin."
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "Yanıtta çevrimdışı Hedef şablonlarının gerektirdiği tamamlama işareti eksik. Şablon talimatlarını kontrol edin veya başka bir devam kaynağı seçin."
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "Uygulama bekleyen devamı kaydedemedi. Boş disk alanını ve uygulama tanılamalarını kontrol edin."
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "Uygulama iletim onayını kaydedemedi. Boş disk alanını kontrol edin; elle yeniden göndermeden önce sohbeti kontrol edin."
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "Uygulama Hedef/Döngü ayarını kaydedemedi. Boş disk alanını kontrol edip yeniden kaydetmeyi deneyin."
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "Uygulama görevi kaydedemedi. Boş disk alanını kontrol edip yeniden kaydetmeyi deneyin."
   }
 }
