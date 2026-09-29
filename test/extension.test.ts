@@ -620,6 +620,7 @@ function loadWorker(options: {
     clearTimeout,
     URL,
     TextEncoder,
+    crypto: globalThis.crypto,
     console
   }, { filename: 'background.js' });
   if (!listener) throw new Error('background.js did not register a message listener');
@@ -863,6 +864,29 @@ describe('accepted helper tab cleanup', () => {
       else expect(worker.tabsRemove).not.toHaveBeenCalled();
     });
   }
+});
+
+describe('browser identity', () => {
+  it('sends one stable random browser id with every app request', async () => {
+    const seen: string[] = [];
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const worker = loadWorker({
+      local, session: new FakeStorageArea(),
+      fetch: async (input, init = {}) => {
+        const headers = (init.headers ?? {}) as Record<string, string>;
+        if (new URL(input).pathname !== '/hello') seen.push(headers['x-extension-browser'] ?? '');
+        return new URL(input).pathname === '/hello'
+          ? response(200, { app: 'chat-on-steroids', paired: true })
+          : response(200, { ok: true });
+      }
+    });
+    await worker.fireAlarm();
+    await worker.fireAlarm();
+    expect(seen.length).toBeGreaterThanOrEqual(2);
+    expect(seen[0]).toMatch(/^[0-9a-f]{32}$/);
+    expect(new Set(seen).size).toBe(1);
+    expect((await local.get(['browserId'])).browserId).toBe(seen[0]);
+  });
 });
 
 describe('automatic Continue shares scheduled reload custody', () => {

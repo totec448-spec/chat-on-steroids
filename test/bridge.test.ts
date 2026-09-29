@@ -245,7 +245,7 @@ interface Reply {
 function request(
   method: string,
   path: string,
-  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string } = {}
+  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string } = {}
 ): Promise<Reply> {
   const url = new URL(path, base);
   const payload = options.raw ?? (options.body === undefined ? null : JSON.stringify(options.body));
@@ -256,6 +256,7 @@ function request(
   headers['x-extension-version'] = options.extensionVersion ?? APP_VERSION;
   headers['x-extension-protocol'] = String(options.protocol ?? BRIDGE_PROTOCOL);
   if (options.extensionBuild) headers['x-extension-build'] = options.extensionBuild;
+  if (options.browser) headers['x-extension-browser'] = options.browser;
   if (payload !== null) {
     headers['content-type'] = 'application/json';
     headers['content-length'] = String(Buffer.byteLength(payload));
@@ -1203,6 +1204,40 @@ describe('activity feed', () => {
       attributionMethod: 'request_id'
     });
   });
+  it('hands a new chat to one browser only while that browser keeps polling', async () => {
+    // Live 2026-09-29: with the extension in two browsers, one opened the elected tab and left it
+    // blank while an idle tab in the other browser typed and sent the same opening message.
+    await pair();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    await writeDurableNow('session-input', []);
+    const first = 'a'.repeat(32), second = 'b'.repeat(32);
+    const id = randomUUID();
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      await input.enqueueInput({ id, sessionId: null, text: 'Open one chat', mode: 'auto', dueAt: now, model: null, reasoningEffort: null });
+      const offered = async (browser?: string) => ((await request('POST', '/status', { body: { openConversations: [] }, browser })).body.inputs as Array<{ id: string }>)
+        .some(row => row.id === id);
+      expect(await offered(first)).toBe(true);
+      expect(await offered(second)).toBe(false);
+      expect((await request('POST', '/input/claim', { body: { id, owner: '9:other-browser:0', conversationId: null }, browser: second })).body.input).toBeNull();
+      expect(await offered(first)).toBe(true);
+      // An older extension without an id is not told apart, as before.
+      expect(await offered()).toBe(true);
+      // The first browser went away: the other one may take the opening over.
+      now += 61_000;
+      expect(await offered(second)).toBe(true);
+      now += 1_000;
+      expect(await offered(first)).toBe(false);
+      expect((await request('POST', '/input/claim', { body: { id, owner: '9:other-browser:0', conversationId: null }, browser: second })).body.input)
+        .toMatchObject({ id });
+    } finally {
+      clock.mockRestore();
+      input.resetInputForTests();
+      await writeDurableNow('session-input', []);
+    }
+  });
+
   it('keeps bind, first correlation and ACK on the reserved opening session', async () => {
     await pair();
     const input = await import('../src/main/session/input.js');
