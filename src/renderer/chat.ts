@@ -4887,6 +4887,21 @@ export function initChat(next: Deps): void {
     }
     if (historyDemand) void fillTimelineHistory();
   }, { passive: true });
+  // The visible chat area also shrinks without new content: opening the bottom terminal or a
+  // side panel, or a growing message box. A reader who was at the end stays at the end; anyone
+  // who scrolled up keeps their place.
+  let atEnd = true;
+  const measureEnd = (): void => { atEnd = historyPane.scrollTop + historyPane.clientHeight >= historyPane.scrollHeight - 2; };
+  historyPane.addEventListener('scroll', measureEnd, { passive: true });
+  if (typeof ResizeObserver === 'function') {
+    let lastHeight = historyPane.clientHeight;
+    new ResizeObserver(() => {
+      const height = historyPane.clientHeight;
+      if (height !== lastHeight && atEnd) historyPane.scrollTop = historyPane.scrollHeight;
+      lastHeight = height;
+      measureEnd();
+    }).observe(historyPane);
+  }
   $('timeline').addEventListener('click', event => {
     // Disclosure changes deliberately change geometry. Padding retained for an
     // earlier reconciliation is not part of the collapsed headline's height.
