@@ -2100,6 +2100,24 @@ input[readonly] {
 /* Copy and export under a completed turn's answer: quiet until pointed at, like the answer's own
    text. The export menu is anchored to its button and flips at the window edge; it enters like the
    composer menus and fades out while ::details-content keeps it painted. */
+/* A completed turn's duration above its answer: quiet text on a hairline, the boundary between
+   the turn's work and what it says. */
+.turn-worked { margin: 12px 0 8px; padding-bottom: 9px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: calc(12.5px * var(--text-scale, 1)); font-weight: 500; letter-spacing: .01em; line-height: 18px; font-variant-numeric: tabular-nums; }
+.turn-worked[hidden] { display: none; }
+/* While the turn works, a light sheen passes through the words (not the rule under them). */
+.turn-status.is-working .turn-worked-label {
+  color: transparent;
+  background: linear-gradient(100deg, var(--faint) 38%, var(--ink) 50%, var(--faint) 62%) 0 0 / 260% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  animation: turn-sheen 4.2s ease-in-out infinite;
+}
+@keyframes turn-sheen { from { background-position: 130% 0; } to { background-position: -130% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .turn-status.is-working .turn-worked-label { animation: none; color: var(--soft); background: none; }
+}
+/* The status now opens each turn in the timeline; the header shows it only in developer mode. */
+.subhead-note.is-mirrored { display: none; }
+.subhead:has(#chatState.is-mirrored) { display: none; }
 .answer-actions { display: flex; align-items: center; gap: 2px; margin: 8px 0 0 -6px; }
 .answer-action { display: grid; place-items: center; width: 28px; height: 28px; padding: 6px; border: 0; border-radius: 7px; background: transparent; color: var(--faint); cursor: pointer; list-style: none; }
 .answer-action::-webkit-details-marker { display: none; }
