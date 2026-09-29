@@ -9,9 +9,6 @@
   "One request, without automatic continuation.": "Otomatik devam olmadan tek bir istek.",
   "Continue until this objective is satisfied.": "Bu hedefe ulaşılana kadar devam et.",
   "Keep working within the brief until paused.": "Duraklatılana kadar istek kapsamında çalışmaya devam et.",
-  "Current conversation": "Geçerli konuşma",
-  "Local estimate": "Yerel tahmin",
-  "Auto-compaction threshold": "Otomatik sıkıştırma eşiği",
   "By model": "Modele göre",
   "By day": "Güne göre",
   "Code": "Kod",
@@ -1746,5 +1743,9 @@
   "Review this edit ({0} of {1} files)": "Bu düzenlemeyi incele ({1} dosyadan {0})",
   "This reply points to content from another message that was not recorded.": "Bu yanıt, kaydedilmemiş başka bir mesajdaki içeriğe işaret ediyor.",
   "Local control API: let agents on this computer read app status and chats": "Yerel kontrol API'si: bu bilgisayardaki ajanların uygulama durumunu ve sohbetleri okumasına izin ver",
-  "Use effort: {0}": "Bu seviyeyi kullan: {0}"
+  "Use effort: {0}": "Bu seviyeyi kullan: {0}",
+  "This chat (estimate)": "Bu sohbet (tahmini)",
+  "Context limit": "Bağlam sınırı",
+  "Filled": "Dolu",
+  "Compacts automatically at": "Otomatik sıkıştırma başlangıcı"
 }

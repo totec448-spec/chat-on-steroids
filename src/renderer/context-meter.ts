@@ -45,7 +45,10 @@ export function paintContextMeter(session: SessionSummary | null, config: Config
     pro ? t('Auto-compaction off for Pro') : config.compaction.auto
       ? t('Auto-compaction at {0} tokens', [new Intl.NumberFormat().format(config.compaction.autoTokens)])
       : t('Auto-compaction off')].join('\n');
-  ui(document.getElementById('contextTokens')!, 'textContent', () => `${counts()} ${t('est.')}`);
+  // One fact per row: the estimate, the limit from Settings, the share, and when compaction starts.
+  ui(document.getElementById('contextTokens')!, 'textContent', () => short(used));
+  const limitRow = document.getElementById('contextLimit');
+  if (limitRow) ui(limitRow, 'textContent', () => pro ? '—' : short(limit));
   ui(document.getElementById('contextPercent')!, 'textContent', () => pro ? '—' : `${percent}%`);
   ui(document.getElementById('contextThreshold')!, 'textContent', () => pro ? t('Auto-compaction off for Pro') : config.compaction.auto ? short(config.compaction.autoTokens) : t('Off'));
   const progress = panel.querySelector<HTMLElement>('.context-progress')!;
