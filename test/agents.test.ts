@@ -384,14 +384,30 @@ describe('account-observed worker admission', () => {
   });
 
   // #499: a default saved before 2.1.15 read picker lanes stopped matching, and every spawn failed.
-  it('uses ChatGPT\'s current model when the saved default model is not offered, but keeps explicit requests strict', async () => {
+  // The same stale value is the picker label's hyphenated form of one unique family —
+  // it resolves to that family; explicit requests keep their strict id/alias check.
+  it('resolves a stale default display slug to its unique observed family, but keeps explicit requests strict', async () => {
     const base = defaultConfig();
     await saveConfig({ ...base, multiAgent: { ...base.multiAgent, enabled: true, defaultModel: 'gpt-5.6-sol', defaultReasoning: 'high' } });
     try {
       const result = spawn({ caller: prime, workers: [{ task: 'stale default' }, { task: 'second' }] });
-      expect(result.created.map(worker => [worker.model, worker.reasoningEffort])).toEqual([[null, 'high'], [null, 'high']]);
-      expect(result.defaultNotes).toEqual([expect.stringMatching(/default worker model "gpt-5.6-sol" saved in Settings is not offered/)]);
+      expect(result.created.map(worker => [worker.model, worker.reasoningEffort])).toEqual([['5.6', 'high'], ['5.6', 'high']]);
+      expect(result.defaultNotes ?? []).toEqual([]);
       expect(() => spawn({ caller: prime, workers: [{ task: 'explicit', model: 'gpt-5.6-sol' }] })).toThrow(/not observed/);
+    } finally { await setEnabled(true); }
+  });
+
+  it('uses ChatGPT\'s current model when the saved default is ambiguous, but keeps explicit requests strict', async () => {
+    const base = defaultConfig();
+    await saveConfig({ ...base, multiAgent: { ...base.multiAgent, enabled: true, defaultModel: '5.5', defaultReasoning: 'high' } });
+    vi.mocked(chatModels.getChatModels).mockReturnValue({ state: 'ready', requestedAt: null, observedAt: 1, models: [
+      { id: 'gpt-5-5-thinking', label: '5.5', efforts: ['medium', 'high'] },
+      { id: 'gpt-5-5-pro', label: '5.5', efforts: ['pro'] }
+    ] });
+    try {
+      const result = spawn({ caller: prime, workers: [{ task: 'ambiguous default' }] });
+      expect(result.created.map(worker => [worker.model, worker.reasoningEffort])).toEqual([[null, 'high']]);
+      expect(result.defaultNotes).toEqual([expect.stringMatching(/default worker model "5.5" saved in Settings is not offered/)]);
     } finally { await setEnabled(true); }
   });
 

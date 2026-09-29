@@ -52,6 +52,7 @@ import type { GoalBackend } from '../shared/types.js';
 import { createHash } from 'node:crypto';
 import { getConfig } from './config.js';
 import { getChatModels } from './chat-models.js';
+import { resolveChatModel } from '../shared/chat-models.js';
 import type { ReasoningEffort } from '../shared/session.js';
 import { writeDurableNow, writeDurableSnapshotSoon, writeDurableSoon } from './durable.js';
 import { logInfo, logWarn } from './logger.js';
@@ -1772,10 +1773,15 @@ export function goalHelperSelection(): { model: string | null; reasoningEffort: 
   let reasoningEffort: ReasoningEffort | null = settings.helperReasoning ?? 'high';
   const models = getChatModels().models;
   if (!models.length) return { model, reasoningEffort };
-  const matching = (id: string) => models.filter(choice => choice.id === id || choice.aliases?.includes(id));
   const notes: string[] = [];
-  if (model && matching(model).length !== 1) { notes.push(`model "${model}"`); model = null; }
-  if (reasoningEffort && !(model ? matching(model) : models).some(choice => choice.efforts.includes(reasoningEffort!))) {
+  // A saved display label resolves to its unique observed family — the same rule the
+  // Settings selects apply before showing the badge. Exact ids and lane aliases keep
+  // their lane; a resolved label canonicalizes to the family. An ambiguous label stays rejected.
+  const resolved = model ? resolveChatModel(models, model) : undefined;
+  if (model && !resolved) { notes.push(`model "${model}"`); model = null; }
+  else if (resolved && resolved.id !== model && !resolved.aliases?.includes(model)) model = resolved.id;
+  const offered = model ? (resolved ? [resolved] : models.filter(choice => choice.id === model || choice.aliases?.includes(model))) : models;
+  if (reasoningEffort && !offered.some(choice => choice.efforts.includes(reasoningEffort!))) {
     notes.push(`reasoning "${reasoningEffort}"`); reasoningEffort = null;
   }
   const key = notes.join(',');

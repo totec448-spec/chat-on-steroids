@@ -1,6 +1,6 @@
 import { ui, uiText, t } from './i18n.js';
 import type { ChatModelCatalog } from '../shared/chat-models.js';
-import { chatModelDisplayLabel } from '../shared/chat-models.js';
+import { chatModelDisplayLabel, resolveChatModel } from '../shared/chat-models.js';
 import type { Config } from '../shared/types.js';
 import type { ReasoningEffort } from '../shared/session.js';
 import { $, el, icon, run } from './dom.js';
@@ -35,12 +35,7 @@ const effortNames: Record<string, string> = { none: "Instant", minimal: "Minimal
 const composerEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'pro'] as const;
 const effortLabel = (effort: string): string => effortNames[effort] ? t(effortNames[effort]) : effort;
 function observedModel(value: string) {
-  const exact = catalog.models.filter(choice => choice.id === value || choice.aliases?.includes(value));
-  if (exact.length) return exact.length === 1 ? exact[0] : undefined;
-  const normalize = (text: string) => text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}.]/gu, '');
-  const name = normalize(value);
-  const matches = name ? catalog.models.filter(choice => normalize(choice.label) === name) : [];
-  return matches.length === 1 ? matches[0] : undefined;
+  return resolveChatModel(catalog.models, value);
 }
 
 function paintComposerContext(): void {

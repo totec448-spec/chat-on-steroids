@@ -2721,6 +2721,12 @@ var CLF_DOM = (() => {
             return da - db || ladder.indexOf(b) - ladder.indexOf(a);
           });
           wantedEffort = efforts[0];
+        } else if (target >= 0) {
+          // A fixed-tier family exposes only efforts outside the reasoning ladder:
+          // a Pro-only model reports `pro` as its sole rung, so a requested ladder
+          // step has nothing to round to. The family's own tier is then the only
+          // honest resolution — still the requested model, never another rung.
+          wantedEffort = [...new Set(offered.map(entry => entry.choice.effort))][0];
         }
       }
       const candidates = offered.filter(entry => !wantedEffort || entry.choice.effort === wantedEffort);
