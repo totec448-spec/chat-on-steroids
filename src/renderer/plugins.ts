@@ -2,7 +2,7 @@ import { ui, t } from './i18n.js';
 import type { AppState } from '../shared/types.js';
 import type { SettingsPatch } from '../preload/index.js';
 import type { PluginSnapshot, PluginView, PluginCatalogEntry, PluginSource } from '../shared/plugins.js';
-import { $, el, run, toast } from './dom.js';
+import { $, disclosureChevron, el, run, toast } from './dom.js';
 
 let snapshot: PluginSnapshot = { plugins: [], catalog: [], schemaRevision: 0 };
 let epoch = 0;
@@ -18,6 +18,15 @@ function button(label: string | (() => string), action: () => void | Promise<voi
     finally { node.disabled = false; }
   });
   return node;
+}
+/**
+ * A disclosure headline with the app's chevron, the only sign it opens once the native marker is
+ * hidden. The words sit in their own span, so a language change rewrites them without the chevron.
+ */
+function disclosureSummary(label: () => string): HTMLElement {
+  const summary = el('summary');
+  summary.append(disclosureChevron('details-chevron'), el('span', '', label));
+  return summary;
 }
 function art(id: string): HTMLElement {
   const img = document.createElement('img'); img.className = 'plugin-icon'; img.alt = '';
@@ -204,7 +213,7 @@ function showPlugin(plugin: PluginView): void {
   intro.append(el('p', '', () => recipe ? t(recipe.description) : t("Your own MCP server, available in your conversations.")), configure);
   hero.append(art(recipe?.icon ?? plugin.catalogId ?? 'custom'), intro); body.append(hero);
   const tools = el('section', 'plugin-detail-tools'); tools.dataset.pluginDetail = plugin.id; renderPluginTools(tools, plugin); body.append(tools);
-  const about = document.createElement('details'); about.className = 'plugin-about'; about.append(el('summary', '', () => t("About this plugin")));
+  const about = document.createElement('details'); about.className = 'plugin-about'; about.append(disclosureSummary(() => t("About this plugin")));
   about.append(el('p', 'plugin-source', plugin.source.url ?? plugin.source.package ?? plugin.source.command ?? plugin.source.kind), el('p', 'muted', () => `${plugin.version || t("Custom version")} · ${plugin.license || t("License not supplied")}`), el('p', '', () => t("Runs while installed and enabled, including after reopening the app. Disable or uninstall it to stop its connection. Restart reconnects and refreshes its tools.")));
   if (plugin.homepage ?? recipe?.homepage) about.append(button(() => t("Open upstream project"), async () => { await run(window.api.openLink((plugin.homepage ?? recipe!.homepage)!)); }));
   body.append(about);
@@ -248,7 +257,7 @@ function showRecipe(recipe: PluginCatalogEntry): void {
     const tools = el('ul', 'plugin-tool-preview'); for (const name of recipe.tools) tools.append(el('li', '', () => t(name)));
     body.append(el('h3', 'plugin-preview-title', () => t("Tool preview")), tools);
   }
-  const setup = document.createElement('details'); setup.className = 'plugin-about'; setup.append(el('summary', '', () => t("Setup requirements")));
+  const setup = document.createElement('details'); setup.className = 'plugin-about'; setup.append(disclosureSummary(() => t("Setup requirements")));
   const steps = el('ol', 'plugin-steps'); for (const step of recipe.instructions) steps.append(el('li', '', () => t(step))); setup.append(steps, button(() => t("Open project & setup guide"), async () => { await run(window.api.openLink(recipe.homepage)); })); body.append(setup);
   const values = new Map<string, HTMLInputElement>();
   for (const item of recipe.fields) { const input = field(body, item.label, '', item.secret, item.placeholder); input.required = !!item.required; values.set(item.key, input); }
