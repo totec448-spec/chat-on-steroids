@@ -1182,8 +1182,19 @@ function view(draft: GoalDraft): GoalDraftView {
   };
 }
 
+/**
+ * A failure nothing will fix on its own: no credit, a rejected key, an unknown model. The page does
+ * not retry it, so it is the chat's Goal state until a newer draft replaces it. Hiding it once the
+ * page acknowledged it left only the still-owed reply, which read as "Answer settling" forever (#584).
+ */
+function settledFailure(draft: GoalDraft): boolean {
+  return draft.stage === 'failed' && draft.error !== null && !retryableGoalFailure(draft.error);
+}
+
 function expireDraftPayload(draft: GoalDraft): void {
   if (draft.settledAt === 0 || Date.now() - draft.settledAt <= DRAFT_TTL_MS) return;
+  // Its reason stays on screen; there is no payload to expire.
+  if (settledFailure(draft)) { draft.acknowledged = true; return; }
   // The TTL is for the *payload*, not the idempotency key. A ready draft can have crossed
   // ChatGPT's irreversible send boundary while its local ACK was lost. Keep this turn's token
   // as a spent tombstone until a genuinely newer generation supersedes it.
@@ -1209,7 +1220,7 @@ export function goalViewFor(conversationId: string, clientId?: string): GoalDraf
   // here only so the turn it belongs to cannot be drafted a second time, and reporting it
   // would leave the page polling fast and the panel above the composer describing something
   // that finished minutes ago.
-  if (draft.acknowledged) return null;
+  if (draft.acknowledged && !settledFailure(draft)) return null;
   return view(draft);
 }
 
