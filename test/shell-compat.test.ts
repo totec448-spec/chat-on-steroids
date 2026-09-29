@@ -1158,7 +1158,9 @@ it('discovers both native versions, selects exact worker lanes and restores the 
   expect(models.map((m: any) => m.id)).toEqual(['gpt-5-6-thinking', 'future-thinking', 'future-pro']);
   expect(await f.api.selectModelSettings('future-pro', 'pro')).toBe(true);
   expect(f.api.visibleModelSelection()).toEqual({ model: 'future-pro', reasoningEffort: 'pro' });
-  expect(await f.api.selectModelSettings('future-pro', 'high')).toBe(false);
+  // A fixed-tier family offers only `pro`: a ladder request resolves to the lane's own
+  // tier — same model, its only offered effort — rather than failing the selection.
+  expect(await f.api.selectModelSettings('future-pro', 'high')).toBe(true);
   expect(f.doc.querySelector('[data-model-picker-view]')).toBeNull();
   expect(f.api.visibleModelSelection()).toEqual({ model: 'future-pro', reasoningEffort: 'pro' });
 });
