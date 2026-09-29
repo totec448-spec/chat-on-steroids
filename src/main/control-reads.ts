@@ -20,7 +20,7 @@ import { swarmState } from './agents.js';
 import { sessionControlsFor } from './bridge.js';
 import { getLog, logWarn } from './logger.js';
 import { redactSecretText } from './redaction.js';
-import { listInputs } from './session/input.js';
+import { deliveryProof, listInputs } from './session/input.js';
 import type { InputEntry } from './session/input.js';
 import { readSession, readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 
@@ -354,7 +354,13 @@ export function projectInput(entry: InputEntry): ControlApiInput {
     deliveredSessionId: entry.deliveredSessionId ?? null,
     conversationId: entry.conversationId,
     state: entry.state,
+    // What the row proves about delivery, from the one owner of that rule.
+    delivery: deliveryProof(entry),
     mode: entry.mode,
+    transportIntent: entry.transportIntent ?? null,
+    // Filed by the app itself (a recovery pickup or an automatic follow-up), not typed by anyone.
+    // A silence boundary alone is not that: it can ride a message a person typed.
+    automatic: !!(entry.recovery || entry.finishOwner),
     purpose: entry.purpose ?? null,
     createdAt: entry.createdAt,
     dueAt: entry.dueAt,
