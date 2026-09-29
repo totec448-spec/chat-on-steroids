@@ -38,7 +38,7 @@
   getSwarm:()=>ok({running:false,runId:null,agents:[],maxWorkers:2,pendingReports:0}),
   petsList:()=>ok({pets:[]}),petsOverlayState:()=>ok({visible:false,ready:true,activeCount:0,activityCount:0}),
   listSessions:()=>ok({sessions:[{...summary,events:events.length,activeTurnId:controls.activeTurnId}],activeId:id,pressure:[]}),
-  listProjects:()=>ok([]),listPausedHelpers:()=>ok([]),listInputs:()=>ok(inputs),
+  listProjects:()=>ok([]),runningTools:()=>ok([]),listPausedHelpers:()=>ok([]),listInputs:()=>ok(inputs),
   getSession:()=>ok({summary:{...summary,events:events.length,activeTurnId:controls.activeTurnId},events,total:events.length,nextFrom:events.length+1}),
   getSessionControls:()=>ok(controls),getHandoff:()=>ok(null),
   setSessionAutomation:(_id,mode)=>{controls.automation=mode;notify();return ok(controls);},

@@ -32,7 +32,7 @@ app.whenReady().then(async () => {
       listSessions:()=>ok({sessions,total:1,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
       getSession:id=>ok({summary:sessions[0],total:events.length,nextFrom:events.length+1,events}),
       getSessionControls:id=>ok({sessionId:id,automation:'off',objective:'',blocked:'',job:null,activeTurnId:null}),
-      listInputs:()=>ok([]),listPausedHelpers:()=>ok([]),onSessionChanged:()=>()=>{},
+      listInputs:()=>ok([]),runningTools:()=>ok([]),listPausedHelpers:()=>ok([]),onSessionChanged:()=>()=>{},
       getSwarm:()=>ok({running:false,agents:[],pendingReports:0}),getChatModels:()=>ok({state:'unknown',models:[]})
     },{get:(target,key)=>key in target?target[key]:()=>ok(null)});
     await import('/main.ts');

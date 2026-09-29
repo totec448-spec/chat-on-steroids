@@ -34,7 +34,7 @@ app.whenReady().then(async () => {
     window.controls = {sessionId:session.id,conversationId:'fixture',automation:'loop',objective:'Continue the requested work',blocked:'',job:null,
       goalWait:{reason:'quiet',until:Date.now()+125000},goalDraft:null};
     window.api = new Proxy({listSessions:()=>ok({sessions:[session],activeId:null,blocked:[],pressure:[]}),
-      listProjects:()=>ok([]),listInputs:()=>ok([]),listPausedHelpers:()=>ok([]),
+      listProjects:()=>ok([]),listInputs:()=>ok([]),runningTools:()=>ok([]),listPausedHelpers:()=>ok([]),
       getSession:()=>ok({summary:session,total:0,events:[],nextFrom:0}),getSessionControls:()=>ok(controls)
     }, {get:(target,key)=>target[key]??(()=>ok(null))});
     window.frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));

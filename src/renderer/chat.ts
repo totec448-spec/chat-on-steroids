@@ -46,6 +46,7 @@ import type {
   AgentState,
   Handoff,
   MessageReference,
+  RunningToolActivity,
   SessionChange,
   SessionEvent,
   SessionSummary,
@@ -3352,6 +3353,109 @@ function paintRecoveryVerdict(host: HTMLElement, sessionId: string | null): bool
  */
 const turnStatusLine = turnLine('turn-worked turn-status');
 
+/*
+ * What the turn is doing right now, as the last row of its work, where the next thing will appear,
+ * as ChatGPT and Claude show it: the tool call running in this app ("Running npm test", with its own
+ * clock once it lasts), else the step ChatGPT's own page names ("Searching the web"), else
+ * "Thinking". Streaming prose needs no row; it is the feedback. A call only reaches the list once it
+ * has finished, so without this a long command read as an idle chat.
+ */
+const turnNow = el('p', 'meta is-progress thinking-line turn-now');
+const turnNowIcon = el('span', 'turn-now-icon');
+const turnNowText = el('span', 'turn-now-text');
+const turnNowTime = el('span', 'turn-now-time');
+const turnNowBody = el('span', 'turn-now-body');
+turnNowBody.append(turnNowText, turnNowTime);
+turnNow.append(turnNowIcon, turnNowBody);
+turnNow.hidden = true;
+let runningTools: RunningToolActivity[] = [];
+let runningToolsFor: string | null = null;
+let runningToolsAt = 0;
+let runningToolsEvents = -1;
+let runningToolsRequest = 0;
+/**
+ * Prose speaks for itself only while it is being written. Interim paragraphs stay "streaming" once
+ * finished, so what counts is whether its text changed in the last moments, not its state.
+ */
+let proseSeen: { key: string; chars: number; changedAt: number } | null = null;
+const PROSE_QUIET_MS = 2500;
+function proseMoving(event: Extract<SessionEvent, { kind: 'assistant_message' }>): boolean {
+  const key = event.messageId ?? `seq:${event.seq}`;
+  const chars = event.message.chars ?? event.message.text.length;
+  if (proseSeen?.key !== key || proseSeen.chars !== chars) proseSeen = { key, chars, changedAt: Date.now() };
+  return Date.now() - proseSeen.changedAt < PROSE_QUIET_MS;
+}
+/** ChatGPT names its own steps in the progressive ("Searching…", "Reading…"); a finished one does not describe now. */
+const NATIVE_STEP_NOW = /^\S+ing\b/i;
+
+/**
+ * The step in progress, with the icon its finished row will wear: a call of this app by its kind,
+ * a ChatGPT step by the globe its rows use. Thinking is not a step and does not look like one: it
+ * shows ChatGPT's own sign for it, a white dot that breathes.
+ */
+function liveActivity(): { text: string; icon: string; working: boolean; since?: number } | null {
+  const call = runningToolsFor === selectedId ? runningTools.at(-1) : undefined;
+  if (call) return { text: call.title, icon: KIND_ICON[call.kind] ?? KIND_ICON.other, working: true, since: call.since };
+  const thinking = { text: t('Thinking'), icon: '', working: false };
+  // A message not yet recorded opens a turn that has done nothing visible so far.
+  if ($('inputQueue').querySelector('.pending-message')) return thinking;
+  let asked = Number.NEGATIVE_INFINITY;
+  for (const event of events) if (event.kind === 'user_message') asked = Math.max(asked, event.time);
+  let newest: SessionEvent | undefined;
+  for (const event of events) {
+    if (event.time < asked || !['assistant_message', 'tool_call', 'page_tool', 'progress'].includes(event.kind)) continue;
+    if (!newest || event.time >= newest.time) newest = event;
+  }
+  if (newest?.kind === 'assistant_message' && proseMoving(newest)) return null;
+  if (newest?.kind === 'page_tool' && NATIVE_STEP_NOW.test(newest.label)) return { text: newest.label, icon: 'i-globe', working: true, since: newest.time };
+  return thinking;
+}
+
+function paintTurnNow(): void {
+  const now = turnStatusLine.classList.contains('is-working') ? liveActivity() : null;
+  const text = now?.text ?? '';
+  if (now && turnNowIcon.dataset.icon !== now.icon) {
+    turnNowIcon.dataset.icon = now.icon;
+    turnNowIcon.replaceChildren(...(now.icon ? [icon(now.icon)] : []));
+  }
+  turnNow.classList.toggle('is-thinking', now !== null && !now.working);
+  if (turnNow.dataset.text !== text) {
+    turnNow.dataset.text = text;
+    turnNowText.textContent = text;
+    turnNowText.title = text;
+    // A new step fades in; restarting the animation needs the class off for one style pass.
+    turnNow.classList.remove('is-new');
+    void turnNow.offsetWidth;
+    if (text) turnNow.classList.add('is-new');
+  }
+  const seconds = now?.since === undefined ? 0 : Math.max(0, Math.floor((Date.now() - now.since) / 1000));
+  // Short steps keep no clock; the one worth watching is the one that lasts.
+  turnNowTime.textContent = seconds >= 3
+    ? `${seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : ''}${seconds % 60}s` : '';
+  turnNow.hidden = !text;
+}
+
+/**
+ * Asks, at most once a second while the chat works, what its tool calls are doing, and again as
+ * soon as new rows arrive, so a call that just finished never reads as running beside its own row.
+ */
+function pollRunningTools(): void {
+  const summary = sessions.find(entry => entry.id === selectedId);
+  if (!summary || !turnStatusLine.classList.contains('is-working')) { runningTools = []; return; }
+  if (Date.now() - runningToolsAt < 900 && events.length === runningToolsEvents) return;
+  runningToolsAt = Date.now();
+  runningToolsEvents = events.length;
+  const conversationIds = [...new Set([summary.conversationId, ...summary.chatIds].filter((id): id is string => !!id))].slice(0, 16);
+  if (!conversationIds.length) return;
+  const request = ++runningToolsRequest, session = selectedId;
+  void api.runningTools(conversationIds).then(reply => {
+    if (request !== runningToolsRequest || session !== selectedId) return;
+    runningTools = reply.ok ? reply.data : [];
+    runningToolsFor = session;
+    paintTurnNow();
+  });
+}
+
 /** A turn line: the text sits in its own span so the working shimmer spans the words, not the rule. */
 function turnLine(className: string): HTMLElement {
   const line = el('div', className);
@@ -3406,7 +3510,7 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
   for (let i = asks.length - 1; i >= 0; i--) {
     const { index, asked } = asks[i]!;
     const latest = i === asks.length - 1;
-    if (latest && working && !pending) { rows.splice(index + 1, 0, turnStatusLine); continue; }
+    if (latest && working && !pending) { rows.splice(index + 1, 0, turnStatusLine); rows.push(turnNow); continue; }
     const seconds = workedSeconds.get(asked);
     if (seconds === undefined || (latest && working)) continue;
     rows.splice(index + 1, 0, workedLine(asked, seconds)); used.add(String(asked));
@@ -3420,13 +3524,15 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
 
 /** A running turn with no row yet: its line waits right after your pending message. */
 function parkTurnStatus(working: boolean): void {
-  if (working) $('inputQueue').after(turnStatusLine);
-  else if (!turnStatusLine.closest('#timeline')) turnStatusLine.remove();
+  if (working) $('inputQueue').after(turnStatusLine, turnNow);
+  else if (!turnStatusLine.closest('#timeline')) { turnStatusLine.remove(); turnNow.remove(); }
 }
 
 function paintTurnStatus(status: ReturnType<typeof stateLine>): void {
   ui(turnStatusLine.firstElementChild as HTMLElement, 'textContent', () => stateLine().text);
   turnStatusLine.classList.toggle('is-working', status.working === true);
+  paintTurnNow();
+  pollRunningTools();
 }
 
 /** One line under the header saying what is happening right now. */

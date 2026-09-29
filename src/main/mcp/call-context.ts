@@ -13,7 +13,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { AssetRef, FileChange, ToolOutcome } from '../../shared/session.js';
+import type { AssetRef, FileChange, RunningToolActivity, ToolOutcome } from '../../shared/session.js';
 import type { OutputPublication, ProcessCompletion } from '../codex/unified-exec.js';
 
 export interface CallEvidence {
@@ -72,6 +72,8 @@ export interface CallContext {
   publication?: OutputPublication;
   /** Wall-clock start of this MCP request, shared by identity-sensitive handlers. */
   startedAt: number;
+  /** Present-tense caption for the chat while this call runs, with the kind of its finished row. */
+  activity?: Omit<RunningToolActivity, 'since'>;
   /** Stable per-conversation key when the transport offers one, else null. */
   transportKey: string | null;
   /** Resolved agent id in multi-agent mode, else null. */
@@ -162,6 +164,25 @@ export function runningToolCalls(conversationId: string | null = null): number {
 export function runningToolProgress(conversationId: string): { count: number; since: number } | null {
   const owned = [...running].filter(call => call.caller.conversationId === conversationId);
   return owned.length ? { count: owned.length, since: Math.min(...owned.map(call => call.startedAt)) } : null;
+}
+
+/**
+ * What this chat's calls are doing right now, oldest first. Exact ownership only, as above.
+ *
+ * A call is placed only after its handler has run, so while it runs it usually names no chat yet.
+ * `requestOwner` answers from the page's exact proof of the call's request id, which ChatGPT
+ * reports while it draws the running call; without it a live caption saw a call only once done.
+ */
+export function runningToolActivity(
+  conversationIds: readonly string[],
+  requestOwner: (requestId: string) => string | null = () => null
+): RunningToolActivity[] {
+  const ownerOf = (call: CallContext): string | null =>
+    call.caller.conversationId ?? (call.caller.requestId ? requestOwner(call.caller.requestId) : null);
+  return [...running]
+    .filter(call => { const owner = call.activity ? ownerOf(call) : null; return owner !== null && conversationIds.includes(owner); })
+    .sort((a, b) => a.startedAt - b.startedAt)
+    .map(call => ({ ...call.activity!, since: call.startedAt }));
 }
 
 /** Finished tool work whose unattributed durable record is still landing. */
