@@ -39,7 +39,7 @@
     "message": "初期メッセージの挿入中に ChatGPT が入力欄を置き換えました"
   },
   "content_bootstrap_composer_unavailable": {
-    "message": "ChatGPT が初期メッセージ用の入力欄を利用可能にしませんでした"
+    "message": "モデル選択後にChatGPTが使用可能な入力欄を再表示しませんでした"
   },
   "content_bootstrap_fresh_chat_changed": {
     "message": "指定した新しいチャットが初期メッセージ送信前に変わりました。何も送信されていません"
@@ -52,9 +52,6 @@
   },
   "content_bootstrap_missing_target": {
     "message": "既存のチャットに渡されましたが、対象のチャットが指定されていません"
-  },
-  "content_bootstrap_composer_unavailable": {
-    "message": "モデル選択後にChatGPTが使用可能な入力欄を再表示しませんでした"
   },
   "content_bootstrap_model_unavailable": {
     "message": "指定したモデルまたは推論設定を利用できないか、ChatGPT で確認できませんでした"
@@ -1045,5 +1042,110 @@
   },
   "popup_yes": {
     "message": "はい"
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "前回の応答で MCP ツール呼び出しが記録されなかったため、アプリはツール接続が失われたかどうかを判断できません。自動継続は一時停止していますが、ループは有効のままです。続行する前にトンネルと Core コネクタを確認してください。"
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "この回答に対する保留中の継続はありません。すでに処理済みか、新しい作業に置き換えられた可能性があります。再試行する前に最新のチャット活動を確認してください。"
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "タスクとゴール/ループの指示が長すぎるため、ヘルパーに送信できません。タスクまたは設定内のカスタム継続指示を短くしてください。"
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "ヘルパーが作成した継続内容が長すぎて送信できません。より短い継続指示を依頼するか、設定で別のヘルパーモデルを選択してください。"
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "プロバイダーから上限を超える大きさの応答が返されました。別の継続モデルを選択するか、より短い応答を依頼してください。"
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "プロバイダーの応答がサイズ上限を超えました。別の継続モデルを選択するか、より短い応答を依頼してください。"
+  },
+  "content_goal_error_no_api_key": {
+    "message": "継続プロバイダーの API キーが設定されていません。設定で追加するか、ChatGPT の継続ソースを選択してください。"
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "継続プロバイダーが API 認証情報を拒否しました。設定で API キーとアクセス権限を確認してください。"
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "継続プロバイダーのアカウントで利用可能なクレジットがありません。クレジットを追加するか、設定で別の継続ソースを選択してください。"
+  },
+  "content_goal_error_unknown_model": {
+    "message": "継続プロバイダーで選択したモデルが見つかりませんでした。モデル一覧を更新し、設定で利用可能なモデルを選択してください。"
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "カスタム継続エンドポイントが無効です。設定で URL を確認し、HTTPS またはローカル HTTP エンドポイントを使用してください。"
+  },
+  "content_goal_error_rate_limited": {
+    "message": "継続プロバイダーがリクエストをレート制限しています。表示されている再試行まで待つか、別の継続モデルを選択してください。"
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "継続リクエストがタイムアウトしたか、キャンセルされました。再試行する前に、ヘルパーチャットまたはプロバイダーの状態を確認してください。"
+  },
+  "content_goal_error_request_failed": {
+    "message": "継続リクエストに失敗しました。再試行する前に、選択したヘルパーまたは API エンドポイントとアプリの診断を確認してください。"
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "ヘルパーのリクエストがすでに保留中です。完了を待つか、そのリクエストをキャンセルしてから別のリクエストを開始してください。"
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "ヘルパーのリクエストはキャンセルされました。続行するときにもう一度開始してください。"
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "ヘルパーのプロンプトを ChatGPT に送信できませんでした。再試行する前にヘルパーチャットを開き、入力欄または表示されているエラーを確認してください。"
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "ChatGPT がヘルパーのプロンプトを受信したかどうかをアプリで確認できませんでした。二重送信を避けるため、再試行する前にヘルパーチャットを確認してください。"
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "別のブラウザータブがこの継続処理を担当しています。そのタブで進捗を確認してください。"
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "自動継続の対象となる最終回答をアプリが確認できていません。元のチャットで進行中の作業やエラーを確認してください。"
+  },
+  "content_goal_error_astra_finish_only": {
+    "message": "このチャットは終了ツールを通じて継続します。現在の設定では、ブラウザーの最終回答だけでは次のメッセージは送信されません。"
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "このチャットではゴール/ループがオフです。継続を許可するにはオンにしてください。"
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "ワーカーは自身のゴール/ループを実行できません。代わりに親チャットで継続を有効にしてください。"
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "このチャットは「圧縮して再開」によって置き換えられました。後継のチャットで続行してください。"
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "このチャットはアプリでブロックされています。継続を有効にする前に、アプリでブロックを解除してください。"
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "このチャットの記録履歴がアプリにありません。自動継続を使用する前に、記録を有効にしてメッセージを送信してください。"
+  },
+  "content_goal_error_no_conversation": {
+    "message": "継続できる記録済みの会話がありません。まずタスクを送信してください。"
+  },
+  "content_goal_error_no_objective": {
+    "message": "タスクが指定されていません。ゴール/ループを開始する前にタスクを入力してください。"
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "ヘルパーが開始メッセージを生成しませんでした。タスクをより具体的にして、もう一度お試しください。"
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "ヘルパーがループの継続を書く代わりに停止を選び続けました。ループの指示を見直すか、別のヘルパーモデルを選択してください。"
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "回答に、オフラインのゴールテンプレートで必要な完了マーカーがありません。テンプレートの指示を確認するか、別の継続ソースを選択してください。"
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "保留中の継続をアプリが保存できませんでした。空きディスク容量とアプリの診断を確認してください。"
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "配信確認をアプリが保存できませんでした。空きディスク容量を確認し、手動で再送信する前にチャットを確認してください。"
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "ゴール/ループの設定をアプリが保存できませんでした。空きディスク容量を確認して、もう一度保存してください。"
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "タスクをアプリが保存できませんでした。空きディスク容量を確認して、もう一度保存してください。"
   }
 }

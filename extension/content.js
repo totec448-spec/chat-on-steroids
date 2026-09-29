@@ -8438,7 +8438,7 @@
           : 'OpenRouter';
     const bar = (at, done = false) => ({ steps: GOAL_STEPS, at, done });
     const failure = goal.error || (draft && draft.stage === 'failed'
-      ? draft.message || draft.error || t('content_goal_backend_no_answer', '$1 did not answer', dest)
+      ? goalFailureText(draft) || draft.error || t('content_goal_backend_no_answer', '$1 did not answer', dest)
       : '');
     if (failure) {
       const at = draft && draft.stage === 'failed' ? 2 : (GOAL_STEP_AT[goal.phase] ?? 1);
@@ -10159,7 +10159,7 @@
           : goalConfig && goalConfig.provider === 'custom'
             ? t('content_goal_backend_custom_endpoint', 'custom endpoint')
             : 'OpenRouter';
-      const why = draft.message || draft.error || t(
+      const why = goalFailureText(draft) || draft.error || t(
         'content_goal_backend_no_answer',
         '$1 did not answer',
         fallbackDestination
@@ -10369,10 +10369,20 @@
     void pullActivity();
   }
 
+  /** The app's explanation in the page language when it is a fixed catalog text. */
+  function goalFailureText(source) {
+    if (!source || !source.message) return '';
+    const message = String(source.message).slice(0, 600);
+    const key = typeof source.messageKey === 'string' && /^[a-z0-9_]+$/.test(source.messageKey)
+      ? source.messageKey
+      : '';
+    return key ? t(`content_goal_error_${key}`, message) : message;
+  }
+
   function replyError(reply) {
     if (!reply) return '';
     const data = reply.data || {};
-    if (data.message) return String(data.message).slice(0, 600);
+    if (data.message) return goalFailureText(data);
     if (data.error === 'session_not_recorded') return t(
       'content_error_session_not_recorded',
       'This chat has no recorded local session yet.'

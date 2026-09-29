@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { goalErrorMessage } from '../src/shared/goal-errors.js';
+import { readFileSync } from 'node:fs';
+import { goalErrorKey, goalErrorMessage } from '../src/shared/goal-errors.js';
 import es from '../src/renderer/locales/es.json';
 import zhCN from '../src/renderer/locales/zh-CN.json';
 import zhTW from '../src/renderer/locales/zh-TW.json';
@@ -75,5 +76,31 @@ describe('Goal failure explanations', () => {
         expect(Object.hasOwn(catalog, source), `${locale}: ${source}`).toBe(true);
       }
     }
+  });
+
+  it('gives the page a catalog key for every fixed explanation, in every extension language', () => {
+    const codes = [
+      'out_of_credit', 'auth_rejected', 'no_api_key', 'rate_limited', 'loop_mcp_call_missing',
+      'goal_context_too_large', 'request_failed', 'request_failed: fetch failed', 'request_failed: no_api_key'
+    ];
+    const locales = ['de', 'en', 'es', 'fr', 'ja', 'tr', 'zh_CN', 'zh_TW'];
+    const catalogs = Object.fromEntries(locales.map((locale) => [
+      locale,
+      JSON.parse(readFileSync(new URL(`../extension/_locales/${locale}/messages.json`, import.meta.url), 'utf8')) as Record<string, { message: string }>
+    ]));
+    for (const code of codes) {
+      const key = goalErrorKey(code);
+      expect(key, code).toMatch(/^[a-z_]+$/);
+      expect(catalogs.en?.[`content_goal_error_${key}`]?.message, code).toBe(goalErrorMessage(code));
+      for (const locale of locales) expect(catalogs[locale]?.[`content_goal_error_${key}`]?.message, `${locale}: ${code}`).toBeTruthy();
+    }
+    expect(catalogs.de?.content_goal_error_out_of_credit?.message).not.toBe(catalogs.en?.content_goal_error_out_of_credit?.message);
+  });
+
+  it('leaves explanations with dynamic detail untranslated rather than dropping the detail', () => {
+    expect(goalErrorKey('request_failed: goal_browser_send_failed: Temporary Chat was not confirmed.')).toBeNull();
+    expect(goalErrorKey('http_503')).toBeNull();
+    expect(goalErrorKey('invalid_goal_decision_json')).toBeNull();
+    expect(goalErrorKey('something_unknown')).toBeNull();
   });
 });

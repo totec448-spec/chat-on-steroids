@@ -39,7 +39,7 @@
     "message": "ChatGPT sustituyó el redactor mientras se insertaba el inicio"
   },
   "content_bootstrap_composer_unavailable": {
-    "message": "ChatGPT nunca mostró un redactor utilizable para el inicio"
+    "message": "ChatGPT no volvió a mostrar un editor utilizable tras seleccionar el modelo"
   },
   "content_bootstrap_fresh_chat_changed": {
     "message": "el chat nuevo marcado cambió antes del envío inicial; no se envió nada"
@@ -52,9 +52,6 @@
   },
   "content_bootstrap_missing_target": {
     "message": "se ofreció a un chat que ya existe y no identifica ninguno"
-  },
-  "content_bootstrap_composer_unavailable": {
-    "message": "ChatGPT no volvió a mostrar un editor utilizable tras seleccionar el modelo"
   },
   "content_bootstrap_model_unavailable": {
     "message": "El modelo o nivel de razonamiento solicitado no está disponible o no pudo confirmarse en ChatGPT"
@@ -1045,5 +1042,110 @@
   },
   "popup_yes": {
     "message": "sí"
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "No se registró ninguna llamada a una herramienta MCP en la última respuesta, por lo que la aplicación no puede saber si se perdió la conexión con las herramientas. La continuación automática está en pausa; Loop sigue activado. Comprueba el túnel y el conector Core antes de continuar."
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "No hay una continuación pendiente para esta respuesta. Puede que ya se haya procesado o que un trabajo más reciente la haya sustituido. Revisa la actividad más reciente del chat antes de volver a intentarlo."
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "La tarea y las instrucciones de Goal/Loop son demasiado largas para enviarlas al asistente. Acorta la tarea o las instrucciones de continuación personalizadas en Ajustes."
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "El asistente escribió una continuación demasiado larga para enviarla. Pide instrucciones de continuación más breves o elige otro modelo asistente en Ajustes."
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "El proveedor devolvió una respuesta demasiado grande. Elige otro modelo de continuación o pide respuestas más breves."
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "La respuesta del proveedor superó el límite de tamaño. Elige otro modelo de continuación o pide respuestas más breves."
+  },
+  "content_goal_error_no_api_key": {
+    "message": "No hay ninguna clave de API configurada para el proveedor de continuación. Añádela en Ajustes o selecciona la fuente de continuación de ChatGPT."
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "El proveedor de continuación rechazó las credenciales de API. Comprueba su clave de API y los permisos de acceso en Ajustes."
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "La cuenta del proveedor de continuación no tiene crédito disponible. Añade crédito o elige otra fuente de continuación en Ajustes."
+  },
+  "content_goal_error_unknown_model": {
+    "message": "El proveedor de continuación no pudo encontrar el modelo seleccionado. Actualiza su lista de modelos y elige uno disponible en Ajustes."
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "El endpoint de continuación personalizado no es válido. Revisa su URL en Ajustes; usa HTTPS o un endpoint HTTP local."
+  },
+  "content_goal_error_rate_limited": {
+    "message": "El proveedor de continuación está limitando la frecuencia de las solicitudes. Espera al reintento indicado o elige otro modelo de continuación."
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "La solicitud de continuación agotó el tiempo de espera o fue cancelada. Revisa el chat del asistente o el estado del proveedor antes de volver a intentarlo."
+  },
+  "content_goal_error_request_failed": {
+    "message": "La solicitud de continuación falló. Comprueba el asistente o endpoint de API seleccionados y los diagnósticos de la aplicación antes de volver a intentarlo."
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "Ya hay una solicitud del asistente pendiente. Deja que termine o cancélala antes de iniciar otra."
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "La solicitud del asistente fue cancelada. Iníciala de nuevo cuando quieras continuar."
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "No se pudo entregar el prompt del asistente a ChatGPT. Abre el chat del asistente y revisa su campo de redacción o cualquier error visible antes de volver a intentarlo."
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "La aplicación no pudo confirmar si ChatGPT recibió el prompt del asistente. Revisa el chat del asistente antes de reintentar para evitar enviarlo dos veces."
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "Otra pestaña del navegador está gestionando esta continuación. Revisa esa pestaña para ver el progreso."
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "La aplicación no ha confirmado una respuesta final apta para la continuación automática. Revisa el chat de origen por si sigue trabajando o muestra un error."
+  },
+  "content_goal_error_astra_finish_only": {
+    "message": "Este chat continúa mediante la herramienta finish. Con la configuración actual, una respuesta final del navegador no activa otro mensaje."
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "Goal/Loop está desactivado en este chat. Actívalo para permitir la continuación."
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "Los subagentes no pueden ejecutar su propio Goal/Loop. Activa la continuación en el chat principal."
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "Este chat fue sustituido por Compact & Resume. Continúa en su chat sucesor."
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "Este chat está bloqueado en la aplicación. Desbloquéalo allí antes de activar la continuación."
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "La aplicación no tiene un historial registrado para este chat. Activa el registro y envía un mensaje antes de usar la continuación automática."
+  },
+  "content_goal_error_no_conversation": {
+    "message": "No hay ninguna conversación registrada disponible para continuar. Envía primero una tarea."
+  },
+  "content_goal_error_no_objective": {
+    "message": "No se proporcionó ninguna tarea. Introduce una tarea antes de iniciar Goal/Loop."
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "El asistente no generó un mensaje inicial. Haz la tarea más específica e inténtalo de nuevo."
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "El asistente siguió eligiendo detenerse en lugar de escribir una continuación de Loop. Revisa las instrucciones de Loop o elige otro modelo asistente."
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "La respuesta no contiene el marcador de finalización requerido por las plantillas de Goal sin conexión. Revisa las instrucciones de la plantilla o elige otra fuente de continuación."
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "La aplicación no pudo guardar la continuación pendiente. Comprueba el espacio libre en disco y los diagnósticos de la aplicación."
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "La aplicación no pudo guardar la confirmación de entrega. Comprueba el espacio libre en disco; revisa el chat antes de reenviar manualmente."
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "La aplicación no pudo guardar la configuración de Goal/Loop. Comprueba el espacio libre en disco e intenta guardarla de nuevo."
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "La aplicación no pudo guardar la tarea. Comprueba el espacio libre en disco e intenta guardarla de nuevo."
   }
 }

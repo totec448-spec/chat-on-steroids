@@ -39,7 +39,7 @@
     "message": "ChatGPT a remplacé la zone de saisie pendant l’insertion du message initial"
   },
   "content_bootstrap_composer_unavailable": {
-    "message": "ChatGPT n’a jamais fourni de zone de saisie utilisable pour le message initial"
+    "message": "ChatGPT n'a pas réaffiché d'éditeur utilisable après la sélection du modèle"
   },
   "content_bootstrap_fresh_chat_changed": {
     "message": "le nouveau chat désigné a changé avant l’envoi du message initial ; rien n’a été envoyé"
@@ -52,9 +52,6 @@
   },
   "content_bootstrap_missing_target": {
     "message": "il a été proposé à un chat existant sans en désigner un précisément"
-  },
-  "content_bootstrap_composer_unavailable": {
-    "message": "ChatGPT n'a pas réaffiché d'éditeur utilisable après la sélection du modèle"
   },
   "content_bootstrap_model_unavailable": {
     "message": "Le modèle ou le niveau de raisonnement demandé n’est pas disponible ou n’a pas pu être confirmé dans ChatGPT"
@@ -1045,5 +1042,110 @@
   },
   "popup_yes": {
     "message": "oui"
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "Aucun appel d’outil MCP n’a été enregistré dans la dernière réponse ; l’application ne peut donc pas déterminer si la connexion aux outils a été perdue. La continuation automatique est en pause ; Loop reste activé. Vérifiez le tunnel et le connecteur Core avant de continuer."
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "Aucune continuation n’est en attente pour cette réponse. Elle a peut-être déjà été traitée ou remplacée par un travail plus récent. Vérifiez l’activité la plus récente du chat avant de réessayer."
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "La tâche et les instructions Goal/Loop sont trop longues pour être envoyées à l’assistant. Raccourcissez la tâche ou les instructions de continuation personnalisées dans les paramètres."
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "L’assistant a rédigé une continuation trop longue pour être envoyée. Demandez des instructions de continuation plus courtes ou choisissez un autre modèle d’assistant dans les paramètres."
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "Le fournisseur a renvoyé une réponse trop volumineuse. Choisissez un autre modèle de continuation ou demandez des réponses plus courtes."
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "La réponse du fournisseur a dépassé la limite de taille. Choisissez un autre modèle de continuation ou demandez des réponses plus courtes."
+  },
+  "content_goal_error_no_api_key": {
+    "message": "Aucune clé API n’est configurée pour le fournisseur de continuation. Ajoutez-en une dans les paramètres ou sélectionnez la source de continuation ChatGPT."
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "Le fournisseur de continuation a rejeté les identifiants API. Vérifiez sa clé API et ses autorisations d’accès dans les paramètres."
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "Le compte du fournisseur de continuation n’a plus de crédit disponible. Ajoutez du crédit ou choisissez une autre source de continuation dans les paramètres."
+  },
+  "content_goal_error_unknown_model": {
+    "message": "Le fournisseur de continuation n’a pas trouvé le modèle sélectionné. Actualisez sa liste de modèles et choisissez un modèle disponible dans les paramètres."
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "Le point de terminaison de continuation personnalisé est invalide. Vérifiez son URL dans les paramètres ; utilisez HTTPS ou un point de terminaison HTTP local."
+  },
+  "content_goal_error_rate_limited": {
+    "message": "Le fournisseur de continuation limite le débit des requêtes. Attendez la nouvelle tentative affichée ou choisissez un autre modèle de continuation."
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "La requête de continuation a expiré ou a été annulée. Vérifiez le chat de l’assistant ou l’état du fournisseur avant de réessayer."
+  },
+  "content_goal_error_request_failed": {
+    "message": "La requête de continuation a échoué. Vérifiez l’assistant sélectionné ou le point de terminaison API ainsi que les diagnostics de l’application avant de réessayer."
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "Une requête d’assistant est déjà en attente. Laissez-la se terminer ou annulez-la avant d’en lancer une autre."
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "La requête de l’assistant a été annulée. Relancez-la lorsque vous souhaitez continuer."
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "L’invite de l’assistant n’a pas pu être envoyée à ChatGPT. Ouvrez le chat de l’assistant et vérifiez son éditeur ou l’erreur visible avant de réessayer."
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "L’application n’a pas pu confirmer si ChatGPT a reçu l’invite de l’assistant. Vérifiez le chat de l’assistant avant de réessayer afin d’éviter un double envoi."
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "Un autre onglet du navigateur gère cette continuation. Consultez cet onglet pour suivre la progression."
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "L’application n’a pas encore confirmé de réponse finale pouvant déclencher la continuation automatique. Vérifiez le chat source pour voir s’il reste du travail en cours ou une erreur."
+  },
+  "content_goal_error_astra_finish_only": {
+    "message": "Ce chat se poursuit via l’outil de fin de session. Avec le réglage actuel, une réponse finale dans le navigateur ne déclenche pas un nouveau message."
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "Goal/Loop est désactivé pour ce chat. Activez-le pour autoriser la continuation."
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "Les workers ne peuvent pas exécuter leur propre Goal/Loop. Activez plutôt la continuation dans le chat parent."
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "Ce chat a été remplacé par « Compacter et continuer ». Continuez dans le chat qui lui succède."
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "Ce chat est bloqué dans l’application. Débloquez-le avant d’activer la continuation."
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "L’application ne dispose d’aucun historique enregistré pour ce chat. Activez l’enregistrement et envoyez un message avant d’utiliser la continuation automatique."
+  },
+  "content_goal_error_no_conversation": {
+    "message": "Aucune conversation enregistrée n’est disponible à poursuivre. Envoyez d’abord une tâche."
+  },
+  "content_goal_error_no_objective": {
+    "message": "Aucune tâche n’a été fournie. Saisissez une tâche avant de démarrer Goal/Loop."
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "L’assistant n’a pas produit de message d’ouverture. Rendez la tâche plus précise et réessayez."
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "L’assistant a continué à choisir l’arrêt au lieu de rédiger une continuation Loop. Vérifiez les instructions Loop ou choisissez un autre modèle d’assistant."
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "La réponse ne contient pas le marqueur d’achèvement requis par les modèles Goal hors ligne. Vérifiez les instructions du modèle ou choisissez une autre source de continuation."
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "L’application n’a pas pu enregistrer la continuation en attente. Vérifiez l’espace disque disponible et les diagnostics de l’application."
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "L’application n’a pas pu enregistrer la confirmation de livraison. Vérifiez l’espace disque disponible ; consultez le chat avant de renvoyer manuellement."
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "L’application n’a pas pu enregistrer le réglage Goal/Loop. Vérifiez l’espace disque disponible et essayez de l’enregistrer à nouveau."
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "L’application n’a pas pu enregistrer la tâche. Vérifiez l’espace disque disponible et essayez de l’enregistrer à nouveau."
   }
 }

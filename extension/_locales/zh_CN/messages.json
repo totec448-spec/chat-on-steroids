@@ -39,7 +39,7 @@
     "message": "插入引导消息时，ChatGPT 替换了输入框"
   },
   "content_bootstrap_composer_unavailable": {
-    "message": "ChatGPT 始终未提供可用于引导消息的输入框"
+    "message": "选择模型后，ChatGPT 未重新显示可用的输入框"
   },
   "content_bootstrap_fresh_chat_changed": {
     "message": "发送引导消息前，标记的新聊天发生了变化；未发送任何内容"
@@ -52,9 +52,6 @@
   },
   "content_bootstrap_missing_target": {
     "message": "它被提供给一个已有聊天，但没有指定目标聊天"
-  },
-  "content_bootstrap_composer_unavailable": {
-    "message": "选择模型后，ChatGPT 未重新显示可用的输入框"
   },
   "content_bootstrap_model_unavailable": {
     "message": "请求的模型或推理级别不可用，或无法在 ChatGPT 中确认"
@@ -1045,5 +1042,110 @@
   },
   "popup_yes": {
     "message": "是"
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "上一条回复中未记录任何 MCP 工具调用，因此应用无法判断工具连接是否已丢失。自动继续已暂停；Loop 仍保持启用。继续前请检查隧道和 Core 连接器。"
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "此回答没有待处理的继续操作。它可能已经处理，或已被更新的工作取代。重试前请先检查最新的聊天活动。"
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "任务和 Goal/Loop 指令太长，无法发送给辅助工具。请缩短任务或设置中的自定义继续指令。"
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "辅助工具编写的继续内容太长，无法发送。请要求更短的继续指令，或在设置中选择其他辅助模型。"
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "提供者返回的响应过大。请选择其他继续模型，或要求更短的回复。"
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "提供者响应超出大小限制。请选择其他继续模型，或要求更短的回复。"
+  },
+  "content_goal_error_no_api_key": {
+    "message": "未为继续提供者配置 API 密钥。请在设置中添加，或选择 ChatGPT 继续来源。"
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "继续提供者拒绝了 API 凭据。请在设置中检查 API 密钥和访问权限。"
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "继续提供者账户没有可用额度。请充值，或在设置中选择其他继续来源。"
+  },
+  "content_goal_error_unknown_model": {
+    "message": "继续提供者找不到所选模型。请刷新其模型列表，并在设置中选择可用模型。"
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "自定义继续端点无效。请在设置中检查其 URL；请使用 HTTPS 或本地 HTTP 端点。"
+  },
+  "content_goal_error_rate_limited": {
+    "message": "继续提供者正在限制请求频率。请等待显示的重试时间，或选择其他继续模型。"
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "继续请求超时或已取消。重试前请检查辅助聊天或提供者状态。"
+  },
+  "content_goal_error_request_failed": {
+    "message": "继续请求失败。重试前请检查所选辅助工具或 API 端点，以及应用诊断。"
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "已有一个辅助请求正在等待处理。请让它完成，或先取消该请求再开始另一个。"
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "辅助请求已取消。想继续时请重新开始。"
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "无法将辅助提示发送到 ChatGPT。重试前请打开辅助聊天，检查其输入框或可见错误。"
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "应用无法确认 ChatGPT 是否收到了辅助提示。重试前请先检查辅助聊天，以免重复发送。"
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "另一个浏览器标签页正在处理此次继续操作。请前往该标签页查看进度。"
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "应用尚未确认可用于自动继续的最终回答。请检查来源聊天是否仍在进行工作或发生错误。"
+  },
+  "content_goal_error_astra_finish_only": {
+    "message": "此聊天通过 finish 工具继续。按当前设置，浏览器中的最终回答不会触发另一条消息。"
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "此聊天的 Goal/Loop 已关闭。请开启它以允许继续。"
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "子智能体不能运行自己的 Goal/Loop。请改为在父聊天中启用继续。"
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "此聊天已被 Compact & Resume 替换。请在其后续聊天中继续。"
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "此聊天已在应用中被阻止。请先在应用中解除阻止，然后再启用继续。"
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "应用没有此聊天的已记录历史。请启用记录并先发送一条消息，然后再使用自动继续。"
+  },
+  "content_goal_error_no_conversation": {
+    "message": "没有可继续的已记录对话。请先发送任务。"
+  },
+  "content_goal_error_no_objective": {
+    "message": "未提供任务。请在启动 Goal/Loop 前输入任务。"
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "辅助工具未生成开场消息。请让任务更具体后再试。"
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "辅助工具一直选择停止，而不是编写 Loop 继续内容。请检查 Loop 指令，或选择其他辅助模型。"
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "回答缺少离线 Goal 模板要求的完成标记。请检查模板指令，或选择其他继续来源。"
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "应用无法保存待处理的继续操作。请检查可用磁盘空间和应用诊断。"
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "应用无法保存发送确认。请检查可用磁盘空间；手动重新发送前先检查聊天。"
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "应用无法保存 Goal/Loop 设置。请检查可用磁盘空间，然后重试保存。"
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "应用无法保存任务。请检查可用磁盘空间，然后重试保存。"
   }
 }
