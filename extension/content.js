@@ -12308,11 +12308,17 @@
       }
       // Popup diagnostics. Ids and counters only — no prose, no transcript, no page text.
       if (message.type === 'clf-page-status') {
+        const assistantError = Boolean(turnId) && CLF_DOM.errors().some(error =>
+          error.recoverable === true && !isStale(error.node) && localErrorGeneration(error) === turnId);
         sendResponse({
           ok: true,
           // ChatGPT's own account that a response is streaming right now, as opposed to the
           // recorder's `generating`, which also holds while a turn waits on a local tool.
           streaming: CLF_DOM.generating(),
+          // Only the current recorder generation's still-visible recoverable transport error.
+          // Historical failed turns can remain mounted in the DOM and must not authorize a
+          // reload of a newer response.
+          assistantError,
           recorderVersion: RECORDER_VERSION,
           runId: RUN_ID,
           conversationId,
