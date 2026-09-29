@@ -3126,17 +3126,26 @@ it is cut to a fixed size, and carries the stored length and a `truncated` flag;
 record is never changed. That is a list of shapes, not a guarantee: other secrets typed into a
 chat pass through, which is why the switch and the token matter. A user message shows what the
 user wrote (`authoredText`), not the framed text the app delivered. Asset ids, request ids and
-outbox owners, delivery-only prompt text, attachment paths and recovery bookkeeping do not
-appear. Unknown, repeated or malformed query parameters are refused with 400, page sizes are
+outbox owners, delivery-only prompt text, attachment paths and recovery bookkeeping (apart from
+the deadlines `live` reports) do not appear. Unknown, repeated or malformed query parameters are refused with 400, page sizes are
 capped, session ids match only in their generated lowercase spelling (a differently cased
 spelling would open the same journal under a second name on a case-insensitive filesystem),
 and at most two journal reads run at once (503 `busy` otherwise). Events carry `position`; the
 `before` and `after` cursors take it, since a revised message keeps its first position but gets
 a new `seq`. Two things run the app's own bookkeeping and so are not pure reads: `listInputs()`,
-which `/v1/inputs` and `/v1/sessions` call, repairs delivery receipts and materializes queued
-follow-up rows exactly as when the renderer polls it; and `/v1/sessions/{id}?live=1`, which
-calls `sessionControlsFor`, can load the session into memory and seal a torn last line of its
-journal. The live state is therefore asked for, not attached to every read. Start and stop are serialized; a
+which `/v1/inputs`, `/v1/sessions` and `/v1/sessions/{id}?live=1` all reach (the last through
+`sessionControlsFor`), repairs delivery receipts and materializes queued follow-up rows exactly
+as when the renderer polls it; and `live=1` can also load the session into memory, seal a torn
+last line of its journal and retire a compaction ticket that has outlived its time limit. The
+live state is therefore asked for, not attached to every read. It is the view the renderer
+polls, cut to fields that are a flag, a number, the running turn's id or one of a fixed set of
+words: Stop pending, automation and block, how a message sent now would be delivered
+(`canSendDirectly`, `canInject`, `queueAtFinish`), whether the turn's finish is held or waited
+on, the deadlines the app holds for the chat (`recovery`, `goalWait`) and the compaction it is
+in or has just finished (`job`: stage, both send states, and an error masked and cut like other
+text). Drafts, the objective, the plan, and the continuation's token and ids are not
+published. If a compaction moves the session to another chat while the read runs, `live` is
+null instead of describing a different chat than `session`. Start and stop are serialized; a
 settings change starts or stops it only when the switch changes. Shutdown stops it in the
 admission/drain phase and does not let a late save reopen it.
 
