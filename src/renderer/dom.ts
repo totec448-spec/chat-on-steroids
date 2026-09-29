@@ -113,7 +113,32 @@ export function el(tag: string, className = '', text: string | (() => string) = 
   return node;
 }
 
-export const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
+export const $ = <T extends HTMLElement>(id: string): T => {
+  const element = document.getElementById(id);
+  if (!element) {
+    console.error(`Element with id "${id}" not found in DOM`);
+  }
+  return element as T;
+};
+
+/**
+ * Safely add an event listener to an element by ID.
+ * Logs an error and returns false if the element doesn't exist.
+ */
+export function on<K extends keyof HTMLElementEventMap>(
+  id: string,
+  event: K,
+  handler: (this: HTMLElement, ev: HTMLElementEventMap[K]) => void,
+  options?: boolean | AddEventListenerOptions
+): boolean {
+  const element = document.getElementById(id);
+  if (!element) {
+    console.error(`Cannot add ${event} listener: element with id "${id}" not found`);
+    return false;
+  }
+  element.addEventListener(event, handler, options);
+  return true;
+}
 
 /** Filter complete settings sections so headings, controls and their context stay together. */
 export function filterSettingsSections(view: HTMLElement, search: string): void {
