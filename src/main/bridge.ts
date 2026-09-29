@@ -592,6 +592,34 @@ function staleCompanion(req: http.IncomingMessage): boolean {
   const current = extensionBuildSeenAt.get(shipped);
   return current !== undefined && Date.now() - current < STALE_COMPANION_WINDOW_MS;
 }
+/**
+ * Which browser a companion request comes from. Every browser shares one pairing token, so each
+ * extension sends its own random id; requests without one (older builds) are not told apart.
+ */
+function browserOf(req: http.IncomingMessage): string | null {
+  const id = req.headers['x-extension-browser'];
+  return typeof id === 'string' && /^[a-z0-9]{16,64}$/.test(id) ? id : null;
+}
+const browserSeenAt = new Map<string, number>();
+/** How long a browser keeps a new chat it was handed after it stops polling. */
+const OPENING_CUSTODY_MS = 60_000;
+/** New-chat inputs and the one browser each was first handed to. */
+const openingCustody = new Map<string, string>();
+
+/**
+ * Whether another browser holds this new-chat input. With the extension in two browsers both
+ * polled the same opening: measured 2026-09-29, one browser opened the elected tab and left it
+ * blank while an idle tab in the other browser typed and sent the message. An opening belongs to
+ * the first browser that is handed it, for as long as that browser keeps polling.
+ */
+function openingHeldElsewhere(inputId: string, browser: string | null): boolean {
+  if (!browser) return false;
+  const holder = openingCustody.get(inputId);
+  if (holder && holder !== browser && Date.now() - (browserSeenAt.get(holder) ?? 0) < OPENING_CUSTODY_MS) return true;
+  openingCustody.set(inputId, browser);
+  return false;
+}
+
 let versionWarned = false;
 let latestCompanionDiagnostics: CompanionDiagnostics | null = null;
 let companionDiagnosticsRevision = 0;
@@ -856,7 +884,7 @@ function json(res: http.ServerResponse, status: number, body: unknown, origin: s
   };
   if (origin) {
     headers['access-control-allow-origin'] = origin;
-    headers['access-control-allow-headers'] = 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build';
+    headers['access-control-allow-headers'] = 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build, x-extension-browser';
     headers['access-control-allow-methods'] = 'GET, POST, OPTIONS';
   }
   res.writeHead(status, headers);
@@ -1831,7 +1859,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!origin) return json(res, 403, { error: 'forbidden_origin' }, null);
     res.writeHead(204, {
       'access-control-allow-origin': origin,
-      'access-control-allow-headers': 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build',
+      'access-control-allow-headers': 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build, x-extension-browser',
       'access-control-allow-methods': 'GET, POST, OPTIONS',
       // Chrome asks for this before letting an extension reach a loopback address.
       'access-control-allow-private-network': 'true',
@@ -2086,6 +2114,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const revival = pendingBrowserRevival();
     const inputRows = await listInputs();
+    const browser = browserOf(req);
+    if (browser) browserSeenAt.set(browser, Date.now());
+    const pendingInputs = await pendingBrowserInputs();
+    const pendingIds = new Set(pendingInputs.map(input => input.id));
+    for (const id of openingCustody.keys()) if (!pendingIds.has(id)) openingCustody.delete(id);
     return json(
       res,
       200,
@@ -2097,7 +2130,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         pluginRefreshRequests: getConfig().ui.autoRefreshPlugins === true ? pluginRefreshPublications().map(({ surface, schemaId, connectorName }) => ({ surface, schemaId, connectorName })) : [],
         browserPreferenceRequest: pendingBrowserPreferenceRequest(),
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
-        inputs: [...(await pendingBrowserInputs()).filter(input => !input.conversationId || runningToolCalls(input.conversationId) === 0),
+        inputs: [...pendingInputs.filter(input => input.conversationId
+            ? runningToolCalls(input.conversationId) === 0
+            : !openingHeldElsewhere(input.id, browser)),
           ...inputRows.filter(row => row.lifetime === 'temporary-planner' && ['sent', 'cancelled', 'failed'].includes(row.state))
             .map(row => ({ id: row.id, owner: row.owner, lifetime: row.lifetime, close: true,
               retire: true }))],
@@ -2200,6 +2235,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (body.authorize === true) return json(res, 200, { ok: await authorizeBrowserInput(body.id, body.owner, target) }, origin);
     if (target && runningToolCalls(target) > 0) return json(res, 200, { input: null }, origin);
     if (staleCompanion(req)) return json(res, 200, { input: null }, origin);
+    if (!target && openingHeldElsewhere(body.id, browserOf(req))) return json(res, 200, { input: null }, origin);
     const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
     return json(res, 200, { input }, origin);
   }
