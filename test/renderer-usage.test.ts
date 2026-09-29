@@ -125,7 +125,7 @@ it.each([256_000, 400_000])('shows the calculated %i context cap and edits formu
   const cost = () => dom.window.document.getElementById('usageTotalCost')!.textContent;
   const divisor = field('usageDivisor');
   initUsage(); await refreshUsage();
-  expect(dom.window.document.getElementById('usageFormula')!.textContent).toContain(`capped at ${contextTokenCap.toLocaleString()} tokens`);
+  expect(dom.window.document.getElementById('usageFormula')!.textContent).toContain(`capped at ${contextTokenCap.toLocaleString('en')} tokens`);
   const formulaDetails = dom.window.document.getElementById('usageFormulaDetails') as HTMLDetailsElement;
   expect(formulaDetails.open).toBe(false);
   expect(divisor.closest('details')).toBe(formulaDetails);

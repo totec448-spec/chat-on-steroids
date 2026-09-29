@@ -1,7 +1,7 @@
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
-import { ui, t } from './i18n.js';
+import { currentLanguage, ui, t } from './i18n.js';
 import { initSkills } from './skills.js';
 import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel } from './chat-models.js';
@@ -913,7 +913,7 @@ function paintGoalProgress(): void {
     browser: t("Sending opening message to ChatGPT…"), sent: t("Opening message sent"), tool: t('Opening message delivered to the active turn'),
     failed: t("Task could not continue"), cancelled: t("Opening message cancelled"), paused: t("Automation paused · task text preserved"), 'no-reply': t("Goal reached") };
   if (phase === 'retrying') { text = ''; error = undefined; }
-  labels.retrying = t("Provider busy · retry {0}{1}", [progress?.attempt ?? '', progress?.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString()]) : '']);
+  labels.retrying = t("Provider busy · retry {0}{1}", [progress?.attempt ?? '', progress?.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString(currentLanguage())]) : '']);
   const mode = $<HTMLSelectElement>('chatAutomation').value === 'loop' ? t('Loop') : t('Goal');
   labels.settling = `${mode} · ${wait?.reason === 'native-busy' ? t('ChatGPT resumed work · waiting before retry') : wait?.reason === 'silence' ? t('Waiting before recovery reload') : wait?.reason === 'quiet' ? t('Waiting for tool inactivity') :
     wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : t('Answer settling')}`;
@@ -1061,7 +1061,7 @@ function paintTaskPlan(): void {
     preview.append(error, el('div', 'muted', () => t("Send again to retry, or cancel the plan.")));
   } else if (plan?.requestId) {
     const progress = plan.progress;
-    const label = () => !progress ? t("Creating plan…") : progress.phase === 'retrying' ? t("Provider busy · retry {0}{1}", [progress.attempt ?? '', progress.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString()]) : '']) : progress.phase === 'cancelled' ? t("Plan cancelled") : progress.phase === 'preparing' ? t("Preparing plan…") : progress.phase === 'ready' ? t("Plan ready") : progress.phase === 'failed' ? t("Plan failed") : t("Writing plan…");
+    const label = () => !progress ? t("Creating plan…") : progress.phase === 'retrying' ? t("Provider busy · retry {0}{1}", [progress.attempt ?? '', progress.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString(currentLanguage())]) : '']) : progress.phase === 'cancelled' ? t("Plan cancelled") : progress.phase === 'preparing' ? t("Preparing plan…") : progress.phase === 'ready' ? t("Plan ready") : progress.phase === 'failed' ? t("Plan failed") : t("Writing plan…");
     preview.append(el('span', 'muted', label));
     if (progress?.text || progress?.error) preview.append(el('pre', 'task-progress-text', progress.error ? () => localizedGoalError(progress.error!) : progress.text));
   }
@@ -2277,7 +2277,7 @@ function eventRow(event: SessionEvent): HTMLElement {
   tagImageRow(row, event);
   const time = document.createElement('time');
   time.textContent = clockTime(event.time);
-  time.title = new Date(event.time).toLocaleString();
+  time.title = new Date(event.time).toLocaleString(currentLanguage());
   const body = el('div', 'ev-body');
   const currentWorker = sessions.find(session => session.id === selectedId)?.origin;
   if (event.agent && event.agent !== 'prime' && !(currentWorker?.kind === 'worker' && currentWorker.agentId === event.agent)) {
@@ -2630,7 +2630,7 @@ function compactionRow(block: CompactionBlock, previous?: HTMLElement): HTMLElem
   if (previous) return row;
   const time = document.createElement('time');
   time.textContent = clockTime(block.time);
-  time.title = new Date(block.time).toLocaleString();
+  time.title = new Date(block.time).toLocaleString(currentLanguage());
   const body = el('div', 'ev-body');
   body.append(box);
   row.append(time, body);
@@ -2897,7 +2897,7 @@ function paintDetail(followBottom = historyBefore === null): void {
       const row = cached?.sig === sig ? cached.row : inputMessageRow(entry, true);
       if (row !== cached?.row) {
         const time = document.createElement('time');
-        time.textContent = new Date(entry.createdAt).toLocaleString();
+        time.textContent = new Date(entry.createdAt).toLocaleString(currentLanguage());
         row.prepend(time);
       }
       row.dataset.timelineKey = key;
@@ -3958,7 +3958,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
   visibleInputIds.add(entry.id);
   if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
-  const status = () => entry.error ? t(entry.error) : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString()]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
+  const status = () => entry.error ? t(entry.error) : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
   const files = el('div', 'message-attachments');
   if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
   for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }

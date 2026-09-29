@@ -175,7 +175,7 @@ export function shortAgo(atMs: number | null): string {
 
 /** A clock time for one event in a timeline. */
 export function clockTime(atMs: number): string {
-  return new Date(atMs).toLocaleTimeString();
+  return new Date(atMs).toLocaleTimeString(currentLanguage());
 }
 
 /** "1.2k", "3.4M" — for token and character counts that get large. */
