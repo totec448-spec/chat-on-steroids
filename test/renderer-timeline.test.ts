@@ -744,7 +744,7 @@ it('keeps cancelled Continue attempts at their own times across a long session i
   for (let index = 0; index < 3; index++) {
     const card = timeline.querySelector<HTMLElement>(`[data-input-id="retired-continue-${index}"]`)!;
     expect(card).not.toBeNull();
-    expect(card.querySelector('time')?.textContent).toBe(new Date(live.inputs[index]!.createdAt).toLocaleString());
+    expect(card.querySelector('time')?.textContent).toBe(new Date(live.inputs[index]!.createdAt).toLocaleString('en'));
     const content = timeline.textContent!;
     expect(content.indexOf(`NIGHT QUESTION ${index}`)).toBeLessThan(content.indexOf(`UNSENT CONTINUE ${index}`));
     expect(content.indexOf(`UNSENT CONTINUE ${index}`)).toBeLessThan(content.indexOf(`NIGHT QUESTION ${index + 1}`));
@@ -4007,7 +4007,7 @@ it('keeps a cancelled automatic draft at its creation time as later messages arr
   const timeline = w.document.getElementById('timeline')!;
   const retired = timeline.querySelector<HTMLElement>('[data-input-id="retired-auto"]')!;
   expect(retired).not.toBeNull();
-  expect(retired.querySelector('time')!.textContent).toBe(new Date(T0 + 1000).toLocaleString());
+  expect(retired.querySelector('time')!.textContent).toBe(new Date(T0 + 1000).toLocaleString('en'));
   expect(w.document.getElementById('inputQueue')!.textContent).not.toContain('Unused automatic instruction');
   const before = () => timeline.textContent!.indexOf('Unused automatic instruction') < timeline.textContent!.indexOf('Later continuation');
   expect(before()).toBe(true);

@@ -43,7 +43,7 @@ export function paintContextMeter(session: SessionSummary | null, config: Config
     ? t('{0} tokens used', [tokens()])
     : t('{0} / {1} tokens · {2}% of configured limit', [tokens(), new Intl.NumberFormat(currentLanguage()).format(limit), percent]),
     pro ? t('Auto-compaction off for Pro') : config.compaction.auto
-      ? t('Auto-compaction at {0} tokens', [new Intl.NumberFormat().format(config.compaction.autoTokens)])
+      ? t('Auto-compaction at {0} tokens', [new Intl.NumberFormat(currentLanguage()).format(config.compaction.autoTokens)])
       : t('Auto-compaction off')].join('\n');
   // One fact per row: the estimate, the limit from Settings, the share, and when compaction starts.
   ui(document.getElementById('contextTokens')!, 'textContent', () => short(used));
