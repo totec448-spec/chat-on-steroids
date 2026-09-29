@@ -1294,6 +1294,33 @@ describe('when OpenRouter refuses', () => {
     }
   });
 
+  it('keeps a failure the page cannot retry on screen after the page acknowledged it (#584)', async () => {
+    // 402: nothing will change until the user adds credit, so the page does not retry. It shows the
+    // reason and acknowledges the draft. The failure must stay the chat's Goal state: hiding it left
+    // only the still-owed reply, which read as "Answer settling" forever.
+    const sessionId = await seed('c-no-credit');
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: 'Insufficient credits' } }), { status: 402 })) as never;
+    goal.startGoalDraft({ sessionId, conversationId: 'c-no-credit', turnId: 'g-1' });
+    const failed = await settled('c-no-credit');
+    expect(failed.stage).toBe('failed');
+    expect(goal.ackGoalDraft('c-no-credit', failed.token)).toBe(true);
+    expect(goal.goalViewFor('c-no-credit')).toMatchObject({ stage: 'failed', error: expect.stringContaining('out_of_credit'), reply: '' });
+    // Still there once the draft's payload would otherwise expire.
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 11 * 60_000);
+    try {
+      expect(goal.goalViewFor('c-no-credit')).toMatchObject({ stage: 'failed', error: expect.stringContaining('out_of_credit') });
+    } finally { clock.mockRestore(); }
+
+    // A failure the page retries on its own clock is still hidden once acknowledged.
+    const retrySession = await seed('c-busy');
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: 'busy' } }), { status: 503 })) as never;
+    goal.startGoalDraft({ sessionId: retrySession, conversationId: 'c-busy', turnId: 'g-1' });
+    const busy = await settled('c-busy');
+    expect(goal.ackGoalDraft('c-busy', busy.token)).toBe(true);
+    expect(goal.goalViewFor('c-busy')).toBeNull();
+  });
+
   it('does not read an arbitrarily large OpenRouter error body just to produce a short status', async () => {
     const sessionId = await seed('c-huge-error');
     globalThis.fetch = (async () =>
