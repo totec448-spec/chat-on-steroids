@@ -1783,8 +1783,8 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
 
   const head = document.createElement('summary');
   head.append(icon(KIND_ICON[call.summary.kind] ?? 'i-bolt', 'ico tool-ico'));
-  if (call.tool === 'exec_command' || call.tool === 'write_stdin') head.append(el('span', 'tool-tag', 'shell'));
-  else if (call.changes?.length || call.tool === 'apply_patch') head.append(el('span', 'tool-tag', 'diff'));
+  if (call.tool === 'exec_command' || call.tool === 'write_stdin') head.append(el('span', 'tool-tag is-shell', 'shell'));
+  else if (call.changes?.length || call.tool === 'apply_patch') head.append(el('span', 'tool-tag is-diff', 'diff'));
   head.append(el('b', '', call.summary.title));
   if (call.summary.detail) head.append(el('em', '', call.summary.detail));
   if (call.changes?.length) {
@@ -1793,7 +1793,10 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
     const approximate = call.changes.some(change => change.approximate);
     const count = toolMetric(`+${added} −${removed}`, 'tool-change-count');
     if (approximate) count.append(el('span', '', () => t(' (approx.)')));
-    head.append(count);
+    // When the outcome metric on the right is already a line delta ("+39", "+2 −13", "~−7"),
+    // a second count beside the title only repeats it, whatever its exact formatting.
+    const deltaMetric = /^~?(?:\+\d+)?\s*(?:[−-]\d+)?$/.test(summary.metric ?? '') && /\d/.test(summary.metric ?? '');
+    if (!deltaMetric) head.append(count);
   }
   if (summary.metric) head.append(toolMetric(summary.metric));
   const project = context ? null : selectedLocalProject();
