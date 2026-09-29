@@ -3085,8 +3085,15 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
      * This only changes what the caption admits — no turn is invented, and nothing here
      * offers a Stop the app could not carry out.
      */
+    // The tool clock only speaks for work the page has not accounted for: a call newer than the
+    // last reported end (turn end or final answer), the same rule the sidebar applies. When the
+    // page reports the end after the last call, the turn is over; letting the ninety-second
+    // window run on kept a finished chat saying "Working…" long after it had stopped.
+    const reportedEnd = Math.max(lastBoundary?.kind === 'turn_end' ? lastBoundary.time : 0,
+      summary.lastTurnEndAt ?? 0, summary.lastAssistantFinalAt ?? 0);
     const blind = !active && summary.lastToolCallAt !== null &&
-      Date.now() - summary.lastToolCallAt < BLIND_CAPTION_MS
+      Date.now() - summary.lastToolCallAt < BLIND_CAPTION_MS &&
+      summary.lastToolCallAt > reportedEnd
       ? { text: t("Working…"), tone: '' as const, working: true }
       : null;
     const turnId = active ?? lastBoundary?.turnId;
