@@ -2982,7 +2982,10 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .composer-menu > summary { display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; border-radius: 8px; padding: 7px 8px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
 .composer-menu > summary::-webkit-details-marker { display: none; }
 #attachmentMenu > summary { width: 36px; height: 36px; padding: 0; justify-content: center; }
-#attachmentMenu > summary .ico { display: block; --ico: 20px; --glyph: 20px; }
+/* Drawn at the toolbar's 17px glyph size so its baseline rounds like its neighbours (a 20px glyph
+   landed 1-2 device pixels lower at fractional scales such as 75% zoom on a 125% display), then
+   scaled about its centre to the intended 20px. */
+#attachmentMenu > summary .ico { display: block; --ico: 17px; --glyph: 17px; transform: scale(calc(20 / 17)); }
 .composer-menu > summary:hover, .composer-menu[open] > summary { color: var(--ink); background: var(--hover); }
 .composer-popover { position: absolute; z-index: 30; bottom: calc(100% + 12px); left: 0; width: 224px; padding: 7px; background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 14px; box-shadow: 0 8px 30px #0005; }
 .model-menu .composer-popover { left: auto; right: 0; width: 300px; max-width: calc(100vw - 32px); max-height: 70vh; overflow-y: auto; padding: 8px; }
@@ -3499,7 +3502,10 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 
 .context-meter { position: relative; flex: 0 0 auto; }
 #contextMeterButton { display: flex; align-items: center; gap: 5px; height: 32px; padding: 0 5px; border: 0; border-radius: 8px; background: transparent; color: var(--soft); cursor: pointer; }
-#contextMeterCompact { font: calc(10px * var(--text-scale, 1)) var(--mono); white-space: nowrap; }
+/* A toolbar label like Mode, Plan and Model: same face and size, with tabular digits so the value
+   does not shift as it changes. The 10px monospace of the old token chip broke the row's line. */
+#contextMeterButton { font: inherit; }
+#contextMeterCompact { font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; white-space: nowrap; }
 #contextMeterButton:hover { background: var(--hover); }
 #contextMeterButton svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; transform: rotate(-90deg); }
 .context-track { opacity: .35; }
