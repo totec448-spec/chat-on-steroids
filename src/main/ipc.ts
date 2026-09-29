@@ -78,7 +78,6 @@ import {
   bridgeStatus,
   publishBridgePortChange,
   companionDiagnostics,
-  sessionActivityExpiresAt,
   sessionInputActivity,
   recoveryInputAllowed,
   sessionControlsFor, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, cancelSessionCompaction,
@@ -97,26 +96,21 @@ import {
   clearImageStorage,
   getSession,
   getImageStorage,
-  listSessionPage,
-  findSessionByConversation,
-  readEvents,
-  readRecentEvents,
   readHandoff,
   readToolEditReview
 } from './session/store.js';
-import { activeSessionId, forgetSession, onSessionChange } from './session/recorder.js';
+import { forgetSession, onSessionChange } from './session/recorder.js';
+import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatBlocked } from './session/blocked-chats.js';
 import {
   clearAgent,
-  primeForOwnedConversation,
   onSwarmChange,
   pauseSwarmForDisable,
   persistAgentAuthorityNow,
   resetSwarm,
   swarmState
 } from './agents.js';
-import { tokenPressure } from '../shared/session.js';
 import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
 import {
@@ -1012,51 +1006,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:list', async (payload) => {
     const { cursor, limit } = z
       .object({
-        cursor: z
-          .object({
-            updatedAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-            id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i)
-          })
-          .optional(),
+        cursor: sessionListCursorSchema.optional(),
         // Keep one renderer payload small even when the store can index much more history.
         limit: z.number().int().min(1).max(60).optional()
       })
       .parse(payload ?? {});
-    const config = getConfig();
-    await listInputs(); // Restore exact helper origins before the first sidebar page.
-    const page = await listSessionPage({ cursor, limit: limit ?? 60 });
-    // Older recordings omitted worker origins' parent IDs. The broker's exact
-    // retained owner can repair that presentation without reviving a worker or
-    // guessing from reusable names such as worker-1.
-    const parents = new Map<string, ReturnType<typeof findSessionByConversation>>();
-    const sessions = await Promise.all(page.sessions.map(async (summary) => {
-      if (summary.origin?.kind !== 'worker' || summary.origin.fromSessionId || !summary.conversationId) return summary;
-      const prime = primeForOwnedConversation(summary.conversationId);
-      if (!prime || prime === summary.conversationId) return summary;
-      if (!parents.has(prime)) parents.set(prime, findSessionByConversation(prime, { requireUnique: true }));
-      const parent = await parents.get(prime);
-      return parent && parent.id !== summary.id ? { ...summary, origin: { ...summary.origin, fromSessionId: parent.id } } : summary;
-    }));
-    return {
-      sessions: sessions.map(summary => {
-        const activityExpiresAt = sessionActivityExpiresAt(summary);
-        return activityExpiresAt === undefined ? summary : { ...summary, activityExpiresAt };
-      }),
-      total: page.total,
-      nextCursor: page.nextCursor,
-      activeId: activeSessionId(),
-      // Live policy, not session history: a block is keyed by ChatGPT conversation and does
-      // not belong in any session's meta.json. It rides the list for the same reason
-      // `activeId` and `pressure` do — one paint, one round trip.
-      blocked: blockedChatIds(),
-      pressure: sessions.map((summary) => ({
-        id: summary.id,
-        // Pressure belongs to the currently attached ChatGPT context. `estimatedTokens` is
-        // deliberately lifetime history and therefore never resets across Compact & Resume;
-        // using it here made a fresh B look fuller than the A it had just replaced.
-        ...tokenPressure(summary.contextTokens, config.sessions.advisoryTokens, config.sessions.limitTokens)
-      }))
-    };
+    return readSessionList({ cursor, limit: limit ?? 60 });
   });
 
   handle('sessions:image', async (payload) => {
@@ -1071,7 +1026,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return result;
   });
   handle('sessions:events', async (payload) => {
-    const { id, from, before, after, limit } = z
+    const { id, ...options } = z
       .object({
         id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
         from: z.number().int().min(0).max(10_000_000).optional(),
@@ -1080,23 +1035,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         limit: z.number().int().min(1).max(1000).optional()
       })
       .parse(payload);
-    const summary = await getSession(id);
-    if (!summary) throw new Error('Session not found');
-    // The renderer draws a timeline, not the whole log: the tail is what matters and
-    // the rest stays one click away rather than being pushed over IPC every refresh.
-    // The renderer never paints more than 160 rows. Sending nearly twice that on every first
-    // load was pure cloning/IPC work; later refreshes use the sequence cursor below.
-    const cap = limit ?? 160;
-    if (from === undefined) {
-      // Navigation uses immutable origins. `from` alone is a publication cursor
-      // for live revisions and must never decide which history page owns a row.
-      const events = await readRecentEvents(id, cap, { before, after, orderByOrigin: true });
-      const nextFrom = events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), 0);
-      return { summary, events, total: summary.events, nextFrom };
-    }
-    const events = await readEvents(id, { from, limit: cap });
-    const nextFrom = events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), from);
-    return { summary, events, total: summary.events, nextFrom };
+    const page = await readSessionEvents(id, options);
+    if (!page) throw new Error('Session not found');
+    return page;
   });
 
   const stageFiles = async (sources: AttachmentSource[]) => {
