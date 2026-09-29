@@ -16867,6 +16867,26 @@ describe('the goal loop', () => {
     expect(drafts(live)).toHaveLength(2);
   });
 
+  it('stands aside without a stopped card when another tab owns this turn\'s Goal draft', async () => {
+    // The app hides another tab's draft from this one (goalViewFor), so an observer shows no
+    // Goal run at all. Its refused request must not claim the loop stopped: the owning tab is
+    // working, and on 2026-09-30 the other tab's draft went on to report "goal met".
+    const pending = { replyId: 'stable-final', turnId: 'g-original', eventSeq: 12, acceptedAt: 1000 };
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
+        goal: { enabled: true, own: true, hasKey: true, model: MODEL, pending, draft: null } } }),
+      goal_draft: () => ({ ok: false, status: 409,
+        data: { error: 'goal_owned_elsewhere', message: 'Another tab is already handling Goal Mode for this chat.' } })
+    });
+    for (let n = 0; n < 5; n++) { await live.hook.pullActivity(); await settle(); }
+    // The claim is kept, so repeated pulls do not ask again.
+    expect(drafts(live)).toHaveLength(1);
+    live.hook.injectStage();
+    expect(live.document.querySelector('.clf-stage-title')?.textContent ?? '').not.toBe('The goal loop stopped');
+    expect(live.document.querySelector('.clf-stage-detail')?.textContent ?? '').not.toContain('Another tab');
+  });
+
   it.each(['native', 'compaction'] as const)('recollects the same recovery ticket after a delayed retry meets temporary %s work', async busyKind => {
     const pending = { replyId: 'silence:retry-busy', turnId: 'g-silence-retry-busy',
       silenceSourceTurnId: 'g-original', eventSeq: 12, acceptedAt: 1000, listenUntil: 0 };
