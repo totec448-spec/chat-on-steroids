@@ -76,7 +76,7 @@ What every PR needs:
 1. **An issue.** Link it (`Fixes #123` or `Refs #123`). For anything beyond a small fix, agree on the behavior in the issue before writing code.
 2. **Why and what.** The root cause or user problem, and the behavior change, in a few sentences each.
 3. **A test that fails without the change.** Name it in the PR. The "Fail-first test" check proves it: it runs your changed tests against `main`'s code, and at least one must fail there. Only when a test is truly impossible, write `No test: <reason>`; when your tests only follow a refactor, write `Fail-first: n/a <reason>`.
-4. **Screenshots for interface changes.** Before and after, with placeholder data. Run `npm run verify:ui`.
+4. **Screenshots for interface changes.** Before and after, with placeholder data. Run `npm run verify:ui`. When renderer code changes but nothing on screen does, write `No visual change: <reason>` instead.
 5. **One topic, small.** At most 600 changed lines outside tests and translations. Split larger work, or state `Large change: <reason>` and expect a slower review.
 6. **Clean contents.** Nothing unrelated: no worklogs, notes, logs, formatting-only edits or generated output. Rebase on `main` when it conflicts.
 7. **Green checks.** `npm run verify` passes on your machine. Say which OS you ran it on. Packaging/runtime changes also need a packaged-runtime smoke check.
