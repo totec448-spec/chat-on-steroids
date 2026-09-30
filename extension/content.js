@@ -604,6 +604,12 @@
     if (stagePanel?.root.dataset.clfStageKind === 'wait') removeStagePanel();
   }
   let stallReported = false;
+  /**
+   * The exact native model/effort of the open generation, keyed by its local turn id. Frozen at
+   * that generation's first exact picker reading: a later picker change belongs to the next
+   * turn and never rewrites the stall policy of this one (#786).
+   */
+  let turnSelection = null;
   // Intent only. Later exact MCP work can prove that this request did not stop the turn.
   let stopRequestedAt = 0;
   let recoveryStopping = false;
@@ -2040,11 +2046,7 @@
     // model proof either; never treat that absence as proof of a non-Pro turn. Read the
     // existing passive picker authority, without opening it or trusting a cached selection.
     const selection = CLF_DOM.visibleModelSelection?.();
-    const model = (selection?.model || '').trim().toLowerCase().replace(/\s+/g, '-');
-    // Exact aliases match shared/chat-models.ts::isProModel (the extension is plain JS).
-    const pro = /^(?:astra|gpt-?6-astra|gpt-?\d+(?:[.-]\d+)?-pro)$/.test(model) ||
-      (/^(?:gpt-?6(?:\.0)?|gpt-?5\.6(?:-sol)?)$/.test(model) && selection?.reasoningEffort === 'pro');
-    if (!fiberPresent && !unwitnessedGeneration && model && !pro && answerText(turn).length > 0) return { outcome: 'completed' };
+    if (!fiberPresent && !unwitnessedGeneration && selection?.model && !proSelection(selection) && answerText(turn).length > 0) return { outcome: 'completed' };
     if (turnStalled()) {
       return {
         outcome: 'stalled',
@@ -2061,6 +2063,32 @@
    */
   function turnStalled() {
     return turnStartedAt > 0 && Date.now() - lastChangeAt > STALL_MS;
+  }
+
+  /** Exact aliases match shared/chat-models.ts::isProModel (the extension is plain JS). */
+  function proSelection(selection) {
+    const model = (selection?.model || '').trim().toLowerCase().replace(/\s+/g, '-');
+    return /^(?:astra|gpt-?6-astra|gpt-?\d+(?:[.-]\d+)?-pro)$/.test(model) ||
+      (/^(?:gpt-?6(?:\.0)?|gpt-?5\.6(?:-sol)?)$/.test(model) && selection?.reasoningEffort === 'pro');
+  }
+
+  /**
+   * A non-Pro generation sent at xhigh/max/ultra that is provably still running (#786): this
+   * route, native Stop, this document's own section for the generation, and ChatGPT's Fiber
+   * turn for that exact section with no end. Such a turn can think for longer than STALL_MS
+   * without changing the page, and reporting it stalled gets it reloaded mid-thought. Every
+   * clause is re-read on each tick, so losing any one of them makes the ordinary stall due at
+   * once; the app's bounded silence window remains the backstop for a turn that never ends.
+   */
+  function deliberateTurnLive() {
+    const selected = turnSelection?.turnId === turnId ? turnSelection : null;
+    // Exact efforts match shared/chat-models.ts::isDeliberateEffort.
+    if (!generating || !turnId || stopRequestedAt || !selected || proSelection(selected) ||
+        !['xhigh', 'max', 'ultra'].includes(selected.reasoningEffort)) return false;
+    if (!conversationId || CLF_DOM.conversationId() !== conversationId || !CLF_DOM.generating()) return false;
+    const owner = currentGenerationOwner();
+    const native = owner && localGenerationOf(owner.pageTurn) === turnId ? fiberTurnFor(owner.pageTurn) : null;
+    return Boolean(native && !native.endMessageId && native.conversationId === conversationId);
   }
 
   /** The turn section a node is rendered in, or null. */
@@ -2619,6 +2647,8 @@
     // apart in the same tick. At millisecond resolution they tie, and a tie read as "this
     // turn's" — so an undismissed banner from an earlier failure could fail the next turn,
     // which is the exact thing that comparison exists to prevent.
+    if (generating && turnId && turnSelection?.turnId !== turnId && modelSelection &&
+        !modelCatalogBusy && !desktopInputBusy && !bootstrapModelRestoreBusy) turnSelection = { turnId, ...modelSelection };
     const visibleErrors = CLF_DOM.errors();
     for (const error of visibleErrors) {
       if (!errorFirstSeen.has(error.node)) errorFirstSeen.set(error.node, turnId);
@@ -2710,7 +2740,7 @@
       // generic stall, including when it appears after a long quiet run.
       const thinkingFailure = quietOutcome?.reason === 'thinking_failed' || visibleErrors.some(
         error => error.reason === 'thinking_failed' && localErrorGeneration(error) === turnId && !isStale(error.node));
-      if (!thinkingFailure && !stallReported && Date.now() - lastChangeAt > STALL_MS) {
+      if (!thinkingFailure && !stallReported && Date.now() - lastChangeAt > STALL_MS && !deliberateTurnLive()) {
         stallReported = true;
         emit({
           kind: 'chat_error',

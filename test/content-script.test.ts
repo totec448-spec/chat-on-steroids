@@ -8119,6 +8119,56 @@ describe('a stop button that goes missing while the turn is still running', () =
   });
 
   /**
+   * #786: a non-Pro turn at Extra high or above can think for more than ten minutes without
+   * changing the page. While its exact liveness holds — this route, native Stop, this
+   * document's section for it and ChatGPT's own unfinished Fiber turn for that section — ten
+   * quiet minutes are not a stall. The moment that proof is gone, the already-expired
+   * ordinary fallback is due at once, without another ten minutes.
+   */
+  const stallText = 'No visible progress for ten minutes. The app could not confirm that this turn finished.';
+  const stalls = (harnessed: Harness): number =>
+    emitted(harnessed.sent, 'chat_error').filter(entry => entry.event.text === stallText).length;
+  async function liveReasoningTurn(effort: string, id: string): Promise<HTMLElement> {
+    live = await harness();
+    let selected = { model: 'GPT-5.6 Sol', reasoningEffort: effort };
+    (live.window as any).CLF_DOM.visibleModelSelection = () => selected;
+    userTurn(live.document, `${id}-user`, 'think about this for a long time');
+    startGenerating(live.document, { send: false });
+    const section = assistantTurn(live.document, id, []);
+    live.hook.observe();
+    await settle();
+    // Unfinished: the page model has the turn's thinking and no end message.
+    await bindFiberTurns([{ section, turn: { turnId: id, endMessageId: null,
+      activities: [{ messageId: `${id}-thought`, label: 'Weighing the approaches', order: 0 }] } }]);
+    // The picker moving on after Send is the next turn's choice, not this one's.
+    selected = { model: 'GPT-5.6 Sol', reasoningEffort: effort === 'high' ? 'xhigh' : 'high' };
+    return section;
+  }
+
+  it.each(['xhigh', 'max', 'ultra'])('keeps a live %s turn unstalled at ten minutes while its exact Fiber turn runs', async effort => {
+    const section = await liveReasoningTurn(effort, `deliberate-${effort}`);
+    live!.advance(live!.hook.STALL_MS + 1);
+    live!.hook.observe();
+    await settle();
+    expect(stalls(live!), `a live ${effort} turn was reported stalled`).toBe(0);
+
+    // The page model no longer holds this turn: the exact proof is gone and the stall is due now.
+    section.removeAttribute('data-clf-fiber-turn');
+    await replyFiber([], []);
+    live!.hook.observe();
+    await settle();
+    expect(stalls(live!)).toBe(1);
+  });
+
+  it('still reports a live high turn stalled at ten minutes, even after the picker moves to xhigh', async () => {
+    await liveReasoningTurn('high', 'ordinary-high');
+    live!.advance(live!.hook.STALL_MS + 1);
+    live!.hook.observe();
+    await settle();
+    expect(stalls(live!)).toBe(1);
+  });
+
+  /**
    * The key claims the attempt, so an attempt that failed has to give it back.
    *
    * Writing it and forgetting the answer looks harmless until the worker is asleep, has retired
