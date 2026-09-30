@@ -5671,13 +5671,18 @@
   }
 
   function repairNotice(entry) {
-    return Boolean(
-      entry &&
-        entry.kind === 'progress' &&
-        !entry.turnId &&
-        typeof entry.progressId === 'string' &&
-        entry.progressId.startsWith('browser-repair:')
-    );
+    if (
+      !entry ||
+      entry.kind !== 'progress' ||
+      entry.turnId ||
+      typeof entry.progressId !== 'string' ||
+      !entry.progressId.startsWith('browser-repair:')
+    ) return false;
+    // `browser-repair:<chat>:<id>` names the chat that was reloaded. Compact & resume moves the
+    // session on to a new chat, whose log then still holds the source chat's reload; it did not
+    // happen here. Older rows name no chat and keep their place.
+    const parts = entry.progressId.split(':');
+    return parts.length < 3 || parts[1] === CLF_DOM.conversationId();
   }
 
   /**

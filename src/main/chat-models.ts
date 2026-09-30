@@ -124,6 +124,18 @@ export async function startChatModelDiscovery(allowOpen = true): Promise<ChatMod
   await Promise.resolve();
   return getChatModels();
 }
+const unofferedAsked = new Set<string>();
+/**
+ * A choice saved in Settings that the stored catalog does not offer may be newer than the catalog:
+ * a restored catalog is never observed again on its own, so one saved before a rollout hid the new
+ * model for good. Asks an already open ChatGPT page, never a new browser, once per saved choice; a
+ * fresh catalog that still lacks it is the account's answer, not a reason to ask again.
+ */
+export function refreshForUnoffered(saved: string): void {
+  if (catalog.observedAt === null || unofferedAsked.has(saved)) return;
+  unofferedAsked.add(saved);
+  requestChatModels(false);
+}
 export function pendingChatModelRequest(): { nonce: string; expiresAt: number; allowOpen: boolean } | null {
   expire(); return request ? { ...request } : null;
 }
@@ -162,5 +174,5 @@ export function observeChatModels(raw: unknown): boolean {
 }
 export function resetChatModelsForTests(): void {
   if (deadline) clearTimeout(deadline); deadline = null; launch = null;
-  request = null; lastProblem = null; catalog = { state: 'unknown', requestedAt: null, observedAt: null, models: [] };
+  request = null; lastProblem = null; unofferedAsked.clear(); catalog = { state: 'unknown', requestedAt: null, observedAt: null, models: [] };
 }
