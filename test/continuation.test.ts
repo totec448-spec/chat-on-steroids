@@ -537,6 +537,27 @@ describe('committing', () => {
     expect((await getSession(sessionId))?.chatIds).toEqual([CHAT_A, CHAT_B]);
   });
 
+  it('records the sent resume message of the committed chat when its first call committed first', async () => {
+    // 2026-09-30, live: B's first attributed tool call committed the resume 50 ms before the
+    // page reported the message it typed, and the report was refused as a conflict. Without
+    // it the feed knows no resume boundary, and A's reload notice sat above B's first message.
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    expect(await commitContinuation(token, CHAT_B)).toBe(true);
+
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_A, 'resume-message-b')).toBe(false);
+    expect(await bindContinuationDestinationMessageNow(token, 'some-other-chat', 'resume-message-b')).toBe(false);
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).toBe(true);
+    expect(continuationByToken(token)).toMatchObject({
+      state: 'committed',
+      destinationSend: { state: 'sent', conversationId: CHAT_B, messageId: 'resume-message-b' }
+    });
+    // Once recorded it is the proof, and a different message is still a conflict.
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'another-message')).toBe(false);
+  });
+
   it('hands an armed replacement dispatch back on proof that nothing left the page, never once sent', async () => {
     // 2026-09-02: the brief landed in the replacement chat and the user's Escape emptied the
     // composer in the same instant. The armed dispatch then sat for its six hours.

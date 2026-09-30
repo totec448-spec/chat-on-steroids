@@ -1174,6 +1174,18 @@ it('maps native lane labels over transport effort values (Pro/Extra High lanes)'
   expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'xhigh')).toBe(true);
   expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh' });
 });
+it('identifies a Pro shell lane from its execution id when the effort label is localized', async () => {
+  const f = fixture();
+  Object.assign(f.selections[0]![0]!, {
+    model: 'gpt-6-pro', modelLabel: '6 Pro', reasoningEffort: 'medium',
+    sliderLabel: 'LOCALIZED_PRO', labels: { effort: 'LOCALIZED_PRO' }
+  });
+  const models = await f.api.inspectModelSettings();
+  expect(models.find((m: any) => m.id === 'gpt-6-pro')?.efforts).toEqual(['pro']);
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-pro', reasoningEffort: 'pro' });
+  expect(await f.api.selectModelSettings('gpt-6-pro', 'pro')).toBe(true);
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-pro', reasoningEffort: 'pro' });
+});
 it.each([false, true])('rechecks the cold shell picker owner when its account state hydrates (cancelled=%s)', async cancelled => {
   const f = fixture(), options = f.props.modelListConfig;
   f.props.modelListConfig = null;

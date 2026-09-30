@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentInfo, AgentMessage, AgentState, ReasoningEffort, SwarmState } from '../shared/session.js';
 import { REASONING_EFFORTS, isReasoningEffort } from '../shared/session.js';
 import { getConfig } from './config.js';
-import { getChatModels } from './chat-models.js';
+import { getChatModels, refreshForUnoffered } from './chat-models.js';
 import { resolveChatModel, type ChatModelOption } from '../shared/chat-models.js';
 import { logInfo, logWarn } from './logger.js';
 import { inheritWorkspace, releasePrimeWorkspace, bindAgentWorkspace } from './workspace.js';
@@ -1583,6 +1583,7 @@ function usableDefaults(
     notes.add(`The default worker reasoning "${effort}" saved in Settings is not offered${model ? ` for model "${model}"` : ''} by this ChatGPT account, so workers use ChatGPT's current reasoning. Choose an available level in Settings → Agents & automation.`);
     effort = null;
   }
+  if (notes.size) refreshForUnoffered(`default worker ${[...notes].join(',')}`);
   return { model, effort };
 }
 
