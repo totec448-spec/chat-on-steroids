@@ -3048,7 +3048,7 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     if (!rows[i]!.matches('.ev-tool_call, .ev-page_tool, .ev-agent_message')) { grouped.push(rows[i++]!); continue; }
     let end = i + 1;
     while (end < rows.length && rows[end]!.matches('.ev-tool_call, .ev-page_tool, .ev-agent_message') && rows[end]!.dataset.activityBoundary === rows[i]!.dataset.activityBoundary) end++;
-    if (end - i === 1) { grouped.push(rows[i++]!); continue; }
+    if (end - i === 1) { markNativeStep(rows[i]!, false); grouped.push(rows[i++]!); continue; }
     // Paging can extend or trim the beginning of an activity group. Its first
     // member is therefore not a new disclosure/viewport identity.
     const previous = rows.slice(i, end).map(row => row.closest<HTMLElement>('.tool-group'))
@@ -3065,10 +3065,25 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
       group.addEventListener('toggle', () => { if (group!.open) openTools.add(key); else openTools.delete(key); });
       group.open = openTools.has(key) || rows.slice(i, end).some((row) => row.querySelector('details[open]')); groups.set(key, group);
     }
-    // Name the group after its latest real action ("Ran npm test"), not after a thinking note
-    // ChatGPT wrote around it; the note still names a group that holds nothing else.
+    // Name the group after ChatGPT's recap of the round ("Inspected downloads and updated the plan"):
+    // ChatGPT closes each round of work with one, and titles the block with it. The recap is picked
+    // by position, never by wording, so it holds in any language of the page: the native step that
+    // ends a finished round (prose follows it, or the turn is over). It then heads the group instead
+    // of repeating inside it. A step that ends a round still in progress is a note, and a group
+    // without a recap is named after its latest real action ("Ran npm test").
     const members = rows.slice(i, end);
-    const latest = [...members].reverse().find(row => row.matches('.ev-tool_call, .ev-agent_message')) ?? rows[end - 1]!;
+    const finished = end < rows.length ? rows[end] !== turnNow : !(groups === toolGroups && turnWorking);
+    const last = members[members.length - 1]!;
+    const recap = finished && last.matches('.ev-page_tool') ? last : undefined;
+    // A native step written after this app's calls in the same round is about that work and is
+    // marked done, unless it ends a round still in progress; one before any call (a web search
+    // between paragraphs) keeps the globe.
+    let afterCall = false;
+    for (const member of members) {
+      if (member.matches('.ev-page_tool')) markNativeStep(member, afterCall && (finished || member !== last));
+      else afterCall = true;
+    }
+    const latest = recap ?? [...members].reverse().find(row => row.matches('.ev-tool_call, .ev-agent_message')) ?? rows[end - 1]!;
     const latestHead = latest.querySelector('.tool > summary, .agent-communication > summary, .thinking-line');
     const observedPhase = rows[i - 1]?.matches('.ev-progress')
       ? rows[i - 1]!.querySelector('.is-progress')?.textContent?.trim() : '';
@@ -3076,14 +3091,24 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
       || latestHead?.querySelector('span:not(.agent-avatar)')?.textContent || t("Activity");
     group.classList.toggle('has-activity-phase', !!observedPhase);
     group.querySelector('.activity-title')!.textContent = label;
-    ui(group.querySelector('summary')!, 'title', () => t("{0} actions · {1}", [end - i, label]));
+    const listed = members.filter(row => row !== recap || observedPhase);
+    ui(group.querySelector('summary')!, 'title', () => t("{0} actions · {1}", [listed.length, label]));
     const symbol = latestHead?.querySelector('.ico, .agent-avatar');
     group.querySelector('.activity-symbol')!.replaceChildren(...(symbol ? [symbol.cloneNode(true)] : []));
-    reconcileChildren(group.lastElementChild!, foldRoutineActivity(rows.slice(i, end)));
+    reconcileChildren(group.lastElementChild!, foldRoutineActivity(listed));
     grouped.push(group); i = end;
   }
   for (const key of groups.keys()) if (!retained.has(key)) groups.delete(key);
   return grouped;
+}
+
+/** The icon of a native ChatGPT step: a check once it follows this app's calls in its round, else the globe. */
+function markNativeStep(row: HTMLElement, done: boolean): void {
+  const line = row.querySelector<HTMLElement>('.thinking-line');
+  const name = done ? 'i-check-circle' : 'i-globe';
+  if (!line || (line.dataset.icon ?? 'i-globe') === name) return;
+  line.dataset.icon = name;
+  line.querySelector('.ico')?.replaceWith(icon(name, 'ico thinking-ico'));
 }
 
 /** Adjacent images from one response share a compact gallery, retaining canonical rows. */
@@ -3360,6 +3385,8 @@ const turnStatusLine = turnLine('turn-worked turn-status');
  * "Thinking". Streaming prose needs no row; it is the feedback. A call only reaches the list once it
  * has finished, so without this a long command read as an idle chat.
  */
+/** Whether the latest turn was working at the last paint; the status line's class is never cleared. */
+let turnWorking = false;
 const turnNow = el('p', 'meta is-progress thinking-line turn-now');
 const turnNowIcon = el('span', 'turn-now-icon');
 const turnNowText = el('span', 'turn-now-text');
@@ -3509,6 +3536,7 @@ function workedLine(asked: number, seconds: number): HTMLElement {
 function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, number>): void {
   const status = deps.state()?.config.ui.developerMode ? null : stateLine();
   const working = status?.working === true;
+  turnWorking = working;
   const asks = rows.map((row, index) => ({ row, index, asked: Number(row.dataset.askedAt) }))
     .filter(entry => entry.row.matches('.ev-user_message') && Number.isFinite(entry.asked));
   const pending = !!$('inputQueue').querySelector('.pending-message');
