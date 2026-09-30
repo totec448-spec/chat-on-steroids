@@ -332,9 +332,9 @@ var CLF_DOM = (() => {
   function retryFailure(button) {
     return safe(() => {
       const label = (button.innerText || button.textContent || '').replace(/\s+/g, ' ').trim();
-      // The provider keeps its English message in every interface language while the button is
-      // localized ("Reintentar", "Erneut versuchen"), so the label cannot be the anchor. Another
-      // language's button counts only as the single labelled control that ends a notice whose
+      // A transport card can keep its English message while localizing its button; this was
+      // observed with "Reintentar". The label cannot be the anchor. Another language's
+      // button counts only as the single labelled control that ends a notice whose
       // remaining text is, whole, a known transport failure; the wording check still decides.
       const english = /^retry$/i.test(label);
       if (!label || !displayed(button)) return null;
