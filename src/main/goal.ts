@@ -51,7 +51,7 @@ import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-te
 import type { GoalBackend } from '../shared/types.js';
 import { createHash } from 'node:crypto';
 import { getConfig } from './config.js';
-import { getChatModels } from './chat-models.js';
+import { getChatModels, refreshForUnoffered } from './chat-models.js';
 import { resolveChatModel } from '../shared/chat-models.js';
 import type { ReasoningEffort } from '../shared/session.js';
 import { writeDurableNow, writeDurableSnapshotSoon, writeDurableSoon } from './durable.js';
@@ -1785,6 +1785,7 @@ export function goalHelperSelection(): { model: string | null; reasoningEffort: 
     notes.push(`reasoning "${reasoningEffort}"`); reasoningEffort = null;
   }
   const key = notes.join(',');
+  if (key) refreshForUnoffered(`goal helper ${key}`);
   if (key && key !== helperFallbackLogged) {
     helperFallbackLogged = key;
     logWarn(`goal: the saved helper ${notes.join(' and ')} is not offered by this ChatGPT account; using ChatGPT's current selection`);
