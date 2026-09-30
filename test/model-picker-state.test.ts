@@ -157,14 +157,15 @@ it('still refuses a model the account does not offer, whatever the effort', asyn
  * family reports `pro` as its sole rung. Asking for a ladder step there has nothing to
  * round to — the family's own tier is the honest resolution, not a refusal.
  */
-it('selects the only offered tier of a Pro-only family for a ladder effort', async () => {
+it('refuses a ladder effort for a Pro-only family instead of substituting its tier', async () => {
+  // Saved execution aliases stay exact, effort included (AGENTS.md §13): the app drops an
+  // unoffered effort before it asks, so a request that still names one must not run as Pro.
   const f = fixture('', 0);
   const pro = f.selections[0]![2]!;
   pro.availability.status = 'available';
   (pro as Record<string, unknown>).category = { ...pro.category, modelVersion: 'gpt-6-pro', shortLabel: '6' };
   (pro as Record<string, unknown>).modelConfig = { title: '6' };
-  expect(await f.api.selectModelSettings('6', 'medium'), 'Pro-only family refused a ladder effort').toBe(true);
-  expect(f.state.currentBucket).toBe(3);
+  expect(await f.api.selectModelSettings('6', 'medium')).toBe(false);
 });
 
 it('still refuses a non-ladder effort the family does not offer', async () => {
