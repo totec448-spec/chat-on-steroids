@@ -79,7 +79,7 @@
     "@phosphor-icons/web": "2.1.2",
     "@types/js-yaml": "4.0.9",
     "@types/jsdom": "^30.0.0",
-    "@types/node": "^24.13.4",
+    "@types/node": "^26.6.3",
     "@types/ws": "8.18.1",
     "electron": "44.3.0",
     "electron-builder": "^26.16.1",
