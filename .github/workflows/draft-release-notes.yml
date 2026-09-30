@@ -1,0 +1,35 @@
+name: Draft release notes
+
+# A starting point for docs/release-notes/vX.Y.Z.md: every PR merged since the latest release,
+# using its optional "Release note:" line, else its title. The draft appears in the run summary
+# and as an artifact; nothing is committed.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  draft:
+    if: github.repository == 'totec448-spec/chat-on-steroids'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - name: Draft the notes
+        run: |
+          node scripts/draft-release-notes.mjs draft.md
+          cat draft.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-notes-draft
+          path: draft.md
+          retention-days: 14
