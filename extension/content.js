@@ -11737,24 +11737,30 @@
       CLF_DOM.conversationId() === target && epoch === forEpoch;
     // An exact compaction ticket may recover its own busy page. It still cannot
     // discard a draft or cross a new user message while main is granting the claim.
+    // The first reason that holds, so the app can log why a repair waits (#820). Order matters
+    // only for the message; every one of them keeps the page untouched.
+    const draft = () => Boolean((CLF_DOM.composer()?.textContent || '').trim() || CLF_DOM.hasComposerAttachments());
+    const verdict = (holds, extra) => {
+      const why = holds.find(([held]) => held)?.[1];
+      return { safe: !why, ...(why ? { why } : {}), ...extra };
+    };
     if (message.draftOnly === true) {
       const questionId = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id ?? null;
-      return { safe: current() && !desktopInputBusy &&
-        !(CLF_DOM.composer()?.textContent || '').trim() && !CLF_DOM.hasComposerAttachments() &&
-        (!message.expected || message.expected.questionId === questionId),
-        revision: turnProgressRevision, turnId, questionId };
+      return verdict([[!current(), 'page-changed'], [desktopInputBusy, 'sending'], [draft(), 'draft'],
+        [message.expected && message.expected.questionId !== questionId, 'changed']],
+      { revision: turnProgressRevision, turnId, questionId });
     }
-    if (!current() || stopRequestedAt) return { safe: false };
+    if (!current()) return { safe: false, why: 'page-changed' };
+    if (stopRequestedAt) return { safe: false, why: 'stop-requested' };
     const source = currentAssistantTurn();
     if (source) await refreshFiber({ pageTurnId: source.id, pageTurn: source.node || source.nodes?.[0] });
     await flush();
     const questionId = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id ?? null;
     const expected = message.expected;
-    return { safe: current() && !stopRequestedAt && pendingTools === 0 && !desktopInputBusy && !nativeBusy && !job?.busy &&
-      !(CLF_DOM.composer()?.textContent || '').trim() && !CLF_DOM.hasComposerAttachments() &&
-      (!expected || (expected.turnId === turnId && expected.questionId === questionId &&
-        expected.revision === turnProgressRevision)),
-      revision: turnProgressRevision, turnId, questionId };
+    return verdict([[!current(), 'page-changed'], [stopRequestedAt, 'stop-requested'], [pendingTools !== 0, 'tool-running'],
+      [desktopInputBusy, 'sending'], [nativeBusy, 'page-busy'], [job?.busy, 'compaction'], [draft(), 'draft'],
+      [expected && !(expected.turnId === turnId && expected.questionId === questionId && expected.revision === turnProgressRevision), 'changed']],
+    { revision: turnProgressRevision, turnId, questionId });
   }
 
   async function acceptDesktopInput(message) {

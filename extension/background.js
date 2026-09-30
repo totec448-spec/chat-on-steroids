@@ -2828,7 +2828,11 @@ async function performBrowserRepairs(repairs, policy) {
         const draftOnly = reason === 'compaction';
         const check = inspectTurn ? await tabReply(target.id,
           { type: 'clf-repair-check', conversationId, draftOnly }, documentId ? { documentId } : undefined) : null;
-        if (check?.safe === false) continue;
+        if (check?.safe === false) {
+          // The repair stays handed for the next pass; the app logs once why the page held it.
+          await call(`/status?repairHeld=${encodeURIComponent(token)}&why=${encodeURIComponent(check.why || 'unknown')}`);
+          continue;
+        }
         const claim = await call('/repairs/claim', { method: 'POST', body: JSON.stringify({ token }) });
         if (!claim.ok || claim.data?.allowed !== true) continue;
         if (target && !suspended) {
