@@ -29,5 +29,16 @@ export function initBrowserPreferences(): void {
   overwrite.addEventListener('change', () => void request({ overwrite: overwrite.checked }));
   durations.addEventListener('change', () => void request({ durations: durations.checked }));
   refresh.addEventListener('click', () => void request());
+  // The switches are unusable until the extension has answered, and a reader did not know to press
+  // Refresh first. Ask once each time they come into view while unconfirmed; a failed answer stays
+  // on screen with the button until the next visit, and nothing is asked in a loop.
+  if (typeof IntersectionObserver === 'function') {
+    let visible = false;
+    new IntersectionObserver(entries => {
+      const now = entries.some(entry => entry.isIntersecting);
+      if (now && !visible && !confirmed) void request();
+      visible = now;
+    }).observe(overwrite.closest('.setting') ?? overwrite);
+  }
   paint();
 }
