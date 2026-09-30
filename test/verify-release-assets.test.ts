@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { strToU8, zipSync } from 'fflate';
-import { RELEASE_FILES, verifyReleaseAssets } from '../scripts/verify-release-assets.mjs';
+// @ts-expect-error The checker is a plain Node script without type declarations.
+import { RELEASE_FILES as files, verifyReleaseAssets as verify } from '../scripts/verify-release-assets.mjs';
+
+const RELEASE_FILES = files as string[];
+const verifyReleaseAssets = verify as (options: { dir: string; tag: string }) => Promise<string[]>;
 
 const EXTENSION_FILES = ['background.js', 'chatgpt-dom.js', 'content.js', 'fiber.js', 'overlay.css', 'popup.html', 'popup.css', 'popup.js',
   'icons/icon16.png', 'icons/icon32.png', 'icons/icon48.png', 'icons/icon128.png', 'LICENSE'];
