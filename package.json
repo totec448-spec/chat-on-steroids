@@ -62,7 +62,7 @@
     "@xterm/xterm": "6.0.0",
     "codemirror": "^6.0.2",
     "fflate": "^0.8.3",
-    "js-yaml": "4.3.2",
+    "js-yaml": "5.4.2",
     "koffi": "3.3.2",
     "marked": "18.0.13",
     "node-pty": "1.2.0-beta.15",
