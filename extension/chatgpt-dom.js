@@ -1630,7 +1630,13 @@ var CLF_DOM = (() => {
     return safe(() => {
       const classic = document.querySelector('#prompt-textarea');
       if (classic) return classic;
-      const candidates = [...document.querySelectorAll('form[data-chatgpt-composer] [contenteditable="true"][role="textbox"]')]
+      // The current rich editor can remount before its surrounding form regains
+      // data-chatgpt-composer. Accept that stable editor identity, but only while
+      // the visible candidate remains unique.
+      const candidates = [...document.querySelectorAll(
+        'form[data-chatgpt-composer] [contenteditable="true"][role="textbox"], ' +
+        'form [data-composer-markdown][contenteditable="true"][role="textbox"]'
+      )]
         .filter(node => !node.closest(`${OWN_SURFACES},[data-turn-key],.markdown,[hidden],[aria-hidden="true"],[inert]`));
       return candidates.length === 1 ? candidates[0] : null;
     }, null);

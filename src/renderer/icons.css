@@ -50,6 +50,7 @@
 .ph.ph-chart-line::before { content: '\e154'; }
 .ph.ph-chat-circle::before { content: '\e168'; }
 .ph.ph-check::before { content: '\e182'; }
+.ph.ph-check-circle::before { content: '\e184'; }
 .ph.ph-clock::before { content: '\e19a'; }
 .ph.ph-copy::before { content: '\e1ca'; }
 .ph.ph-corners-in::before { content: '\e1ce'; }

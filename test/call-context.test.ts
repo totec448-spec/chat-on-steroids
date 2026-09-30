@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   emptyEvidence,
   inFlightToolCalls,
+  runningToolActivity,
   runningToolCalls,
+  runningToolProgress,
+  setRequestOwner,
   settlingToolCalls,
   trackInFlight,
   type CallContext
@@ -32,6 +35,55 @@ async function whileRunning(context: CallContext, fn: () => void): Promise<void>
   release();
   await call;
 }
+
+import { summarizeRunningCall } from '../src/main/session/summarize.js';
+
+describe('what a chat’s calls are doing', () => {
+  it('names a running call from its arguments, in the present tense', () => {
+    expect(summarizeRunningCall('exec_command', { cmd: 'npm test' }, emptyEvidence())).toEqual({ title: 'Running npm test', kind: 'run' });
+    expect(summarizeRunningCall('read', { paths: ['/workspace/src/x.ts'] }, emptyEvidence())).toEqual({ title: expect.stringMatching(/^Reading .*x\.ts$/), kind: 'read' });
+    expect(summarizeRunningCall('some_new_tool', {}, emptyEvidence())).toEqual({ title: 'Running some_new_tool', kind: 'other' });
+  });
+
+  it('lists only the calls proven to belong to the asking chat', async () => {
+    const own = { ...callFrom('conversation-a'), activity: { title: 'Running npm test', kind: 'run' as const } };
+    const other = { ...callFrom('conversation-b'), activity: { title: 'Reading secret.txt', kind: 'read' as const } };
+    const unproven = { ...callFrom(null), activity: { title: 'Editing x.ts', kind: 'edit' as const } };
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const calls = [other, unproven, own].map(call => trackInFlight(call, () => held));
+    expect(runningToolActivity(['conversation-a'])).toEqual([{ title: 'Running npm test', kind: 'run', since: own.startedAt }]);
+    release();
+    await Promise.all(calls);
+    expect(runningToolActivity(['conversation-a'])).toEqual([]);
+  });
+
+  it('counts and names a running call by one ownership rule: the page’s exact proof of its request', async () => {
+    // Calls are placed only after their handler ran, so a running call names no chat yet. What the
+    // caption names and what counts as the chat's running work must be the same calls.
+    const call = (requestId: string | null) => ({ ...callFrom(null), activity: { title: 'Running npm test', kind: 'run' as const },
+      caller: { transportKey: null, requestId, conversationId: null } });
+    const proven = call('req-a'), elsewhere = call('req-b'), unknown = call('req-unknown'), none = call(null);
+    const owners: Record<string, string> = { 'req-a': 'conversation-a', 'req-b': 'conversation-b' };
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const calls = [proven, elsewhere, unknown, none].map(entry => trackInFlight(entry, () => held));
+    try {
+      // No proof installed: neither sees an unplaced call.
+      expect(runningToolActivity(['conversation-a'])).toEqual([]);
+      expect(runningToolProgress('conversation-a')).toBeNull();
+      setRequestOwner(id => owners[id] ?? null);
+      expect(runningToolActivity(['conversation-a'])).toEqual([{ title: 'Running npm test', kind: 'run', since: proven.startedAt }]);
+      expect(runningToolProgress('conversation-a')).toEqual({ count: 1, since: proven.startedAt });
+      expect(runningToolProgress('conversation-b')).toEqual({ count: 1, since: elsewhere.startedAt });
+      expect(runningToolProgress('conversation-c')).toBeNull();
+    } finally {
+      setRequestOwner(() => null);
+      release();
+      await Promise.all(calls);
+    }
+  });
+});
 
 describe('local calls still running', () => {
   it('does not let one chat’s work hold another chat busy', async () => {

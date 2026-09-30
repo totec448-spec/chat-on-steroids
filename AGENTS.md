@@ -2864,6 +2864,16 @@ status checks or waits on the same process inside the existing activity disclosu
 each row on expansion; a failed call breaks the fold. An immediately preceding recorded progress
 line may title that disclosure as the observed activity phase. Tool diff counts and shell/result
 headers are projections of recorded data, not new execution or completion evidence.
+A working turn's timeline ends with one live row: the call this app is running for the chat,
+else a step ChatGPT's page names in the progressive, else Thinking. `sessions:runningTools`
+answers it from `mcp/call-context.ts` `runningToolActivity`, whose caption the kernel builds
+from the call's arguments when it starts. It shares one ownership rule, `exactOwner`, with
+`runningToolProgress`: a call counts for a chat by its placed conversation or, while it still
+runs, by the page's exact proof of its request id (`requestCorrelation`, installed through
+`setRequestOwner`). The anonymous safety counters never feed it. The renderer asks at most once
+a second while the chat works. The row is presentation only: it records nothing and is not
+completion evidence. Page step labels are recognised by English wording; in other languages
+the row says Thinking.
 Setup's Show/Hide guide button stays available even while setup is incomplete. Manual collapse
 survives status pushes. Profile management stays out of first-run Setup: a compact row below
 Language in Appearance has a dropdown, a plus button with a name dialog and a delete button
