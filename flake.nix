@@ -18,7 +18,6 @@
           builtins.elemAt match 0;
 
       electronAttr = "electron_${versionMajor package.devDependencies.electron}";
-      nodeAttr = "nodejs_${versionMajor package.devDependencies."@types/node"}";
       systems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -34,11 +33,9 @@
               pkgs.${electronAttr}
             else
               throw "nixpkgs does not provide ${electronAttr}, required by package.json";
-          nodejs =
-            if builtins.hasAttr nodeAttr pkgs then
-              pkgs.${nodeAttr}
-            else
-              throw "nixpkgs does not provide ${nodeAttr}, required by package.json";
+          # Match the development runtime used by CI. @types/node follows
+          # Electron's embedded Node version, not the host development runtime.
+          nodejs = pkgs.nodejs_22;
 
           nodeModules = pkgs.importNpmLock.buildNodeModules {
             npmRoot = ./.;
