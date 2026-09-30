@@ -1,0 +1,40 @@
+name: Welcome
+
+# A short, friendly hello on someone's first issue or pull request, with the few things that help
+# most. pull_request_target is used for write access on fork PRs; no pull request code is checked
+# out or run.
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  contents: read
+
+jobs:
+  welcome:
+    if: github.repository == 'totec448-spec/chat-on-steroids'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/first-interaction@1c4688942c71f71d4f5502a26ea67c331730fa4d # v3.1.0
+        with:
+          issue_message: |
+            Thanks for your first issue, and welcome! 👋 Two things help us most:
+            - the app and extension versions (click the connection dot at the bottom left of the app), and your OS and browser;
+            - the steps that lead to the problem, and what you expected instead.
+
+            If we need more details we will ask here. Screenshots are welcome; please blur names, chat text and paths.
+          pr_message: |
+            Thanks for your first pull request, and welcome! 👋 The short version of [CONTRIBUTING.md](https://github.com/totec448-spec/chat-on-steroids/blob/main/CONTRIBUTING.md):
+            1. Link the issue it solves (`Fixes #123`), and keep one topic per PR.
+            2. Add a test that fails without your change; the "Fail-first test" check confirms it.
+            3. For interface changes, add before and after screenshots.
+            4. Keep "Allow edits by maintainers" on, so we can help with small fixes.
+            5. The "PR checklist" check tells you exactly what is missing, so no need to guess.
+
+            We review once the checks are green. Questions are welcome right here.
