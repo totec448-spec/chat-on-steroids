@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { initConfigPath, defaultConfig, saveConfig } from '../src/main/config.js';
 import { initDurableStore, readDurable, writeDurableNow, flushDurable, resetDurableForTests } from '../src/main/durable.js';
-import { initSessionStore, getSession, createSession, findSessionByConversation, listSessions, resetSessionStoreForTests } from '../src/main/session/store.js';
+import { initSessionStore, getSession, createSession, findSessionByConversation, listSessions, rebindSession, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { enqueueInput, listInputs, pendingBrowserInputs, claimBrowserInput, authorizeBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject,
   cancelInput, failBrowserInput, resetInputForTests, configureInputDelivery, setInputAutomation, type InputArgs, type InputEntry } from '../src/main/session/input.js';
 import { addProject } from '../src/main/projects.js';
@@ -232,6 +232,34 @@ it('keeps a reviewed pre-send retry in its session but refuses ambiguous Send re
   await expect(enqueueInput(args({ sessionId: row.sessionId }))).rejects.toThrow('no ChatGPT conversation');
   expect(await acknowledgeBrowserInput(retry.id, 'retry-owner', randomUUID(), 'late-real-receipt')).toBe(true);
   expect((await listInputs()).find(entry => entry.id === retry.id)).toMatchObject({ state: 'cancelled', deliveredSessionId: row.sessionId });
+});
+
+/**
+ * #821: the page clicked Send for an opening, but the row it read back never matched its text.
+ * The claim stayed `browser`, and an opening is left out of the 15-minute release, so for six
+ * hours every later message in that chat waited behind it.
+ */
+it('retires an opening whose receipt the page could not confirm, and claims the next message', async () => {
+  const row = await enqueueInput(args());
+  expect(await claimBrowserInput(row.id, 'opening-page', null, true)).not.toBeNull();
+  expect(await authorizeBrowserInput(row.id, 'opening-page', null)).toBe(true);
+  // The recorder binds the new chat from the page's own activity, as it did in the incident.
+  const conversationId = randomUUID();
+  expect(await rebindSession(row.sessionId!, null, conversationId)).toBe(true);
+  // Admitted while the opening's turn could still take it, as the incident's next message was.
+  const next = legacy({ sessionId: row.sessionId, conversationId, text: 'Next message' });
+  const bound = (await listInputs()).map(entry => entry.id === row.id ? { ...entry, conversationId } : entry);
+  await writeDurableNow('session-input', [...bound, next]); resetInputForTests();
+  expect(await claimBrowserInput(next.id, 'opening-page', conversationId, true)).toBeNull();
+
+  expect(await failBrowserInput(row.id, 'opening-page', 'Native Send receipt was not confirmed.')).toBe(true);
+  expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'cancelled',
+    sendAuthorizedAt: expect.any(Number), error: expect.stringContaining('it will not be resent') });
+  expect(await claimBrowserInput(next.id, 'opening-page', conversationId, true)).toMatchObject({ id: next.id });
+  // Never a replay, and a late exact receipt still confirms the retired opening.
+  expect((await pendingBrowserInputs()).some(entry => entry.id === row.id)).toBe(false);
+  expect(await acknowledgeBrowserInput(row.id, 'opening-page', conversationId, 'late-receipt')).toBe(true);
+  expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'cancelled', messageId: 'late-receipt' });
 });
 
 it('does not let a generic failed label erase native Send authorization', async () => {
