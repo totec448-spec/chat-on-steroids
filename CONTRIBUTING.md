@@ -47,11 +47,21 @@ What every PR needs:
 
 1. **An issue.** Link it (`Fixes #123` or `Refs #123`). For anything beyond a small fix, agree on the behavior in the issue before writing code.
 2. **Why and what.** The root cause or user problem, and the behavior change, in a few sentences each.
-3. **A test that fails without the change.** Name it in the PR. Only when a test is truly impossible, write `No test: <reason>`.
+3. **A test that fails without the change.** Name it in the PR. The "Fail-first test" check proves it: it runs your changed tests against `main`'s code, and at least one must fail there. Only when a test is truly impossible, write `No test: <reason>`; when your tests only follow a refactor, write `Fail-first: n/a <reason>`.
 4. **Screenshots for interface changes.** Before and after, with placeholder data. Run `npm run verify:ui`.
 5. **One topic, small.** At most 600 changed lines outside tests and translations. Split larger work, or state `Large change: <reason>` and expect a slower review.
 6. **Clean contents.** Nothing unrelated: no worklogs, notes, logs, formatting-only edits or generated output. Rebase on `main` when it conflicts.
 7. **Green checks.** `npm run verify` passes on your machine. Say which OS you ran it on. Packaging/runtime changes also need a packaged-runtime smoke check.
+8. **Docs with contracts.** A change to the preload API, IPC handlers or `src/shared` types updates the matching part of [`AGENTS.md`](AGENTS.md) in the same PR, or states `No contract change: <reason>`. The same applies to new recorded fields, bridge routes and extension messages.
+9. **Maintainer edits allowed.** Keep "Allow edits by maintainers" on, so a small fix can be finished on your PR instead of another review round. Your authorship stays.
+10. **No stacks out of order.** A PR that builds on another one says `Depends on #N` and stays a draft until #N is merged; then rebase it on `main`.
+
+What reviews look for, beyond the checks:
+
+- **Every change serves the linked issue.** No extra behavior changes "while at it", even small ones; open a separate issue for them.
+- **Nothing depends on ChatGPT's wording.** Decide behavior from structure, ids and machine fields, never from visible English text. ChatGPT is used in many languages; if text is unavoidable, include a non-English case in the test.
+- **Interface changes are checked in the real app.** Besides `npm run verify:ui`, run the change in a real build and show it in the screenshots or a short clip.
+- **Answer review comments within 7 days.** After that, a maintainer may finish the PR on your branch (keeping your credit) or close it; it can be reopened at any time.
 
 A PR that stays red for two weeks without activity may be closed; it can be reopened at any time.
 
