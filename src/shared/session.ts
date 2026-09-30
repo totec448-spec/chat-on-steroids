@@ -714,6 +714,17 @@ export interface SessionSummary {
   origin: SessionOrigin | null;
 }
 
+/**
+ * What one `session:changed` push says about transcripts. A push without it refreshes only
+ * the session catalog and controls; the selected transcript is reread only for its owner.
+ */
+export interface SessionChange {
+  /** Exact local sessions whose durable transcript projection changed in this burst. */
+  sessionIds?: string[];
+  /** A cross-session mutation without enumerable owners; every open transcript is stale. */
+  allTranscripts?: true;
+}
+
 export interface Handoff {
   id: string;
   sessionId: string;

@@ -2781,6 +2781,13 @@ evicted. Historical browsing leaves committed inputs with history. Never infer m
 the minimum event timestamp: old observations and tool start times can occur on newer pages.
 Pushes and async loads are scoped to selection/draft generation; a late load must not overwrite
 focused edits or a newer A → B → A view.
+`session:changed` carries a `SessionChange`: the recorder coalesces the exact local ids it
+wrote in one 400 ms burst (`sessionIds`; input-history offered → confirmed revisions publish
+their owner there too), and a mutation without enumerable owners, such as image-storage
+cleanup, sends `allTranscripts`. A payload-less push refreshes only catalog/controls. The
+scheduled refresh rereads the selected transcript only when it is named, all transcripts are
+invalidated, or its refreshed summary's `updatedAt`/`events` differ from those its last live-tail
+read was requested against; manual/visible refreshes still reread. Losing the selected row from the catalog clears its transcript.
 
 First-run Setup keeps the six-step flow, with reviewed screenshots in `renderer/setup-images/`
 and translated numbered highlights in `renderer/setup-guide.ts`. Sensitive identifiers must

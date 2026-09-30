@@ -32,7 +32,7 @@ app.whenReady().then(async () => {
       getSessionControls:()=>ok({automation:'off',blocked:'',job:null}),listInputs:()=>ok([]),listPausedHelpers:()=>ok([]),
       onSessionChanged:fn=>{window.changed=fn;return ()=>{}},getSwarm:()=>ok({running:false,agents:[]}),
       getChatModels:()=>ok({state:'unknown',models:[]})},{get:(target,key)=>key in target?target[key]:()=>ok(null)});
-    window.reaction=(value)=>{question.reaction=value;question.seq++;window.changed()};
+    window.reaction=(value)=>{question.reaction=value;question.seq++;window.changed({sessionIds:[summary.id]})};
     await import('/main.ts');window.ready=true;
   `;
   const server = await createServer({ configFile:false, root:path.join(root,'src/renderer'), server:{host:'127.0.0.1',port:0,hmr:false},
