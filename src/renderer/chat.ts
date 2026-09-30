@@ -46,6 +46,7 @@ import type {
   AgentState,
   Handoff,
   MessageReference,
+  SessionChange,
   SessionEvent,
   SessionSummary,
   StoredText,
@@ -282,6 +283,10 @@ let handoffFor: string | null = null;
 
 let listTimer: number | undefined;
 let listRefreshDirty = false;
+/** Transcript owners named by `session:changed` pushes that no catalog refresh has consumed yet. */
+let changedTranscripts: { all: boolean; ids: Set<string> } = { all: false, ids: new Set() };
+/** Summary values the selected transcript's latest live-tail read was requested against. */
+let detailStamp: { updatedAt: number; events: number } | null = null;
 let toolActivityTimer: number | undefined;
 let sessionsLoadGeneration = 0;
 let detailLoadGeneration = 0;
@@ -563,10 +568,18 @@ function mergeSessionRows(rows: SessionSummary[]): void {
   sessions = sortSessionRows([...merged.values()]);
 }
 
-async function loadSessions(): Promise<void> {
+/**
+ * Refreshes the catalog and controls. `detail: 'changed'` rereads the selected transcript only
+ * when a consumed push named it (or all transcripts) or its refreshed summary proves it stale;
+ * explicit refreshes keep `'reread'`. Pushes are consumed after the list arrives, so the
+ * detail read that follows always starts after every write they announced.
+ */
+async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<void> {
   const generation = ++sessionsLoadGeneration;
   const [list, catalog] = await Promise.all([run(api.listSessions({ limit: SESSION_PAGE_SIZE })), run(api.listProjects())]);
   if (!list || generation !== sessionsLoadGeneration) return;
+  const changed = changedTranscripts;
+  changedTranscripts = { all: false, ids: new Set() };
   if (catalog) projects = catalog;
   // Once older pages have been requested, a hot refresh only replaces/updates the newest page.
   // Throwing the older rows away here would make scrolling history vanish every 400 ms while a
@@ -601,7 +614,10 @@ async function loadSessions(): Promise<void> {
     detailCursor = null;
   }
   paintSessions();
-  await loadDetail();
+  const row = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
+  if (detail === 'reread' || selectedId === null || detailFor !== selectedId || changed.all || changed.ids.has(selectedId) ||
+      row?.updatedAt !== detailStamp?.updatedAt || row?.events !== detailStamp?.events) await loadDetail();
+  else void refreshSessionControls();
   void refreshInputQueue();
 }
 
@@ -1372,6 +1388,9 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
       ? detail.nextFrom
       : detail.events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), incremental ? detailCursor! : 0));
   totalEvents = detail.total;
+  // Stamp from the request-time copy: a summary newer than this read must still prove it stale.
+  if (!prepend && newerFrom === undefined)
+    detailStamp = observedCompletion ? { updatedAt: observedCompletion.updatedAt, events: observedCompletion.events } : null;
   if (opening) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
   paintDetail(!prepend && newerFrom === undefined);
   // A sidebar completion becomes read only after this exact selection/load has successfully
@@ -4105,14 +4124,16 @@ async function refreshAll(): Promise<void> {
 }
 
 /** Sessions change on every recorded event, so the reload is coalesced. */
-function scheduleReload(): void {
+function scheduleReload(change?: SessionChange): void {
   if (!visible) return;
+  if (change?.allTranscripts) changedTranscripts.all = true;
+  for (const id of change?.sessionIds ?? []) changedTranscripts.ids.add(id);
   // One refresh owns the timer until its asynchronous read completes. Starting a
   // newer read every 400 ms can invalidate every result on a busy/slower store.
   if (listTimer !== undefined) { listRefreshDirty = true; return; }
   listTimer = window.setTimeout(() => {
     listRefreshDirty = false;
-    void loadSessions().finally(() => {
+    void loadSessions('changed').finally(() => {
       listTimer = undefined;
       if (listRefreshDirty) scheduleReload();
     });

@@ -254,6 +254,56 @@ it('publishes Goal draft progress through the session refresh channel without a 
   }
 });
 
+it('publishes the exact transcript owners of one recorder burst and an explicit global invalidation', async () => {
+  const { recordNote } = await import('../src/main/session/recorder.js');
+  const first = await createSession({ title: 'Changed A', conversationId: 'ipc-changed-a' });
+  const second = await createSession({ title: 'Changed B', conversationId: 'ipc-changed-b' });
+  const send = vi.fn();
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send } };
+  await recordNote(first.id, 'first owner');
+  await recordNote(second.id, 'second owner');
+  await recordNote(first.id, 'first owner again');
+  await vi.waitFor(() => expect(send.mock.calls.filter(([channel]) => channel === 'session:changed')).toHaveLength(1));
+  const [, change] = send.mock.calls.find(([channel]) => channel === 'session:changed')!;
+  // Earlier fixtures may share this burst; each owner is still named exactly once.
+  expect(change.sessionIds).toEqual(expect.arrayContaining([first.id, second.id]));
+  expect(new Set(change.sessionIds).size).toBe(change.sessionIds.length);
+  send.mockClear();
+  expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'all' })).toMatchObject({ ok: true });
+  expect(send).toHaveBeenCalledWith('session:changed', { allTranscripts: true });
+});
+
+it('publishes the owning session when delivered input history is revised in place', async () => {
+  const input = await import('../src/main/session/input.js');
+  const store = await import('../src/main/session/store.js');
+  const previous = await readDurable('session-input');
+  const session = await createSession({ title: 'Input revision owner', conversationId: 'input-revision-owner' });
+  const id = '30000000-0000-4000-8000-000000000002';
+  const send = vi.fn();
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send } };
+  const owners = () => send.mock.calls.filter(([channel, change]) => channel === 'session:changed' && change?.sessionIds?.includes(session.id));
+  const row = { id, sessionId: session.id, text: 'Revised fixture', mode: 'auto', model: null, reasoningEffort: null, dueAt: 100,
+    createdAt: 100, owner: 'request', conversationId: 'input-revision-owner', offeredAt: 200, historyRecorded: false };
+  try {
+    await writeDurableNow('session-input', [{ ...row, state: 'tool' }]);
+    input.resetInputForTests();
+    expect(await handlers.get('sessions:outbox')!(null, undefined)).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(owners()).toHaveLength(1));
+    send.mockClear();
+    // Same canonical key, same anchor and count: only the delivery state changes in place.
+    await writeDurableNow('session-input', [{ ...row, state: 'sent', owner: null, messageId: `input:${id}`, deliveredAt: 300 }]);
+    input.resetInputForTests();
+    expect(await handlers.get('sessions:outbox')!(null, undefined)).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(owners()).toHaveLength(1));
+    const users = (await store.readEvents(session.id)).filter(event => event.kind === 'user_message');
+    expect(users).toHaveLength(1);
+    expect(users[0]).toMatchObject({ inputId: id, inputDelivery: 'confirmed' });
+  } finally {
+    await writeDurableNow('session-input', previous ?? []);
+    input.resetInputForTests();
+  }
+});
+
 it('stages clipboard image bytes with a preview through the general attachment owner', async () => {
   const drop = (payload: unknown) => handlers.get('sessions:dropFiles')!(null, payload) as Promise<any>;
   expect(await drop({ files: [] })).toMatchObject({ ok: false });
