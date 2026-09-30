@@ -20755,6 +20755,18 @@ describe('ordinary Continue native recovery', () => {
     expect(live.sent.filter(message => message.type === 'desktop_input' && message.fail)).toEqual(scenario === 'authorization'
       ? [expect.objectContaining({ id, owner: 'input-owner', error: 'After-turn pickup was withdrawn before Send.' })] : []);
   });
+  it('names why a repair is held: an unsent draft in the message box, then nothing once it is cleared', async () => {
+    live = await harness(`https://chatgpt.com/c/${chat}`);
+    await settle();
+    const composer = live.document.getElementById('prompt-textarea')!;
+    composer.textContent = 'Half-written follow-up';
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).toMatchObject({ safe: false, why: 'draft' });
+    composer.textContent = '';
+    const clear = await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat }) as Record<string, unknown>;
+    expect(clear).toMatchObject({ safe: true });
+    expect(clear).not.toHaveProperty('why');
+  });
+
   it('blocks automatic repair on trusted Stop intent without inventing a terminal observation', async () => {
     live = await harness(`https://chatgpt.com/c/${chat}`);
     userTurn(live.document, 'source', 'Complete the task'); startGenerating(live.document, { send: false });
@@ -20764,7 +20776,7 @@ describe('ordinary Continue native recovery', () => {
     live.trustedClick(button); await live.hook.flush();
     expect(live.document.contains(button)).toBe(true);
     expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
-    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).toMatchObject({ safe: false });
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).toMatchObject({ safe: false, why: 'stop-requested' });
     live.trustedClick(button); await live.hook.flush();
     expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
   });
