@@ -23,6 +23,7 @@ A big update: CoS now speaks Korean, the message box has been redesigned, and ev
 
 ### Improved
 
+- **Your message stays in view while the answer grows.** After you send, your message moves to the top of the chat and the answer fills the space below it, so nothing jumps while ChatGPT writes. Scroll up to read earlier parts; a button takes you back to the end.
 - **Smoother side and bottom panels.** Panels slide in and out instead of jumping, tabs look the same in both panels and can be reordered by dragging, and long tab names no longer run under the close button.
 - **Lighter tool calls in the chat.** Commands and edits no longer sit in heavy boxes, so a long run of steps is easier to read. A collapsed group of steps is named after what actually ran, not after a note ChatGPT wrote around it.
 - **ChatGPT's steps in the right place.** ChatGPT's own step lines ("Searching…", "Reading…") now appear before the paragraph they belong to, as they do in ChatGPT, instead of after it.
