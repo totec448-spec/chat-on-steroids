@@ -332,13 +332,26 @@ var CLF_DOM = (() => {
   function retryFailure(button) {
     return safe(() => {
       const label = (button.innerText || button.textContent || '').replace(/\s+/g, ' ').trim();
-      if (!/^retry$/i.test(label) || !displayed(button)) return null;
+      // The provider keeps its English message in every interface language while the button is
+      // localized ("Reintentar", "Erneut versuchen"), so the label cannot be the anchor. Another
+      // language's button counts only as the single labelled control that ends a notice whose
+      // remaining text is, whole, a known transport failure; the wording check still decides.
+      const english = /^retry$/i.test(label);
+      if (!label || !displayed(button)) return null;
+      if (!english && button.closest(`${OWN_SURFACES}, .markdown, [data-message-author-role], [hidden], [inert]`)) return null;
       let node = button.parentElement;
       for (let up = 0; node && up < 8 && node !== document.body; up++, node = node.parentElement) {
         if (node.closest && node.closest(OWN_SURFACES)) return null;
         const value = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
         if (value.length >= 500) return null;
-        if (displayed(node) && transportFailure(value)) return { text: value, node };
+        if (!displayed(node)) continue;
+        if (english) {
+          if (transportFailure(value)) return { text: value, node };
+          continue;
+        }
+        if (!value.endsWith(label) || [...node.querySelectorAll('button')].filter(displayed).length !== 1) continue;
+        const notice = value.slice(0, -label.length).trim();
+        if (notice && transportFailure(notice)) return { text: notice, node };
       }
       return null;
     }, null);
