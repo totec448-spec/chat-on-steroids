@@ -2060,6 +2060,47 @@ describe('automatic compaction', () => {
       'the chat was dropped without saying why').toBe(true);
   });
 
+
+  /**
+   * The verdict above was a timeline note and a log line, which is where nobody is looking.
+   * Measured on 2026-09-30: a chat whose page stayed on "Resume stream unavailable" sat for
+   * hours, and the only trace was that note. Giving up is the moment to tell the person.
+   */
+  it('tells the user once when the browser never claims a repair and recovery gives up', async () => {
+    const told: Array<{ title: string; body: string; sessionId: string }> = [];
+    setStuckNotifier((title, body, sessionId) => { told.push({ title, body, sessionId }); return true; });
+    try {
+      await pair();
+      const conversationId = randomUUID();
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), text: 'Continue this task', messageId: 'never-claimed-notice' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'never-claimed-notice-turn' },
+        { kind: 'chat_error', time: Date.now(), turnId: 'never-claimed-notice-turn', recoverable: true,
+          text: 'Connection interrupted. Waiting for the complete answer' }
+      ] } });
+      await settled();
+
+      const offered = async (): Promise<boolean> => {
+        const status = await request('GET', '/status');
+        return (status.body.repairs as Array<{ conversationId: string }>)
+          .some(row => row.conversationId === conversationId);
+      };
+      expect(await offered(), 'no repair was offered at all').toBe(true);
+      expect(told, 'told before the ceiling was reached').toEqual([]);
+      for (let pass = 0; pass < 40 && await offered(); pass++);
+      expect(await offered(), 'the repair was still being offered').toBe(false);
+
+      const session = (await findSessionByConversation(conversationId))!;
+      expect(told).toHaveLength(1);
+      expect(told[0]!.sessionId).toBe(session.id);
+      expect(told[0]!.body).toContain('tab');
+      // Later reads of the same retired repair say nothing more.
+      for (let pass = 0; pass < 5; pass++) await request('GET', '/status');
+      expect(told).toHaveLength(1);
+    } finally {
+      setStuckNotifier(null);
+    }
+  });
   it.each([false, true])('hands manual compaction the pending repair only before browser claim (claimed=%s)', async claimed => {
     await pair();
     const conversationId = randomUUID();

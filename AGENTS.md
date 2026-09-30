@@ -2181,6 +2181,9 @@ late attribution or lost owner authority denies that claim. A reload receipt pro
 not that attribution recovered. Other repair reasons retain their own delivery policy.
 Silence, missing-tab, stalled-tab and queued/Goal repairs also use that exact pre-action claim. Unclaimed
 offers retain one token; a claimed action is not reissued merely because its ACK is absent.
+When an unclaimed repair exhausts its offers the chat is marked page-less, the session gets its timeline note
+and the user gets one notification through the stuck-chat notifier, once per episode; a page that asks for
+its chat again lifts the verdict.
 A responsive page flushes native progress and Stop before the main claim, then rechecks its
 captured work/question/document after the claim. An explicit veto or navigation prevents the
 browser action. An unresponsive page supplies no new proof; the original main-process grant

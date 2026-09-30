@@ -8519,6 +8519,11 @@ async function takePendingRepairs(
             `Stopped trying to recover this chat: ${repair.offers - 1} attempts were offered to the browser and ` +
               'none was picked up, so this chat has no page to reload. Open its tab again and recovery resumes.'
           ).catch(() => undefined);
+          noticeChatStopped(
+            'Recovery stopped',
+            'The browser did not pick up this chat\'s repair, so the app stopped retrying. Open its tab again and recovery resumes.',
+            repair.sessionId
+          );
           logWarn(
             `bridge: ${conversationId} never claimed ${repair.offers - 1} ${repair.reason} repair offer(s) — no page; not offering again`
           );
