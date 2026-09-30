@@ -6,7 +6,7 @@ import { getConfig } from './config.js';
 import { listDirectoryLevel, readTextFile, statInfo } from './codex/read-backend.js';
 import { getProject, projectWorkspace } from './projects.js';
 import { rawPromises as fs } from './rawfs.js';
-import { isContained, resolvePath, SandboxError } from './sandbox.js';
+import { isContained, nativePathIdentity, resolvePath, SandboxError } from './sandbox.js';
 import type {
   ProjectDirectoryListing,
   ProjectFileKind,
@@ -134,9 +134,7 @@ function parentPath(relative: string): string {
 }
 
 function sameRealPath(left: string, right: string): boolean {
-  const a = path.resolve(left);
-  const b = path.resolve(right);
-  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+  return nativePathIdentity(left) === nativePathIdentity(right);
 }
 
 async function context(projectId: string): Promise<{
@@ -511,7 +509,7 @@ export async function saveProjectTextFile(
     throw new Error(`Edited files must be ${MAX_PREVIEW_BYTES} bytes or smaller`);
   }
   const target = await projectFileTarget(projectId, relativePath, { allowRoot: false, fileOnly: true });
-  const key = process.platform === 'win32' ? target.real.toLowerCase() : target.real;
+  const key = nativePathIdentity(target.real);
   if (activeSaves.has(key) || activeSaves.size >= 32) throw new Error('A file save is already in progress. Try again when it finishes.');
   activeSaves.add(key);
   const temporary = path.join(path.dirname(target.real), `.cos-save-${randomUUID()}.tmp`);
