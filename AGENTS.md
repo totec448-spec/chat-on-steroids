@@ -519,6 +519,21 @@ metadata retains the Fiber path. Fetch reattachment at DOM readiness captures ea
 wrapper separately and deduplicates responses to avoid recursion through page instrumentation.
 The native `f/conversation/resume` stream uses the same complete-event reader. Observer version 2
 has an explicit refresh/disposal handle, also reached by existing MAIN-helper restoration.
+The same fetch wrapper observes exact same-origin POST `f/conversation/resume` HTTP 404s.
+Only `conversation_id` leaves a string JSON request body (bounded to 16 KiB); unsupported or
+id-less bodies abstain. Before fetch yields, synchronous `cos-resume-request` carries a unique
+id and conversation to content, which freezes the current open generation, native question,
+navigation epoch and request order. `cos-resume-response` retires that custody with the HTTP
+status (null for rejected/unknown/duplicate responses) and optional `streamOpened:true` only
+for 200 `text/event-stream` headers. Content retains at most 16 requests;
+readiness/restoration never replays them. A 404 earns `chat_error` with `reason:stream_gone`
+and `recoverable:true` only while that exact generation/question/epoch still owns it and
+has no native final or Stop. Idle-load 404s, late/foreign requests and ordinary polling abstain.
+The fact neither closes the turn nor renews activity. A newer resume's SSE-open headers,
+terminal evidence or navigation retires its page projection; local tool work behind a broken
+stream does not. Older 404s cannot resurrect failure after a newer successful resume.
+Recorder protocol 22 installs the matching isolated handler; MAIN observer replacement keeps
+its existing nonstreaming disposal gate. Tests: `usage-observer`, `content-script`, `bridge`.
 Replacing a versioned instance cancels its readers and retires listeners; a provider's wrapper
 can still delegate through an inactive instance. A legacy boolean has no disposal handle and
 requires a fresh document; `__cosUsageObserverNeedsReload` records that fact without an extra reload grant.
@@ -2213,6 +2228,15 @@ markers do not repeat the same notice, and commitment is logged only after actua
 Neither these notices nor page-helper observations grant a browser action.
 Recoverable notice equality ignores a trailing native Retry button label while retaining the
 original recorded error text. Canonical-question ownership still separates genuinely new work.
+`stream_gone` and a recoverable DOM notice for the same canonical question coalesce without
+comparing provider wording; the first recorded notice retains its text/reason. The bridge
+rechecks H2's exact currently open recorded turn and absence of a final before granting the
+existing `assistant-error` episode, whose key is the authored question, independent of text.
+`clf-page-status.assistantError` includes that document's current machine failure even without
+a rendered error card; the existing rule stays that a live stream defers the reload only
+once that error is gone. An exact no-action failure receipt releases the
+reserved reload budget; preservation after recovery spends none. Existing cooldown, claim,
+Stop/draft/tool, completion and after-turn gates continue to own action; no new timer exists.
 The renderer keeps acknowledged Reloaded/Reopened receipts visible after tools resume, colors
 those notices with the existing accent, and explains the one-error-reload budget and subsequent
 silence wait. Trying/failed receipts do not prove a reload; only actual completion is resolved.

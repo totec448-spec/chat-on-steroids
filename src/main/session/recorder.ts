@@ -1789,8 +1789,8 @@ export interface ChatObservation {
   /** Internal React conversation id used only to cross-check the URL conversation id. */
   fiberConversationId?: string;
   outcome?: TurnOutcome;
-  /** Exact native failure; closes input immediately, recovery separately owns listening. */
-  reason?: 'thinking_failed';
+  /** Thinking failed closes input; stream_gone only files a recoverable transport episode. */
+  reason?: 'thinking_failed' | 'stream_gone';
   detail?: string;
   /** Browser terminal proof; app-owned Goal policy is applied only after this is durable. */
   goalEligible?: boolean;
@@ -2345,6 +2345,8 @@ async function recordChatObservationsNow(
       }
       case 'chat_error': {
         if (item.reason === 'thinking_failed' && !item.turnId) continue;
+        if (item.reason === 'stream_gone' && (!item.turnId || live?.turnId !== item.turnId ||
+            await readCompletedFinal(sessionId, conversationId, item.turnId))) continue;
         // Reloads lose/remint document turn ids. A recoverable notice belongs to the
         // canonical question, not that document. Keep the original notice throughout
         // recovery; a genuinely new question gives the same error a new owner.
@@ -2357,11 +2359,13 @@ async function recordChatObservationsNow(
               (item.reason === 'thinking_failed' && event.reason === item.reason && event.turnId === item.turnId)) &&
             (item.blocking === true || (event.turnId ?? '') === (item.turnId ?? '')) &&
             (!question || event.seq > (question.origin ?? question.seq)))) &&
-            chatErrorMessageKey(event.message.text, event.recoverable === true) === text)) continue;
+            (chatErrorMessageKey(event.message.text, event.recoverable === true) === text ||
+              (item.recoverable === true && event.recoverable === true &&
+                (item.reason === 'stream_gone' || event.reason === 'stream_gone'))))) continue;
         await appendEvent(sessionId, {
           ...base,
           kind: 'chat_error',
-          ...(item.reason === 'thinking_failed' ? { reason: item.reason } : {}),
+          ...(item.reason === 'thinking_failed' || item.reason === 'stream_gone' ? { reason: item.reason } : {}),
           ...(typeof item.recoverable === 'boolean' ? { recoverable: item.recoverable } : {}),
           ...(typeof item.blocking === 'boolean' ? { blocking: item.blocking } : {}),
           message: await storeText(sessionId, item.text ?? '', 2000)
