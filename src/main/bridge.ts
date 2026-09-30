@@ -6022,7 +6022,7 @@ function grantActivity(conversationId: string, sessionId: string, at = Date.now(
   // this is a thinking turn, or the window would snap back to two minutes mid-thought.
   const deliberate = ownership.deliberate || (previous?.sessionId === sessionId && previous.turnId === ownership.turnId && previous.deliberate);
   activeUntil.set(conversationId, { sessionId, evidenceAt,
-    until: evidenceAt + (ownership.model === 'pro' || deliberate ? PRO_SILENCE_MS : window),
+    until: evidenceAt + (ownership.model === 'pro' ? PRO_SILENCE_MS : deliberate ? DELIBERATE_SILENCE_MS : window),
     turnId: ownership.turnId, model: ownership.model,
     ...(mcpBacked ? { mcpBacked: true } : {}), ...(deliberate ? { deliberate: true as const } : {}) });
   awaitingReturn.delete(conversationId);
@@ -6060,13 +6060,22 @@ const lastAttributedCallAt = new Map<string, number>();
 export const GOAL_QUIET_MS = 60_000;
 export const PRO_SILENCE_MS = 10 * 60_000;
 export const PRO_ACTIVITY_MS = 10 * 60_000;
+/**
+ * Silence recovery for a non-Pro turn at `xhigh`, `max` or `ultra` (#786).
+ *
+ * Longer than Pro's ten minutes on purpose: such a turn can think for more than ten minutes
+ * without touching the page, and a reload at Pro's boundary interrupts it. Still bounded, so a
+ * genuinely dead page is recovered. It is a silence window only; `model` stays `other`.
+ */
+export const DELIBERATE_SILENCE_MS = 20 * 60_000;
 
 /** Failure shortens Pro silence; it never counts as new model work. */
 function silenceWindowMs(grant: Pick<ActivityGrant, 'model' | 'thinkingFailed' | 'deliberate'>): number {
   if (grant.model === 'pro') return grant.thinkingFailed ? 5 * 60_000 : PRO_SILENCE_MS;
-  // A turn thinking at high effort or above is quiet for minutes between tool calls, and two
+  // A turn thinking above high effort is quiet for minutes between tool calls, and two
   // minutes of that used to buy it a reload that killed the stream. See `deliberate`.
-  return grant.deliberate ? PRO_SILENCE_MS : CHAT_SILENCE_MS;
+  // Thinking failed proves the thinking is over, so it keeps the ordinary window.
+  return grant.deliberate && !grant.thinkingFailed ? DELIBERATE_SILENCE_MS : CHAT_SILENCE_MS;
 }
 
 /** Display can outlive the silence deadline without granting a browser action. */
@@ -7056,6 +7065,7 @@ async function noteRecoveryObservations(
   if (!activity.terminal && unresolved?.model === 'unknown' && unresolved.sessionId === sessionId &&
       recorded?.conversationId === conversationId && (recorded.activeTurnId === unresolved.turnId || unresolved.thinkingFailed) && provenModel !== 'unknown') {
     unresolved.model = provenModel;
+    if (provenDeliberate.deliberate) unresolved.deliberate = true;
     // Enrich identity, not activity. In particular, a replacement page's picker
     // must not spend or restart the listening window of its acknowledged reload.
     if (!(repaired?.reason === 'silence' && repaired.state === 'done' && repaired.sessionId === sessionId)) {
@@ -7086,8 +7096,8 @@ async function noteRecoveryObservations(
       const workingTurn = liveTurn ?? (sourceBoundary?.kind === 'turn_end' &&
         ['stalled', 'failed', 'unknown'].includes(sourceBoundary.outcome) ? sourceBoundary.turnId : null);
       let selection: ChatObservation | undefined;
-      let turn: Pick<ActivityGrant, 'turnId' | 'model'> | undefined = !previous && workingTurn
-        ? { turnId: workingTurn, model: provenModel } : undefined;
+      let turn: Pick<ActivityGrant, 'turnId' | 'model' | 'deliberate'> | undefined = !previous && workingTurn
+        ? { turnId: workingTurn, model: provenModel, ...provenDeliberate } : undefined;
       for (const item of observations) {
         if (item.kind === 'model_selection') selection = item;
         if (item.kind === 'turn_start' && item.turnId === liveTurn && previous?.turnId !== item.turnId) {

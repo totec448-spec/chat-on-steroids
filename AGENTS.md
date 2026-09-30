@@ -950,7 +950,8 @@ for restored tickets and before claims; a genuine full final uses ordinary compl
 A running local tool still vetoes Send.
 
 Queued after-turn work and pending immediate corrections use **two-minute**
-silence/refresh authority for normal and unknown models; only proven Pro uses **ten minutes**.
+silence/refresh authority for normal and unknown models; proven Pro uses **ten minutes** and a
+non-Pro Extra high/Max/Ultra turn **twenty** (see the model table).
 Normal and unknown models then listen for **one minute
 from the acknowledged refresh** before queued-checkpoint delivery. The existing
 activity grant and outbox listening deadline own this wait. Thinking failed keeps two minutes
@@ -1696,8 +1697,9 @@ Model names and recovery policy checked against native picker metadata on **2026
 
 | Display family / compatible short name | Execution identity / selected effort | Silence refresh |
 | --- | --- | --- |
-| GPT-5.6 Sol / 5.6 Sol / Sol | `gpt-5-6`, `gpt-5-6-thinking`; Instant/Medium/High/Extra High | 2 minutes, then 1 minute listening after confirmed refresh |
-| GPT-5.5 / 5.5 | `gpt-5-5-instant`, `gpt-5-5-thinking`; non-Pro efforts | 2 minutes, then 1 minute listening |
+| GPT-5.6 Sol / 5.6 Sol / Sol | `gpt-5-6`, `gpt-5-6-thinking`; Instant/Medium/High | 2 minutes, then 1 minute listening after confirmed refresh |
+| GPT-5.5 / 5.5 | `gpt-5-5-instant`, `gpt-5-5-thinking`; non-Pro efforts up to High | 2 minutes, then 1 minute listening |
+| Any non-Pro family at Extra high / Max / Ultra | selected `xhigh`, `max` or `ultra` effort | 20 minutes (Thinking failed: 2), then 1 minute listening |
 | GPT-5.6 Pro / 5.6 Pro; GPT-5.5 Pro / 5.5 Pro | `gpt-5-6-pro`, `gpt-5-5-pro`, or an explicitly selected `pro` effort | 10 minutes |
 | GPT-6 Pro / 6 Pro / Astra | `gpt-6-pro`, `gpt-6-astra`; exact Astra identities retain their finish policy | 10 minutes |
 | Unobserved / unknown model | No invented model identity | 2 minutes, then 1 minute listening |
@@ -1710,6 +1712,15 @@ it need not repeat an unchanged selection in every turn-start batch. Recovery us
 selection for the exact conversation, pins known turn identity, and resolves previously unknown
 selection without advancing its last-work timestamp. Unknown timing does not invent normal-model
 proof for other features. All continuation paths still require their exact source/MCP/queue proof.
+
+Extra high, Max and Ultra can think for more than ten minutes without changing the page (#786).
+The bridge's `deliberate` grant flag widens only the silence window; the grant stays `other`
+and inherits no Pro rule. The flag belongs to the turn that armed the grant: a later picker
+change cannot rewrite it, while late exact picker evidence for a still-unknown grant widens that
+same grant from its existing work timestamp. The content script freezes the generation's first
+exact picker reading. Its ten-minute no-progress report waits for such a turn only while the
+route, native Stop, this document's section owner and that section's unfinished Fiber turn are
+all proven; losing any of them makes the already-expired report due at once.
 
 Direct Chrome selection is observed even with the picker closed. The existing MAIN scan reads
 the current native picker state, including September's retained `dropdownContent.props`, then
@@ -1936,7 +1947,8 @@ and workers retain their separate lifecycle. Silence intervention requires an ex
 local MCP call in the current source turn, including at refresh and restored-ticket admission.
 Observing a website chat, native searches and earlier-turn calls do not grant that permission.
 An eligible turn's actual-work silence earns one initial reload:
-two minutes normally/unknown, ten for proven Pro; Thinking failed shortens only Pro to five.
+two minutes normally/unknown, ten for proven Pro, twenty for non-Pro Extra high/Max/Ultra;
+Thinking failed shortens Pro to five and Extra high/Max/Ultra to two.
 These deadlines use the last real work, not the failure observation or its replay. After confirmed
 reload, idle permits Continue immediately if the same question still lacks a final. Native busy
 gets one additional minute (Pro: five), measured from the confirmed browser action. A slow reload
