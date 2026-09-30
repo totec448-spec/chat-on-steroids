@@ -16135,6 +16135,34 @@ app-owned prompt`,
     ]);
   });
 
+  /**
+   * #787: the answer remounted under another assistant id, so the mounted shape has no
+   * terminal. The app captured the brief from its recorder when the anchor was bound; the page
+   * accepts that capture and neither re-binds nor sends a brief of its own.
+   */
+  it('accepts the app capture from the bound anchor when the mounted answer lost its terminal', async () => {
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      activity: activityReply,
+      compact: (message) => {
+        if (message.sourceMessageId) return { ok: true, data: { bound: true, stored: true, job: null } };
+        return { ok: false, error: 'unexpected_compact_shape' };
+      }
+    });
+    const [prompt, answer] = splitMarkedTurns();
+    const remounted = { ...answer, endMessageId: 'assistant-final-raw' };
+    const bindings = [
+      { section: assistantTurn(live.document, 'turn-prompt', []), turn: prompt },
+      { section: assistantTurn(live.document, 'turn-answer', []), turn: remounted }
+    ];
+    await bindFiberTurns(bindings);
+    await bindFiberTurns(bindings);
+
+    expect(live.sent.filter((message) => message.type === 'compact').map((message) => ({
+      sourceMessageId: message.sourceMessageId,
+      summary: message.summary
+    }))).toEqual([{ sourceMessageId: 'user-source-raw', summary: undefined }]);
+  });
+
   it('waits while the turn after the marked prompt is still being written', async () => {
     live = await harness(`https://chatgpt.com/c/${CHAT}`, {
       activity: activityReply,

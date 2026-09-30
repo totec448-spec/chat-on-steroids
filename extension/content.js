@@ -9647,6 +9647,14 @@
       ) + (marked.answer?.calls || []).filter(call => call?.answered === true).length)
     });
     if (!bound || bound.ok !== true) return continuationRefused(bound) ? 'settled' : false;
+    // The app captured the brief from its recorder's exact response to this anchor, which
+    // outranks whatever answer shape is mounted now (#787).
+    if (bound.data?.stored === true) {
+      if (bound.data.job) job = bound.data.job;
+      localError = '';
+      renderControl();
+      return 'committed';
+    }
     // The answer turn, not the prompt's — see answerTurnFor. Its calls are the ones that have
     // to be finished, too: a brief cut while the compaction turn is still running a tool
     // describes a machine that is still changing.
