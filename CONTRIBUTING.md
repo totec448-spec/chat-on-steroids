@@ -65,7 +65,7 @@ Release CI builds and smoke-tests every platform/architecture on a native runner
 
 This project is maintained by one person, so review time is the scarce part. A PR is reviewed only when **CI and the "PR checklist" check are green**. The checklist runs automatically on every PR and on every edit of its description; its log says exactly what is missing. Use the pull request template and it passes by itself.
 
-Maintainers are happy to fix small things before merging, but they do not build out, debug or finish a change from scratch, and a pull request whose checks fail is not reviewed until you fix it. Please keep at most three pull requests open at a time; further ones can wait as drafts. AI-assisted contributions are welcome when you have run, understood and tested every line yourself: you are responsible for the whole change, and a PR is not a request for someone else to finish it.
+Maintainers are happy to fix small things before merging, but they do not build out, debug or finish a change from scratch, and a pull request whose checks fail is not reviewed until you fix it. AI-assisted contributions are welcome when you have run, understood and tested every line yourself: you are responsible for the whole change, and a PR is not a request for someone else to finish it.
 
 What every PR needs:
 
