@@ -4263,12 +4263,15 @@ async function placeSuccessorChat(raw, tabId) {
     const query = [marker];
     if (model) query.push(`model=${encodeURIComponent(model)}`);
     if (effort) query.push(`reasoning_effort=${encodeURIComponent(effort)}`);
+    let created;
     try {
-      const created = await createChatTab(`https://chatgpt.com/?${query.join('&')}#${marker}`, true);
-      await protectCreatedTab(created, id);
+      created = await createChatTab(`https://chatgpt.com/?${query.join('&')}#${marker}`, true);
     } catch (error) {
       await failPlacement(`successor_tab_create_failed: ${placementError(error)}`);
+      return;
     }
+    // The tab exists and loads its marker: its page redeems the command, or the deadline reports it.
+    await protectCreatedTab(created, id);
     return;
   }
   if (!id) return;
@@ -4308,11 +4311,17 @@ async function placeSuccessorChat(raw, tabId) {
       const query = [marker];
       if (model) query.push(`model=${encodeURIComponent(model)}`);
       if (reasoningEffort) query.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
+      let created;
       try {
-        const created = await createChatTab(`${base}?${query.join('&')}#${marker}`, false, raw.active !== false);
-        await protectCreatedTab(created, id);
+        created = await createChatTab(`${base}?${query.join('&')}#${marker}`, false, raw.active !== false);
       } catch (error) {
         await failPlacement(`successor_tab_create_failed: ${placementError(error)}`);
+        return;
+      }
+      try {
+        await protectCreatedTab(created, id);
+      } catch {
+        // The tab exists and loads its marker: its page redeems the command, or the deadline reports it.
       }
       return;
     }
@@ -4341,11 +4350,17 @@ async function placeSuccessorChat(raw, tabId) {
   // Directly after the chat it continues, so a handoff reads as one piece of work instead of a
   // tab appended to the far end of a long strip.
   if (typeof home.index === 'number') create.index = home.index + 1;
+  let created;
   try {
-    const created = await chrome.tabs.create(create);
-    await protectCreatedTab(created, id);
+    created = await chrome.tabs.create(create);
   } catch (error) {
     await failPlacement(`successor_tab_create_failed: ${placementError(error)}`);
+    return;
+  }
+  try {
+    await protectCreatedTab(created, id);
+  } catch {
+    // The tab exists and loads its marker: its page redeems the command, or the deadline reports it.
   }
 }
 
