@@ -11,6 +11,10 @@ updates:
     ignore:
       - dependency-name: '*'
         update-types: ['version-update:semver-major']
+      # Native packages pinned by the native source review (docs/licenses/native/sources.json):
+      # a new version needs that review, so it is never bumped automatically.
+      - dependency-name: sharp
+      - dependency-name: '@img/*'
     groups:
       minor-and-patch:
         update-types: [minor, patch]
