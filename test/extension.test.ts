@@ -1980,6 +1980,41 @@ describe('worker settings authority', () => {
     ]);
   });
 
+  it('leaves a successor tab Chrome did create to its page when protecting it fails', async () => {
+    const acknowledgements: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        return response(200, { stored: true, commandId: 'cmd-created', placement: { id: 'cmd-created' } });
+      }
+      if (url.pathname === '/commands/ack') {
+        acknowledgements.push(JSON.parse(String(init.body)));
+        return response(200, { ok: true, outcome: 'terminal-failure', committed: false });
+      }
+      return response(404, {});
+    });
+    const session = new FakeStorageArea();
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session,
+      fetch,
+      tabsGet: async () => ({ id: 45, windowId: 9, index: 2, url: `https://chatgpt.com/c/${CHAT}` }) as never
+    });
+    await worker.registerTab(45);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 45);
+    // The tab exists and will load its marker; only recording its protection fails.
+    worker.tabsCreate.mockImplementationOnce(async () => { session.failNextSets = 1; return { id: 99 }; });
+
+    await worker.send(
+      { type: 'compact', conversationId: CHAT, token: '0123456789abcdef0123456789abcdef', summary: 'the brief' },
+      45
+    ).catch(() => undefined);
+
+    expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
+    expect(acknowledgements).not.toContainEqual(expect.objectContaining({ id: 'cmd-created', status: 'failed' }));
+  });
+
   it('reports a missing successor home window instead of waiting for the command deadline', async () => {
     const acknowledgements: Array<Record<string, unknown>> = [];
     const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
