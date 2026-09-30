@@ -1,0 +1,32 @@
+name: PRs waiting on their author
+
+# Once a day: a contributor PR that has waited 10 quiet days on an answer or a fix gets one friendly
+# reminder, and is closed 7 days later if still nothing happens. Any push or reply resets the clock,
+# and a closed PR can be reopened at any time. Drafts, bots and maintainers' own PRs are never touched.
+on:
+  schedule:
+    - cron: '41 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nudge:
+    if: github.repository == 'totec448-spec/chat-on-steroids'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+      issues: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - name: Remind or close quiet PRs
+        run: node scripts/waiting-prs.mjs
