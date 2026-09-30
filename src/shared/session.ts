@@ -287,6 +287,15 @@ export function messageReferences(value: unknown): MessageReference[] | undefine
   return out.length ? out : undefined;
 }
 
+/** A tool call still running for a chat, as its live caption names it. */
+export interface RunningToolActivity {
+  /** Present-tense summary built from the call's own arguments, e.g. "Running git status". */
+  title: string;
+  /** The kind its finished row will have, so the live row wears the same icon. */
+  kind: ActivitySummary['kind'];
+  since: number;
+}
+
 /** A persisted launch acknowledgement never proves that its child is still alive. */
 export function toolCallSummary(call: Pick<ToolCallRecord, 'tool' | 'summary'>): ActivitySummary {
   return call.tool === 'exec_command' && call.summary.metric === 'running'

@@ -36,7 +36,7 @@ app.whenReady().then(async () => {
       listSessions:()=>ok({sessions,total:2,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
       getSession:id=>window.hold?new Promise(resolve=>window.pending.push({id,resolve})):ok(detail(id)),
       getSessionControls:()=>ok({automation:'off',objective:'',blocked:'',job:null}),
-      listInputs:()=>ok(structuredClone(window.inputs)),listPausedHelpers:()=>ok([]),
+      listInputs:()=>ok(structuredClone(window.inputs)),runningTools:()=>ok([]),listPausedHelpers:()=>ok([]),
       onSessionChanged:listener=>{window.changed=listener;return ()=>{}},
       getSwarm:()=>ok({running:false,agents:[],pendingReports:0}),
       getChatModels:()=>ok({state:'unknown',models:[]})

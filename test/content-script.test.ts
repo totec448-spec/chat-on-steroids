@@ -215,7 +215,9 @@ async function harness(
   // DOM adapter's hidden/inert checks, including replacement editor fixtures.
   const rects = window.HTMLElement.prototype.getClientRects;
   window.HTMLElement.prototype.getClientRects = function () {
-    return this.id === 'prompt-textarea' ? [{ width: 400, height: 60 }] as unknown as DOMRectList : rects.call(this);
+    return this.id === 'prompt-textarea' || this.hasAttribute('data-composer-markdown')
+      ? [{ width: 400, height: 60 }] as unknown as DOMRectList
+      : rects.call(this);
   };
   await new Promise<void>((resolve) => {
     if (window.document.readyState === 'complete') resolve();
@@ -344,7 +346,7 @@ async function harness(
   // Exact draft withdrawal remains a separate native operation. Refusal fixtures
   // override this handler; normal deletion consumes the actual focused selection.
   window.document.execCommand = (command: string, _ui?: boolean, value?: string) => {
-    const box = window.document.querySelector('#prompt-textarea');
+    const box = window.document.querySelector('#prompt-textarea, [data-composer-markdown][contenteditable="true"][role="textbox"]');
     const selection = window.document.getSelection();
     if (!box || window.document.activeElement !== box || !selection) return false;
     if (command === 'selectAll') { selection.selectAllChildren(box); return true; }
@@ -12994,6 +12996,55 @@ describe('the Compact & resume control', () => {
     expect(compacts[0]).toMatchObject({ ticket: true, automatic: true });
     expect(compacts.some((message) => message.cancel === true)).toBe(false);
     expect(live.document.querySelector('.clf-pill-text')!.textContent).toContain('message box is not ready (composer_missing)');
+  });
+
+  it('uses the current rich-text composer for handoff even while its form marker is absent', async () => {
+    const prompt = 'Write the current handoff brief.';
+    let submitted = '';
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, job: null } }),
+      compact: () => ({
+        ok: true,
+        data: {
+          started: true,
+          token: 'tok-current-rich-composer',
+          prompt,
+          job: { sessionId: 's-current-rich-composer', stage: 'handoff-pending', busy: true, handoffId: null, error: null }
+        }
+      })
+    }, document => {
+      const editor = document.querySelector('#prompt-textarea')!;
+      editor.removeAttribute('id');
+      editor.setAttribute('role', 'textbox');
+      editor.setAttribute('data-composer-markdown', '');
+      expect(editor.closest('form')?.hasAttribute('data-chatgpt-composer')).toBe(false);
+    });
+    live.hook.injectControl();
+    const editor = live.document.querySelector('[data-composer-markdown]')!;
+    const sends = watchSend(live.document);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      submitted = (editor.textContent || '').trim();
+    });
+
+    await live.hook.startCompact();
+
+    expect((live.window as any).CLF_DOM.composer()).toBe(editor);
+    expect(submitted).toContain('current handoff brief');
+    expect(sends()).toBe(1);
+    expect(live.document.querySelector('.clf-pill-text')!.textContent).not.toContain('message box is not ready');
+  });
+
+  it('fails closed when more than one unmarked rich-text composer is visible', async () => {
+    live = await harness(undefined, {}, document => {
+      const editor = document.querySelector('#prompt-textarea')!;
+      editor.removeAttribute('id');
+      editor.setAttribute('role', 'textbox');
+      editor.setAttribute('data-composer-markdown', '');
+      const second = editor.cloneNode(true) as Element;
+      editor.closest('form')!.appendChild(second);
+    });
+
+    expect((live.window as any).CLF_DOM.composer()).toBeNull();
   });
 
   it.each([false, true])('establishes the compaction source after hydration (editor already mounted=%s)', async editorMounted => {

@@ -259,7 +259,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
         entry.state = 'cancelled'; entry.cancelledByUser = true;
         return ok(true);
       }),
-      listPausedHelpers: () => ok(pausedHelpers),
+      runningTools: () => ok([]), listPausedHelpers: () => ok(pausedHelpers),
       retryHelper: (id: string, sourceSessionId: string) => {
         live.controlCalls.push({ id: sourceSessionId, action: `retry:${id}` });
         pausedHelpers = pausedHelpers.filter(row => row.id !== id);
@@ -4133,6 +4133,45 @@ it('shows the running turn working at its top while it works', async () => {
   expect(line.previousElementSibling?.matches('.ev-user_message')).toBe(true);
 });
 
+it('ends the running turn with a row saying what it is doing now', async () => {
+  const asked = Date.now() - 12_000;
+  const { w, append } = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'held-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'held-turn', messageId: 'q-now', message: text('Run the tests') }
+  ]);
+  const now = () => w.document.querySelector<HTMLElement>('#timeline .turn-now')!;
+  // The Working line keeps only its clock; the step is the last row of the turn's work.
+  expect(w.document.querySelector('#timeline .turn-status')!.textContent).toMatch(/^Working for \d+s$/);
+  expect(now().parentElement!.lastElementChild).toBe(now());
+  const shown = () => now().hidden ? null : [now().querySelector('.turn-now-text')!.textContent, now().querySelector('.turn-now-time')!.textContent];
+  // Nothing visible has happened since the message.
+  expect(shown()).toEqual(['Thinking', '']);
+  // A call of this app runs for this chat: it is named, with its own clock once it lasts.
+  const asks: string[][] = [];
+  (w as any).api.runningTools = (ids: string[]) => {
+    asks.push(ids);
+    return Promise.resolve({ ok: true, data: [{ title: 'Running npm test', kind: 'run', since: Date.now() - 5_000 }] });
+  };
+  await append([]); await append([]);
+  expect(asks.at(-1)).toEqual(['chat-b', 'chat-a']);
+  expect(shown()).toEqual(['Running npm test', '5s']);
+  // No call of ours: ChatGPT's own step, while it is still going on.
+  (w as any).api.runningTools = () => Promise.resolve({ ok: true, data: [] });
+  await append([{ seq: 3, time: Date.now(), source: 'extension', kind: 'page_tool', messageId: 'thought-1', label: 'Searching the web' }]);
+  await append([]);
+  expect(shown()?.[0]).toBe('Searching the web');
+  // It follows the work: a new step lands above it, and it stays the last row.
+  expect(now().previousElementSibling?.textContent).toContain('Searching the web');
+  expect(now().parentElement!.lastElementChild).toBe(now());
+  // Prose speaks for itself while it is being written…
+  await append([{ kind: 'assistant_message', seq: 4, time: Date.now(), source: 'extension', messageId: 'a-now', message: text('Two tests fail…'), final: false, state: 'streaming' }]);
+  expect(shown()).toBeNull();
+  // …and once it stops changing the turn is still working: an interim paragraph stays "streaming".
+  await new Promise(resolve => setTimeout(resolve, 2_600));
+  await append([]);
+  expect(shown()?.[0]).toBe('Thinking');
+});
+
 it('shows a just-started turn working right after your message, never in the header first', async () => {
   // The controls report a running turn before any of its rows reached the timeline.
   const { w } = await boot([]);
@@ -4164,15 +4203,50 @@ it('anchors the worked line to your message when the page reports an empty turn 
   expect(lines[0]!.nextElementSibling?.textContent).toContain('quinto arquivo');
 });
 
-it('names an activity group after its latest real action, not a thinking note around it', async () => {
+it('titles a finished round with the native step that ends it, by position and in any language', async () => {
+  // ChatGPT closes a round of work with a recap and titles the block with it. It is picked by where
+  // it sits, never by its wording: the step that ends the round, once prose follows. Spanish labels.
   const note = (seq: number, label: string): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'page_tool', messageId: `note-${seq}`, label });
-  const { w } = await boot([note(1, 'Planning the check'), toolCall(2, 'call-a'), toolCall(3, 'call-b'), note(4, 'Executed exact command check')]);
+  const prose: SessionEvent = { kind: 'assistant_message', seq: 5, time: T0 + 5000, source: 'extension', messageId: 'after-round', message: text('Listo.'), final: true, state: 'final' };
+  const { w } = await boot([note(1, 'Planificando la comprobación'), toolCall(2, 'call-a'), toolCall(3, 'call-b'), note(4, 'Se ejecutó la comprobación exacta'), prose]);
   const group = w.document.querySelector<HTMLDetailsElement>('#timeline details.tool-group')!;
-  const lastTool = [...w.document.querySelectorAll<HTMLElement>('#timeline .ev-tool_call')].at(-1)!;
-  const toolTitle = lastTool.querySelector('.tool > summary b')?.textContent ?? lastTool.querySelector('.tool > summary span')?.textContent;
-  expect(toolTitle).toBeTruthy();
-  expect(group.querySelector('.activity-title')!.textContent).toBe(toolTitle);
-  expect(group.querySelector('.activity-title')!.textContent).not.toBe('Executed exact command check');
+  expect(group.querySelector('.activity-title')!.textContent).toBe('Se ejecutó la comprobación exacta');
+  expect(group.querySelector('.activity-symbol .ph-check-circle')).not.toBeNull();
+  // The recap heads the group rather than repeating inside it; the calls and the earlier note stay,
+  // and a step written before any call keeps the globe.
+  const inside = [...group.querySelectorAll<HTMLElement>('.tool-group-body .thinking-line')];
+  expect(inside.map(line => line.textContent)).toEqual(['Planificando la comprobación']);
+  expect(inside[0]!.querySelector('.ph-globe-hemisphere-west')).not.toBeNull();
+  expect(group.querySelectorAll('.tool-group-body .ev-tool_call')).toHaveLength(2);
+});
+
+/** A page_tool event, and how a test reads the group title and the latest call's own title. */
+const nativeStep = (seq: number, label: string): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'page_tool', messageId: `note-${seq}`, label });
+const groupTitle = (document: Document) => document.querySelector('#timeline details.tool-group .activity-title')!.textContent;
+const latestCallTitle = (document: Document) => {
+  const tool = [...document.querySelectorAll<HTMLElement>('#timeline .ev-tool_call')].at(-1)!;
+  return tool.querySelector('.tool > summary b')?.textContent ?? tool.querySelector('.tool > summary span')?.textContent;
+};
+
+it('names a round still in progress after its latest real action, until prose ends it', async () => {
+  // The turn still works and nothing follows the step: it is a note, whatever it says, not a recap.
+  const { w, append } = await boot([toolCall(2, 'call-a'), toolCall(3, 'call-b'), nativeStep(4, 'Executed exact command check')]);
+  expect(latestCallTitle(w.document)).toBeTruthy();
+  expect(groupTitle(w.document)).toBe(latestCallTitle(w.document));
+  const pending = [...w.document.querySelectorAll<HTMLElement>('#timeline .tool-group-body .thinking-line')];
+  expect(pending.map(line => line.textContent)).toEqual(['Executed exact command check']);
+  expect(pending[0]!.querySelector('.ph-check-circle')).toBeNull();
+  // Once prose follows, the same step ends a finished round and titles it.
+  await append([{ kind: 'assistant_message', seq: 5, time: T0 + 5000, source: 'extension', messageId: 'after-round', message: text('Done.'), final: true, state: 'final' }]);
+  expect(groupTitle(w.document)).toBe('Executed exact command check');
+});
+
+it('names a finished round that ends in a call after that call, and keeps the globe on a step before its calls', async () => {
+  const { w } = await boot([nativeStep(1, 'Searched 3 websites'), toolCall(2, 'call-a'), toolCall(3, 'call-b'),
+    { kind: 'assistant_message', seq: 5, time: T0 + 5000, source: 'extension', messageId: 'after-search', message: text('Done.'), final: true, state: 'final' }]);
+  expect(latestCallTitle(w.document)).toBeTruthy();
+  expect(groupTitle(w.document)).toBe(latestCallTitle(w.document));
+  expect(w.document.querySelector('#timeline .tool-group-body .thinking-line .ph-globe-hemisphere-west')).not.toBeNull();
 });
 
 it('offers a way back to the end of the chat that clears any reserved space', async () => {
