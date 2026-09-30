@@ -65,7 +65,7 @@ export async function refreshUsage(): Promise<void> {
     paintMessages();
     const summary = $('usageSummary'); summary.replaceChildren();
     for (const [label, number] of [['Processed tokens · est.', value.tokens], ['Peak daily tokens', Math.max(0, ...value.days.map((day) => day.tokens))], ['Conversations', value.sessions], ['Active days', value.days.filter((day) => day.tokens > 0).length]] as const) {
-      const item = el('div'); item.dataset.usageMetric = label; usageHint(item, () => `${Math.round(number).toLocaleString()} ${t(label).toLowerCase()}`); item.append(el('strong', '', count.format(number)), el('span', '', () => t(label))); summary.append(item);
+      const item = el('div'); item.dataset.usageMetric = label; usageHint(item, () => `${Math.round(number).toLocaleString(currentLanguage())} ${t(label).toLowerCase()}`); item.append(el('strong', '', count.format(number)), el('span', '', () => t(label))); summary.append(item);
     }
     const limits = $('usageLimits'); limits.replaceChildren();
     const modelRows = value.limits.filter((row) => row.scope === 'model');
@@ -79,9 +79,9 @@ export async function refreshUsage(): Promise<void> {
       const name = el('div'); name.append(el('strong', '', displayName));
       if (entry.scope !== 'model') name.append(el('small', 'muted', () => entry.scope === 'shared' ? t("Shared across all models") : t("Feature quota")));
       const detail = el('div');
-      detail.append(el('b', '', () => stale ? t("Refresh needed") : entry.remaining !== null ? t("{0} remaining", [entry.remaining.toLocaleString()]) : entry.remainingPercent !== null ? t("{0}% remaining", [Math.round(entry.remainingPercent)]) : t("Not reported")));
+      detail.append(el('b', '', () => stale ? t("Refresh needed") : entry.remaining !== null ? t("{0} remaining", [entry.remaining.toLocaleString(currentLanguage())]) : entry.remainingPercent !== null ? t("{0}% remaining", [Math.round(entry.remainingPercent)]) : t("Not reported")));
       const window = () => entry.scope === 'shared' ? '' : entry.windowSeconds === 604800 ? t("Weekly · ") : entry.windowSeconds ? t("{0}h window · ", [Math.round(entry.windowSeconds / 3600)]) : '';
-      detail.append(el('small', 'muted', () => window() + (entry.resetAt ? t("Resets {0}", [new Date(entry.resetAt).toLocaleString()]) : t("Reset not reported"))));
+      detail.append(el('small', 'muted', () => window() + (entry.resetAt ? t("Resets {0}", [new Date(entry.resetAt).toLocaleString(currentLanguage())]) : t("Reset not reported"))));
       if (entry.remainingPercent !== null && !stale) { const progress = document.createElement('progress'); progress.max = 100; progress.value = entry.remainingPercent; ui(progress, 'aria-label', () => t("{0}: {1}% remaining", [displayName(), entry.remainingPercent])); detail.append(progress); }
       row.append(name, detail); limits.append(row);
     }
@@ -122,12 +122,12 @@ function paintCost(): void {
   const costSummary = document.getElementById('usageTotalCost');
   if (costSummary) {
     ui(costSummary.querySelector('strong')!, 'textContent', () => costText(total));
-    ui(costSummary, 'data-usage-hint', () => t('{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.', [Math.round(total.tokens).toLocaleString(), Math.round(total.unpricedTokens).toLocaleString()]));
+    ui(costSummary, 'data-usage-hint', () => t('{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.', [Math.round(total.tokens).toLocaleString(currentLanguage()), Math.round(total.unpricedTokens).toLocaleString(currentLanguage())]));
   }
   const daily = snapshot.days.map(day => ({ ...day, ...usageEstimate(day.models, formula) }));
   for (const [label, number] of [['Processed tokens · est.', total.tokens], ['Peak daily tokens', Math.max(0, ...daily.map(day => day.tokens))]] as const) {
     const item = [...$('usageSummary').children].find(node => (node as HTMLElement).dataset.usageMetric === label) as HTMLElement | undefined;
-    if (item) { item.querySelector('strong')!.textContent = count.format(number); ui(item, 'data-usage-hint', () => `${Math.round(number).toLocaleString()} ${t(label).toLowerCase()}`); }
+    if (item) { item.querySelector('strong')!.textContent = count.format(number); ui(item, 'data-usage-hint', () => `${Math.round(number).toLocaleString(currentLanguage())} ${t(label).toLowerCase()}`); }
   }
   const heat = $('usageHeatmap'); heat.replaceChildren();
   const byDay = new Map(daily.map(day => [day.date, day.tokens])); const peak = Math.max(1, ...daily.map(day => day.tokens));
@@ -166,7 +166,7 @@ function paintCost(): void {
       if (date > today) { place(el('span', 'heat-cell is-future'), row + 2, String(week + 2)); continue; }
       const key = dateKey(date), tokens = byDay.get(key) ?? 0;
       const cell = el('span', 'heat-cell'); cell.dataset.level = String(tokens ? Math.max(1, Math.ceil(tokens / peak * 4)) : 0);
-      const hint = () => t("{0}: {1} estimated tokens", [dayLabel(key), Math.round(tokens).toLocaleString()]); usageHint(cell, hint); ui(cell, 'aria-label', hint);
+      const hint = () => t("{0}: {1} estimated tokens", [dayLabel(key), Math.round(tokens).toLocaleString(currentLanguage())]); usageHint(cell, hint); ui(cell, 'aria-label', hint);
       place(cell, row + 2, String(week + 2));
     }
   }
@@ -176,8 +176,8 @@ function paintCost(): void {
   legend.append(el('span', '', () => t('More')));
   heat.append(grid, legend);
   ui($('usageHeatmapCaption'), 'textContent', () => t("Estimated context processed per tool call · last 52 weeks"));
-  ui($('usageFormula'), 'textContent', () => t("Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.", [formula.divisor, formula.multiplier, snapshot!.contextTokenCap.toLocaleString()]));
-  ui($('usageCost'), 'textContent', () => t("{0} estimated equivalent. {1}This is a comparison, not a bill.", [costText(total), total.unpricedTokens ? t("{0} tokens have no rate. ", [Math.round(total.unpricedTokens).toLocaleString()]) : '']));
+  ui($('usageFormula'), 'textContent', () => t("Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.", [formula.divisor, formula.multiplier, snapshot!.contextTokenCap.toLocaleString(currentLanguage())]));
+  ui($('usageCost'), 'textContent', () => t("{0} estimated equivalent. {1}This is a comparison, not a bill.", [costText(total), total.unpricedTokens ? t("{0} tokens have no rate. ", [Math.round(total.unpricedTokens).toLocaleString(currentLanguage())]) : '']));
   const modelTable = el('table', 'usage-table'); const modelHead = el('tr');
   for (const title of ['Recorded model / effort', 'Estimated tokens', 'Estimated equivalent']) modelHead.append(el('th', '', () => t(title)));
   modelTable.append(modelHead);
@@ -185,7 +185,7 @@ function paintCost(): void {
     const estimate = usageEstimate(entry.sources, formula); const row = el('tr');
     const name = el('td', '', () => `${entry.model} · ${entry.reasoningEffort ?? t("effort unknown")}${entry.assumed ? t(" (assumed)") : ''}`);
     usageHint(name, () => t("Recorded IDs: {0}", [[...new Set(entry.sources.map(source => source.model))].join(', ')]));
-    row.append(name, el('td', '', Math.round(estimate.tokens).toLocaleString()), el('td', '', () => estimate.unpricedTokens > 0 && estimate.unpricedTokens === estimate.tokens ? t("Rate unknown") : costText(estimate))); modelTable.append(row);
+    row.append(name, el('td', '', Math.round(estimate.tokens).toLocaleString(currentLanguage())), el('td', '', () => estimate.unpricedTokens > 0 && estimate.unpricedTokens === estimate.tokens ? t("Rate unknown") : costText(estimate))); modelTable.append(row);
   }
   // The last 30 days as bars, one glance instead of a long table; the table stays one click away.
   const recent = daily.slice(-30);
@@ -196,7 +196,7 @@ function paintCost(): void {
     const bar = el('span', 'usage-bar');
     bar.style.height = `${top > 0 ? Math.max(2, Math.round(day.cost / top * 100)) : 2}%`;
     if (day.cost === top && top > 0) bar.classList.add('is-peak');
-    usageHint(bar, () => `${dayLabel(day.date)} · ${costText(day)} · ${t("{0} estimated tokens", [Math.round(day.tokens).toLocaleString()])}`);
+    usageHint(bar, () => `${dayLabel(day.date)} · ${costText(day)} · ${t("{0} estimated tokens", [Math.round(day.tokens).toLocaleString(currentLanguage())])}`);
     chart.append(bar);
   }
   // Scale and range at a glance: the peak day's amount on top, the first and last day below.
@@ -207,7 +207,7 @@ function paintCost(): void {
   breakdown.append(el('summary', '', () => t("Daily breakdown")));
   const table = el('table', 'usage-table'); const head = el('tr');
   head.append(el('th', '', () => t("Day")), el('th', '', () => t("Estimated tokens")), el('th', '', () => t("Cached × {0}", [formula.multiplier]))); table.append(head);
-  for (const day of [...daily].reverse()) { const row = el('tr'); row.append(el('td', '', () => dayLabel(day.date)), el('td', '', Math.round(day.tokens).toLocaleString()), el('td', '', costText(day))); table.append(row); }
+  for (const day of [...daily].reverse()) { const row = el('tr'); row.append(el('td', '', () => dayLabel(day.date)), el('td', '', Math.round(day.tokens).toLocaleString(currentLanguage())), el('td', '', costText(day))); table.append(row); }
   if (!snapshot.days.length) { const row = el('tr'); const cell = el('td', 'muted', () => t("No recorded tool calls yet.")); cell.setAttribute('colspan', '3'); row.append(cell); table.append(row); }
   breakdown.append(table);
   const modelSection = el('section', 'usage-days-model');
