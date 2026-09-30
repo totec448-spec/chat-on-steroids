@@ -12308,8 +12308,13 @@
       }
       // Popup diagnostics. Ids and counters only — no prose, no transcript, no page text.
       if (message.type === 'clf-page-status') {
-        const assistantError = Boolean(turnId) && CLF_DOM.errors().some(error =>
-          error.recoverable === true && !isStale(error.node) && localErrorGeneration(error) === turnId);
+        const assistantError = CLF_DOM.errors().some(error => {
+          if (error.recoverable !== true || isStale(error.node)) return false;
+          const owner = localErrorGeneration(error);
+          // Unknown ownership is conservative evidence that the current page is still broken.
+          // Only a concrete different generation proves this is an old historical failure.
+          return !turnId || owner === null || owner === turnId;
+        });
         sendResponse({
           ok: true,
           // ChatGPT's own account that a response is streaming right now, as opposed to the

@@ -8702,7 +8702,7 @@ describe('unattributed activity recovery', () => {
     expect((await request('POST', '/repairs/claim', { body: { token: retry!.token } })).body.allowed).toBe(true);
   });
 
-  it('retires one assistant-error episode when Chrome preserves a still-responsive document', async () => {
+  it('preserves a recovered assistant-error page without spending a later reload on the same question', async () => {
     await pair();
     await events(PRIME, [
       { kind: 'user_message', time: Date.now(), messageId: 'preserved-question', text: 'Keep working' },
@@ -8719,11 +8719,13 @@ describe('unattributed activity recovery', () => {
     expect(preserved.body.repairs).toEqual([]);
     expect(await maintenance()).toBeNull();
 
-    // The same broken authored turn has spent its automatic repair budget even though the live
-    // document was deliberately kept intact. A repeated transport toast must not re-arm reload.
+    // No browser action happened, so preservation must not spend the authored question's one
+    // real error reload. If the transport failure returns, it earns a fresh repair.
     await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'preserved-answer',
       text: 'Connection interrupted. Waiting for the complete answer', recoverable: true }]);
-    expect(await maintenance()).toBeNull();
+    const retry = await maintenance();
+    expect(retry?.reason).toBe('assistant-error');
+    expect((await request('POST', '/repairs/claim', { body: { token: retry!.token } })).body.allowed).toBe(true);
   });
 
   it('does not refund error recovery when reload remints a generation for the same authored question', async () => {

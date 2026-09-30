@@ -2865,8 +2865,10 @@ async function performBrowserRepairs(repairs, policy) {
         // same destructive edge once ChatGPT has already recovered: keep a resumed stream queued
         // for another pass, and retire the episode without navigation only after its exact
         // transport error has disappeared. A still-visible error keeps the existing reload path.
-        const status = await tabReply(target.id, { type: 'clf-page-status' });
-        if (status?.ok === true && status.streaming === true) {
+        const status = await tabReply(target.id, { type: 'clf-page-status' },
+          documentId ? { documentId } : undefined);
+        if (status?.ok === true && status.streaming === true &&
+            (reason !== 'assistant-error' || status.assistantError === false)) {
           await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
           continue;
         }

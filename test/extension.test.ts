@@ -4668,9 +4668,10 @@ it.each([
   ['unattributed', null, 1],
   ['blind', { ok: true, draft: false, streaming: true }, 0],
   ['blind', { ok: true, draft: false, streaming: false }, 1],
-  ['assistant-error', { ok: true, draft: false, streaming: true, assistantError: true }, 0],
+  ['assistant-error', { ok: true, draft: false, streaming: true, assistantError: true }, 1],
   ['assistant-error', { ok: true, draft: false, streaming: false, assistantError: true }, 1],
   ['assistant-error', { ok: true, draft: false, streaming: false, assistantError: false }, 0],
+  ['assistant-error', { ok: true, draft: false, streaming: false }, 1],
   ['assistant-error', null, 1],
   ['silence', { ok: true, draft: false, streaming: true }, 1]
 ])('for reason %s and page status %j reloads %i time(s)', async (reason, status, reloads) => {
