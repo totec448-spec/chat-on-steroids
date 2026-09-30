@@ -25,13 +25,18 @@ const special = {
 
 const scripts = readdirSync(path.join(root, 'scripts'))
   .filter(name => /^verify-.*\.cjs$/.test(name) && name.includes(filter)).sort();
+// CI runners are shared and uneven: a different check timed out on each run while all of them
+// passed on a real machine. With VERIFY_UI_RETRY a failed check runs once more; a pass on retry
+// counts, and is named as a flake (a GitHub warning in CI) so it stays visible.
+const retries = Number(process.env.VERIFY_UI_RETRY) || 0;
+const flaky = [];
 const results = [];
 for (const name of scripts) {
   if (skip.has(name)) { console.log(`SKIP  ${name}  (needs a real GPU and display timing; run it locally)`); continue; }
   const how = special[name] ?? { command: electron, args: [] };
   const started = Date.now();
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-  const outcome = await new Promise(resolve => {
+  const run = () => new Promise(resolve => {
     const child = spawn(how.command, [path.join('scripts', name), ...how.args], { cwd: root, env, windowsHide: true });
     let output = '';
     const keep = chunk => { output = (output + chunk).slice(-4000); };
@@ -39,9 +44,15 @@ for (const name of scripts) {
     const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ code: 'timeout', output }); }, TIMEOUT_MS);
     child.on('close', code => { clearTimeout(timer); resolve({ code, output }); });
   });
+  let outcome = await run();
+  for (let attempt = 0; outcome.code !== 0 && attempt < retries; attempt++) {
+    const retried = await run();
+    if (retried.code === 0) { flaky.push(name); outcome = retried; }
+  }
   const ok = outcome.code === 0;
   results.push({ name, ok, seconds: Math.round((Date.now() - started) / 1000) });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}  (${results.at(-1).seconds}s)`);
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}  (${results.at(-1).seconds}s)${flaky.includes(name) ? '  (failed once, passed on retry)' : ''}`);
+  if (flaky.includes(name) && process.env.GITHUB_ACTIONS) console.log(`::warning title=Flaky UI check::${name} failed once and passed on retry`);
   if (!ok) {
     const reason = outcome.output.split('\n').filter(line =>
       /Error|assert|Timeout|timed out|expected|actual/i.test(line) && !/sandbox_extension|task_policy|js2c/.test(line)).slice(0, 6);

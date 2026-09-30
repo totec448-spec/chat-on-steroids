@@ -104,6 +104,8 @@ jobs:
           # Pixel comparisons, animation timing and a transparent overlay window need a real GPU; the
           # hosted runner has none. They run with npm run verify:ui on a real machine.
           VERIFY_UI_SKIP: verify-plan-collapse.cjs,verify-settings-focus.cjs,verify-pet-overlay-electron.cjs,verify-message-reactions.cjs
+          # The shared runner times out a different check now and then; one retry each, named as flaky.
+          VERIFY_UI_RETRY: '1'
         run: npm run verify:ui
 
       - name: Keep the UI check screenshots when a check fails
