@@ -64,3 +64,19 @@ it('uses the translated thousands unit in German', async () => {
     expect(compactTokens(6_992, 'de')).toBe('6992');
   } finally { setLanguage('en'); }
 });
+
+it.each([['en', '150,000 tokens'], ['de', '150.000 Tokens']] as const)(
+  'writes the auto-compaction threshold in the interface language (%s), not the system locale',
+  async (language, threshold) => {
+    dom = new JSDOM(readFileSync('src/renderer/index.html', 'utf8'), { url: 'https://local.test/' });
+    vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('Node', dom.window.Node);
+    const { setLanguage } = await import('../src/renderer/i18n.js');
+    setLanguage(language);
+    try {
+      const session = { conversationId: 'chat', contextTokens: 100000,
+        selectedModel: { conversationId: 'chat', model: 'gpt-5.6-sol-high', reasoningEffort: 'high' } } as SessionSummary;
+      paintContextMeter(session, { sessions: { limitTokens: 533333 }, compaction: { auto: true, autoTokens: 150000 } } as Config);
+      // Every number in one sentence uses the same grouping: 2.1.21 printed "533,333" beside "400.000".
+      expect(dom.window.document.getElementById('contextMeterButton')?.getAttribute('aria-label')).toContain(threshold);
+    } finally { setLanguage('en'); }
+  });
