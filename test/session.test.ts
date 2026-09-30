@@ -704,10 +704,10 @@ describe('session store', () => {
     // A refusal to read is not damage, and may not be answered as "no such session".
     resetSessionStoreForTests();
     const readFile = fs.readFile.bind(fs);
-    const spy = vi.spyOn(fs, 'readFile').mockImplementation((async (target, ...args) => {
+    const spy = vi.spyOn(fs, 'readFile').mockImplementation((async (target: Parameters<typeof fs.readFile>[0], ...args: unknown[]) => {
       if (String(target).startsWith(path.join(folder, 'meta'))) throw Object.assign(new Error('denied'), { code: 'EACCES' });
-      return readFile(target, ...args);
-    }) as typeof fs.readFile);
+      return (readFile as (...input: unknown[]) => Promise<unknown>)(target, ...args);
+    }) as unknown as typeof fs.readFile);
     try {
       await expect(getSession(session.id)).rejects.toThrow(/EACCES/);
     } finally {
@@ -732,10 +732,10 @@ describe('session store', () => {
 
     const folder = path.join(sessionsRoot(), blocked.id);
     const readFile = fs.readFile.bind(fs);
-    const spy = vi.spyOn(fs, 'readFile').mockImplementation((async (target, ...args) => {
+    const spy = vi.spyOn(fs, 'readFile').mockImplementation((async (target: Parameters<typeof fs.readFile>[0], ...args: unknown[]) => {
       if (String(target).startsWith(path.join(folder, 'meta'))) throw Object.assign(new Error('denied'), { code: 'EACCES' });
-      return readFile(target, ...args);
-    }) as typeof fs.readFile);
+      return (readFile as (...input: unknown[]) => Promise<unknown>)(target, ...args);
+    }) as unknown as typeof fs.readFile);
     try {
       expect(await findSessionByConversation('catalog-readable', { requireUnique: true })).not.toBeNull();
       expect(await findSessionByConversation('catalog-blocked', { requireUnique: true })).toBeNull();
