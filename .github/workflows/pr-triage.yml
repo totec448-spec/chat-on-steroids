@@ -1,49 +1,32 @@
 name: PR triage
 
-# Friendly helpers for every pull request, including ones from forks. They only label and, at most
-# once, leave a note; they never fail a PR. pull_request_target is used for write access, so this
-# workflow must never check out or run the pull request's code.
+# Friendly helpers for open pull requests, including ones from forks: area labels, one note on
+# very large PRs, and one welcome for a first-time contributor. Never fails a PR. It runs on a
+# schedule with the repository's own code instead of pull_request_target, which GitHub restricts
+# on public repositories from November 2026; no pull request code is ever checked out or run.
 on:
-  pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review]
+  schedule:
+    - cron: '13,43 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  label:
-    name: Area labels
+  triage:
     if: github.repository == 'totec448-spec/chat-on-steroids'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
+      issues: write
       pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          sync-labels: false
-
-  size:
-    name: Size note
-    if: github.repository == 'totec448-spec/chat-on-steroids'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      pull-requests: write
-    steps:
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const MARK = '<!-- size-note -->';
-            const LIMIT = 1000;
-            const pr = context.payload.pull_request;
-            const files = await github.paginate(github.rest.pulls.listFiles, { ...context.repo, pull_number: pr.number, per_page: 100 });
-            // Tests, translations, docs and the lockfile grow with a change without making it harder to review.
-            const counted = files.filter(file => !/^(test\/|docs\/|src\/renderer\/locales\/|extension\/_locales\/|package-lock\.json$)|\.md$/.test(file.filename));
-            const lines = counted.reduce((sum, file) => sum + file.additions + file.deletions, 0);
-            if (lines <= LIMIT) return;
-            const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: pr.number, per_page: 100 });
-            if (comments.some(comment => comment.body?.includes(MARK))) return;
-            await github.rest.issues.createComment({ ...context.repo, issue_number: pr.number, body: `${MARK}
-            Thanks for the PR! It changes about ${lines} lines outside tests, translations and docs. Large PRs take much longer to review, so if this covers more than one topic, splitting it up usually gets it merged faster. If it is one topic that simply needs the space, ignore this note.` });
+          node-version: 22
+      - name: Label, note and welcome open PRs
+        run: node scripts/pr-triage.mjs
