@@ -47,7 +47,7 @@ app.whenReady().then(async () => {
       signal:change=>{if(!sessionChanged)throw new Error('onSessionChanged was not registered');sessionChanged(change);}};
     window.api = new Proxy({
       listSessions: () => {fixture.lists++;return ok({sessions, activeId:null, blocked:[], pressure:[]});},
-      listProjects: () => ok([]), listInputs: () => ok([]), listPausedHelpers: () => ok([]),
+      listProjects: () => ok([]), listInputs: () => ok([]), runningTools: () => ok([]), listPausedHelpers: () => ok([]),
       onSessionChanged:handler=>{sessionChanged=handler;return()=>{if(sessionChanged===handler)sessionChanged=null;}},
       getSession: (id, options) => {
         reads.push({id,options});
