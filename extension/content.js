@@ -9246,7 +9246,7 @@
         const fresh = await refreshFiber(null, true);
         if (!current()) return true;
         return fresh && received();
-      }, TOOL_SETTLE_MS);
+      }, AUTO_RECEIPT_SETTLE_MS);
       if (!current()) return t(
         'content_compact_chat_changed_waiting_results',
         'This chat changed while compaction was waiting for tool results.'
@@ -10401,6 +10401,17 @@
    * headroom without making a genuinely stuck local call wait indefinitely.
    */
   const TOOL_SETTLE_MS = 30_000;
+  /**
+   * How long an automatic compaction waits for a moment with no local call running and every
+   * result received, before it stops the turn.
+   *
+   * A busy turn is rarely idle: ChatGPT polls long commands with write_stdin, and one empty poll
+   * may run up to the app's five-minute background terminal timeout. Thirty seconds almost never
+   * found the gap between two polls, so a turn running long unit tests never compacted (#825).
+   * Six minutes always spans one whole poll plus the model's pause before the next call, and the
+   * turn is stopped inside that gap. Still bounded: a call that runs longer is refused as before.
+   */
+  const AUTO_RECEIPT_SETTLE_MS = 6 * 60_000;
   /** How many silent answers about pending calls to sit through before refusing. */
   const SETTLE_UNKNOWN_TRIES = 3;
 
