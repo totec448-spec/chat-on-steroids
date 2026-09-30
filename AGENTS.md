@@ -1848,6 +1848,14 @@ An unexpected lost/discarded page retains its existing recovery contract. A newe
 of the exact departed page clears the dismissal; unresolved work reuses its last exact MCP
 timestamp and normal deadline. A tab close never fabricates provider completion.
 
+Several browsers can run the extension against one app. Each sends a random
+`x-extension-browser` id; its `/status` pass reports the chats it has open, and a browser that
+reported a chat and is still polling (60 s) holds it. Work for an existing chat — a queued
+input, a repair, a Compact & Resume replacement with no page waiting — goes only to a browser
+holding that chat. A browser handed work for a chat it lacks opens the chat itself, so a second
+copy would otherwise run that work. A chat open nowhere, like a brand-new chat, goes to the
+first browser it is handed to while that browser polls. Requests without an id are not told apart.
+
 Browser-only preferences suppress automatic opening as defined by their owner. Background
 operations reuse a suitable existing window unchanged. If a new background window is actually
 authorized, its shared layout policy bounds it to 45% of the work area and 800×600, then
@@ -2288,7 +2296,11 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    The shipped content prompt prefers a dense roughly 2k-6k-token operational handoff for a
    substantial session, shorter when less state exists and longer only when correctness needs
    it. Preparing a brief does not yet publish a rebind.
-4. **Elect B and commit.** Destination creation/claim has one opening owner. B must present
+4. **Elect B and commit.** Destination creation/claim has one opening owner. B opens in the
+   browser that holds A: the capture reply places it beside the capturing page, and a resume
+   queued with no page waiting is offered to a browser still reporting A open (§13). Only when
+   no browser holds A does the OS opener choose; an uncollected offer falls back to it after
+   60 s. B must present
    the exact continuation context; early B observations are gated to prevent a shadow local
    session. Persist the committing decision, rebind S's metadata, then publish projections.
    **Durable metadata rebind is the point of no return.** Before it, failure leaves A current;
