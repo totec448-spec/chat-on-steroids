@@ -4526,6 +4526,8 @@ function selectSession(id: string): void {
   if (ownerChanged) {
     // Retire the prior owner now; retain only its inert painted transcript until the
     // selected detail arrives. Existing async image/load generation fences still apply.
+    // Reading away from a sent message belongs to the chat it happened in.
+    sendAnchor = null; readingAfterSend = false;
     events = [];
     totalEvents = 0;
     historyBefore = null;
@@ -4552,6 +4554,7 @@ function selectNewChat(projectId: string | null = null): void {
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  sendAnchor = null; readingAfterSend = false;
   if (projectId) expandedProjects.add(projectId);
   applyComposerSessionModel(null, null);
   // New Chat selects its existing draft, just like a session. Navigation is not

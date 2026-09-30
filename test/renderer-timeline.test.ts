@@ -4184,3 +4184,32 @@ it('offers a way back to the end of the chat that clears any reserved space', as
   jump.click();
   expect(content.style.getPropertyValue('--timeline-scroll-reserve')).toBe('');
 });
+
+it('opens the next chat at its end after the reader scrolled away from a sent message', async () => {
+  const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+    source: 'extension', kind: 'user_message', messageId: `reading-${i}`, message: text(`Reading item ${i + 1}`) }));
+  const first = summary(rows), second = { ...summary(rows), id: '2026-09-02-test0002', title: 'Other chat' };
+  const { w, append } = await boot(rows, false, [], [], { sessions: [first, second] });
+  const pane = w.document.getElementById('chatBody')!;
+  const timeline = w.document.getElementById('timeline')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+  const select = async (id: string) => {
+    (w.document.querySelector(`#sessionList [data-id="${id}"]`) as HTMLElement).click();
+    await settle();
+  };
+  await select(first.id);
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Hold this one'; input.dispatchEvent(new w.Event('input'));
+  (w.document.getElementById('chatSend') as HTMLButtonElement).click();
+  await settle();
+  // The reader scrolls up with the wheel, releasing the hold on the sent message.
+  pane.dispatchEvent(new w.WheelEvent('wheel'));
+  pane.scrollTop = 300;
+  pane.dispatchEvent(new w.Event('scroll'));
+  await select(second.id);
+  expect(pane.scrollTop).toBe(pane.scrollHeight);
+  // Its answer keeps growing: the reader who just opened it follows the end.
+  await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message', messageId: 'grown', message: text('A new answer') }]);
+  expect(pane.scrollTop).toBe(pane.scrollHeight);
+});
