@@ -6058,6 +6058,66 @@ ${SAMPLE_BRIEF}` }
     expect(opened).toEqual([commandUrl(command.id)]);
   });
 
+  /**
+   * Live 2.1.21, 2026-09-30: the extension ran in two browsers and chat A lived in one of them.
+   * Work owed to A was handed to both, and the browser without A answered it by opening A
+   * itself. With A in both, the copy in the other browser wrote the handoff, the replacement was
+   * placed beside that copy, and the user found chat B in the browser they were not working in.
+   */
+  describe('with the extension in two browsers', () => {
+    const holder = 'e'.repeat(32), other = 'f'.repeat(32);
+    const poll = async (browser: string, open: string[]) =>
+      (await request('POST', '/status', { body: { openConversations: open }, browser })).body;
+
+    it('offers a message for a chat only to the browser that holds that chat', async () => {
+      await pair();
+      const input = await import('../src/main/session/input.js');
+      input.resetInputForTests();
+      await writeDurableNow('session-input', []);
+      const home = randomUUID();
+      const session = await createSession({ conversationId: home });
+      try {
+        await poll(holder, [home]);
+        const { id } = await input.enqueueInput({ id: randomUUID(), sessionId: session.id, text: 'Next step', mode: 'auto',
+          dueAt: Date.now(), model: null, reasoningEffort: null });
+        const offered = (body: { inputs: Array<{ id: string }> }) => body.inputs.some(row => row.id === id);
+        expect(offered(await poll(other, [])), 'the browser without the chat would open a second copy of it').toBe(false);
+        expect(offered(await poll(holder, [home]))).toBe(true);
+        // Closed in the holder, the chat is open nowhere: its opening stays with the first
+        // browser handed it, exactly like a new chat's.
+        expect(offered(await poll(holder, []))).toBe(true);
+        expect(offered(await poll(other, []))).toBe(false);
+      } finally {
+        input.resetInputForTests();
+        await writeDurableNow('session-input', []);
+      }
+    });
+
+    it('hands the Compact & Resume repair only to the browser that holds the source chat', async () => {
+      await pair();
+      const home = randomUUID();
+      const session = await createSession({ conversationId: home });
+      await poll(holder, [home]);
+      await compactSession(session.id);
+      const repairs = (body: { repairs: Array<{ conversationId: string }> }) => body.repairs.filter(row => row.conversationId === home);
+      expect(repairs(await poll(other, [])), 'the browser without the chat would reopen it and run the handoff there').toEqual([]);
+      expect(repairs(await poll(holder, [home]))).toMatchObject([{ reason: 'compaction', requiresClaim: true }]);
+    });
+
+    it('places a replacement nobody is waiting for beside its source chat, in that browser', async () => {
+      await pair();
+      const home = 'c0c0c0c0-1111-4222-8333-000000000b03';
+      const { sessionId, token } = await compactedSession(home, 'carry on');
+      await poll(holder, [home]);
+      await poll(other, []);
+      const command = queueResume(sessionId, token)!;
+      await vi.waitFor(async () => expect((await readDurable<any>('bridge-commands'))?.commands?.[0]?.phase).toBe('leased'));
+      expect(opened, 'the operating system picks a browser, not the one holding the chat').toEqual([]);
+      expect((await poll(other, [])).placement).toBeNull();
+      expect((await poll(holder, [home])).placement).toMatchObject({ id: command.id, homeConversationId: home, active: true });
+    });
+  });
+
   it('never issues a second open while the handed-out browser tab is still hydrating', async () => {
     vi.useFakeTimers();
     try {
