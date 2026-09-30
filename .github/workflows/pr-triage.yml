@@ -1,0 +1,49 @@
+name: PR triage
+
+# Friendly helpers for every pull request, including ones from forks. They only label and, at most
+# once, leave a note; they never fail a PR. pull_request_target is used for write access, so this
+# workflow must never check out or run the pull request's code.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  label:
+    name: Area labels
+    if: github.repository == 'totec448-spec/chat-on-steroids'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
+        with:
+          sync-labels: false
+
+  size:
+    name: Size note
+    if: github.repository == 'totec448-spec/chat-on-steroids'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const MARK = '<!-- size-note -->';
+            const LIMIT = 1000;
+            const pr = context.payload.pull_request;
+            const files = await github.paginate(github.rest.pulls.listFiles, { ...context.repo, pull_number: pr.number, per_page: 100 });
+            // Tests, translations, docs and the lockfile grow with a change without making it harder to review.
+            const counted = files.filter(file => !/^(test\/|docs\/|src\/renderer\/locales\/|extension\/_locales\/|package-lock\.json$)|\.md$/.test(file.filename));
+            const lines = counted.reduce((sum, file) => sum + file.additions + file.deletions, 0);
+            if (lines <= LIMIT) return;
+            const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: pr.number, per_page: 100 });
+            if (comments.some(comment => comment.body?.includes(MARK))) return;
+            await github.rest.issues.createComment({ ...context.repo, issue_number: pr.number, body: `${MARK}
+            Thanks for the PR! It changes about ${lines} lines outside tests, translations and docs. Large PRs take much longer to review, so if this covers more than one topic, splitting it up usually gets it merged faster. If it is one topic that simply needs the space, ignore this note.` });
