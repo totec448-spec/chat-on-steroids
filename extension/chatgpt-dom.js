@@ -331,6 +331,8 @@ var CLF_DOM = (() => {
    */
   function retryFailure(button) {
     return safe(() => {
+      // Exclude navigation/composer controls before rendered-text reads on each recorder tick.
+      if (button.closest('nav, aside, header, form, [role="navigation"], [role="menu"]')) return null;
       const label = (button.innerText || button.textContent || '').replace(/\s+/g, ' ').trim();
       // A transport card can keep its English message while localizing its button; this was
       // observed with "Reintentar". The label cannot be the anchor. Another language's
@@ -342,7 +344,9 @@ var CLF_DOM = (() => {
       let node = button.parentElement;
       for (let up = 0; node && up < 8 && node !== document.body; up++, node = node.parentElement) {
         if (node.closest && node.closest(OWN_SURFACES)) return null;
-        const value = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+        const content = node.textContent || '';
+        if (content.length >= 500) return null;
+        const value = (node.innerText || content).replace(/\s+/g, ' ').trim();
         if (value.length >= 500) return null;
         if (!displayed(node)) continue;
         if (english) {

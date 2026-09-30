@@ -719,6 +719,62 @@ describe('native image readiness', () => {
 });
 
 
+describe('transport-card scan cost', () => {
+  it('skips hundreds of sidebar buttons without reading innerText and still finds the real card', () => {
+    const sidebar = document.createElement('nav');
+    const readSidebarText = vi.fn(function (this: HTMLElement) { return this.textContent; });
+    Object.defineProperty(sidebar, 'innerText', { get: readSidebarText });
+    for (let index = 0; index < 300; index++) {
+      const row = document.createElement('div');
+      const control = document.createElement('button');
+      control.textContent = `Chat ${index}`;
+      Object.defineProperty(control, 'innerText', { get: readSidebarText });
+      Object.defineProperty(row, 'innerText', { get: readSidebarText });
+      row.append(control); sidebar.append(row);
+    }
+    document.body.append(sidebar);
+    const card = document.createElement('div');
+    card.innerHTML = '<p>Resume stream unavailable </p><button>Reintentar</button>';
+    document.body.append(card);
+
+    for (let tick = 0; tick < 3; tick++) {
+      expect(api.errors()).toEqual([
+        expect.objectContaining({ text: 'Resume stream unavailable', recoverable: true })
+      ]);
+    }
+    expect(readSidebarText.mock.calls.length).toBe(0);
+  });
+
+  it.each(['nav', 'aside', 'header', 'form', '[role="navigation"]', '[role="menu"]'])(
+    'does not read or classify a retry-like control inside %s', selector => {
+      const host = document.createElement(selector.startsWith('[') ? 'div' : selector);
+      if (selector.startsWith('[')) host.setAttribute('role', selector.includes('navigation') ? 'navigation' : 'menu');
+      host.innerHTML = '<p>Resume stream unavailable </p><button>Reintentar</button>';
+      const readText = vi.fn(function (this: HTMLElement) { return this.textContent; });
+      Object.defineProperty(host, 'innerText', { get: readText });
+      Object.defineProperty(host.querySelector('button')!, 'innerText', { get: readText });
+      document.body.append(host);
+
+      expect(api.errors()).toEqual([]);
+      expect(readText.mock.calls.length).toBe(0);
+    }
+  );
+
+  it.each([500, 5000])('rejects a %i-character container before reading its rendered text', length => {
+    const host = document.createElement('div');
+    const control = document.createElement('button');
+    control.textContent = 'Reintentar';
+    host.append('x'.repeat(length - control.textContent.length), control);
+    const readText = vi.fn(() => 'Resume stream unavailable Reintentar');
+    Object.defineProperty(host, 'innerText', { get: readText });
+    document.body.append(host);
+
+    expect(host.textContent).toHaveLength(length);
+    expect(api.errors()).toEqual([]);
+    expect(readText.mock.calls.length).toBe(0);
+  });
+});
+
 describe('provider limit notice', () => {
   it('records and acknowledges the exact Korean access notice once without accepting other dialogs', () => {
     const notice = document.createElement('div'); notice.setAttribute('role', 'dialog');
