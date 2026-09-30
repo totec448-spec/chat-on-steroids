@@ -45,6 +45,7 @@ import type {
   ActivitySummary,
   AgentState,
   Handoff,
+  MessageReference,
   SessionEvent,
   SessionSummary,
   StoredText,
@@ -1571,6 +1572,157 @@ function citationLabels(source: string, capture?: StoredText): Map<string, strin
 }
 
 /**
+ * ChatGPT's inline citation directive, `:chatgpt-content-reference{index="0"}` at the end of a
+ * sentence, which its page draws as a source pill ("arXiv +2") and plain Markdown shows raw. The
+ * directive names an index into the reply's references. When the reply was recorded with them,
+ * the pill and every source behind it come from that exact index. Otherwise a pill is taken from
+ * the page's own rendering only when the prose before it matches the prose before the directive,
+ * as `citationLabels` proves native citation ranges. An unproven directive is dropped: never raw,
+ * and never a guessed destination.
+ */
+const INLINE_REFERENCE = /^:{1,2}chatgpt-content-reference\{[^}\n]*\}/;
+/** The sources behind one pill, and how many more its page counted than the recording holds. */
+interface CitationPill { sources: MessageReference['sources']; unrecorded: number }
+
+function citationPills(source: string, capture?: StoredText): Map<number, CitationPill> {
+  const pills = new Map<number, CitationPill>();
+  if (!capture?.text || capture.truncated || capture.text.length > MAX_RENDERED_HTML_CHARS) return pills;
+  const template = document.createElement('template');
+  template.innerHTML = capture.text;
+  const captured = [...template.content.querySelectorAll('a[data-testid="chatgpt-citation"]')];
+  if (!captured.length) return pills;
+  // Other native citations are pills on the page too; their words are not prose.
+  const pillOf = (element: Element): number => captured.indexOf(element);
+  const capturedPrefixes = prosePrefixes(template.content, element => {
+    const at = pillOf(element);
+    return at >= 0 ? `pill:${at}` : element.hasAttribute('data-content-reference-start') ? 'native' : null;
+  });
+  const probeAttribute = `data-cos-probe-${Math.random().toString(36).slice(2)}`;
+  let probes = 0;
+  const probeParser = new Marked({ gfm: true, extensions: [{
+    name: 'inlineReferenceProbe', level: 'inline',
+    start: value => { const at = value.search(/:{1,2}chatgpt-content-reference\{|\uE200/); return at < 0 ? undefined : at; },
+    tokenizer(value) {
+      const reference = value.match(INLINE_REFERENCE);
+      if (reference) return { type: 'inlineReferenceProbe', raw: reference[0], probe: probes++ };
+      const native = value.match(PROVIDER_URL) ?? value.match(PROVIDER_CITATION);
+      return native ? { type: 'inlineReferenceProbe', raw: native[0], probe: -1 } : undefined;
+    },
+    renderer(token) {
+      const probe = Number((token as unknown as { probe: number }).probe);
+      return probe >= 0 ? `<span ${probeAttribute}="${probe}"></span>` : '';
+    }
+  }] });
+  const canonical = document.createElement('template');
+  canonical.innerHTML = probeParser.parse(source, { async: false, gfm: true });
+  const canonicalPrefixes = prosePrefixes(canonical.content, element => {
+    const value = element.getAttribute(probeAttribute);
+    return value !== null && /^\d+$/.test(value) ? `probe:${value}` : null;
+  });
+  const used = new Set<number>();
+  for (let probe = 0; probe < probes; probe++) {
+    const prefix = canonicalPrefixes.get(`probe:${probe}`);
+    if (prefix === undefined) continue;
+    // In page order, the first unused pill whose preceding prose is this directive's.
+    const at = captured.findIndex((_, index) => !used.has(index) && capturedPrefixes.get(`pill:${index}`) === prefix);
+    if (at < 0) continue;
+    used.add(at);
+    const anchor = captured[at]!;
+    const href = safeRenderedHref(anchor.getAttribute('href') ?? '');
+    if (!href || !/^https?:/.test(href)) continue;
+    const moreNode = [...anchor.querySelectorAll('[aria-hidden="true"]')].find(node => /^\+\d{1,3}$/.test(node.textContent?.trim() ?? ''));
+    const more = moreNode ? Number(moreNode.textContent!.trim().slice(1)) : 0;
+    const label = (anchor.textContent ?? '').replace(moreNode?.textContent ?? '', '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    // The page's label reads "Source: Title, URL, N additional sources".
+    const described = anchor.getAttribute('aria-label') ?? '';
+    const title = label && described.startsWith(`${label}: `) ? described.slice(label.length + 2).split(`, ${href}`)[0]!.trim() : '';
+    pills.set(probe, { sources: [{ title: title.slice(0, 300) || href, url: href, ...(label ? { source: label } : {}) }], unrecorded: more });
+  }
+  return pills;
+}
+
+const siteOf = (url: string): string => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; } };
+
+/**
+ * The app's own pill for a proven inline citation, added after sanitising like the code panels.
+ * Clicking it opens its source through the message's link handler. Hovering or focusing it shows
+ * the card ChatGPT shows: the source's site, title, date and snippet, paging through every source
+ * behind the count. A reply recorded without them says how many more its page counted.
+ */
+function citationPill(pill: CitationPill): HTMLElement {
+  const first = pill.sources[0]!;
+  const total = pill.sources.length + pill.unrecorded;
+  const wrap = el('span', 'citation');
+  const link = document.createElement('a');
+  link.className = 'citation-pill';
+  link.href = first.url;
+  link.append(el('span', 'citation-pill-label', first.source || siteOf(first.url)));
+  if (total > 1) link.append(el('span', 'citation-pill-more', `+${total - 1}`));
+  const card = el('span', 'citation-card');
+  card.hidden = true;
+  card.setAttribute('role', 'tooltip');
+  // Built once: paging rewrites only the words, so the arrow just clicked keeps focus and stays
+  // under the pointer. Rebuilding the card removed the focused button and closed the card.
+  const site = el('span', 'citation-card-site');
+  const title = document.createElement('a');
+  title.className = 'citation-card-title';
+  const detail = el('span', 'citation-card-detail');
+  const count = el('span', 'citation-card-count');
+  let at = 0;
+  const paint = (): void => {
+    const source = pill.sources[at]!;
+    site.textContent = source.source || siteOf(source.url);
+    title.href = source.url; title.textContent = source.title || siteOf(source.url);
+    const date = source.date ? new Date(source.date).toLocaleDateString(currentLanguage(), { year: 'numeric', month: 'long', day: 'numeric' }) : '';
+    detail.textContent = [date, source.snippet].filter(Boolean).join(' — ');
+    detail.hidden = !detail.textContent;
+    count.textContent = `${at + 1}/${pill.sources.length}`;
+  };
+  if (pill.sources.length > 1) {
+    const step = (delta: number, name: string, label: string): HTMLButtonElement => {
+      const button = el('button', 'citation-card-step') as HTMLButtonElement;
+      button.type = 'button'; button.append(icon(name));
+      ui(button, 'aria-label', () => t(label));
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        at = (at + delta + pill.sources.length) % pill.sources.length;
+        paint();
+      });
+      return button;
+    };
+    const nav = el('span', 'citation-card-nav');
+    nav.append(step(-1, 'i-arrow-left', 'Previous source'), step(1, 'i-arrow-right', 'Next source'), count);
+    card.append(nav);
+  }
+  card.append(site, title, detail);
+  if (pill.unrecorded) card.append(el('span', 'citation-card-note', () => t('{0} more sources were not recorded with this reply.', [pill.unrecorded])));
+  let timer: number | undefined;
+  let pointerInside = false;
+  const show = (): void => {
+    window.clearTimeout(timer);
+    if (!card.hidden) return;
+    at = 0; paint(); card.hidden = false;
+    // Near the end of a line the card grows back from the pill instead of past the column.
+    card.classList.remove('is-end');
+    const column = wrap.closest('.msg')?.getBoundingClientRect();
+    if (column && card.getBoundingClientRect().right > column.right) card.classList.add('is-end');
+  };
+  const hide = (delay: number): void => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => { card.hidden = true; }, delay);
+  };
+  wrap.addEventListener('pointerenter', () => { pointerInside = true; window.clearTimeout(timer); timer = window.setTimeout(show, 150); });
+  wrap.addEventListener('pointerleave', () => { pointerInside = false; hide(200); });
+  wrap.addEventListener('focusin', show);
+  // Focus leaving for the page while the pointer is still on the card (a click on its words) keeps it.
+  wrap.addEventListener('focusout', event => { if (!pointerInside && !wrap.contains(event.relatedTarget as Node | null)) hide(0); });
+  wrap.addEventListener('keydown', event => { if (event.key === 'Escape') hide(0); });
+  wrap.append(link, card);
+  return wrap;
+}
+const PILL_PLACEHOLDER = /^\uE000(\d{1,4})\uE001$/;
+
+/**
  * Sanitizes ChatGPT's captured rendered HTML without reparsing Markdown.
  *
  * The page is untrusted input even though the extension produced the observation. Preserve
@@ -1608,7 +1760,7 @@ const WRITING_BLOCK: TokenizerAndRendererExtension = {
   }
 };
 
-export function renderedMarkdown(source: string, capture?: StoredText): HTMLElement {
+export function renderedMarkdown(source: string, capture?: StoredText, references?: readonly MessageReference[]): HTMLElement {
   // Fiber's canonical text can be complete while a background provider tab still
   // paints its first words. Render this revision directly; captured DOM HTML is
   // never evidence that it contains the current message revision.
@@ -1621,8 +1773,24 @@ export function renderedMarkdown(source: string, capture?: StoredText): HTMLElem
     text = plain || t('This reply points to content from another message that was not recorded.');
   }
   const citations = text.includes('\uE200') ? citationLabels(text, capture) : new Map<string, string>();
+  const pills = text.includes('chatgpt-content-reference{') ? citationPills(text, capture) : new Map<number, CitationPill>();
+  const byIndex = new Map((references ?? []).map(reference => [reference.index, reference]));
+  let directives = 0;
   // An inline tokenizer leaves literal citation examples inside code spans/fences intact.
   const parser = new Marked({ gfm: true, extensions: [WRITING_BLOCK, {
+    name: 'inlineReference', level: 'inline',
+    start: value => { const at = value.search(/:{1,2}chatgpt-content-reference\{/); return at < 0 ? undefined : at; },
+    tokenizer(value) { const match = value.match(INLINE_REFERENCE); return match ? { type: 'inlineReference', raw: match[0], probe: directives++ } : undefined; },
+    renderer(token) {
+      // A proven pill travels the sanitiser as a plain link; the pill itself is drawn afterwards.
+      const probe = Number((token as unknown as { probe: number }).probe);
+      const index = token.raw.match(/\bindex="(\d{1,4})"/)?.[1];
+      const recorded = index === undefined ? undefined : byIndex.get(Number(index));
+      if (recorded) pills.set(probe, { sources: recorded.sources, unrecorded: 0 });
+      const pill = pills.get(probe);
+      return pill ? `<a href="${escapeHtml(pill.sources[0]!.url)}">\uE000${probe}\uE001</a>` : '';
+    }
+  }, {
     name: 'providerReference', level: 'inline',
     start: value => value.indexOf('\uE200'),
     tokenizer(value) { const match = value.match(PROVIDER_URL) ?? value.match(PROVIDER_CITATION); return match ? { type: 'providerReference', raw: match[0] } : undefined; },
@@ -1644,7 +1812,15 @@ export function renderedMarkdown(source: string, capture?: StoredText): HTMLElem
     }
   }] });
   const html = parser.parse(text, { async: false });
-  return renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
+  const box = renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
+  if (pills.size) {
+    for (const anchor of box.querySelectorAll('a[href]')) {
+      const probe = anchor.textContent?.match(PILL_PLACEHOLDER)?.[1];
+      const pill = probe === undefined ? undefined : pills.get(Number(probe));
+      if (pill) anchor.replaceWith(citationPill(pill));
+    }
+  }
+  return box;
 }
 
 export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
@@ -2092,7 +2268,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
     case 'assistant_message': {
       const box = el('div', 'said');
       box.append(el('b', '', () => event.final ? 'ChatGPT' : t("ChatGPT (partial)")));
-      box.append(renderedMarkdown(event.message.text, event.renderedHtml));
+      box.append(renderedMarkdown(event.message.text, event.renderedHtml, event.references));
       return box;
     }
     case 'native_image': {
