@@ -1,0 +1,31 @@
+name: Open release checklist
+
+# One issue per release with the live checks from .github/release-checklist.md as checkboxes, so a
+# release is tested the same way every time and anyone can see what is still open.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to check, for example v2.1.22
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  open:
+    if: github.repository == 'totec448-spec/chat-on-steroids'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Open the checklist issue
+        run: |
+          node -e 'const fs = require("fs"); const v = process.env.VERSION.trim(); if (!/^v\d+\.\d+\.\d+$/.test(v)) throw new Error("Version must look like v2.1.22"); fs.writeFileSync("checklist.md", fs.readFileSync(".github/release-checklist.md", "utf8").replaceAll("VERSION", v))'
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Release checklist ${VERSION}" --body-file checklist.md
