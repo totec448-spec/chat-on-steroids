@@ -43,7 +43,7 @@ Release CI builds and smoke-tests every platform/architecture on a native runner
 
 This project is maintained by one person, so review time is the scarce part. A PR is reviewed only when **CI and the "PR checklist" check are green**. The checklist runs automatically on every PR and on every edit of its description; its log says exactly what is missing. Use the pull request template and it passes by itself.
 
-Maintainers do not debug, complete or rebase a pull request whose checks fail, and do not write its missing tests or documentation. Please keep at most three pull requests open at a time; further ones can wait as drafts. AI-assisted contributions are welcome when you have run, understood and tested every line yourself: you are responsible for the whole change, and a PR is not a request for someone else to finish it.
+Maintainers are happy to fix small things before merging, but they do not build out, debug or finish a change from scratch, and a pull request whose checks fail is not reviewed until you fix it. Please keep at most three pull requests open at a time; further ones can wait as drafts. AI-assisted contributions are welcome when you have run, understood and tested every line yourself: you are responsible for the whole change, and a PR is not a request for someone else to finish it.
 
 What every PR needs:
 
@@ -55,7 +55,7 @@ What every PR needs:
 6. **Clean contents.** Nothing unrelated: no worklogs, notes, logs, formatting-only edits or generated output. Rebase on `main` when it conflicts.
 7. **Green checks.** `npm run verify` passes on your machine. Say which OS you ran it on. Packaging/runtime changes also need a packaged-runtime smoke check.
 8. **Docs with contracts.** A change to the preload API, IPC handlers or `src/shared` types updates the matching part of [`AGENTS.md`](AGENTS.md) in the same PR, or states `No contract change: <reason>`. The same applies to new recorded fields, bridge routes and extension messages.
-9. **Maintainer edits allowed.** Keep "Allow edits by maintainers" on, so a maintainer can make a one-line fix before merging instead of another review round. Your authorship stays. It is not a way to leave work unfinished.
+9. **Maintainer edits allowed.** Keep "Allow edits by maintainers" on, so a maintainer can make a small fix before merging instead of another review round. Your authorship stays. It is not a way to leave work unfinished.
 10. **No stacks out of order.** A PR that builds on another one says `Depends on #N` and stays a draft until #N is merged; then rebase it on `main`.
 
 What reviews look for, beyond the checks:
