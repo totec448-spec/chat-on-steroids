@@ -13,7 +13,9 @@ Fixes #
 ## Test
 
 <!-- Name the test you added or changed and confirm it fails without your change.
-     If a test is truly impossible, write: No test: <reason> -->
+     The "Fail-first test" check runs it against main's code to prove that.
+     If a test is truly impossible, write: No test: <reason>
+     If your tests only follow a refactor, write: Fail-first: n/a <reason> -->
 
 ## Screenshots
 
@@ -25,3 +27,6 @@ Fixes #
 - [ ] For interface changes: `npm run verify:ui` passes.
 - [ ] The branch is up to date with `main`, and the PR contains nothing unrelated (no notes, logs or formatting-only changes).
 - [ ] Screenshots, logs and examples contain no real names, paths, chat text, IDs or credentials.
+- [ ] Every change serves the linked issue; nothing depends on ChatGPT's English wording.
+- [ ] Contract changes (preload, IPC, `src/shared`, recorded fields, extension messages) are described in AGENTS.md, or I wrote "No contract change: <reason>".
+- [ ] "Allow edits by maintainers" is on. If this builds on another PR, it says "Depends on #N" and is a draft.
