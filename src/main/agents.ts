@@ -18,7 +18,7 @@ import type { AgentInfo, AgentMessage, AgentState, ReasoningEffort, SwarmState }
 import { REASONING_EFFORTS, isReasoningEffort } from '../shared/session.js';
 import { getConfig } from './config.js';
 import { getChatModels } from './chat-models.js';
-import type { ChatModelOption } from '../shared/chat-models.js';
+import { resolveChatModel, type ChatModelOption } from '../shared/chat-models.js';
 import { logInfo, logWarn } from './logger.js';
 import { inheritWorkspace, releasePrimeWorkspace, bindAgentWorkspace } from './workspace.js';
 import { requestCorrelation } from './session/correlation.js';
@@ -1570,12 +1570,16 @@ function usableDefaults(
   models: ChatModelOption[], notes: Set<string>
 ): { model: string | null; effort: ReasoningEffort | null } {
   if (!models.length) return { model, effort };
-  const matching = (id: string) => models.filter(choice => choice.id === id || choice.aliases?.includes(id));
-  if (defaultModel && model && matching(model).length !== 1) {
+  // A saved display label resolves to its unique observed family before the offer
+  // check, same as the Settings badge. Exact ids and lane aliases keep their lane; a
+  // resolved label canonicalizes to the family. An ambiguous label stays a dropped default.
+  const resolved = defaultModel && model ? resolveChatModel(models, model) : undefined;
+  if (defaultModel && model && !resolved) {
     notes.add(`The default worker model "${model}" saved in Settings is not offered by this ChatGPT account, so workers use ChatGPT's current model. Choose an available model in Settings → Agents & automation.`);
     model = null;
-  }
-  if (defaultEffort && effort && !(model ? matching(model) : models).some(choice => choice.efforts.includes(effort!))) {
+  } else if (resolved && resolved.id !== model && !resolved.aliases?.includes(model!)) model = resolved.id;
+  const offered = model ? (resolved ? [resolved] : models.filter(choice => choice.id === model || choice.aliases?.includes(model!))) : models;
+  if (defaultEffort && effort && !offered.some(choice => choice.efforts.includes(effort!))) {
     notes.add(`The default worker reasoning "${effort}" saved in Settings is not offered${model ? ` for model "${model}"` : ''} by this ChatGPT account, so workers use ChatGPT's current reasoning. Choose an available level in Settings → Agents & automation.`);
     effort = null;
   }
