@@ -1,0 +1,21 @@
+# Weekly, grouped dependency updates: one PR for all minor and patch updates of npm packages, one for
+# GitHub Actions. Major versions come one by one, because they can change behavior.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ['*']
