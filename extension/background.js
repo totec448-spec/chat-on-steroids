@@ -4244,6 +4244,18 @@ function successorChatBase(offered, source) {
 
 async function placeSuccessorChat(raw, tabId) {
   const id = commandMarkerId(raw && raw.id);
+  const placementError = error => error && typeof error.message === 'string' && error.message
+    ? error.message
+    : String(error);
+  const failPlacement = async reason => {
+    if (!id) return;
+    try {
+      await ackCommand(id, 'failed', reason, null, null, null);
+    } catch {
+      // ackCommand journals before transport. If local persistence itself fails, the command
+      // deadline remains the only truthful fallback; do not mint another opening attempt.
+    }
+  };
   if (id && raw.background === true) {
     const marker = `clf=${encodeURIComponent(id)}`;
     const model = commandModelSlug(raw.model);
@@ -4251,7 +4263,14 @@ async function placeSuccessorChat(raw, tabId) {
     const query = [marker];
     if (model) query.push(`model=${encodeURIComponent(model)}`);
     if (effort) query.push(`reasoning_effort=${encodeURIComponent(effort)}`);
-    const created = await createChatTab(`https://chatgpt.com/?${query.join('&')}#${marker}`, true);
+    let created;
+    try {
+      created = await createChatTab(`https://chatgpt.com/?${query.join('&')}#${marker}`, true);
+    } catch (error) {
+      await failPlacement(`successor_tab_create_failed: ${placementError(error)}`);
+      return;
+    }
+    // The tab exists and loads its marker: its page redeems the command, or the deadline reports it.
     await protectCreatedTab(created, id);
     return;
   }
@@ -4292,11 +4311,17 @@ async function placeSuccessorChat(raw, tabId) {
       const query = [marker];
       if (model) query.push(`model=${encodeURIComponent(model)}`);
       if (reasoningEffort) query.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
+      let created;
       try {
-        const created = await createChatTab(`${base}?${query.join('&')}#${marker}`, false, raw.active !== false);
+        created = await createChatTab(`${base}?${query.join('&')}#${marker}`, false, raw.active !== false);
+      } catch (error) {
+        await failPlacement(`successor_tab_create_failed: ${placementError(error)}`);
+        return;
+      }
+      try {
         await protectCreatedTab(created, id);
       } catch {
-        // Opening authority was spent. The command deadline reports an unsuccessful attempt.
+        // The tab exists and loads its marker: its page redeems the command, or the deadline reports it.
       }
       return;
     }
@@ -4304,12 +4329,14 @@ async function placeSuccessorChat(raw, tabId) {
   let home = null;
   try {
     home = await chrome.tabs.get(tabId);
-  } catch {
-    // The polling tab closed between its request and this reply. Its operation has spent
-    // opening authority, so the command deadline reports the unsuccessful placement.
+  } catch (error) {
+    await failPlacement(`successor_home_tab_unavailable: ${placementError(error)}`);
     return;
   }
-  if (!home || typeof home.windowId !== 'number') return;
+  if (!home || typeof home.windowId !== 'number') {
+    await failPlacement('successor_home_window_missing');
+    return;
+  }
   // Both a query and a fragment, matching the app's commandUrl(): ChatGPT rewrites its own URL
   // during boot and which of the two survives has changed between builds.
   const base = successorChatBase(raw.project, raw.homeConversationId);
@@ -4323,11 +4350,17 @@ async function placeSuccessorChat(raw, tabId) {
   // Directly after the chat it continues, so a handoff reads as one piece of work instead of a
   // tab appended to the far end of a long strip.
   if (typeof home.index === 'number') create.index = home.index + 1;
+  let created;
   try {
-    const created = await chrome.tabs.create(create);
+    created = await chrome.tabs.create(create);
+  } catch (error) {
+    await failPlacement(`successor_tab_create_failed: ${placementError(error)}`);
+    return;
+  }
+  try {
     await protectCreatedTab(created, id);
   } catch {
-    // Opening authority was spent. The command deadline reports an unsuccessful attempt.
+    // The tab exists and loads its marker: its page redeems the command, or the deadline reports it.
   }
 }
 
