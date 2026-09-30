@@ -2187,7 +2187,7 @@ var CLF_DOM = (() => {
     }, false);
   }
 
-  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null } = {}) {
+  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null } = {}) {
     try {
       const box = composer();
       if (!box || !box.isConnected || !stillCurrent() || generating() || stopButton()) return false;
@@ -2285,7 +2285,14 @@ var CLF_DOM = (() => {
             // The deadline bounds readiness, not an already-dispatched receipt.
             // Keep this same observer and exact send lifetime until the provider
             // publishes its identity; never click again because that is delayed.
-            if (acceptUserReceipt && timer !== null) { clearTimeout(timer); timer = null; }
+            if (acceptUserReceipt && timer !== null) {
+              clearTimeout(timer); timer = null;
+              // A caller may still bound the wait itself. Expiry never clicks again: it only
+              // ends this wait, so a row the page cannot recognise cannot hold its caller for
+              // the life of the document (#821). One last check keeps a receipt that is there.
+              if (Number.isFinite(receiptTimeoutMs) && receiptTimeoutMs > 0)
+                timer = setTimeout(() => { check(); finish(false); }, receiptTimeoutMs);
+            }
             try { button.click(); } catch { return finish(false); }
             check(); // Synchronous navigation/cancellation during click also re-proves ownership.
           };

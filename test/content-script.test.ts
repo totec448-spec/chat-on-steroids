@@ -150,6 +150,8 @@ interface Hook {
   streamRootKeys(): string[];
   /** How long the stop button must stay gone before content.js calls a turn finished. */
   TURN_SETTLE_MS: number;
+  /** How long an app-owned Send waits for its exact user row after the click. */
+  DESKTOP_RECEIPT_MS: number;
   /** Test seam for the no-visible-progress fallback. */
   STALL_MS: number;
   /** How long a failed Goal draft waits before it asks again. */
@@ -159,6 +161,7 @@ interface Hook {
   renderStreamEnabled(): boolean;
   setDesktopProjectInputForTest(claim: { id: string; owner: string } | null): void;
   desktopProjectInputForTest(): { id: string; owner: string } | null;
+  desktopInputBusyForTest(): boolean;
   setShowTimes(on: boolean): void;
   /** How long Overwrite leaves a user-driven scroll completely presentation-stable. */
   PRESENTATION_SCROLL_IDLE_MS: number;
@@ -323,6 +326,9 @@ async function harness(
   const nativeTimeout = window.setTimeout.bind(window);
   window.setTimeout = ((fn: () => void, ms?: number) => {
     if (holdSendDeadline && ms === 30000) return 0;
+    // An app-owned Send's receipt deadline (DESKTOP_RECEIPT_MS). Tests settle a receipt
+    // after the click on their own schedule; one that is about the deadline fires it.
+    if (ms === 120_000) return 0;
     // Native readiness now authorizes through an async app reply. A deadline must
     // expire after those microtasks, just as a real browser timer does.
     if (ms === 30000) return nativeTimeout(fn, 0);
@@ -1194,6 +1200,39 @@ describe('desktop input delivery and helper ownership', () => {
    * from the app: its first user row read back `[[COS_CONTEXT:19956]]\\ You are…`, so the send
    * was never recognised — no ACK, and no turn start or end for Goal or Loop to act on.
    */
+  /**
+   * #821: an app-owned Send whose row the page reads back differently never got a receipt, and
+   * native Send dropped its deadline after the click. The page held its input slot until reload,
+   * and the claim stayed open in the app, so the next message could not be delivered.
+   */
+  it('ends a receipt wait the page cannot recognise without a second Send, and frees the input slot', async () => {
+    const typed = 'Inspect the exact requested task';
+    let claims = 0;
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.fail || message.ack ? { ok: true }
+        : ++claims === 1 ? { input: claimed({ text: typed }) } : {} })
+    });
+    const sends = vi.fn(() => {
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      userTurn(live!.document, 'unrecognised-user', `${typed}, as the page wrote it back`);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', sends);
+    const held = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) =>
+      held(fn, ms === live!.hook.DESKTOP_RECEIPT_MS ? 0 : ms)) as typeof live.window.setTimeout;
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: false });
+    expect(sends).toHaveBeenCalledTimes(1);
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toEqual([]);
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.fail)).toEqual([
+      expect.objectContaining({ id: inputId, owner: 'input-owner', error: 'Native Send receipt was not confirmed.' })
+    ]);
+    // The page's input slot is free again: the next message waits only for this turn to end.
+    expect(live.hook.desktopInputBusyForTest()).toBe(false);
+    expect(claims).toBe(1);
+  });
+
   it('ACKs a fresh input whose user row the page stores Markdown-escaped', async () => {
     const typed = '[[COS_CONTEXT:1]]\nInspect #3 of the *exact* task_list [here](x).';
     const stored = '[[COS_CONTEXT:1]]\\\nInspect \\#3 of the \\*exact\\* task\\_list \\[here\\](x).';
