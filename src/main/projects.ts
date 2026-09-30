@@ -4,14 +4,14 @@ import { z } from 'zod';
 import { rawPromises as fs } from './rawfs.js';
 import { readDurable, writeDurableNow } from './durable.js';
 import { getConfig } from './config.js';
-import { resolvePath } from './sandbox.js';
+import { nativePathIdentity, resolvePath } from './sandbox.js';
 import { bindSessionProject, findSessionByConversation, getSession } from './session/store.js';
 import type { LocalProject } from '../shared/projects.js';
 
 const projectSchema = z.object({ id: z.string().uuid(), name: z.string().min(1).max(160), path: z.string().min(1).max(32768), createdAt: z.number().finite().nonnegative(), ungrouped: z.boolean().optional() });
 const catalogSchema = z.array(projectSchema).max(200);
 let mutations: Promise<unknown> = Promise.resolve();
-const samePath = (a: string, b: string) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+const samePath = (a: string, b: string) => nativePathIdentity(a) === nativePathIdentity(b);
 
 export async function listProjects(): Promise<LocalProject[]> {
   const raw = await readDurable<unknown>('projects');
