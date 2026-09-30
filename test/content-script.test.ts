@@ -15726,6 +15726,28 @@ describe('the context meter and automatic compaction', () => {
     expect(sends()).toBe(1);
   });
 
+  it.each([[120_000, true], [8 * 60_000, false]])('lets a local poll of %i ms finish before stopping an automatic source (compacts: %s)', async (pollMs, compacts) => {
+    // #825: long unit tests are polled with write_stdin, and one poll can run for five minutes.
+    // The automatic barrier gave up after 30 seconds, so a busy turn never compacted.
+    let pollEndsAt = 0;
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: live!.window.Date.now() < pollEndsAt ? 1 : 0 }),
+      compact: () => ({ ok: true, data: { token: 'receipt-token', prompt: 'Write the brief.',
+        ...automaticTicket('not-attempted') } })
+    });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'polling-source', []);
+    compactionFiber(section, () => [compactionCall(true)], () => []);
+    const stopped = vi.fn(() => stopGenerating(live!.document));
+    live.document.querySelector('[data-testid="stop-button"]')!.addEventListener('click', stopped);
+    const sends = watchSend(live.document);
+    pollEndsAt = live.window.Date.now() + pollMs;
+    await live.hook.startCompact(true);
+    expect(stopped).toHaveBeenCalledTimes(compacts ? 1 : 0);
+    expect(sends()).toBe(compacts ? 1 : 0);
+    if (!compacts) expect(live.document.querySelector('.clf-pill-text')?.textContent ?? '').toContain('has not confirmed receiving');
+  });
+
   it.each(['distinct-pre-row', 'same-request-running', 'same-request-code-pending'])('waits for another outstanding call beside an answered native call (%s)', async mode => {
     let received = false;
     live = await harness(undefined, {
