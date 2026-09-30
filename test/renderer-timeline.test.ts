@@ -4212,6 +4212,6 @@ it('opens the next chat at its end after the reader scrolled away from a sent me
   await select(second.id);
   expect(pane.scrollTop).toBe(pane.scrollHeight);
   // Its answer keeps growing: the reader who just opened it follows the end.
-  await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message', messageId: 'grown', message: text('A new answer') }]);
+  await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message', messageId: 'grown', message: text('A new answer'), final: false }]);
   expect(pane.scrollTop).toBe(pane.scrollHeight);
 });
