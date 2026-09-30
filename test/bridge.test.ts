@@ -2186,6 +2186,21 @@ describe('automatic compaction', () => {
     ]);
   });
 
+  it('hands out an explicitly requested Compact & resume for a chat whose tab the user closed', async () => {
+    // 2026-09-30, live on 2.1.22: the test chat's tab had been closed, so its automatic recovery
+    // was paused. The explicit Compact & resume was then dropped at handout without a word and
+    // expired ten minutes later as "it took too long". Pressing it is the user coming back.
+    await pair();
+    const conversationId = randomUUID();
+    const session = await createSession({ conversationId });
+    await request('POST', '/closed', { body: { conversationId, manual: true } });
+    expect((await getSession(session.id))?.browserRecoveryDismissedAt).toBeDefined();
+    await compactSession(session.id);
+    const handout = (await request('GET', '/status')).body.repairs
+      .filter((row: { conversationId: string }) => row.conversationId === conversationId);
+    expect(handout).toEqual([expect.objectContaining({ reason: 'compaction' })]);
+  });
+
   it('keeps the concrete pre-send failure and refuses a stale page abort of a newer ticket', async () => {
     await pair();
     const conversationId = randomUUID();

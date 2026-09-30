@@ -2392,7 +2392,8 @@ to renew the ordinary clock, and a healthy long Pro generation used to be swept 
 long". Captured/claimed phases and an unobserved selection keep the ordinary ten minutes.
 
 An explicit desktop compaction immediately uses the existing exact-tab recovery path, which can
-open a missing source while Chrome is already running. It may replace an unclaimed ordinary
+open a missing source while Chrome is already running. It also passes a user's earlier close of that tab: the
+close pauses only automatic repairs, and pressing Compact & resume is the return. It may replace an unclaimed ordinary
 repair, but cannot create a second browser action while another repair is already claimed.
 Every compaction reload rechecks its original continuation token and phase at handout and the
 browser action claim. Cancellation, replacement, source dispatch and completed capture revoke
