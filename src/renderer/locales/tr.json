@@ -1,5 +1,8 @@
 {
   "Jump to latest": "En yeniye git",
+  "Previous source": "Önceki kaynak",
+  "Next source": "Sonraki kaynak",
+  "{0} more sources were not recorded with this reply.": "Bu yanıtla birlikte {0} kaynak daha kaydedilmedi.",
   "Copy answer": "Yanıtı kopyala",
   "Export as Markdown": "Markdown olarak dışa aktar",
   "This answer": "Bu yanıt",

@@ -90,6 +90,12 @@ interface Reply {
   reset: boolean;
 }
 
+/** The server ended the connection before reading the whole request: a reset, or EPIPE on macOS. */
+function closedByServer(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code ?? '';
+  return code.startsWith('ECONN') || code === 'EPIPE';
+}
+
 function call(
   method: string,
   route: string,
@@ -118,7 +124,7 @@ function call(
     // A refused request may be cut off before its body is read. That is an answer too, and it has
     // to settle this promise: an ECONNRESET closes the socket, so the idle timeout below never fires.
     req.on('error', (error) => {
-      if ((error as NodeJS.ErrnoException).code?.startsWith('ECONN')) resolve({ status: 0, body: null, raw: '', headers: {}, continued, reset: true });
+      if (closedByServer(error)) resolve({ status: 0, body: null, raw: '', headers: {}, continued, reset: true });
       else reject(error);
     });
     req.setTimeout(10_000, () => req.destroy(new Error('the test request timed out')));
@@ -382,7 +388,7 @@ describe('the request body', () => {
         res.resume();
         res.on('end', () => resolve(res.statusCode ?? 0));
       });
-      req.on('error', (error) => { if ((error as NodeJS.ErrnoException).code?.startsWith('ECONN')) resolve(0); else reject(error); });
+      req.on('error', (error) => { if (closedByServer(error)) resolve(0); else reject(error); });
       req.write('{"id":');
     });
     expect(status).toBe(408);

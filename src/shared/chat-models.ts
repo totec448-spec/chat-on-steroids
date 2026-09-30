@@ -30,6 +30,24 @@ export function isProModel(model: string | null | undefined, effort?: ReasoningE
 export function isDeliberateEffort(effort?: ReasoningEffort | null): boolean {
   return effort === 'xhigh' || effort === 'max' || effort === 'ultra';
 }
+const normalizeChatModelName = (value: string): string =>
+  value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}.]/gu, '');
+/**
+ * Resolve a saved model value to one observed catalog entry.
+ *
+ * An exact execution id or lane alias wins. Otherwise a unique display-label match
+ * resolves — settings saved before lanes had catalog ids, and labels the picker itself
+ * shows (family "6" for gpt-6-pro), must round-trip or every saved default silently
+ * falls back. An ambiguous label resolves to nothing: guessing a lane is not a
+ * rounding decision.
+ */
+export function resolveChatModel(models: ChatModelOption[], value: string): ChatModelOption | undefined {
+  const exact = models.filter(choice => choice.id === value || choice.aliases?.includes(value));
+  if (exact.length) return exact.length === 1 ? exact[0] : undefined;
+  const name = normalizeChatModelName(value);
+  const matches = name ? models.filter(choice => normalizeChatModelName(choice.label) === name) : [];
+  return matches.length === 1 ? matches[0] : undefined;
+}
 /** Keep the selected generation intact; Pro is already a complete model label. */
 export function chatModelDisplayLabel(label: string, effort: ReasoningEffort, effortLabel: string): string {
   if (effort === 'pro') return /\bpro$/i.test(label) ? label : `${label.replace(/\s+Sol$/i, '')} Pro`;

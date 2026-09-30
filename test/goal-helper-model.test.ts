@@ -29,6 +29,18 @@ it("falls back to ChatGPT's current selection for a saved model the account no l
   expect(goalHelperSelection()).toEqual({ model: null, reasoningEffort: null });
 });
 
+it('resolves a saved display label to its unique observed family', () => {
+  state.models.push({ id: 'gpt-6-pro', label: '6', efforts: ['pro'] });
+  state.goal = { helperModel: '6', helperReasoning: 'pro' };
+  expect(goalHelperSelection()).toEqual({ model: 'gpt-6-pro', reasoningEffort: 'pro' });
+});
+
+it('keeps rejecting a display label shared by several families', () => {
+  state.models.push({ id: 'gpt-5-5-pro', label: '5.5', efforts: ['pro'] });
+  state.goal = { helperModel: '5.5', helperReasoning: 'high' };
+  expect(goalHelperSelection()).toEqual({ model: null, reasoningEffort: 'high' });
+});
+
 it('keeps an offered model but drops a reasoning level it does not have', () => {
   state.goal = { helperModel: 'gpt-5-5-thinking', helperReasoning: 'xhigh' };
   expect(goalHelperSelection()).toEqual({ model: 'gpt-5-5-thinking', reasoningEffort: null });

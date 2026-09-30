@@ -17,6 +17,8 @@ const CATALOG = /(^|\/)(locales\/[^/]+\.json|_locales\/[^/]+\/messages\.json)$/;
 const UI = /^(src\/renderer\/(?!locales\/)|extension\/(popup|options|sidepanel)[^/]*\.(html|css|js)$|extension\/content\.css$)/;
 const STRAY = /(^|\/)(\.DS_Store|Thumbs\.db|npm-debug\.log[^/]*|[^/]+\.log|[^/]+\.orig|[^/]+\.rej)$|^docs\/(worklog|notes|scratch)[^/]*$/i;
 
+/** Files that define contracts between processes, the extension and stored data; AGENTS.md maps them. */
+const CONTRACT = /^(src\/preload\/index\.ts|src\/main\/(ipc|plugins-ipc)\.ts|src\/shared\/[^/]+\.ts)$/;
 /** The template's headings and the names contributors already use for the same thing. */
 const HEADINGS = {
   why: ['why', 'problem', 'root cause', 'cause', 'summary', 'motivation'],
@@ -39,10 +41,11 @@ function section(body, key) {
 }
 
 /**
- * @param {{ body: string, files: Array<{ path: string, changes: number }> }} pr
+ * @param {{ body: string, files: Array<{ path: string, changes: number }>, draft?: boolean,
+ *   fromFork?: boolean, maintainerCanModify?: boolean }} pr
  * @returns {string[]} what is missing, in words a contributor can act on; empty when it passes
  */
-export function checkPullRequest({ body, files }) {
+export function checkPullRequest({ body, files, draft = false, fromFork = false, maintainerCanModify = true }) {
   const problems = [];
   const text = String(body || '');
   if (!/(^|[\s(])#\d+\b/.test(text.replace(/<!--[\s\S]*?-->/g, ''))) {
@@ -67,10 +70,21 @@ export function checkPullRequest({ body, files }) {
     }
   }
 
-  if (files.some((file) => UI.test(file.path)) && !/!\[[^\]]*\]\(|<img\s/i.test(section(text, 'screenshots'))) {
-    problems.push('This changes the interface: add before and after screenshots under "## Screenshots".');
+  if (files.some((file) => UI.test(file.path)) && !/!\[[^\]]*\]\(|<img\s/i.test(section(text, 'screenshots')) &&
+      !/^no visual change:\s*\S.{10,}/im.test(text)) {
+    problems.push('This changes the interface: add before and after screenshots under "## Screenshots", or write "No visual change: <reason>" when nothing on screen changes.');
   }
 
+  if (files.some((file) => CONTRACT.test(file.path)) && !files.some((file) => file.path === 'AGENTS.md') &&
+      !/^no contract change:\s*\S.{10,}/im.test(text)) {
+    problems.push('This changes a shared contract (preload, IPC or src/shared): update AGENTS.md in the same PR, or write "No contract change: <reason>".');
+  }
+  if (fromFork && !maintainerCanModify) {
+    problems.push('Turn on "Allow edits by maintainers" so small fixes can be finished on this PR.');
+  }
+  if (/\bdepends on\s+#\d+/i.test(text) && !draft) {
+    problems.push('This PR depends on another one: keep it a draft until that PR is merged, then rebase on main.');
+  }
   const changed = code.reduce((sum, file) => sum + file.changes, 0);
   if (changed > MAX_CHANGED_LINES && !/^large change:\s*\S.{10,}/im.test(text)) {
     problems.push(`${changed} changed lines outside tests and translations (limit ${MAX_CHANGED_LINES}). Split it into smaller PRs, or add a line "Large change: <reason>".`);
@@ -91,7 +105,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH ?? '', 'utf8'));
   const pr = event.pull_request;
   if (!pr) { console.log('Not a pull request; nothing to check.'); process.exit(0); }
-  const problems = checkPullRequest({ body: pr.body ?? '', files: changedFiles(`origin/${pr.base.ref}`) });
+  const problems = checkPullRequest({
+    body: pr.body ?? '', files: changedFiles(`origin/${pr.base.ref}`), draft: pr.draft === true,
+    fromFork: pr.head?.repo?.full_name !== pr.base?.repo?.full_name, maintainerCanModify: pr.maintainer_can_modify !== false
+  });
   if (!problems.length) { console.log('Pull request checklist passed.'); process.exit(0); }
   console.log('This pull request is not ready for review yet. See CONTRIBUTING.md.\n');
   for (const problem of problems) {

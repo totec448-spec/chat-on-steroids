@@ -16,6 +16,7 @@ import { currentLanguage, t, ui } from './i18n.js';
 const ICONS: Readonly<Record<string, string>> = {
   'i-agents': 'robot',
   'i-arrow-down': 'arrow-down',
+  'i-arrow-left': 'arrow-left',
   'i-arrow-right': 'arrow-right',
   'i-back': 'arrow-left',
   'i-ban': 'prohibit',
@@ -176,7 +177,7 @@ export function shortAgo(atMs: number | null): string {
 
 /** A clock time for one event in a timeline. */
 export function clockTime(atMs: number): string {
-  return new Date(atMs).toLocaleTimeString();
+  return new Date(atMs).toLocaleTimeString(currentLanguage());
 }
 
 /** "1.2k", "3.4M" — for token and character counts that get large. */

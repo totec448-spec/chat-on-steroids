@@ -21,6 +21,7 @@ import type {
   AgentMessage,
   AssetRef,
   CallAttribution,
+  SessionChange,
   SessionEvent,
   SessionOrigin,
   SessionSummary,
@@ -162,19 +163,25 @@ let lastActiveSessionId: string | null = null;
  */
 const REOPEN_NOTICE_MS = 60_000;
 
-const listeners = new Set<() => void>();
+const listeners = new Set<(change: SessionChange) => void>();
 let notifyTimer: NodeJS.Timeout | null = null;
+/** Every local session written during the current burst; one push names all of them. */
+const changedSessions = new Set<string>();
 
-export function onSessionChange(listener: () => void): () => void {
+export function onSessionChange(listener: (change: SessionChange) => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
-function notifyChanged(): void {
+/** Publishes the exact sessions whose durable projection this recorder just wrote. */
+export function notifyChanged(...sessionIds: string[]): void {
+  for (const id of sessionIds) changedSessions.add(id);
   if (notifyTimer) return;
   notifyTimer = setTimeout(() => {
     notifyTimer = null;
-    for (const listener of listeners) listener();
+    const change: SessionChange = { sessionIds: [...changedSessions] };
+    changedSessions.clear();
+    for (const listener of listeners) listener(change);
   }, 400);
   notifyTimer.unref?.();
 }
@@ -410,7 +417,7 @@ async function initializeSessionForConversation(
     }
   }
   lastActiveSessionId = summary.id;
-  notifyChanged();
+  notifyChanged(summary.id);
   return summary.id;
 }
 
@@ -421,7 +428,7 @@ async function promoteGenericTitle(sessionId: string, title?: string): Promise<v
   const summary = await getSession(sessionId);
   if (!summary || summary.title !== 'ChatGPT session') return;
   await renameSession(sessionId, next, 'fallback');
-  notifyChanged();
+  notifyChanged(sessionId);
 }
 
 /** Provider titles may arrive before message history, after a receipt, or after restart. */
@@ -429,7 +436,7 @@ async function promoteConversationTitle(sessionId: string, title?: string, conve
   const next = title?.trim();
   if (!next) return;
   await renameSession(sessionId, next, 'provider', conversationId);
-  notifyChanged();
+  notifyChanged(sessionId);
 }
 
 /**
@@ -480,7 +487,7 @@ async function applyOrigin(sessionId: string, conversationId: string): Promise<v
     if (summary.origin.kind === 'worker' && origin.kind === 'worker' &&
         summary.origin.agentId === origin.agentId && !summary.origin.fromSessionId && origin.fromSessionId) {
       await setSessionOrigin(sessionId, { ...summary.origin, fromSessionId: origin.fromSessionId }, summary.title);
-      notifyChanged();
+      notifyChanged(sessionId);
     }
     return;
   }
@@ -488,7 +495,7 @@ async function applyOrigin(sessionId: string, conversationId: string): Promise<v
     logWarn(`could not name the ${origin.kind} session: ${err.message}`)
   );
   logInfo(`session ${sessionId} named for the ${origin.kind} chat this app opened`);
-  notifyChanged();
+  notifyChanged(sessionId);
 }
 
 /** What a session's own log already says, for a conversation being picked up again. */
@@ -598,7 +605,7 @@ async function ensureUnattributedSession(): Promise<string | null> {
     });
     unattributedSessionId = summary.id;
     lastActiveSessionId = summary.id;
-    notifyChanged();
+    notifyChanged(summary.id);
     return summary.id;
   })();
   unattributedInitialization = initializing;
@@ -894,6 +901,8 @@ export async function repairDeterministicAttribution(affected?: ReadonlySet<stri
   if (!recordingEnabled()) return { sessions: 0, calls: 0 };
   let repairedSessions = 0;
   let repairedCalls = 0;
+  /** The rewritten source and every target session gained or lost transcript rows. */
+  const changed = new Set<string>();
 
   for (const summary of await indexedSessions()) {
     if (summary.conversationId !== null || summary.title !== 'Unattributed activity') continue;
@@ -1027,13 +1036,15 @@ export async function repairDeterministicAttribution(affected?: ReadonlySet<stri
     if (repaired.retained === 0 && lastActiveSessionId === summary.id) lastActiveSessionId = firstTargetSessionId;
     if (!repaired.deleted && unattributedSessionId === null) unattributedSessionId = summary.id;
     repairedSessions += 1;
+    changed.add(summary.id);
+    for (const id of destinations.values()) changed.add(id);
     logInfo(
       `repaired ${tools.length - unknown.length} deterministically attributed call(s) from session ${summary.id}; ` +
         `${repaired.retained} remain unknown`
     );
   }
 
-  if (repairedSessions > 0) notifyChanged();
+  if (repairedSessions > 0) notifyChanged(...changed);
   return { sessions: repairedSessions, calls: repairedCalls };
 }
 
@@ -1456,7 +1467,7 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       // A process that exited during recorder admission resolves this same promise.
       void evidence.processCompletion.then(completion => {
         const work = completeProcessCall(sessionId, call.callId, completion)
-          .then(() => notifyChanged())
+          .then(() => notifyChanged(sessionId))
           .catch(() => logWarn('session recorder could not store process completion'));
         pendingRecordings.add(work);
         void work.then(() => pendingRecordings.delete(work));
@@ -1470,7 +1481,7 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       eventAgent,
       target.turnId
     ));
-    notifyChanged();
+    notifyChanged(sessionId);
     try {
       const completed = target.conversationId ? await readCompletedFinal(sessionId, target.conversationId) : null;
       const filed = await getSession(sessionId);
@@ -1758,6 +1769,8 @@ export interface ChatObservation {
   providerMessageId?: string;
   /** Server-reported model of an assistant reply; see SessionEvent.resolvedModel. */
   resolvedModel?: string;
+  /** Sources an assistant reply cites inline; see SessionEvent.references. */
+  references?: import('../../shared/session.js').MessageReference[];
   /** Exact non-secret provider asset id for a native generated image. */
   providerAssetId?: string;
   providerRole?: 'tool' | 'assistant';
@@ -2088,6 +2101,7 @@ async function recordSupersededMessages(
           state,
           ...(item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
           ...(item.resolvedModel ? { resolvedModel: item.resolvedModel } : {}),
+          ...(item.references ? { references: item.references } : {}),
           final: state === 'final'
         },
         { preferTime: item.authoredTime === true }
@@ -2098,7 +2112,7 @@ async function recordSupersededMessages(
     }
     if (written?.changed) stored++;
   }
-  if (stored > 0) notifyChanged();
+  if (stored > 0) notifyChanged(sessionId);
   return stored;
 }
 
@@ -2236,6 +2250,7 @@ async function recordChatObservationsNow(
           final: state === 'final',
           ...(item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
           ...(item.resolvedModel ? { resolvedModel: item.resolvedModel } : {}),
+          ...(item.references ? { references: item.references } : {}),
           ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
         }, { preferTime: item.authoredTime === true, work: item.activeNow === true });
         const canonicalTurn = written.event.turnId;
@@ -2483,7 +2498,7 @@ async function recordChatObservationsNow(
     stored++;
   }
   if (recoveredGoalSeen && live) live.lastTurnOutcome = 'completed';
-  notifyChanged();
+  notifyChanged(sessionId);
   return { sessionId, stored, activity, goalCandidates };
 }
 
@@ -2497,7 +2512,7 @@ export async function recordNote(sessionId: string, text: string, continuation?:
     message: await storeText(sessionId, text, 4000),
     ...(continuation ? { continuation } : {})
   }).catch(() => undefined);
-  notifyChanged();
+  notifyChanged(sessionId);
 }
 
 /**
@@ -2532,7 +2547,7 @@ export async function recordProgress(
     message: await storeText(sessionId, text, 4000)
   }).catch(() => null);
   if (!event) return null;
-  notifyChanged();
+  notifyChanged(sessionId);
   return anchor ?? { seq: event.seq, time };
 }
 
@@ -2578,7 +2593,7 @@ export async function recordAgentMessage(
       message: await storeText(sessionId, message.text, MAX_MESSAGE_CHARS),
       delivery
     });
-    notifyChanged();
+    notifyChanged(sessionId);
   } catch (err) {
     logWarn(`session recorder could not store an agent message: ${(err as Error).message}`);
   }
@@ -2598,7 +2613,7 @@ export async function recordHandoff(
     chars,
     reason
   });
-  notifyChanged();
+  notifyChanged(sessionId);
 }
 
 /**
@@ -2656,7 +2671,7 @@ export async function closeConversation(conversationId: string, dismissBrowserRe
   }
   conversations.delete(conversationId);
   await endSession(live.sessionId, dismissBrowserRecovery, conversationId);
-  notifyChanged();
+  notifyChanged(live.sessionId);
 }
 
 /**
@@ -2694,7 +2709,7 @@ export function rebindConversation(sessionId: string, fromConversationId: string
     pageTools: new Map()
   });
   lastActiveSessionId = sessionId;
-  notifyChanged();
+  notifyChanged(sessionId);
 }
 
 /**
@@ -2760,6 +2775,7 @@ export function resetRecorderForTests(): void {
   if (notifyTimer) {
     clearTimeout(notifyTimer);
     notifyTimer = null;
+    changedSessions.clear();
   }
 }
 

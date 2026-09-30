@@ -2771,6 +2771,29 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     expect(revisions.map(entry => entry.resolvedModel)).toEqual([undefined, 'gpt-5-6-thinking', undefined]);
   });
 
+  it('passes a reply’s cited sources on, re-emits when they arrive, and drops malformed ones', async () => {
+    live = await harness();
+    const section = assistantTurn(live.document, 'cited-turn', []);
+    const message = {
+      messageId: 'assistant:working:exchange:1787165100127', rawMessageId: 'provider-cited',
+      role: 'assistant', stable: true, createTime: 1_787_165_100_127,
+      rawText: 'Cited answer.', renderedHtml: '<p>Cited answer.</p>'
+    };
+    const good = [{ index: 0, sources: [{ title: 'A paper', url: 'https://arxiv.org/abs/2609.00001', source: 'arXiv', date: 1790553600000, snippet: 'A summary.' }, { title: 'Hostile', url: 'javascript:alert(1)' }] }];
+    const bad = [{ index: -1, sources: [{ title: 'x', url: 'https://example.org' }] }, { index: 1, sources: [{ url: 'data:text/html,x' }] }];
+    for (const references of [undefined, good, bad]) {
+      await bindFiberTurns([{ section, turn: { turnId: 'cited-turn', messages: [{ ...message, ...(references ? { references } : {}) }] } }]);
+      await live.hook.flush();
+      await settle();
+    }
+    const revisions = emitted(live.sent, 'assistant_message').map(entry => entry.event);
+    expect(revisions.map(entry => entry.references)).toEqual([
+      undefined,
+      [{ index: 0, sources: [{ title: 'A paper', url: 'https://arxiv.org/abs/2609.00001', source: 'arXiv', date: 1790553600000, snippet: 'A summary.' }] }],
+      undefined
+    ]);
+  });
+
   it('adds the model from the send request to the user message, also when it arrives after the message', async () => {
     live = await harness();
     const messageId = '2bd27eea-290d-444c-bc46-1487f143d603', other = '3cd27eea-290d-444c-bc46-1487f143d604';
@@ -8060,6 +8083,26 @@ describe('a stop button that goes missing while the turn is still running', () =
         recoverable: true
       })
     );
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({
+      assistantError: true
+    });
+    notice.remove();
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({
+      assistantError: false
+    });
+  });
+
+  it('treats an already-visible unowned transport error as current until ownership proves otherwise', async () => {
+    live = await harness(undefined, undefined, document => {
+      const notice = document.createElement('div');
+      notice.setAttribute('role', 'alert');
+      notice.textContent = 'A network error occurred. Please check your connection and try again.';
+      document.body.append(notice);
+    });
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({
+      turnId: null,
+      assistantError: true
+    });
   });
 
   /**
@@ -8093,6 +8136,56 @@ describe('a stop button that goes missing while the turn is still running', () =
       await settle();
     }
     expect(live.sent.some((message) => message.type === 'reload_owned_chat')).toBe(false);
+  });
+
+  /**
+   * #786: a non-Pro turn at Extra high or above can think for more than ten minutes without
+   * changing the page. While its exact liveness holds — this route, native Stop, this
+   * document's section for it and ChatGPT's own unfinished Fiber turn for that section — ten
+   * quiet minutes are not a stall. The moment that proof is gone, the already-expired
+   * ordinary fallback is due at once, without another ten minutes.
+   */
+  const stallText = 'No visible progress for ten minutes. The app could not confirm that this turn finished.';
+  const stalls = (harnessed: Harness): number =>
+    emitted(harnessed.sent, 'chat_error').filter(entry => entry.event.text === stallText).length;
+  async function liveReasoningTurn(effort: string, id: string): Promise<HTMLElement> {
+    live = await harness();
+    let selected = { model: 'GPT-5.6 Sol', reasoningEffort: effort };
+    (live.window as any).CLF_DOM.visibleModelSelection = () => selected;
+    userTurn(live.document, `${id}-user`, 'think about this for a long time');
+    startGenerating(live.document, { send: false });
+    const section = assistantTurn(live.document, id, []);
+    live.hook.observe();
+    await settle();
+    // Unfinished: the page model has the turn's thinking and no end message.
+    await bindFiberTurns([{ section, turn: { turnId: id, endMessageId: null,
+      activities: [{ messageId: `${id}-thought`, label: 'Weighing the approaches', order: 0 }] } }]);
+    // The picker moving on after Send is the next turn's choice, not this one's.
+    selected = { model: 'GPT-5.6 Sol', reasoningEffort: effort === 'high' ? 'xhigh' : 'high' };
+    return section;
+  }
+
+  it.each(['xhigh', 'max', 'ultra'])('keeps a live %s turn unstalled at ten minutes while its exact Fiber turn runs', async effort => {
+    const section = await liveReasoningTurn(effort, `deliberate-${effort}`);
+    live!.advance(live!.hook.STALL_MS + 1);
+    live!.hook.observe();
+    await settle();
+    expect(stalls(live!), `a live ${effort} turn was reported stalled`).toBe(0);
+
+    // The page model no longer holds this turn: the exact proof is gone and the stall is due now.
+    section.removeAttribute('data-clf-fiber-turn');
+    await replyFiber([], []);
+    live!.hook.observe();
+    await settle();
+    expect(stalls(live!)).toBe(1);
+  });
+
+  it('still reports a live high turn stalled at ten minutes, even after the picker moves to xhigh', async () => {
+    await liveReasoningTurn('high', 'ordinary-high');
+    live!.advance(live!.hook.STALL_MS + 1);
+    live!.hook.observe();
+    await settle();
+    expect(stalls(live!)).toBe(1);
   });
 
   /**
@@ -16042,6 +16135,34 @@ app-owned prompt`,
     ]);
   });
 
+  /**
+   * #787: the answer remounted under another assistant id, so the mounted shape has no
+   * terminal. The app captured the brief from its recorder when the anchor was bound; the page
+   * accepts that capture and neither re-binds nor sends a brief of its own.
+   */
+  it('accepts the app capture from the bound anchor when the mounted answer lost its terminal', async () => {
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      activity: activityReply,
+      compact: (message) => {
+        if (message.sourceMessageId) return { ok: true, data: { bound: true, stored: true, job: null } };
+        return { ok: false, error: 'unexpected_compact_shape' };
+      }
+    });
+    const [prompt, answer] = splitMarkedTurns();
+    const remounted = { ...answer, endMessageId: 'assistant-final-raw' };
+    const bindings = [
+      { section: assistantTurn(live.document, 'turn-prompt', []), turn: prompt },
+      { section: assistantTurn(live.document, 'turn-answer', []), turn: remounted }
+    ];
+    await bindFiberTurns(bindings);
+    await bindFiberTurns(bindings);
+
+    expect(live.sent.filter((message) => message.type === 'compact').map((message) => ({
+      sourceMessageId: message.sourceMessageId,
+      summary: message.summary
+    }))).toEqual([{ sourceMessageId: 'user-source-raw', summary: undefined }]);
+  });
+
   it('waits while the turn after the marked prompt is still being written', async () => {
     live = await harness(`https://chatgpt.com/c/${CHAT}`, {
       activity: activityReply,
@@ -16865,6 +16986,26 @@ describe('the goal loop', () => {
     wakes[1]?.();
     await settle();
     expect(drafts(live)).toHaveLength(2);
+  });
+
+  it('stands aside without a stopped card when another tab owns this turn\'s Goal draft', async () => {
+    // The app hides another tab's draft from this one (goalViewFor), so an observer shows no
+    // Goal run at all. Its refused request must not claim the loop stopped: the owning tab is
+    // working, and on 2026-09-30 the other tab's draft went on to report "goal met".
+    const pending = { replyId: 'stable-final', turnId: 'g-original', eventSeq: 12, acceptedAt: 1000 };
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
+        goal: { enabled: true, own: true, hasKey: true, model: MODEL, pending, draft: null } } }),
+      goal_draft: () => ({ ok: false, status: 409,
+        data: { error: 'goal_owned_elsewhere', message: 'Another tab is already handling Goal Mode for this chat.' } })
+    });
+    for (let n = 0; n < 5; n++) { await live.hook.pullActivity(); await settle(); }
+    // The claim is kept, so repeated pulls do not ask again.
+    expect(drafts(live)).toHaveLength(1);
+    live.hook.injectStage();
+    expect(live.document.querySelector('.clf-stage-title')?.textContent ?? '').not.toBe('The goal loop stopped');
+    expect(live.document.querySelector('.clf-stage-detail')?.textContent ?? '').not.toContain('Another tab');
   });
 
   it.each(['native', 'compaction'] as const)('recollects the same recovery ticket after a delayed retry meets temporary %s work', async busyKind => {

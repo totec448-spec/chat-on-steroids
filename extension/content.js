@@ -604,6 +604,12 @@
     if (stagePanel?.root.dataset.clfStageKind === 'wait') removeStagePanel();
   }
   let stallReported = false;
+  /**
+   * The exact native model/effort of the open generation, keyed by its local turn id. Frozen at
+   * that generation's first exact picker reading: a later picker change belongs to the next
+   * turn and never rewrites the stall policy of this one (#786).
+   */
+  let turnSelection = null;
   // Intent only. Later exact MCP work can prove that this request did not stop the turn.
   let stopRequestedAt = 0;
   let recoveryStopping = false;
@@ -2040,11 +2046,7 @@
     // model proof either; never treat that absence as proof of a non-Pro turn. Read the
     // existing passive picker authority, without opening it or trusting a cached selection.
     const selection = CLF_DOM.visibleModelSelection?.();
-    const model = (selection?.model || '').trim().toLowerCase().replace(/\s+/g, '-');
-    // Exact aliases match shared/chat-models.ts::isProModel (the extension is plain JS).
-    const pro = /^(?:astra|gpt-?6-astra|gpt-?\d+(?:[.-]\d+)?-pro)$/.test(model) ||
-      (/^(?:gpt-?6(?:\.0)?|gpt-?5\.6(?:-sol)?)$/.test(model) && selection?.reasoningEffort === 'pro');
-    if (!fiberPresent && !unwitnessedGeneration && model && !pro && answerText(turn).length > 0) return { outcome: 'completed' };
+    if (!fiberPresent && !unwitnessedGeneration && selection?.model && !proSelection(selection) && answerText(turn).length > 0) return { outcome: 'completed' };
     if (turnStalled()) {
       return {
         outcome: 'stalled',
@@ -2061,6 +2063,32 @@
    */
   function turnStalled() {
     return turnStartedAt > 0 && Date.now() - lastChangeAt > STALL_MS;
+  }
+
+  /** Exact aliases match shared/chat-models.ts::isProModel (the extension is plain JS). */
+  function proSelection(selection) {
+    const model = (selection?.model || '').trim().toLowerCase().replace(/\s+/g, '-');
+    return /^(?:astra|gpt-?6-astra|gpt-?\d+(?:[.-]\d+)?-pro)$/.test(model) ||
+      (/^(?:gpt-?6(?:\.0)?|gpt-?5\.6(?:-sol)?)$/.test(model) && selection?.reasoningEffort === 'pro');
+  }
+
+  /**
+   * A non-Pro generation sent at xhigh/max/ultra that is provably still running (#786): this
+   * route, native Stop, this document's own section for the generation, and ChatGPT's Fiber
+   * turn for that exact section with no end. Such a turn can think for longer than STALL_MS
+   * without changing the page, and reporting it stalled gets it reloaded mid-thought. Every
+   * clause is re-read on each tick, so losing any one of them makes the ordinary stall due at
+   * once; the app's bounded silence window remains the backstop for a turn that never ends.
+   */
+  function deliberateTurnLive() {
+    const selected = turnSelection?.turnId === turnId ? turnSelection : null;
+    // Exact efforts match shared/chat-models.ts::isDeliberateEffort.
+    if (!generating || !turnId || stopRequestedAt || !selected || proSelection(selected) ||
+        !['xhigh', 'max', 'ultra'].includes(selected.reasoningEffort)) return false;
+    if (!conversationId || CLF_DOM.conversationId() !== conversationId || !CLF_DOM.generating()) return false;
+    const owner = currentGenerationOwner();
+    const native = owner && localGenerationOf(owner.pageTurn) === turnId ? fiberTurnFor(owner.pageTurn) : null;
+    return Boolean(native && !native.endMessageId && native.conversationId === conversationId);
   }
 
   /** The turn section a node is rendered in, or null. */
@@ -2619,6 +2647,8 @@
     // apart in the same tick. At millisecond resolution they tie, and a tie read as "this
     // turn's" — so an undismissed banner from an earlier failure could fail the next turn,
     // which is the exact thing that comparison exists to prevent.
+    if (generating && turnId && turnSelection?.turnId !== turnId && modelSelection &&
+        !modelCatalogBusy && !desktopInputBusy && !bootstrapModelRestoreBusy) turnSelection = { turnId, ...modelSelection };
     const visibleErrors = CLF_DOM.errors();
     for (const error of visibleErrors) {
       if (!errorFirstSeen.has(error.node)) errorFirstSeen.set(error.node, turnId);
@@ -2710,7 +2740,7 @@
       // generic stall, including when it appears after a long quiet run.
       const thinkingFailure = quietOutcome?.reason === 'thinking_failed' || visibleErrors.some(
         error => error.reason === 'thinking_failed' && localErrorGeneration(error) === turnId && !isStale(error.node));
-      if (!thinkingFailure && !stallReported && Date.now() - lastChangeAt > STALL_MS) {
+      if (!thinkingFailure && !stallReported && Date.now() - lastChangeAt > STALL_MS && !deliberateTurnLive()) {
         stallReported = true;
         emit({
           kind: 'chat_error',
@@ -3236,6 +3266,31 @@
 
   const cap = (value, max) => (typeof value === 'string' && value.length > 0 ? value.slice(0, max) : null);
 
+  /** A reply's cited sources as the page reader sent them: bounded, http(s) links only, else dropped. */
+  function readReferences(raw) {
+    if (!Array.isArray(raw)) return null;
+    const out = [];
+    const indexes = new Set();
+    for (const entry of raw.slice(0, 64)) {
+      if (!entry || typeof entry !== 'object' || !Number.isInteger(entry.index) || entry.index < 0 || entry.index > 9999) continue;
+      if (indexes.has(entry.index) || !Array.isArray(entry.sources)) continue;
+      const sources = [];
+      for (const source of entry.sources.slice(0, 12)) {
+        const url = source && typeof source.url === 'string' && source.url.length <= 2000 && /^https?:\/\/\S+$/i.test(source.url) ? source.url : null;
+        if (!url) continue;
+        const title = cap(source.title, 300) || url;
+        const name = cap(source.source, 80);
+        const snippet = cap(source.snippet, 300);
+        const date = typeof source.date === 'number' && Number.isFinite(source.date) && source.date > 0 && source.date < 1e13 ? Math.round(source.date) : 0;
+        sources.push({ title, url, ...(name ? { source: name } : {}), ...(date ? { date } : {}), ...(snippet ? { snippet } : {}) });
+      }
+      if (!sources.length) continue;
+      indexes.add(entry.index);
+      out.push({ index: entry.index, sources });
+    }
+    return out.length ? out : null;
+  }
+
   function fiberBusyCaption(label) {
     const plain = String(label || '').toLowerCase().replace(/[.…\s]+$/, '').trim();
     return FIBER_BUSY_CAPTIONS.has(plain) || FIBER_TIMER_CAPTION.test(plain);
@@ -3371,6 +3426,7 @@
             : null,
         ...(entry.role === 'assistant' && typeof entry.resolvedModel === 'string' &&
           /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(entry.resolvedModel) ? { resolvedModel: entry.resolvedModel } : {}),
+        ...(entry.role === 'assistant' && readReferences(entry.references) ? { references: readReferences(entry.references) } : {}),
         rawText,
         ...(attachments.length ? { attachments } : {}),
         renderedHtml,
@@ -4418,7 +4474,8 @@
         // claim is different and fails closed instead of choosing either generation.
         const signature =
           `${state}\u0000${message.rawText}\u0000${message.renderedHtml}\u0000${owner}` +
-          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}\u0000${message.resolvedModel || ''}`;
+          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}\u0000${message.resolvedModel || ''}` +
+          `\u0000${message.references ? JSON.stringify(message.references) : ''}`;
         if (priorMessage?.signature === signature) continue;
         messagesReported.set(message.messageId, { signature, owner, conflicted: ownerConflict, text: message.rawText });
         if (state === 'streaming' && owner && priorMessage?.text !== message.rawText && freshPublication) noteTurnProgress(owner);
@@ -4430,6 +4487,7 @@
           messageId: message.messageId,
           providerMessageId: message.rawMessageId,
           ...(message.resolvedModel ? { resolvedModel: message.resolvedModel } : {}),
+          ...(message.references ? { references: message.references } : {}),
           ...(message.createTime ? { authoredAt: message.createTime } : {}),
           turnId: localOwner || undefined,
           text: message.rawText,
@@ -9589,6 +9647,14 @@
       ) + (marked.answer?.calls || []).filter(call => call?.answered === true).length)
     });
     if (!bound || bound.ok !== true) return continuationRefused(bound) ? 'settled' : false;
+    // The app captured the brief from its recorder's exact response to this anchor, which
+    // outranks whatever answer shape is mounted now (#787).
+    if (bound.data?.stored === true) {
+      if (bound.data.job) job = bound.data.job;
+      localError = '';
+      renderControl();
+      return 'committed';
+    }
     // The answer turn, not the prompt's — see answerTurnFor. Its calls are the ones that have
     // to be finished, too: a brief cut while the compaction turn is still running a tool
     // describes a machine that is still changing.
@@ -10077,6 +10143,13 @@
         // cancelled queue can later collect the still-owed durable Goal turn.
         goalTurnId = null;
         goalTicketId = null;
+        setGoalPhase('');
+        return;
+      }
+      // Another tab showing this chat owns the turn's draft, and the app shows that draft only
+      // there. Keep the claim so this page does not ask again, and show no run of its own:
+      // a stopped card here said the loop had ended while the owning tab went on working.
+      if (failure.error === 'goal_owned_elsewhere') {
         setGoalPhase('');
         return;
       }
@@ -12345,11 +12418,22 @@
       }
       // Popup diagnostics. Ids and counters only — no prose, no transcript, no page text.
       if (message.type === 'clf-page-status') {
+        const assistantError = CLF_DOM.errors().some(error => {
+          if (error.recoverable !== true || isStale(error.node)) return false;
+          const owner = localErrorGeneration(error);
+          // Unknown ownership is conservative evidence that the current page is still broken.
+          // Only a concrete different generation proves this is an old historical failure.
+          return !turnId || owner === null || owner === turnId;
+        });
         sendResponse({
           ok: true,
           // ChatGPT's own account that a response is streaming right now, as opposed to the
           // recorder's `generating`, which also holds while a turn waits on a local tool.
           streaming: CLF_DOM.generating(),
+          // Only the current recorder generation's still-visible recoverable transport error.
+          // Historical failed turns can remain mounted in the DOM and must not authorize a
+          // reload of a newer response.
+          assistantError,
           recorderVersion: RECORDER_VERSION,
           runId: RUN_ID,
           conversationId,
