@@ -2104,6 +2104,25 @@ describe('automatic compaction', () => {
     expect(after.body.repairs?.some((row: { token: string }) => row.token === repair.token)).toBe(false);
   });
 
+  it('says an app-started Compact & resume reloaded its chat to send the request, in a row naming that chat', async () => {
+    await pair();
+    const conversationId = randomUUID();
+    const session = await createSession({ conversationId });
+    await compactSession(session.id);
+    const handout = (await request('GET', '/status')).body.repairs
+      .find((row: { conversationId: string }) => row.conversationId === conversationId);
+    expect(handout).toMatchObject({ reason: 'compaction' });
+    await request('POST', '/repairs/claim', { body: { token: handout.token } });
+    await request('GET', `/status?repaired=${encodeURIComponent(handout.token)}&repairAction=reloaded`);
+    const rows = foldProgress((await readEvents(session.id, { kinds: ['progress'] })).filter(
+      (event): event is Extract<SessionEvent, { kind: 'progress' }> => event.kind === 'progress' && !!event.progressId?.startsWith('browser-repair:')
+    ));
+    // The page paints this row only in the chat it names; Compact & resume moves the session on.
+    expect(rows.map(row => row.kind === 'progress' ? [row.progressId!.split(':')[1], row.message.text] : [])).toEqual([
+      [conversationId, 'Reloaded chat to send the handoff request for Compact & resume.']
+    ]);
+  });
+
   it('keeps the concrete pre-send failure and refuses a stale page abort of a newer ticket', async () => {
     await pair();
     const conversationId = randomUUID();

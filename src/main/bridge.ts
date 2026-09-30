@@ -7009,7 +7009,9 @@ function queueBrowserRecovery(
     reason,
     notBefore,
     token: '',
-    progressId: `browser-repair:${randomBytes(9).toString('base64url')}`
+    // Names the chat it reloads: Compact & resume moves the session on, and the page paints the
+    // row only in this chat, not before the first message of the chat the session moved to.
+    progressId: `browser-repair:${conversationId}:${randomBytes(9).toString('base64url')}`
   };
   repairsInFlight.set(conversationId, repair);
   // Queue publication owns the pickup notification, just as the input outbox does.
@@ -8524,7 +8526,7 @@ async function takePendingRepairs(
     } else {
       repair.state = 'handed';
       repair.token = randomBytes(9).toString('base64url');
-      await updateRepairProgress(conversationId, repair, `Trying to reload chat to recover ${repairReason(repair)}…`);
+      await updateRepairProgress(conversationId, repair, `Trying to reload chat to ${repairPurpose(repair).to}…`);
     }
     // A missed pre-action claim may retry the same offer. Once claimed, ambiguous
     // acknowledgement keeps custody and cannot authorize a second browser action.
@@ -8596,7 +8598,7 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'r
         await updateRepairProgress(
           conversationId,
           repair,
-          `Kept the recovered chat open instead of reloading while recovering ${repairReason(repair)}.`
+          `Kept the recovered chat open instead of reloading while ${repairPurpose(repair).during}.`
         );
         if (turnRepairSpent.get(conversationId)?.token === token) turnRepairSpent.delete(conversationId);
         repairsInFlight.delete(conversationId);
@@ -8638,7 +8640,7 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'r
       await updateRepairProgress(
         conversationId,
         repair,
-        `${action === 'reopened' ? 'Reopened' : action === 'resumed' ? 'Resumed' : 'Reloaded'} chat to recover ${repairReason(repair)}.`
+        `${action === 'reopened' ? 'Reopened' : action === 'resumed' ? 'Resumed' : 'Reloaded'} chat to ${repairPurpose(repair).to}.`
       );
       return;
     }
@@ -8653,7 +8655,7 @@ async function failRepairAttempt(token: string, action: 'reloaded' | 'reopened' 
     await updateRepairProgress(
       conversationId,
       repair,
-      `${action === 'reopened' ? 'Reopen' : action === 'resumed' ? 'Resume' : 'Reload'} failed while recovering ${repairReason(repair)}${repair.attribution ? '.' : '; will retry.'}`
+      `${action === 'reopened' ? 'Reopen' : action === 'resumed' ? 'Resume' : 'Reload'} failed while ${repairPurpose(repair).during}${repair.attribution ? '.' : '; will retry.'}`
     );
     if (repairsInFlight.get(conversationId) !== repair) return;
     if (repair.reason === 'assistant-error' && turnRepairSpent.get(conversationId)?.token === token)
@@ -8667,6 +8669,16 @@ async function failRepairAttempt(token: string, action: 'reloaded' | 'reopened' 
     }
     return;
   }
+}
+
+/**
+ * What a reload is for, in the row's words. Compact & resume started from the app reaches its
+ * chat through this same repair channel, but nothing failed: the reload sends the request.
+ */
+function repairPurpose(repair: Repair): { to: string; during: string } {
+  if (repair.reason === 'compaction' && repair.episode.endsWith(':manual') && repair.episode.includes(':asking:'))
+    return { to: 'send the handoff request for Compact & resume', during: 'sending the handoff request for Compact & resume' };
+  return { to: `recover ${repairReason(repair)}`, during: `recovering ${repairReason(repair)}` };
 }
 
 function repairReason(repair: Repair): string {
