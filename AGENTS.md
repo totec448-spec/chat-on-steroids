@@ -2290,7 +2290,13 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    known pre-dispatch failure, but never click again merely because the receipt is missing.
 3. **Capture exact provenance.** Match the authored handoff request and assistant brief by
    token/message/turn identity. Enforce minimum and bounded brief content; do not capture the
-   latest convenient assistant text. The user may edit the **content instructions** used to
+   latest convenient assistant text. Once the authored handoff anchor is durable (`sent`), binding
+   it lets the bridge capture from the recorder's bounded interval after that anchor (store
+   `readHandoffResponse`): exactly one local generation, its latest boundary a completed
+   `turn_end`, exactly one nonempty final. That outranks the mounted Fiber shape, which can
+   lose the terminal when ChatGPT remounts a long answer under another assistant id. A second
+   generation for the same user message (Retry/regenerate) fails closed; never pick the
+   newest final. The user may edit the **content instructions** used to
    write that brief; continuation markers, send/provenance framing, tool-detail policy and the
    requirement that the compaction reply contain only the brief remain code-owned invariants.
    The shipped content prompt prefers a dense roughly 2k-6k-token operational handoff for a
@@ -2316,7 +2322,8 @@ can outlive a transport command; expiration releases transport, not permission f
 blind Send. Automatic tickets can wait indefinitely before the request was sent and retain a
 six-hour sent-request window; manual transport is shorter (ten minutes). Pickup budgets depend
 on phase: unsent 2m×5, writing 5m×3, opening 15m×3. These are bounded recovery of one obligation,
-not fresh compaction attempts. Re-observe the exact page before advancing its state.
+not fresh compaction attempts. After writing 3/3 the sent transaction stays protected with no
+fourth reload; one visible timeline note says it is stuck, and lifetime limits stay terminal. Re-observe the exact page before advancing its state.
 A manual ticket whose frozen source selection is Pro instead gets a one-hour deadline while the
 brief is being written: Pro reasoning is not visible transcript, so it produces no text growth
 to renew the ordinary clock, and a healthy long Pro generation used to be swept as "took too
