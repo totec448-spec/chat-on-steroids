@@ -1,5 +1,8 @@
 {
   "Jump to latest": "最新へ移動",
+  "Previous source": "前のソース",
+  "Next source": "次のソース",
+  "{0} more sources were not recorded with this reply.": "この返信では他の {0} 件のソースが記録されていません。",
   "Copy answer": "回答をコピー",
   "Export as Markdown": "Markdown としてエクスポート",
   "This answer": "この回答",

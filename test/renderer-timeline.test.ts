@@ -214,7 +214,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   };
   const ok = (data: any) => Promise.resolve({ ok: true, data });
   const live = { events: [...events], inputs: [] as InputEntry[], sent: [] as InputArgs[], automation: 'off', controlCalls: [] as Array<{ id: string; action: string }>, compacting: false, finishHeld: true };
-  let sessionListener: () => void = () => undefined;
+  let sessionListener: (change?: unknown) => void = () => undefined;
   let writeSessionListener: (id: string) => void = () => undefined;
   const taskProgressListeners = new Set<(progress: any) => void>();
   const api: any = new Proxy(
@@ -317,12 +317,14 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   return {
     w,
     live,
-    notifySession: () => sessionListener(),
+    // This fixture serves one shared `live.events` for every session id, so a recorder write
+    // changes every transcript it can show. Payload-less pushes are catalog/control only.
+    notifySession: () => sessionListener({ allTranscripts: true }),
     writeSession: (id: string) => writeSessionListener(id),
     progress: (value: any) => { for (const listener of taskProgressListeners) listener(value); },
     async append(more: SessionEvent[]) {
       live.events.push(...more);
-      sessionListener();
+      sessionListener({ allTranscripts: true });
       await settle(500);
     }
   };
@@ -744,7 +746,7 @@ it('keeps cancelled Continue attempts at their own times across a long session i
   for (let index = 0; index < 3; index++) {
     const card = timeline.querySelector<HTMLElement>(`[data-input-id="retired-continue-${index}"]`)!;
     expect(card).not.toBeNull();
-    expect(card.querySelector('time')?.textContent).toBe(new Date(live.inputs[index]!.createdAt).toLocaleString());
+    expect(card.querySelector('time')?.textContent).toBe(new Date(live.inputs[index]!.createdAt).toLocaleString('en'));
     const content = timeline.textContent!;
     expect(content.indexOf(`NIGHT QUESTION ${index}`)).toBeLessThan(content.indexOf(`UNSENT CONTINUE ${index}`));
     expect(content.indexOf(`UNSENT CONTINUE ${index}`)).toBeLessThan(content.indexOf(`NIGHT QUESTION ${index + 1}`));
@@ -4007,7 +4009,7 @@ it('keeps a cancelled automatic draft at its creation time as later messages arr
   const timeline = w.document.getElementById('timeline')!;
   const retired = timeline.querySelector<HTMLElement>('[data-input-id="retired-auto"]')!;
   expect(retired).not.toBeNull();
-  expect(retired.querySelector('time')!.textContent).toBe(new Date(T0 + 1000).toLocaleString());
+  expect(retired.querySelector('time')!.textContent).toBe(new Date(T0 + 1000).toLocaleString('en'));
   expect(w.document.getElementById('inputQueue')!.textContent).not.toContain('Unused automatic instruction');
   const before = () => timeline.textContent!.indexOf('Unused automatic instruction') < timeline.textContent!.indexOf('Later continuation');
   expect(before()).toBe(true);

@@ -1271,6 +1271,7 @@ export function upsertMessageEvent(
               authoredAt: authoredTimeOf(previous) ?? event.authoredAt,
               providerMessageId: event.providerMessageId ?? previous.providerMessageId,
               resolvedModel: event.resolvedModel ?? previous.resolvedModel,
+              references: event.references ?? previous.references,
               // `final` is a compatibility mirror of state, not an independent truth.
               state: event.state === 'final' || event.final === true ? 'final' : 'streaming',
               final: event.state === 'final' || event.final === true,
@@ -1343,7 +1344,8 @@ export function upsertMessageEvent(
             previous.final === nextEvent.final &&
             previous.goalEligible === nextEvent.goalEligible &&
             previous.providerMessageId === nextEvent.providerMessageId &&
-            previous.resolvedModel === nextEvent.resolvedModel)) &&
+            previous.resolvedModel === nextEvent.resolvedModel &&
+            JSON.stringify(previous.references) === JSON.stringify(nextEvent.references))) &&
         (nextEvent.kind !== 'user_message' || previous.kind !== 'user_message' ||
           (nextEvent.reaction === previous.reaction && nextEvent.inputId === previous.inputId && nextEvent.authoredText === previous.authoredText && nextEvent.wireTokenEstimate === previous.wireTokenEstimate && nextEvent.inputDelivery === previous.inputDelivery && JSON.stringify(nextEvent.assets) === JSON.stringify(previous.assets) && JSON.stringify(nextEvent.retiredImageAssetIds) === JSON.stringify(previous.retiredImageAssetIds) && JSON.stringify(nextEvent.attachments) === JSON.stringify(previous.attachments))) &&
         (previous.turnId ?? undefined) === settledTurnId &&
@@ -1803,6 +1805,55 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   })) return null;
   return { messageId, turnId: final.turnId ?? null, completedAt, contentSeq: seq,
     text: final.kind === 'turn_end' ? '' : modelFacingText(final.message.text, final.renderedHtml) };
+}
+
+/**
+ * The recorder's answer to one exact authored Compact & Resume request (#787).
+ *
+ * The interval runs from the durable handoff user anchor to the next native question. It is
+ * complete only when exactly one local generation answered it, its latest lifecycle boundary is
+ * a completed `turn_end` and it holds exactly one nonempty final. Assistant ids inside that
+ * generation may change (ChatGPT remounts a long answer under another id); a second
+ * generation in the same interval is Retry/regenerate reusing the question and is ambiguous.
+ * Anything short of that is `pending`; nothing here picks the newest or the mounted answer.
+ */
+export async function readHandoffResponse(sessionId: string, conversationId: string, anchorMessageId: string, token: string): Promise<
+  { status: 'complete'; text: string; messageId: string } | { status: 'pending' | 'ambiguous' }
+> {
+  const pending = { status: 'pending' } as const, ambiguous = { status: 'ambiguous' } as const;
+  const entry = await ensureOpen(sessionId);
+  await flushSession(sessionId);
+  const revision = entry.nextSeq;
+  if (entry.summary.conversationId !== conversationId) return pending;
+  const anchor = entry.messages.get(`user_message\u0000${anchorMessageId}`);
+  const marker = anchor?.kind === 'user_message' ? continuationMarkerOf(anchor.message.text) : null;
+  if (!anchor || marker?.kind !== 'HANDOFF' || marker.token !== token) return pending;
+  const events = await readRecentEventsFromDisk(sessionId, MAX_EVENT_TAIL, {
+    kinds: ['turn_start', 'turn_end', 'user_message', 'assistant_message'], after: positionOf(anchor), orderByOrigin: true
+  });
+  if (entry.nextSeq !== revision || events.length >= MAX_EVENT_TAIL) return pending;
+  const turns = entry.summary.timelineTurns;
+  const next = events.findIndex(event => event.kind === 'user_message' && !injectedUserMessage(event, turns));
+  const interval = next < 0 ? events : events.slice(0, next);
+  const generations = new Set<string>();
+  for (const event of interval) {
+    if (event.kind === 'user_message') continue;
+    if (event.turnId) generations.add(responseTurnId(turns, event.turnId));
+    else if (event.kind !== 'assistant_message' || event.final) return ambiguous;
+  }
+  if (generations.size > 1) return ambiguous;
+  const [generation] = generations;
+  const boundary = interval.filter(event => event.kind === 'turn_start' || event.kind === 'turn_end').at(-1);
+  if (!generation || boundary?.kind !== 'turn_end' || boundary.outcome !== 'completed') return pending;
+  const finals = interval.filter((event): event is Extract<SessionEvent, { kind: 'assistant_message' }> =>
+    event.kind === 'assistant_message' && event.final === true && !!event.messageId && !!event.message.text.trim());
+  if (finals.length > 1) return ambiguous;
+  const final = finals[0];
+  if (!final) return pending;
+  const text = final.message.truncated
+    ? final.message.assetId ? await readOverflowText(sessionId, final.message.assetId) : null
+    : final.message.text;
+  return text?.trim() ? { status: 'complete', text, messageId: final.messageId! } : pending;
 }
 
 /** Recorded local execution, not a native tool label or a request-id sighting alone. */

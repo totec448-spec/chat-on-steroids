@@ -11,6 +11,7 @@ interface Row {
   final?: boolean;
   state?: string;
   label?: string;
+  authoredAt?: number;
 }
 
 const row = (seq: number, time: number, kind: string, turnId: string | null, label?: string): Row => ({
@@ -24,6 +25,29 @@ const row = (seq: number, time: number, kind: string, turnId: string | null, lab
 const reading = (rows: Row[]): string[] => chronological(rows).map((entry) => entry.label!);
 
 describe('the order a recorded turn is read in', () => {
+  /**
+   * Native ChatGPT steps between paragraphs, with the times a live session recorded. ChatGPT
+   * opened each paragraph (12.267s, 32.946s) before the step drawn above it was read (15.371s,
+   * 36.884s), so steps ordered by when they were read fell after the paragraph that follows them.
+   * The page is read in ChatGPT's order: a step read in the same pass as the next paragraph goes
+   * before it. A step read on its own keeps its own time.
+   */
+  it('places a native step before the paragraph read with it, where ChatGPT draws it', () => {
+    const prose = (seq: number, time: number, authoredAt: number, label: string): Row => ({ ...row(seq, time, 'assistant_message', 't1', label), authoredAt });
+    const rows: Row[] = [
+      row(3, 1790715424000, 'turn_start', 't1', 'start'),
+      prose(6, 1790715431068, 1790715424455, 'first paragraph'),
+      row(7, 1790715435371, 'page_tool', 't1', 'Searched 2 websites'),
+      prose(11, 1790715435371, 1790715432267, 'second paragraph'),
+      row(12, 1790715446000, 'tool_call', 't1', 'Created teste-timeline.txt'),
+      row(14, 1790715456884, 'page_tool', 't1', 'Created Electron release timeline file'),
+      prose(18, 1790715456885, 1790715452946, 'third paragraph'),
+      row(24, 1790715530132, 'page_tool', 't1', 'Retried the identical operation')
+    ];
+    expect(reading(rows)).toEqual(['start', 'first paragraph', 'Searched 2 websites', 'second paragraph',
+      'Created teste-timeline.txt', 'Created Electron release timeline file', 'third paragraph', 'Retried the identical operation']);
+  });
+
   /**
    * A message the app handed between two agents, drawn where it was delivered.
    *

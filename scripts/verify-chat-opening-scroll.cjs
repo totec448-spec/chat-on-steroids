@@ -40,13 +40,13 @@ app.whenReady().then(async () => {
       chatIds:[id], startedAt:1, updatedAt:1, endedAt:null, events:history[id].length, userMessages:1,
       toolCalls:0, errors:0, estimatedTokens:0, contextTokens:0, agents:[], origin:null}));
     const reads=[];
-    window.fixture={history,sessions,reads,
+    window.fixture={history,sessions,reads,lists:0,
       addLive:()=>{const seq=history.a.length+1;history.a.push({seq,time:seq,source:'extension',kind:'assistant_message',
         messageId:'a-live',message:{text:'New live row',truncated:false,chars:12},state:'final',final:true});
         const summary=sessions.find(row=>row.id==='a');summary.events=history.a.length;summary.updatedAt++;},
-      signal:()=>{if(!sessionChanged)throw new Error('onSessionChanged was not registered');sessionChanged();}};
+      signal:change=>{if(!sessionChanged)throw new Error('onSessionChanged was not registered');sessionChanged(change);}};
     window.api = new Proxy({
-      listSessions: () => ok({sessions, activeId:null, blocked:[], pressure:[]}),
+      listSessions: () => {fixture.lists++;return ok({sessions, activeId:null, blocked:[], pressure:[]});},
       listProjects: () => ok([]), listInputs: () => ok([]), listPausedHelpers: () => ok([]),
       onSessionChanged:handler=>{sessionChanged=handler;return()=>{if(sessionChanged===handler)sessionChanged=null;}},
       getSession: (id, options) => {
@@ -85,19 +85,19 @@ app.whenReady().then(async () => {
     }
     pane.scrollTop=pane.scrollHeight-pane.clientHeight-20;
     await frame();
-    const nearTail=pane.scrollTop, nearTailRefreshes=[];
+    const nearTail=pane.scrollTop, nearTailRefreshes=[], unrelatedReads=[];
     for(let index=0;index<3;index++) {
       fixture.sessions.find(row=>row.id==='b').updatedAt++;
-      const reads=fixture.reads.length;fixture.signal();
-      await waitFor(()=>fixture.reads.length>reads);await frame();
-      nearTailRefreshes.push(pane.scrollTop);
+      const reads=fixture.reads.length, lists=fixture.lists;fixture.signal({sessionIds:['b']});
+      await waitFor(()=>fixture.lists>lists);await frame();
+      nearTailRefreshes.push(pane.scrollTop);unrelatedReads.push(fixture.reads.length-reads);
     }
     pane.scrollTop=700;
     await frame();
-    const readBefore=fixture.reads.length;fixture.addLive();fixture.signal();
+    const readBefore=fixture.reads.length;fixture.addLive();fixture.signal({sessionIds:['a']});
     await waitFor(()=>fixture.reads.length>readBefore&&[...document.querySelectorAll('.ev-assistant_message')].some(row=>row.textContent.includes('New live row')));
     await frame();
-    return {observations,nearTail,nearTailRefreshes, readerAfterRefresh:pane.scrollTop,readBefore,readAfter:fixture.reads.length,
+    return {observations,nearTail,nearTailRefreshes,unrelatedReads, readerAfterRefresh:pane.scrollTop,readBefore,readAfter:fixture.reads.length,
       inserted:[...document.querySelectorAll('.ev-assistant_message')].some(row=>row.textContent.includes('New live row'))};
   })()`);
   console.log(JSON.stringify(results, null, 2));
@@ -110,6 +110,7 @@ app.whenReady().then(async () => {
   assert.equal(results.inserted, true, 'Live refresh must render the inserted assistant row');
   assert.equal(results.readerAfterRefresh, 700, 'Live refresh preserves deliberate reading');
   assert.deepEqual(results.nearTailRefreshes,[results.nearTail,results.nearTail,results.nearTail], 'Other sessions cannot reclaim a near-tail reading position');
+  assert.deepEqual(results.unrelatedReads,[0,0,0], 'Another session\'s activity refreshes the catalog without rereading this transcript');
   console.log('Chat opening passed: initial open, A/B/A cycles, long first message, near-tail background refresh and live reader position.');
   win.destroy(); app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });

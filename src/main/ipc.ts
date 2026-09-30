@@ -10,7 +10,7 @@ import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
 import { installRecommendedSkill, listRecommendedSkills } from './recommended-skills.js';
 import { noteChatOrigin } from './session/recorder.js';
-import { REASONING_EFFORTS } from '../shared/session.js';
+import { REASONING_EFFORTS, type SessionChange } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { wakeBrowserWork } from './browser-wake.js';
 import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } from './chat-models.js';
@@ -1034,7 +1034,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:clearImageStorage', async (payload) => {
     const { mode } = z.object({ mode: z.enum(['oldest-gib', 'all']) }).parse(payload);
     const result = await clearImageStorage(mode);
-    push('session:changed');
+    // Retired images can belong to any transcript; this is the explicit global invalidation.
+    push('session:changed', { allTranscripts: true } satisfies SessionChange);
     return result;
   });
   handle('sessions:events', async (payload) => {
@@ -1388,6 +1389,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   onUpdateChange(pushState);
   onMacOSDesktopAccessChange(pushState);
   onLog((entry) => push('log:entry', entry));
-  onSessionChange(() => push('session:changed'));
+  // Recorder pushes name their exact transcript owners; payload-less pushes are catalog/control only.
+  onSessionChange(change => push('session:changed', change));
   onSwarmChange(() => push('swarm:changed', swarmState()));
 }
