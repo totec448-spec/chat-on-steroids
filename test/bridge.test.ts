@@ -70,6 +70,7 @@ const {
   CHAT_SILENCE_MS,
   GOAL_QUIET_MS,
   PRO_SILENCE_MS,
+  DELIBERATE_SILENCE_MS,
   PRO_ACTIVITY_MS,
   COMMAND_DEADLINE_MS,
   REVIVAL_ACTIVITY_MS,
@@ -6724,11 +6725,13 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it.each(['gpt-6-pro', 'GPT-5.6 Sol'])('projects the confirmed Thinking-failed wait and removes it on fresh work (%s)', async model => {
+  // Extra high thinks quietly for long, but Thinking failed proves that thinking is over:
+  // it keeps the ordinary two-minute failure window, never the long silence window.
+  it.each([['gpt-6-pro', 'pro'], ['GPT-5.6 Sol', 'high'], ['GPT-5.6 Sol', 'xhigh']])('projects the confirmed Thinking-failed wait and removes it on fresh work (%s, %s)', async (model, effort) => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [{ kind: 'model_selection', model, reasoningEffort: model === 'gpt-6-pro' ? 'pro' : 'high', time: Date.now() }, openTurn('failed-countdown')]);
+      await events(OTHER, [{ kind: 'model_selection', model, reasoningEffort: effort, time: Date.now() }, openTurn('failed-countdown')]);
       await attributed(OTHER, false, Date.now());
       const id = (await request('GET', `/activity?conversationId=${OTHER}`)).body.sessionId;
       expect((await sessionControlsFor(id)).recovery?.every(row => row.kind === 'silence')).toBe(true);
@@ -7893,10 +7896,47 @@ describe('unattributed activity recovery', () => {
       await sweepStaleSwarm(Date.now());
       expect(await maintenance(), `a ${effort} turn was reloaded mid-thought`).toBeNull();
 
-      // The watchdog still exists: the Pro window applies, and past it the reload is offered.
-      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS);
+      // Pro's ten minutes are not its boundary either (#786): such a turn can think longer.
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance(), `a ${effort} turn was reloaded at the Pro boundary`).toBeNull();
+
+      // The watchdog still exists: past its own bounded window the reload is offered.
+      await vi.advanceTimersByTimeAsync(DELIBERATE_SILENCE_MS - PRO_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance(), `a ${effort} turn was never recovered at all`)
+        .toMatchObject({ conversationId: chat, reason: 'silence' });
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
+  /**
+   * The picker can report the selection after the turn and its first call (#786). That late
+   * exact evidence names the effort of the grant that is already running: it widens that grant
+   * to the long window, measured from the same last real work, and is not itself work.
+   */
+  it('widens an unresolved grant for a late exact xhigh selection without restarting its clock', async () => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), workAt = Date.now();
+      await events(chat, [
+        { kind: 'user_message', messageId: 'question', text: 'Do the long analysis', time: Date.now(), authoredNow: true },
+        openTurn('late-selection')
+      ]);
+      await attributed(chat, false, workAt);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await events(chat, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'xhigh', time: Date.now() }]);
+
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance(), 'the late xhigh selection did not widen the running grant').toBeNull();
+
+      // Measured from the call, not from the selection a minute later.
+      await vi.advanceTimersByTimeAsync(workAt + DELIBERATE_SILENCE_MS + 1_000 - Date.now());
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance(), 'the late selection restarted the silence clock')
         .toMatchObject({ conversationId: chat, reason: 'silence' });
     } finally { vi.useRealTimers(); await saveConfig(previous); }
   });
