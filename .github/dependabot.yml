@@ -1,21 +1,24 @@
-# Weekly, grouped dependency updates: one PR for all minor and patch updates of npm packages, one for
-# GitHub Actions. Major versions come one by one, because they can change behavior.
+# Quiet, grouped dependency updates: once a month, one PR for all npm minor and patch updates and
+# one for GitHub Actions. Major versions are left out on purpose; they change behavior and are
+# upgraded deliberately by a maintainer instead of arriving as automatic PRs.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 1
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
     groups:
       minor-and-patch:
         update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
+    open-pull-requests-limit: 1
     groups:
       actions:
         patterns: ['*']
