@@ -61,6 +61,10 @@ npm run dist:linux:arm64
 
 Release CI builds and smoke-tests every platform/architecture on a native runner. Packaging downloads/stages pinned external assets and verifies their checksums, so the first packaging run needs network access. Do not claim a cross-OS package is validated merely because electron-builder can sometimes emit it from another host.
 
+## Issues
+
+Issues are closed as soon as their fix is merged to `main`; the fix ships with the next release. When an issue is labeled `needs-info`, it waits for details from the reporter: after 7 days without a reply it gets one reminder, and 3 days later it is closed. Reply or reopen at any time with the details.
+
 ## Pull requests
 
 This project is maintained by one person, so review time is the scarce part. A PR is reviewed only when **CI and the "PR checklist" check are green**. The checklist runs automatically on every PR and on every edit of its description; its log says exactly what is missing. Use the pull request template and it passes by itself.
