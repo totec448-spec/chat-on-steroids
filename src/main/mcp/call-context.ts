@@ -160,27 +160,34 @@ export function runningToolCalls(conversationId: string | null = null): number {
   return countFor(running, conversationId);
 }
 
-/** Presentation requires exact ownership; anonymous safety counts are not this chat's work. */
-export function runningToolProgress(conversationId: string): { count: number; since: number } | null {
-  const owned = [...running].filter(call => call.caller.conversationId === conversationId);
-  return owned.length ? { count: owned.length, since: Math.min(...owned.map(call => call.startedAt)) } : null;
+let requestOwner: (requestId: string) => string | null = () => null;
+
+/** Installs the page's exact proof of a request id. The kernel does, before it dispatches a call. */
+export function setRequestOwner(resolve: (requestId: string) => string | null): void {
+  requestOwner = resolve;
 }
 
 /**
- * What this chat's calls are doing right now, oldest first. Exact ownership only, as above.
+ * The chat a running call is proven to belong to, or null. The one ownership rule for presentation.
  *
- * A call is placed only after its handler has run, so while it runs it usually names no chat yet.
- * `requestOwner` answers from the page's exact proof of the call's request id, which ChatGPT
- * reports while it draws the running call; without it a live caption saw a call only once done.
+ * A call is placed in its chat only after its handler has run, so while it runs it usually names
+ * no chat yet. The page's exact proof of its request id, which ChatGPT reports while it draws the
+ * running call, names it sooner. Anonymous safety counts are never this chat's work.
  */
-export function runningToolActivity(
-  conversationIds: readonly string[],
-  requestOwner: (requestId: string) => string | null = () => null
-): RunningToolActivity[] {
-  const ownerOf = (call: CallContext): string | null =>
-    call.caller.conversationId ?? (call.caller.requestId ? requestOwner(call.caller.requestId) : null);
+function exactOwner(call: CallContext): string | null {
+  return call.caller.conversationId ?? (call.caller.requestId ? requestOwner(call.caller.requestId) : null);
+}
+
+/** Whether this chat has work running, and since when. Exact ownership only. */
+export function runningToolProgress(conversationId: string): { count: number; since: number } | null {
+  const owned = [...running].filter(call => exactOwner(call) === conversationId);
+  return owned.length ? { count: owned.length, since: Math.min(...owned.map(call => call.startedAt)) } : null;
+}
+
+/** What this chat's calls are doing right now, oldest first. The same exact ownership. */
+export function runningToolActivity(conversationIds: readonly string[]): RunningToolActivity[] {
   return [...running]
-    .filter(call => { const owner = call.activity ? ownerOf(call) : null; return owner !== null && conversationIds.includes(owner); })
+    .filter(call => { const owner = call.activity ? exactOwner(call) : null; return owner !== null && conversationIds.includes(owner); })
     .sort((a, b) => a.startedAt - b.startedAt)
     .map(call => ({ ...call.activity!, since: call.startedAt }));
 }

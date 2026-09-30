@@ -3385,7 +3385,14 @@ function proseMoving(event: Extract<SessionEvent, { kind: 'assistant_message' }>
   if (proseSeen?.key !== key || proseSeen.chars !== chars) proseSeen = { key, chars, changedAt: Date.now() };
   return Date.now() - proseSeen.changedAt < PROSE_QUIET_MS;
 }
-/** ChatGPT names its own steps in the progressive ("Searching…", "Reading…"); a finished one does not describe now. */
+/**
+ * ChatGPT names its own steps in the progressive ("Searching…", "Reading…"); a finished one does not
+ * describe now. This reads English wording only: on a ChatGPT page in another language no label
+ * matches and the row says "Thinking", which is always true. The page reports no
+ * language-independent "in progress" for a step, and taking the newest step by position would
+ * show a finished one ("Searched 3 websites") as if it were running. Calls this app runs do not
+ * depend on it.
+ */
 const NATIVE_STEP_NOW = /^\S+ing\b/i;
 
 /**
