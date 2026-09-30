@@ -82,6 +82,7 @@ import {
   holdWhileSettling,
   runInCallContext,
   runningToolProgress,
+  setRequestOwner,
   trackInFlight,
   trackMcpRequest,
   type CallContext,
@@ -96,6 +97,7 @@ import {
   recordToolCall
 } from '../session/recorder.js';
 import { requestCorrelation } from '../session/correlation.js';
+import { summarizeRunningCall } from '../session/summarize.js';
 import { BLOCKED_CHAT_REFUSAL, anyChatBlocked, isChatBlocked } from '../session/blocked-chats.js';
 import { anyContinuationOpen, compactingConversation } from '../session/continuation.js';
 import {
@@ -115,6 +117,9 @@ import {
 } from '../session/store.js';
 import { sessionFinishDeadline } from '../session/finish.js';
 import type { StoredText, ToolOutcome } from '../../shared/session.js';
+
+/** The page's exact proof of a request id, by which a running call counts for its chat. */
+const requestOwner = (requestId: string): string | null => requestCorrelation(requestId)?.conversationId ?? null;
 
 export interface ToolContext {
   exposedFinishTool?: boolean;
@@ -547,6 +552,7 @@ export async function dispatch(
   const context: CallContext = {
     publication: parent?.publication ?? inboundPublication() ?? { completedAt: null, failed: false },
     startedAt: Date.now(),
+    activity: summarizeRunningCall(name, args, emptyEvidence()),
     transportKey,
     agent: null,
     allowUnattributed: getConfig().multiAgent.allowUnattributedCalls,
@@ -554,6 +560,8 @@ export async function dispatch(
     outcome: null,
     evidence: emptyEvidence()
   };
+  // Every call runs through here, so the proof is installed before any call can be running.
+  setRequestOwner(requestOwner);
   try {
     const result = await trackMcpRequest(() =>
       trackInFlight(context, () => dispatchTracked(context, name, args, transportKey, requestId, surface, run, !!parent))
