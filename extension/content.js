@@ -767,7 +767,10 @@
   // break — ChatGPT stores the composer's hard breaks as Markdown `\<newline>`. The second made a
   // worker's 20k-character bootstrap unrecognisable to its own receipt (2026-09-26, #426): every
   // hard break kept its backslash, so the page never bound the worker until its turn had ended.
-  const unescapeMarkdown = (value) => String(value || '').replace(/\\\r?\n/g, '\n').replace(/\\([!-\/:-@\[-`{-~])/g, '$1');
+  // A third (#821): an indented line's first space reads back as `&#x20;`. A 96,000-character
+  // opening never got its receipt, and the page held its input slot until it was reloaded.
+  const unescapeMarkdown = (value) => String(value || '').replace(/\\\r?\n/g, '\n').replace(/\\([!-\/:-@\[-`{-~])/g, '$1')
+    .replace(/(^|\n)&#x20;/g, '$1 ');
   /** The leading continuation marker, as typed or as the composer escaped it. */
   const markedAs = (value) => {
     const text = String(value || '');
