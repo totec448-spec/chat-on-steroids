@@ -1018,7 +1018,11 @@ export async function bindContinuationDestinationMessageNow(
         entry.destinationSend.messageId === messageId
       );
     }
-    if (!isOpen(entry)) return false;
+    // B's first attributed tool call can commit the transaction before the page reports the
+    // message it typed. Recording that message for the committed destination moves nothing, and
+    // it is the resume boundary the page feed needs (where A's rows stop).
+    const committedHere = entry.state === 'committed' && entry.to === conversationId;
+    if (!isOpen(entry) && !committedHere) return false;
     if (entry.destinationSend.state !== 'dispatched-unresolved') return false;
     await transitionNow(entry, (current) => ({
       ...current,
