@@ -1,6 +1,6 @@
 import { REASONING_EFFORTS } from '../src/shared/session.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { getChatModels, requestChatModels, pendingChatModelRequest, observeChatModels, resetChatModelsForTests, configureChatModelDiscovery, startChatModelDiscovery, restoreChatModels } from '../src/main/chat-models.js';
+import { getChatModels, requestChatModels, pendingChatModelRequest, observeChatModels, resetChatModelsForTests, configureChatModelDiscovery, startChatModelDiscovery, restoreChatModels, refreshForUnoffered } from '../src/main/chat-models.js';
 const saved = vi.hoisted(() => ({ value: null as unknown }));
 vi.mock('../src/main/durable.js', () => ({ readDurable: async () => saved.value, writeDurableSoon: (_name: string, value: unknown) => { saved.value = structuredClone(value); } }));
 const models = [{ id: 'gpt-example', label: 'GPT Example', efforts: ['none', 'medium', 'high', 'xhigh'] }];
@@ -174,4 +174,26 @@ it('publishes exactly all canonical observed efforts without dropping Low or imp
   const observed = [{ id: 'actual-sol', label: 'GPT-5.6 Sol', efforts: [...REASONING_EFFORTS] }];
   expect(observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: observed })).toBe(true);
   expect(getChatModels()).toMatchObject({ state: 'ready', models: observed });
+});
+
+describe('a saved choice the stored catalog does not offer', () => {
+  it('asks the open ChatGPT page once, and not again after a fresh catalog still lacks it', () => {
+    requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });
+    expect(pendingChatModelRequest()).toBeNull();
+    refreshForUnoffered('goal helper 6');
+    const request = pendingChatModelRequest()!;
+    expect(request).toMatchObject({ allowOpen: false });
+    refreshForUnoffered('goal helper 6');
+    expect(pendingChatModelRequest()).toEqual(request);
+    vi.advanceTimersByTime(1);
+    observeChatModels({ nonce: request.nonce, models });
+    refreshForUnoffered('goal helper 6');
+    expect(pendingChatModelRequest()).toBeNull();
+    refreshForUnoffered('default worker 6');
+    expect(pendingChatModelRequest()).toMatchObject({ allowOpen: false });
+  });
+  it('does nothing before any catalog was observed', () => {
+    refreshForUnoffered('goal helper 6');
+    expect(pendingChatModelRequest()).toBeNull();
+  });
 });
