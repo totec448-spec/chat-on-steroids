@@ -7711,6 +7711,24 @@ describe('unattributed activity recovery', () => {
     }
   });
 
+  it('leaves a chat alone that already proved its join earlier in the same turn', async () => {
+    // An exactly attributed call in the current turn already shows this chat's join works. Live
+    // on 2.1.21, a chat waiting on ChatGPT's own tool approval was reloaded because a conversation
+    // with no CoS page at all used a browser tool; the unknown call was never this chat's.
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(PRIME, [openTurn('turn-proven')]);
+      await attributed(PRIME, false, Date.now());
+      await vi.advanceTimersByTimeAsync(1_000);
+      await unattributed();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await maintenance()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('leaves a chat that has finished its answer, or that the user stopped, alone', async () => {
     for (const outcome of ['completed', 'stopped']) {
       vi.useFakeTimers();
