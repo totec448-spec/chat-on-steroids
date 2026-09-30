@@ -2147,6 +2147,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     } else if (repairFailed) {
       await failRepairAttempt(repairFailed.slice(0, 64), action);
     }
+    const repairHeld = url.searchParams.get('repairHeld');
+    if (repairHeld) noteRepairHeld(repairHeld.slice(0, 64), url.searchParams.get('why'));
     const revival = pendingBrowserRevival();
     const inputRows = await listInputs();
     const browser = browserOf(req);
@@ -2182,7 +2184,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         placement: pendingBrowserPlacement(null, browser),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
-        repairs: repairFailed ? [] : await takePendingRepairs(Date.now(), browser),
+        repairs: repairFailed || repairHeld ? [] : await takePendingRepairs(Date.now(), browser),
         ...tabPolicy,
         recoveryMonitoring: browserRecoveryMonitoring(),
         // A newer extension build ships with this app. The extension reloads into it on its own
@@ -8648,6 +8650,38 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'r
 }
 
 /** An exact browser action failed; keep the episode queued and replace its one debug row. */
+/** Why a page said a handed repair is not safe yet, in the words the log uses. */
+const REPAIR_HOLD_REASONS: Record<string, string> = {
+  'page-changed': 'the page is on another chat or was reloaded',
+  'stop-requested': 'a Stop is in progress',
+  'tool-running': 'a local tool call for this chat is still running',
+  sending: 'a sent message is still waiting for ChatGPT to confirm it',
+  'page-busy': 'the page is busy with another action',
+  compaction: 'a Compact & resume is in progress',
+  draft: 'text or attachments are in the ChatGPT message box',
+  changed: 'the chat changed while the repair was being checked'
+};
+const repairHoldsLogged = new Set<string>();
+
+/**
+ * Logs, once per repair and reason, that the page refused a handed repair.
+ *
+ * The page may say a reload is not safe yet, and the browser then keeps the repair for its next
+ * pass. That is correct, but it used to be silent: a chat could show "Reload pending…" for as long
+ * as the page stayed busy, and the log only proved that repairs were handed out (#820).
+ */
+function noteRepairHeld(token: string, why: string | null): void {
+  const reason = why && Object.hasOwn(REPAIR_HOLD_REASONS, why) ? why : 'unknown';
+  const held = [...repairsInFlight].find(([, repair]) => repair.token === token);
+  if (!held) return;
+  const key = `${token}:${reason}`;
+  if (repairHoldsLogged.has(key)) return;
+  repairHoldsLogged.add(key);
+  if (repairHoldsLogged.size > 500) for (const old of [...repairHoldsLogged].slice(0, 100)) repairHoldsLogged.delete(old);
+  const [conversationId, repair] = held;
+  logInfo(`bridge: the page held the ${repair.reason} repair for ${conversationId}: ${REPAIR_HOLD_REASONS[reason] ?? 'it gave no reason'}`);
+}
+
 async function failRepairAttempt(token: string, action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | null): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state !== 'handed' || repair.token !== token) continue;

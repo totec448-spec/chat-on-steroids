@@ -2170,6 +2170,9 @@ A responsive page flushes native progress and Stop before the main claim, then r
 captured work/question/document after the claim. An explicit veto or navigation prevents the
 browser action. An unresponsive page supplies no new proof; the original main-process grant
 still requires independent validation. These checks use existing RPC and repair owners.
+A veto names its reason (`why`: page-changed, stop-requested, tool-running, sending, page-busy,
+compaction, draft, changed). The extension reports it with `/status?repairHeld=<token>&why=`, which
+hands nothing out and changes no repair; the app logs each token and reason once (#820).
 The maintenance projection must retain each repair's reason. Compaction uses the same two
 document checks in draft-only mode: its exact ticket can recover its busy source, but an unsent
 text/attachment draft or a new user question vetoes the reload. Suspended shells are checked
