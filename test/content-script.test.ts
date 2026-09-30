@@ -2622,6 +2622,166 @@ function alertBanner(document: Document, text: string): HTMLElement {
   return node;
 }
 
+function resumeSignal(h: Harness, type: 'cos-resume-request' | 'cos-resume-response', id = 'resume-1',
+  conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', status = 404, streamOpened = false): void {
+  h.window.dispatchEvent(new h.window.MessageEvent('message', { source: h.window as unknown as Window,
+    origin: h.window.location.origin, data: { type, id, conversationId, status, streamOpened } }));
+}
+
+describe('H2 resume transport evidence', () => {
+  it('H2 records stream_gone immediately in a non-English page without ending a live generation', async () => {
+    live = await harness();
+    live.document.documentElement.lang = 'es';
+    startGenerating(live.document);
+    assistantTurn(live.document, 'respuesta', []);
+    live.hook.observe(); await settle();
+    resumeSignal(live, 'cos-resume-request');
+    resumeSignal(live, 'cos-resume-response');
+    await settle(); await live.hook.flush();
+    const turnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId;
+    expect(emitted(live.sent, 'chat_error').map(row => row.event)).toEqual([
+      expect.objectContaining({ reason: 'stream_gone', recoverable: true, turnId })
+    ]);
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ streaming: true, assistantError: true });
+    // A later DOM rendering is the same failure, not another notice.
+    alertBanner(live.document, 'Resume stream unavailable');
+    live.hook.observe(); await settle(); await live.hook.flush();
+    resumeSignal(live, 'cos-resume-request', 'resume-2');
+    resumeSignal(live, 'cos-resume-response', 'resume-2');
+    await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'chat_error')).toHaveLength(1);
+  });
+
+  it.each(['idle', 'other-conversation', 'navigation', 'new-question', 'unmatched', 'not-404'])('H2 ignores %s resume evidence', async scenario => {
+    live = await harness();
+    if (scenario !== 'idle') {
+      startGenerating(live.document); assistantTurn(live.document, 'answer', []);
+      live.hook.observe(); await settle();
+    }
+    const target = scenario === 'other-conversation' ? '11111111-2222-3333-4444-555555555555' : undefined;
+    if (scenario !== 'unmatched') resumeSignal(live, 'cos-resume-request', 'resume-1', target);
+    if (scenario === 'navigation') {
+      live.window.history.replaceState({}, '', '/c/11111111-2222-3333-4444-555555555555');
+      live.hook.observe(); await settle();
+      live.window.history.replaceState({}, '', '/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+      live.hook.observe(); await settle();
+    }
+    if (scenario === 'new-question') { startGenerating(live.document); live.hook.observe(); await settle(); }
+    resumeSignal(live, 'cos-resume-response', 'resume-1', target, scenario === 'not-404' ? 429 : 404);
+    await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'chat_error')).toEqual([]);
+  });
+
+  it('H2 bounds pending resume custody and coalesces repeated failures without any polling timer', async () => {
+    live = await harness();
+    startGenerating(live.document); assistantTurn(live.document, 'answer', []);
+    live.hook.observe(); await settle();
+    for (let n = 0; n < 17; n++) resumeSignal(live, 'cos-resume-request', `resume-${n}`);
+    resumeSignal(live, 'cos-resume-response', 'resume-0');
+    await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'chat_error')).toEqual([]); // oldest custody was evicted
+    for (let n = 1; n < 17; n++) resumeSignal(live, 'cos-resume-response', `resume-${n}`);
+    for (let n = 17; n < 50; n++) {
+      resumeSignal(live, 'cos-resume-request', `resume-${n}`);
+      resumeSignal(live, 'cos-resume-response', `resume-${n}`);
+    }
+    await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'chat_error')).toHaveLength(1);
+  });
+
+  it('H2 retains a broken stream fact while local tools keep working, and retires it only on a newer successful resume', async () => {
+    live = await harness();
+    startGenerating(live.document); assistantTurn(live.document, 'answer', []);
+    live.hook.observe(); await settle();
+    resumeSignal(live, 'cos-resume-request'); resumeSignal(live, 'cos-resume-response');
+    const turnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId;
+    stopGenerating(live.document); live.hook.observe(); await settle();
+    live.reply.set('activity', () => ({ ok: true, data: { activeTurnId: turnId, entries: [], stream: [
+      { seq: 900, time: Date.now(), kind: 'tool_call', callId: 'h2-local-work', tool: 'read', turnId,
+        attribution: 'request_id', outcome: 'ok', summary: { kind: 'read', title: 'Read source.ts' } }
+    ] } }));
+    await live.hook.pullActivity();
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ streaming: false, assistantError: true });
+    resumeSignal(live, 'cos-resume-request', 'recovered');
+    resumeSignal(live, 'cos-resume-response', 'recovered', undefined, 200, true);
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ assistantError: false });
+  });
+
+  it.each(['old-404', 'old-200'])('H2 fences reversed same-turn resume responses: %s', async scenario => {
+    live = await harness();
+    startGenerating(live.document); assistantTurn(live.document, 'answer', []);
+    live.hook.observe(); await settle();
+    resumeSignal(live, 'cos-resume-request', 'older');
+    resumeSignal(live, 'cos-resume-request', 'newer');
+    if (scenario === 'old-404') {
+      resumeSignal(live, 'cos-resume-response', 'newer', undefined, 200, true);
+      resumeSignal(live, 'cos-resume-response', 'older');
+    } else {
+      resumeSignal(live, 'cos-resume-response', 'newer');
+      resumeSignal(live, 'cos-resume-response', 'older', undefined, 200, true);
+    }
+    await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'chat_error')).toHaveLength(scenario === 'old-404' ? 0 : 1);
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ assistantError: scenario === 'old-200' });
+  });
+
+  it('H2 ignores an old document request receipt in another tab of the same conversation', async () => {
+    live = await harness();
+    startGenerating(live.document); assistantTurn(live.document, 'first-tab', []);
+    live.hook.observe(); await settle();
+    resumeSignal(live, 'cos-resume-request', 'first-tab-request');
+    const other = await harness();
+    try {
+      startGenerating(other.document); assistantTurn(other.document, 'second-tab', []);
+      other.hook.observe(); await settle();
+      resumeSignal(other, 'cos-resume-response', 'first-tab-request');
+      await settle(); await other.hook.flush();
+      expect(emitted(other.sent, 'chat_error')).toEqual([]);
+    } finally { other.close(); }
+  });
+
+  it('H2 ignores a delayed 404 after a native terminal and clears a filed machine failure on the final', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'answer', []);
+    live.hook.observe(); await settle();
+    resumeSignal(live, 'cos-resume-request', 'late');
+    resumeSignal(live, 'cos-resume-request', 'failed'); resumeSignal(live, 'cos-resume-response', 'failed');
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ assistantError: true });
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'answer', endMessageId: 'h2-final', messages: [
+      { messageId: 'h2-final', rawMessageId: 'h2-final', stable: true, rawText: 'Hecho.', renderedHtml: '<p>Hecho.</p>' }
+    ] } }]);
+    resumeSignal(live, 'cos-resume-response', 'late');
+    await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'chat_error')).toHaveLength(1);
+    expect(emitted(live.sent, 'turn_end').at(-1)?.event).toMatchObject({ outcome: 'completed' });
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ assistantError: false });
+  });
+
+  it('H2 passes the actual MAIN fetch observer through the recorder without a DOM error card', async () => {
+    live = await harness();
+    startGenerating(live.document); assistantTurn(live.document, 'answer', []);
+    live.hook.observe(); await settle();
+    const response = { status: 404, ok: false, url: `${live.window.location.origin}/backend-api/f/conversation/resume`,
+      headers: { get: () => 'application/json' }, clone: () => { throw new Error('No response body reader'); } };
+    live.window.fetch = async () => response as unknown as Response;
+    // jsdom postMessage omits source/origin; model the browser envelope and asynchronous
+    // delivery without relaxing the production recorder's same-window checks.
+    const page = live.window;
+    page.postMessage = ((data: unknown) => queueMicrotask(() => page.dispatchEvent(new page.MessageEvent('message', {
+      source: page as unknown as Window, origin: page.location.origin, data
+    })))) as typeof page.postMessage;
+    live.window.eval(await fs.readFile(path.join(process.cwd(), 'extension', 'usage.js'), 'utf8'));
+    await live.window.fetch(response.url, { method: 'POST', body: JSON.stringify({ conversation_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }) });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'chat_error').map(row => row.event)).toEqual([
+      expect.objectContaining({ reason: 'stream_gone', recoverable: true })
+    ]);
+  });
+});
+
 /**
  * Moving between chats in a single-page app.
  *
@@ -16600,7 +16760,7 @@ describe('one live isolated-world recorder per document', () => {
 
     await expect(live.runtimeMessage({ type: 'clf-recorder-ping' })).resolves.toEqual({
       ok: true,
-      recorderVersion: 21,
+      recorderVersion: 22,
       busy: false
     });
   });
@@ -20735,7 +20895,7 @@ describe('ordinary Continue native recovery', () => {
     // Chrome's static content cache can precede the helper read from disk by repair.
     win.__CLF_CONTENT_RECORDER__.stop();
     win.CLF_TEST_HOOK = (api: Hook) => { live!.hook = api; };
-    win.eval(contentSource.replace('const RECORDER_VERSION = 21;', 'const RECORDER_VERSION = 13;')
+    win.eval(contentSource.replace('const RECORDER_VERSION = 22;', 'const RECORDER_VERSION = 13;')
       .replace('const FIBER_VERSION = 21;', 'const FIBER_VERSION = 12;'));
     await settle();
     userTurn(live.document, 'source', 'Complete the task');
