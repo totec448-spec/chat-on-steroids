@@ -15,6 +15,9 @@ updates:
       # a new version needs that review, so it is never bumped automatically.
       - dependency-name: sharp
       - dependency-name: '@img/*'
+      # Electron is pinned exactly: the third-party notices name its source tag and
+      # test/packaging.test.ts proves the packaged runners use those bytes. Upgrade it by hand.
+      - dependency-name: electron
     groups:
       minor-and-patch:
         update-types: [minor, patch]
