@@ -77,9 +77,6 @@ import { $, ago, clockTime, compactNumber, disclosureChevron, el, filterSettings
 
 const api = window.api;
 
-/** ChatGPT's own web search ("Searched 3 websites", "Searching the web"), as opposed to its recaps. */
-const NATIVE_SEARCH = /^(?:search(?:ed|ing)|brows(?:ed|ing))\b/i;
-
 /** Sprite id per tool-call family. Deliberately reuses the existing icon set. */
 const KIND_ICON: Record<ActivitySummary['kind'], string> = {
   edit: 'i-pencil',
@@ -2422,12 +2419,8 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
     case 'progress':
       return el('p', 'meta is-progress', event.message.text);
     case 'page_tool': {
-      // A web search keeps the globe. Any other native step is ChatGPT's note on a round of work,
-      // marked done; written in the past ("Created and verified the file") it is the round's recap.
-      const search = NATIVE_SEARCH.test(event.label);
       const line = el('p', 'meta is-progress thinking-line');
-      line.dataset.step = search ? 'search' : NATIVE_STEP_NOW.test(event.label) ? 'note' : 'recap';
-      line.append(icon(search ? 'i-globe' : 'i-check-circle', 'ico thinking-ico'), el('span', '', event.label));
+      line.append(icon('i-globe', 'ico thinking-ico'), el('span', '', event.label));
       return line;
     }
     case 'turn_start':
@@ -3055,7 +3048,7 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     if (!rows[i]!.matches('.ev-tool_call, .ev-page_tool, .ev-agent_message')) { grouped.push(rows[i++]!); continue; }
     let end = i + 1;
     while (end < rows.length && rows[end]!.matches('.ev-tool_call, .ev-page_tool, .ev-agent_message') && rows[end]!.dataset.activityBoundary === rows[i]!.dataset.activityBoundary) end++;
-    if (end - i === 1) { grouped.push(rows[i++]!); continue; }
+    if (end - i === 1) { markNativeStep(rows[i]!, false); grouped.push(rows[i++]!); continue; }
     // Paging can extend or trim the beginning of an activity group. Its first
     // member is therefore not a new disclosure/viewport identity.
     const previous = rows.slice(i, end).map(row => row.closest<HTMLElement>('.tool-group'))
@@ -3072,13 +3065,24 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
       group.addEventListener('toggle', () => { if (group!.open) openTools.add(key); else openTools.delete(key); });
       group.open = openTools.has(key) || rows.slice(i, end).some((row) => row.querySelector('details[open]')); groups.set(key, group);
     }
-    // Name the group after ChatGPT's recap of the round when it wrote one ("Inspected downloads and
-    // updated the plan"): ChatGPT closes each round of work with one, and its last one describes the
-    // whole block, as ChatGPT titles the block itself. The recap then heads the group instead of
-    // repeating inside it. Without a recap, the group is named after its latest real action ("Ran
-    // npm test"), not after a loose note written around it.
+    // Name the group after ChatGPT's recap of the round ("Inspected downloads and updated the plan"):
+    // ChatGPT closes each round of work with one, and titles the block with it. The recap is picked
+    // by position, never by wording, so it holds in any language of the page: the native step that
+    // ends a finished round (prose follows it, or the turn is over). It then heads the group instead
+    // of repeating inside it. A step that ends a round still in progress is a note, and a group
+    // without a recap is named after its latest real action ("Ran npm test").
     const members = rows.slice(i, end);
-    const recap = [...members].reverse().find(row => row.querySelector('.thinking-line[data-step="recap"]'));
+    const finished = end < rows.length ? rows[end] !== turnNow : !(groups === toolGroups && turnWorking);
+    const last = members[members.length - 1]!;
+    const recap = finished && last.matches('.ev-page_tool') ? last : undefined;
+    // A native step written after this app's calls in the same round is about that work and is
+    // marked done, unless it ends a round still in progress; one before any call (a web search
+    // between paragraphs) keeps the globe.
+    let afterCall = false;
+    for (const member of members) {
+      if (member.matches('.ev-page_tool')) markNativeStep(member, afterCall && (finished || member !== last));
+      else afterCall = true;
+    }
     const latest = recap ?? [...members].reverse().find(row => row.matches('.ev-tool_call, .ev-agent_message')) ?? rows[end - 1]!;
     const latestHead = latest.querySelector('.tool > summary, .agent-communication > summary, .thinking-line');
     const observedPhase = rows[i - 1]?.matches('.ev-progress')
@@ -3096,6 +3100,15 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
   }
   for (const key of groups.keys()) if (!retained.has(key)) groups.delete(key);
   return grouped;
+}
+
+/** The icon of a native ChatGPT step: a check once it follows this app's calls in its round, else the globe. */
+function markNativeStep(row: HTMLElement, done: boolean): void {
+  const line = row.querySelector<HTMLElement>('.thinking-line');
+  const name = done ? 'i-check-circle' : 'i-globe';
+  if (!line || (line.dataset.icon ?? 'i-globe') === name) return;
+  line.dataset.icon = name;
+  line.querySelector('.ico')?.replaceWith(icon(name, 'ico thinking-ico'));
 }
 
 /** Adjacent images from one response share a compact gallery, retaining canonical rows. */
@@ -3372,6 +3385,8 @@ const turnStatusLine = turnLine('turn-worked turn-status');
  * "Thinking". Streaming prose needs no row; it is the feedback. A call only reaches the list once it
  * has finished, so without this a long command read as an idle chat.
  */
+/** Whether the latest turn was working at the last paint; the status line's class is never cleared. */
+let turnWorking = false;
 const turnNow = el('p', 'meta is-progress thinking-line turn-now');
 const turnNowIcon = el('span', 'turn-now-icon');
 const turnNowText = el('span', 'turn-now-text');
@@ -3426,11 +3441,7 @@ function liveActivity(): { text: string; icon: string; working: boolean; since?:
     if (!newest || event.time >= newest.time) newest = event;
   }
   if (newest?.kind === 'assistant_message' && proseMoving(newest)) return null;
-  // A search in progress is a step; any other headline ChatGPT writes as it goes is its thinking,
-  // shown as thinking with its words.
-  if (newest?.kind === 'page_tool' && NATIVE_STEP_NOW.test(newest.label)) return NATIVE_SEARCH.test(newest.label)
-    ? { text: newest.label, icon: 'i-globe', working: true, since: newest.time }
-    : { ...thinking, text: newest.label };
+  if (newest?.kind === 'page_tool' && NATIVE_STEP_NOW.test(newest.label)) return { text: newest.label, icon: 'i-globe', working: true, since: newest.time };
   return thinking;
 }
 
@@ -3525,6 +3536,7 @@ function workedLine(asked: number, seconds: number): HTMLElement {
 function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, number>): void {
   const status = deps.state()?.config.ui.developerMode ? null : stateLine();
   const working = status?.working === true;
+  turnWorking = working;
   const asks = rows.map((row, index) => ({ row, index, asked: Number(row.dataset.askedAt) }))
     .filter(entry => entry.row.matches('.ev-user_message') && Number.isFinite(entry.asked));
   const pending = !!$('inputQueue').querySelector('.pending-message');
