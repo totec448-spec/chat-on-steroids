@@ -46,6 +46,7 @@ describe('pull request checklist', () => {
     const files = [{ path: 'src/renderer/styles.css', changes: 4 }, { path: 'test/ui.test.ts', changes: 4 }];
     expect(check({ body: good, files }).join()).toMatch(/screenshots/);
     expect(check({ body: `${good}\n## Screenshots\n\n![before](https://example.com/a.png)\n`, files })).toEqual([]);
+    expect(check({ body: `${good}\nNo visual change: only which transcript reads happen changes.`, files })).toEqual([]);
   });
 
   it('rejects stray notes and logs', () => {
