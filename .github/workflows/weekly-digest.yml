@@ -1,0 +1,31 @@
+name: Weekly digest
+
+# Monday morning: one issue with the PRs waiting for a review, the ones waiting on their authors, new
+# issues nobody has answered yet and issues waiting for their reporters. The previous digest closes.
+on:
+  schedule:
+    - cron: '7 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  digest:
+    if: github.repository == 'totec448-spec/chat-on-steroids'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+      issues: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - name: Open this week's digest
+        run: node scripts/weekly-digest.mjs
