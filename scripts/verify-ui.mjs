@@ -12,6 +12,9 @@ import { createRequire } from 'node:module';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electron = createRequire(import.meta.url)('electron');
 const filter = process.argv[2] ?? '';
+// CI runners have no real GPU and slower timers, so checks that compare pixels or watch an animation
+// fail there although they pass on a real machine. CI names them here; they still run locally.
+const skip = new Set((process.env.VERIFY_UI_SKIP ?? '').split(',').map(name => name.trim()).filter(Boolean));
 const TIMEOUT_MS = 6 * 60_000;
 
 // How each check has to be started, where that differs from `electron <script>`.
@@ -24,6 +27,7 @@ const scripts = readdirSync(path.join(root, 'scripts'))
   .filter(name => /^verify-.*\.cjs$/.test(name) && name.includes(filter)).sort();
 const results = [];
 for (const name of scripts) {
+  if (skip.has(name)) { console.log(`SKIP  ${name}  (needs a real GPU and display timing; run it locally)`); continue; }
   const how = special[name] ?? { command: electron, args: [] };
   const started = Date.now();
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
@@ -45,5 +49,5 @@ for (const name of scripts) {
   }
 }
 const failed = results.filter(result => !result.ok);
-console.log(`\n${results.length - failed.length} of ${results.length} UI checks passed.`);
+console.log(`\n${results.length - failed.length} of ${results.length} UI checks passed${skip.size ? `, ${[...skip].filter(name => scripts.includes(name)).length} skipped` : ''}.`);
 process.exit(failed.length ? 1 : 0);
