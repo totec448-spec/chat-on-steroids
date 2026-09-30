@@ -24,7 +24,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Open the checklist issue
         run: |
           node -e 'const fs = require("fs"); const v = process.env.VERSION.trim(); if (!/^v\d+\.\d+\.\d+$/.test(v)) throw new Error("Version must look like v2.1.22"); fs.writeFileSync("checklist.md", fs.readFileSync(".github/release-checklist.md", "utf8").replaceAll("VERSION", v))'
