@@ -2350,7 +2350,11 @@ repair, but cannot create a second browser action while another repair is alread
 Every compaction reload rechecks its original continuation token and phase at handout and the
 browser action claim. Cancellation, replacement, source dispatch and completed capture revoke
 obsolete pickup authority. Recovery text distinguishes an unsent request from an outstanding
-answer; neither implies a completed brief exists. A reloaded source waits for its visible,
+answer; neither implies a completed brief exists. An explicit desktop compaction's reload says it sends the
+request; nothing failed. Every reload row's id names the chat it reloaded
+(`browser-repair:<chat>:<id>`) and the page paints it only in that chat. B's page may record its
+sent resume message after B's first attributed call already committed; that message is the
+feed's resume boundary, where A's rows stop. A reloaded source waits for its visible,
 editable composer and recorded original question before freezing the source identity or stopping
 the turn. Already observed identities and a real user Send remain cancellation boundaries during
 hydration; an empty loading DOM must not be treated as a different conversation. The source

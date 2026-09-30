@@ -5848,6 +5848,30 @@ describe('the app-owned chronological stream', () => {
     expect(again[0]!.nextElementSibling).toBe(secondQuestion);
   });
 
+  it('paints a reload notice only in the chat it happened in, not in the chat Compact & resume moved on to', async () => {
+    // Compact & resume keeps the session and moves it to a new chat. The source chat's reload
+    // is in the session log before the new chat's first message, but it did not happen here.
+    const repairActivity = () => ({
+      ok: true,
+      data: {
+        entries: [],
+        userAnchors: [{ seq: 7, time: 700, messageId: 'm-user-two' }],
+        stream: [
+          { seq: 5, time: 500, kind: 'progress', turnId: null, agent: null, progressId: 'browser-repair:11111111-2222-3333-4444-555555555555:x', text: 'Reloaded chat to send the handoff request for Compact & resume.' },
+          { seq: 6, time: 600, kind: 'progress', turnId: null, agent: null, progressId: 'browser-repair:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:y', text: 'Reloaded chat to recover an interrupted response.' }
+        ],
+        job: null
+      }
+    });
+    live = await harness(undefined, { activity: repairActivity });
+    const question = userTurn(live.document, 'user-two', 'second question', { sent: false });
+    await live.hook.pullActivity();
+    live.hook.renderStreams();
+    const notices = [...live.document.querySelectorAll('.clf-repair-notice')] as HTMLElement[];
+    expect(notices.map(notice => notice.textContent)).toEqual([expect.stringContaining('recover an interrupted response')]);
+    expect(notices[0]!.nextElementSibling).toBe(question);
+  });
+
   it('keeps a reload notice out of the DOM while the user message it precedes is virtualised away', async () => {
     const repairActivity = () => ({
       ok: true,
