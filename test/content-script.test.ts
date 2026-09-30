@@ -8083,6 +8083,26 @@ describe('a stop button that goes missing while the turn is still running', () =
         recoverable: true
       })
     );
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({
+      assistantError: true
+    });
+    notice.remove();
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({
+      assistantError: false
+    });
+  });
+
+  it('treats an already-visible unowned transport error as current until ownership proves otherwise', async () => {
+    live = await harness(undefined, undefined, document => {
+      const notice = document.createElement('div');
+      notice.setAttribute('role', 'alert');
+      notice.textContent = 'A network error occurred. Please check your connection and try again.';
+      document.body.append(notice);
+    });
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({
+      turnId: null,
+      assistantError: true
+    });
   });
 
   /**

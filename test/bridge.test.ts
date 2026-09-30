@@ -8836,6 +8836,32 @@ describe('unattributed activity recovery', () => {
     expect((await request('POST', '/repairs/claim', { body: { token: retry!.token } })).body.allowed).toBe(true);
   });
 
+  it('preserves a recovered assistant-error page without spending a later reload on the same question', async () => {
+    await pair();
+    await events(PRIME, [
+      { kind: 'user_message', time: Date.now(), messageId: 'preserved-question', text: 'Keep working' },
+      openTurn('preserved-answer'),
+      { kind: 'chat_error', time: Date.now(), turnId: 'preserved-answer',
+        text: 'Connection interrupted. Waiting for the complete answer', recoverable: true }
+    ]);
+    const repair = await maintenance();
+    expect(repair?.reason).toBe('assistant-error');
+    expect((await request('POST', '/repairs/claim', { body: { token: repair!.token } })).body.allowed).toBe(true);
+
+    const preserved = await request('GET', `/status?repaired=${repair!.token}&repairAction=preserved`);
+    expect(preserved.status).toBe(200);
+    expect(preserved.body.repairs).toEqual([]);
+    expect(await maintenance()).toBeNull();
+
+    // No browser action happened, so preservation must not spend the authored question's one
+    // real error reload. If the transport failure returns, it earns a fresh repair.
+    await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'preserved-answer',
+      text: 'Connection interrupted. Waiting for the complete answer', recoverable: true }]);
+    const retry = await maintenance();
+    expect(retry?.reason).toBe('assistant-error');
+    expect((await request('POST', '/repairs/claim', { body: { token: retry!.token } })).body.allowed).toBe(true);
+  });
+
   it('does not refund error recovery when reload remints a generation for the same authored question', async () => {
     vi.useFakeTimers();
     try {

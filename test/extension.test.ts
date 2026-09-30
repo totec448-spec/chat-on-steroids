@@ -4681,8 +4681,10 @@ it.each([
 
 /**
  * #393, 2026-09-26: an attribution refresh reloaded a page in the middle of its stream, and the
- * turn was lost ("Resume stream unavailable"). Only that reason stands down for a streaming page;
- * silence and error recovery exist for pages that look busy and are not, and keep reloading.
+ * turn was lost ("Resume stream unavailable"). Interrupted-response recovery needs a narrower
+ * fence: a resumed stream stands down without spending the episode; once the current transport
+ * error has disappeared the episode can be retired without navigation; a still-visible error
+ * keeps the existing reload recovery.
  */
 it.each([
   ['unattributed', { ok: true, draft: false, streaming: true }, 0],
@@ -4690,6 +4692,11 @@ it.each([
   ['unattributed', null, 1],
   ['blind', { ok: true, draft: false, streaming: true }, 0],
   ['blind', { ok: true, draft: false, streaming: false }, 1],
+  ['assistant-error', { ok: true, draft: false, streaming: true, assistantError: true }, 1],
+  ['assistant-error', { ok: true, draft: false, streaming: false, assistantError: true }, 1],
+  ['assistant-error', { ok: true, draft: false, streaming: false, assistantError: false }, 0],
+  ['assistant-error', { ok: true, draft: false, streaming: false }, 1],
+  ['assistant-error', null, 1],
   ['silence', { ok: true, draft: false, streaming: true }, 1]
 ])('for reason %s and page status %j reloads %i time(s)', async (reason, status, reloads) => {
   const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -4708,7 +4715,13 @@ it.each([
   await repair([{ conversationId, token: `stream-${reason}`, reason, suspended: false }], {});
   expect(reload).toHaveBeenCalledTimes(reloads);
   const reported = call.mock.calls.map((args: unknown[]) => String(args[0]));
-  expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(1 - reloads);
+  if (reason === 'assistant-error' && status?.ok === true && status.streaming !== true &&
+      'assistantError' in status && status.assistantError === false) {
+    expect(reported.some((url) => url.includes('repaired=') && url.includes('repairAction=preserved'))).toBe(true);
+    expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(0);
+  } else {
+    expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(1 - reloads);
+  }
 });
 
 /**

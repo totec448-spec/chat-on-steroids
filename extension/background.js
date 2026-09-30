@@ -2866,15 +2866,23 @@ async function performBrowserRepairs(repairs, policy) {
           continue;
         }
       }
-      if (target && (reason === 'unattributed' || reason === 'blind')) {
+      if (target && (reason === 'unattributed' || reason === 'blind' || reason === 'assistant-error')) {
         // An attribution refresh exists to make a live page report again, not to rescue a
         // broken one, and a reload in the middle of a stream ends that stream: ChatGPT answers
         // it with "Resume stream unavailable" or "could not be loaded", and the turn is lost.
-        // Reported in #393 and measured on 2026-09-26. A page that answers that it is streaming
-        // is alive; stand down and let the incident's next pass decide.
-        const status = await tabReply(target.id, { type: 'clf-page-status' });
-        if (status?.ok === true && status.streaming === true) {
+        // Reported in #393 and measured on 2026-09-26. Interrupted-response recovery has the
+        // same destructive edge once ChatGPT has already recovered: keep a resumed stream queued
+        // for another pass, and retire the episode without navigation only after its exact
+        // transport error has disappeared. A still-visible error keeps the existing reload path.
+        const status = await tabReply(target.id, { type: 'clf-page-status' },
+          documentId ? { documentId } : undefined);
+        if (status?.ok === true && status.streaming === true &&
+            (reason !== 'assistant-error' || status.assistantError === false)) {
           await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
+          continue;
+        }
+        if (reason === 'assistant-error' && status?.ok === true && status.assistantError === false) {
+          await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=preserved`);
           continue;
         }
       }
