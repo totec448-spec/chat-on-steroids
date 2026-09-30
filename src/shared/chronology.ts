@@ -221,6 +221,9 @@ export function projectTimeline<T extends Chronological>(
   });
 }
 
+/** Entries recorded from one read of the page land within this many milliseconds of each other. */
+const SAME_READ_MS = 50;
+
 /** Where an entry sits in the log: its first appearance if it has revisions, else its seq. */
 export function positionOf(entry: Chronological): number {
   return typeof entry.origin === 'number' && Number.isFinite(entry.origin) ? entry.origin : entry.seq;
@@ -294,11 +297,30 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
   const rank = (entry: T, ends: T | null): number =>
     entry.kind === 'turn_start' ? -1 : entry.kind === 'turn_end' ? 1 : entry === ends ? 0.5 : 0;
 
+  /*
+   * A native ChatGPT step (a web search, a thinking headline) carries only the moment it was read,
+   * while prose carries the moment ChatGPT opened it — and ChatGPT opens a paragraph before it runs
+   * the steps drawn above it. Compared as they are, every step fell after the paragraph that
+   * follows it on the page. The page is read in ChatGPT's own order, so a step read in the same pass
+   * as the paragraph right after it is placed just before that paragraph was opened.
+   */
+  const readBefore = new Map<T, number>();
+  for (let at = 0; at < bySeq.length; at++) {
+    const step = bySeq[at]!;
+    if (step.kind !== 'page_tool' || authoredTimeOf(step) !== undefined) continue;
+    let next = at + 1;
+    while (next < bySeq.length && bySeq[next]!.kind === 'page_tool' && Math.abs(bySeq[next]!.time - step.time) <= SAME_READ_MS) next++;
+    const prose = bySeq[next];
+    const opened = prose?.kind === 'assistant_message' ? authoredTimeOf(prose) : undefined;
+    if (opened === undefined || Math.abs(prose!.time - step.time) > SAME_READ_MS || (prose!.turnId ?? null) !== (step.turnId ?? null)) continue;
+    if (opened <= step.time) readBefore.set(step, opened - 1);
+  }
+
   // An entry with no usable time is ordered by its stable position (`origin` for a mutable
   // canonical item, otherwise `seq`) rather than being flung to one end of its turn: a
   // missing timestamp is not evidence about when the thing happened.
   const byTime = (a: T, b: T): number => {
-    const apart = (authoredTimeOf(a) ?? a.time) - (authoredTimeOf(b) ?? b.time);
+    const apart = (readBefore.get(a) ?? authoredTimeOf(a) ?? a.time) - (readBefore.get(b) ?? authoredTimeOf(b) ?? b.time);
     return Number.isFinite(apart) && apart !== 0
       ? apart
       : position(a) - position(b) || a.seq - b.seq;

@@ -1,4 +1,4 @@
-import { ui, uiText, t, initLanguage } from './i18n.js';
+import { currentLanguage, ui, uiText, t, initLanguage } from './i18n.js';
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
 import { initUsage, refreshUsage } from './usage.js';
@@ -1681,7 +1681,7 @@ function logRow(entry: LogEntry): HTMLElement {
   const line = el('p', entry.level === 'info' ? '' : 'bad');
   if (entry.agent) line.dataset.agent = entry.agent;
   const time = document.createElement('time');
-  time.textContent = new Date(entry.time).toLocaleTimeString();
+  time.textContent = new Date(entry.time).toLocaleTimeString(currentLanguage());
   line.append(time, el('span', 'what', what), el('span', 'rest', rest));
   return line;
 }

@@ -1,4 +1,7 @@
 {
+  "Previous source": "Fonte anterior",
+  "Next source": "Fonte seguinte",
+  "{0} more sources were not recorded with this reply.": "Outras {0} fontes não foram gravadas com esta resposta.",
   "Copy answer": "Copiar resposta",
   "Export as Markdown": "Exportar como Markdown",
   "This answer": "Esta resposta",

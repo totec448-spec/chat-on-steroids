@@ -152,6 +152,27 @@ it('still refuses a model the account does not offer, whatever the effort', asyn
   expect(await f.api.selectModelSettings('no-such-model', 'high')).toBe(false);
 });
 
+/*
+ * A fixed-tier family exposes only efforts outside the reasoning ladder: a Pro-only
+ * family reports `pro` as its sole rung. Asking for a ladder step there has nothing to
+ * round to — the family's own tier is the honest resolution, not a refusal.
+ */
+it('refuses a ladder effort for a Pro-only family instead of substituting its tier', async () => {
+  // Saved execution aliases stay exact, effort included (AGENTS.md §13): the app drops an
+  // unoffered effort before it asks, so a request that still names one must not run as Pro.
+  const f = fixture('', 0);
+  const pro = f.selections[0]![2]!;
+  pro.availability.status = 'available';
+  (pro as Record<string, unknown>).category = { ...pro.category, modelVersion: 'gpt-6-pro', shortLabel: '6' };
+  (pro as Record<string, unknown>).modelConfig = { title: '6' };
+  expect(await f.api.selectModelSettings('6', 'medium')).toBe(false);
+});
+
+it('still refuses a non-ladder effort the family does not offer', async () => {
+  const f = fixture('', 0);
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'pro')).toBe(false);
+});
+
 it('refuses selection success when the picker retains its focus trap', async () => {
   const f = fixture('', null);
   expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(false);

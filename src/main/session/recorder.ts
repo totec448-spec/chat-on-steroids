@@ -1758,6 +1758,8 @@ export interface ChatObservation {
   providerMessageId?: string;
   /** Server-reported model of an assistant reply; see SessionEvent.resolvedModel. */
   resolvedModel?: string;
+  /** Sources an assistant reply cites inline; see SessionEvent.references. */
+  references?: import('../../shared/session.js').MessageReference[];
   /** Exact non-secret provider asset id for a native generated image. */
   providerAssetId?: string;
   providerRole?: 'tool' | 'assistant';
@@ -2088,6 +2090,7 @@ async function recordSupersededMessages(
           state,
           ...(item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
           ...(item.resolvedModel ? { resolvedModel: item.resolvedModel } : {}),
+          ...(item.references ? { references: item.references } : {}),
           final: state === 'final'
         },
         { preferTime: item.authoredTime === true }
@@ -2236,6 +2239,7 @@ async function recordChatObservationsNow(
           final: state === 'final',
           ...(item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
           ...(item.resolvedModel ? { resolvedModel: item.resolvedModel } : {}),
+          ...(item.references ? { references: item.references } : {}),
           ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
         }, { preferTime: item.authoredTime === true, work: item.activeNow === true });
         const canonicalTurn = written.event.turnId;

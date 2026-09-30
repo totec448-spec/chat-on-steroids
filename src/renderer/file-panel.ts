@@ -5,7 +5,7 @@ import type { ProjectDirectoryListing, ProjectFileEntry, ProjectFileKind, Projec
 import type { ProjectGitChange, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot, ProjectGitStatus } from '../shared/project-git.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { marked } from 'marked';
-import { t, ui } from './i18n.js';
+import { currentLanguage, t, ui } from './i18n.js';
 import { disclosureChevron, el, icon, run, toast } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
@@ -956,7 +956,7 @@ export function createFilePanel(options: FilePanelOptions) {
     const value = previewValue;
     const head = viewerHeader(value);
     const meta = el('div', 'file-preview-meta');
-    meta.append(el('span', '', `${value.path} · ${humanBytes(value.bytes)} · ${new Date(value.modifiedAt).toLocaleString()}`));
+    meta.append(el('span', '', `${value.path} · ${humanBytes(value.bytes)} · ${new Date(value.modifiedAt).toLocaleString(currentLanguage())}`));
     let content: HTMLElement;
     let viewerHost: HTMLElement | null = null;
     let languageLabel: HTMLElement | null = null;
@@ -1346,8 +1346,8 @@ export function createFilePanel(options: FilePanelOptions) {
     if (!branchStats.hidden && gitSnapshot?.state === 'ready') {
       const additions = gitSnapshot.changes.reduce((sum, change) => sum + (change.additions ?? 0), 0);
       const deletions = gitSnapshot.changes.reduce((sum, change) => sum + (change.deletions ?? 0), 0);
-      branchStats.append(el('span', 'is-added', `+${additions.toLocaleString()}`),
-        el('span', 'is-deleted', `−${deletions.toLocaleString()}`));
+      branchStats.append(el('span', 'is-added', `+${additions.toLocaleString(currentLanguage())}`),
+        el('span', 'is-deleted', `−${deletions.toLocaleString(currentLanguage())}`));
       branchStats.title = gitSnapshot.truncated ? t('More changes exist than can be shown at once.') :
         t('Committed changes only; local work is excluded');
     }
