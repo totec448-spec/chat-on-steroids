@@ -1941,6 +1941,126 @@ describe('worker settings authority', () => {
     expect(worker.windowsUpdate).not.toHaveBeenCalled();
   });
 
+  it('reports successor tab creation failure instead of waiting for the command deadline', async () => {
+    const acknowledgements: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        return response(200, { stored: true, commandId: 'cmd-create-failed', placement: { id: 'cmd-create-failed' } });
+      }
+      if (url.pathname === '/commands/ack') {
+        acknowledgements.push(JSON.parse(String(init.body)));
+        return response(200, { ok: true, outcome: 'terminal-failure', committed: false });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch,
+      tabsGet: async () => ({ id: 45, windowId: 9, index: 2, url: `https://chatgpt.com/c/${CHAT}` }) as never
+    });
+    worker.tabsCreate.mockRejectedValueOnce(new Error('Chrome refused tab creation'));
+    await worker.registerTab(45);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 45);
+
+    await worker.send(
+      { type: 'compact', conversationId: CHAT, token: '0123456789abcdef0123456789abcdef', summary: 'the brief' },
+      45
+    );
+
+    expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
+    expect(acknowledgements).toEqual([
+      expect.objectContaining({
+        id: 'cmd-create-failed',
+        status: 'failed',
+        error: 'successor_tab_create_failed: Chrome refused tab creation'
+      })
+    ]);
+  });
+
+  it('reports a missing successor home window instead of waiting for the command deadline', async () => {
+    const acknowledgements: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        return response(200, { stored: true, commandId: 'cmd-window-missing', placement: { id: 'cmd-window-missing' } });
+      }
+      if (url.pathname === '/commands/ack') {
+        acknowledgements.push(JSON.parse(String(init.body)));
+        return response(200, { ok: true, outcome: 'terminal-failure', committed: false });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch,
+      tabsGet: async () => ({ id: 45, url: `https://chatgpt.com/c/${CHAT}` })
+    });
+    await worker.registerTab(45);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 45);
+
+    await worker.send(
+      { type: 'compact', conversationId: CHAT, token: '0123456789abcdef0123456789abcdef', summary: 'the brief' },
+      45
+    );
+
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+    expect(acknowledgements).toEqual([
+      expect.objectContaining({
+        id: 'cmd-window-missing',
+        status: 'failed',
+        error: 'successor_home_window_missing'
+      })
+    ]);
+  });
+
+  it('reports a successor home tab that disappears after placement is handed out', async () => {
+    const acknowledgements: Array<Record<string, unknown>> = [];
+    let placementHandedOut = false;
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        placementHandedOut = true;
+        return response(200, { stored: true, commandId: 'cmd-home-gone', placement: { id: 'cmd-home-gone' } });
+      }
+      if (url.pathname === '/commands/ack') {
+        acknowledgements.push(JSON.parse(String(init.body)));
+        return response(200, { ok: true, outcome: 'terminal-failure', committed: false });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch,
+      tabsGet: async () => {
+        if (placementHandedOut) throw new Error('No tab with id: 45');
+        return { id: 45, windowId: 9, index: 2, url: `https://chatgpt.com/c/${CHAT}` } as never;
+      }
+    });
+    await worker.registerTab(45);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 45);
+
+    await worker.send(
+      { type: 'compact', conversationId: CHAT, token: '0123456789abcdef0123456789abcdef', summary: 'the brief' },
+      45
+    );
+
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+    expect(acknowledgements).toEqual([
+      expect.objectContaining({
+        id: 'cmd-home-gone',
+        status: 'failed',
+        error: 'successor_home_tab_unavailable: No tab with id: 45'
+      })
+    ]);
+  });
+
   it('leaves a compaction reply that places nothing to the app’s own opener', async () => {
     const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
       const url = new URL(input);
