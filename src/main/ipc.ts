@@ -63,7 +63,6 @@ import { bridgePortSelection } from './bridge-ports.js';
 import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts, goalBackendFor, goalSwitchFor, setGoalSwitchNow, setGoalReplyActiveNow, setGoalObjectiveNow } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
 import { runningToolActivity } from './mcp/call-context.js';
-import { requestCorrelation } from './session/correlation.js';
 import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
@@ -1127,7 +1126,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // What a working chat's tool calls are doing right now, for its live caption.
   handle('sessions:runningTools', async (payload) => {
     const { conversationIds } = z.object({ conversationIds: z.array(z.string().min(1).max(200)).max(16) }).parse(payload);
-    return runningToolActivity(conversationIds, requestId => requestCorrelation(requestId)?.conversationId ?? null);
+    return runningToolActivity(conversationIds);
   });
   handle('sessions:retryHelper', async (payload) => {
     const { id, sourceSessionId } = z.object({ id: z.string().uuid(), sourceSessionId: z.string().min(8).max(64) }).parse(payload);

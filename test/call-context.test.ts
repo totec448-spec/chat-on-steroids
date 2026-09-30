@@ -4,6 +4,8 @@ import {
   inFlightToolCalls,
   runningToolActivity,
   runningToolCalls,
+  runningToolProgress,
+  setRequestOwner,
   settlingToolCalls,
   trackInFlight,
   type CallContext
@@ -56,8 +58,9 @@ describe('what a chat’s calls are doing', () => {
     expect(runningToolActivity(['conversation-a'])).toEqual([]);
   });
 
-  it('shows a call still running by the page’s exact proof of its request, before it is placed', async () => {
-    // Calls are placed only after their handler ran, so a running call names no chat yet.
+  it('counts and names a running call by one ownership rule: the page’s exact proof of its request', async () => {
+    // Calls are placed only after their handler ran, so a running call names no chat yet. What the
+    // caption names and what counts as the chat's running work must be the same calls.
     const call = (requestId: string | null) => ({ ...callFrom(null), activity: { title: 'Running npm test', kind: 'run' as const },
       caller: { transportKey: null, requestId, conversationId: null } });
     const proven = call('req-a'), elsewhere = call('req-b'), unknown = call('req-unknown'), none = call(null);
@@ -65,10 +68,20 @@ describe('what a chat’s calls are doing', () => {
     let release = (): void => {};
     const held = new Promise<void>((resolve) => { release = resolve; });
     const calls = [proven, elsewhere, unknown, none].map(entry => trackInFlight(entry, () => held));
-    expect(runningToolActivity(['conversation-a'], id => owners[id] ?? null)).toEqual([{ title: 'Running npm test', kind: 'run', since: proven.startedAt }]);
-    expect(runningToolActivity(['conversation-a'])).toEqual([]);
-    release();
-    await Promise.all(calls);
+    try {
+      // No proof installed: neither sees an unplaced call.
+      expect(runningToolActivity(['conversation-a'])).toEqual([]);
+      expect(runningToolProgress('conversation-a')).toBeNull();
+      setRequestOwner(id => owners[id] ?? null);
+      expect(runningToolActivity(['conversation-a'])).toEqual([{ title: 'Running npm test', kind: 'run', since: proven.startedAt }]);
+      expect(runningToolProgress('conversation-a')).toEqual({ count: 1, since: proven.startedAt });
+      expect(runningToolProgress('conversation-b')).toEqual({ count: 1, since: elsewhere.startedAt });
+      expect(runningToolProgress('conversation-c')).toBeNull();
+    } finally {
+      setRequestOwner(() => null);
+      release();
+      await Promise.all(calls);
+    }
   });
 });
 
