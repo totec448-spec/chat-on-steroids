@@ -22,6 +22,28 @@ npm run verify     # the same gate CI runs
 npm run dev        # Electron development build
 ```
 
+On Linux with Nix installed, the repository also has a flake-based development shell. It uses
+Node 22 to match CI, derives the Electron major from `package.json`, and imports npm dependencies
+from the integrity hashes already stored in `package-lock.json`, so there is no second npm
+dependency hash to bump.
+
+The Nix shell has been built and tested on `x86_64-linux`. `aarch64-linux` has only been
+evaluated, not built or tested.
+
+```sh
+nix develop
+npm run verify
+npm run dev
+```
+
+The Nix shell owns its `node_modules` symlinks. When changing dependencies, update the manifest
+and lockfile with `npm install --package-lock-only ...`, then re-enter `nix develop`. If you are
+switching an existing checkout from a regular `npm ci`, remove that generated `node_modules`
+directory once before entering the Nix shell. `flake.lock` is the only Nix-specific dependency
+pin; Nix contributors can update it in their own pull requests with `nix flake update`.
+Run `npm run tunnel` when working on the OpenAI tunnel path; the shell already provides ripgrep
+for normal development fallback discovery.
+
 A behavior change should include a deterministic regression test where practical. Run the nearest focused tests while working and `npm run verify` before submitting.
 
 ## Packaging
