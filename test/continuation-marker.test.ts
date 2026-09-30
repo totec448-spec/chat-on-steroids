@@ -52,7 +52,9 @@ describe('page readback unescaping', () => {
     ['[[COS_CONTEXT:34]]\\\nYou are worker-1.\\\nRun it.', '[[COS_CONTEXT:34]]\nYou are worker-1.\nRun it.'],
     ['a\\\r\nb', 'a\nb'],
     ['Keep C:\\_work and \\* unchanged', 'Keep C:_work and * unchanged'],
-    ['no escapes here', 'no escapes here']
+    ['no escapes here', 'no escapes here'],
+    // #821: an indented line's first space reads back as `&#x20;`; one inside a line stays.
+    ['&#x20;Indented\n&#x20; deeper\nkeep &#x20; here', ' Indented\n  deeper\nkeep &#x20; here']
   ])('reads %j as %j in both readers', (raw, typed) => {
     expect(unescapeMarkdown(raw)).toBe(typed);
     expect(pageUnescape(raw)).toBe(typed);

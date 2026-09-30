@@ -526,8 +526,9 @@ const CONTINUATION_MARKER_ESCAPED = /^\s*(?:\\?\[){2}CLF\\?-(HANDOFF|RESUME)\\?:
  */
 export function unescapeMarkdown(value: string): string {
   // A backslash before a line break is the composer's Markdown hard break (see asTyped in
-  // shared/user-prompt.ts); ASCII punctuation is the other escape the page applies.
-  return value.replace(/\\\r?\n/g, '\n').replace(/\\([!-/:-@[-`{-~])/g, '$1');
+  // shared/user-prompt.ts); ASCII punctuation is the other escape the page applies, and an
+  // indented line's first space comes back as `&#x20;` (#821).
+  return value.replace(/\\\r?\n/g, '\n').replace(/\\([!-/:-@[-`{-~])/g, '$1').replace(/(^|\n)&#x20;/g, '$1 ');
 }
 
 /** The continuation marker at the head of `text`, as typed or as the composer escaped it. */

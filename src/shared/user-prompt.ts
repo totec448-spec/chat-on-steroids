@@ -16,11 +16,15 @@ const continuation = (text: string): string => /^\[\[CLF-(?:HANDOFF|RESUME):[A-Z
  * conversation with them, and the recorder files the framed text as a second user message
  * beside the authored one.
  *
+ * It also writes the first space of an indented line as `&#x20;`, and only that one: measured
+ * in issue #821, a 96,000-character opening read back with 47 of them, every one opening a
+ * line, and replacing them gave the sent bytes exactly. An `&#x20;` inside a line stays as typed.
+ *
  * Same rule as `unescapeMarkdown()` in shared/session.ts, which readers of the continuation
  * marker already follow: try the exact text first, and only then this.
  */
 function asTyped(text: string): string {
-  return text.replace(/\\\n/g, '\n').replace(/\\([!-/:-@[-`{-~])/g, '$1');
+  return text.replace(/\\\n/g, '\n').replace(/\\([!-/:-@[-`{-~])/g, '$1').replace(/(^|\n)&#x20;/g, '$1 ');
 }
 
 function readFrame(text: string): string | null {

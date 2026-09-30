@@ -2366,7 +2366,10 @@ An unnamed destination never reports a successful resume ACK, even after a trans
 Keep its armed dispatch and journal gate for exact marker reconciliation; a missing id plus
 generic timeout text is not proof of non-delivery and cannot authorize another Send.
 Continuation readback accepts one layer of Markdown escaping on ASCII punctuation, never
-escapes on letters/digits. Main/store/renderer and the unbundled content script must agree on
+escapes on letters/digits. The same fallback turns a line-opening `&#x20;` back into a space:
+the page writes an indented line's first space that way (#821). An `&#x20;` inside a line
+stays literal. The `COS_CONTEXT` frame readers (`shared/user-prompt.ts`, `chatgpt-dom.js`)
+follow the same order: exact first, then this one layer. Main/store/renderer and the unbundled content script must agree on
 the marker and preserve its exact removable span. Match an escaped marker separately from
 the brief before considering a fully escaped rendering, preserving literal path/glob backslashes.
 Bootstrap receipt fallback remains restricted to app-owned opening messages and retains native
