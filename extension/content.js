@@ -866,8 +866,8 @@
     };
   }
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
-                             matchesUser = matchesSubmittedUser) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser,
+                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null) {
+    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -11603,6 +11603,12 @@
   let desktopDecision = null;
   let desktopDecisionSession = null;
   let desktopInputBusy = false;
+  /**
+   * How long an app-owned Send waits for its exact user row after the click. Without a bound,
+   * a row the page reads back differently (#821: `&#x20;` for a space) kept this document's
+   * input slot for good, and every later message waited for a reload.
+   */
+  const DESKTOP_RECEIPT_MS = 120_000;
   // The durable claim, never a project path/title guess, fences first tool evidence.
   let desktopProjectInput = null;
   function retireBoundProjectInput(claim, projectBound) {
@@ -12024,10 +12030,16 @@
         // may replace it before this async operation resumes; do not rediscover it.
         receipt = { conversation, user: { id: user.id } };
         return true;
-      }, matchesSubmittedBootstrap);
+      }, matchesSubmittedBootstrap, DESKTOP_RECEIPT_MS);
       // #744: one retry when the editor was replaced before anything asked to send it.
       if (!(await nativeSend()) &&
-          !(!authorizing && !sendAttempted && !receipt && !draft.current() && draftCurrent() && await nativeSend())) return false;
+          !(!authorizing && !sendAttempted && !receipt && !draft.current() && draftCurrent() && await nativeSend())) {
+        // Send was clicked, but no row proved it. Say so instead of keeping the claim open: the
+        // app retires it as an uncertain send, never a replay, and this document takes the next
+        // input. The reason is a fixed code the app recognises (see failBrowserInput).
+        if (sendAttempted && !receipt) return fail('Native Send receipt was not confirmed.');
+        return false;
+      }
       if (!receipt || !sendingTarget()) return false;
       // Native Send listeners refresh the receipt; pin only that witnessed object.
       const witnessedSendReceipt = userSendReceipt;
@@ -12721,6 +12733,7 @@
       streamRootKeys: () => [...streamRootsByKey.keys()],
       /** So a test settles a turn by the real window rather than a copy of the number. */
       TURN_SETTLE_MS,
+      DESKTOP_RECEIPT_MS,
       STALL_MS,
       GOAL_RETRY_MS,
       PRESENTATION_SCROLL_IDLE_MS,
@@ -12732,6 +12745,7 @@
       renderStreamEnabled: () => RENDER_STREAM,
       setDesktopProjectInputForTest: (claim) => { desktopProjectInput = claim; },
       desktopProjectInputForTest: () => desktopProjectInput,
+      desktopInputBusyForTest: () => desktopInputBusy,
       setShowTimes: (on) => {
         SHOW_TIMES = on === true;
       }
