@@ -2,10 +2,18 @@ name: Verify published release
 
 # What users download, checked right after it is published: every file matches SHA256SUMS.txt and
 # the standalone extension is the tagged build. A problem opens an issue instead of waiting for a
-# user report. It can also be run by hand for any existing tag.
+# user report. publish.yml calls it right after publishing: a release created with the workflow's
+# own token triggers no other workflow, so `release: published` alone never ran for our releases.
+# It can also be run by hand for any existing tag.
 on:
   release:
     types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to verify
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:

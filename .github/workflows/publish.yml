@@ -175,3 +175,13 @@ jobs:
             --title "$(sed -n 's/^## //p' "docs/release-notes/$TAG.md" | head -n 1)" \
             --notes-file "docs/release-notes/$TAG.md"
           gh release view "$TAG" --json url --jq .url
+
+  verify:
+    name: Verify published files
+    needs: publish
+    uses: ./.github/workflows/verify-release.yml
+    with:
+      tag: ${{ github.ref_name }}
+    permissions:
+      contents: read
+      issues: write
