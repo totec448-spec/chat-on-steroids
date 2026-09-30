@@ -4,7 +4,8 @@ const state = vi.hoisted(() => ({
   models: [] as Array<{ id: string; label: string; efforts: string[]; aliases?: string[] }>,
   goal: { helperModel: 'gpt-5.6-sol', helperReasoning: 'high' } as Record<string, unknown>
 }));
-vi.mock('../src/main/chat-models.js', async original => ({ ...(await original<object>()), getChatModels: () => ({ state: 'ready', models: state.models }) }));
+const refreshForUnoffered = vi.hoisted(() => vi.fn());
+vi.mock('../src/main/chat-models.js', async original => ({ ...(await original<object>()), getChatModels: () => ({ state: 'ready', models: state.models }), refreshForUnoffered }));
 vi.mock('../src/main/config.js', async original => {
   const real = await original<typeof import('../src/main/config.js')>();
   return { ...real, getConfig: () => ({ ...real.defaultConfig(), goal: { ...real.defaultConfig().goal, ...state.goal } }) };
@@ -18,10 +19,18 @@ beforeEach(() => {
     { id: 'gpt-5-5-thinking', label: '5.5', efforts: ['medium', 'high'] }
   ];
   state.goal = { helperModel: 'gpt-5.6-sol', helperReasoning: 'high' };
+  refreshForUnoffered.mockClear();
 });
 
 it('keeps a saved helper model and reasoning the account offers', () => {
   expect(goalHelperSelection()).toEqual({ model: 'gpt-5.6-sol', reasoningEffort: 'high' });
+  expect(refreshForUnoffered).not.toHaveBeenCalled();
+});
+
+it('asks for a fresh catalog when the stored one lacks the saved helper model', () => {
+  state.goal = { helperModel: '6', helperReasoning: 'pro' };
+  goalHelperSelection();
+  expect(refreshForUnoffered).toHaveBeenCalledWith(expect.stringContaining('6'));
 });
 
 it("falls back to ChatGPT's current selection for a saved model the account no longer offers", () => {

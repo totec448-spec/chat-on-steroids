@@ -288,6 +288,9 @@ hooks precede browser traffic. Then the secure window/tray, bridge for recording
 the opt-in local control API, independent retention maintenance, optional connector
 auto-connect and updater lifetime begin.
 The current first-window model-discovery exception is noted in §21.
+A restored catalog is observed again only on Refresh, after a send whose model could not be
+confirmed, or once per saved Settings choice it does not offer (Goal helper, default worker:
+`refreshForUnoffered`). Those two are passive: they ask an open ChatGPT page, never open a browser.
 
 Settings use validated current config and `effectiveCapabilities()`. Fresh-install defaults,
 legacy omitted fields and malformed-file recovery are three different cases. User choices must
