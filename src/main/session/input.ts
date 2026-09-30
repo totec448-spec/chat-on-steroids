@@ -109,6 +109,12 @@ const UNCERTAIN_SEND_MS = 15 * 60_000;
  * each kept its chat protected and told the extension an input was still in flight.
  */
 const ABANDONED_SEND_MS = 6 * 60 * 60_000;
+const UNCONFIRMED_SEND = 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.';
+/**
+ * The page clicked native Send, but no row it could read proved the message arrived (#821: an
+ * opening read back with `&#x20;` for spaces). The same code in extension/content.js.
+ */
+const RECEIPT_UNCONFIRMED = 'Native Send receipt was not confirmed.';
 export const TOOL_INPUT_HEADER = '\n--- New instructions from the user ---\n';
 export interface ToolInputBatch {
   messages: Array<{ text: string; images: InputImage[] }>;
@@ -474,7 +480,7 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
       if (row.recovery) return releaseRecoveryClaim(row);
       return { ...row, state: 'cancelled', error: row.requiresAuthorization && row.sendAuthorizedAt === undefined
         ? 'Not sent: browser preparation timed out. This attempt was cancelled.'
-        : 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.' };
+        : UNCONFIRMED_SEND };
     }
     // An authorized claim that never reports its outcome is already unsendable: a
     // browser row past authorization is not preparable, so no path re-offers or
@@ -484,9 +490,9 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
     // combined delivery keep their existing custody.
     if (row.state === 'browser' && row.sendAuthorizedAt !== undefined && !row.recovery && !row.opening &&
         !row.companionInputId && manualInput(row) && Date.now() - row.sendAuthorizedAt >= UNCERTAIN_SEND_MS)
-      return { ...row, state: 'cancelled', error: 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.' };
+      return { ...row, state: 'cancelled', error: UNCONFIRMED_SEND };
     if (row.state === 'browser' && row.sendAuthorizedAt !== undefined && Date.now() - row.sendAuthorizedAt >= ABANDONED_SEND_MS)
-      return { ...row, state: 'cancelled', error: 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.' };
+      return { ...row, state: 'cancelled', error: UNCONFIRMED_SEND };
     return row;
   }));
   for (let i = 0; i < next.length; i++) {
@@ -1573,12 +1579,26 @@ export function authorizeBrowserHelperRetry(id: string, sourceSessionId: string)
   });
 }
 
-/** Only a pre-send failure can be declared failed. An ambiguous click stays claimed. */
+/**
+ * Only a pre-send failure can be declared failed. An ambiguous click stays claimed, unless the
+ * page reports that its receipt was never confirmed: that retires it as an uncertain send.
+ */
 export function failBrowserInput(id: string, owner: string, error: string): Promise<boolean> {
   return serial(async () => {
     const current = await load();
     const entry = current.find((row) => row.id === id && row.owner === owner && row.state === 'browser');
     if (!entry || companionOf(current, entry)) return false;
+    // The page clicked Send and could not prove the result (#821). This is the outcome an
+    // unreported send reaches in expireQueued, without the wait: the session is free again,
+    // nothing is replayed, and a late exact receipt still confirms it (acknowledgeBrowserInput
+    // accepts a cancelled row). Openings and Continue included: they held their chat until then.
+    if (entry.sendAuthorizedAt !== undefined && error === RECEIPT_UNCONFIRMED) {
+      logWarn(`input ${entry.id}: native Send was clicked, but its receipt was not confirmed`);
+      await commit(current.map(row => sameDelivery(entry, row) ? { ...row, state: 'cancelled', error: UNCONFIRMED_SEND } : row));
+      decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + UNCONFIRMED_SEND));
+      decisionWaiters.delete(id);
+      return true;
+    }
     if (entry.recovery && entry.requiresAuthorization === true && entry.sendAuthorizedAt === undefined) {
       // Said once per reason, not once per attempt: the pickup schedule can hand the same ticket to
       // the same page every few seconds, and an unbounded log is its own kind of silence.
