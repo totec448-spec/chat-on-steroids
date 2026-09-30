@@ -1,0 +1,50 @@
+name: Verify published release
+
+# What users download, checked right after it is published: every file matches SHA256SUMS.txt and
+# the standalone extension is the tagged build. A problem opens an issue instead of waiting for a
+# user report. It can also be run by hand for any existing tag.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to verify, for example v2.1.21
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.repository == 'totec448-spec/chat-on-steroids'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install the checker's dependencies
+        # Only fflate is needed; skipping install scripts avoids the Electron download.
+        run: npm ci --ignore-scripts
+      - name: Download the published files
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets
+      - name: Verify checksums and the extension build
+        run: node scripts/verify-release-assets.mjs assets "$TAG" problems.md
+      - name: Open an issue when the release is not sound
+        if: failure()
+        run: |
+          {
+            echo "The published files of $TAG failed verification ([run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)):"
+            echo
+            if [ -s problems.md ]; then cat problems.md; else echo "- The files could not be downloaded or checked; see the run log."; fi
+          } > issue.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Release $TAG: published files failed verification" --body-file issue.md
