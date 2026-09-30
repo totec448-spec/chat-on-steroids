@@ -17,6 +17,8 @@ Fixes #
      If a test is truly impossible, write: No test: <reason>
      If your tests only follow a refactor, write: Fail-first: n/a <reason> -->
 
+Release note: <!-- Optional: one sentence for users, used to draft the release notes. Write "none" for changes users never notice. Leave it out and the PR title is used. -->
+
 ## Screenshots
 
 <!-- Required when the interface changes: before and after, with placeholder data. Otherwise delete this section. -->
