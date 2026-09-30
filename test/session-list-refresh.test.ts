@@ -212,7 +212,7 @@ describe('visible Chat refresh', () => {
     if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
 
     const selected = summary('2026-08-25-aaaaaaaa', 20_000, 2);
-    let changed: () => void = () => undefined;
+    let changed: (change?: unknown) => void = () => undefined;
     const detailCalls: Array<{ id: string; options: any }> = [];
     let detailRound = 0;
     let listDelay = 0;
@@ -237,7 +237,7 @@ describe('visible Chat refresh', () => {
             : ok({ summary: { ...selected, events: 2 }, events: [note(101, 'delta')], total: 2, nextFrom: 102 });
         },
         getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
-        onSessionChanged: (listener: () => void) => {
+        onSessionChanged: (listener: (change?: unknown) => void) => {
           changed = listener;
           return () => undefined;
         },
@@ -265,9 +265,11 @@ describe('visible Chat refresh', () => {
     expect(detailCalls[0]).toEqual({ id: selected.id, options: { limit: 30 } });
 
     listDelay = streaming ? 600 : 0;
-    const stream = streaming ? setInterval(changed, 100) : undefined;
+    // The selected session owns these writes; unrelated pushes are covered separately below.
+    const own = () => changed({ sessionIds: [selected.id] });
+    const stream = streaming ? setInterval(own, 100) : undefined;
     try {
-      changed();
+      own();
       await vi.waitFor(() => expect(detailCalls).toHaveLength(2), { timeout: 1600 });
     } finally { clearInterval(stream); }
     expect(detailCalls[1]).toEqual({ id: selected.id, options: { from: 101, limit: 30 } });
@@ -337,6 +339,94 @@ describe('visible Chat refresh', () => {
     await vi.waitFor(() => expect(listCalls).toHaveLength(2));
     expect(listCalls[1]).toEqual({ cursor, limit: 60 });
     await vi.waitFor(() => expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(65));
+  });
+});
+
+describe('scoped session change refresh', () => {
+  /** Opens A in the production Chat renderer while B is another live row in the catalog. */
+  async function openSelected() {
+    const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
+    dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+    const w = dom.window;
+    Object.assign(globalThis, {
+      window: w, document: w.document, HTMLElement: w.HTMLElement, Element: w.Element, Node: w.Node,
+      DocumentFragment: w.DocumentFragment, HTMLInputElement: w.HTMLInputElement, HTMLSelectElement: w.HTMLSelectElement,
+      HTMLTextAreaElement: w.HTMLTextAreaElement, HTMLButtonElement: w.HTMLButtonElement
+    });
+    if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
+    const state = {
+      a: summary('2026-09-30-aaaaaaaa', 30_000, 1),
+      b: summary('2026-09-30-bbbbbbbb', 20_000, 1),
+      listed: true,
+      lists: 0,
+      detailCalls: [] as Array<{ id: string; options: any }>,
+      changed: (_change?: unknown) => undefined as void
+    };
+    const ok = (data: any) => Promise.resolve({ ok: true as const, data });
+    const api: any = new Proxy({
+      listSessions: () => {
+        state.lists += 1;
+        const sessions = state.listed ? [state.a, state.b] : [state.b];
+        return ok({ sessions, activeId: null, pressure: [], total: sessions.length, nextCursor: null, blocked: [] });
+      },
+      getSession: (id: string, options?: any) => {
+        state.detailCalls.push({ id, options });
+        const seq = 100 + state.detailCalls.length - 1;
+        return ok({ summary: state.a, events: [note(seq, `A row ${state.detailCalls.length}`)], total: state.detailCalls.length, nextFrom: seq + 1 });
+      },
+      getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
+      onSessionChanged: (listener: (change?: unknown) => void) => { state.changed = listener; return () => undefined; },
+      onSwarmChanged: () => () => undefined
+    }, { get(target, prop) { return prop in target ? (target as any)[prop] : (..._args: any[]) => ok(null); } });
+    Object.defineProperty(w, 'api', { value: api, configurable: true });
+    const { chatVisible, initChat } = await import('../src/renderer/chat.js');
+    initChat({ save: async () => undefined,
+      state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
+    chatVisible(true);
+    await vi.waitFor(() => expect(w.document.querySelector(`#sessionList [data-id="${state.a.id}"]`)).not.toBeNull());
+    (w.document.querySelector(`#sessionList [data-id="${state.a.id}"]`) as HTMLElement).click();
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(1));
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('A row 1'));
+    /** Publishes one change and waits until the coalesced catalog refresh has completed. */
+    const publish = async (change?: unknown) => {
+      const before = state.lists;
+      state.changed(change);
+      await vi.waitFor(() => expect(state.lists).toBe(before + 1), { timeout: 1600 });
+      await new Promise(resolve => setTimeout(resolve, 50));
+    };
+    return { w, state, publish };
+  }
+
+  it('keeps the catalog fresh without rereading A for unrelated or payload-less changes', async () => {
+    const { w, state, publish } = await openSelected();
+    await publish({ sessionIds: [state.b.id] });
+    state.b = { ...state.b, updatedAt: 40_000, events: 2 };
+    await publish({ sessionIds: [state.b.id] });
+    await publish();
+    expect(state.detailCalls.map(call => call.id)).toEqual([state.a.id]);
+    expect(w.document.getElementById('timeline')?.textContent).toContain('A row 1');
+  });
+
+  it('rereads A for its exact owner, a stale refreshed summary, or an explicit global invalidation', async () => {
+    const { w, state, publish } = await openSelected();
+    await publish({ sessionIds: [state.b.id, state.a.id] });
+    expect(state.detailCalls[1]).toEqual({ id: state.a.id, options: { from: 101, limit: 30 } });
+    state.a = { ...state.a, updatedAt: 31_000, events: 3 };
+    await publish({ sessionIds: [state.b.id] });
+    expect(state.detailCalls).toHaveLength(3);
+    await publish({ allTranscripts: true });
+    expect(state.detailCalls).toHaveLength(4);
+    expect(state.detailCalls.every(call => call.id === state.a.id)).toBe(true);
+    expect(w.document.getElementById('timeline')?.textContent).toContain('A row 4');
+  });
+
+  it('clears the selected transcript when its session disappears from the catalog', async () => {
+    const { w, state, publish } = await openSelected();
+    state.listed = false;
+    await publish();
+    expect(w.document.getElementById('timeline')?.textContent).not.toContain('A row 1');
+    expect(w.document.querySelector(`#sessionList [data-id="${state.a.id}"]`)).toBeNull();
+    expect(state.detailCalls).toHaveLength(1);
   });
 });
 
