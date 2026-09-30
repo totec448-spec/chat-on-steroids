@@ -113,12 +113,12 @@ describe.runIf(process.platform === 'win32')('Windows WSL approved folders', () 
       if (!matched) throw missing();
       return matched;
     };
-    vi.spyOn(rawfs.rawPromises, 'open').mockImplementation(((target, ...args) =>
-      open(actual(target) as Parameters<typeof open>[0], ...args)) as typeof open);
-    vi.spyOn(rawfs.rawPromises, 'readFile').mockImplementation(((target, ...args) =>
-      readFile(actual(target) as Parameters<typeof readFile>[0], ...args)) as typeof readFile);
-    vi.spyOn(rawfs.rawPromises, 'writeFile').mockImplementation(((target, ...args) =>
-      writeFile(actual(target) as Parameters<typeof writeFile>[0], ...args)) as typeof writeFile);
+    vi.spyOn(rawfs.rawPromises, 'open').mockImplementation(((target: unknown, ...args: unknown[]) =>
+      (open as (...input: unknown[]) => Promise<unknown>)(actual(target), ...args)) as unknown as typeof open);
+    vi.spyOn(rawfs.rawPromises, 'readFile').mockImplementation(((target: unknown, ...args: unknown[]) =>
+      (readFile as (...input: unknown[]) => Promise<unknown>)(actual(target), ...args)) as unknown as typeof readFile);
+    vi.spyOn(rawfs.rawPromises, 'writeFile').mockImplementation(((target: unknown, ...args: unknown[]) =>
+      (writeFile as (...input: unknown[]) => Promise<unknown>)(actual(target), ...args)) as unknown as typeof writeFile);
     const root = { name: 'work', path: await validateNewRoot(folder, []) };
     const native = await resolvePath([root], `${alias}\\file.txt`);
     expect((await readTextFile(native.real)).text).toContain('hello');
