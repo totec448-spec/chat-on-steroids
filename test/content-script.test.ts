@@ -8020,6 +8020,19 @@ describe('a stop button that goes missing while the turn is still running', () =
     });
   });
 
+  it('treats an already-visible unowned transport error as current until ownership proves otherwise', async () => {
+    live = await harness(undefined, undefined, document => {
+      const notice = document.createElement('div');
+      notice.setAttribute('role', 'alert');
+      notice.textContent = 'A network error occurred. Please check your connection and try again.';
+      document.body.append(notice);
+    });
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({
+      turnId: null,
+      assistantError: true
+    });
+  });
+
   /**
    * The live failure this exists for: no final output, tool calls stopped some minutes ago,
    * the stop button never went away and the user never pressed it. ChatGPT says nothing about

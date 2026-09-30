@@ -8429,6 +8429,17 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'r
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state === 'handed' && repair.token === token) {
       if (!compactionRepairCurrent(conversationId, repair)) { repairsInFlight.delete(conversationId); return; }
+      if (action === 'preserved' && repair.reason === 'assistant-error') {
+        logInfo(`bridge: the browser preserved the recovered page for ${conversationId} without spending its assistant-error reload`);
+        await updateRepairProgress(
+          conversationId,
+          repair,
+          `Kept the recovered chat open instead of reloading while recovering ${repairReason(repair)}.`
+        );
+        if (turnRepairSpent.get(conversationId)?.token === token) turnRepairSpent.delete(conversationId);
+        repairsInFlight.delete(conversationId);
+        return;
+      }
       logInfo(`bridge: the browser confirmed ${repair.reason} recovery for ${conversationId} (${action ?? 'action unspecified'})`);
       repair.state = 'done';
       if (repair.attribution && repair.attribution.incident.firstAttemptAt === null)
@@ -8465,9 +8476,7 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'r
       await updateRepairProgress(
         conversationId,
         repair,
-        action === 'preserved'
-          ? `Kept the live chat open instead of reloading while recovering ${repairReason(repair)}.`
-          : `${action === 'reopened' ? 'Reopened' : action === 'resumed' ? 'Resumed' : 'Reloaded'} chat to recover ${repairReason(repair)}.`
+        `${action === 'reopened' ? 'Reopened' : action === 'resumed' ? 'Resumed' : 'Reloaded'} chat to recover ${repairReason(repair)}.`
       );
       return;
     }
