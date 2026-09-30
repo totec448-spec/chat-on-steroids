@@ -1212,6 +1212,29 @@ describe('desktop input delivery and helper ownership', () => {
     ]);
   });
 
+  /**
+   * #821: an app-sent opening read back with each indented line's first space as `&#x20;`. Its
+   * receipt never matched, so native Send never settled: no ACK, and the page's input slot stayed
+   * busy, so the next message could not be collected until the page was reloaded.
+   */
+  it('ACKs a fresh input whose indented lines the page reads back with a leading &#x20;', async () => {
+    const typed = '[[COS_CONTEXT:28]]\nRules:\n  - keep it\n    exact\n[[/COS_CONTEXT]]\n\nGo.';
+    const stored = typed.replace(/(^|\n) /g, '$1&#x20;');
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize ? { ok: true } : message.ack ? { ok: true } : { input: claimed({ text: typed }) } })
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      userTurn(live!.document, 'entity-desktop-user', stored);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toEqual([
+      expect.objectContaining({ id: inputId, owner: 'input-owner', conversationId: chatA, ack: true })
+    ]);
+  });
+
   it.each([false, true])('carries a reserved opening into route binding before activity (project: %s)', async project => {
     live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
       events: () => ({ ok: false }),

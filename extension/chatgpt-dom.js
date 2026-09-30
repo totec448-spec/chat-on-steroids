@@ -79,8 +79,9 @@ var CLF_DOM = (() => {
   // frame is punctuation and newlines almost entirely, so an escaped readback matches none of
   // it — and the declared length stops matching too, because escaping adds characters. Read
   // exactly first, as everywhere else; only a frame that cannot be read as sent is read as one
-  // the page escaped. Keep in sync with asTyped() in shared/user-prompt.ts.
-  const promptAsTyped = value => value.replace(/\\\n/g, '\n').replace(/\\([!-/:-@[-`{-~])/g, '$1');
+  // the page escaped. It also writes an indented line's first space as `&#x20;` (#821).
+  // Keep in sync with asTyped() in shared/user-prompt.ts.
+  const promptAsTyped = value => value.replace(/\\\n/g, '\n').replace(/\\([!-/:-@[-`{-~])/g, '$1').replace(/(^|\n)&#x20;/g, '$1 ');
   function readPromptFrame(value) {
     const identity = promptContinuation(value);
     const header = /^\[\[COS_CONTEXT:(\d{1,6})\]\]\n/.exec(value.slice(identity.length));
