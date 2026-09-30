@@ -56,3 +56,58 @@ jobs:
         # These suites install full npm/Python environments and immediately start
         # their servers. Give each cold start the runner without competing installs.
         run: npx vitest run --maxWorkers=1 test/plugins-live-proxy.test.ts test/plugins-python-live.test.ts test/plugins-catalog-live.test.ts
+
+  ui:
+    # The real-Electron UI checks (scripts/verify-*.cjs) catch layout and interaction bugs the unit
+    # tests cannot see. They take several minutes, so they run only when the interface can change.
+    name: UI checks (macOS)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether the interface can change
+        id: scope
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ -z "$BASE_REF" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if git diff --name-only "origin/$BASE_REF...HEAD" | grep -qE '^(src/renderer/|src/preload/|src/shared/|extension/|scripts/verify-|scripts/fixtures/|package(-lock)?\.json$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No interface files changed; the UI checks are skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.scope.outputs.run == 'true'
+        run: npm ci
+
+      - name: Build the app
+        if: steps.scope.outputs.run == 'true'
+        run: npm run build
+
+      - name: Run the UI checks
+        if: steps.scope.outputs.run == 'true'
+        env:
+          # Pixel comparisons, animation timing and a transparent overlay window need a real GPU; the
+          # hosted runner has none. They run with npm run verify:ui on a real machine.
+          VERIFY_UI_SKIP: verify-plan-collapse.cjs,verify-settings-focus.cjs,verify-pet-overlay-electron.cjs,verify-message-reactions.cjs
+        run: npm run verify:ui
+
+      - name: Keep the UI check screenshots when a check fails
+        if: failure() && steps.scope.outputs.run == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ui-check-screenshots-${{ github.run_id }}
+          path: outputs/
+          if-no-files-found: ignore
+          retention-days: 7
