@@ -6733,6 +6733,15 @@ function departureAllowsRepair(session: SessionSummary): boolean {
   return session.browserRecoveryDismissedAt === undefined;
 }
 
+/**
+ * Whether this repair may act on a chat the user closed. Automatic repairs wait for the page to
+ * return. A Compact & resume the user pressed is that return: dropping it at handout left the
+ * ticket to expire ten minutes later as "it took too long" (2026-09-30, live on 2.1.22).
+ */
+function departureAllowsRepairFor(session: SessionSummary, reason: Repair['reason'], episode: string): boolean {
+  return departureAllowsRepair(session) || (reason === 'compaction' && episode.endsWith(':manual'));
+}
+
 /** The broker owns worker activity, including sleeping workers in parked families. */
 function workerRecoveryAllowed(conversationId: string): boolean {
   const agent = agentInfoForOwnedConversation(conversationId);
@@ -7028,7 +7037,7 @@ function queueBrowserRecovery(
     const ticket = continuationForSession(sessionId);
     const lifecycle = bridgeLifecycleEpoch;
     void getSession(sessionId).then(session => {
-      if (session?.conversationId !== conversationId || !departureAllowsRepair(session)) return;
+      if (session?.conversationId !== conversationId || !departureAllowsRepairFor(session, reason, episode)) return;
       const current = () => bridgeLifecycleEpoch === lifecycle && !bridgeShutdownRequested &&
         getConfig().ui.browserOnly !== true &&
         repairsInFlight.get(conversationId) === repair && repair.state === 'queued' &&
@@ -8452,7 +8461,7 @@ async function takePendingRepairs(
     if (!isChatBlocked(conversationId) && !superseded && session?.conversationId === conversationId &&
         !(repair.reason !== 'compaction' && !session.activeTurnId && session.lastTurnOutcome === 'stopped') &&
         !stopRequestedFor(conversationId, session.activeTurnId)) {
-      if (!departureAllowsRepair(session)) {
+      if (!departureAllowsRepairFor(session, repair.reason, repair.episode)) {
         // Keep confirmed receipts as history; a user close revokes all pending actions.
         endActivity(conversationId);
         if (repairsInFlight.get(conversationId) === repair && repair.state !== 'done') repairsInFlight.delete(conversationId);
