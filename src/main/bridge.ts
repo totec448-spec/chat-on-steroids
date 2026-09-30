@@ -1323,6 +1323,7 @@ function parseObservations(input: unknown): ChatObservation[] {
     if (((kind === 'turn_end' && observation.outcome === 'failed') || kind === 'chat_error') && item['reason'] === 'thinking_failed') {
       observation.reason = 'thinking_failed';
     }
+    if (kind === 'chat_error' && item['reason'] === 'stream_gone') observation.reason = 'stream_gone';
     if (
       item['goalEligible'] === true &&
       kind === 'assistant_message' &&
@@ -7282,6 +7283,11 @@ async function noteRecoveryObservations(
       continue;
     }
     if (item.recoverable !== true) continue;
+    // Resume can legitimately return 404 on an idle page. The recorder's exact current
+    // generation (not a stale tab's turn or the newest question chosen below) must own H2.
+    if (item.reason === 'stream_gone' && (!sessionId || recorded?.conversationId !== conversationId ||
+        !item.turnId || recorded.activeTurnId !== item.turnId ||
+        await readCompletedFinal(sessionId, conversationId, item.turnId))) continue;
     // Auto-compaction owns this chat's recovery clock until its ticket commits or is cancelled.
     // A native error inside a handoff is not permission for the ordinary two-minute response
     // watchdog to cut across the compaction's own pickup schedule. The failure is still the page
@@ -7296,7 +7302,16 @@ async function noteRecoveryObservations(
       break;
     }
     const source = sessionId ? await assistantRepairSource(sessionId) : null;
-    const episode = `assistant-error:${source?.key ?? 'page'}:${(item.text ?? '').slice(0, 240)}`;
+    if (item.reason === 'stream_gone') {
+      // Source reads yield. A newer question/turn can arrive after the admission check;
+      // never attach the old 404 to that newly read question or reserve its budget.
+      const current = await getSession(sessionId!);
+      const questionId = current?.timelineTurns?.[item.turnId!]?.questionId;
+      if (!source || source.turnId !== item.turnId || source.completed || current?.conversationId !== conversationId ||
+          current.activeTurnId !== item.turnId || (questionId && source.key !== `user:${questionId}`)) continue;
+    }
+    // One authored question owns the transport episode, whether fetch or its DOM card wins.
+    const episode = `assistant-error:${source?.key ?? 'page'}`;
     // How many turns this chat will have finished once the broken turn is over. The turn that
     // just failed is still open here - its own end is the very next one to arrive - so counting
     // only the ends already in hand would have the failure retire its own repair a few seconds

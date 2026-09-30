@@ -38,7 +38,7 @@ function harness() {
   };
   window.dispatchEvent = (event: { type: string }) => { dispatch(event.type, event); return true; };
   class MessageEvent { constructor(readonly type: string, init: Record<string, unknown>) { Object.assign(this, init); } }
-  const evaluate = (source = script) => runInNewContext(source, { window, document, location: { origin: 'https://chatgpt.com' }, URL, Date: Clock, TextDecoder, MessageEvent,
+  const evaluate = (source = script) => runInNewContext(source, { window, document, location: { origin: 'https://chatgpt.com' }, URL, crypto, Date: Clock, TextDecoder, MessageEvent,
     setTimeout: (run: () => void, ms: number) => { timers.set(++timerId, { at: now + ms, run }); return timerId; },
     clearTimeout: (id: number) => timers.delete(id) });
   evaluate();
@@ -88,6 +88,21 @@ function harness() {
     socket: (url = 'wss://ws.chatgpt.com/ws') => new window.WebSocket(url),
     feed,
     feedSse,
+    resume: async (status = 404, conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      endpoint = 'https://chatgpt.com/backend-api/f/conversation/resume', method = 'POST', mime = 'application/json') => {
+      response = { url: endpoint, status, ok: status === 200, clone: () => { throw new Error('Do not read error bodies'); },
+        headers: { get: () => mime } };
+      const starts: unknown[] = [];
+      const listener = (event: any) => { if (event.data?.type === 'cos-resume-request') starts.push(event.data); };
+      window.addEventListener('message', listener);
+      const result = window.fetch(endpoint, { method, body: JSON.stringify({ conversation_id: conversationId, private: 'not projected' }) });
+      const synchronousStarts = starts.length;
+      const returned = await result;
+      expect(returned).toBe(response);
+      await Promise.resolve();
+      window.removeEventListener('message', listener);
+      return { starts, synchronousStarts };
+    },
     openSse: async () => {
       let resolve: (value: unknown) => void = () => {};
       let cancelled = false, clones = 0;
@@ -119,6 +134,44 @@ function harness() {
 }
 
 describe('MAIN-world usage projection', () => {
+  it('H2 observes an exact resume 404 without reading its body and captures request ownership synchronously', async () => {
+    const h = harness();
+    const { starts, synchronousStarts } = await h.resume();
+    expect(synchronousStarts).toBe(1);
+    expect(starts).toEqual([expect.objectContaining({ type: 'cos-resume-request', conversationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' })]);
+    expect(h.posts.filter(row => row.type === 'cos-resume-response')).toEqual([
+      { type: 'cos-resume-response', id: (starts[0] as any).id, conversationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', status: 404 }
+    ]);
+    expect(JSON.stringify(starts)).not.toContain('not projected');
+    h.request();
+    expect(h.posts.filter(row => row.type === 'cos-resume-response')).toHaveLength(1);
+  });
+
+  it.each([
+    ['foreign endpoint', 'https://elsewhere.example/backend-api/f/conversation/resume', 'POST', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'],
+    ['polling', 'https://chatgpt.com/backend-api/conversation/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', 'GET', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'],
+    ['GET resume', 'https://chatgpt.com/backend-api/f/conversation/resume', 'GET', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'],
+    ['invalid identity', 'https://chatgpt.com/backend-api/f/conversation/resume', 'POST', 'unknown']
+  ])('H2 ignores %s', async (_name, endpoint, method, conversationId) => {
+    const h = harness();
+    expect((await h.resume(404, conversationId, endpoint, method)).synchronousStarts).toBe(0);
+    expect(h.posts.filter(row => row.type === 'cos-resume-response')).toEqual([]);
+  });
+
+  it('H2 deduplicates a resume response when a provider wrapper delegates through the earlier observer', async () => {
+    const h = harness();
+    h.replaceFetch(true); h.ready();
+    await h.resume();
+    expect(h.posts.filter(row => row.type === 'cos-resume-response' && row.status === 404)).toHaveLength(1);
+  });
+
+  it.each(['application/json', 'text/event-stream; charset=utf-8'])('H2 projects successful SSE headers only for %s', async mime => {
+    const h = harness();
+    await h.resume(200, undefined, undefined, undefined, mime);
+    const [response] = h.posts.filter(row => row.type === 'cos-resume-response');
+    expect(response?.status).toBe(200);
+    expect(response?.streamOpened === true).toBe(mime.startsWith('text/event-stream'));
+  });
   it('keeps one current observer and refreshes a provider-replaced wrapper without extra active readers', async () => {
     const h = harness(), current = h.observer(), fetch = h.currentFetch();
     h.evaluate(); expect(h.observer()).toBe(current); expect(h.currentFetch()).toBe(fetch);
