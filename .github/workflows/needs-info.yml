@@ -1,0 +1,36 @@
+name: Close unanswered issues
+
+# Only issues labeled needs-info are touched: a maintainer asked the reporter for details.
+# After 7 quiet days they get one reminder, 3 days later they close. Any reply restarts the clock,
+# and a closed issue can be reopened at any time.
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  close:
+    if: github.repository == 'totec448-spec/chat-on-steroids'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        with:
+          only-issue-labels: needs-info
+          days-before-issue-stale: 7
+          days-before-issue-close: 3
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          stale-issue-label: waiting-for-reply
+          close-issue-reason: not_planned
+          stale-issue-message: >
+            This issue is waiting for the details asked for above. If there is no reply in the
+            next 3 days it will be closed; you can reopen it at any time with the information.
+          close-issue-message: >
+            Closing because the details asked for above did not arrive. Reply or reopen at any
+            time with them and it will be looked at again.
