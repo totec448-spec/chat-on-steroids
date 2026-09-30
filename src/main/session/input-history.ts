@@ -5,6 +5,7 @@ import { getSession, observeSessionModel, readAsset, readEvents, upsertMessageEv
 import { validateInputImages } from './input-images.js';
 import sharp from 'sharp';
 import { positionOf } from '../../shared/chronology.js';
+import { notifyChanged } from './recorder.js';
 
 /** Project a tool handout or proven delivery into history, never the enqueue intent. */
 export async function recordDeliveredInput(entry: Readonly<InputEntry>, anchorCommitted?: (seq: number) => void): Promise<boolean> {
@@ -43,6 +44,8 @@ export async function recordDeliveredInput(entry: Readonly<InputEntry>, anchorCo
   // stable row survives a quota failure; retry only enriches the same origin.
   const committed = await upsertMessageEvent(sessionId, message);
   anchorCommitted?.(positionOf(committed.event));
+  // Offered → confirmed revises this row in place; count and time cannot reveal it.
+  notifyChanged(sessionId);
   if (images.length) {
     await validateInputImages(images);
     const assets = [];
@@ -50,6 +53,7 @@ export async function recordDeliveredInput(entry: Readonly<InputEntry>, anchorCo
       assets.push(await writeAsset(sessionId, Buffer.from(image.dataUrl.split(',')[1]!, 'base64'), 'image/webp'));
     }
     await upsertMessageEvent(sessionId, { ...message, assets });
+    notifyChanged(sessionId);
   }
   return true;
 }
