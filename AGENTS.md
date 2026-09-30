@@ -2132,8 +2132,9 @@ multiple candidates get a fixed one-minute window. The second and final attempt 
 minutes after that incident began, only if new unattributed work on that same request started
 after the first browser attempt and the request remains unresolved. Another request cannot
 renew this budget. Headerless activity cannot prove the same request and gets no second attempt.
-Exactly attributed current-owner MCP calls remove their chat from the original cohort; exact
-correlation resolves the matching request. The cohort survives activity-label expiry, but never
+Exactly attributed current-owner MCP calls remove their chat from the original cohort, including
+one already recorded in the chat's frozen turn when the incident opens: that chat has shown its
+join works, so an unknown call is not its own. Exact correlation resolves the matching request. The cohort survives activity-label expiry, but never
 Stop, block, a completed/replaced turn, session rebind or supersession. Later active chats do not
 join it. These deadlines follow the recorder's separate 20-second request-id grace.
 Attribution repair handouts retain their token after an absent acknowledgement. The extension
