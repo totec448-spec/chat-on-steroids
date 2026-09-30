@@ -125,3 +125,33 @@ it('hides a provider-prefixed blank paragraph using exact source, retaining stri
     }
   } finally { page.window.close(); }
 });
+
+/**
+ * #821: ChatGPT read an app-sent opening back with the first space of each indented line as
+ * `&#x20;` (47 of them in 96,000 characters, every one opening a line). The frame's declared
+ * length no longer matched, so the page showed the whole internal context as the user's words.
+ */
+it('reads a frame whose indented lines came back with a leading &#x20;, and nothing else as one', () => {
+  const page = new JSDOM('<section data-testid="conversation-turn-0"><div data-message-id="user-1" data-message-author-role="user"><div class="whitespace-pre-wrap"></div></div></section>', { runScripts: 'outside-only' });
+  try {
+    page.window.eval(readFileSync('extension/chatgpt-dom.js', 'utf8'));
+    const api = (page.window as any).CLF_DOM;
+    const authored = 'Review the plan.\n  Keep &#x20; in my words.';
+    const sent = prependUserPrompt(authored, '# Rules\n - first\n  - nested\n   deeper\n \n\tTabbed stays.');
+    const readBack = sent.replace(/(^|\n) /g, '$1&#x20;');
+    expect(readBack).not.toBe(sent);
+    for (const read of [userPromptText, api.userPromptText]) {
+      expect(read(sent)).toBe(authored);
+      expect(read(readBack)).toBe(authored);
+      // The same, also Markdown-escaped: both layers are undone together.
+      expect(read(readBack.replace(/([[\]#:])/g, '\\$1'))).toBe(authored);
+      // Only a line's first character: an entity inside a line never makes a frame readable.
+      expect(read(sent.replace('first', '&#x20;first'))).toBeNull();
+    }
+    const raw = page.window.document.querySelector('.whitespace-pre-wrap')!;
+    raw.textContent = readBack;
+    api.presentUserPrompts();
+    expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(true);
+    expect(page.window.document.querySelector('[data-clf-user-text]')?.textContent).toBe(authored);
+  } finally { page.window.close(); }
+});
