@@ -214,7 +214,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   };
   const ok = (data: any) => Promise.resolve({ ok: true, data });
   const live = { events: [...events], inputs: [] as InputEntry[], sent: [] as InputArgs[], automation: 'off', controlCalls: [] as Array<{ id: string; action: string }>, compacting: false, finishHeld: true };
-  let sessionListener: () => void = () => undefined;
+  let sessionListener: (change?: unknown) => void = () => undefined;
   let writeSessionListener: (id: string) => void = () => undefined;
   const taskProgressListeners = new Set<(progress: any) => void>();
   const api: any = new Proxy(
@@ -317,12 +317,14 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   return {
     w,
     live,
-    notifySession: () => sessionListener(),
+    // This fixture serves one shared `live.events` for every session id, so a recorder write
+    // changes every transcript it can show. Payload-less pushes are catalog/control only.
+    notifySession: () => sessionListener({ allTranscripts: true }),
     writeSession: (id: string) => writeSessionListener(id),
     progress: (value: any) => { for (const listener of taskProgressListeners) listener(value); },
     async append(more: SessionEvent[]) {
       live.events.push(...more);
-      sessionListener();
+      sessionListener({ allTranscripts: true });
       await settle(500);
     }
   };

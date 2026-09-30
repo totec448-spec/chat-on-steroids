@@ -12,7 +12,7 @@ import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePre
 import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
-import type { ToolEditReview } from '../shared/session.js';
+import type { SessionChange, ToolEditReview } from '../shared/session.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
 /**
  * The entire renderer-facing API.
@@ -318,8 +318,9 @@ const api = {
     ipcRenderer.on('log:entry', wrapped);
     return () => ipcRenderer.removeListener('log:entry', wrapped);
   },
-  onSessionChanged: (listener: () => void): (() => void) => {
-    const wrapped = (): void => listener();
+  /** `change` names changed transcript owners; without it only catalog/controls changed. */
+  onSessionChanged: (listener: (change?: SessionChange) => void): (() => void) => {
+    const wrapped = (_event: unknown, change?: SessionChange): void => listener(change);
     ipcRenderer.on('session:changed', wrapped);
     return () => ipcRenderer.removeListener('session:changed', wrapped);
   },
