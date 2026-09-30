@@ -2312,6 +2312,12 @@
     }
     return state;
   }
+  /** Shell execution ids are provider identities, not localized presentation. */
+  function shellProExecutionModel(value) {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return /^(?:pro|(?:gpt-?)?\d+(?:[.-]\d+)?-pro)$/.test(normalized);
+  }
+
   // The native closed picker does not mount composerIntelligencePickerState.
   // Its own ancestor carries the current execution model; its visible label
   // carries the selected effort. These are observation, never catalog discovery.
@@ -2334,7 +2340,7 @@
       if (typeof current !== 'string' || !/^[a-zA-Z0-9._-]{1,80}$/.test(current) || (model && model !== current)) return null;
       model = current;
     }
-    const effort = (lane && lane.model === model && lane.effort) ||
+    const effort = shellProExecutionModel(model) ? 'pro' : (lane && lane.model === model && lane.effort) ||
       (machine !== null ? (['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(machine) ? machine : null) : captionEffort);
     if (!effort) return null;
     return model ? { id: model, effort } : null;
@@ -2396,7 +2402,8 @@
       // The machine reasoningEffort is a lane's transport setting, not its identity: the
       // Pro and Extra High lanes still report medium/max. The lane's visible label is what
       // the picker offers, matching readPickerSnapshot's modelLane/thinkingEffort mapping.
-      const laneEffort = c => effort(String(c?.labels?.effort ?? c?.sliderLabel ?? '').trim().toLowerCase()) ?? effort(c?.reasoningEffort);
+      const laneEffort = c => shellProExecutionModel(c?.model) ? 'pro' :
+        effort(String(c?.labels?.effort ?? c?.sliderLabel ?? '').trim().toLowerCase()) ?? effort(c?.reasoningEffort);
       const current = options.filter(o => o?.selected === true);
       if (current.length !== 1) return null;
       const version = group(current[0].id);
