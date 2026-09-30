@@ -8,9 +8,11 @@ export default defineConfig({
     // defaults are too tight.
     testTimeout: 30_000,
     hookTimeout: 30_000,
-    // Release packaging only: the shared Intel macOS runner can run the suite 6x slower than a
-    // laptop, and timing-sensitive tests then fail at random. PR CI keeps retries off.
+    // CI sets COS_TEST_RETRY: timing-sensitive tests can fail at random on shared runners (the Intel
+    // macOS release runner is up to 6x slower than a laptop). A retry keeps a flake from turning a
+    // run red; the flaky reporter names every test that needed one, so flakes stay visible.
     retry: Number(process.env.COS_TEST_RETRY) || 0,
+    reporters: process.env.GITHUB_ACTIONS ? ['default', './scripts/flaky-reporter.mjs'] : ['default'],
     env: {
       // Never let a test bind — or worse, fall through to — the shipped bridge range.
       // The developer's own installed app is usually listening on 8765 while the suite

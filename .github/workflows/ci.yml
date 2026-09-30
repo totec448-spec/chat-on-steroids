@@ -41,6 +41,9 @@ jobs:
         run: npm ci
 
       - name: Verify
+        env:
+          # One retry per failed test; scripts/flaky-reporter.mjs lists every test that needed it.
+          COS_TEST_RETRY: '1'
         run: npm run verify:ci
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
