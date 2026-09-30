@@ -33,6 +33,7 @@ import type { Root } from '../shared/types.js';
 import { currentCall } from './mcp/call-context.js';
 import { requestCorrelation } from './session/correlation.js';
 import { isSkillPath, isSkillVirtualPath } from './skill-access.js';
+import { isContained } from './sandbox.js';
 
 /** How long a learned workspace survives without being used or renewed. */
 const WORKSPACE_TTL_MS = 12 * 60 * 60 * 1000;
@@ -333,8 +334,7 @@ export async function projectFolderOf(
   // Bounded by the virtual depth, so a malformed pair can never spin.
   for (let step = 0; step <= depth; step++) {
     // Never above the approved root: containment is the boundary, here as everywhere.
-    const relative = path.relative(rootReal, currentReal);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) break;
+    if (!isContained(rootReal, currentReal)) break;
     if (await hasMarker(currentReal)) return { real: currentReal, virtual: currentVirtual };
     const parentReal = path.dirname(currentReal);
     if (parentReal === currentReal) break;

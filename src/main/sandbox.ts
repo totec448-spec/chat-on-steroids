@@ -18,6 +18,17 @@ import type { Root } from '../shared/types.js';
 
 const IS_WINDOWS = process.platform === 'win32';
 
+/** WSL's local redirector aliases; the Linux part of their paths is case-sensitive. */
+const WSL_PATH = /^\\\\(?:wsl\.localhost|wsl\$)\\([^\\]+)(.*)$/i;
+
+/** Native path identity shared by the sandbox and project catalog. */
+export function nativePathIdentity(input: string): string {
+  const resolved = path.resolve(input);
+  if (!IS_WINDOWS) return resolved;
+  const wsl = WSL_PATH.exec(resolved);
+  return wsl ? `\\\\wsl.localhost\\${wsl[1]!.toLowerCase()}${wsl[2]}` : resolved.toLowerCase();
+}
+
 /** Final-path identity, using Windows' native canonicalizer when path spelling is ambiguous. */
 async function canonicalRealpath(target: string): Promise<string> {
   return IS_WINDOWS ? rawRealpathNative(target) : fs.realpath(target);
@@ -150,13 +161,10 @@ export function splitVirtualPath(input: string): string[] {
   return segments;
 }
 
-/** True when `child` is `parent` or lives underneath it. Case-insensitive on Windows. */
+/** True when `child` is `parent` or lives underneath it; WSL retains Linux path case. */
 export function isContained(parent: string, child: string): boolean {
-  const a = path.resolve(parent);
-  const b = path.resolve(child);
-  const norm = (s: string) => (IS_WINDOWS ? s.toLowerCase() : s);
-  const na = norm(a);
-  const nb = norm(b);
+  const na = nativePathIdentity(parent);
+  const nb = nativePathIdentity(child);
   if (na === nb) return true;
   // The separator check stops "C:\Root" from matching "C:\RootEvil".
   const prefix = na.endsWith(path.sep) ? na : na + path.sep;
@@ -177,6 +185,15 @@ async function realpathDeepest(absPath: string): Promise<{ real: string; missing
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code !== 'ENOENT' && code !== 'ENOTDIR') throw err;
+      if (IS_WINDOWS && WSL_PATH.test(current)) {
+        // The WSL redirector can report ENOENT for an existing Linux link it cannot
+        // canonicalize. Never interpret that link as a missing path available for writes.
+        const exists = await fs.lstat(current).then(() => true, (probe: NodeJS.ErrnoException) => {
+          if (probe.code === 'ENOENT' || probe.code === 'ENOTDIR') return false;
+          throw new SandboxError('Path could not be resolved safely');
+        });
+        if (exists) throw new SandboxError('Path contains a link that could not be resolved');
+      }
     }
     const parent = path.dirname(current);
     if (parent === current) {
@@ -194,8 +211,7 @@ async function realRoot(root: Root): Promise<string> {
     // roots:add persists validateNewRoot()'s canonical path. Re-resolving that pathname is a
     // liveness check, not permission to follow a new reparse target: otherwise replacing the
     // approved directory itself with a junction silently moves the sandbox boundary to whatever
-    // unapproved tree the junction names. Path equivalence is case-insensitive on Windows via
-    // isContained(), matching the rest of this module's containment rules.
+    // unapproved tree the junction names. isContained() applies the native path's case rules.
     if (!isContained(root.path, current) || !isContained(current, root.path)) {
       throw new SandboxError(`Root "/${root.name}" changed on disk. Remove it and approve the folder again.`);
     }
@@ -278,17 +294,16 @@ async function normaliseNativePath(roots: readonly Root[], input: string): Promi
     : trimmed.replace(/^\/+/, '');
   const nativeSegments = nativeWindows ? withoutNativeRoot.split(/[/\\]+/) : withoutNativeRoot.split(/\/+/);
   for (const segment of nativeSegments.filter((part) => part.length > 0)) checkSegment(segment);
-  // Approved roots categorically reject UNC paths. Do not ask Windows to resolve a network
-  // share merely to discover that it cannot belong to any root: an unreachable host can turn
-  // an immediate sandbox refusal into seconds of blocking DNS/SMB work.
-  if (nativeWindows && trimmed.startsWith('\\\\')) {
+  const native = path.resolve(trimmed);
+  // A WSL folder (or a mapped drive's canonical UNC root) may be approved. Reject every
+  // other UNC spelling lexically, before a remote host can trigger DNS/SMB or credentials.
+  if (nativeWindows && native.startsWith('\\\\') && !roots.some(root => isContained(root.path, native))) {
     const names = roots.map((r) => `/${r.name}`).join(', ') || '(none approved)';
     throw new SandboxError(
       `Native path "${trimmed}" is not inside an approved folder. ` +
         `Approved roots: ${names}`
     );
   }
-  const native = path.resolve(trimmed);
   let canonicalNative: string;
   try {
     const { real, missing } = await realpathDeepest(native);
@@ -400,7 +415,11 @@ export async function resolvePath(
 
 /** Converts a real path back into the virtual path the model sees. */
 export function toVirtualPath(root: Root, rootReal: string, realPath: string): string {
-  const rel = path.relative(rootReal, realPath);
+  // path.win32.relative folds case even on WSL. Containment already proved the Linux
+  // prefix, so retain the exact suffix and treat only the local host/distro as aliases.
+  const rel = IS_WINDOWS && WSL_PATH.test(path.resolve(rootReal)) && isContained(rootReal, realPath)
+    ? nativePathIdentity(realPath).slice(nativePathIdentity(rootReal).replace(/\\$/, '').length).replace(/^\\/, '')
+    : path.relative(rootReal, realPath);
   if (rel === '') return `/${root.name}`;
   return `/${root.name}/${rel.split(path.sep).join('/')}`;
 }
@@ -417,16 +436,20 @@ export async function resolveRoot(roots: readonly Root[], name: string): Promise
 
 /**
  * Validates a folder the user picked in the UI before it becomes a root.
- * Rejects network paths and roots that would nest inside an existing one.
+ * Allows local WSL folders, rejects other network paths and overlapping roots.
  */
 export async function validateNewRoot(folderPath: string, existing: readonly Root[]): Promise<string> {
   if (!path.isAbsolute(folderPath)) {
     throw new SandboxError('Folder path must be absolute');
   }
-  // UNC paths bring credential-delegation and latency surprises we do not want to
-  // reason about; a mapped drive letter works and is explicit.
-  if (IS_WINDOWS && folderPath.startsWith('\\\\')) {
+  // WSL's local redirector is not an arbitrary SMB host. Both supported aliases still
+  // have to exist on this Windows installation; no fallback or remote lookup is added.
+  const windowsPath = folderPath.replace(/\//g, '\\');
+  if (IS_WINDOWS && windowsPath.startsWith('\\\\') && !WSL_PATH.test(windowsPath)) {
     throw new SandboxError('Network (UNC) paths are not supported. Map it to a drive letter first.');
+  }
+  if (IS_WINDOWS && WSL_PATH.test(windowsPath)) {
+    for (const segment of windowsPath.split(/\\+/).slice(1).filter(Boolean)) checkSegment(segment);
   }
   const real = await canonicalRealpath(folderPath);
   const stat = await fs.stat(real);
@@ -434,7 +457,7 @@ export async function validateNewRoot(folderPath: string, existing: readonly Roo
     throw new SandboxError('That is not a folder');
   }
   const parsed = path.parse(real);
-  const sameRoot = IS_WINDOWS ? parsed.root.toLowerCase() === real.toLowerCase() : parsed.root === real;
+  const sameRoot = nativePathIdentity(parsed.root) === nativePathIdentity(real);
   if (sameRoot) {
     throw new SandboxError(
       IS_WINDOWS
