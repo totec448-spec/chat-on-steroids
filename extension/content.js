@@ -3236,6 +3236,31 @@
 
   const cap = (value, max) => (typeof value === 'string' && value.length > 0 ? value.slice(0, max) : null);
 
+  /** A reply's cited sources as the page reader sent them: bounded, http(s) links only, else dropped. */
+  function readReferences(raw) {
+    if (!Array.isArray(raw)) return null;
+    const out = [];
+    const indexes = new Set();
+    for (const entry of raw.slice(0, 64)) {
+      if (!entry || typeof entry !== 'object' || !Number.isInteger(entry.index) || entry.index < 0 || entry.index > 9999) continue;
+      if (indexes.has(entry.index) || !Array.isArray(entry.sources)) continue;
+      const sources = [];
+      for (const source of entry.sources.slice(0, 12)) {
+        const url = source && typeof source.url === 'string' && source.url.length <= 2000 && /^https?:\/\/\S+$/i.test(source.url) ? source.url : null;
+        if (!url) continue;
+        const title = cap(source.title, 300) || url;
+        const name = cap(source.source, 80);
+        const snippet = cap(source.snippet, 300);
+        const date = typeof source.date === 'number' && Number.isFinite(source.date) && source.date > 0 && source.date < 1e13 ? Math.round(source.date) : 0;
+        sources.push({ title, url, ...(name ? { source: name } : {}), ...(date ? { date } : {}), ...(snippet ? { snippet } : {}) });
+      }
+      if (!sources.length) continue;
+      indexes.add(entry.index);
+      out.push({ index: entry.index, sources });
+    }
+    return out.length ? out : null;
+  }
+
   function fiberBusyCaption(label) {
     const plain = String(label || '').toLowerCase().replace(/[.…\s]+$/, '').trim();
     return FIBER_BUSY_CAPTIONS.has(plain) || FIBER_TIMER_CAPTION.test(plain);
@@ -3371,6 +3396,7 @@
             : null,
         ...(entry.role === 'assistant' && typeof entry.resolvedModel === 'string' &&
           /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(entry.resolvedModel) ? { resolvedModel: entry.resolvedModel } : {}),
+        ...(entry.role === 'assistant' && readReferences(entry.references) ? { references: readReferences(entry.references) } : {}),
         rawText,
         ...(attachments.length ? { attachments } : {}),
         renderedHtml,
@@ -4418,7 +4444,8 @@
         // claim is different and fails closed instead of choosing either generation.
         const signature =
           `${state}\u0000${message.rawText}\u0000${message.renderedHtml}\u0000${owner}` +
-          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}\u0000${message.resolvedModel || ''}`;
+          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}\u0000${message.resolvedModel || ''}` +
+          `\u0000${message.references ? JSON.stringify(message.references) : ''}`;
         if (priorMessage?.signature === signature) continue;
         messagesReported.set(message.messageId, { signature, owner, conflicted: ownerConflict, text: message.rawText });
         if (state === 'streaming' && owner && priorMessage?.text !== message.rawText && freshPublication) noteTurnProgress(owner);
@@ -4430,6 +4457,7 @@
           messageId: message.messageId,
           providerMessageId: message.rawMessageId,
           ...(message.resolvedModel ? { resolvedModel: message.resolvedModel } : {}),
+          ...(message.references ? { references: message.references } : {}),
           ...(message.createTime ? { authoredAt: message.createTime } : {}),
           turnId: localOwner || undefined,
           text: message.rawText,

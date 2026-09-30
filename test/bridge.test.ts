@@ -1491,6 +1491,27 @@ describe('activity feed', () => {
       .toEqual({ 'user-a': 'gpt-5-6-thinking', 'user-b': undefined });
   });
 
+  it('records a reply’s cited sources, keeps them across sparse updates and drops unsafe links', async () => {
+    await pair();
+    const conversationId = '99999999-8888-7777-6666-555555555554';
+    const references = [{ index: 0, sources: [
+      { title: 'A paper', url: 'https://arxiv.org/abs/2609.00001', source: 'arXiv' },
+      { title: 'Hostile', url: 'javascript:alert(1)' },
+      { title: 'A report', url: 'https://example.org/report' }
+    ] }, { index: 1, sources: [{ title: 'Only unsafe', url: 'file:///etc/passwd' }] }];
+    const result = await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'assistant_message', messageId: 'reply-cited', time: Date.now(), text: 'Cited.', state: 'streaming', references }
+    ] } });
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'assistant_message', messageId: 'reply-cited', time: Date.now(), text: 'Cited, final.', state: 'final' }
+    ] } });
+    const [reply] = await readEvents(result.body.sessionId, { kinds: ['assistant_message'] });
+    expect(reply?.kind === 'assistant_message' && reply.references).toEqual([{ index: 0, sources: [
+      { title: 'A paper', url: 'https://arxiv.org/abs/2609.00001', source: 'arXiv' },
+      { title: 'A report', url: 'https://example.org/report' }
+    ] }]);
+  });
+
   it('records the server-resolved reply model, keeps it across sparse updates and drops malformed values', async () => {
     await pair();
     const conversationId = '99999999-8888-7777-6666-555555555552';
