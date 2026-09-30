@@ -174,8 +174,10 @@
 .plugin-tool b { font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; overflow-wrap: anywhere; }
 .plugin-tool small { display: block; margin-top: 3px; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; overflow-wrap: anywhere; }
 .plugin-about { display: block; margin-top: 24px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
-.plugin-about > summary, .plugin-legal > summary { width: fit-content; cursor: pointer; }
-.plugin-about p { margin: 10px 0 0; }
+.plugin-about > summary, .plugin-legal > summary { display: flex; align-items: center; gap: 6px; width: fit-content; list-style: none; cursor: pointer; }
+.plugin-about > summary::-webkit-details-marker, .plugin-legal > summary::-webkit-details-marker { display: none; }
+.plugin-about > summary:hover, .plugin-legal > summary:hover { color: var(--ink); }
+.plugin-about p, .plugin-legal > p:first-of-type { margin: 10px 0 0; }
 .plugin-source { overflow-wrap: anywhere; font-size: calc(12px * var(--text-scale, 1)); }
 .plugin-error { color: var(--red); background: var(--red-wash); padding: 12px; border-radius: var(--r-sm); overflow-wrap: anywhere; }
 .plugin-card-error { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--red); font-size: calc(11px * var(--text-scale, 1)); }

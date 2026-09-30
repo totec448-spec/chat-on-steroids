@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { readFileSync } from 'node:fs';
 import { initPlugins, refreshPlugins, applyPluginsState } from '../src/renderer/plugins.js';
+import { setLanguage } from '../src/renderer/i18n.js';
 import type { PluginSnapshot } from '../src/shared/plugins.js';
 import type { AppState } from '../src/shared/types.js';
 
@@ -149,6 +150,26 @@ it('opens a concise tool preview without installing or showing enabled-tool cont
   expect(document.querySelector('.plugin-tool input')).toBeNull();
   expect(document.querySelector<HTMLDetailsElement>('.plugin-about')!.open).toBe(false);
   expect(api.pluginsInstall).not.toHaveBeenCalled();
+});
+
+it('marks the About and Setup disclosures with the chevron, and keeps it through a language change', async () => {
+  // The native marker is hidden, so the chevron is the only sign these rows open.
+  const chevronFirst = (summary: HTMLElement) => summary.firstElementChild!.classList.contains('details-chevron');
+  await refreshPlugins();
+  document.querySelector<HTMLButtonElement>('#pluginsExplore .plugin-catalog-card')!.click();
+  const setup = document.querySelector<HTMLElement>('#pluginDialog .plugin-about > summary')!;
+  expect(setup.textContent).toBe('Setup requirements');
+  expect(chevronFirst(setup)).toBe(true);
+  document.querySelector<HTMLButtonElement>('.plugin-entry')!.click();
+  const about = [...document.querySelectorAll<HTMLElement>('#pluginDialog .plugin-about > summary')].find(node => node.textContent === 'About this plugin')!;
+  expect(chevronFirst(about)).toBe(true);
+  try {
+    setLanguage('pt-BR');
+    expect(about.textContent).toBe('Sobre este plugin');
+    expect(chevronFirst(about)).toBe(true);
+  } finally {
+    setLanguage('en');
+  }
 });
 
 it('opens the full error from the compact card and exposes configuration beside the introduction', async () => {
