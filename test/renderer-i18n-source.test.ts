@@ -32,3 +32,22 @@ it('has every literal interface string of the renderer in every catalog', () => 
     expect([...keys].filter(([key]) => !Object.hasOwn(catalog, key)).map(([key, file]) => `${file}: ${key}`), locale).toEqual([]);
   }
 });
+
+it('keeps every catalog complete, nonempty and free of duplicate keys or changed placeholders', () => {
+  const entries = LOCALES.map(locale => {
+    const source = readFileSync(`src/renderer/locales/${locale}.json`, 'utf8');
+    return { locale, source, catalog: JSON.parse(source) as Record<string, string> };
+  });
+  const union = [...new Set(entries.flatMap(({ catalog }) => Object.keys(catalog)))].sort();
+  const args = (value: string) => (value.match(/\{\d+\}/g) ?? []).sort();
+  for (const { locale, source, catalog } of entries) {
+    expect(Object.keys(catalog).sort(), locale).toEqual(union);
+    const rawKeys = [...source.matchAll(/^\s{2}("(?:[^"\\]|\\.)*")\s*:/gm)].map(match => JSON.parse(match[1]!));
+    expect(rawKeys, locale).toHaveLength(Object.keys(catalog).length);
+    expect(new Set(rawKeys).size, locale).toBe(rawKeys.length);
+    for (const [key, value] of Object.entries(catalog)) {
+      expect(value.trim(), `${locale}: ${key}`).not.toBe('');
+      expect(args(value), `${locale}: ${key}`).toEqual(args(key));
+    }
+  }
+});
