@@ -2995,7 +2995,10 @@ App-owned external/local links cross their validated main-process route.
 
 English, Spanish, Simplified Chinese, Traditional Chinese, Japanese, Turkish, French, European Portuguese, Brazilian Portuguese and German use the existing UI
 catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja,tr,fr,pt-PT,pt-BR,de}.json`), with the selected locale in
-`cos.ui.language`. Setup uses SVG flags only, with native language names in tooltips and
+`cos.ui.language`. The main process has no catalogs: the renderer translates the allowlisted
+stopped-chat notice texts (`shared/stop-notice.ts`) and publishes them over `ui:stopNoticeTexts`
+at startup and on each language change; unknown keys are refused and untranslated notices stay English.
+Setup uses SVG flags only, with native language names in tooltips and
 accessible labels; Appearance retains the named language dropdown. Both controls share the
 same persisted preference. `translate="no"` protects text and attributes, including native
 language names. Japanese has its own system-font fallbacks and CJK wrapping. Changing language

@@ -25,6 +25,13 @@ catch { /* Storage may be unavailable in a restricted renderer; English remains 
 
 export function currentLanguage(): Language { return language; }
 
+const languageListeners = new Set<() => void>();
+/** Runs after each language change, for copy that leaves this document (#855). */
+export function onLanguageChange(listener: () => void): () => void {
+  languageListeners.add(listener);
+  return () => { languageListeners.delete(listener); };
+}
+
 /** Translate only app-authored copy at explicit call sites. Arguments remain verbatim. */
 export function t(source: string, args: readonly unknown[] = []): string {
   const catalog = language === 'en' ? undefined : catalogs[language];
@@ -66,6 +73,9 @@ export function setLanguage(next: Language): void {
   try { window.localStorage.setItem(STORAGE_KEY, next); } catch { /* The current window can still change language. */ }
   document.documentElement.lang = next;
   syncLanguageControls();
+  for (const listener of languageListeners) {
+    try { listener(); } catch { /* One listener cannot block the repaint below. */ }
+  }
   // The document owns the live labels, including hidden settings and collapsed
   // history. Do not index every label ever created: sweeping WeakRefs during
   // rendering keeps their detached DOM trees alive until the job ends and makes
