@@ -11334,6 +11334,10 @@
         // replay an ambiguous click or let ordinary events create its shadow session.
         return;
       }
+      // The command fails either way; that is what keeps a possible click from being replayed.
+      // The draft is a separate matter: left in the box it read as a message the user still had
+      // to send (#864). Clear only our own unchanged text; anything the user typed stays.
+      await bootstrapDraft.clear();
       return void (await fail(t(
         'content_bootstrap_send_not_accepted',
         'ChatGPT did not accept the bootstrap send'
