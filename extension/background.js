@@ -1812,7 +1812,7 @@ async function reconcileBackgroundWindow(policy) {
   return inBackgroundWindow(async () => {
     let window = await storedBackgroundWindow();
     const tabs = await chrome.tabs.query({});
-    const owned = tabs.filter(tab => Number.isInteger(tab.id) && Number.isInteger(tab.windowId) && owns(tab));
+    const owned = tabs.filter(tab => Number.isInteger(tab.id) && Number.isInteger(tab.windowId) && !tab.pinned && owns(tab));
     if (!window) {
       // Only adopt a window made entirely of app-owned tabs. A personal window
       // containing one managed conversation is not authority over its other tabs.
@@ -1831,7 +1831,7 @@ async function reconcileBackgroundWindow(policy) {
       // async boundary so navigation cannot move an unrelated replacement tab.
       try {
         const current = await chrome.tabs.get(tab.id);
-        if (!owns(current) || current.windowId === window.id) continue;
+        if (current.pinned || !owns(current) || current.windowId === window.id) continue;
         await chrome.tabs.move(current.id, { windowId: window.id, index: -1 });
       } catch { /* A closing/navigating tab is reconsidered by the next ordinary status pass. */ }
     }
