@@ -772,7 +772,8 @@ describe('desktop input delivery and helper ownership', () => {
       desktop_input: async message => {
         if (message.authorize && kind === 'after authorization') await held;
         return { ok: true, data: message.authorize || message.ack || message.fail
-          ? { ok: true } : { input: claimed(kind === 'plain input' ? {} : { recovery: true }) } };
+          ? { ok: true } : { input: claimed(kind === 'plain input' ? {} : { recovery: {
+            questionId: 'source-question', pro: false, busyUntil: Date.now() + 60_000, phase: 'ready' } }) } };
       }
     }, () => undefined, false, true);
     const button = live.document.querySelector<HTMLButtonElement>('[data-testid="send-button"]')!;
@@ -805,6 +806,33 @@ describe('desktop input delivery and helper ownership', () => {
       expect(authorizations).toHaveLength(kind === 'after authorization' ? 1 : 0);
     }
     if (kind === 'other text') expect(composerText(live.document)).toBe('A sentence I was still writing');
+  });
+
+  it('clears its exact remounted recovery draft when Send authorization is withdrawn', async () => {
+    let authorizations = 0;
+    const recovery = { questionId: 'source-question', pro: false, busyUntil: Date.now() + 60_000, phase: 'ready' };
+    const recoveryInput = claimed({ recovery, silenceBoundary: { turnId: 'source-turn' } });
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => {
+        if (message.authorize) {
+          authorizations++;
+          const composer = live!.document.querySelector('#prompt-textarea')!;
+          composer.replaceWith(composer.cloneNode(true));
+          return { ok: true, data: { ok: false } };
+        }
+        return { ok: true, data: message.ack || message.fail ? { ok: true } : { input: recoveryInput } };
+      }
+    }, () => undefined, false, true);
+    const sends = watchSend(live.document);
+
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: false });
+    await settle();
+
+    expect(authorizations).toBe(1);
+    expect(sends()).toBe(0);
+    expect(live.sent.filter(message => message.fail)).toContainEqual(expect.objectContaining({ error: 'After-turn pickup was withdrawn before Send.' }));
+    expect(composerText(live.document), 'the withdrawn recovery left its own text blocking repair').toBe('');
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chatA })).toMatchObject({ safe: true });
   });
 
   it('keeps a helper claim revocable until its delayed Send is ready', async () => {
