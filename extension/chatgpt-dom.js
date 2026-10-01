@@ -2287,17 +2287,22 @@ var CLF_DOM = (() => {
     }
   }
 
-  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null } = {}) {
+  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null, explain = null } = {}) {
+    // Why a Send ended without acceptance, as one short code for the caller's diagnostics (#820).
+    // It names the first refusal only and never changes what Send does.
+    const refused = (why) => { try { explain?.(why); } catch { /* Diagnostics never change Send. */ } return false; };
     try {
       const box = composer();
-      if (!box || !box.isConnected || !stillCurrent() || generating() || stopButton()) return false;
-      if (box.getAttribute('aria-disabled') === 'true' || box.getAttribute('contenteditable') === 'false') return false;
+      if (!box || !box.isConnected) return refused('editor-missing');
+      if (!stillCurrent()) return refused('chat-changed');
+      if (generating() || stopButton()) return refused('page-busy');
+      if (box.getAttribute('aria-disabled') === 'true' || box.getAttribute('contenteditable') === 'false') return refused('editor-disabled');
       // Rich editors use adjacent paragraphs for newlines; textContent concatenates
       // their words. Preserve those boundaries when matching the rendered user message.
       const draftText = () => (typeof box.innerText === 'string' ? box.innerText : [...box.childNodes]
         .map((node) => (node.textContent || '') + (/^(P|DIV|BR)$/.test(node.nodeName) ? '\n' : '')).join('')).trim();
       const submitted = draftText();
-      if (!submitted) return false;
+      if (!submitted) return refused('draft-empty');
       const compact = (value) => String(value || '').replace(/\s+/g, ' ').trim();
       const expected = compact(submitted);
       const beforeConversation = conversationId();
@@ -2357,8 +2362,9 @@ var CLF_DOM = (() => {
         let mentionPlain = '';
         let priorMentions = new Set();
         const ownMentions = () => mentionAdded ? [...box.querySelectorAll(`[app-mention-path="${mention.path}"]`)].filter(node => !priorMentions.has(node)) : [];
-        const finish = (value) => {
+        const finish = (value, why = attempted ? 'not-accepted' : 'send-not-ready') => {
           if (done) return;
+          if (!value) refused(why);
           done = true;
           // A Send that was not accepted leaves the prompt as it was approved, without our token.
           // The editor may have drawn its own token in place of the one we inserted.
@@ -2388,7 +2394,7 @@ var CLF_DOM = (() => {
           for (const pending of mentionTimers) clearTimeout(pending);
           mentionTimers = [];
           // Only the prompt as it was approved may be sent, with or without the token.
-          if (promptWithoutMentions(box) !== mentionPlain) return finish(false);
+          if (promptWithoutMentions(box) !== mentionPlain) return finish(false, 'draft-changed');
           mentionedDraft = draftText();
           const resume = resumeClick;
           resumeClick = null;
@@ -2396,7 +2402,7 @@ var CLF_DOM = (() => {
         };
         const check = () => {
           if (done) return;
-          if (!stillCurrent() || (beforeConversation && conversationId() !== beforeConversation)) return finish(false);
+          if (!stillCurrent() || (beforeConversation && conversationId() !== beforeConversation)) return finish(false, 'chat-changed');
           if (attempted) {
             if (accepted()) finish(true);
             return;
@@ -2406,7 +2412,7 @@ var CLF_DOM = (() => {
           // readiness through this same bounded operation; neither a guessed Enter nor
           // an unrelated Stop/composer-clear is evidence that this draft was submitted.
           if (conversationId() !== beforeConversation || composer() !== box || !box.isConnected ||
-              draftText() !== (mentionedDraft ?? submitted) || generating()) return finish(false);
+              draftText() !== (mentionedDraft ?? submitted) || generating()) return finish(false, generating() ? 'page-busy' : 'draft-changed');
           if (box.getAttribute('aria-disabled') === 'true' || box.getAttribute('contenteditable') === 'false') return;
           const button = sendButton();
           if (!sendButtonEnabled(button)) return;
@@ -2420,13 +2426,13 @@ var CLF_DOM = (() => {
             if (!stillCurrent() || conversationId() !== beforeConversation || composer() !== box ||
                 !box.isConnected || draftText() !== (mentionedDraft ?? submitted) || generating() || sendButton() !== control ||
                 !sendButtonEnabled(control) || box.getAttribute('aria-disabled') === 'true' ||
-                box.getAttribute('contenteditable') === 'false') return finish(false);
+                box.getAttribute('contenteditable') === 'false') return finish(false, 'send-not-ready');
             if (mention && !mentionTried) {
               mentionTried = true;
               priorMentions = new Set(box.querySelectorAll('[app-mention-path]'));
               mentionPlain = promptWithoutMentions(box);
               const added = addAppMention(box, mention);
-              if (added === false) return finish(false);
+              if (added === false) return finish(false, 'draft-changed');
               if (added) {
                 mentionAdded = true;
                 mentioning = true;
@@ -2455,8 +2461,8 @@ var CLF_DOM = (() => {
           authorizing = true;
           // Claim/dispatch authority belongs at readiness, not before a possibly long
           // disabled-Send wait. This is still one attempt under the existing deadline.
-          try { Promise.resolve(beforeSend(() => !done && stillCurrent())).then(allowed => allowed === true ? click() : finish(false), () => finish(false)); }
-          catch { finish(false); }
+          try { Promise.resolve(beforeSend(() => !done && stillCurrent())).then(allowed => allowed === true ? click() : finish(false, 'not-authorized'), () => finish(false, 'not-authorized')); }
+          catch { finish(false, 'not-authorized'); }
         };
 
         observer = new MutationObserver(check);

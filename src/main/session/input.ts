@@ -60,7 +60,9 @@ const entrySchema = inputArgs.extend({
   /** The active turn at admission; its final may already be waiting in the browser journal. */
   queuedTurn: z.object({ conversationId: z.string().min(1).max(256), turnId: z.string().min(1).max(256) }).optional(),
   /** Shared unfinished-response fallback belongs to this question in every mode. */
-  recovery: z.object({ questionId: z.string(), episode: z.string().max(200).optional(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional() }).optional(),
+  recovery: z.object({ questionId: z.string(), episode: z.string().max(200).optional(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional(),
+    /** First release of an unbroken run of pages withdrawing this Continue before Send (#820). */
+    withdrawnSince: z.number().optional() }).optional(),
   /** Exact tool-free turn this explicit browser correction may interrupt. */
   directTurn: z.object({ id: z.string().min(1).max(256), startedAt: z.number() }).optional(),
   finishOwner: z.object({ turnId: z.string().min(1).max(256), periodic: z.boolean(), mode: z.enum(['goal', 'loop']).optional(), userRequested: z.boolean().optional() }).optional(),
@@ -1583,7 +1585,14 @@ export function authorizeBrowserHelperRetry(id: string, sourceSessionId: string)
  * Only a pre-send failure can be declared failed. An ambiguous click stays claimed, unless the
  * page reports that its receipt was never confirmed: that retires it as an uncertain send.
  */
-export function failBrowserInput(id: string, owner: string, error: string): Promise<boolean> {
+/**
+ * How long pages may keep withdrawing one automatic Continue before Send. Measured in #820: a page
+ * that refuses for a reason it cannot get past released the same ticket about once a second for
+ * many minutes, its text left in the composer. Past this, the Continue ends and the log says why.
+ */
+export const RECOVERY_WITHDRAW_LIMIT_MS = 3 * 60_000;
+
+export function failBrowserInput(id: string, owner: string, error: string, detail?: string): Promise<boolean> {
   return serial(async () => {
     const current = await load();
     const entry = current.find((row) => row.id === id && row.owner === owner && row.state === 'browser');
@@ -1602,12 +1611,23 @@ export function failBrowserInput(id: string, owner: string, error: string): Prom
     if (entry.recovery && entry.requiresAuthorization === true && entry.sendAuthorizedAt === undefined) {
       // Said once per reason, not once per attempt: the pickup schedule can hand the same ticket to
       // the same page every few seconds, and an unbounded log is its own kind of silence.
-      if (recoveryReleaseTold.get(entry.id) !== error) {
-        recoveryReleaseTold.set(entry.id, error);
+      const told = detail ? `${error} (${detail})` : error;
+      if (recoveryReleaseTold.get(entry.id) !== told) {
+        recoveryReleaseTold.set(entry.id, told);
         if (recoveryReleaseTold.size > 200) for (const old of [...recoveryReleaseTold.keys()].slice(0, 50)) recoveryReleaseTold.delete(old);
-        logWarn(`input ${entry.id}: the browser could not send this recovery message — ${error.slice(0, 160)}`);
+        logWarn(`input ${entry.id}: the browser could not send this recovery message — ${told.slice(0, 200)}`);
       }
-      await commit(current.map(row => row === entry ? releaseRecoveryClaim(row, error) : row));
+      const now = Date.now();
+      const since = entry.recovery.withdrawnSince ?? now;
+      if (now - since >= RECOVERY_WITHDRAW_LIMIT_MS) {
+        logWarn(`input ${entry.id}: automatic Continue ended — pages withdrew it before Send for ` +
+          `${Math.round((now - since) / 60_000)} minutes (last: ${told.slice(0, 160)})`);
+        await commit(current.map(row => row === entry
+          ? { ...row, state: 'failed', owner: null, error: `Automatic Continue was not sent: ${detail ?? 'withdrawn before Send'}`.slice(0, 200) } : row));
+        return true;
+      }
+      await commit(current.map(row => row === entry
+        ? { ...releaseRecoveryClaim(row, error), recovery: { ...releaseRecoveryClaim(row, error).recovery!, withdrawnSince: since } } : row));
       return true;
     }
     // The document reports this only while its native Send has never been attempted.

@@ -887,8 +887,8 @@
     coreMention = path && event.data.name === 'Chat On Steroids Core' ? { path, name: event.data.name } : null;
   });
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
-                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention: coreMention,
+                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null) {
+    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention: coreMention, explain,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -11809,11 +11809,14 @@
 
   // Continue may arrive before the browser journal's final reaches the app. Check the
   // exact latest native answer locally as well, even when the composer already says Send.
-  async function recoveryPageUnfinished(safe) {
-    if (!safe()) return false;
+  async function recoveryPageUnfinished(safe, note = () => undefined) {
+    // `note` names the veto for the caller's release report (#820); it never changes the verdict.
+    const unsafe = () => { note('lease-lost'); return false; };
+    const unreadable = () => { note(safe() ? 'page-unreadable' : 'lease-lost'); return false; };
+    if (!safe()) return unsafe();
     const latest = CLF_DOM.turns().at(-1);
     if (latest?.role === 'assistant') {
-      if (!await refreshFiber({ pageTurnId: latest.id, pageTurn: latest.node || latest.nodes?.[0] }) || !safe()) return false;
+      if (!await refreshFiber({ pageTurnId: latest.id, pageTurn: latest.node || latest.nodes?.[0] }) || !safe()) return unreadable();
       let current = CLF_DOM.turns().at(-1);
       let native = current?.role === 'assistant' ? fiberTurnFor(current) : null;
       // A successful page-model scan can still omit the latest React turn while a
@@ -11821,18 +11824,22 @@
       // fresh exact native evidence before allowing either Stop or Send.
       if (!native) {
         const repair = await repairFiberReader();
-        if (repair?.ok !== true || !safe()) return false;
+        if (repair?.ok !== true || !safe()) return unreadable();
         current = CLF_DOM.turns().at(-1);
         if (current?.role !== 'assistant' ||
-            !await refreshFiber({ pageTurnId: current.id, pageTurn: current.node || current.nodes?.[0] }) || !safe()) return false;
+            !await refreshFiber({ pageTurnId: current.id, pageTurn: current.node || current.nodes?.[0] }) || !safe()) return unreadable();
         current = CLF_DOM.turns().at(-1);
         native = current?.role === 'assistant' ? fiberTurnFor(current) : null;
-        if (!native) return false;
+        if (!native) return unreadable();
       }
       // A known native final vetoes Continue even while delivery to the app is pending.
-      if (native?.endMessageId) { await flush(); return false; }
+      if (native?.endMessageId) { note('page-final'); await flush(); return false; }
     }
-    return Boolean(await flush() && safe());
+    const flushed = await flush();
+    if (flushed && safe()) return true;
+    if (!flushed) note('journal-pending');
+    else note('lease-lost');
+    return false;
   }
 
   async function inspectRepairPage(message) {
@@ -11935,6 +11942,9 @@
     let sent = false;
     let draft = null;
     let claimedSilence = null;
+    // The first reason this attempt ended before Send, reported with its release (#820).
+    let withdrawReason = null;
+    const noteWithdraw = (why) => { withdrawReason ??= why; };
     const writableComposer = () => CLF_DOM.composerVisible() && CLF_DOM.composerWritable() && CLF_DOM.composer();
     try {
       // Registration may precede React mounting the composer. Observe that same document
@@ -12119,11 +12129,12 @@
       // unescape); a person's own sends keep the raw comparison in matchesUserSendReceipt.
       const nativeSend = () => sendSubmittedText(sendingTarget, false, async sendCurrent => {
         // Preserve the outbox's revocable claim until the actual native Send is ready.
-        if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current())) return false;
+        if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), noteWithdraw)) return false;
         authorizing = true;
         const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
-        if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) return false;
-        if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current())) return false;
+        if (authorized?.data?.ok !== true) noteWithdraw('app-refused');
+        if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) { noteWithdraw('lease-lost'); return false; }
+        if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), noteWithdraw)) return false;
         sendAttempted = true;
         return true;
       }, (user, conversation) => {
@@ -12134,7 +12145,7 @@
         // may replace it before this async operation resumes; do not rediscover it.
         receipt = { conversation, user: { id: user.id } };
         return true;
-      }, matchesSubmittedBootstrap, DESKTOP_RECEIPT_MS);
+      }, matchesSubmittedBootstrap, DESKTOP_RECEIPT_MS, noteWithdraw);
       // #744: one retry when the editor was replaced before anything asked to send it.
       if (!(await nativeSend()) &&
           !(!authorizing && !sendAttempted && !receipt && !draft.current() && draftCurrent() && await nativeSend())) {
@@ -12193,7 +12204,7 @@
     } finally {
       if (claimedSilence && !sendAttempted) {
         await ask({ type: 'desktop_input', id: claimedSilence.id, owner: claimedSilence.owner, fail: true,
-          error: 'After-turn pickup was withdrawn before Send.' }).catch(() => undefined);
+          error: 'After-turn pickup was withdrawn before Send.', detail: withdrawReason ?? undefined }).catch(() => undefined);
       }
       if (draft) {
         try { if (!sendAttempted) await draft.clear(); }
