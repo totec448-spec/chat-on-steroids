@@ -760,6 +760,16 @@ describe('transport-card scan cost', () => {
     }
   );
 
+  it('still finds an English Retry card rendered beside the composer', () => {
+    const form = document.createElement('form');
+    form.innerHTML = '<div><p>A network error occurred. </p><button>Retry</button></div><div contenteditable="true"></div>';
+    document.body.append(form);
+
+    expect(api.errors()).toEqual([
+      expect.objectContaining({ text: 'A network error occurred. Retry', recoverable: true })
+    ]);
+  });
+
   it.each([500, 5000])('rejects a %i-character container before reading its rendered text', length => {
     const host = document.createElement('div');
     const control = document.createElement('button');

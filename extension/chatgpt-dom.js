@@ -332,7 +332,9 @@ var CLF_DOM = (() => {
   function retryFailure(button) {
     return safe(() => {
       // Exclude navigation/composer controls before rendered-text reads on each recorder tick.
-      if (button.closest('nav, aside, header, form, [role="navigation"], [role="menu"]')) return null;
+      // An exact English Retry keeps its earlier reach: its card was never tied to one region.
+      const quick = (button.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!/^retry$/i.test(quick) && button.closest('nav, aside, header, form, [role="navigation"], [role="menu"]')) return null;
       const label = (button.innerText || button.textContent || '').replace(/\s+/g, ' ').trim();
       // A transport card can keep its English message while localizing its button; this was
       // observed with "Reintentar". The label cannot be the anchor. Another language's
