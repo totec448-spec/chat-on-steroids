@@ -13,7 +13,7 @@ interface DomApi {
   temporaryChatReady(): boolean;
   confirmTemporaryChatIntroduction(): void;
   errors(): Array<{ text: string; recoverable: boolean; blocking?: boolean }>;
-  captureComposerDraft(text: string, current?: () => boolean): { current(): boolean; clear(): Promise<boolean>; dispose(): void; attachments(nodes: Element[]): void };
+  captureComposerDraft(text: string, current?: () => boolean): { current(): boolean; clear(): Promise<boolean>; withdraw(): boolean; dispose(): void; attachments(nodes: Element[]): void };
   visibleModelSelection(): { model: string; reasoningEffort?: string } | null;
   hasComposerAttachments(): boolean;
   stopGeneration(current: () => boolean): boolean;
@@ -981,6 +981,32 @@ describe('native image readiness', () => {
     if (reason === 'navigation') current = false;
     expect(await draft.clear()).toBe(false);
     expect(removed).not.toHaveBeenCalled(); expect(box.textContent).not.toBe(''); draft.dispose();
+  });
+  it('withdraws exact app text across one remount after send authority is revoked', () => {
+    document.execCommand = command => { if (command === 'delete') api.composer()?.replaceChildren(); return true; };
+    let current = true;
+    const draft = api.captureComposerDraft('Exact app prompt', () => current);
+    current = false;
+    const replacement = box.cloneNode(true) as HTMLElement;
+    box.replaceWith(replacement);
+    box = replacement;
+    expect(draft.current()).toBe(false);
+    expect(draft.withdraw()).toBe(true);
+    expect(box.textContent).toBe('');
+    draft.dispose();
+  });
+  it('does not withdraw a changed remounted draft after send authority is revoked', () => {
+    document.execCommand = command => { if (command === 'delete') api.composer()?.replaceChildren(); return true; };
+    let current = true;
+    const draft = api.captureComposerDraft('Exact app prompt', () => current);
+    current = false;
+    const replacement = box.cloneNode(true) as HTMLElement;
+    replacement.textContent = 'User-authored replacement';
+    box.replaceWith(replacement);
+    box = replacement;
+    expect(draft.withdraw()).toBe(false);
+    expect(box.textContent).toBe('User-authored replacement');
+    draft.dispose();
   });
   it.each(['Remove file:', 'Remove file 1:'])('waits for matching %s attachment and upload completion before Send', async (label) => {
     const input = upload();
