@@ -178,10 +178,10 @@ describe('one native HTML edit for prepared text', () => {
 describe('native Project entry readiness', () => {
   const entry = { id: 'g-p-11111111222233334444555555555555', sourceConversationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' };
   const projectUrl = `https://chatgpt.com/g/${entry.id}-example/project`;
-  function sourceLink() {
+  function sourceLink(markup = `<a href="${projectUrl}"><span data-testid="project-folder-icon"></span>Project</a>`) {
     dom.reconfigure({ url: `https://chatgpt.com/c/${entry.sourceConversationId}` });
     const header = document.createElement('header');
-    header.innerHTML = `<a href="${projectUrl}"><span data-testid="project-folder-icon"></span>Project</a>`;
+    header.innerHTML = markup;
     document.body.prepend(header);
     return header.querySelector('a')!;
   }
@@ -204,6 +204,28 @@ describe('native Project entry readiness', () => {
     document.querySelector('form')!.prepend(box);
     expect(await entered).toBe(true);
     expect(clicks).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['the October 2026 header link', `<a href="/g/${entry.id}/project" data-discover="true"><span><span><svg></svg></span><span>Homelab</span></span></a>`]
+  ])('enters through %s, which no longer carries the folder icon test id', async (_shape, markup) => {
+    // Measured 2026-10-01: every Compact & resume from a Project chat failed with "could not
+    // open the source Project" because the header link lost data-testid="project-folder-icon".
+    const link = sourceLink(markup);
+    box.textContent = '';
+    link.addEventListener('click', event => { event.preventDefault(); dom.reconfigure({ url: projectUrl }); box.replaceWith(box.cloneNode(true)); });
+    expect(await api.enterProject(entry)).toBe(true);
+  });
+
+  it('refuses two header links to the same Project instead of guessing', async () => {
+    const link = sourceLink(`<a href="/g/${entry.id}/project"><span>A</span></a><a href="/g/${entry.id}/project"><span>B</span></a>`);
+    const clicks = vi.fn((event: Event) => event.preventDefault());
+    document.querySelectorAll('header a').forEach(node => node.addEventListener('click', clicks));
+    const entered = api.enterProject(entry);
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(await entered).toBe(false);
+    expect(clicks).not.toHaveBeenCalled();
+    void link;
   });
 
   it('gives the native transition its own deadline after source loading', async () => {
