@@ -1815,8 +1815,13 @@
     // the authorized request first, but roll it back if no click was possible.
     stopRequestedAt = Date.now();
     const clicked = CLF_DOM.stopGeneration(current);
-    if (!clicked && epoch === stopEpoch) stopRequestedAt = previous;
-    return clicked;
+    if (clicked) return true;
+    // ChatGPT is already idle while this document still holds the turn open, because nothing
+    // proved how it ended (#864). There is no control to click, and the open turn is exactly
+    // what Stop asks to end: keep the request so the quiet path closes it as stopped.
+    if (epoch === stopEpoch && current() && !CLF_DOM.generating()) return true;
+    if (epoch === stopEpoch) stopRequestedAt = previous;
+    return false;
   }
   async function stopAppTurn(request) {
     const expected = request?.turnId, target = request?.conversationId, commandId = request?.id;
