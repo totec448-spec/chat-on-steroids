@@ -2325,9 +2325,11 @@ var CLF_DOM = (() => {
         let observer = null;
         let timer = null;
         let unsubscribeEvidence = null;
-        // Core mention state (#861): added once Send is ready, clicked only after the editor
-        // has taken the token into its own document.
+        // Core mention state (#861): added by the authorized click, which resumes only after the
+        // editor has taken the token into its own document. Never before authorization: the
+        // caller's draft lease reads any edit of the prompt as someone else's.
         let mentionTried = false;
+        let resumeClick = null;
         let mentionAdded = false;
         let mentioning = false;
         let mentionTicked = false;
@@ -2369,7 +2371,9 @@ var CLF_DOM = (() => {
           // Only the prompt as it was approved may be sent, with or without the token.
           if (promptWithoutMentions(box) !== mentionPlain) return finish(false);
           mentionedDraft = draftText();
-          check();
+          const resume = resumeClick;
+          resumeClick = null;
+          if (resume) resume();
         };
         const check = () => {
           if (done) return;
@@ -2388,28 +2392,31 @@ var CLF_DOM = (() => {
           const button = sendButton();
           if (!sendButtonEnabled(button)) return;
           if (authorizing) return;
-          if (mention && !mentionTried) {
-            mentionTried = true;
-            priorMentions = new Set(box.querySelectorAll('[app-mention-path]'));
-            mentionPlain = promptWithoutMentions(box);
-            const added = addAppMention(box, mention);
-            if (added === false) return finish(false);
-            if (added) {
-              mentionAdded = true;
-              mentioning = true;
-              mentionTimers = [setTimeout(() => { mentionTicked = true; settleMention(); }, 0),
-                setTimeout(() => { mentionTicked = true; settleMention(true); }, 1500)];
-              return;
-            }
-          }
-          const click = () => {
+          const click = (resumed = false) => {
             if (done) return;
+            // After our own mention the editor may have drawn its Send control again.
+            const control = resumed ? sendButton() : button;
             // Authorization can await the app. The exact editor, text and native control
             // must still be the ones it authorized; a late answer cannot revive this send.
             if (!stillCurrent() || conversationId() !== beforeConversation || composer() !== box ||
-                !box.isConnected || draftText() !== (mentionedDraft ?? submitted) || generating() || sendButton() !== button ||
-                !sendButtonEnabled(button) || box.getAttribute('aria-disabled') === 'true' ||
+                !box.isConnected || draftText() !== (mentionedDraft ?? submitted) || generating() || sendButton() !== control ||
+                !sendButtonEnabled(control) || box.getAttribute('aria-disabled') === 'true' ||
                 box.getAttribute('contenteditable') === 'false') return finish(false);
+            if (mention && !mentionTried) {
+              mentionTried = true;
+              priorMentions = new Set(box.querySelectorAll('[app-mention-path]'));
+              mentionPlain = promptWithoutMentions(box);
+              const added = addAppMention(box, mention);
+              if (added === false) return finish(false);
+              if (added) {
+                mentionAdded = true;
+                mentioning = true;
+                resumeClick = () => click(true);
+                mentionTimers = [setTimeout(() => { mentionTicked = true; settleMention(); }, 0),
+                  setTimeout(() => { mentionTicked = true; settleMention(true); }, 1500)];
+                return;
+              }
+            }
             attempted = true;
             // The deadline bounds readiness, not an already-dispatched receipt.
             // Keep this same observer and exact send lifetime until the provider
@@ -2422,7 +2429,7 @@ var CLF_DOM = (() => {
               if (Number.isFinite(receiptTimeoutMs) && receiptTimeoutMs > 0)
                 timer = setTimeout(() => { check(); finish(false); }, receiptTimeoutMs);
             }
-            try { button.click(); } catch { return finish(false); }
+            try { control.click(); } catch { return finish(false); }
             check(); // Synchronous navigation/cancellation during click also re-proves ownership.
           };
           if (!beforeSend) return click();
