@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const swift = readFileSync(path.join(process.cwd(), 'native/macos-desktop-helper/main.swift'), 'utf8');
 const preparation = readFileSync(path.join(process.cwd(), 'scripts/prepare-macos-desktop-helper.mjs'), 'utf8');
 const computer = readFileSync(path.join(process.cwd(), 'src/main/computer/index.ts'), 'utf8');
+const desktopTools = readFileSync(path.join(process.cwd(), 'src/main/mcp/tools-desktop-macos.ts'), 'utf8');
 
 describe('macOS desktop safety hardening', () => {
   it('requires exact Workspace, WindowServer and AX agreement for physical input', () => {
@@ -174,6 +175,18 @@ describe('macOS desktop safety hardening', () => {
     expect(computer).toContain("const frameWindow = captureMode === 'window' ? requestedWindow : null");
     expect(computer).toContain('windowId: frame.windowId');
     expect(computer).toContain("frame.captureMode !== 'screen_fallback'");
+  });
+
+  it('keeps every valid upscaled image pixel inside its desktop frame', () => {
+    expect(computer).toContain('const upper = Math.max(lower, Math.ceil(origin + extent) - 1)');
+    expect(computer).toContain('clampMappedCoordinate(Math.round(frame.region.x + x / frame.scale)');
+    expect(computer).toContain('clampMappedCoordinate(Math.round(frame.region.y + y / frame.scale)');
+  });
+
+  it('budgets the actual combined Desktop text and image response', () => {
+    expect(desktopTools).toContain("Buffer.byteLength(JSON.stringify(result), 'utf8')");
+    expect(desktopTools).toContain('MAX_MCP_RESPONSE_BYTES - MCP_RESPONSE_ENVELOPE_RESERVE_BYTES');
+    expect(desktopTools).toContain('DESKTOP_RESULT_TOO_LARGE');
   });
 
   it('carries proven semantic and explicit focus targets into later keyboard input', () => {
