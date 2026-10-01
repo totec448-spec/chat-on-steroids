@@ -20487,6 +20487,22 @@ describe('app Stop command uses current native turn proof', () => {
     expect(h.clicks()).toBe(1);
   });
 
+  it('closes a turn that stayed open after ChatGPT went idle when the app asks to stop it', async () => {
+    // #864: the answer had arrived, but nothing proved the turn's end, so the app kept showing
+    // Stop and held the next message. Stop found no native control to click and changed nothing.
+    const h = await setup();
+    stopGenerating(live!.document);
+    live!.advance(30_000);
+    live!.hook.observe(); await settle(); await live!.hook.flush();
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+    expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
+    live!.hook.observe(); await settle(); await live!.hook.flush();
+    expect(h.clicks()).toBe(0);
+    expect(emitted(live!.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: h.request.turnId, outcome: 'stopped' })
+    ]);
+  });
+
   it('does not confirm a Stop command while the native page continues generating', async () => {
     const h = await setup();
     expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
