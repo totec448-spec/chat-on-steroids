@@ -1044,7 +1044,7 @@
     "message": "yes"
   },
   "content_goal_error_loop_mcp_call_missing": {
-    "message": "No MCP tool call was recorded in the last response, so the app cannot tell whether the tool connection was lost. Automatic continuation is paused; Loop remains enabled. Check the tunnel and Core connector before continuing."
+    "message": "No MCP tool call was recorded in the last response. ChatGPT may be asking you something, or the tool connection may have been lost. Answer it, or check the tunnel if tools stopped working. Automatic continuation is paused; Loop remains enabled."
   },
   "content_goal_error_goal_reply_not_pending": {
     "message": "There is no pending continuation for this answer. It may already have been handled or replaced by newer work. Check the latest chat activity before trying again."
