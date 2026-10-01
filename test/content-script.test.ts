@@ -10293,6 +10293,56 @@ describe('how a turn is recorded as having ended', () => {
     });
   });
 
+  /**
+   * Live 2026-09-30, Spanish ChatGPT: the full-width card kept the provider's English message
+   * ("Resume stream unavailable") but its button read "Reintentar". The card was found only
+   * through a button labelled exactly "Retry", so the failure never reached the session and the
+   * chat sat on the card for 33 minutes until the user typed into it.
+   */
+  it.each([
+    ['Reintentar', 'Resume stream unavailable'],
+    ['Erneut versuchen', 'A network error occurred. Please check your connection and try again.']
+  ])('records the non-alert failure card whose button reads %s', async (label, message) => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'turn-localized-retry-card', []);
+    live.hook.observe();
+    await settle();
+
+    const card = live.document.createElement('div');
+    const copy = live.document.createElement('p');
+    copy.textContent = message;
+    const retry = live.document.createElement('button');
+    retry.textContent = label;
+    card.append(copy, retry);
+    live.document.body.append(card);
+    live.hook.observe();
+    await settle();
+
+    const [failure] = emitted(live.sent, 'chat_error').map((entry) => entry.event);
+    const [started] = emitted(live.sent, 'turn_start').map((entry) => entry.event);
+    expect(failure).toMatchObject({ text: message, recoverable: true, turnId: started.turnId });
+  });
+
+  it('does not take a localized button beside unrelated prose for the failure card', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'turn-localized-prose', []);
+    live.hook.observe();
+    await settle();
+
+    const explanation = live.document.createElement('div');
+    explanation.textContent = 'Resume stream unavailable was the old message; pulsa solo si quieres repetir. ';
+    const retry = live.document.createElement('button');
+    retry.textContent = 'Reintentar';
+    explanation.append(retry);
+    live.document.body.append(explanation);
+    live.hook.observe();
+    await settle();
+
+    expect(emitted(live.sent, 'chat_error')).toEqual([]);
+  });
+
   it('keeps a generating transport failure open through reload and records the recovered final under its original identity', async () => {
     live = await harness();
     startGenerating(live.document);

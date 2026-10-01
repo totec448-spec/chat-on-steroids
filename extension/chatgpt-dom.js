@@ -342,14 +342,33 @@ var CLF_DOM = (() => {
    */
   function retryFailure(button) {
     return safe(() => {
+      // Exclude navigation/composer controls before rendered-text reads on each recorder tick.
+      // An exact English Retry keeps its earlier reach: its card was never tied to one region.
+      const quick = (button.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!/^retry$/i.test(quick) && button.closest('nav, aside, header, form, [role="navigation"], [role="menu"]')) return null;
       const label = (button.innerText || button.textContent || '').replace(/\s+/g, ' ').trim();
-      if (!/^retry$/i.test(label) || !displayed(button)) return null;
+      // A transport card can keep its English message while localizing its button; this was
+      // observed with "Reintentar". The label cannot be the anchor. Another language's
+      // button counts only as the single labelled control that ends a notice whose
+      // remaining text is, whole, a known transport failure; the wording check still decides.
+      const english = /^retry$/i.test(label);
+      if (!label || !displayed(button)) return null;
+      if (!english && button.closest(`${OWN_SURFACES}, .markdown, [data-message-author-role], [hidden], [inert]`)) return null;
       let node = button.parentElement;
       for (let up = 0; node && up < 8 && node !== document.body; up++, node = node.parentElement) {
         if (node.closest && node.closest(OWN_SURFACES)) return null;
-        const value = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+        const content = node.textContent || '';
+        if (content.length >= 500) return null;
+        const value = (node.innerText || content).replace(/\s+/g, ' ').trim();
         if (value.length >= 500) return null;
-        if (displayed(node) && transportFailure(value)) return { text: value, node };
+        if (!displayed(node)) continue;
+        if (english) {
+          if (transportFailure(value)) return { text: value, node };
+          continue;
+        }
+        if (!value.endsWith(label) || [...node.querySelectorAll('button')].filter(displayed).length !== 1) continue;
+        const notice = value.slice(0, -label.length).trim();
+        if (notice && transportFailure(notice)) return { text: notice, node };
       }
       return null;
     }, null);
