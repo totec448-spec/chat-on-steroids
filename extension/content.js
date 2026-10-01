@@ -9256,11 +9256,23 @@
       received();
       nativePhase = 'settling';
       renderControl();
+      let endedPolls = 0;
       const ready = await waitUntil(async () => {
         if (!current()) return true;
         const count = await peekPendingTools(forId);
         if (!current()) return true;
-        if (count !== 0) return false;
+        if (count !== 0) {
+          endedPolls = 0;
+          return false;
+        }
+        // ChatGPT ending the turn by itself is its own receipt: it answered after the last
+        // result and there is nothing left to stop. A retry started now skips this wait for
+        // the same reason, yet the first attempt waited out the whole budget on a row it
+        // could no longer match. Seen on two polls, so a Stop button that flickers between
+        // two steps does not count; the settle below still drains local calls.
+        if (!CLF_DOM.generating()) {
+          if (++endedPolls >= 2) return true;
+        } else endedPolls = 0;
         const fresh = await refreshFiber(null, true);
         if (!current()) return true;
         return fresh && received();
