@@ -16007,6 +16007,32 @@ describe('the context meter and automatic compaction', () => {
     expect(live.sent.some(message => message.type === 'compact' && (message.sourceDispatch || message.sourceLost))).toBe(false);
   });
 
+  it('compacts once the turn ends by itself while a stale row still reads as unanswered', async () => {
+    // Live 2026-10-01: the ticket was filed mid-turn, the turn finished on its own, and the
+    // first attempt still sat in Settling for the whole six-minute budget on a row it could no
+    // longer match. A retry two pickups later skipped the wait and compacted at once.
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0 }),
+      compact: () => ({ ok: true, data: { token: 'receipt-token', prompt: 'Write the brief.',
+        ...automaticTicket('not-attempted') } })
+    });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'ended-source', []);
+    compactionFiber(section, () => [compactionCall(false)]);
+    const stopped = vi.fn();
+    live.document.querySelector('[data-testid="stop-button"]')!.addEventListener('click', stopped);
+    const sends = watchSend(live.document);
+    const startedAt = live.window.Date.now();
+    const compacting = live.hook.startCompact(true);
+    await settle();
+    expect(sends()).toBe(0);
+    stopGenerating(live.document);
+    await compacting;
+    expect(stopped).not.toHaveBeenCalled();
+    expect(sends()).toBe(1);
+    expect(live.window.Date.now() - startedAt).toBeLessThan(60_000);
+  });
+
   it('does not stop a newer question while an automatic source waits for native receipt', async () => {
     live = await harness(undefined, {
       activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0 }),
