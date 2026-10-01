@@ -2869,9 +2869,12 @@ var CLF_DOM = (() => {
         // actual editor is mounted and ready.
         const source = composer();
         if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) return;
+        // The header link to this exact Project home is the native entry. Its folder icon lost
+        // its test id in October 2026, and every Project handoff then waited out its deadline;
+        // the link's own same-origin target is the identity, and it must be the only one.
         const links = [...document.querySelectorAll('header a[href], [role="banner"] a[href]')].filter(link =>
-          link.querySelector('[data-testid="project-folder-icon"]') && !link.closest(OWN_SURFACES) &&
-          new URL(link.href, location.href).origin === location.origin && projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
+          !link.closest(OWN_SURFACES) && new URL(link.href, location.href).origin === location.origin &&
+          projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
         if (links.length !== 1) return;
         sourceComposer = source;
         clicked = true;
