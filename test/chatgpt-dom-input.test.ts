@@ -658,6 +658,40 @@ describe('Core app mention on app-owned sends (#861)', () => {
     expect(await result).toBe(false);
     expect(clicked).toBe(false);
   });
+  it('adds the mention only after the caller authorized the unchanged prompt', async () => {
+    // Measured 2026-10-01: added at readiness, the token made the app's draft lease refuse
+    // authorization, and every app prompt stayed typed in the composer.
+    const editor = redrawingEditor();
+    let tokenWhenAuthorizing = true;
+    let submittedWithMention = false;
+    button.addEventListener('click', () => {
+      submittedWithMention = !!editor.drawn?.isConnected;
+      dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+      mentionedUser('Exact app prompt'); box.replaceChildren();
+    });
+    const beforeSend = async () => { tokenWhenAuthorizing = !!box.querySelector('[app-mention-path]'); return true; };
+    expect(await sendMention({ beforeSend })).toBe(true);
+    expect(tokenWhenAuthorizing).toBe(false);
+    expect(submittedWithMention).toBe(true);
+  });
+  it('clicks the Send control the editor drew again after the mention', async () => {
+    redrawingEditor();
+    let clicked = false;
+    const redraw = new dom.window.MutationObserver(() => {
+      if (!box.querySelector('[app-mention-path][contenteditable="false"]') || button.isConnected === false) return;
+      redraw.disconnect();
+      const fresh = button.cloneNode(true) as HTMLButtonElement;
+      fresh.addEventListener('click', () => {
+        clicked = true;
+        dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+        mentionedUser('Exact app prompt'); box.replaceChildren();
+      });
+      button.replaceWith(fresh);
+    });
+    redraw.observe(box, { childList: true });
+    expect(await sendMention({ beforeSend: async () => true })).toBe(true);
+    expect(clicked).toBe(true);
+  });
   it('sends exactly as before without a mention', async () => {
     const insert = vi.spyOn(document, 'execCommand');
     button.addEventListener('click', () => { user('Exact app prompt'); box.replaceChildren(); });
