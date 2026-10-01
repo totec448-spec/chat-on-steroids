@@ -516,9 +516,10 @@ export type SessionEventKind = SessionEvent['kind'];
  */
 export const CONTINUATION_MARKER = /^\s*\[\[CLF-(HANDOFF|RESUME):([A-Za-z0-9_-]{16,64})\]\](?:\s|$)/;
 
-/** Page readback may escape ASCII punctuation. Letters and digits cannot be escaped.
+/** Page readback may escape ASCII punctuation. Letters and digits cannot be escaped. A message
+ * that mentions an app is stored as Markdown, so the marker's line ends in a hard break (`\`).
  * Keep this grammar in sync with markedAs() in the unbundled extension/content.js. */
-const CONTINUATION_MARKER_ESCAPED = /^\s*(?:\\?\[){2}CLF\\?-(HANDOFF|RESUME)\\?:((?:[A-Za-z0-9]|\\?[_-]){16,64})(?:\\?\]){2}(?:\s|$)/;
+const CONTINUATION_MARKER_ESCAPED = /^\s*(?:\\?\[){2}CLF\\?-(HANDOFF|RESUME)\\?:((?:[A-Za-z0-9]|\\?[_-]){16,64})(?:\\?\]){2}\\?(?:\s|$)/;
 
 /**
  * Undo one layer of ASCII-punctuation escaping in page readback only. Callers try exact

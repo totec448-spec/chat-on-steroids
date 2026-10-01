@@ -1638,10 +1638,23 @@ var CLF_DOM = (() => {
     }, []);
   }
 
+  /**
+   * Whether a node belongs to an earlier page ChatGPT keeps mounted but undisplayed. Its workspace
+   * keeps each step of a redirect as such a page: a tab opened on /c/<id> and moved into the chat's
+   * Project holds the chat two more times, editor, header and turns included (measured 2026-10-01).
+   */
+  function onKeptPage(node) {
+    for (let page = node?.closest?.('[data-app-shell-page-surface]'); page;
+      page = page.parentElement?.closest('[data-app-shell-page-surface]')) {
+      if (getComputedStyle(page).display === 'none') return true;
+    }
+    return false;
+  }
+
   function composer() {
     return safe(() => {
-      const classic = document.querySelector('#prompt-textarea');
-      if (classic) return classic;
+      const classic = [...document.querySelectorAll('#prompt-textarea')].filter(node => !onKeptPage(node));
+      if (classic.length) return classic.length === 1 ? classic[0] : null;
       // The current rich editor can remount before its surrounding form regains
       // data-chatgpt-composer. Accept that stable editor identity, but only while
       // the visible candidate remains unique.
@@ -1649,7 +1662,8 @@ var CLF_DOM = (() => {
         'form[data-chatgpt-composer] [contenteditable="true"][role="textbox"], ' +
         'form [data-composer-markdown][contenteditable="true"][role="textbox"]'
       )]
-        .filter(node => !node.closest(`${OWN_SURFACES},[data-turn-key],.markdown,[hidden],[aria-hidden="true"],[inert]`));
+        .filter(node => !node.closest(`${OWN_SURFACES},[data-turn-key],.markdown,[hidden],[aria-hidden="true"],[inert]`) &&
+          !onKeptPage(node));
       return candidates.length === 1 ? candidates[0] : null;
     }, null);
   }
@@ -2198,6 +2212,13 @@ var CLF_DOM = (() => {
     }, false);
   }
 
+  /** The composer's words without app mention tokens and without whitespace. */
+  function promptWithoutMentions(box) {
+    const clone = box.cloneNode(true);
+    for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
+    return String(clone.textContent || '').replace(/\s+/g, '');
+  }
+
   /**
    * Mentions the Core app at the end of an app-owned prompt, right before Send (#861).
    *
@@ -2215,11 +2236,7 @@ var CLF_DOM = (() => {
       const name = typeof mention?.name === 'string' ? mention.name.trim() : '';
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
       if (!path || !name || name.length > 80 || !slug) return null;
-      const plain = () => {
-        const clone = box.cloneNode(true);
-        for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
-        return String(clone.textContent || '').replace(/\s+/g, '');
-      };
+      const plain = () => promptWithoutMentions(box);
       const token = document.createElement('span');
       token.setAttribute('app-mention-name', slug);
       token.setAttribute('app-mention-display-name', name);
@@ -2308,23 +2325,55 @@ var CLF_DOM = (() => {
         let observer = null;
         let timer = null;
         let unsubscribeEvidence = null;
-        let mentionToken = null;
+        // Core mention state (#861): added by the authorized click, which resumes only after the
+        // editor has taken the token into its own document. Never before authorization: the
+        // caller's draft lease reads any edit of the prompt as someone else's.
+        let mentionTried = false;
+        let resumeClick = null;
+        let mentionAdded = false;
+        let mentioning = false;
+        let mentionTicked = false;
+        let mentionTimers = [];
+        let mentionedDraft = null;
+        let mentionPlain = '';
+        let priorMentions = new Set();
+        const ownMentions = () => mentionAdded ? [...box.querySelectorAll(`[app-mention-path="${mention.path}"]`)].filter(node => !priorMentions.has(node)) : [];
         const finish = (value) => {
           if (done) return;
           done = true;
           // A Send that was not accepted leaves the prompt as it was approved, without our token.
-          if (!value && mentionToken?.isConnected && box.contains(mentionToken)) {
-            safe(() => { mentionToken.remove(); box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null })); }, undefined);
+          // The editor may have drawn its own token in place of the one we inserted.
+          const own = value ? [] : safe(ownMentions, []);
+          if (own.length) {
+            safe(() => { for (const node of own) node.remove(); box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null })); }, undefined);
           }
           if (observer) observer.disconnect();
           if (unsubscribeEvidence) unsubscribeEvidence();
           if (timer !== null) clearTimeout(timer);
+          for (const pending of mentionTimers) clearTimeout(pending);
           // A fresh matching user row proves this text was accepted. Some provider
           // transitions retain that same draft; leaving it lets the next Loop append
           // to and resend the entire bootstrap. Preserve replaced editors/new drafts.
           if (clearAcceptedDraft && value && submittedMessageObserved && stillCurrent() && composer() === box)
             clearPromptExact(submitted);
           resolve(value);
+        };
+        // ChatGPT's editor reads the inserted token on a later task and draws it again. A click
+        // before that sends the prompt without the mention, so ChatGPT never attaches Core. Wait
+        // at least one task, then for the editor's token; the last pass accepts that it was dropped.
+        const settleMention = (last = false) => {
+          if (done || !mentioning || !mentionTicked) return;
+          const own = ownMentions().filter(node => node.isConnected);
+          if (!own.length && !last) return;
+          mentioning = false;
+          for (const pending of mentionTimers) clearTimeout(pending);
+          mentionTimers = [];
+          // Only the prompt as it was approved may be sent, with or without the token.
+          if (promptWithoutMentions(box) !== mentionPlain) return finish(false);
+          mentionedDraft = draftText();
+          const resume = resumeClick;
+          resumeClick = null;
+          if (resume) resume();
         };
         const check = () => {
           if (done) return;
@@ -2333,27 +2382,40 @@ var CLF_DOM = (() => {
             if (accepted()) finish(true);
             return;
           }
+          if (mentioning) return settleMention();
           // React can enable/mount Send after accepting our editor input. Observe that
           // readiness through this same bounded operation; neither a guessed Enter nor
           // an unrelated Stop/composer-clear is evidence that this draft was submitted.
           if (conversationId() !== beforeConversation || composer() !== box || !box.isConnected ||
-              draftText() !== submitted || generating()) return finish(false);
+              draftText() !== (mentionedDraft ?? submitted) || generating()) return finish(false);
           if (box.getAttribute('aria-disabled') === 'true' || box.getAttribute('contenteditable') === 'false') return;
           const button = sendButton();
           if (!sendButtonEnabled(button)) return;
           if (authorizing) return;
-          const click = () => {
+          const click = (resumed = false) => {
             if (done) return;
+            // After our own mention the editor may have drawn its Send control again.
+            const control = resumed ? sendButton() : button;
             // Authorization can await the app. The exact editor, text and native control
             // must still be the ones it authorized; a late answer cannot revive this send.
             if (!stillCurrent() || conversationId() !== beforeConversation || composer() !== box ||
-                !box.isConnected || draftText() !== submitted || generating() || sendButton() !== button ||
-                !sendButtonEnabled(button) || box.getAttribute('aria-disabled') === 'true' ||
+                !box.isConnected || draftText() !== (mentionedDraft ?? submitted) || generating() || sendButton() !== control ||
+                !sendButtonEnabled(control) || box.getAttribute('aria-disabled') === 'true' ||
                 box.getAttribute('contenteditable') === 'false') return finish(false);
-            if (mention) {
+            if (mention && !mentionTried) {
+              mentionTried = true;
+              priorMentions = new Set(box.querySelectorAll('[app-mention-path]'));
+              mentionPlain = promptWithoutMentions(box);
               const added = addAppMention(box, mention);
               if (added === false) return finish(false);
-              mentionToken = added;
+              if (added) {
+                mentionAdded = true;
+                mentioning = true;
+                resumeClick = () => click(true);
+                mentionTimers = [setTimeout(() => { mentionTicked = true; settleMention(); }, 0),
+                  setTimeout(() => { mentionTicked = true; settleMention(true); }, 1500)];
+                return;
+              }
             }
             attempted = true;
             // The deadline bounds readiness, not an already-dispatched receipt.
@@ -2367,7 +2429,7 @@ var CLF_DOM = (() => {
               if (Number.isFinite(receiptTimeoutMs) && receiptTimeoutMs > 0)
                 timer = setTimeout(() => { check(); finish(false); }, receiptTimeoutMs);
             }
-            try { button.click(); } catch { return finish(false); }
+            try { control.click(); } catch { return finish(false); }
             check(); // Synchronous navigation/cancellation during click also re-proves ownership.
           };
           if (!beforeSend) return click();
@@ -2851,7 +2913,7 @@ var CLF_DOM = (() => {
   async function enterProject(entry, stillCurrent = () => true) {
     if (!entry || !/^g-p-[0-9a-f]{32}$/.test(entry.id) || conversationId() !== entry.sourceConversationId) return false;
     return new Promise(resolve => {
-      let clicked = false, done = false, sourceComposer = null;
+      let clicked = false, done = false;
       const interrupt = event => { if (event.isTrusted) finish(false); };
       const finish = result => {
         if (done) return;
@@ -2863,27 +2925,30 @@ var CLF_DOM = (() => {
       const check = () => {
         if (done) return;
         if (!stillCurrent()) return finish(false);
-        if (clicked && projectHomeId() === entry.id && composer()?.isConnected && composer() !== sourceComposer && !turns().length) return finish(true);
+        // Since October 2026 ChatGPT keeps the same editor element from the chat to the Project
+        // home, so a new editor is no evidence. The Project route with the source's turns gone and
+        // an empty, writable editor is; the caller still refuses to send while a chat id remains.
+        // Turns of the earlier pages ChatGPT keeps mounted, undisplayed, are not on this page.
+        if (clicked && projectHomeId() === entry.id && composer()?.isConnected && composerSubmitReady() &&
+            !turns().some(turn => !onKeptPage(turn.node))) return finish(true);
         if (conversationId() !== entry.sourceConversationId) {
           if (projectHomeId() !== entry.id) finish(false);
           return;
         }
         if (clicked) return;
         // The native header arrives before the source chat finishes loading. Its link
-        // alone is not readiness: an early click can be swallowed during hydration and
-        // would also leave us comparing the destination editor with a null source.
+        // alone is not readiness: an early click can be swallowed during hydration.
         // Preserve the source draft/generation and spend our one click only once its
         // actual editor is mounted and ready.
         const source = composer();
         if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) return;
         // The header link to this exact Project home is the native entry. Its folder icon lost
         // its test id in October 2026, and every Project handoff then waited out its deadline;
-        // the link's own same-origin target is the identity, and it must be the only one.
+        // the link's own same-origin target is the identity, and it must be the only one on this page.
         const links = [...document.querySelectorAll('header a[href], [role="banner"] a[href]')].filter(link =>
-          !link.closest(OWN_SURFACES) && new URL(link.href, location.href).origin === location.origin &&
+          !link.closest(OWN_SURFACES) && !onKeptPage(link) && new URL(link.href, location.href).origin === location.origin &&
           projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
         if (links.length !== 1) return;
-        sourceComposer = source;
         clicked = true;
         // Loading the source and following its link are separate page transitions.
         // Reuse the same deadline timer; source loading must not consume the budget
