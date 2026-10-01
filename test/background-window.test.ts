@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest';
 
 const source = readFileSync('extension/background.js', 'utf8');
 const code = source.slice(source.indexOf('let backgroundWindowFlight = null;'), source.indexOf('\nasync function deliverDesktopInputs'));
-type Tab = { id: number; windowId: number; url: string };
+type Tab = { id: number; windowId: number; url: string; pinned?: boolean };
 function harness(initial: Tab[], cached?: number) {
   const tabs = new Map(initial.map(tab => [tab.id, { ...tab }]));
   const windows = new Map([...new Set(initial.map(tab => tab.windowId))].map(id => [id, { id }]));
@@ -69,6 +69,22 @@ it('consolidates app tabs into the existing owner without opening another window
   await app.reconcileBackgroundWindow(policy);
   expect(app.move).toHaveBeenCalledWith(1, { windowId: 10, index: -1 });
   expect(app.windowCreate).not.toHaveBeenCalled();
+});
+
+it('never moves a user-pinned managed tab into the background owner', async () => {
+  const app = harness([{ id: 1, windowId: 9, url: 'https://chatgpt.com/c/main', pinned: true },
+    { id: 2, windowId: 10, url: 'https://chatgpt.com/c/worker' }], 10);
+  await app.reconcileBackgroundWindow(policy);
+  expect(app.tabs.get(1)?.windowId).toBe(9);
+  expect(app.move).not.toHaveBeenCalled();
+});
+
+it('rechecks pin state immediately before moving a managed tab', async () => {
+  const app = harness([{ id: 1, windowId: 9, url: 'https://chatgpt.com/c/main' },
+    { id: 2, windowId: 10, url: 'https://chatgpt.com/c/worker' }], 10);
+  app.get.mockResolvedValueOnce({ id: 1, windowId: 9, url: 'https://chatgpt.com/c/main', pinned: true });
+  await app.reconcileBackgroundWindow(policy);
+  expect(app.move).not.toHaveBeenCalled();
 });
 
 it('serializes concurrent first tabs into one minimized unfocused window', async () => {
