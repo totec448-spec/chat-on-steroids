@@ -587,3 +587,36 @@ describe('replacing the MAIN-world observer after an extension update', () => {
     expect(h.observer()).toBe(second);
   });
 });
+
+describe('Core app identity for mentions (#861)', () => {
+  const hint = (system_hint: string, name: string) => ({ system_hint, name, description: 'x', is_plugin: true });
+  const url = 'https://chatgpt.com/backend-api/system_hints?mode=composer';
+  const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
+  it('reports the one Core app from the page\'s own system hints and repeats it on request', async () => {
+    const h = harness();
+    await h.feed({ system_hints: [hint('plugin:asdk_app_6aa5b6651c3c81919f03cb5dc38bf019', 'Chat On Steroids Core'),
+      hint('connector:asdk_app_6aa5b6651c3c81919f03cb5dc38bf019', 'Chat On Steroids Core'),
+      hint('plugin:asdk_app_6aa5b67a02148191b8053d85e5731dd3', 'Chat On Steroids Desktop'), hint('agent', 'Agent')] }, url);
+    await settle();
+    const expected = { type: 'cos-core-mention', path: 'app://asdk_app_6aa5b6651c3c81919f03cb5dc38bf019', name: 'Chat On Steroids Core' };
+    expect(h.posts.filter(row => row.type === 'cos-core-mention')).toEqual([expected]);
+    h.request();
+    expect(h.posts.filter(row => row.type === 'cos-core-mention')).toEqual([expected, expected]);
+  });
+  it.each([
+    ['two different Core apps', [hint('plugin:asdk_app_aaaa1111', 'Chat On Steroids Core'), hint('plugin:asdk_app_bbbb2222', 'Chat On Steroids Core')]],
+    ['no Core app', [hint('plugin:asdk_app_6aa5b67a02148191b8053d85e5731dd3', 'Chat On Steroids Desktop')]]
+  ])('reports no mention for %s', async (_case, list) => {
+    const h = harness();
+    await h.feed({ system_hints: list }, url);
+    await settle();
+    expect(h.posts.filter(row => row.type === 'cos-core-mention')).toEqual([{ type: 'cos-core-mention', path: null, name: null }]);
+  });
+  it('ignores a system hint list from another origin', async () => {
+    const h = harness();
+    await h.feed({ system_hints: [hint('plugin:asdk_app_aaaa1111', 'Chat On Steroids Core')] }, 'https://evil.example/backend-api/system_hints');
+    await settle();
+    expect(h.posts.filter(row => row.type === 'cos-core-mention')).toEqual([]);
+  });
+});
+

@@ -89,6 +89,47 @@
     latestOrder = order;
     latest = { type: 'cos-usage', rows, observedAt }; post(latest, location.origin);
   };
+  /**
+   * The Core app's identity, read from the page's own system hint list (#861).
+   *
+   * On some accounts ChatGPT attaches an app to a message only when the message mentions it, so
+   * prompts the app sends carry a mention of Core. Only the app id and its name leave this world,
+   * and only when exactly one app has Core's name; anything else means no mention at all.
+   */
+  const CORE_APP_NAME = 'Chat On Steroids Core';
+  let coreMention = null;
+  async function inspectSystemHints(response) {
+    if (!active) return;
+    let url;
+    try { url = new URL(response.url); } catch { return; }
+    if (url.origin !== location.origin || url.pathname !== '/backend-api/system_hints') return;
+    if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) return;
+    const copy = response.clone(), reader = copy.body?.getReader();
+    if (!reader) return;
+    readers.add(reader);
+    const timer = setTimeout(() => void reader.cancel().catch(() => {}), 10000);
+    let bytes = 0, text = ''; const decoder = new TextDecoder();
+    try {
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        bytes += value.byteLength; if (bytes > 1024 * 1024) return;
+        text += decoder.decode(value, { stream: true });
+      }
+      const list = JSON.parse(text + decoder.decode())?.system_hints;
+      if (!Array.isArray(list)) return;
+      const ids = new Set();
+      for (const hint of list.slice(0, 2000)) {
+        const id = /^(?:plugin|connector):(asdk_app_[A-Za-z0-9_-]{1,160})$/.exec(typeof hint?.system_hint === 'string' ? hint.system_hint : '')?.[1];
+        if (id && hint.name === CORE_APP_NAME) ids.add(id);
+      }
+      const [id] = ids;
+      coreMention = ids.size === 1
+        ? { type: 'cos-core-mention', path: `app://${id}`, name: CORE_APP_NAME }
+        : { type: 'cos-core-mention', path: null, name: null };
+      post(coreMention, location.origin);
+    } catch { /* An unreadable list proves nothing; prompts keep going without a mention. */ }
+    finally { clearTimeout(timer); readers.delete(reader); void reader.cancel().catch(() => {}); }
+  }
   async function inspect(response, observedAt, order) {
     if (!active) return;
     let url;
@@ -368,6 +409,7 @@
         if (inspectedResponses.has(response)) return;
         inspectedResponses.add(response);
         void inspect(response, observedAt, order).catch(() => {});
+        void inspectSystemHints(response).catch(() => {});
         let method = 'GET';
         try {
           const explicit = args[1] && typeof args[1].method === 'string' ? args[1].method : null;
@@ -395,6 +437,7 @@
   const request = (event) => {
     if (!active || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-usage-request') return;
     if (latest) post(latest, location.origin);
+    if (coreMention) post(coreMention, location.origin);
     // Newest first: old evidence must not fill content's 16-ID pending capacity
     // before the current workflow can enter it during document startup.
     for (const { conversationId, requestId, observedAt } of [...origins.values()].slice(-16).reverse())
