@@ -11082,7 +11082,9 @@ describe('unattributed activity recovery', () => {
       expect(refused.status).toBe(409);
       expect(refused.body).toMatchObject({ error: 'loop_mcp_call_missing', retryable: false });
       expect(refused.body.message).toContain('No MCP tool call was recorded in the last response');
-      expect(refused.body.message).toContain('cannot tell whether the tool connection was lost');
+      expect(refused.body.message).toContain('ChatGPT may be asking you something');
+      expect(refused.body.message).toContain('the tool connection may have been lost');
+      expect(refused.body.message).toContain('Answer it');
       expect(refused.body.message).toContain('Loop remains enabled');
       expect(goal.goalViewFor(chat)).toBeNull();
       await request('POST', '/settings', { body: { conversationId: chat, loop: false } });

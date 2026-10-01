@@ -1044,7 +1044,7 @@
     "message": "evet"
   },
   "content_goal_error_loop_mcp_call_missing": {
-    "message": "Son yanıtta MCP araç çağrısı kaydedilmedi; bu nedenle uygulama araç bağlantısının kesilip kesilmediğini belirleyemiyor. Otomatik devam duraklatıldı; Döngü etkin kalır. Devam etmeden önce tüneli ve Core bağlayıcısını kontrol edin."
+    "message": "Son yanıtta MCP araç çağrısı kaydedilmedi. ChatGPT size bir soru soruyor olabilir veya araç bağlantısı kesilmiş olabilir. Soruyu yanıtlayın ya da araçlar çalışmayı durdurduysa tüneli kontrol edin. Otomatik devam duraklatıldı; Loop etkin kalır."
   },
   "content_goal_error_goal_reply_not_pending": {
     "message": "Bu yanıt için bekleyen bir devam yok. Zaten işlenmiş veya daha yeni bir çalışma tarafından değiştirilmiş olabilir. Yeniden denemeden önce en son sohbet etkinliğini kontrol edin."

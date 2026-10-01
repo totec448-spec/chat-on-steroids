@@ -1,6 +1,6 @@
 /** Presentation only. Keep machine errors and retry/ownership decisions unchanged. */
 const explanations: Readonly<Record<string, string>> = {
-  loop_mcp_call_missing: 'No MCP tool call was recorded in the last response, so the app cannot tell whether the tool connection was lost. Automatic continuation is paused; Loop remains enabled. Check the tunnel and Core connector before continuing.',
+  loop_mcp_call_missing: 'No MCP tool call was recorded in the last response. ChatGPT may be asking you something, or the tool connection may have been lost. Answer it, or check the tunnel if tools stopped working. Automatic continuation is paused; Loop remains enabled.',
   goal_reply_not_pending: 'There is no pending continuation for this answer. It may already have been handled or replaced by newer work. Check the latest chat activity before trying again.',
   goal_context_too_large: 'The task and Goal/Loop instructions are too long to send to the helper. Shorten the task or the custom continuation instructions in Settings.',
   reply_too_long: 'The helper wrote a continuation that is too long to send. Ask for shorter continuation instructions or choose another helper model in Settings.',

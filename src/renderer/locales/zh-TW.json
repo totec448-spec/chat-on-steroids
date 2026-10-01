@@ -1496,7 +1496,7 @@
   "Internal Chromium · ready": "內建 Chromium · 就緒",
   "Manage pets…": "管理寵物…",
   "No API key is configured for the continuation provider. Add one in Settings, or select the ChatGPT continuation source.": "未設定續接供應商的 API 金鑰。請在設定中新增，或選擇 ChatGPT 續接來源。",
-  "No MCP tool call was recorded in the last response, so the app cannot tell whether the tool connection was lost. Automatic continuation is paused; Loop remains enabled. Check the tunnel and Core connector before continuing.": "上一則回覆中沒有記錄到 MCP 工具呼叫，因此應用程式無法判斷工具連線是否中斷。自動續接已暫停；Loop 仍保持啟用。繼續前請檢查隧道與 Core 連接器。",
+  "No MCP tool call was recorded in the last response. ChatGPT may be asking you something, or the tool connection may have been lost. Answer it, or check the tunnel if tools stopped working. Automatic continuation is paused; Loop remains enabled.": "上一則回覆中沒有記錄到 MCP 工具呼叫。ChatGPT 可能正在向你提問，也可能是工具連線已中斷。請回答問題；如果工具停止運作，請檢查隧道。自動續接已暫停；Loop 仍保持啟用。",
   "No recorded conversation is available to continue. Send a task first.": "沒有可繼續的已記錄對話。請先傳送任務。",
   "No task was provided. Enter a task before starting Goal/Loop.": "尚未提供任務。請先輸入任務再啟動 Goal/Loop。",
   "PDF exceeds the preview limit": "PDF 超過預覽限制",
