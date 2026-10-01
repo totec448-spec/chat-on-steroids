@@ -2335,7 +2335,9 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    scans or vanished calls cannot acknowledge an observed pending result. The bounded wait
    (six minutes, longer than one five-minute empty `write_stdin` poll plus the model's pause, so
    a turn that keeps polling long commands is stopped in the gap between two calls; #825)
-   leaves an unsent automatic ticket durable when receipt remains unknown. Recheck the exact
+   leaves an unsent automatic ticket durable when receipt remains unknown. A turn that ChatGPT
+   ends by itself (no Stop button on two polls, no local call running) counts as received: there
+   is nothing to stop, and a retry would skip the wait anyway. Recheck the exact
    source question, route and document across every await, then retain the local-tool drain.
    Mixed visible/pre-row calls retain their outstanding request evidence, and automatic Stop
    also waits for local execution to drain before the final native scan. Native Code Mode
