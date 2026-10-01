@@ -7203,6 +7203,19 @@ async function noteRecoveryObservations(
     await inspectSilentChats(Date.now());
     armSilenceSweep();
   }
+  // A failed end is the turn over: nothing is still thinking, so the long window that protects
+  // deliberate effort no longer applies. Measured 2026-10-01 on an Extra High prime: the stream
+  // died, the error reload found "Resume stream unavailable", the turn ended as failed, and the
+  // chat sat toward its twenty-minute window until its owner typed. Two minutes from the failure
+  // leaves room for a native retry; the ordinary silence reload and Continue follow.
+  if (lastEnd === 'failed' && !thinkingFailed && activity.terminal && sessionId && ended?.turnId &&
+      terminalGrant?.deliberate && terminalGrant.sessionId === sessionId && terminalGrant.turnId === ended.turnId &&
+      activeUntil.get(conversationId) === terminalGrant) {
+    terminalGrant.deliberate = undefined;
+    const failedAt = Math.max(terminalGrant.evidenceAt, Math.min(Date.now(), ended.time ?? Date.now()));
+    terminalGrant.until = Math.min(terminalGrant.until, failedAt + CHAT_SILENCE_MS);
+    armSilenceSweep();
+  }
   // Another turn is the chat carrying on, and the only thing that is. Read before the failure
   // below rather than after it: one batch can carry a turn's start and its failed end, and
   // clearing afterwards would file exactly that batch as a chat that kept going.
