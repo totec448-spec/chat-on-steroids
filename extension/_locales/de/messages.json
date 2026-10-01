@@ -1044,7 +1044,7 @@
     "message": "ja"
   },
   "content_goal_error_loop_mcp_call_missing": {
-    "message": "In der letzten Antwort wurde kein MCP-Tool-Aufruf aufgezeichnet, daher kann die App nicht erkennen, ob die Verbindung zu den Tools verloren ging. Die automatische Fortsetzung ist pausiert; Loop bleibt aktiv. Prüfe den Tunnel und den Core-Connector, bevor du weitermachst."
+    "message": "In der letzten Antwort wurde kein MCP-Tool-Aufruf aufgezeichnet. ChatGPT stellt möglicherweise eine Frage, oder die Verbindung zu den Tools wurde unterbrochen. Beantworte die Frage oder prüfe den Tunnel, falls die Tools nicht mehr funktionieren. Die automatische Fortsetzung ist pausiert; Loop bleibt aktiv."
   },
   "content_goal_error_goal_reply_not_pending": {
     "message": "Für diese Antwort gibt es keine ausstehende Fortsetzung. Sie wurde vielleicht schon erledigt oder durch neuere Arbeit ersetzt. Prüfe die letzte Chat-Aktivität, bevor du es erneut versuchst."

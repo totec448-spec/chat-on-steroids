@@ -1044,7 +1044,7 @@
     "message": "是"
   },
   "content_goal_error_loop_mcp_call_missing": {
-    "message": "上一条回复中未记录任何 MCP 工具调用，因此应用无法判断工具连接是否已丢失。自动继续已暂停；Loop 仍保持启用。继续前请检查隧道和 Core 连接器。"
+    "message": "上一条回复中未记录 MCP 工具调用。ChatGPT 可能正在向你提问，也可能是工具连接已断开。请回答问题；如果工具无法继续工作，请检查隧道。自动继续已暂停；Loop 仍保持启用。"
   },
   "content_goal_error_goal_reply_not_pending": {
     "message": "此回答没有待处理的继续操作。它可能已经处理，或已被更新的工作取代。重试前请先检查最新的聊天活动。"

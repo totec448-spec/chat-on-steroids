@@ -1542,7 +1542,7 @@
   "… still writing. The full answer appears when it finishes.": "… まだ書き込み中です。完了すると回答全文が表示されます。",
   "PDF exceeds the preview limit": "PDF がプレビュー上限を超えています",
   "PDF page dimensions exceed the preview limit": "PDF ページの寸法がプレビュー上限を超えています",
-  "No MCP tool call was recorded in the last response, so the app cannot tell whether the tool connection was lost. Automatic continuation is paused; Loop remains enabled. Check the tunnel and Core connector before continuing.": "前回の応答で MCP ツール呼び出しが記録されなかったため、アプリはツール接続が失われたかどうかを判断できません。自動継続は一時停止していますが、ループは有効のままです。続行する前にトンネルと Core コネクタを確認してください。",
+  "No MCP tool call was recorded in the last response. ChatGPT may be asking you something, or the tool connection may have been lost. Answer it, or check the tunnel if tools stopped working. Automatic continuation is paused; Loop remains enabled.": "前回の応答で MCP ツール呼び出しが記録されませんでした。ChatGPT が質問しているか、ツール接続が失われた可能性があります。質問に答えるか、ツールが動作しなくなった場合はトンネルを確認してください。自動継続は一時停止中ですが、Loop は有効のままです。",
   "There is no pending continuation for this answer. It may already have been handled or replaced by newer work. Check the latest chat activity before trying again.": "この回答に対する保留中の継続はありません。すでに処理済みか、新しい作業に置き換えられた可能性があります。再試行する前に最新のチャット活動を確認してください。",
   "The task and Goal/Loop instructions are too long to send to the helper. Shorten the task or the custom continuation instructions in Settings.": "タスクとゴール/ループの指示が長すぎるため、ヘルパーに送信できません。タスクまたは設定内のカスタム継続指示を短くしてください。",
   "The helper wrote a continuation that is too long to send. Ask for shorter continuation instructions or choose another helper model in Settings.": "ヘルパーが作成した継続内容が長すぎて送信できません。より短い継続指示を依頼するか、設定で別のヘルパーモデルを選択してください。",

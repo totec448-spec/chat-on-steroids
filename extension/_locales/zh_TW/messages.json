@@ -1044,7 +1044,7 @@
     "message": "是"
   },
   "content_goal_error_loop_mcp_call_missing": {
-    "message": "上一則回覆中沒有記錄到 MCP 工具呼叫，因此應用程式無法判斷工具連線是否中斷。自動續接已暫停；Loop 仍保持啟用。繼續前請檢查隧道與 Core 連接器。"
+    "message": "上一則回覆中沒有記錄到 MCP 工具呼叫。ChatGPT 可能正在向你提問，也可能是工具連線已中斷。請回答問題；如果工具停止運作，請檢查隧道。自動續接已暫停；Loop 仍保持啟用。"
   },
   "content_goal_error_goal_reply_not_pending": {
     "message": "此回答沒有待處理的續接。它可能已處理，或已被較新的工作取代。重試前請先檢查最新的聊天活動。"
