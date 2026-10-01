@@ -1097,6 +1097,44 @@ it.each(['open', 'stalled', 'final-during-listen', 'failure-during-listen', 'fai
   } finally { clock.mockRestore(); }
 });
 
+it('continues an Extra High chat whose turn ended as failed after two minutes, not twenty', async () => {
+  // Measured 2026-10-01: an Extra High prime lost its stream twice; each turn ended as failed and
+  // the chat then sat toward its twenty-minute thinking window until its owner typed "continue".
+  const bridge = await import('../src/main/bridge.js');
+  await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: true } });
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Failed Extra High', conversationId });
+    const questionId = randomUUID(), turnId = randomUUID();
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-5.6-sol', reasoningEffort: 'xhigh', time: now },
+      { kind: 'user_message', messageId: questionId, text: 'Finish the long task', time: now },
+      { kind: 'turn_start', turnId, time: now }
+    ] });
+    await attributedMcp(conversationId);
+    now += 5 * 60_000;
+    await bridge.sweepStaleSwarm(now);
+    expect((await post('/status', { openConversations: [conversationId] })).body.repairs
+      .some((row: any) => row.conversationId === conversationId)).toBe(false);
+
+    await post('/events', { conversationId, events: [
+      { kind: 'chat_error', text: 'Resume stream unavailable', recoverable: true, time: now },
+      { kind: 'turn_end', turnId, outcome: 'failed', time: now }
+    ] });
+    now += 2 * 60_000 + 1;
+    await bridge.sweepStaleSwarm(now);
+    const repair = (await post('/status', { openConversations: [conversationId] })).body.repairs
+      .find((row: any) => row.conversationId === conversationId && row.reason === 'silence');
+    expect(repair, 'the failed turn waited for the long thinking window').toBeDefined();
+    if (repair.requiresClaim) expect((await post('/repairs/claim', { token: repair.token })).body.allowed).toBe(true);
+    await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
+    expect((await input.listInputs()).find(row => row.sessionId === session.id && row.recovery))
+      .toMatchObject({ state: 'queued', recovery: { questionId, phase: 'ready' } });
+  } finally { clock.mockRestore(); }
+});
+
 it('commits a failed-source listening deadline while another chat observation is still recording', async () => {
   const bridge = await import('../src/main/bridge.js');
   const recorder = await import('../src/main/session/recorder.js');
