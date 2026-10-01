@@ -122,6 +122,10 @@
         const id = /^(?:plugin|connector):(asdk_app_[A-Za-z0-9_-]{1,160})$/.exec(typeof hint?.system_hint === 'string' ? hint.system_hint : '')?.[1];
         if (id && hint.name === CORE_APP_NAME) ids.add(id);
       }
+      // The page asks for several hint lists (basic, custom agents, plugins) and only the plugins
+      // list names Core, in whatever order they answer. A list without Core says nothing about it;
+      // only two different Core apps make the mention ambiguous.
+      if (!ids.size) return;
       const [id] = ids;
       coreMention = ids.size === 1
         ? { type: 'cos-core-mention', path: `app://${id}`, name: CORE_APP_NAME }

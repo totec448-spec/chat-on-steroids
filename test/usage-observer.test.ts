@@ -603,14 +603,25 @@ describe('Core app identity for mentions (#861)', () => {
     h.request();
     expect(h.posts.filter(row => row.type === 'cos-core-mention')).toEqual([expected, expected]);
   });
-  it.each([
-    ['two different Core apps', [hint('plugin:asdk_app_aaaa1111', 'Chat On Steroids Core'), hint('plugin:asdk_app_bbbb2222', 'Chat On Steroids Core')]],
-    ['no Core app', [hint('plugin:asdk_app_6aa5b67a02148191b8053d85e5731dd3', 'Chat On Steroids Desktop')]]
-  ])('reports no mention for %s', async (_case, list) => {
+  it('reports no mention for two different Core apps', async () => {
     const h = harness();
-    await h.feed({ system_hints: list }, url);
+    await h.feed({ system_hints: [hint('plugin:asdk_app_aaaa1111', 'Chat On Steroids Core'), hint('plugin:asdk_app_bbbb2222', 'Chat On Steroids Core')] }, url);
     await settle();
     expect(h.posts.filter(row => row.type === 'cos-core-mention')).toEqual([{ type: 'cos-core-mention', path: null, name: null }]);
+  });
+  it('keeps the Core app when another hint list without it answers later', async () => {
+    // Measured live: the page asks for basic, custom_agents and plugins lists in parallel, and only
+    // the plugins list names Core. A later basic answer reset the mention, so the first prompt the
+    // app sent went out without it.
+    const h = harness();
+    await h.feed({ system_hints: [hint('plugin:asdk_app_6aa5b6651c3c81919f03cb5dc38bf019', 'Chat On Steroids Core')] }, 'https://chatgpt.com/backend-api/system_hints?exclude_logo=true&mode=plugins');
+    await settle();
+    await h.feed({ system_hints: [hint('agent', 'Agent'), hint('plugin:asdk_app_6aa5b67a02148191b8053d85e5731dd3', 'Chat On Steroids Desktop')] }, 'https://chatgpt.com/backend-api/system_hints?exclude_logo=true&mode=basic');
+    await settle();
+    const expected = { type: 'cos-core-mention', path: 'app://asdk_app_6aa5b6651c3c81919f03cb5dc38bf019', name: 'Chat On Steroids Core' };
+    expect(h.posts.filter(row => row.type === 'cos-core-mention')).toEqual([expected]);
+    h.request();
+    expect(h.posts.filter(row => row.type === 'cos-core-mention').at(-1)).toEqual(expected);
   });
   it('ignores a system hint list from another origin', async () => {
     const h = harness();
