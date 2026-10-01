@@ -2208,7 +2208,7 @@ var CLF_DOM = (() => {
    * exactly what was approved (send it unchanged), or false when the prompt could not be
    * restored (do not send).
    */
-  function addAppMention(box, mention, expected) {
+  function addAppMention(box, mention) {
     // Not safe(): it maps null, which means "send unchanged" here, to its fallback.
     try {
       const path = typeof mention?.path === 'string' && /^app:\/\/asdk_app_[A-Za-z0-9_-]{1,160}$/.test(mention.path) ? mention.path : null;
@@ -2227,6 +2227,10 @@ var CLF_DOM = (() => {
       token.setAttribute('data-prompt-link-href', path);
       token.setAttribute('data-prompt-link-label', `$${slug}`);
       token.textContent = name;
+      // Compared with itself before and after the edit, never with Send's rendered-text reading:
+      // the editor can hold text that one measure counts and the other does not, and that
+      // difference alone must never stop a prompt that was already approved.
+      const expected = plain();
       const before = new Set(box.querySelectorAll('[app-mention-path]'));
       box.focus();
       const selection = document.getSelection();
@@ -2236,11 +2240,14 @@ var CLF_DOM = (() => {
       if (!document.execCommand('insertHTML', false, ` ${token.outerHTML}`)) return plain() === expected ? null : false;
       const added = [...box.querySelectorAll('[app-mention-path]')].find(node => !before.has(node) && node.getAttribute('app-mention-path') === path);
       if (added && plain() === expected) return added;
-      // The editor kept the markup as text, or changed the prompt: take the edit back.
+      // The editor kept the markup as text, or changed the prompt: take the edit back and send
+      // the prompt as it was. Only a prompt that cannot be restored is not sent.
       document.execCommand('undo', false);
-      return plain() === expected && !box.querySelector(`[app-mention-path="${path}"]`) ? null : false;
+      const left = [...box.querySelectorAll(`[app-mention-path="${path}"]`)].filter(node => !before.has(node));
+      for (const node of left) node.remove();
+      return plain() === expected ? null : false;
     } catch {
-      return false;
+      return null;
     }
   }
 
@@ -2344,7 +2351,7 @@ var CLF_DOM = (() => {
                 !sendButtonEnabled(button) || box.getAttribute('aria-disabled') === 'true' ||
                 box.getAttribute('contenteditable') === 'false') return finish(false);
             if (mention) {
-              const added = addAppMention(box, mention, submitted.replace(/\s+/g, ''));
+              const added = addAppMention(box, mention);
               if (added === false) return finish(false);
               mentionToken = added;
             }
@@ -2869,9 +2876,12 @@ var CLF_DOM = (() => {
         // actual editor is mounted and ready.
         const source = composer();
         if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) return;
+        // The header link to this exact Project home is the native entry. Its folder icon lost
+        // its test id in October 2026, and every Project handoff then waited out its deadline;
+        // the link's own same-origin target is the identity, and it must be the only one.
         const links = [...document.querySelectorAll('header a[href], [role="banner"] a[href]')].filter(link =>
-          link.querySelector('[data-testid="project-folder-icon"]') && !link.closest(OWN_SURFACES) &&
-          new URL(link.href, location.href).origin === location.origin && projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
+          !link.closest(OWN_SURFACES) && new URL(link.href, location.href).origin === location.origin &&
+          projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
         if (links.length !== 1) return;
         sourceComposer = source;
         clicked = true;
