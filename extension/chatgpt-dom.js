@@ -66,6 +66,16 @@ var CLF_DOM = (() => {
   const text = (node, cap = 256_000) =>
     node ? (node.textContent || '').replace(/ /g, ' ').trim().slice(0, cap) : '';
 
+  // A ChatGPT app mention renders as an inline chip (#861). It is how a message attached the app,
+  // not what its author wrote, so readers comparing authored text never count it.
+  const APP_MENTION_CHIP = '[data-prompt-link-href^="app://"], [app-mention-path]';
+  const authoredText = (node) => {
+    if (!node?.querySelector?.(APP_MENTION_CHIP) || typeof node.cloneNode !== 'function') return text(node);
+    const clone = node.cloneNode(true);
+    for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
+    return text(clone);
+  };
+
   function searchUnitRole(node) {
     const key = node?.getAttribute?.('data-chatgpt-search-unit-key') ||
       node?.getAttribute?.('data-content-search-unit-key') || '';
@@ -219,7 +229,7 @@ var CLF_DOM = (() => {
             return !outer || outer === node || !(node.contains && node.contains(outer));
           })
           .filter(part => !part.hasAttribute?.('data-clf-user-text'))
-          .map((part) => text(part))
+          .map((part) => authoredText(part))
           .filter(Boolean);
         if (parts.length > 0) return parts.join('\n');
       }
@@ -245,6 +255,7 @@ var CLF_DOM = (() => {
       // every repaint, so the strip has to happen before any fallback, not only in
       // pageText().
       stripOwn(clone);
+      for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
       for (const control of clone.querySelectorAll('button, [role="button"], [data-testid*="copy"], [data-testid*="feedback"], [data-testid="assistant-message-reaction"]')) {
         control.remove();
       }
@@ -2187,7 +2198,53 @@ var CLF_DOM = (() => {
     }, false);
   }
 
-  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null } = {}) {
+  /**
+   * Mentions the Core app at the end of an app-owned prompt, right before Send (#861).
+   *
+   * On some accounts ChatGPT attaches a connector to a message only when the message mentions
+   * it, so a worker or Loop prompt arrived with no CoS tools at all. The editor turns this
+   * element into its own non-editable token, exactly what picking the app from its @ menu
+   * produces. Returns the token, null when the editor did not take it and the prompt is back to
+   * exactly what was approved (send it unchanged), or false when the prompt could not be
+   * restored (do not send).
+   */
+  function addAppMention(box, mention, expected) {
+    // Not safe(): it maps null, which means "send unchanged" here, to its fallback.
+    try {
+      const path = typeof mention?.path === 'string' && /^app:\/\/asdk_app_[A-Za-z0-9_-]{1,160}$/.test(mention.path) ? mention.path : null;
+      const name = typeof mention?.name === 'string' ? mention.name.trim() : '';
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      if (!path || !name || name.length > 80 || !slug) return null;
+      const plain = () => {
+        const clone = box.cloneNode(true);
+        for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
+        return String(clone.textContent || '').replace(/\s+/g, '');
+      };
+      const token = document.createElement('span');
+      token.setAttribute('app-mention-name', slug);
+      token.setAttribute('app-mention-display-name', name);
+      token.setAttribute('app-mention-path', path);
+      token.setAttribute('data-prompt-link-href', path);
+      token.setAttribute('data-prompt-link-label', `$${slug}`);
+      token.textContent = name;
+      const before = new Set(box.querySelectorAll('[app-mention-path]'));
+      box.focus();
+      const selection = document.getSelection();
+      if (!selection || document.activeElement !== box) return null;
+      selection.selectAllChildren(box);
+      selection.collapseToEnd();
+      if (!document.execCommand('insertHTML', false, ` ${token.outerHTML}`)) return plain() === expected ? null : false;
+      const added = [...box.querySelectorAll('[app-mention-path]')].find(node => !before.has(node) && node.getAttribute('app-mention-path') === path);
+      if (added && plain() === expected) return added;
+      // The editor kept the markup as text, or changed the prompt: take the edit back.
+      document.execCommand('undo', false);
+      return plain() === expected && !box.querySelector(`[app-mention-path="${path}"]`) ? null : false;
+    } catch {
+      return false;
+    }
+  }
+
+  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null } = {}) {
     try {
       const box = composer();
       if (!box || !box.isConnected || !stillCurrent() || generating() || stopButton()) return false;
@@ -2244,9 +2301,14 @@ var CLF_DOM = (() => {
         let observer = null;
         let timer = null;
         let unsubscribeEvidence = null;
+        let mentionToken = null;
         const finish = (value) => {
           if (done) return;
           done = true;
+          // A Send that was not accepted leaves the prompt as it was approved, without our token.
+          if (!value && mentionToken?.isConnected && box.contains(mentionToken)) {
+            safe(() => { mentionToken.remove(); box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null })); }, undefined);
+          }
           if (observer) observer.disconnect();
           if (unsubscribeEvidence) unsubscribeEvidence();
           if (timer !== null) clearTimeout(timer);
@@ -2281,6 +2343,11 @@ var CLF_DOM = (() => {
                 !box.isConnected || draftText() !== submitted || generating() || sendButton() !== button ||
                 !sendButtonEnabled(button) || box.getAttribute('aria-disabled') === 'true' ||
                 box.getAttribute('contenteditable') === 'false') return finish(false);
+            if (mention) {
+              const added = addAppMention(box, mention, submitted.replace(/\s+/g, ''));
+              if (added === false) return finish(false);
+              mentionToken = added;
+            }
             attempted = true;
             // The deadline bounds readiness, not an already-dispatched receipt.
             // Keep this same observer and exact send lifetime until the provider
