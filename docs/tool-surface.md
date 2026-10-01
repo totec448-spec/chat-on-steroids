@@ -179,6 +179,8 @@ can keep observation available while disabling state-changing desktop actions.
 - Read-only mode removes effective file-write, command, control and clipboard-write permissions
   without pretending the underlying configuration was changed.
 - Approved filesystem roots do not sandbox command execution or desktop control.
+- CoS's own windows are never listed, inspected, focused or targeted by window id, on Windows or
+  macOS. This is not a sandbox: desktop-level coordinates still reach whatever is on screen.
 - Tool results and validation errors are bounded; large structured or binary payloads must not
   grow without an explicit cap.
 
