@@ -2,51 +2,105 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import zhCN from '../src/renderer/locales/zh-CN.json';
+import type { Language } from '../src/renderer/i18n.js';
+
+const names = { en: 'English', es: 'Español', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', ja: '日本語', ko: '한국어', tr: 'Türkçe', fr: 'Français', 'pt-PT': 'Português (Portugal)', 'pt-BR': 'Português (Brasil)', de: 'Deutsch' } as const;
+const languages = Object.keys(names) as Language[];
+const catalogs = Object.fromEntries(languages.filter(locale => locale !== 'en').map(locale =>
+  [locale, JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>]));
 
 let dom: JSDOM;
 beforeEach(() => {
   vi.resetModules();
   dom = new JSDOM(readFileSync('src/renderer/index.html', 'utf8'), { url: 'https://local.test/' });
-  Object.assign(globalThis, { window: dom.window, document: dom.window.document,
-    Node: dom.window.Node, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement });
+  for (const key of ['window', 'document', 'Node', 'Element', 'HTMLElement'] as const) {
+    vi.stubGlobal(key, key === 'window' ? dom.window : dom.window[key]);
+  }
 });
-afterEach(() => dom.window.close());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); dom.window.close(); });
 
-describe('Chinese app interface', () => {
-  it('exposes flagged setup choices and keeps them synchronized with settings and reloads', async () => {
-    window.localStorage.setItem('cos.ui.language', 'zh-CN');
-    const { initLanguage } = await import('../src/renderer/i18n.js');
-    initLanguage();
-    const english = document.querySelector<HTMLButtonElement>('[data-language="en"]')!;
-    const chinese = document.querySelector<HTMLButtonElement>('[data-language="zh-CN"]')!;
-    const select = document.getElementById('uiLanguage') as HTMLSelectElement;
-    expect(chinese.closest('[data-panel="setup"]')).not.toBeNull();
-    expect(chinese.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
-    expect(english.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
-    expect(chinese.getAttribute('aria-pressed')).toBe('true');
-    expect(select.value).toBe('zh-CN');
-    english.click();
-    expect(select.value).toBe('en');
-    expect(english.getAttribute('aria-pressed')).toBe('true');
-    expect(chinese.getAttribute('aria-pressed')).toBe('false');
-    expect(document.querySelector('.setup-heading h1')!.textContent).toBe('Setup');
-    chinese.click();
-    expect(select.value).toBe('zh-CN');
-    expect(document.querySelector('.setup-heading h1')!.textContent).toBe('连接设置');
-    expect(window.localStorage.getItem('cos.ui.language')).toBe('zh-CN');
-    select.value = 'en';
-    select.dispatchEvent(new dom.window.Event('change'));
-    expect(english.getAttribute('aria-pressed')).toBe('true');
-    expect(chinese.getAttribute('aria-pressed')).toBe('false');
-  });
+// Includes the Traditional Chinese selector regression from aliceric27's #243.
+it.each(languages)('restores %s and synchronizes accessible setup flags, settings and reloads', async locale => {
+  window.localStorage.setItem('cos.ui.language', locale);
+  const { initLanguage, currentLanguage, t } = await import('../src/renderer/i18n.js');
+  initLanguage();
+  const select = document.getElementById('uiLanguage') as HTMLSelectElement;
+  const flag = document.querySelector<HTMLButtonElement>(`[data-language="${locale}"]`)!;
+  expect(currentLanguage()).toBe(locale);
+  expect(document.documentElement.lang).toBe(locale);
+  expect(select.value).toBe(locale);
+  expect(select.selectedOptions[0]!.textContent).toBe(names[locale]);
+  expect(flag.closest('[data-panel="setup"]')).not.toBeNull();
+  expect(flag.type).toBe('button');
+  expect(flag.lang).toBe(locale);
+  expect(flag.textContent.trim()).toBe('');
+  expect(flag.title).toBe(names[locale]);
+  expect(flag.getAttribute('aria-label')).toBe(names[locale]);
+  expect(flag.querySelector('svg.language-flag[aria-hidden="true"]')).not.toBeNull();
+  expect(document.querySelector('.setup-heading h1')!.textContent).toBe(catalogs[locale]?.Setup ?? 'Setup');
+  expect(t('Settings')).toBe(catalogs[locale]?.Settings ?? 'Settings');
+
+  select.value = locale === 'en' ? 'ja' : 'en';
+  select.dispatchEvent(new dom.window.Event('change'));
+  expect(flag.getAttribute('aria-pressed')).toBe('false');
+  flag.click();
+  expect(select.value).toBe(locale);
+  expect([...document.querySelectorAll('[data-language][aria-pressed="true"]')]).toEqual([flag]);
+  expect(window.localStorage.getItem('cos.ui.language')).toBe(locale);
+  vi.resetModules();
+  expect((await import('../src/renderer/i18n.js')).currentLanguage()).toBe(locale);
+});
+
+it('defaults to English, rejects unsupported variants and switches even when storage fails', async () => {
+  expect((await import('../src/renderer/i18n.js')).currentLanguage()).toBe('en');
+  expect(window.localStorage.getItem('cos.ui.language')).toBeNull();
+  window.localStorage.setItem('cos.ui.language', 'pt-AO');
+  vi.resetModules();
+  expect((await import('../src/renderer/i18n.js')).currentLanguage()).toBe('en');
+  vi.resetModules();
+  vi.spyOn(dom.window.Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('unavailable'); });
+  vi.spyOn(dom.window.Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('unavailable'); });
+  const { initLanguage, currentLanguage, t } = await import('../src/renderer/i18n.js');
+  initLanguage();
+  document.querySelector<HTMLButtonElement>('[data-language="ja"]')!.click();
+  expect(currentLanguage()).toBe('ja');
+  expect(document.documentElement.lang).toBe('ja');
+  expect((document.getElementById('uiLanguage') as HTMLSelectElement).value).toBe('ja');
+  expect(t('Settings')).toBe('設定');
+  expect(t('unknown /Save/<img src=x>')).toBe('unknown /Save/<img src=x>');
+});
+
+it('translates known IPC failures and keeps provider errors and successful replies literal', async () => {
+  window.localStorage.setItem('cos.ui.language', 'ja');
+  const { run } = await import('../src/renderer/dom.js');
+  expect(await run(Promise.resolve({ ok: false, error: 'Secure credential storage is unavailable.' }))).toBeNull();
+  expect(document.querySelector('.toast')!.textContent).toBe(catalogs.ja!['Secure credential storage is unavailable.']);
+  const error = 'PROVIDER: /Save/<img src=x> {0}\n  details';
+  expect(await run(Promise.resolve({ ok: false, error }))).toBeNull();
+  expect(document.querySelector('.toast')!.textContent).toBe(error);
+  expect(document.querySelector('.toast img')).toBeNull();
+  expect(await run(Promise.resolve({ ok: true, data: 'Settings' }))).toBe('Settings');
+  expect(document.querySelectorAll('.toast')).toHaveLength(1);
+});
+
+it('preserves nested translated duration arguments in Turkish', async () => {
+  const { setLanguage, t } = await import('../src/renderer/i18n.js');
+  setLanguage('tr');
+  expect(t('{0} for {1}{2}s', [t('Worked'), `${t('{0}m', [1])} `, 5])).toBe('1 dk 5 sn · Çalıştı');
+});
+
+describe('app interface localization', () => {
 
   it('switches both ways without replacing controls, icons, emphasis, drafts or authored content', async () => {
     const { initLanguage, ui, t } = await import('../src/renderer/i18n.js');
     const { el } = await import('../src/renderer/dom.js');
+    const native = document.createElement('span');
+    native.setAttribute('translate', 'no'); native.title = 'Settings'; native.setAttribute('aria-label', 'Save');
+    native.textContent = 'Save'; document.body.append(native);
     initLanguage();
     const input = document.getElementById('chatInput') as HTMLTextAreaElement;
     input.value = 'Save\n用户草稿 <script>not markup</script> 🙂';
-    input.setSelectionRange(2, 7);
+    input.focus(); input.setSelectionRange(2, 7);
     const automation = document.getElementById('chatAutomation') as HTMLSelectElement;
     automation.value = 'loop';
     const icons = [...document.querySelectorAll('svg')];
@@ -58,7 +112,7 @@ describe('Chinese app interface', () => {
     ui(action, 'aria-label', () => t('Remove {0}', ['Save <img src=x>']));
     document.body.append(action);
     const snapshots = new Map<string, string>();
-    for (const locale of ['zh-CN', 'en', 'zh-CN', 'en', 'zh-CN'] as const) {
+    for (const locale of [...languages, 'en', 'zh-CN'] as const) {
       const language = document.getElementById('uiLanguage') as HTMLSelectElement;
       language.value = locale;
       language.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
@@ -66,20 +120,28 @@ describe('Chinese app interface', () => {
       expect(document.getElementById('chatInput')).toBe(input);
       expect(input.value).toBe('Save\n用户草稿 <script>not markup</script> 🙂');
       expect([input.selectionStart, input.selectionEnd]).toEqual([2, 7]);
+      expect(document.activeElement).toBe(input);
       expect(automation.value).toBe('loop');
+      expect([native.textContent, native.title, native.getAttribute('aria-label')]).toEqual(['Save', 'Settings', 'Save']);
       expect(authored.textContent).toBe('Save');
       expect(action.querySelector('img')).toBeNull();
-      expect(action.textContent).toBe(locale === 'zh-CN' ? '移除 Save <img src=x>' : 'Remove Save <img src=x>');
+      expect(action.textContent).toBe((catalogs[locale]?.['Remove {0}'] ?? 'Remove {0}').replace('{0}', 'Save <img src=x>'));
       expect(action.getAttribute('aria-label')).toBe(action.textContent);
       expect([...document.querySelectorAll('svg')]).toEqual(icons);
       expect(strong!.outerHTML).toBe(savedHTML);
       const text = document.getElementById('newChat')!.textContent!.trim();
-      expect(text).toBe(locale === 'zh-CN' ? '新建聊天' : 'New chat');
+      expect(text).toBe(catalogs[locale]?.['New chat'] ?? 'New chat');
       const shell = document.querySelector('.plugin-refresh-guide')!.textContent!;
       if (snapshots.has(locale)) expect(shell).toBe(snapshots.get(locale));
       else snapshots.set(locale, shell);
     }
     expect(window.localStorage.getItem('cos.ui.language')).toBe('zh-CN');
+    expect(t('  Settings\n')).toBe('设置');
+    expect(t('Remove {0}')).toBe('移除 {0}');
+    const argument = '$& /資料/Save <img src=x>';
+    expect(t('Remove {0}', [argument])).toBe(`移除 ${argument}`);
+    expect(t('unknown source {0}', [argument])).toBe(`unknown source ${argument}`);
+    for (const source of ['exec_command', 'gpt-6-astra']) expect(t(source)).toBe(source);
   });
 
   it('retains a newer authored value and persists the explicit language across renderer reloads', async () => {
@@ -168,7 +230,7 @@ describe('Chinese app interface', () => {
     expect(confirmedComposerModel()).toEqual({ model: 'gpt-6-astra', reasoningEffort: 'high' });
   });
 
-  it('covers every static app label and keeps interpolated content in translated messages', () => {
+  it('covers every static app label in every catalog', () => {
     const catalog: Record<string, string> = zhCN;
     const walker = document.createTreeWalker(document.body, 4);
     const missing: string[] = [];
@@ -186,10 +248,23 @@ describe('Chinese app interface', () => {
       }
     }
     expect(missing).toEqual([]);
-    for (const [key, translation] of Object.entries(catalog)) {
-      expect(translation.trim(), key).not.toBe('');
-      expect([...translation.matchAll(/\{\d+\}/g)].map(match => match[0]).sort(), key)
-        .toEqual([...key.matchAll(/\{\d+\}/g)].map(match => match[0]).sort());
+    for (const [locale, messages] of Object.entries(catalogs)) {
+      expect(Object.keys(catalog).filter(key => !Object.hasOwn(messages, key)), locale).toEqual([]);
     }
   });
+});
+
+it('matches both Turkish I pairs when filtering complete settings sections', async () => {
+  window.localStorage.setItem('cos.ui.language', 'tr');
+  const { filterSettingsSections } = await import('../src/renderer/dom.js');
+  const view = document.createElement('section');
+  view.innerHTML = '<h2 class="automation-section-head">İzinler</h2><div class="pane">IŞIK</div><p id="settingsSearchEmpty"></p>';
+  for (const query of ['izinler', 'İZİNLER', 'ışık', 'IŞIK']) {
+    filterSettingsSections(view, query);
+    expect(view.querySelector<HTMLElement>('.pane')!.hidden).toBe(false);
+    expect(view.querySelector<HTMLElement>('h2')!.hidden).toBe(false);
+  }
+  filterSettingsSections(view, 'missing');
+  expect(view.querySelector<HTMLElement>('.pane')!.hidden).toBe(true);
+  expect(view.querySelector<HTMLElement>('#settingsSearchEmpty')!.hidden).toBe(false);
 });
