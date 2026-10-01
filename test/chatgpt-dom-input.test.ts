@@ -447,6 +447,31 @@ describe('Core app mention on app-owned sends (#861)', () => {
       return true;
     };
   });
+  // The mention waits at least one task for the editor before Send.
+  async function sendMention(options: Parameters<DomApi['send']>[0] = {}) {
+    const result = api.send({ mention, ...options });
+    await vi.advanceTimersByTimeAsync(10);
+    return result;
+  }
+  // ChatGPT's editor drops the inserted element on a microtask and draws its own token one
+  // task later; only that token is part of what Send submits.
+  function redrawingEditor(draw = true) {
+    const state = { drawn: null as Element | null };
+    document.execCommand = (command, _ui, value) => {
+      if (command === 'delete') { box.replaceChildren(); return true; }
+      if (command !== 'insertHTML' || document.activeElement !== box) return false;
+      const template = document.createElement('template'); template.innerHTML = value || '';
+      const inserted = template.content.querySelector('[app-mention-path]')!;
+      box.append(template.content);
+      queueMicrotask(() => {
+        const copy = inserted.cloneNode(true) as Element;
+        inserted.remove();
+        if (draw) setTimeout(() => { copy.setAttribute('contenteditable', 'false'); box.append(copy); state.drawn = copy; }, 0);
+      });
+      return true;
+    };
+    return state;
+  }
   function mentionedUser(text: string) {
     user('');
     const row = document.querySelector('[data-message-author-role="user"]')!;
@@ -463,7 +488,7 @@ describe('Core app mention on app-owned sends (#861)', () => {
       mentionedUser('Exact app prompt');
       box.replaceChildren();
     });
-    expect(await api.send({ mention })).toBe(true);
+    expect(await sendMention()).toBe(true);
     const clicked = document.createElement('div'); clicked.innerHTML = atClick;
     const token = clicked.querySelector('[app-mention-path]')!;
     expect(token.getAttribute('app-mention-path')).toBe(mention.path);
@@ -489,7 +514,7 @@ describe('Core app mention on app-owned sends (#861)', () => {
     };
     let atClick = '';
     button.addEventListener('click', () => { atClick = box.textContent || ''; user('Exact app prompt'); box.replaceChildren(); });
-    expect(await api.send({ mention })).toBe(true);
+    expect(await sendMention()).toBe(true);
     expect(atClick.trim()).toBe('Exact app prompt');
   });
   it('adds the mention even when rendered text and raw text of the prompt differ', async () => {
@@ -503,13 +528,54 @@ describe('Core app mention on app-owned sends (#861)', () => {
       dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
       mentionedUser('Exact app prompt'); box.replaceChildren();
     });
-    expect(await api.send({ mention })).toBe(true);
+    expect(await sendMention()).toBe(true);
     expect(tokenAtClick).toBe(true);
   });
   it('sends unchanged when adding the mention throws', async () => {
     document.execCommand = () => { throw new Error('editor refused'); };
     button.addEventListener('click', () => { user('Exact app prompt'); box.replaceChildren(); });
-    expect(await api.send({ mention })).toBe(true);
+    expect(await sendMention()).toBe(true);
+  });
+  it('clicks Send only after the editor has drawn its own token', async () => {
+    const editor = redrawingEditor();
+    let submittedWithMention = false;
+    button.addEventListener('click', () => {
+      submittedWithMention = !!editor.drawn?.isConnected;
+      dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+      mentionedUser('Exact app prompt'); box.replaceChildren();
+    });
+    expect(await sendMention()).toBe(true);
+    expect(submittedWithMention).toBe(true);
+  });
+  it('sends unchanged when the editor drops the token without drawing its own', async () => {
+    redrawingEditor(false);
+    let atClick: string | null = null;
+    button.addEventListener('click', () => { atClick = box.innerHTML; user('Exact app prompt'); box.replaceChildren(); });
+    const result = api.send({ mention });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(atClick).toBeNull();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(await result).toBe(true);
+    expect(atClick!.trim()).toBe('Exact app prompt');
+  });
+  it("removes the editor's own token when Send is not accepted", async () => {
+    const editor = redrawingEditor();
+    const result = api.send({ mention, acceptanceTimeoutMs: 1000 });
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(await result).toBe(false);
+    expect(editor.drawn).not.toBeNull();
+    expect(box.querySelector('[app-mention-path]')).toBeNull();
+    expect(box.textContent!.trim()).toBe('Exact app prompt');
+  });
+  it('does not send when the prompt changed while the editor drew the token', async () => {
+    redrawingEditor();
+    let clicked = false;
+    button.addEventListener('click', () => { clicked = true; });
+    const result = api.send({ mention });
+    box.prepend(document.createTextNode('typed by the user '));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await result).toBe(false);
+    expect(clicked).toBe(false);
   });
   it('sends exactly as before without a mention', async () => {
     const insert = vi.spyOn(document, 'execCommand');

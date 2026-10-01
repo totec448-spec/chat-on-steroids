@@ -2198,6 +2198,13 @@ var CLF_DOM = (() => {
     }, false);
   }
 
+  /** The composer's words without app mention tokens and without whitespace. */
+  function promptWithoutMentions(box) {
+    const clone = box.cloneNode(true);
+    for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
+    return String(clone.textContent || '').replace(/\s+/g, '');
+  }
+
   /**
    * Mentions the Core app at the end of an app-owned prompt, right before Send (#861).
    *
@@ -2215,11 +2222,7 @@ var CLF_DOM = (() => {
       const name = typeof mention?.name === 'string' ? mention.name.trim() : '';
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
       if (!path || !name || name.length > 80 || !slug) return null;
-      const plain = () => {
-        const clone = box.cloneNode(true);
-        for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
-        return String(clone.textContent || '').replace(/\s+/g, '');
-      };
+      const plain = () => promptWithoutMentions(box);
       const token = document.createElement('span');
       token.setAttribute('app-mention-name', slug);
       token.setAttribute('app-mention-display-name', name);
@@ -2308,23 +2311,51 @@ var CLF_DOM = (() => {
         let observer = null;
         let timer = null;
         let unsubscribeEvidence = null;
-        let mentionToken = null;
+        // Core mention state (#861): added once Send is ready, clicked only after the editor
+        // has taken the token into its own document.
+        let mentionTried = false;
+        let mentionAdded = false;
+        let mentioning = false;
+        let mentionTicked = false;
+        let mentionTimers = [];
+        let mentionedDraft = null;
+        let mentionPlain = '';
+        let priorMentions = new Set();
+        const ownMentions = () => mentionAdded ? [...box.querySelectorAll(`[app-mention-path="${mention.path}"]`)].filter(node => !priorMentions.has(node)) : [];
         const finish = (value) => {
           if (done) return;
           done = true;
           // A Send that was not accepted leaves the prompt as it was approved, without our token.
-          if (!value && mentionToken?.isConnected && box.contains(mentionToken)) {
-            safe(() => { mentionToken.remove(); box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null })); }, undefined);
+          // The editor may have drawn its own token in place of the one we inserted.
+          const own = value ? [] : safe(ownMentions, []);
+          if (own.length) {
+            safe(() => { for (const node of own) node.remove(); box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null })); }, undefined);
           }
           if (observer) observer.disconnect();
           if (unsubscribeEvidence) unsubscribeEvidence();
           if (timer !== null) clearTimeout(timer);
+          for (const pending of mentionTimers) clearTimeout(pending);
           // A fresh matching user row proves this text was accepted. Some provider
           // transitions retain that same draft; leaving it lets the next Loop append
           // to and resend the entire bootstrap. Preserve replaced editors/new drafts.
           if (clearAcceptedDraft && value && submittedMessageObserved && stillCurrent() && composer() === box)
             clearPromptExact(submitted);
           resolve(value);
+        };
+        // ChatGPT's editor reads the inserted token on a later task and draws it again. A click
+        // before that sends the prompt without the mention, so ChatGPT never attaches Core. Wait
+        // at least one task, then for the editor's token; the last pass accepts that it was dropped.
+        const settleMention = (last = false) => {
+          if (done || !mentioning || !mentionTicked) return;
+          const own = ownMentions().filter(node => node.isConnected);
+          if (!own.length && !last) return;
+          mentioning = false;
+          for (const pending of mentionTimers) clearTimeout(pending);
+          mentionTimers = [];
+          // Only the prompt as it was approved may be sent, with or without the token.
+          if (promptWithoutMentions(box) !== mentionPlain) return finish(false);
+          mentionedDraft = draftText();
+          check();
         };
         const check = () => {
           if (done) return;
@@ -2333,28 +2364,38 @@ var CLF_DOM = (() => {
             if (accepted()) finish(true);
             return;
           }
+          if (mentioning) return settleMention();
           // React can enable/mount Send after accepting our editor input. Observe that
           // readiness through this same bounded operation; neither a guessed Enter nor
           // an unrelated Stop/composer-clear is evidence that this draft was submitted.
           if (conversationId() !== beforeConversation || composer() !== box || !box.isConnected ||
-              draftText() !== submitted || generating()) return finish(false);
+              draftText() !== (mentionedDraft ?? submitted) || generating()) return finish(false);
           if (box.getAttribute('aria-disabled') === 'true' || box.getAttribute('contenteditable') === 'false') return;
           const button = sendButton();
           if (!sendButtonEnabled(button)) return;
           if (authorizing) return;
+          if (mention && !mentionTried) {
+            mentionTried = true;
+            priorMentions = new Set(box.querySelectorAll('[app-mention-path]'));
+            mentionPlain = promptWithoutMentions(box);
+            const added = addAppMention(box, mention);
+            if (added === false) return finish(false);
+            if (added) {
+              mentionAdded = true;
+              mentioning = true;
+              mentionTimers = [setTimeout(() => { mentionTicked = true; settleMention(); }, 0),
+                setTimeout(() => { mentionTicked = true; settleMention(true); }, 1500)];
+              return;
+            }
+          }
           const click = () => {
             if (done) return;
             // Authorization can await the app. The exact editor, text and native control
             // must still be the ones it authorized; a late answer cannot revive this send.
             if (!stillCurrent() || conversationId() !== beforeConversation || composer() !== box ||
-                !box.isConnected || draftText() !== submitted || generating() || sendButton() !== button ||
+                !box.isConnected || draftText() !== (mentionedDraft ?? submitted) || generating() || sendButton() !== button ||
                 !sendButtonEnabled(button) || box.getAttribute('aria-disabled') === 'true' ||
                 box.getAttribute('contenteditable') === 'false') return finish(false);
-            if (mention) {
-              const added = addAppMention(box, mention);
-              if (added === false) return finish(false);
-              mentionToken = added;
-            }
             attempted = true;
             // The deadline bounds readiness, not an already-dispatched receipt.
             // Keep this same observer and exact send lifetime until the provider
