@@ -6,6 +6,7 @@ const source = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.u
 interface DomApi {
   insertPrompt(text: string, mode?: boolean | 'append', failure?: (reason: string) => void): boolean;
   enterProject(entry: { id: string; sourceConversationId: string }, current?: () => boolean): Promise<boolean>;
+  composer(): HTMLElement | null;
   composerActions(): { host: HTMLElement; before: HTMLElement | null } | null;
   generating(): boolean;
   sendButton(): HTMLButtonElement | null;
@@ -175,6 +176,32 @@ describe('one native HTML edit for prepared text', () => {
   });
 });
 
+describe('a workspace page kept mounted behind the current one', () => {
+  // Measured 2026-10-01: a tab opened on /c/<id> and moved into its Project keeps the first page
+  // mounted under display:none, editor and header included. Two editors meant no composer at all,
+  // so the tab could neither send nor enter its Project.
+  function keptPage(shown = false) {
+    const kept = document.createElement('div');
+    kept.setAttribute('data-app-shell-page-surface', 'true');
+    if (!shown) kept.style.display = 'none';
+    kept.innerHTML = '<form><div id="prompt-textarea" contenteditable="true">Old page</div><button type="button" data-testid="send-button">Send</button></form>';
+    document.body.prepend(kept);
+    return kept;
+  }
+  it('takes the rendered editor and its own Send', async () => {
+    keptPage();
+    expect(api.composer()).toBe(box);
+    let clicked = false;
+    button.addEventListener('click', () => { clicked = true; user('Exact app prompt'); box.replaceChildren(); });
+    expect(await api.send()).toBe(true);
+    expect(clicked).toBe(true);
+  });
+  it('still refuses two displayed editors', () => {
+    keptPage(true);
+    expect(api.composer()).toBeNull();
+  });
+});
+
 describe('native Project entry readiness', () => {
   const entry = { id: 'g-p-11111111222233334444555555555555', sourceConversationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' };
   const projectUrl = `https://chatgpt.com/g/${entry.id}-example/project`;
@@ -215,6 +242,60 @@ describe('native Project entry readiness', () => {
     box.textContent = '';
     link.addEventListener('click', event => { event.preventDefault(); dom.reconfigure({ url: projectUrl }); box.replaceWith(box.cloneNode(true)); });
     expect(await api.enterProject(entry)).toBe(true);
+  });
+
+  it('accepts the Project home when ChatGPT keeps the same editor element', async () => {
+    // Measured 2026-10-01: from a Project chat, the header link leads to the Project home in
+    // the same editor element. Waiting for a new editor failed every Compact & resume there.
+    const link = sourceLink(`<a href="/g/${entry.id}/project"><span>Homelab</span></a>`);
+    box.textContent = '';
+    user('Earlier turn');
+    const turn = document.querySelector('section[data-testid^="conversation-turn"]')!;
+    const kept = box;
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: `https://chatgpt.com/g/${entry.id}/project` });
+      dom.window.setTimeout(() => turn.remove(), 300);
+    });
+    const entered = api.enterProject(entry);
+    await vi.advanceTimersByTimeAsync(200);
+    // Still the source's turns on screen: not entered yet.
+    let settled = false; void entered.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(await entered).toBe(true);
+    expect(document.getElementById('prompt-textarea')).toBe(kept);
+  });
+
+  it('enters while turns of an earlier page stay mounted but undisplayed', async () => {
+    // Measured 2026-10-01: the app's tab keeps its redirect steps as hidden pages, turns included.
+    const link = sourceLink(`<a href="/g/${entry.id}/project"><span>Homelab</span></a>`);
+    box.textContent = '';
+    user('Earlier turn');
+    const turn = document.querySelector('section[data-testid^="conversation-turn"]')!;
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: `https://chatgpt.com/g/${entry.id}/project` });
+      const kept = document.createElement('div');
+      kept.setAttribute('data-app-shell-page-surface', 'true'); kept.style.display = 'none';
+      turn.replaceWith(kept); kept.append(turn);
+    });
+    expect(await api.enterProject(entry)).toBe(true);
+    expect(turn.isConnected).toBe(true);
+  });
+
+  it('ignores the header of an earlier page ChatGPT keeps undisplayed', async () => {
+    // Measured 2026-10-01: a replacement tab's header held the Project link twice, one on a kept,
+    // undisplayed page. Counting both refused the only real link and the resume failed.
+    const link = sourceLink(`<div data-app-shell-page-surface="true" style="display:none"><a href="/g/${entry.id}/project"><span>Homelab</span></a></div><a href="/g/${entry.id}/project"><span>Homelab</span></a>`);
+    const shown = document.querySelectorAll('header a')[1]!;
+    box.textContent = '';
+    const clicks = vi.fn((event: Event) => { event.preventDefault(); dom.reconfigure({ url: `https://chatgpt.com/g/${entry.id}/project` }); });
+    shown.addEventListener('click', clicks);
+    expect(await api.enterProject(entry)).toBe(true);
+    expect(clicks).toHaveBeenCalledTimes(1);
+    void link;
   });
 
   it('refuses two header links to the same Project instead of guessing', async () => {

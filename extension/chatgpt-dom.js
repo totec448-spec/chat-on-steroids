@@ -1638,10 +1638,23 @@ var CLF_DOM = (() => {
     }, []);
   }
 
+  /**
+   * Whether a node belongs to an earlier page ChatGPT keeps mounted but undisplayed. Its workspace
+   * keeps each step of a redirect as such a page: a tab opened on /c/<id> and moved into the chat's
+   * Project holds the chat two more times, editor, header and turns included (measured 2026-10-01).
+   */
+  function onKeptPage(node) {
+    for (let page = node?.closest?.('[data-app-shell-page-surface]'); page;
+      page = page.parentElement?.closest('[data-app-shell-page-surface]')) {
+      if (getComputedStyle(page).display === 'none') return true;
+    }
+    return false;
+  }
+
   function composer() {
     return safe(() => {
-      const classic = document.querySelector('#prompt-textarea');
-      if (classic) return classic;
+      const classic = [...document.querySelectorAll('#prompt-textarea')].filter(node => !onKeptPage(node));
+      if (classic.length) return classic.length === 1 ? classic[0] : null;
       // The current rich editor can remount before its surrounding form regains
       // data-chatgpt-composer. Accept that stable editor identity, but only while
       // the visible candidate remains unique.
@@ -1649,7 +1662,8 @@ var CLF_DOM = (() => {
         'form[data-chatgpt-composer] [contenteditable="true"][role="textbox"], ' +
         'form [data-composer-markdown][contenteditable="true"][role="textbox"]'
       )]
-        .filter(node => !node.closest(`${OWN_SURFACES},[data-turn-key],.markdown,[hidden],[aria-hidden="true"],[inert]`));
+        .filter(node => !node.closest(`${OWN_SURFACES},[data-turn-key],.markdown,[hidden],[aria-hidden="true"],[inert]`) &&
+          !onKeptPage(node));
       return candidates.length === 1 ? candidates[0] : null;
     }, null);
   }
@@ -2892,7 +2906,7 @@ var CLF_DOM = (() => {
   async function enterProject(entry, stillCurrent = () => true) {
     if (!entry || !/^g-p-[0-9a-f]{32}$/.test(entry.id) || conversationId() !== entry.sourceConversationId) return false;
     return new Promise(resolve => {
-      let clicked = false, done = false, sourceComposer = null;
+      let clicked = false, done = false;
       const interrupt = event => { if (event.isTrusted) finish(false); };
       const finish = result => {
         if (done) return;
@@ -2904,27 +2918,30 @@ var CLF_DOM = (() => {
       const check = () => {
         if (done) return;
         if (!stillCurrent()) return finish(false);
-        if (clicked && projectHomeId() === entry.id && composer()?.isConnected && composer() !== sourceComposer && !turns().length) return finish(true);
+        // Since October 2026 ChatGPT keeps the same editor element from the chat to the Project
+        // home, so a new editor is no evidence. The Project route with the source's turns gone and
+        // an empty, writable editor is; the caller still refuses to send while a chat id remains.
+        // Turns of the earlier pages ChatGPT keeps mounted, undisplayed, are not on this page.
+        if (clicked && projectHomeId() === entry.id && composer()?.isConnected && composerSubmitReady() &&
+            !turns().some(turn => !onKeptPage(turn.node))) return finish(true);
         if (conversationId() !== entry.sourceConversationId) {
           if (projectHomeId() !== entry.id) finish(false);
           return;
         }
         if (clicked) return;
         // The native header arrives before the source chat finishes loading. Its link
-        // alone is not readiness: an early click can be swallowed during hydration and
-        // would also leave us comparing the destination editor with a null source.
+        // alone is not readiness: an early click can be swallowed during hydration.
         // Preserve the source draft/generation and spend our one click only once its
         // actual editor is mounted and ready.
         const source = composer();
         if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) return;
         // The header link to this exact Project home is the native entry. Its folder icon lost
         // its test id in October 2026, and every Project handoff then waited out its deadline;
-        // the link's own same-origin target is the identity, and it must be the only one.
+        // the link's own same-origin target is the identity, and it must be the only one on this page.
         const links = [...document.querySelectorAll('header a[href], [role="banner"] a[href]')].filter(link =>
-          !link.closest(OWN_SURFACES) && new URL(link.href, location.href).origin === location.origin &&
+          !link.closest(OWN_SURFACES) && !onKeptPage(link) && new URL(link.href, location.href).origin === location.origin &&
           projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
         if (links.length !== 1) return;
-        sourceComposer = source;
         clicked = true;
         // Loading the source and following its link are separate page transitions.
         // Reuse the same deadline timer; source loading must not consume the budget
