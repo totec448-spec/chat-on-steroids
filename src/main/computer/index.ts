@@ -381,6 +381,8 @@ async function startHelper(): Promise<HelperRuntime> {
           args = [];
         } else {
           host = findWindowsPowerShell() ?? 'powershell.exe';
+          // The helper leaves this app's own windows out of every lookup, as on macOS.
+          env.COS_APP_PID = String(process.pid);
           args = ['-NoProfile', '-NonInteractive', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-File', scriptFile!];
         }
         const child = spawn(host, args, {
