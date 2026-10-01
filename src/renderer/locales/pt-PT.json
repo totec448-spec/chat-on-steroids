@@ -1753,5 +1753,10 @@
   "This chat (estimate)": "Este chat (estimativa)",
   "Context limit": "Limite de contexto",
   "Filled": "Ocupado",
-  "Compacts automatically at": "Compacta automaticamente a partir de"
+  "Compacts automatically at": "Compacta automaticamente a partir de",
+  "A chat stopped": "Um chat parou",
+  "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "O último turno não produziu nada e nada se seguiu. Envie uma mensagem aí para iniciar um novo turno.",
+  "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "O último turno falhou e nada se seguiu. Envie uma mensagem aí para iniciar um novo turno.",
+  "Recovery stopped": "Recuperação interrompida",
+  "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "O navegador não assumiu a reparação deste chat, por isso a app deixou de tentar. Volte a abrir o separador e a recuperação continua."
 }

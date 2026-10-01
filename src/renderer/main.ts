@@ -43,6 +43,7 @@ import {
 import type { SwarmState } from '../shared/session.js';
 import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom.js';
 import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatView } from './chat.js';
+import { publishStopNoticeTexts } from './stop-notices.js';
 
 declare global {
   interface Window {
@@ -52,6 +53,7 @@ declare global {
 
 const api = window.api;
 initLanguage();
+publishStopNoticeTexts(texts => api.setStopNoticeTexts(texts));
 const pet = initPet(api, () => showTab('pets'));
 initSetupGuide();
 // Escape the translucent sidebar's backdrop-filter containing block.
