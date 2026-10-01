@@ -1753,5 +1753,10 @@
   "This chat (estimate)": "Bu sohbet (tahmini)",
   "Context limit": "Bağlam sınırı",
   "Filled": "Dolu",
-  "Compacts automatically at": "Otomatik sıkıştırma başlangıcı"
+  "Compacts automatically at": "Otomatik sıkıştırma başlangıcı",
+  "A chat stopped": "Bir sohbet durdu",
+  "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "Son turu hiçbir şey üretmedi ve ardından hiçbir şey gelmedi. Yeni bir tur başlatmak için oraya bir mesaj gönderin.",
+  "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "Son turu başarısız oldu ve ardından hiçbir şey gelmedi. Yeni bir tur başlatmak için oraya bir mesaj gönderin.",
+  "Recovery stopped": "Kurtarma durduruldu",
+  "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Tarayıcı bu sohbetin onarımını almadı, bu yüzden uygulama yeniden denemeyi bıraktı. Sekmesini yeniden açın, kurtarma devam eder."
 }

@@ -1753,5 +1753,10 @@
   "This chat (estimate)": "이 채팅(추정)",
   "Context limit": "컨텍스트 한도",
   "Filled": "사용률",
-  "Compacts automatically at": "자동 압축 시작"
+  "Compacts automatically at": "자동 압축 시작",
+  "A chat stopped": "채팅이 멈췄습니다",
+  "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "마지막 턴이 아무것도 만들지 못했고 이후에도 아무것도 이어지지 않았습니다. 새 턴을 시작하려면 그 채팅에 메시지를 보내세요.",
+  "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "마지막 턴이 실패했고 이후에도 아무것도 이어지지 않았습니다. 새 턴을 시작하려면 그 채팅에 메시지를 보내세요.",
+  "Recovery stopped": "복구 중지됨",
+  "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "브라우저가 이 채팅의 복구 요청을 받지 않아 앱이 재시도를 중지했습니다. 탭을 다시 열면 복구가 다시 시작됩니다."
 }
