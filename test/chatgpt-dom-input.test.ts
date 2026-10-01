@@ -6,6 +6,7 @@ const source = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.u
 interface DomApi {
   insertPrompt(text: string, mode?: boolean | 'append', failure?: (reason: string) => void): boolean;
   enterProject(entry: { id: string; sourceConversationId: string }, current?: () => boolean): Promise<boolean>;
+  composer(): HTMLElement | null;
   composerActions(): { host: HTMLElement; before: HTMLElement | null } | null;
   generating(): boolean;
   sendButton(): HTMLButtonElement | null;
@@ -175,6 +176,32 @@ describe('one native HTML edit for prepared text', () => {
   });
 });
 
+describe('a workspace page kept mounted behind the current one', () => {
+  // Measured 2026-10-01: a tab opened on /c/<id> and moved into its Project keeps the first page
+  // mounted under display:none, editor and header included. Two editors meant no composer at all,
+  // so the tab could neither send nor enter its Project.
+  function keptPage(shown = false) {
+    const kept = document.createElement('div');
+    kept.setAttribute('data-app-shell-page-surface', 'true');
+    if (!shown) kept.style.display = 'none';
+    kept.innerHTML = '<form><div id="prompt-textarea" contenteditable="true">Old page</div><button type="button" data-testid="send-button">Send</button></form>';
+    document.body.prepend(kept);
+    return kept;
+  }
+  it('takes the rendered editor and its own Send', async () => {
+    keptPage();
+    expect(api.composer()).toBe(box);
+    let clicked = false;
+    button.addEventListener('click', () => { clicked = true; user('Exact app prompt'); box.replaceChildren(); });
+    expect(await api.send()).toBe(true);
+    expect(clicked).toBe(true);
+  });
+  it('still refuses two displayed editors', () => {
+    keptPage(true);
+    expect(api.composer()).toBeNull();
+  });
+});
+
 describe('native Project entry readiness', () => {
   const entry = { id: 'g-p-11111111222233334444555555555555', sourceConversationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' };
   const projectUrl = `https://chatgpt.com/g/${entry.id}-example/project`;
@@ -215,6 +242,60 @@ describe('native Project entry readiness', () => {
     box.textContent = '';
     link.addEventListener('click', event => { event.preventDefault(); dom.reconfigure({ url: projectUrl }); box.replaceWith(box.cloneNode(true)); });
     expect(await api.enterProject(entry)).toBe(true);
+  });
+
+  it('accepts the Project home when ChatGPT keeps the same editor element', async () => {
+    // Measured 2026-10-01: from a Project chat, the header link leads to the Project home in
+    // the same editor element. Waiting for a new editor failed every Compact & resume there.
+    const link = sourceLink(`<a href="/g/${entry.id}/project"><span>Homelab</span></a>`);
+    box.textContent = '';
+    user('Earlier turn');
+    const turn = document.querySelector('section[data-testid^="conversation-turn"]')!;
+    const kept = box;
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: `https://chatgpt.com/g/${entry.id}/project` });
+      dom.window.setTimeout(() => turn.remove(), 300);
+    });
+    const entered = api.enterProject(entry);
+    await vi.advanceTimersByTimeAsync(200);
+    // Still the source's turns on screen: not entered yet.
+    let settled = false; void entered.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(await entered).toBe(true);
+    expect(document.getElementById('prompt-textarea')).toBe(kept);
+  });
+
+  it('enters while turns of an earlier page stay mounted but undisplayed', async () => {
+    // Measured 2026-10-01: the app's tab keeps its redirect steps as hidden pages, turns included.
+    const link = sourceLink(`<a href="/g/${entry.id}/project"><span>Homelab</span></a>`);
+    box.textContent = '';
+    user('Earlier turn');
+    const turn = document.querySelector('section[data-testid^="conversation-turn"]')!;
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: `https://chatgpt.com/g/${entry.id}/project` });
+      const kept = document.createElement('div');
+      kept.setAttribute('data-app-shell-page-surface', 'true'); kept.style.display = 'none';
+      turn.replaceWith(kept); kept.append(turn);
+    });
+    expect(await api.enterProject(entry)).toBe(true);
+    expect(turn.isConnected).toBe(true);
+  });
+
+  it('ignores the header of an earlier page ChatGPT keeps undisplayed', async () => {
+    // Measured 2026-10-01: a replacement tab's header held the Project link twice, one on a kept,
+    // undisplayed page. Counting both refused the only real link and the resume failed.
+    const link = sourceLink(`<div data-app-shell-page-surface="true" style="display:none"><a href="/g/${entry.id}/project"><span>Homelab</span></a></div><a href="/g/${entry.id}/project"><span>Homelab</span></a>`);
+    const shown = document.querySelectorAll('header a')[1]!;
+    box.textContent = '';
+    const clicks = vi.fn((event: Event) => { event.preventDefault(); dom.reconfigure({ url: `https://chatgpt.com/g/${entry.id}/project` }); });
+    shown.addEventListener('click', clicks);
+    expect(await api.enterProject(entry)).toBe(true);
+    expect(clicks).toHaveBeenCalledTimes(1);
+    void link;
   });
 
   it('refuses two header links to the same Project instead of guessing', async () => {
@@ -447,6 +528,31 @@ describe('Core app mention on app-owned sends (#861)', () => {
       return true;
     };
   });
+  // The mention waits at least one task for the editor before Send.
+  async function sendMention(options: Parameters<DomApi['send']>[0] = {}) {
+    const result = api.send({ mention, ...options });
+    await vi.advanceTimersByTimeAsync(10);
+    return result;
+  }
+  // ChatGPT's editor drops the inserted element on a microtask and draws its own token one
+  // task later; only that token is part of what Send submits.
+  function redrawingEditor(draw = true) {
+    const state = { drawn: null as Element | null };
+    document.execCommand = (command, _ui, value) => {
+      if (command === 'delete') { box.replaceChildren(); return true; }
+      if (command !== 'insertHTML' || document.activeElement !== box) return false;
+      const template = document.createElement('template'); template.innerHTML = value || '';
+      const inserted = template.content.querySelector('[app-mention-path]')!;
+      box.append(template.content);
+      queueMicrotask(() => {
+        const copy = inserted.cloneNode(true) as Element;
+        inserted.remove();
+        if (draw) setTimeout(() => { copy.setAttribute('contenteditable', 'false'); box.append(copy); state.drawn = copy; }, 0);
+      });
+      return true;
+    };
+    return state;
+  }
   function mentionedUser(text: string) {
     user('');
     const row = document.querySelector('[data-message-author-role="user"]')!;
@@ -463,7 +569,7 @@ describe('Core app mention on app-owned sends (#861)', () => {
       mentionedUser('Exact app prompt');
       box.replaceChildren();
     });
-    expect(await api.send({ mention })).toBe(true);
+    expect(await sendMention()).toBe(true);
     const clicked = document.createElement('div'); clicked.innerHTML = atClick;
     const token = clicked.querySelector('[app-mention-path]')!;
     expect(token.getAttribute('app-mention-path')).toBe(mention.path);
@@ -489,7 +595,7 @@ describe('Core app mention on app-owned sends (#861)', () => {
     };
     let atClick = '';
     button.addEventListener('click', () => { atClick = box.textContent || ''; user('Exact app prompt'); box.replaceChildren(); });
-    expect(await api.send({ mention })).toBe(true);
+    expect(await sendMention()).toBe(true);
     expect(atClick.trim()).toBe('Exact app prompt');
   });
   it('adds the mention even when rendered text and raw text of the prompt differ', async () => {
@@ -503,13 +609,88 @@ describe('Core app mention on app-owned sends (#861)', () => {
       dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
       mentionedUser('Exact app prompt'); box.replaceChildren();
     });
-    expect(await api.send({ mention })).toBe(true);
+    expect(await sendMention()).toBe(true);
     expect(tokenAtClick).toBe(true);
   });
   it('sends unchanged when adding the mention throws', async () => {
     document.execCommand = () => { throw new Error('editor refused'); };
     button.addEventListener('click', () => { user('Exact app prompt'); box.replaceChildren(); });
-    expect(await api.send({ mention })).toBe(true);
+    expect(await sendMention()).toBe(true);
+  });
+  it('clicks Send only after the editor has drawn its own token', async () => {
+    const editor = redrawingEditor();
+    let submittedWithMention = false;
+    button.addEventListener('click', () => {
+      submittedWithMention = !!editor.drawn?.isConnected;
+      dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+      mentionedUser('Exact app prompt'); box.replaceChildren();
+    });
+    expect(await sendMention()).toBe(true);
+    expect(submittedWithMention).toBe(true);
+  });
+  it('sends unchanged when the editor drops the token without drawing its own', async () => {
+    redrawingEditor(false);
+    let atClick: string | null = null;
+    button.addEventListener('click', () => { atClick = box.innerHTML; user('Exact app prompt'); box.replaceChildren(); });
+    const result = api.send({ mention });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(atClick).toBeNull();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(await result).toBe(true);
+    expect(atClick!.trim()).toBe('Exact app prompt');
+  });
+  it("removes the editor's own token when Send is not accepted", async () => {
+    const editor = redrawingEditor();
+    const result = api.send({ mention, acceptanceTimeoutMs: 1000 });
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(await result).toBe(false);
+    expect(editor.drawn).not.toBeNull();
+    expect(box.querySelector('[app-mention-path]')).toBeNull();
+    expect(box.textContent!.trim()).toBe('Exact app prompt');
+  });
+  it('does not send when the prompt changed while the editor drew the token', async () => {
+    redrawingEditor();
+    let clicked = false;
+    button.addEventListener('click', () => { clicked = true; });
+    const result = api.send({ mention });
+    box.prepend(document.createTextNode('typed by the user '));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await result).toBe(false);
+    expect(clicked).toBe(false);
+  });
+  it('adds the mention only after the caller authorized the unchanged prompt', async () => {
+    // Measured 2026-10-01: added at readiness, the token made the app's draft lease refuse
+    // authorization, and every app prompt stayed typed in the composer.
+    const editor = redrawingEditor();
+    let tokenWhenAuthorizing = true;
+    let submittedWithMention = false;
+    button.addEventListener('click', () => {
+      submittedWithMention = !!editor.drawn?.isConnected;
+      dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+      mentionedUser('Exact app prompt'); box.replaceChildren();
+    });
+    const beforeSend = async () => { tokenWhenAuthorizing = !!box.querySelector('[app-mention-path]'); return true; };
+    expect(await sendMention({ beforeSend })).toBe(true);
+    expect(tokenWhenAuthorizing).toBe(false);
+    expect(submittedWithMention).toBe(true);
+  });
+  it('clicks the Send control the editor drew again after the mention', async () => {
+    redrawingEditor();
+    let clicked = false;
+    const redraw = new dom.window.MutationObserver(() => {
+      if (!box.querySelector('[app-mention-path][contenteditable="false"]') || button.isConnected === false) return;
+      redraw.disconnect();
+      const fresh = button.cloneNode(true) as HTMLButtonElement;
+      fresh.addEventListener('click', () => {
+        clicked = true;
+        dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+        mentionedUser('Exact app prompt'); box.replaceChildren();
+      });
+      button.replaceWith(fresh);
+    });
+    redraw.observe(box, { childList: true });
+    expect(await sendMention({ beforeSend: async () => true })).toBe(true);
+    expect(clicked).toBe(true);
   });
   it('sends exactly as before without a mention', async () => {
     const insert = vi.spyOn(document, 'execCommand');
