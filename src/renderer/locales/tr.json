@@ -390,7 +390,7 @@
   "Add attachments": "Ek ekle",
   "Chat mode": "Sohbet modu",
   "Chat automation": "Sohbet otomasyonu",
-  "What should this chat achieve?": "Bu sohbetin hedefi ne olmalı?",
+  "Optional. Leave empty to work toward what you asked in this chat.": "İsteğe bağlı. Boş bırakırsanız bu sohbette istediğiniz şeye doğru çalışır.",
   "Goal behavior": "Hedef davranışı",
   "Estimated session context": "Tahmini oturum bağlamı",
   "Reload ChatGPT models": "ChatGPT modellerini yeniden yükle",
