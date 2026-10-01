@@ -1243,7 +1243,7 @@ function paintAutomationSwitch(): void {
   $<HTMLSelectElement>('sessionObjectiveMode').value = editMode;
   const loop = editMode === 'loop';
   ui(document.querySelector('label[for="sessionObjective"]')!, 'textContent', () => loop ? t("Loop instructions") : t("Goal"));
-  ui($<HTMLTextAreaElement>('sessionObjective'), 'placeholder', () => loop ? t("What should each continuation focus on?") : t("What should this chat achieve?"));
+  ui($<HTMLTextAreaElement>('sessionObjective'), 'placeholder', () => loop ? t("What should each continuation focus on?") : t("Optional. Leave empty to work toward what you asked in this chat."));
   paintTaskActions();
 }
 async function refreshSessionControls(): Promise<void> {

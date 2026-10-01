@@ -377,7 +377,7 @@
   "Add attachments": "Anhänge hinzufügen",
   "Chat mode": "Chat-Modus",
   "Chat automation": "Chat-Automatisierung",
-  "What should this chat achieve?": "Was soll dieser Chat erreichen?",
+  "Optional. Leave empty to work toward what you asked in this chat.": "Optional. Leer lassen, um auf das hinzuarbeiten, worum du in diesem Chat gebeten hast.",
   "Goal behavior": "Verhalten von Goal",
   "Estimated session context": "Geschätzter Sitzungskontext",
   "Reload ChatGPT models": "ChatGPT-Modelle neu laden",

@@ -400,7 +400,7 @@
   "Add attachments": "添付ファイルを追加",
   "Chat mode": "チャットモード",
   "Chat automation": "チャットの自動化",
-  "What should this chat achieve?": "このチャットで何を達成しますか？",
+  "Optional. Leave empty to work toward what you asked in this chat.": "任意です。空欄のままにすると、このチャットで依頼した内容に向けて進めます。",
   "Goal behavior": "ゴールの動作",
   "Estimated session context": "セッションの推定コンテキスト量",
   "Reload ChatGPT models": "ChatGPT のモデルを再読み込み",

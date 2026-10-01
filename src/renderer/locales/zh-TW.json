@@ -573,7 +573,7 @@
   "Add attachments": "新增附件",
   "Chat mode": "聊天模式",
   "Chat automation": "聊天自動化",
-  "What should this chat achieve?": "此聊天要實現什麼目標？",
+  "Optional. Leave empty to work toward what you asked in this chat.": "選填。留空則以你在此聊天中提出的請求為目標。",
   "Goal behavior": "目標行為",
   "Estimated session context": "對話上下文估算",
   "Reload ChatGPT models": "重新載入 ChatGPT 模型",
