@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { expect, it } from 'vitest';
 
-// Languages read as a list people scan by their own language's name: Latin-script names in
-// alphabetical order, then Japanese and Chinese. A new language is sorted in, not appended.
-const ORDER = ['de', 'en', 'es', 'fr', 'pt-BR', 'pt-PT', 'tr', 'ja', 'ko', 'zh-CN', 'zh-TW'];
+// Languages read as a list people scan by their own language's name: European languages first,
+// then Japanese, Korean and Chinese. A new language is sorted in, not appended.
+const ORDER = ['de', 'en', 'es', 'fr', 'pt-BR', 'pt-PT', 'ru', 'tr', 'ja', 'ko', 'zh-CN', 'zh-TW'];
 
 it('lists languages in the same native-name order in Appearance and Setup', () => {
   const page = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'));
