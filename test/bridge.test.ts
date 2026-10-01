@@ -8194,6 +8194,41 @@ describe('unattributed activity recovery', () => {
   });
 
   /**
+   * A failed end is the turn over, so nothing is still thinking and the long window no longer
+   * applies. Measured 2026-10-01 on an Extra High prime: its stream died twice, the error reload
+   * found "Resume stream unavailable", the turn ended as failed, and the chat then waited toward
+   * its twenty-minute window — the automatic Continue never came before its owner typed.
+   */
+  it.each(['xhigh', 'max'] as const)('recovers a %s turn that ended as failed on the ordinary two-minute window', async effort => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), turnId = `failed-${effort}`;
+      await events(chat, [
+        { kind: 'user_message', messageId: 'question', text: 'Do the long analysis', time: Date.now(), authoredNow: true },
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: effort, time: Date.now() },
+        openTurn(turnId)
+      ]);
+      await attributed(chat, false, Date.now());
+      // Quiet thinking first: the long window still protects the running turn.
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance(), `a running ${effort} turn was reloaded mid-thought`).toBeNull();
+
+      await events(chat, [endTurn(turnId, 'failed')]);
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 10_000);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance(), 'the failed turn was reloaded before its two minutes').toBeNull();
+      await vi.advanceTimersByTimeAsync(20_000);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance(), `a failed ${effort} turn waited for the long thinking window`)
+        .toMatchObject({ conversationId: chat, reason: 'silence' });
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
+  /**
    * The picker can report the selection after the turn and its first call (#786). That late
    * exact evidence names the effort of the grant that is already running: it widens that grant
    * to the long window, measured from the same last real work, and is not itself work.
