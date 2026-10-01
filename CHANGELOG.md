@@ -9,6 +9,33 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.23] — Fewer stuck chats
+
+This update is about chats that got stuck and waited for no reason. Stop always works now, auto-compaction no longer waits needlessly, and CoS tells you when it can't recover a chat on its own.
+
+### Fixed
+
+- **Stop always gets you out.** Sometimes CoS kept showing the Stop button after ChatGPT had already finished, and your next message waited forever. Pressing Stop did nothing. Now Stop ends that answer, and your next message goes out.
+- **Auto-compaction starts right away.** If a chat reached its limit just as an answer was finishing, the app waited up to six minutes before compacting. Now it compacts as soon as the answer is done.
+- **Compact & resume works after you close the tab.** If you started Compact & resume and closed the chat's tab, the request quietly expired after ten minutes. It now reopens the chat and finishes the handoff.
+- **Interrupted answers are recovered more reliably.** When ChatGPT can't resume an interrupted answer, CoS now notices immediately and recovers the chat instead of waiting for an error that never appears.
+
+### New
+
+- **WSL project folders on Windows.** You can approve project folders inside your local WSL distributions (`\\wsl.localhost\…`) and work in them like any other folder.
+- **A notice when recovery needs you.** If CoS has tried everything to recover a stuck chat, it now tells you with a notification instead of only writing it to the log.
+
+### Improved
+
+- **The desktop tools leave CoS alone on Windows too.** The model can no longer see or target the CoS window itself, so it can't change CoS's own settings. This was already the case on macOS.
+- Updated dependencies.
+
+### Thank you
+
+To **@AcureroAdrian** for WSL folder support, the recovery notice and the improved recovery of interrupted answers. And to **@sumit171204** and **@tngcphng** for reporting stuck chats, with screenshots and logs.
+
+**Updating from 2.1.18 or older?** If the extension doesn't connect, click its icon once; from 2.1.19 on it connects by itself.
+
 ## [2.1.22] — Long Loop sessions keep going
 
 A small update for everyone who lets CoS work for a long time. Chats in Loop and with auto-compaction no longer get stuck where 2.1.21 could hang until you stepped in.
