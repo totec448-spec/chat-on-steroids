@@ -15612,6 +15612,29 @@ describe('the fresh chat the app opened', () => {
       })
     ]);
     expect(live.sent.some((message) => message.type === 'ack' && message.status === 'sent')).toBe(false);
+    // #864: the worker failed, so its own unsent text must not sit in the box afterwards.
+    expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe('');
+  });
+
+  it('keeps text the user typed after a worker bootstrap Send was not accepted', async () => {
+    live = await harness(
+      'https://chatgpt.com/?clf=cmd-user-edit',
+      {
+        redeem: () => ({ ok: true, command: { id: 'cmd-user-edit', type: 'worker', text: 'Worker task text.', agent: 'worker-1' } }),
+        ack: () => ({ ok: true })
+      },
+      (document) => {
+        const button = document.querySelector('[data-testid="send-button"]') as HTMLButtonElement;
+        button.disabled = true;
+        button.addEventListener('click', () => undefined);
+      }
+    );
+    await settle(400);
+    const box = live.document.querySelector('#prompt-textarea')!;
+    box.textContent = 'Worker task text. And my own note';
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await settle();
+    expect(box.textContent).toBe('Worker task text. And my own note');
   });
 
   it('types nothing when the marker is stale', async () => {
