@@ -60,6 +60,21 @@ it('waits for an existing hydrating or busy ChatGPT tab rather than opening anot
   await h.inspectModels({ nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: true }, true);
   expect(h.create).not.toHaveBeenCalled();
 });
+it.each([false, true])('never borrows a command-owned opening for model discovery (allowOpen=%s)', async allowOpen => {
+  const marker = `https://chatgpt.com/?clf=${firstId}#clf=${firstId}`;
+  const h = await worker([], undefined, {}, { discardProtectedTabs: {
+    7: { commandId: firstId, at: Date.now(), url: marker, conversationId: null }
+  } });
+  h.tabs.push({ id: 7, url: marker });
+  await h.inspectModels({ nonce: secondId, expiresAt: Date.now() + 60000, allowOpen }, true);
+  expect(h.sendMessage.mock.calls.filter(([id, message]) => id === 7 && message.type.startsWith('clf-model-catalog'))).toHaveLength(0);
+  if (allowOpen) {
+    expect(h.create).toHaveBeenCalledTimes(1);
+    expect(h.saved.modelCatalogOwner).toMatchObject({ nonce: secondId });
+  } else {
+    expect(h.create).not.toHaveBeenCalled();
+  }
+});
 it.each(['generating', 'draft', 'attachments', 'input_busy', 'composer_hidden'])('explicit refresh uses one helper without touching a %s user tab', async reason => {
   const h = await worker([]);
   const userTab = { id: 8, url: `https://chatgpt.com/c/${secondId}` }; h.tabs.push(userTab);
