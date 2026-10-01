@@ -14482,7 +14482,9 @@ describe('the fresh chat the app opened', () => {
    * as history, which is what left the chat with no app session and every later tool call
    * without a provable caller.
    */
-  it.each(['success', 'wrong-link', 'retarget', 'stale-editor'])(
+  // ChatGPT keeps the same editor element into the Project home (2026-10-01), so 'kept-editor'
+  // enters too; only the source chat still on screen after the click does not.
+  it.each(['success', 'kept-editor', 'wrong-link', 'retarget', 'source-still-shown'])(
     'Project resume enters through the source native link and fences the send: %s', async outcome => {
     const project = 'g-p-11111111222233334444555555555555';
     const source = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -14505,6 +14507,7 @@ describe('the fresh chat the app opened', () => {
           const editor = document.getElementById('prompt-textarea')!;
           editor.replaceWith(editor.cloneNode(true));
         }
+        if (outcome === 'source-still-shown') userTurn(document, 'source-turn', 'An earlier turn of the source chat');
         header.remove();
       });
       document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
@@ -14519,9 +14522,10 @@ describe('the fresh chat the app opened', () => {
       expect.objectContaining({ conversationId: source, projectEntry: true })
     ]);
     expect(clicks).toBe(outcome === 'wrong-link' ? 0 : 1);
-    expect(sends, JSON.stringify(live.sent.filter(message => ['ack', 'compact'].includes(String(message.type))))).toBe(outcome === 'success' ? 1 : 0);
+    const enters = outcome === 'success' || outcome === 'kept-editor';
+    expect(sends, JSON.stringify(live.sent.filter(message => ['ack', 'compact'].includes(String(message.type))))).toBe(enters ? 1 : 0);
     expect(live.sent.filter(message => message.type === 'ack')).toEqual([
-      expect.objectContaining(outcome === 'success' ? { status: 'sent', conversationId: destination } : { status: 'failed' })
+      expect.objectContaining(enters ? { status: 'sent', conversationId: destination } : { status: 'failed' })
     ]);
   });
 
