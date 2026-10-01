@@ -470,6 +470,25 @@ describe('Core app mention on app-owned sends (#861)', () => {
     expect(await api.send({ mention })).toBe(true);
     expect(atClick.trim()).toBe('Exact app prompt');
   });
+  it('adds the mention even when rendered text and raw text of the prompt differ', async () => {
+    // A hidden editor node counts in textContent but not in innerText. Comparing the two
+    // aborted an approved Send; the mention is now checked against the box itself.
+    const hidden = document.createElement('span'); hidden.textContent = '\u200b'; hidden.hidden = true; box.append(hidden);
+    Object.defineProperty(box, 'innerText', { configurable: true, get: () => 'Exact app prompt' });
+    let tokenAtClick = false;
+    button.addEventListener('click', () => {
+      tokenAtClick = !!box.querySelector('[app-mention-path]');
+      dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+      mentionedUser('Exact app prompt'); box.replaceChildren();
+    });
+    expect(await api.send({ mention })).toBe(true);
+    expect(tokenAtClick).toBe(true);
+  });
+  it('sends unchanged when adding the mention throws', async () => {
+    document.execCommand = () => { throw new Error('editor refused'); };
+    button.addEventListener('click', () => { user('Exact app prompt'); box.replaceChildren(); });
+    expect(await api.send({ mention })).toBe(true);
+  });
   it('sends exactly as before without a mention', async () => {
     const insert = vi.spyOn(document, 'execCommand');
     button.addEventListener('click', () => { user('Exact app prompt'); box.replaceChildren(); });
