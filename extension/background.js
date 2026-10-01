@@ -2253,6 +2253,13 @@ function catalogTabNonce(tab) {
     return url.origin === 'https://chatgpt.com' && url.pathname === '/' && /^[a-f0-9-]{36}$/i.test(nonce || '') ? nonce : null;
   } catch { return null; }
 }
+
+/** A command-owned opening is authored work, never an idle model-catalog surface. */
+function catalogCandidateTab(tab) {
+  const custody = discardProtectedTabs[String(tab?.id)];
+  return !(custody && custody !== true && commandMarkerId(custody.commandId));
+}
+
 function inspectRequestedModels(request) {
   if (modelCatalogFlight) return modelCatalogFlight;
   const intent = connectionEpoch;
@@ -2268,7 +2275,11 @@ function inspectRequestedModels(request) {
   };
   let targetNonce = null;
   modelCatalogFlight = (async () => {
-    const observed = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+    // A worker/resume tab gets command custody before it has a provider conversation. A passive
+    // catalog refresh can arrive in the same maintenance pass that created that tab; borrowing
+    // its still-loading composer races the bootstrap that owns it. Keep command-owned openings
+    // out of discovery until their command custody is released.
+    const observed = (await chrome.tabs.query({ url: CHATGPT_TAB_URLS })).filter(catalogCandidateTab);
     const owner = (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
     if (wanted && !current()) return;
     if (wanted && owner?.nonce === wanted.nonce && owner.opening) { await waiting('opening'); return; }
