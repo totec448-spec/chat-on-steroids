@@ -460,7 +460,9 @@ describe('Core app mention on app-owned sends (#861)', () => {
     document.execCommand = (command, _ui, value) => {
       if (command === 'undo') { box.textContent = 'Exact app prompt'; return true; }
       if (command !== 'insertHTML') return false;
-      box.append(document.createTextNode(String(value).replace(/<[^>]+>/g, '')));
+      // An editor without the mention node keeps only the element's text.
+      const parsed = document.createElement('template'); parsed.innerHTML = String(value);
+      box.append(document.createTextNode(parsed.content.textContent || ''));
       return true;
     };
     let atClick = '';
