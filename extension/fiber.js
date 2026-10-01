@@ -452,6 +452,17 @@
    * Do not fall back to arbitrary object/string fields. This helper runs in the page world
    * and its allowlist is a privacy boundary: only the public text payload crosses worlds.
    */
+  /**
+   * A message that mentions a ChatGPT app stores the mention inline as `[$slug](app://asdk_app_…)`
+   * (#861). That is how the message attached the app, not what its author wrote, and the app adds
+   * one to every prompt it sends, so user text is read without it. Ordinary links are untouched.
+   */
+  const APP_MENTION_LINK = /[ \t]*\[\$[a-z0-9][a-z0-9-]{0,80}\]\(app:\/\/asdk_app_[A-Za-z0-9_-]{1,160}\)[ \t]*/g;
+  function withoutAppMentions(value) {
+    if (typeof value !== 'string' || !value.includes('](app://asdk_app_')) return value;
+    return value.replace(APP_MENTION_LINK, ' ').trim();
+  }
+
   function authoredText(message) {
     const content = message && typeof message === 'object' ? message.content : null;
     if (!content || typeof content !== 'object' || content.content_type !== 'text') return null;
@@ -639,7 +650,7 @@
           /^image\/[a-z0-9.+-]{1,80}$/i.test(file.mime_type) && Number.isSafeInteger(file.size) && file.size >= 0 && file.size <= 512 * 1024 * 1024)
           .slice(0, Math.min(4, imageCount)).map(file => ({ id: file.id, name: file.name, size: file.size, mimeType: file.mime_type })) : [];
       const authored = multimodal ? content.parts.filter(part => typeof part === 'string').join('\n') : authoredText(message);
-      const rawText = budgetedText(authored, budget, MAX_RENDERED_TEXT) || '';
+      const rawText = budgetedText(withoutAppMentions(authored), budget, MAX_RENDERED_TEXT) || '';
       if (!id || (!rawText && !attachments.length)) continue;
       if (seen.has(id)) continue;
       seen.add(id);

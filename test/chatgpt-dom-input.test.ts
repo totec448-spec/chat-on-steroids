@@ -17,7 +17,8 @@ interface DomApi {
   hasComposerAttachments(): boolean;
   stopGeneration(current: () => boolean): boolean;
   inspectModelSettings(current?: () => boolean, failure?: (reason: string) => void): Promise<Array<{id: string; label: string; efforts: string[]}> | null>;
-  send(options?: { acceptanceTimeoutMs?: number; stillCurrent?: () => boolean; beforeSend?: () => Promise<boolean> }): Promise<boolean>;
+  send(options?: { acceptanceTimeoutMs?: number; stillCurrent?: () => boolean; beforeSend?: () => Promise<boolean>;
+    mention?: { path: string; name: string } | null }): Promise<boolean>;
   selectModelSettings(model: string | null, effort: string | null, current?: () => boolean): Promise<boolean>;
   uploadImages(images: Array<{ name: string; dataUrl: string }>, current?: () => boolean, draft?: ReturnType<DomApi['captureComposerDraft']>, files?: File[]): Promise<boolean>;
   messages(): Array<{ id: string; role: 'user' | 'assistant'; text: string; turnId: string | null }>;
@@ -404,6 +405,74 @@ describe('one native Send and bounded acceptance observation', () => {
     const result = api.send({ acceptanceTimeoutMs: 100 });
     await vi.advanceTimersByTimeAsync(100);
     expect(await result).toBe(false);
+  });
+});
+
+describe('Core app mention on app-owned sends (#861)', () => {
+  const mention = { path: 'app://asdk_app_TESTCORE123', name: 'Chat On Steroids Core' };
+  beforeEach(() => {
+    // The editor turns the pasted mention element into its own non-editable token.
+    document.execCommand = (command, _ui, value) => {
+      const selection = document.getSelection();
+      if (command === 'delete') { box.replaceChildren(); return true; }
+      if (command !== 'insertHTML' || document.activeElement !== box || !selection?.rangeCount) return false;
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      template.content.querySelectorAll('[app-mention-path]').forEach(token => token.setAttribute('contenteditable', 'false'));
+      range.insertNode(template.content);
+      return true;
+    };
+  });
+  function mentionedUser(text: string) {
+    user('');
+    const row = document.querySelector('[data-message-author-role="user"]')!;
+    const body = document.createElement('div'); body.className = 'whitespace-pre-wrap';
+    const chip = document.createElement('span'); chip.setAttribute('data-prompt-link-href', mention.path);
+    chip.setAttribute('data-prompt-link-label', '$chat-on-steroids-core'); chip.textContent = mention.name;
+    body.append(text + ' ', chip); row.append(body);
+  }
+  it('adds the token at the end right before Send and recognizes the rendered message without it', async () => {
+    let atClick = '';
+    button.addEventListener('click', () => {
+      atClick = box.innerHTML;
+      dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+      mentionedUser('Exact app prompt');
+      box.replaceChildren();
+    });
+    expect(await api.send({ mention })).toBe(true);
+    const clicked = document.createElement('div'); clicked.innerHTML = atClick;
+    const token = clicked.querySelector('[app-mention-path]')!;
+    expect(token.getAttribute('app-mention-path')).toBe(mention.path);
+    expect(token.getAttribute('data-prompt-link-label')).toBe('$chat-on-steroids-core');
+    expect(clicked.textContent!.trim().startsWith('Exact app prompt')).toBe(true);
+    expect(api.messages().find(message => message.role === 'user')?.text).toBe('Exact app prompt');
+  });
+  it('removes its own token again when Send is not accepted', async () => {
+    const result = api.send({ mention, acceptanceTimeoutMs: 1000 });
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(await result).toBe(false);
+    expect(box.querySelector('[app-mention-path]')).toBeNull();
+    expect(box.textContent!.trim()).toBe('Exact app prompt');
+  });
+  it('sends unchanged when the editor does not turn the mention into a token', async () => {
+    document.execCommand = (command, _ui, value) => {
+      if (command === 'undo') { box.textContent = 'Exact app prompt'; return true; }
+      if (command !== 'insertHTML') return false;
+      box.append(document.createTextNode(String(value).replace(/<[^>]+>/g, '')));
+      return true;
+    };
+    let atClick = '';
+    button.addEventListener('click', () => { atClick = box.textContent || ''; user('Exact app prompt'); box.replaceChildren(); });
+    expect(await api.send({ mention })).toBe(true);
+    expect(atClick.trim()).toBe('Exact app prompt');
+  });
+  it('sends exactly as before without a mention', async () => {
+    const insert = vi.spyOn(document, 'execCommand');
+    button.addEventListener('click', () => { user('Exact app prompt'); box.replaceChildren(); });
+    expect(await api.send()).toBe(true);
+    expect(insert).not.toHaveBeenCalledWith('insertHTML', expect.anything(), expect.anything());
   });
 });
 

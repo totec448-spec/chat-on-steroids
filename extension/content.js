@@ -875,9 +875,20 @@
       return !revoked;
     };
   }
+  /**
+   * The Core app as this page's ChatGPT names it, or null (#861). On accounts where ChatGPT
+   * attaches an app only to a message that mentions it, every prompt the app sends mentions
+   * Core; on the others the mention is a visible chip and changes nothing else.
+   */
+  let coreMention = null;
+  window.addEventListener('message', (event) => {
+    if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-core-mention') return;
+    const path = typeof event.data.path === 'string' && /^app:\/\/asdk_app_[A-Za-z0-9_-]{1,160}$/.test(event.data.path) ? event.data.path : null;
+    coreMention = path && event.data.name === 'Chat On Steroids Core' ? { path, name: event.data.name } : null;
+  });
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
                              matchesUser = matchesSubmittedUser, receiptTimeoutMs = null) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs,
+    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention: coreMention,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';

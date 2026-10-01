@@ -808,6 +808,26 @@ describe('the calls a turn says it made', () => {
     expect(turns[0]).toMatchObject({ conversationId: THREAD, conversationConflict: false });
   });
 
+  it.each([
+    ['at the end', 'Run the review. [$chat-on-steroids-core](app://asdk_app_6aa5b6651c3c81919f03cb5dc38bf019)', 'Run the review.'],
+    ['at the start', '[$chat-on-steroids-core](app://asdk_app_6aa5b6651c3c81919f03cb5dc38bf019) run echo ok', 'run echo ok'],
+    ['in the middle', 'Ask [$chat-on-steroids-core](app://asdk_app_6aa5b6651c3c81919f03cb5dc38bf019) to list files', 'Ask to list files']
+  ])('reads a user message without its ChatGPT app mention %s (#861)', async (_where, stored, authored_) => {
+    const { turns } = await scan([], [{
+      id: 'mention-user', messages: [{ ...authored('mention-user-message', stored), author: { role: 'user' } }],
+      conversationProps: { conversation: { id: THREAD } }
+    }]);
+    expect(turns[0]!.messages[0]).toMatchObject({ role: 'user', rawText: authored_ });
+  });
+
+  it('keeps an ordinary Markdown link a user wrote', async () => {
+    const { turns } = await scan([], [{
+      id: 'link-user', messages: [{ ...authored('link-user-message', 'See [the docs](https://example.com/app) first.'), author: { role: 'user' } }],
+      conversationProps: { conversation: { id: THREAD } }
+    }]);
+    expect(turns[0]!.messages[0]).toMatchObject({ rawText: 'See [the docs](https://example.com/app) first.' });
+  });
+
   it('reads the durable server identity instead of the mounted WEB identity', async () => {
     const conversation = { id: 'WEB:11111111-2222-4333-8444-555555555555', serverId$: () => THREAD };
     const { turns } = await scan([], [{
