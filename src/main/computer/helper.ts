@@ -43,6 +43,9 @@ using System.Runtime.InteropServices;
 using System.Text;
 
 public static class Clf {
+  // The app's own process. Its windows stay out of every window lookup, as on macOS, where the
+  // backend runs inside the app and skips its own process id.
+  public static uint OwnPid = 0;
   [StructLayout(LayoutKind.Sequential)]
   struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
   [StructLayout(LayoutKind.Sequential)]
@@ -332,6 +335,7 @@ public static class Clf {
     if (!GetWindowRect(h, out r) || r.Right - r.Left <= 0 || r.Bottom - r.Top <= 0) return "";
     uint pid;
     GetWindowThreadProcessId(h, out pid);
+    if (OwnPid != 0 && pid == OwnPid) return ""; // CoS's own windows are not listed or targeted.
     string[] identity = CosWindowsAppIdentity.Read(handle, pid);
     if (identity[0].Length == 0) return ""; // Unknown app identity cannot be targeted by the window API.
     string proc = System.IO.Path.GetFileNameWithoutExtension(identity[1]);
@@ -523,6 +527,10 @@ ${WINDOWS_APP_IDENTITY_SOURCE}
 '@ -ReferencedAssemblies System.Drawing
 
 ${WINDOWS_CAPTURE_BOOTSTRAP}
+
+# The app passes its process id so its own windows are never listed or targeted. A helper
+# started without it, as in tests, sees every window.
+if ($env:COS_APP_PID -match '^[0-9]+$') { [Clf]::OwnPid = [uint32]$env:COS_APP_PID }
 
 # Requests arrive as one JSON object per stdin line. The process stays alive, so the
 # expensive Add-Type/C# compilation above happens once instead of on every MCP call.
