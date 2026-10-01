@@ -2422,6 +2422,19 @@
     return null;
   }
 
+  /**
+   * What reading one connector's declarations back from the page may cost (#864 follow-up).
+   *
+   * The app publishes at most 250,000 UTF-8 bytes of Plugins declarations
+   * (src/main/plugins/exposure.ts). copySchema charges each character as three bytes, the
+   * worst case, plus key overhead, so the old 280,000 rejected anything above roughly 93 KB of
+   * text: a Unity plugin's 82 tools (about 116 KB) made every Plugins refresh fail with an
+   * unreadable settings card. Three times the publication budget, with room for key overhead,
+   * reads back everything the app can publish; the isolated world and the app still cap the
+   * projected JSON at 300,000 characters.
+   */
+  const PLUGIN_SCHEMA_READ_BYTES = 900000;
+
   function copySchema(value, budget, depth = 0) {
     if (depth > 32 || --budget.nodes < 0) throw new Error('schema_bound');
     const spend = bytes => { budget.bytes -= bytes; if (budget.bytes < 0) throw new Error('schema_bound'); };
@@ -2482,7 +2495,7 @@
     if (!connector || !Array.isArray(connector.actions) || typeof connector.name !== 'string') return null;
     const externalPlugins = connector.name === 'Chat On Steroids Plugins';
     if ((!connector.actions.length && !externalPlugins) || connector.actions.length > (externalPlugins ? 257 : 16)) return null;
-    const budget = { bytes: 280000, nodes: 20000 };
+    const budget = { bytes: PLUGIN_SCHEMA_READ_BYTES, nodes: 20000 };
     // Measured 2026-09-27: this page sends `description_model: ""` rather than null, so `??`
     // read every declaration as empty and no refresh could ever match the published schema.
     const tools = connector.actions.map(action => ({ name: action.name, description: copySchema(action.description_model || action.description, budget), inputSchema: copySchema(action.params, budget) }));
@@ -2528,7 +2541,7 @@
         observedActions = props.actions;
         const externalPlugins = props.connector.name === 'Chat On Steroids Plugins';
         if ((!props.actions.length && !externalPlugins) || props.actions.length > (externalPlugins ? 257 : 16) || typeof props.connector.name !== 'string') return null;
-        const budget = { bytes: 280000, nodes: 20000 };
+        const budget = { bytes: PLUGIN_SCHEMA_READ_BYTES, nodes: 20000 };
         const tools = props.actions.map(action => ({ name: action.name, description: copySchema(action.description_model ?? action.description, budget), inputSchema: copySchema(action.params, budget) }));
         if (tools.some(tool => !NAME.test(tool.name) || typeof tool.description !== 'string' || !tool.inputSchema || tool.inputSchema.type !== 'object') ||
             new Set(tools.map(tool => tool.name)).size !== tools.length) return null;
