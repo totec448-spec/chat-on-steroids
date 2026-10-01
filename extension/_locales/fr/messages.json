@@ -1044,7 +1044,7 @@
     "message": "oui"
   },
   "content_goal_error_loop_mcp_call_missing": {
-    "message": "Aucun appel d’outil MCP n’a été enregistré dans la dernière réponse ; l’application ne peut donc pas déterminer si la connexion aux outils a été perdue. La continuation automatique est en pause ; Loop reste activé. Vérifiez le tunnel et le connecteur Core avant de continuer."
+    "message": "Aucun appel d’outil MCP n’a été enregistré dans la dernière réponse. ChatGPT vous pose peut-être une question, ou la connexion aux outils a peut-être été perdue. Répondez à sa question ou vérifiez le tunnel si les outils ne fonctionnent plus. La continuation automatique est en pause ; Loop reste activé."
   },
   "content_goal_error_goal_reply_not_pending": {
     "message": "Aucune continuation n’est en attente pour cette réponse. Elle a peut-être déjà été traitée ou remplacée par un travail plus récent. Vérifiez l’activité la plus récente du chat avant de réessayer."
