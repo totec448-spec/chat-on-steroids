@@ -11934,6 +11934,7 @@
     let decision = null;
     let sent = false;
     let draft = null;
+    let withdrawableRecoveryDraft = false;
     let claimedSilence = null;
     const writableComposer = () => CLF_DOM.composerVisible() && CLF_DOM.composerWritable() && CLF_DOM.composer();
     try {
@@ -11967,6 +11968,7 @@
       const input = reply?.data?.input;
       if (input?.silenceBoundary || input?.completedTurnId) { claimedSilence = input; sourceQuiet = true; }
       if (!input || !onTarget()) return false;
+      withdrawableRecoveryDraft = Boolean(input.recovery) && !(input.images || []).length && !(input.attachments || []).length;
       const fail = async (error) => { await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true, error }); return false; };
       // ChatGPT restores its shared home draft even in a newly opened input tab.
       // This exact claimed bootstrap owns replacement text; existing chats and
@@ -12070,8 +12072,7 @@
       // lease may follow it once; after authorization a lost editor stays a failure.
       let authorizing = false;
       const draftCurrent = () => draft.current() ||
-        (input.recovery === true && !authorizing && !sendAttempted && !(input.images || []).length &&
-          !(input.attachments || []).length && draft.rebind() && draft.current());
+        (withdrawableRecoveryDraft && !authorizing && !sendAttempted && draft.rebind() && draft.current());
       const files = [];
       for (const attachment of input.attachments || []) {
         const parts = [];
@@ -12196,7 +12197,10 @@
           error: 'After-turn pickup was withdrawn before Send.' }).catch(() => undefined);
       }
       if (draft) {
-        try { if (!sendAttempted) await draft.clear(); }
+        try {
+          const cleared = !sendAttempted ? await draft.clear() : false;
+          if (!sendAttempted && !cleared && withdrawableRecoveryDraft) draft.withdraw();
+        }
         catch { /* Unprovable cleanup preserves the draft; never keep the input slot busy. */ }
         finally { draft.dispose(); }
       }
