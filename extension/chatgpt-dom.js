@@ -2927,6 +2927,15 @@ var CLF_DOM = (() => {
     if (!model && !effort) return true;
     const ui = modelPickerAccess(stillCurrent), original = await ui.open();
     if (!original) { await ui.close(); return false; }
+    // Account-evaluated exact selection is already proof; visiting unrelated
+    // versions can reset it or fail unnecessarily. Captions and denied choices
+    // do not qualify, and native closure still has to succeed.
+    const current = original.choices.find(choice => choice.bucket === original.currentBucket);
+    if (current?.available && (current.id === model || current.familyId === model) &&
+        (!effort || current.effort === effort)) {
+      const closed = await ui.close();
+      return closed && stillCurrent();
+    }
     let selected = false, closed = false;
     try {
       // Exact provider slug is preferred. Existing saved display slugs may resolve
