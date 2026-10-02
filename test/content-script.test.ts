@@ -14636,6 +14636,51 @@ describe('the fresh chat the app opened', () => {
     ]);
   });
 
+  it('keeps redeeming through a service worker that is briefly unreachable during a burst of new tabs (#882)', async () => {
+    let redeemCalls = 0, sends = 0;
+    live = await harness(
+      'https://chatgpt.com/?clf=cmd-redeem-burst#clf=cmd-redeem-burst',
+      {
+        // No answer at all, as from a service worker that cannot be reached, for four tries.
+        redeem: () => {
+          redeemCalls++;
+          if (redeemCalls <= 4) return null;
+          return { ok: true, command: { id: 'cmd-redeem-burst', type: 'resume',
+            text: '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nStart after the burst.', agent: null } };
+        },
+        ack: () => ({ ok: true })
+      },
+      (document, dom) => {
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          sends++;
+          dom.reconfigure({ url: 'https://chatgpt.com/c/31313131-3434-5656-8787-909090909090' });
+          userTurn(document, 'redeem-burst-user', '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nStart after the burst.', { sent: false });
+        });
+      }
+    );
+    await new Promise(resolve => globalThis.setTimeout(resolve, 0));
+    await settle(800);
+    expect(redeemCalls).toBe(5);
+    expect(sends).toBe(1);
+    expect(live.sent.filter(message => message.type === 'ack' && message.status === 'sent')).toHaveLength(1);
+  });
+
+  it('stops redeeming once the app has given up on the page', async () => {
+    let redeemCalls = 0;
+    live = await harness('https://chatgpt.com/?clf=cmd-redeem-gone#clf=cmd-redeem-gone', {
+      redeem: () => { redeemCalls++; return null; },
+      ack: () => ({ ok: true })
+    });
+    await new Promise(resolve => globalThis.setTimeout(resolve, 0));
+    await settle(800);
+    // Retries with growing pauses across the twenty-second window, then nothing more.
+    const tried = redeemCalls;
+    expect(tried).toBeGreaterThan(3);
+    await settle(800);
+    expect(redeemCalls).toBe(tried);
+    expect(live.sent.filter(message => message.type === 'ack')).toHaveLength(0);
+  });
+
   it('retries a lost pre-destination redeem response and sends that command exactly once', async () => {
     let redeemCalls = 0, sends = 0;
     live = await harness(
