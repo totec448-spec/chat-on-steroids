@@ -75,6 +75,18 @@ var CLF_DOM = (() => {
     for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
     return text(clone);
   };
+  /**
+   * The composer's raw text without app mention chips (#900). A send receipt is compared with the
+   * message ChatGPT renders, which readers take without its chip; capturing the chip made the two
+   * differ and the first question of a mentioned send never opened its turn.
+   */
+  const composerAuthoredText = () => {
+    const box = composer();
+    if (!box?.querySelector?.(APP_MENTION_CHIP) || typeof box.cloneNode !== 'function') return box?.textContent ?? '';
+    const clone = box.cloneNode(true);
+    for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
+    return clone.textContent ?? '';
+  };
 
   function searchUnitRole(node) {
     const key = node?.getAttribute?.('data-chatgpt-search-unit-key') ||
@@ -3046,6 +3058,7 @@ var CLF_DOM = (() => {
     AUTHORED_SELECTOR: '[data-message-author-role="assistant"], .markdown, [data-content-search-unit-key], [data-markdown-text-style="assistant-message"]',
     turnIdOf,
     messageIdOf,
+    composerAuthoredText,
     userPromptText,
     userMessageReaction,
     presentUserPrompts,
