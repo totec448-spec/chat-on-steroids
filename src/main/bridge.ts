@@ -128,6 +128,7 @@ import {
   requestTurnOwnershipCutoff
 } from './session/store.js';
 import { inFlightMcpRequests, runningToolCalls, runningToolProgress, settlingToolCalls } from './mcp/call-context.js';
+import { setLivePreview } from './live-preview.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../shared/handoff.js';
 import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
@@ -846,7 +847,10 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     error: bridgeError,
     port,
     paired: stored !== null && stored !== BROWSER_DISCONNECTED,
-    present: browserPresent(),
+    // Seen for the user: a recent request, or the authenticated wake channel held open. The
+    // extension makes requests only while it has a chat to serve, so a browser with no ChatGPT
+    // tab open went "missing" a minute after start although it was connected all along.
+    present: browserPresent() || browserWakeConnected(),
     lastSeenAt,
     extensionVersion
   };
@@ -1459,6 +1463,8 @@ function conversationId(value: unknown): string | null {
 }
 
 const MAX_ACTIVITY_CALL_ID_CHARS = 200;
+/** One caption line (#942); the page sends at most this much. */
+const MAX_LIVE_PREVIEW_CHARS = 300;
 const MAX_ACTIVITY_DETAIL_TEXT_CHARS = 8_000;
 const BINARY_OMISSION = (chars: number): string => `<binary payload omitted: ${chars} characters>`;
 
@@ -2522,6 +2528,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const id = conversationId(body['conversationId']);
     if (id) {
+      // A closed page shows no running sentence any more.
+      setLivePreview(id, null);
       // Preserve the page's last exact turn verdict before closeConversation removes its live
       // recorder entry. Agent ownership outlives a tab; an open turn is the narrower fact that
       // authorises reopening it.
@@ -2569,6 +2577,25 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
 
   // One disclosure expansion reads only the exact record already hydrated for this current
   // conversation by /activity. Missing/stale/foreign identities deliberately share one answer.
+  if (route === '/live-preview' && req.method === 'POST') {
+    let body: unknown;
+    try {
+      body = await readBody(req);
+    } catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return json(res, 400, { error: 'bad_request' }, origin);
+    const fields = body as Record<string, unknown>;
+    if (Object.keys(fields).some(key => !['conversationId', 'text'].includes(key))) return json(res, 400, { error: 'bad_request' }, origin);
+    const id = conversationId(fields.conversationId);
+    const text = fields.text === null ? null
+      : typeof fields.text === 'string' && fields.text.length > 0 && fields.text.length <= MAX_LIVE_PREVIEW_CHARS ? fields.text : undefined;
+    if (!id || text === undefined) return json(res, 400, { error: 'bad_request' }, origin);
+    setLivePreview(id, text);
+    return json(res, 200, { ok: true }, origin);
+  }
+
   if (route === '/activity/detail' && req.method === 'POST') {
     let body: unknown;
     try {
@@ -2964,6 +2991,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         context: contextView(!workerBlocked && !superseded && automaticCompactionAllowed(summary)),
         // "Follow new output" applies to the ChatGPT page too; the page owns the scrolling.
         followOutput: getConfig().ui.followOutput !== false,
+        mentionCore: getConfig().ui.mentionCore !== false,
         // This chat was opened by the app, so its first user message is not the user's —
         // it is the handoff brief or the worker bootstrap this app typed. The page uses
         // it to fold that message away. Read off the session record rather than remembered
@@ -3701,6 +3729,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       {
         context: contextView(),
         followOutput: getConfig().ui.followOutput !== false,
+        mentionCore: getConfig().ui.mentionCore !== false,
         goal: {
           enabled: getConfig().goal.enabled,
           // The app-wide setting is nobody's own answer, by definition: it is what a chat that
@@ -4844,7 +4873,7 @@ function attachBridgeWake(instance: http.Server): void {
     async candidate => {
       const stored = await getSecret('bridgeToken');
       return !!stored && stored !== BROWSER_DISCONNECTED && safeEqual(candidate, stored);
-    });
+    }, changed);
 }
 
 /** Called inside the serialized config transaction, with its validated latest proposal. */

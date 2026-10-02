@@ -178,7 +178,9 @@ it('reads the real shell composer, messages and tools through existing contracts
   expect(turns[0].messages.map((m: any) => [m.role, m.rawMessageId, m.rawText])).toEqual([['user', USER, 'hello'], ['assistant', ANSWER, 'Answer']]);
   expect(turns[0].calls).toEqual([{ messageId: CALL, tool: 'read', order: 0, answered: false, requestId: null, createTime: null }]);
   expect(JSON.stringify(turns)).not.toContain('NEVER_COPY_TOOL_ARGS');
-  expect(JSON.stringify(turns)).not.toContain('Commentary without a provider');
+  // Id-less commentary is never a message; while its turn runs it is only a caption (#942).
+  expect(JSON.stringify(turns[0].messages)).not.toContain('Commentary without a provider');
+  expect(turns[0].preview).toBe('Commentary without a provider message id');
   expect(f.api.turns().map((t: any) => t.role)).toEqual(['user', 'assistant']);
   expect(f.api.messages().map((m: any) => [m.id, m.role, m.text])).toEqual([[USER, 'user', 'hello'], [ANSWER, 'assistant', 'Answer']]);
   expect(f.api.presentationTurns().map((t: any) => t.role)).toEqual(['user', 'assistant']);
@@ -188,6 +190,27 @@ it.each(['in_progress', 'cancelled', 'complete', 'unknown', undefined])('does no
   const f = fixture(); (f.entry.turn as any).status = status;
   const turn = (await f.ask()).turns[0];
   expect(turn.calls[0].answered).toBe(false); expect(turn.endMessageId).toBeNull();
+});
+it('captions the newest id-less commentary of a running turn, and nothing once it ends (#942)', async () => {
+  // A new chat's first turn: ChatGPT shows the model's sentences but publishes no message for them.
+  const f = fixture();
+  expect((await f.ask()).turns[0].preview).toBe('Commentary without a provider message id');
+  f.entry.turn.items[1].items.push({ type: 'reasoning', presentation: 'preamble', content: 'Now   reading\n the file.' });
+  expect((await f.ask()).turns[0].preview).toBe('Now reading the file.');
+  // A transient item and a step title are not the model's sentence.
+  f.entry.turn.items[1].items.push({ type: 'reasoning', presentation: 'preamble', content: 'Draft', isTransient: true },
+    { type: 'reasoning', presentation: 'thought', content: 'Reading a file' });
+  expect((await f.ask()).turns[0].preview).toBe('Now reading the file.');
+  f.entry.turn.items[1].items.push({ type: 'reasoning', presentation: 'preamble', content: 'x'.repeat(400) });
+  expect((await f.ask()).turns[0].preview).toBe('x'.repeat(300));
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  expect((await f.ask()).turns[0].preview).toBeUndefined();
+});
+it('gives no caption for commentary whose own message is readable, which is recorded instead (#942)', async () => {
+  const f = fixture(); liveShellMapping(f, true);
+  const turn = (await f.ask()).turns[0];
+  expect(turn.preview).toBeUndefined();
+  expect(turn.messages.map((m: any) => m.rawText)).toContain('I will inspect the project.');
 });
 it('requires the final item and successful turn, while retaining exact messages on reload', async () => {
   const f = fixture(); f.entry.turn.items[2].completed = true;
@@ -926,6 +949,40 @@ it('delivers three successive shell inputs with exact receipts and completed ans
   expect(r.events().filter((e: any) => e.kind === 'turn_end' && e.outcome === 'completed')).toHaveLength(3);
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 }, 15000);
+it('tells the app the running turn\'s newest unpublished sentence and clears it when the turn ends (#942)', async () => {
+  const f = fixture(), edit = editing(f);
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  let offered: any, latest: ReturnType<typeof addExchange>;
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); latest = addExchange(f, 1, edit.serialize()); edit.box.replaceChildren();
+  });
+  const r = await recorder(f, { desktop_input: m => ({ ok: true, data: m.authorize || m.ack || m.fail ? { ok: true } : { input: offered } }) });
+  const previews = () => r.sent.filter(m => m.type === 'live_preview').map(m => [m.conversationId, m.text]);
+  try {
+    offered = { id: '88888888-1111-4111-8111-000000000001', owner: 'owner-1', text: 'First request',
+      model: 'gpt-5-6-thinking', reasoningEffort: 'high', purpose: 'user', images: [] };
+    const pending = r.runtime({ type: 'clf-desktop-input', id: offered.id, conversationId: THREAD });
+    await vi.waitFor(() => expect(latest).toBeTruthy(), { timeout: 5000 });
+    await r.hook.refreshFiber(); r.hook.observe();
+    expect(await pending).toEqual({ ok: true });
+    expect(previews()).toEqual([]);
+    // ChatGPT shows a sentence it has not published as a message.
+    latest!.entry.turn.items.splice(1, 0, { type: 'chatgpt-reasoning-group', items: [
+      { type: 'reasoning', presentation: 'preamble', content: 'First command printed one.' }] } as any);
+    await r.hook.refreshFiber(); await r.hook.refreshFiber();
+    expect(previews()).toEqual([[THREAD, 'First command printed one.']]);
+    // The answer completes (finish() would complete the group now sitting at items[1]).
+    const answer = latest!.entry.turn.items.find((item: any) => item.type === 'assistant-message')!;
+    latest!.entry.turn.status = 'complete'; answer.completed = true; answer.content = 'Finished';
+    f.doc.querySelectorAll('[data-turn-key]')[1]!.querySelector('[data-markdown-text-style]')!.textContent = 'Finished';
+    await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+    await vi.waitFor(() => expect(r.events()).toContainEqual(expect.objectContaining({ kind: 'turn_end', outcome: 'completed' })), { timeout: 3000 });
+    expect(previews()).toEqual([[THREAD, 'First command printed one.'], [THREAD, null]]);
+    // It was a caption only: nothing of it reached the chat's history.
+    expect(JSON.stringify(r.events())).not.toContain('First command printed one.');
+  } finally { (f.win as any).__CLF_CONTENT_RECORDER__.stop(); }
+}, 15000);
+
 it('keeps one lifecycle when the shell unmounts the question while its answer stays (#910)', async () => {
   // #900 showed ChatGPT dropping an exchange's user slot while the answer stayed mounted. turns()
   // then skipped the whole exchange, so its final and turn_end never arrived and the page stayed

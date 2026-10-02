@@ -3421,6 +3421,9 @@ let runningToolsFor: string | null = null;
 let runningToolsAt = 0;
 let runningToolsEvents = -1;
 let runningToolsRequest = 0;
+/** The newest sentence the running turn shows that ChatGPT has not published yet (#942). */
+let livePreviewText: string | null = null;
+let livePreviewFor: string | null = null;
 /**
  * Prose speaks for itself only while it is being written. Interim paragraphs stay "streaming" once
  * finished, so what counts is whether its text changed in the last moments, not its state.
@@ -3454,6 +3457,10 @@ function liveActivity(): { text: string; icon: string; working: boolean; since?:
   const thinking = { text: t('Thinking'), icon: '', working: false };
   // A message not yet recorded opens a turn that has done nothing visible so far.
   if ($('inputQueue').querySelector('.pending-message')) return thinking;
+  // A new chat's first turn: ChatGPT shows the model's sentences long before it publishes them as
+  // messages, so the newest one stands here until it can be recorded in its place.
+  const preview = livePreviewFor === selectedId ? livePreviewText : null;
+  if (preview) return { text: preview, icon: '', working: false };
   let asked = Number.NEGATIVE_INFINITY;
   for (const event of events) if (event.kind === 'user_message') asked = Math.max(asked, event.time);
   let newest: SessionEvent | undefined;
@@ -3496,7 +3503,7 @@ function paintTurnNow(): void {
  */
 function pollRunningTools(): void {
   const summary = sessions.find(entry => entry.id === selectedId);
-  if (!summary || !turnStatusLine.classList.contains('is-working')) { runningTools = []; return; }
+  if (!summary || !turnStatusLine.classList.contains('is-working')) { runningTools = []; livePreviewText = null; return; }
   if (Date.now() - runningToolsAt < 900 && events.length === runningToolsEvents) return;
   runningToolsAt = Date.now();
   runningToolsEvents = events.length;
@@ -3507,6 +3514,12 @@ function pollRunningTools(): void {
     if (request !== runningToolsRequest || session !== selectedId) return;
     runningTools = reply.ok ? reply.data : [];
     runningToolsFor = session;
+    paintTurnNow();
+  });
+  void api.livePreview(conversationIds).then(reply => {
+    if (request !== runningToolsRequest || session !== selectedId) return;
+    livePreviewText = reply.ok ? reply.data : null;
+    livePreviewFor = session;
     paintTurnNow();
   });
 }
