@@ -6,6 +6,8 @@ const catalog = vi.hoisted(() => ({ getChatModels: vi.fn() }));
 vi.mock('../src/main/chat-models.js', () => catalog);
 const durable = vi.hoisted(() => ({ readDurable: vi.fn(), writeDurableSoon: vi.fn() }));
 vi.mock('../src/main/durable.js', () => durable);
+const logger = vi.hoisted(() => ({ logInfo: vi.fn() }));
+vi.mock('../src/main/logger.js', async (importOriginal) => ({ ...(await importOriginal<object>()), logInfo: logger.logInfo }));
 let usage: typeof import('../src/main/session/usage.js');
 let now: number;
 const limit = (overrides: Record<string, unknown> = {}) => ({ model: 'Shared ChatGPT usage', scope: 'shared', remaining: null, remainingPercent: 40, resetAt: null, windowSeconds: 18000, ...overrides });
@@ -20,6 +22,16 @@ beforeEach(async () => {
   usage = await import('../src/main/session/usage.js');
 });
 afterEach(() => vi.restoreAllMocks());
+it('logs an overview pass only when it rebuilt something, not each refresh of the open page', async () => {
+  store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 1, estimatedTokens: 0 }]);
+  logger.logInfo.mockReset();
+  await usage.usageOverview();
+  expect(logger.logInfo).toHaveBeenCalledTimes(1);
+  expect(logger.logInfo.mock.calls[0]![0]).toContain('rebuilt=1');
+  await usage.usageOverview();
+  await usage.usageOverview();
+  expect(logger.logInfo).toHaveBeenCalledTimes(1);
+});
 describe('verified native message counts', () => {
   const message = (messageId: string | undefined, model: string | undefined, time: number, extra = {}) =>
     ({ kind: 'user_message', messageId, model, time, message: { text: '' }, ...extra });
