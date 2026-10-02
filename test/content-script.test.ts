@@ -1069,6 +1069,38 @@ describe('desktop input delivery and helper ownership', () => {
   });
 
 
+  it.each(['alone', 'second answer'] as const)('completes a temporary planner whose page drops the user message after answering (%s)', async shape => {
+    // 2026-10-02, live: a Goal helper's prompt was confirmed, ChatGPT answered, and then redrew the
+    // only exchange without the user message, on the page and in its page model. The decision
+    // waited for that user message and timed out with the answer on screen. The helper chat is
+    // opened for this one decision, so its single completed answer is the decision's answer.
+    const canonical = '{"action":"continue","reply":"answer without its user row"}';
+    const routed = 'f0f00021-2222-4222-8222-222222222222';
+    live = await harness(`https://chatgpt.com/?temporary-chat=true&cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.response ? { ok: true } : { input: claimed({ purpose: 'decision', lifetime: 'temporary-planner' }) } })
+    });
+    const toggle = live.document.createElement('button'); toggle.setAttribute('aria-label', 'Temporary chat'); toggle.innerHTML = '<svg><use href="/sprite.svg#chat-temp-checked"></use></svg>'; Object.defineProperty(toggle, 'getClientRects', { value: () => [{}] }); live.document.body.append(toggle);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'dropped-user', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    live.dom.reconfigure({ url: `https://chatgpt.com/c/${routed}?temporary-chat=true` });
+    live.hook.observe(); await settle();
+    // The answer arrives, and the redraw drops the user message entirely.
+    live.document.querySelector('[data-turn-id="dropped-user"]')!.remove();
+    if (shape === 'second answer') prose(live.document, assistantTurn(live.document, 'other-final', []), 'other-message', 'Something else');
+    const section = assistantTurn(live.document, 'dropped-final', []);
+    prose(live.document, section, 'dropped-message', canonical);
+    live.hook.noteGoalTurn((live.window as any).CLF_DOM.turns().find((item: any) => item.id === 'dropped-final'), 'completed', 'dropped-final');
+    await bindFiberTurns([{ section, turn: { turnId: 'dropped-final', conversationId: routed, endMessageId: 'dropped-message',
+      messages: [{ role: 'assistant', messageId: 'dropped-message', rawMessageId: 'dropped-message', rawText: canonical }] } }]);
+    await settle();
+    expect(live.sent.filter(message => message.response)).toEqual(shape === 'alone'
+      ? [expect.objectContaining({ response: canonical })]
+      : []);
+  });
+
   it('completes a temporary planner when its accepted user row keeps the previous Fiber scan stamp', async () => {
     const canonical = '{"action":"continue","reply":"cross-scan temporary result"}';
     live = await harness(`https://chatgpt.com/?temporary-chat=true&cos-input=${inputId}`, {
