@@ -1145,6 +1145,36 @@ describe('desktop input delivery and helper ownership', () => {
   });
 
 
+  it('lets a helper tab whose decision is gone, or whose script was re-injected, close itself and stay unrecorded', async () => {
+    // 2026-10-02, live: two Goal helpers timed out, the extension then updated and re-injected its
+    // script, and the tabs refused every close request for over an hour while the new script
+    // recorded them as ordinary chats. The tab now remembers which helper it served.
+    const routed = 'f0f00031-2222-4222-8222-222222222222';
+    live = await harness(`https://chatgpt.com/c/${routed}?temporary-chat=true`, {}, (_document, dom) => {
+      dom.window.sessionStorage.setItem('clf-temporary-planner-v1', JSON.stringify({ id: inputId, owner: 'input-owner' }));
+    });
+    assistantTurn(live.document, 'left-final', []);
+    prose(live.document, live.document.querySelector('[data-turn-id="left-final"]') as HTMLElement, 'left-message', '{"action":"stop","reply":"NO_REPLY"}');
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(await live.runtimeMessage({ type: 'clf-close-temporary-planner', id: inputId, owner: 'input-owner' })).toEqual({ safe: true });
+    expect(await live.runtimeMessage({ type: 'clf-close-temporary-planner', id: 'another-input', owner: 'input-owner' })).toEqual({ safe: false });
+    expect(await live.runtimeMessage({ type: 'clf-close-temporary-planner', id: inputId, owner: 'someone-else' })).toEqual({ safe: false });
+    expect(live.sent.filter(message => message.type === 'events')).toEqual([]);
+  });
+
+  it('remembers the helper it was opened for across a script replacement', async () => {
+    live = await harness(`https://chatgpt.com/?temporary-chat=true&cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.response ? { ok: true } : { input: claimed({ purpose: 'decision', lifetime: 'temporary-planner' }) } })
+    });
+    const toggle = live.document.createElement('button'); toggle.setAttribute('aria-label', 'Temporary chat'); toggle.innerHTML = '<svg><use href="/sprite.svg#chat-temp-checked"></use></svg>'; Object.defineProperty(toggle, 'getClientRects', { value: () => [{}] }); live.document.body.append(toggle);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'remembered-user', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(JSON.parse(live.window.sessionStorage.getItem('clf-temporary-planner-v1')!)).toEqual({ id: inputId, owner: 'input-owner' });
+  });
+
   it.each(['alone', 'second answer'] as const)('completes a temporary planner whose page drops the user message after answering (%s)', async shape => {
     // 2026-10-02, live: a Goal helper's prompt was confirmed, ChatGPT answered, and then redrew the
     // only exchange without the user message, on the page and in its page model. The decision
@@ -1596,6 +1626,32 @@ describe('desktop input delivery and helper ownership', () => {
     adapter.send = (options: { mention?: unknown }) => { mentions.push(options.mention ?? null); return send({ ...options, mention: null }); };
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
     expect(mentions).toEqual([expected]);
+  });
+
+  it.each([
+    ['the user\'s own prompt', {}, null],
+    ['Goal\'s helper', { purpose: 'decision', lifetime: 'temporary-planner' }, null]
+  ] as const)('follows the mention setting when it is off: %s (#952)', async (_case, extra, expected) => {
+    // Off is for accounts where ChatGPT reads the mention as "use this app now" and opens a plain
+    // question with a probe call. Continue keeps it, Goal's helper never gets it.
+    const core = { path: 'app://asdk_app_6aa5b6651c3c81919f03cb5dc38bf019', name: 'Chat On Steroids Core' };
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: null, userAnchors: [], mentionCore: false } }),
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.response ? { ok: true } : { input: claimed({ ...extra }) } })
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'mention-setting-user', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    await live.hook.pullActivity(); await settle();
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window, origin: 'https://chatgpt.com', data: { type: 'cos-core-mention', ...core } }));
+    const adapter = (live.window as any).CLF_DOM;
+    const send = adapter.send;
+    const mentions: unknown[] = [];
+    adapter.send = (options: { mention?: unknown }) => { mentions.push(options.mention ? 'core' : null); return send({ ...options, mention: null }); };
+    await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA });
+    expect(mentions).toEqual('purpose' in extra ? mentions.map(() => null) : [expected]);
   });
 
   it.each([false, true])('retains an unmounted native receipt only in its sending lifetime (navigate: %s)', async navigate => {
@@ -16662,6 +16718,29 @@ describe('the context meter and automatic compaction', () => {
     await settle(400);
     // Declined means untouched: no source attempt from this document.
     if (state === 'broken') expect(ticketCalls).toBe(before);
+  });
+
+  it('declines the next pickup when the stream is still broken behind Stop a minute later (#825)', async () => {
+    // 2026-10-02, field log: Stop stayed beside "Connection interrupted" for over half an hour
+    // while the model kept working on the server. Each pickup was accepted and nothing was sent
+    // until the chat reached 100%. The first pickup still trusts the page; a later one reloads.
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true, threshold: 200_000 }), automaticTicket('not-attempted')),
+      // The page's own attempt stays open, waiting for results the broken stream never shows.
+      compact: (message: Record<string, unknown>) => message.ticket ? new Promise(() => {}) : { ok: false }
+    });
+    live.hook.injectControl();
+    void live.hook.pullActivity(); await settle();
+    alertBanner(live.document, 'Connection interrupted. Waiting for the complete answer');
+    startGenerating(live.document, { send: false });
+    live.hook.observe(); await settle();
+    const pickup = () => live!.runtimeMessage({ type: 'clf-resume-compaction', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    expect(await pickup()).toEqual({ accepted: true });
+    await settle(400);
+    live.advance(30_000);
+    expect(await pickup()).toEqual({ accepted: true });
+    live.advance(31_000);
+    expect(await pickup()).toEqual({ accepted: false });
   });
 
   it('accepts a compaction repair poke without starting a second source attempt while one is busy', async () => {

@@ -8,7 +8,7 @@ const source = readFileSync(path.join(root, 'i18n.js'), 'utf8');
 const catalog = (folder: string) => JSON.parse(readFileSync(path.join(root, '_locales', folder, 'messages.json'), 'utf8'));
 
 /** i18n.js in an extension page whose Chrome is German, paired with an app set to `appLanguage`. */
-async function load(appLanguage: string | undefined, protocol = 'chrome-extension:') {
+async function load(appLanguage: string | undefined, protocol = 'chrome-extension:', missing: string[] = []) {
   const german = catalog('de');
   const listeners: Array<(changes: Record<string, { newValue: unknown }>, area: string) => void> = [];
   const stored: Record<string, unknown> = appLanguage ? { appLanguage } : {};
@@ -28,6 +28,7 @@ async function load(appLanguage: string | undefined, protocol = 'chrome-extensio
     }
   };
   const fetch = async (file: string) => {
+    if (missing.some(folder => file.includes(`_locales/${folder}/`))) return { ok: false, json: async () => null };
     try { return { ok: true, json: async () => JSON.parse(readFileSync(path.join(root, file), 'utf8')) }; } catch { return { ok: false, json: async () => null }; }
   };
   const context: Record<string, unknown> = { chrome, fetch, location: { protocol }, CustomEvent: class { constructor(public type: string) {} } };
@@ -56,7 +57,9 @@ it('keeps Chrome\'s language until the app has named one, and follows a later ch
 });
 
 it('reads a language the extension has no catalog for yet as English, not as Chrome\'s', async () => {
-  const page = await load('ko');
+  // Every shipped language has a catalog today, so the missing one is simulated: a language the app
+  // adds before the extension has its translation.
+  const page = await load('ko', 'chrome-extension:', ['ko']);
   expect(page.api.t('content_app_did_not_answer', 'fallback')).toBe('The app did not answer.');
 });
 

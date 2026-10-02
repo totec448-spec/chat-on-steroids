@@ -897,9 +897,18 @@
     const path = typeof event.data.path === 'string' && /^app:\/\/asdk_app_[A-Za-z0-9_-]{1,160}$/.test(event.data.path) ? event.data.path : null;
     coreMention = path && event.data.name === 'Chat On Steroids Core' ? { path, name: event.data.name } : null;
   });
+  /**
+   * Whether the user's own prompts carry the Core mention (the app's ui.mentionCore, on unless off).
+   *
+   * Some accounts attach an app to a chat only when a message mentions it (#861), so the mention
+   * stays on by default. On others ChatGPT reads it as "use this app now" and opens a plain
+   * question with a probe call (#952); those users can switch it off. Workers, Goal, Loop and
+   * Continue keep it regardless, and Goal's helper never gets it: it must not use tools.
+   */
+  let mentionCore = true;
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
-                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention: coreMention, explain,
+                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = coreMention) {
+    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -2358,6 +2367,7 @@
     // other named turn by accident. Modern generations always mint/adopt an id; this is the
     // fail-closed guard for stale/legacy/reinjected state.
     const endedTurnId = turnId;
+    syncLivePreview(livePreviewSent.conversationId, null);
     streamGone = null;
     resumedOrder = 0;
     generating = false;
@@ -3671,8 +3681,10 @@
       codeIds.add(messageId);
       codeModeCalls.push({ messageId, tool: 'functions.exec', requestId: cap(entry.requestId, 100), answered: entry.answered === true });
     }
+    // Presentation only (#942): a caption line for a running turn, never a recorded message.
+    const preview = !endMessageId && typeof raw.preview === 'string' ? cap(raw.preview.trim(), 300) : null;
     if (codeModeCalls.length === 0 && kept.length === 0 && requests.length === 0 && keptMessages.length === 0 && keptActivities.length === 0 &&
-        keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId) {
+        keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId && !preview) {
       return null;
     }
     return {
@@ -3688,7 +3700,8 @@
       messages: keptMessages,
       activities: keptActivities,
       thoughtNotifications: keptThoughtNotifications,
-      images: keptImages
+      images: keptImages,
+      preview
     };
   }
 
@@ -4089,6 +4102,28 @@
     return fiberRepairing ? await fiberRepairing : null;
   }
 
+  /** The caption last sent for the running turn (#942), so an unchanged scan sends nothing. */
+  let livePreviewSent = { conversationId: null, text: null };
+  /**
+   * Tells the app the newest sentence ChatGPT shows for a running turn whose message it has not
+   * published yet. ChatGPT keeps a new chat's first-turn narration out of its page model until it
+   * fetches history again, so without this the app showed only the calls until the final answer.
+   * The app holds it in memory as a caption; the sentence is recorded the ordinary way, with its
+   * own message id, once ChatGPT publishes it.
+   */
+  function syncLivePreview(forConversation, text) {
+    const id = typeof forConversation === 'string' && /^[0-9a-f-]{8,64}$/i.test(forConversation) ? forConversation : null;
+    const next = id && typeof text === 'string' && text ? text : null;
+    const previous = livePreviewSent;
+    if (previous.conversationId === id && previous.text === next) return;
+    livePreviewSent = { conversationId: id, text: next };
+    // A route change must not leave the old chat's caption behind.
+    if (previous.text && previous.conversationId && previous.conversationId !== id) {
+      void ask({ type: 'live_preview', conversationId: previous.conversationId, text: null });
+    }
+    if (id && (next || previous.conversationId === id)) void ask({ type: 'live_preview', conversationId: id, text: next });
+  }
+
   async function refreshFiber(settled = null, presentationOnly = false) {
     // A bound chat can briefly lose its /c/<id> route during React/router churn, and a real
     // navigation to a fresh composer has the exact same pathname until ChatGPT assigns the
@@ -4291,6 +4326,11 @@
     }
     const activeTurnIndex =
       ownedPageTurn && activeLocalTurnId ? answer.turns.indexOf(ownedPageTurn) : -1;
+    // #942: a caption for the generation this document owns right now, never for a settled scan.
+    if (!presentationOnly && !settled) {
+      syncLivePreview(askedConversation || concreteConversation(CLF_DOM.conversationId()),
+        activeTurnIndex >= 0 && generating ? ownedPageTurn.preview : null);
+    }
     if (askedConversation) {
       // Ownership evidence is no longer gated on `activeTurnIndex`.
       //
@@ -6477,6 +6517,7 @@
       if (!alive || CLF_DOM.conversationId() || !reply || reply.ok !== true || !reply.data) return;
       context = readContext(reply.data.context) || context;
       if (typeof reply.data.followOutput === 'boolean') followOutput = reply.data.followOutput;
+      if (typeof reply.data.mentionCore === 'boolean') mentionCore = reply.data.mentionCore;
       if (reply.data.goal && typeof reply.data.goal === 'object') {
         goalConfig = {
           ...reply.data.goal,
@@ -6694,6 +6735,7 @@
       tokens = Number.isFinite(Number(data.tokens)) ? Number(data.tokens) : 0;
       context = readContext(data.context);
       if (typeof data.followOutput === 'boolean') followOutput = data.followOutput;
+      if (typeof data.mentionCore === 'boolean') mentionCore = data.mentionCore;
       // The goal loop's settings and, while one is running, the draft itself: its stage, the
       // text OpenRouter has streamed so far, and — once it is `ready` — the message to type.
       // Nothing is typed here; maybeSendGoalReply below owns that, after the pull has
@@ -9290,6 +9332,17 @@
     });
   }
 
+  /**
+   * When a pickup first found the source answer broken while ChatGPT still showed Stop.
+   *
+   * ChatGPT can come back from "Connection interrupted. Waiting for the complete answer" on its
+   * own while Stop stays up, so the first such pickup still trusts the page. It did not in the
+   * field: Stop stayed beside that card for over half an hour while the model kept working on the
+   * server, the page never saw the results it waited for, and every pickup was "resumed" until
+   * the chat hit 100% (#825, 2026-10-02). A later pickup that finds it still broken declines.
+   */
+  const BROKEN_STREAM_PICKUP_MS = 60_000;
+  let brokenStreamSince = 0;
   function resumePendingCompactionFromRepair(expectedConversationId) {
     const source = job && job.stage === 'handoff-pending' ? job.sourceSend : null;
     if (!alive || !expectedConversationId || conversationId !== expectedConversationId ||
@@ -9299,7 +9352,11 @@
     // answer") never settles in this document, so the ticket cannot be sent from it. Declining
     // hands the pickup to its reload. Accepting kept a ticket unsent behind that card for over
     // half an hour (2026-10-02), five pickups at a time, each one "resumed" and none reloaded.
-    if (!CLF_DOM.generating() && currentAssistantError()) return false;
+    if (currentAssistantError()) {
+      if (!CLF_DOM.generating()) return false;
+      if (!brokenStreamSince) brokenStreamSince = Date.now();
+      else if (Date.now() - brokenStreamSince >= BROKEN_STREAM_PICKUP_MS) return false;
+    } else brokenStreamSince = 0;
     // The browser recovery claim proves only that this exact document may be nudged. It does not
     // own Stop or Send: those remain behind startCompact's source identity, settle and durable WAL
     // checkpoints. If an attempt is already alive, merely acknowledge the healthy document so the
@@ -11827,6 +11884,28 @@
   window.postMessage({ type: 'cos-usage-request' }, location.origin);
   let desktopDecision = null;
   let desktopDecisionSession = null;
+  /**
+   * The helper input this tab was opened to answer, kept for the tab's lifetime.
+   *
+   * The decision itself lives in this script's memory, which a failed decision clears and an
+   * extension update or reload replaces. Without it the tab no longer knew it was a helper: it
+   * refused every close request, stayed open for good, and the re-injected script recorded it as
+   * an ordinary chat in the app (2026-10-02, live). sessionStorage stays with this one tab.
+   */
+  const SERVED_PLANNER_STORAGE = 'clf-temporary-planner-v1';
+  let servedPlanner = null;
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(SERVED_PLANNER_STORAGE) || 'null');
+    if (stored && typeof stored.id === 'string' && typeof stored.owner === 'string' &&
+        stored.id && stored.id.length <= 200 && stored.owner.length <= 200) servedPlanner = { id: stored.id, owner: stored.owner };
+  } catch {
+    // Unreadable storage loses only this hint; the live decision still identifies the helper.
+  }
+  function rememberServedPlanner(id, owner) {
+    if (typeof id !== 'string' || !id || typeof owner !== 'string') return;
+    servedPlanner = { id, owner };
+    try { sessionStorage.setItem(SERVED_PLANNER_STORAGE, JSON.stringify(servedPlanner)); } catch { /* Memory still holds it. */ }
+  }
   let desktopInputBusy = false;
   /**
    * How long an app-owned Send waits for its exact user row after the click. Without a bound,
@@ -11843,7 +11922,8 @@
   function temporaryPlannerPage() {
     if (!alive || !window.document) return false;
     return new URL(location.href).searchParams.get('temporary-chat') === 'true' &&
-      (location.href.includes('cos-input=') || desktopDecisionSession?.temporary === true || desktopDecision?.temporary === true);
+      (location.href.includes('cos-input=') || desktopDecisionSession?.temporary === true || desktopDecision?.temporary === true ||
+        servedPlanner !== null);
   }
   function desktopDecisionChat() {
     return Boolean((desktopDecisionSession && desktopDecisionSession.conversationId === CLF_DOM.conversationId()) || desktopDecision?.onTarget());
@@ -12293,7 +12373,8 @@
         // may replace it before this async operation resumes; do not rediscover it.
         receipt = { conversation, user: { id: user.id } };
         return true;
-      }, matchesSubmittedBootstrap, DESKTOP_RECEIPT_MS, noteWithdraw);
+      }, matchesSubmittedBootstrap, DESKTOP_RECEIPT_MS, noteWithdraw,
+      input.purpose === 'decision' ? null : input.recovery || agent || mentionCore ? coreMention : null);
       // #744: one retry when the editor was replaced before anything asked to send it.
       if (!(await nativeSend()) &&
           !(!authorizing && !sendAttempted && !receipt && !draft.current() && draftCurrent() && await nativeSend())) {
@@ -12329,6 +12410,7 @@
           return route === boundConversation;
         };
         desktopDecisionSession = { conversationId: deliveredConversation, temporary };
+        if (temporary) rememberServedPlanner(message.id, input.owner);
         completeDesktopDecision();
       }
       // The claim remains inert if this ACK is lost; no duplicate send after a reload.
@@ -12768,15 +12850,17 @@
       }
       if (message.type === 'clf-close-temporary-planner') {
         const users = CLF_DOM.messages().filter(row => row.role === 'user');
-        const exact = desktopDecision?.id === message.id && desktopDecision?.owner === message.owner;
+        const exact = (desktopDecision?.id === message.id && desktopDecision?.owner === message.owner) ||
+          (servedPlanner?.id === message.id && servedPlanner?.owner === message.owner);
         // ChatGPT moves a sent temporary chat to /c/<id>?temporary-chat=true, dropping the
         // cos-input marker; the exact decision this page still holds proves the same helper.
-        const routedHelper = exact && desktopDecision.temporary === true && /^\/c\/[0-9a-f-]{36}$/i.test(location.pathname) &&
+        const routedHelper = exact && (desktopDecision?.temporary === true || servedPlanner?.id === message.id) && /^\/c\/[0-9a-f-]{36}$/i.test(location.pathname) &&
           new URL(location.href).searchParams.get('temporary-chat') === 'true';
         sendResponse({ safe: temporaryPlannerPage() && (location.href.includes(`cos-input=${message.id}`) || routedHelper) &&
           !generating && !CLF_DOM.generating() && pendingTools === 0 && !CLF_DOM.hasComposerAttachments() &&
           !(CLF_DOM.composer()?.textContent || '').trim() &&
-          (users.length === 0 || (exact && users.length === 1 && matchesSubmittedUser(users[0], desktopDecision.text))) });
+          // A remembered helper whose decision is gone may still show its own one prompt.
+          (users.length === 0 || (exact && users.length === 1 && (desktopDecision ? matchesSubmittedUser(users[0], desktopDecision.text) : !!servedPlanner))) });
         return false;
       }
       if (message.type === 'clf-render-stream') {
