@@ -71,7 +71,7 @@ import {
 import { runShutdownSequence } from './shutdown.js';
 import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
 import { applyStagedUpdate, startUpdateChecks } from './update.js';
-import { UI_BASE_ZOOM, windowLayoutForDisplays, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
+import { UI_BASE_ZOOM, windowLayoutForDisplays, windowPlacementWasMaximized, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
 import {
   applyLoginStartup,
@@ -119,6 +119,7 @@ function createWindow(): void {
     screen.getAllDisplays().map(display => display.workArea),
     savedWindowBounds
   );
+  const restoreMaximized = windowPlacementWasMaximized(savedWindowBounds);
   const icon = browserWindowIconPath(process.platform, app.isPackaged, process.resourcesPath);
   window = new BrowserWindow({
     ...layout,
@@ -163,15 +164,16 @@ function createWindow(): void {
     // A renderer can finish loading after Cmd+Q has already entered bounded teardown. Never let
     // that late native event make the app visible again while `will-quit` is draining.
     if (!quitting) {
-      // Fresh installs retain the existing maximized first presentation. Once normal bounds were
-      // observed and restored, keep that user-sized geometry instead of maximizing over it.
-      if (!restored && !window?.isFullScreen()) window?.maximize();
+      // Fresh installs retain the existing maximized first presentation. A saved normal window
+      // stays normal; a window last used maximized restores that presentation over its saved
+      // normal rectangle so un-maximizing returns to the same user-sized geometry.
+      if ((!restored || restoreMaximized) && !window?.isFullScreen()) window?.maximize();
       showWindow();
       // Start observing only after initial native presentation has settled. BrowserWindow
       // construction/maximization can itself emit geometry events; those are not user choices.
-      trackNormalWindowBounds(owner, (bounds) => {
-        savedWindowBounds = bounds;
-        writeDurableSoon(WINDOW_BOUNDS_STATE, bounds);
+      trackNormalWindowBounds(owner, (placement) => {
+        savedWindowBounds = placement;
+        writeDurableSoon(WINDOW_BOUNDS_STATE, placement);
       });
     }
   });
