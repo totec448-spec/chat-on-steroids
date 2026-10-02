@@ -1680,7 +1680,6 @@ function citationPill(pill: CitationPill): HTMLElement {
   if (total > 1) link.append(el('span', 'citation-pill-more', `+${total - 1}`));
   const card = el('span', 'citation-card');
   card.hidden = true;
-  card.setAttribute('role', 'tooltip');
   // Built once: paging rewrites only the words, so the arrow just clicked keeps focus and stays
   // under the pointer. Rebuilding the card removed the focused button and closed the card.
   const site = el('span', 'citation-card-site');

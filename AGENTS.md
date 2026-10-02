@@ -3013,6 +3013,17 @@ strand a preview. Cold reads repair legacy context previews from canonical autho
 Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text. Provider
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
+An assistant message may carry `references`: the sources behind its inline
+`:chatgpt-content-reference{index="N"}` citations. `extension/fiber.js` `citedSources` reads
+them from each citation pill's own props (the list its hover card pages through, plus the reply
+and the reference's position in that reply's `content_references`, which is `N`); the page
+model's message metadata does not hold them. They are titles, http(s) links, source names,
+publication dates and snippets only, bounded per reference and by one budget per reply
+(`MAX_REFERENCES_CHARS`), validated in the extension's isolated world and again by
+`shared/session.ts` `messageReferences` in the bridge, and kept across sparse re-observations.
+The renderer draws the pill and its source card from them by index. A reply recorded without
+them takes the pill from the captured rendering only when the prose before it matches; an
+unproven directive is dropped, never shown raw and never given a guessed destination.
 Tool result rendering preserves structured text/image/resource distinctions within bounds.
 App-owned external/local links cross their validated main-process route.
 
