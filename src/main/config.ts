@@ -314,6 +314,7 @@ const configSchema = z.object({
     playfulStatus: z.boolean().optional(),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
     followOutput: z.boolean().optional().default(true),
+    mentionCore: z.boolean().optional().default(true),
     language: z.enum(UI_LANGUAGES).optional(),
     browserPreferences: z.object({ overwrite: z.boolean(), durations: z.boolean() }).strict().optional(),
     finishTool: z.boolean().optional(),
@@ -525,7 +526,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     readOnly: false,
     commandAllowlist: { ...DEFAULT_COMMAND_ALLOWLIST, rules: [] },
     tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: false, backgroundChats: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true },
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: false, backgroundChats: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true },
     sessions: { ...DEFAULT_SESSIONS },
     compaction: { ...DEFAULT_COMPACTION },
     multiAgent: { ...FIRST_LAUNCH_MULTI_AGENT },

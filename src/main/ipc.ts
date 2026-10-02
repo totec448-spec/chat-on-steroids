@@ -177,6 +177,7 @@ const settingsPatch = z.object({
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     followOutput: z.boolean().optional(),
+    mentionCore: z.boolean().optional(),
     language: z.enum(UI_LANGUAGES).optional(),
     browserPreferences: z.object({ overwrite: z.boolean(), durations: z.boolean() }).strict().optional(),
     finishTool: z.boolean().optional(),
@@ -330,6 +331,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
+      mentionCore: pick(current.ui.mentionCore, base.ui.mentionCore, wanted.ui.mentionCore),
       // Not part of the settings form: reported by the window and the extension, carried through.
       language: current.ui.language,
       browserPreferences: current.ui.browserPreferences,
