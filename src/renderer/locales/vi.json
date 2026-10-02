@@ -1761,5 +1761,6 @@
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Trình duyệt không nhận yêu cầu sửa lỗi của cuộc trò chuyện này nên ứng dụng đã ngừng thử lại. Mở lại tab để tiếp tục khôi phục.",
   "Healthy": "Bình thường",
   "Degraded": "Suy giảm",
-  "Unknown": "Không xác định"
+  "Unknown": "Không xác định",
+  "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Theo dõi nội dung mới: luôn ở cuối cuộc trò chuyện khi câu trả lời tiếp tục được tạo, cả tại đây và trên ChatGPT. Cuộn lên để tạm dừng."
 }
