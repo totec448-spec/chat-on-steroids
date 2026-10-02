@@ -2163,7 +2163,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (repaired) {
       await confirmRepair(repaired.slice(0, 64), action);
     } else if (repairFailed) {
-      await failRepairAttempt(repairFailed.slice(0, 64), action);
+      await failRepairAttempt(repairFailed.slice(0, 64), action, url.searchParams.get('why'));
     }
     const repairHeld = url.searchParams.get('repairHeld');
     if (repairHeld) noteRepairHeld(repairHeld.slice(0, 64), url.searchParams.get('why'));
@@ -6756,6 +6756,11 @@ interface Repair {
   progressId: string;
   /** Durable first-snapshot anchor plus the newest text, used to avoid duplicate snapshots. */
   progress?: { sessionId: string; seq: number; time: number; text: string; turnId: string | null };
+  /**
+   * The page last found ChatGPT answering again, so it kept the reload for a later pass. The next
+   * handouts then do not announce a reload that is not going to happen while the answer runs.
+   */
+  awaitingStream?: boolean;
 }
 
 /**
@@ -8623,7 +8628,7 @@ async function takePendingRepairs(
     } else {
       repair.state = 'handed';
       repair.token = randomBytes(9).toString('base64url');
-      await updateRepairProgress(conversationId, repair, `Trying to reload chat to ${repairPurpose(repair).to}…`);
+      if (!repair.awaitingStream) await updateRepairProgress(conversationId, repair, `Trying to reload chat to ${repairPurpose(repair).to}…`);
     }
     // A missed pre-action claim may retry the same offer. Once claimed, ambiguous
     // acknowledgement keeps custody and cannot authorize a second browser action.
@@ -8777,14 +8782,36 @@ function noteRepairHeld(token: string, why: string | null): void {
   logInfo(`bridge: the page held the ${repair.reason} repair for ${conversationId}: ${REPAIR_HOLD_REASONS[reason] ?? 'it gave no reason'}`);
 }
 
-async function failRepairAttempt(token: string, action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | null): Promise<void> {
+/** Why a handed repair took no browser action, in the words the log uses. */
+const REPAIR_FAIL_REASONS: Record<string, string> = {
+  changed: 'the page changed before the action',
+  error: 'Chrome refused the action'
+};
+
+async function failRepairAttempt(
+  token: string,
+  action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | null,
+  why: string | null = null
+): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state !== 'handed' || repair.token !== token) continue;
-    logWarn(`bridge: the browser reported failed ${repair.reason} recovery for ${conversationId} (${action ?? 'action unspecified'})`);
+    // ChatGPT recovered by itself and is answering: the page keeps the reload for after the answer
+    // instead of ending it. Nothing failed, so it is neither a warning nor a "Reload failed" row.
+    const streaming = why === 'streaming';
+    if (streaming) {
+      if (!repair.awaitingStream)
+        logInfo(`bridge: ChatGPT is answering again in ${conversationId}; the ${repair.reason} repair waits until it finishes`);
+    } else {
+      const detail = why && Object.hasOwn(REPAIR_FAIL_REASONS, why) ? `: ${REPAIR_FAIL_REASONS[why]}` : '';
+      logWarn(`bridge: the browser reported failed ${repair.reason} recovery for ${conversationId} (${action ?? 'action unspecified'}${detail})`);
+    }
+    repair.awaitingStream = streaming;
     await updateRepairProgress(
       conversationId,
       repair,
-      `${action === 'reopened' ? 'Reopen' : action === 'resumed' ? 'Resume' : 'Reload'} failed while ${repairPurpose(repair).during}${repair.attribution ? '.' : '; will retry.'}`
+      streaming
+        ? repair.attribution ? 'Not reloaded: ChatGPT is answering.' : 'ChatGPT is answering again; recovery waits until it finishes.'
+        : `${action === 'reopened' ? 'Reopen' : action === 'resumed' ? 'Resume' : 'Reload'} failed while ${repairPurpose(repair).during}${repair.attribution ? '.' : '; will retry.'}`
     );
     if (repairsInFlight.get(conversationId) !== repair) return;
     if (repair.reason === 'assistant-error' && turnRepairSpent.get(conversationId)?.token === token)

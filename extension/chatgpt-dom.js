@@ -2350,7 +2350,7 @@ var CLF_DOM = (() => {
     }
   }
 
-  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null, explain = null } = {}) {
+  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null, explain = null, sentRequest = null } = {}) {
     // Why a Send ended without acceptance, as one short code for the caller's diagnostics (#820).
     // It names the first refusal only and never changes what Send does.
     const refused = (why) => { try { explain?.(why); } catch { /* Diagnostics never change Send. */ } return false; };
@@ -2375,6 +2375,7 @@ var CLF_DOM = (() => {
       const priorUserNodes = new Set(priorUsers.map((message) => message.node));
       const priorUserIds = new Set(priorUsers.map((message) => message.id).filter(Boolean));
       let submittedMessageObserved = false;
+      let clickedAt = null;
 
       // click()/dispatchEvent() only prove that JavaScript ran, not that ChatGPT accepted a
       // prompt. Observe for a page-owned consequence instead of sleeping and re-sampling on a
@@ -2392,6 +2393,15 @@ var CLF_DOM = (() => {
           if (!priorUserNodes.has(message.node) && !priorUserIds.has(message.id) && (matchesUser ? matchesUser(message, submitted) : compact(message.text) === expected)) {
             if (acceptUserReceipt && !acceptUserReceipt(message, currentConversation)) continue;
             submittedMessageObserved = true;
+            return true;
+          }
+        }
+        // A new chat's shell can redraw its first exchange without the question before any read
+        // of the page sees it (#942). ChatGPT's own Send request, the first one after this click,
+        // still names that question exactly; the caller decides whether to take its id.
+        if (acceptUserReceipt && sentRequest && clickedAt !== null) {
+          const sent = safe(() => sentRequest(clickedAt), null);
+          if (sent && !priorUserIds.has(sent.id) && acceptUserReceipt({ id: sent.id, role: 'user', sentRequest: true }, currentConversation)) {
             return true;
           }
         }
@@ -2517,6 +2527,7 @@ var CLF_DOM = (() => {
               if (Number.isFinite(receiptTimeoutMs) && receiptTimeoutMs > 0)
                 timer = setTimeout(() => { check(); finish(false); }, receiptTimeoutMs);
             }
+            clickedAt = Date.now();
             try { control.click(); } catch { return finish(false); }
             check(); // Synchronous navigation/cancellation during click also re-proves ownership.
           };

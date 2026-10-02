@@ -361,10 +361,14 @@
       if (url.origin !== location.origin || !/^\/backend-api\/(?:f\/)?conversation$/.test(url.pathname)) return;
       const body = JSON.parse(init.body);
       const model = typeof body?.model === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(body.model) ? body.model : null;
-      const messageIds = (Array.isArray(body?.messages) ? body.messages : []).slice(0, 8)
-        .filter(message => message?.author?.role === 'user' && typeof message.id === 'string' && CONVERSATION.test(message.id))
-        .map(message => message.id);
+      const users = (Array.isArray(body?.messages) ? body.messages : []).slice(0, 8)
+        .filter(message => message?.author?.role === 'user' && typeof message.id === 'string' && CONVERSATION.test(message.id));
+      const messageIds = users.map(message => message.id);
       if (model && messageIds.length) post({ type: 'cos-send-model', model, messageIds, observedAt }, location.origin);
+      // The same request is the one record of a question that ChatGPT cannot redraw away: a new
+      // chat's first question can leave the page before it is read once (#942). Its exact id lets
+      // the isolated world confirm the Send it just clicked. Ids only: the prompt stays here.
+      if (messageIds.length === 1) post({ type: 'cos-send-request', messageIds, observedAt }, location.origin);
     } catch { /* A body this reader does not understand proves nothing. */ }
   }
   const inspectedResponses = new WeakSet();
