@@ -1761,5 +1761,6 @@
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "El navegador no recogió la reparación de este chat, así que la app dejó de intentarlo. Vuelve a abrir su pestaña y la recuperación continuará.",
   "Healthy": "Saludable",
   "Degraded": "Degradado",
-  "Unknown": "Desconocido"
+  "Unknown": "Desconocido",
+  "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Seguir la nueva salida: permanecer al final del chat mientras crecen las respuestas, aquí y en ChatGPT. Desplazarse hacia arriba lo pausa."
 }
