@@ -1719,7 +1719,12 @@ export async function requestBrowserDecision(text: string, signal: AbortSignal, 
       const current = await load();
       if (current.filter((row) => row.purpose === 'decision' && ['queued', 'browser', 'decision'].includes(row.state)).length >= 4) throw new Error('goal_browser_busy');
       if (options.sourceSessionId && current.some(row => row.decisionSourceSessionId === options.sourceSessionId && !terminal(row))) throw new Error('goal_browser_busy');
-      if (options.sourceSessionId && !options.conversationId && current.some(row => row.decisionSourceSessionId === options.sourceSessionId && row.state === 'cancelled' && !row.conversationId)) {
+      // Only a helper cancelled before any receipt is ambiguous: it may or may not have reached a
+      // chat nobody can name, so a second one could duplicate it. A confirmed Temporary Chat send
+      // keeps no conversation id and is not ambiguous; refusing its retry stopped every Goal whose
+      // helper answer was lost (2026-10-02) with "could not confirm" about a confirmed prompt.
+      if (options.sourceSessionId && !options.conversationId && current.some(row => row.decisionSourceSessionId === options.sourceSessionId &&
+          row.state === 'cancelled' && !row.conversationId && row.deliveredAt === undefined)) {
         throw new Error('goal_browser_send_unconfirmed');
       }
       const entry = entrySchema.parse({ id, sessionId: null, text, mode: 'after-turn', dueAt: Date.now(),
