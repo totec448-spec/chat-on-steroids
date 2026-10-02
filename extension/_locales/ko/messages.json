@@ -396,10 +396,10 @@
     "message": "$1: $2"
   },
   "content_goal_delivery_after_turn_finish": {
-    "message": "이 턴 이후 + 종료 시"
+    "message": "세션 종료 시 또는 턴 이후"
   },
   "content_goal_delivery_only_finish": {
-    "message": "종료 시에만"
+    "message": "세션 종료 시에만"
   },
   "content_goal_loop_off": {
     "message": "Goal과 Loop 꺼짐"
