@@ -82,6 +82,30 @@ describe('the order a recorded turn is read in', () => {
   });
 
   /**
+   * A whole turn read late in one pass (after a reload, or a new chat's first turn): every paragraph
+   * and step is read a few ms apart, minutes after the work. Each step still goes only before the
+   * paragraph after it on the page, as it is drawn there, not before the first paragraph.
+   */
+  it('keeps each step with its own paragraph when a turn is read late in one pass', () => {
+    const late = 1_790_000_420_000;
+    const prose = (seq: number, read: number, authoredAt: number, label: string, final?: boolean): Row =>
+      ({ ...row(seq, read, 'assistant_message', 't1', label), authoredAt, ...(final ? { final } : {}) });
+    const rows: Row[] = [
+      row(3, 1_790_000_000_000, 'turn_start', 't1', 'start'),
+      prose(66, late, 1_790_000_001_500, 'first paragraph'),
+      row(4, 1_790_000_005_000, 'tool_call', 't1', 'first call'),
+      row(67, late + 1, 'page_tool', 't1', 'first recap'),
+      prose(68, late + 2, 1_790_000_009_000, 'second paragraph'),
+      row(5, 1_790_000_012_000, 'tool_call', 't1', 'second call'),
+      row(69, late + 3, 'page_tool', 't1', 'second recap'),
+      prose(73, late + 4, 1_790_000_030_000, 'answer', true),
+      row(7, 1_790_000_040_000, 'turn_end', 't1', 'end')
+    ];
+    expect(reading(rows)).toEqual(['start', 'first paragraph', 'first call', 'first recap', 'second paragraph',
+      'second call', 'second recap', 'answer', 'end']);
+  });
+
+  /**
    * A message the app handed between two agents, drawn where it was delivered.
    *
    * Live: prime's message to worker-1 was stamped 1787057617031 — three milliseconds after
