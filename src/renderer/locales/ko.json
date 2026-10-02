@@ -370,7 +370,7 @@
   "Add attachments": "첨부파일 추가",
   "Chat mode": "채팅 모드",
   "Chat automation": "채팅 자동화",
-  "What should this chat achieve?": "이 채팅에서 무엇을 달성해야 하나요?",
+  "Optional. Leave empty to work toward what you asked in this chat.": "선택 사항입니다. 비워 두면 이 채팅에서 요청한 내용을 목표로 진행합니다.",
   "Goal behavior": "Goal 동작",
   "Estimated session context": "예상 세션 컨텍스트",
   "Reload ChatGPT models": "ChatGPT 모델 새로고침",
