@@ -55,6 +55,7 @@ function runtime(processId = PROCESS_ID) {
 
 function fixture(): {
   deps: AgentRuntimeGcDependencies;
+  setEnabled: (enabled: boolean) => void;
   setOwner: (owner: string | null) => void;
   setAgent: (agent: AgentInfo | null) => void;
   setToolCalls: (count: number) => void;
@@ -63,7 +64,10 @@ function fixture(): {
   terminateProcess: ReturnType<typeof vi.fn>;
   forgetExecOwner: ReturnType<typeof vi.fn>;
   noteExecOwner: ReturnType<typeof vi.fn>;
+  recordNote: ReturnType<typeof vi.fn>;
+  logInfo: ReturnType<typeof vi.fn>;
 } {
+  let enabled = true;
   let owner: string | null = SESSION_ID;
   let agent: AgentInfo | null = workerInfo();
   let toolCalls = 0;
@@ -80,8 +84,11 @@ function fixture(): {
   const noteExecOwner = vi.fn((processId: number | null, sessionId: string | null) => {
     if (processId === PROCESS_ID && alive) owner = sessionId;
   });
+  const recordNote = vi.fn(async () => undefined);
+  const logInfo = vi.fn();
 
   const deps: AgentRuntimeGcDependencies = {
+    enabled: () => enabled,
     listProcesses: () => alive ? [runtime()] : [],
     execOwner: () => owner,
     getSession: async (sessionId) => sessionId === SESSION_ID
@@ -95,11 +102,14 @@ function fixture(): {
     }),
     forgetExecOwner,
     noteExecOwner,
-    terminateProcess
+    terminateProcess,
+    recordNote,
+    logInfo
   };
 
   return {
     deps,
+    setEnabled: (value) => { enabled = value; },
     setOwner: (value) => { owner = value; },
     setAgent: (value) => { agent = value; },
     setToolCalls: (value) => { toolCalls = value; },
@@ -107,11 +117,26 @@ function fixture(): {
     setCompleted: (value) => { completed = value; },
     terminateProcess,
     forgetExecOwner,
-    noteExecOwner
+    noteExecOwner,
+    recordNote,
+    logInfo
   };
 }
 
 describe('sleeping worker runtime GC', () => {
+  it('does nothing unless the user explicitly enables sleeping-worker process cleanup', async () => {
+    const fake = fixture();
+    fake.setEnabled(false);
+
+    const summary = await sweepAgentRuntimeGc(NOW, fake.deps);
+
+    expect(summary.checked).toBe(0);
+    expect(fake.forgetExecOwner).not.toHaveBeenCalled();
+    expect(fake.terminateProcess).not.toHaveBeenCalled();
+    expect(fake.recordNote).not.toHaveBeenCalled();
+    expect(fake.logInfo).not.toHaveBeenCalled();
+  });
+
   it('fences exact ownership before termination and leaves durable worker identity untouched', async () => {
     const fake = fixture();
     const before = workerInfo();
@@ -126,6 +151,11 @@ describe('sleeping worker runtime GC', () => {
 
     expect(fake.forgetExecOwner).toHaveBeenCalledWith(PROCESS_ID);
     expect(summary).toMatchObject({ checked: 1, eligible: 1, terminated: 1 });
+    expect(fake.recordNote).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.stringMatching(/worker-1.*101.*30 minutes/i)
+    );
+    expect(fake.logInfo).toHaveBeenCalledWith(expect.stringMatching(/worker-1.*101.*30 minutes/i));
     expect(before).toMatchObject({
       runId: 'run-a',
       id: 'worker-1',
@@ -274,6 +304,7 @@ describe('sleeping worker runtime GC', () => {
     const alive = new Set([201, 202]);
     const terminated: number[] = [];
     const deps: AgentRuntimeGcDependencies = {
+      enabled: () => true,
       listProcesses: () => [first, second].filter((process) => alive.has(process.processId)),
       execOwner: (processId) => owners.get(processId) ?? null,
       getSession: async () => ({ id: SESSION_ID, conversationId: CONVERSATION_ID }),
@@ -284,6 +315,8 @@ describe('sleeping worker runtime GC', () => {
       noteExecOwner: (processId, sessionId) => {
         if (processId !== null && sessionId !== null && alive.has(processId)) owners.set(processId, sessionId);
       },
+      recordNote: async () => undefined,
+      logInfo: () => undefined,
       terminateProcess: async (processId) => {
         alive.delete(processId);
         terminated.push(processId);

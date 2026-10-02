@@ -8,8 +8,10 @@ import {
   noteExecOwner
 } from './codex/ownership.js';
 import type { BackgroundExecState, BackgroundTerminalInfo } from './codex/unified-exec.js';
-import { logWarn } from './logger.js';
+import { getConfig } from './config.js';
+import { logInfo, logWarn } from './logger.js';
 import { runningToolCalls } from './mcp/call-context.js';
+import { recordNote } from './session/recorder.js';
 import { getSession } from './session/store.js';
 
 /** Resource retention policy; this is never a worker-liveness deadline. */
@@ -31,6 +33,7 @@ interface WorkerProof {
 }
 
 export interface AgentRuntimeGcDependencies {
+  enabled(): boolean;
   listProcesses(): BackgroundTerminalInfo[];
   execOwner(processId: number): string | null;
   getSession(sessionId: string): Promise<SessionIdentity | null>;
@@ -40,6 +43,8 @@ export interface AgentRuntimeGcDependencies {
   forgetExecOwner(processId: number): void;
   noteExecOwner(processId: number | null, sessionId: string | null): void;
   terminateProcess(processId: number): Promise<boolean>;
+  recordNote(sessionId: string, text: string): Promise<void>;
+  logInfo(message: string): void;
 }
 
 export interface AgentRuntimeGcSummary {
@@ -56,6 +61,7 @@ export interface AgentRuntimeGcSummary {
 }
 
 const defaultDependencies: AgentRuntimeGcDependencies = {
+  enabled: () => getConfig().multiAgent.endSleepingWorkerProcesses === true,
   listProcesses: () => unifiedExecManager.listProcesses(),
   execOwner,
   getSession,
@@ -64,7 +70,9 @@ const defaultDependencies: AgentRuntimeGcDependencies = {
   backgroundState: backgroundExecObligations,
   forgetExecOwner,
   noteExecOwner,
-  terminateProcess: (processId) => unifiedExecManager.terminateProcess(processId)
+  terminateProcess: (processId) => unifiedExecManager.terminateProcess(processId),
+  recordNote,
+  logInfo
 };
 
 let timer: NodeJS.Timeout | null = null;
@@ -148,6 +156,7 @@ export async function sweepAgentRuntimeGc(
 ): Promise<AgentRuntimeGcSummary> {
   const cutoff = now - AGENT_RUNTIME_RETENTION_MS;
   const summary = emptySummary();
+  if (!dependencies.enabled()) return summary;
 
   for (const runtime of dependencies.listProcesses()) {
     summary.checked += 1;
@@ -217,6 +226,11 @@ export async function sweepAgentRuntimeGc(
       continue;
     }
     summary.terminated += 1;
+    const audit =
+      `Worker ${proof.agentId}: ended background process ${runtime.processId} after more than 30 minutes asleep. ` +
+      'The worker chat and history remain available.';
+    dependencies.logInfo(`agent runtime GC: ${audit}`);
+    await dependencies.recordNote(sessionId, audit).catch(() => undefined);
   }
 
   return summary;

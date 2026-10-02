@@ -209,7 +209,8 @@ const settingsPatch = z.object({
     maxWorkers: z.number().int().min(1).max(8),
     allowUnattributedCalls: z.boolean(),
     recoverAgentTabs: z.boolean(),
-    waitForSubAgents: z.boolean().optional()
+    waitForSubAgents: z.boolean().optional(),
+    endSleepingWorkerProcesses: z.boolean().optional()
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS) }).strict().optional(),
   controlApi: z.object({ enabled: z.boolean(), allowActions: z.boolean().optional() }).strict().optional(),
@@ -380,6 +381,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.multiAgent.waitForSubAgents,
         base.multiAgent.waitForSubAgents,
         wanted.multiAgent.waitForSubAgents
+      ),
+      endSleepingWorkerProcesses: pick(
+        current.multiAgent.endSleepingWorkerProcesses ?? false,
+        base.multiAgent.endSleepingWorkerProcesses ?? false,
+        wanted.multiAgent.endSleepingWorkerProcesses ?? false
       )
     },
     goal: {
