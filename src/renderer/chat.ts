@@ -225,6 +225,7 @@ function restoreDraft(): void {
   const task = selectedId === null ? newChatTasks.get(draftKey()) : undefined;
   const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = task?.automation ?? 'off'; delete automation.dataset.edited;
   $<HTMLSelectElement>('loopDelivery').value = task?.loopDelivery ?? 'finish';
+  paintLoopDeliveryTitle();
   $<HTMLTextAreaElement>('sessionObjective').value = task?.objective ?? '';
   delete $('sessionObjective').dataset.edited; delete $('sessionObjective').dataset.sessionId; delete $('sessionObjective').dataset.saved;
   paintTaskPlan(); paintComposerImages();
@@ -1194,6 +1195,13 @@ async function queuePreparedPlan(key: string, plan: TaskPlanDraft & { stages: st
     if (taskPlans.get(key) === plan && draftKey() === key) paintTaskPlan();
   }
 }
+/** The option names stay short; the title says what the chosen timing does. */
+function paintLoopDeliveryTitle(): void {
+  const select = $<HTMLSelectElement>('loopDelivery');
+  ui(select, 'title', () => select.value === 'after-turn'
+    ? t("At Session Finish, or as a new message after verified turn completion")
+    : t("Only inside the Session Finish tool result; never start a new turn"));
+}
 function paintTaskActions(): void {
   const objective = $<HTMLTextAreaElement>('sessionObjective');
   const save = $<HTMLButtonElement>('saveSessionObjective');
@@ -1272,6 +1280,7 @@ async function refreshSessionControls(): Promise<void> {
     goalDraftView = null; goalWaitView = null; finishGoalDraftView = null; controlledRecovery = [];
     $<HTMLSelectElement>('chatAutomation').value = opening?.automation ?? 'off';
     $<HTMLSelectElement>('loopDelivery').value = opening?.loopAfterTurn ? 'after-turn' : 'finish';
+    paintLoopDeliveryTitle();
     const objective = $<HTMLTextAreaElement>('sessionObjective');
     objective.value = opening?.objective ?? ''; objective.disabled = true;
     objective.dataset.sessionId = id;
@@ -1313,6 +1322,7 @@ async function refreshSessionControls(): Promise<void> {
   if (!draftMode.dataset.edited) draftMode.value = controls.automation;
   if (!$<HTMLSelectElement>('loopDelivery').disabled)
     $<HTMLSelectElement>('loopDelivery').value = controls.loopAfterTurn ? 'after-turn' : 'finish';
+  paintLoopDeliveryTitle();
   paintAutomationSwitch();
   $<HTMLButtonElement>('compactSession').disabled = !!controls.blocked || !!controls.job?.busy;
   $('cancelCompaction').hidden = !controls.job?.busy;
@@ -3411,6 +3421,9 @@ let runningToolsFor: string | null = null;
 let runningToolsAt = 0;
 let runningToolsEvents = -1;
 let runningToolsRequest = 0;
+/** The newest sentence the running turn shows that ChatGPT has not published yet (#942). */
+let livePreviewText: string | null = null;
+let livePreviewFor: string | null = null;
 /**
  * Prose speaks for itself only while it is being written. Interim paragraphs stay "streaming" once
  * finished, so what counts is whether its text changed in the last moments, not its state.
@@ -3444,6 +3457,10 @@ function liveActivity(): { text: string; icon: string; working: boolean; since?:
   const thinking = { text: t('Thinking'), icon: '', working: false };
   // A message not yet recorded opens a turn that has done nothing visible so far.
   if ($('inputQueue').querySelector('.pending-message')) return thinking;
+  // A new chat's first turn: ChatGPT shows the model's sentences long before it publishes them as
+  // messages, so the newest one stands here until it can be recorded in its place.
+  const preview = livePreviewFor === selectedId ? livePreviewText : null;
+  if (preview) return { text: preview, icon: '', working: false };
   let asked = Number.NEGATIVE_INFINITY;
   for (const event of events) if (event.kind === 'user_message') asked = Math.max(asked, event.time);
   let newest: SessionEvent | undefined;
@@ -3486,7 +3503,7 @@ function paintTurnNow(): void {
  */
 function pollRunningTools(): void {
   const summary = sessions.find(entry => entry.id === selectedId);
-  if (!summary || !turnStatusLine.classList.contains('is-working')) { runningTools = []; return; }
+  if (!summary || !turnStatusLine.classList.contains('is-working')) { runningTools = []; livePreviewText = null; return; }
   if (Date.now() - runningToolsAt < 900 && events.length === runningToolsEvents) return;
   runningToolsAt = Date.now();
   runningToolsEvents = events.length;
@@ -3497,6 +3514,12 @@ function pollRunningTools(): void {
     if (request !== runningToolsRequest || session !== selectedId) return;
     runningTools = reply.ok ? reply.data : [];
     runningToolsFor = session;
+    paintTurnNow();
+  });
+  void api.livePreview(conversationIds).then(reply => {
+    if (request !== runningToolsRequest || session !== selectedId) return;
+    livePreviewText = reply.ok ? reply.data : null;
+    livePreviewFor = session;
     paintTurnNow();
   });
 }
@@ -5025,9 +5048,11 @@ export function initChat(next: Deps): void {
       paintAutomationSwitch();
     }
   });
+  paintLoopDeliveryTitle();
   $('loopDelivery').addEventListener('change', async () => {
     const id = selectedId, generation = selectionGeneration;
     const select = $<HTMLSelectElement>('loopDelivery');
+    paintLoopDeliveryTitle();
     const opening = id && pendingComposerInputs.find(row => row.sessionId === id && row.opening && !row.deliveredAt && ['queued', 'browser'].includes(row.state));
     if (opening) {
       inputQueueGeneration++;

@@ -396,10 +396,10 @@
     "message": "$1: $2"
   },
   "content_goal_delivery_after_turn_finish": {
-    "message": "После этого хода + завершение"
+    "message": "При завершении сеанса или после хода"
   },
   "content_goal_delivery_only_finish": {
-    "message": "Только при завершении"
+    "message": "Только при завершении сеанса"
   },
   "content_goal_loop_off": {
     "message": "Цель и Цикл выключены"
