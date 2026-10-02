@@ -35,8 +35,12 @@ describe('captured ChatGPT rendered HTML', () => {
     expect(quote.querySelectorAll('strong')).toHaveLength(2);
     expect(rendered.textContent).not.toContain(':::');
     expect(rendered.textContent).toContain('After the block.');
-    // An unterminated directive is left as text rather than swallowing the rest of the message.
-    expect(renderedMarkdown(':::writing{title="x"}\nno end').textContent).toContain(':::writing');
+    // A block still streaming, or an answer stopped inside it, has no closing `:::` yet. ChatGPT
+    // draws it as the block to the end of the message; it showed here as its raw directive.
+    const open = renderedMarkdown(':::writing{variant="document" title="The Keeper"}\nElias kept the light.\n\nThen Mara came.');
+    expect(open.querySelector('blockquote strong')?.textContent).toBe('The Keeper');
+    expect(open.querySelector('blockquote')?.textContent).toContain('Then Mara came.');
+    expect(open.textContent).not.toContain(':::writing');
   });
 
   it('shows the page\'s resolved content for a content-reference reply instead of the raw pointer (#574)', () => {
