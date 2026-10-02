@@ -4064,6 +4064,43 @@ describe('simultaneous independent prime families', () => {
     expect(statusForCaller(primeB).state.agents.find(a => a.id === 'worker-1')?.state).toBe('active');
   });
 
+  it('keeps a woken family selectable by the run_id its prime was given before it parked (#881, #882)', () => {
+    // Every report a worker sends the prime is labelled with the run_id of that moment. Once all
+    // workers slept, the family parked; the prime's next message woke it under a new id, and its
+    // reply with the id it had just been given was refused as "no agent family belongs to this
+    // conversation" (2.1.24 log in #882: three refusals right after each reactivation).
+    const a = recruit(prime, 1), b = recruit(primeB, 1);
+    bindConversation('worker-1', 'parallel-worker-a', a.runId);
+    bindConversation('worker-1', 'parallel-worker-b', b.runId);
+    finishAgent({ conversationId: 'parallel-worker-a' }, 'A sleeps');
+    expect(releaseQuiescentRun({}, a.runId)).toBe(true);
+    stageMessages({ ...prime, runId: a.runId }, [{ to: 'worker-1', text: 'reuse A' }]).commit();
+    const nextA = currentRunId(PRIME_CHAT)!;
+    expect(nextA).not.toBe(a.runId);
+
+    // The browser fence stays exact: only the new incarnation may claim the wake.
+    expect(claimWorkerRevival('worker-1', 'parallel-worker-a', a.runId)).toBe(false);
+    expect(claimWorkerRevival('worker-1', 'parallel-worker-a', nextA)).toBe(true);
+    expect(noteWorkerRevived('worker-1', 'parallel-worker-a', pendingWorkerRevivals()[0]!.messageIds, null, nextA)).toBe(true);
+    expect(noteAgentAlive('parallel-worker-a', 'call')?.revived).toBe(true);
+
+    // The prime's earlier id still selects its own, now woken family.
+    expect(statusForCaller({ ...prime, runId: a.runId })).toMatchObject({ runId: nextA });
+    const before = pendingCount('worker-1', nextA);
+    stageMessages({ ...prime, runId: a.runId }, [{ to: 'worker-1', text: 'follow-up with the id from the report' }]).commit();
+    expect(pendingCount('worker-1', nextA)).toBe(before + 1);
+
+    // It never selects another prime's family, and never moves the browser fence back.
+    expect(() => statusForCaller({ ...primeB, runId: a.runId })).toThrow(/AGENTS_BUSY/);
+    expect(() => stageMessages({ ...primeB, runId: a.runId }, [{ to: 'worker-1', text: 'not yours' }])).toThrow(/AGENTS_BUSY/);
+    expect(pendingCount('worker-1', b.runId)).toBe(0);
+
+    // And it survives a restart, like the family it names.
+    const snapshot = JSON.parse(JSON.stringify(snapshotSwarm()));
+    resetAgentsForTests(); restoreSwarm(snapshot);
+    expect(statusForCaller({ ...prime, runId: a.runId })).toMatchObject({ runId: nextA });
+  });
+
   it('fences overlapping prime transfers and preserves B when A resumes', async () => {
     const { beginPrimeTransfer, freezePrimeTransfer, commitPrimeTransfer, cancelPrimeTransfer } = await import('../src/main/agents.js');
     const a = recruit(prime, 1), b = recruit(primeB, 1);
