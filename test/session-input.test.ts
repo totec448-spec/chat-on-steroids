@@ -979,6 +979,24 @@ describe('browser decision lifetime', () => {
     await expect(requestBrowserDecision('Retry', new AbortController().signal, { sourceSessionId: sessionId })).rejects.toThrow('goal_browser_send_unconfirmed');
     expect(await listInputs()).toHaveLength(1);
   });
+  it('lets a source retry after a confirmed temporary helper send timed out', async () => {
+    // 2026-10-02, live: a Temporary Chat helper confirmed its prompt, its answer was never taken,
+    // and the draft timed out. The retry was then refused as "could not confirm whether ChatGPT
+    // received the helper prompt" although it had been confirmed, and Goal stopped for good.
+    // Only a cancellation before any receipt is ambiguous enough to block a second helper.
+    const controller = new AbortController();
+    const answer = requestBrowserDecision('Choose', controller.signal, { sourceSessionId: sessionId, lifetime: 'temporary-planner' });
+    const rejected = expect(answer).rejects.toThrow('goal_browser_cancelled');
+    const row = (await listInputs())[0]!;
+    expect(await claimBrowserInput(row.id, 'document', null)).not.toBeNull();
+    expect(await acknowledgeBrowserInput(row.id, 'document', null, 'helper-user-message')).toBe(true);
+    controller.abort();
+    await rejected;
+    const retry = requestBrowserDecision('Retry', new AbortController().signal, { sourceSessionId: sessionId, lifetime: 'temporary-planner' });
+    void retry.catch(() => undefined);
+    await vi.waitFor(async () => expect((await listInputs()).filter(entry => entry.state === 'queued')).toHaveLength(1));
+  });
+
   it('accepts only its exact claimant answer, with idempotent send ACK', async () => {
     const controller = new AbortController();
     const answer = requestBrowserDecision('Choose one', controller.signal);
