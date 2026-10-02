@@ -48,9 +48,8 @@ function section(body, key) {
 export function checkPullRequest({ body, files, draft = false, fromFork = false, maintainerCanModify = true }) {
   const problems = [];
   const text = String(body || '');
-  if (!/(^|[\s(])#\d+\b/.test(text.replace(/<!--[\s\S]*?-->/g, ''))) {
-    problems.push('Link the issue this answers ("Fixes #123" or "Refs #123"). Open one first if none exists.');
-  }
+  // No issue is required: the description carries the why and the what, and discussion happens
+  // on the PR itself. A PR that closes an issue says "Fixes #123" so it closes on merge.
   if (section(text, 'why').length < 20) problems.push('Fill in "## Why": the root cause or the user problem, in a few sentences.');
   if (section(text, 'what').length < 20) problems.push('Fill in "## What changed": the behavior change, not a file list.');
 
