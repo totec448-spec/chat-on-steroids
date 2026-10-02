@@ -1101,6 +1101,34 @@ describe('desktop input delivery and helper ownership', () => {
       : []);
   });
 
+  it('completes a collapsed temporary planner whose tool call lost its result with the user message', async () => {
+    // 2026-10-02, live: the helper called a tool before answering. ChatGPT then redrew the only
+    // exchange with neither the user message nor the tool result, so the call stayed "unanswered"
+    // beside the final answer and the decision timed out.
+    const canonical = '{"action":"stop","reply":"NO_REPLY"}';
+    const routed = 'f0f00023-2222-4222-8222-222222222222';
+    live = await harness(`https://chatgpt.com/?temporary-chat=true&cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.response ? { ok: true } : { input: claimed({ purpose: 'decision', lifetime: 'temporary-planner' }) } })
+    });
+    const toggle = live.document.createElement('button'); toggle.setAttribute('aria-label', 'Temporary chat'); toggle.innerHTML = '<svg><use href="/sprite.svg#chat-temp-checked"></use></svg>'; Object.defineProperty(toggle, 'getClientRects', { value: () => [{}] }); live.document.body.append(toggle);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'tool-user', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    live.dom.reconfigure({ url: `https://chatgpt.com/c/${routed}?temporary-chat=true` });
+    live.hook.observe(); await settle();
+    live.document.querySelector('[data-turn-id="tool-user"]')!.remove();
+    const section = assistantTurn(live.document, 'tool-final', []);
+    prose(live.document, section, 'tool-message', canonical);
+    live.hook.noteGoalTurn((live.window as any).CLF_DOM.turns().find((item: any) => item.id === 'tool-final'), 'completed', 'tool-final');
+    await bindFiberTurns([{ section, turn: { turnId: 'tool-final', conversationId: routed, endMessageId: 'tool-message',
+      calls: [{ tool: 'exec_command', messageId: 'tool-call', answered: false }],
+      messages: [{ role: 'assistant', messageId: 'tool-message', rawMessageId: 'tool-message', rawText: canonical }] } }]);
+    await settle();
+    expect(live.sent.filter(message => message.response)).toEqual([expect.objectContaining({ response: canonical })]);
+  });
+
   it('completes a temporary planner when its accepted user row keeps the previous Fiber scan stamp', async () => {
     const canonical = '{"action":"continue","reply":"cross-scan temporary result"}';
     live = await harness(`https://chatgpt.com/?temporary-chat=true&cos-input=${inputId}`, {
