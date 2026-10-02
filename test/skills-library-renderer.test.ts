@@ -73,6 +73,8 @@ it('shows the managed library, imports both source shapes, filters and removes o
   await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')).not.toBeNull());
   expect((w.document.getElementById('skillGithubDialog') as HTMLDialogElement).open).toBe(false);
   expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Up to date');
+  expect(w.document.querySelector<HTMLElement>('[data-skill-id="review"] .skill-library-source')!.title)
+    .toContain('main @ aaaaaaaaaaaa');
   (w.document.getElementById('skillsRefresh') as HTMLButtonElement).click();
   await vi.waitFor(() => expect(skillsCheckGithub).toHaveBeenCalledWith('review'));
   await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Update available'));
@@ -83,6 +85,8 @@ it('shows the managed library, imports both source shapes, filters and removes o
   expect(skillsCheckGithub).toHaveBeenCalledTimes(1);
   (w.document.querySelector('[data-skill-id="review"] .plugin-menu-actions .btn') as HTMLButtonElement).click();
   expect(w.document.getElementById('skillUpdateDialog')).not.toBeNull();
+  expect(w.document.querySelector('#skillUpdateDialog .skill-source-revision')?.textContent)
+    .toBe('main @ aaaaaaaaaaaa');
   expect(skillsUpdateGithub).not.toHaveBeenCalled();
   (w.document.querySelector('#skillUpdateDialog .pet-delete-actions .btn') as HTMLButtonElement).click();
   expect(skillsUpdateGithub).not.toHaveBeenCalled();
