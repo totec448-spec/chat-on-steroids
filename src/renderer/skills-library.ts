@@ -13,6 +13,8 @@ export function initSkillsLibrary(api: AppApi): () => void {
   let linkTarget: ManagedSkill | null = null;
   const checkAgeMs = 15 * 60_000;
   let checkPass: Promise<void> | null = null;
+  const installedRevision = (skill: ManagedSkill): string =>
+    skill.origin ? `${skill.origin.ref} @ ${skill.origin.commit.slice(0, 12)}` : '';
 
   const paintSource = (skill: ManagedSkill): void => {
     const source = document.querySelector<HTMLElement>(`[data-skill-id="${skill.id}"] .skill-library-source`);
@@ -42,7 +44,10 @@ export function initSkillsLibrary(api: AppApi): () => void {
     } else {
       source.replaceChildren(icon(marker), el('span', '', () => t(label)));
     }
-    source.title = check?.error ? `${skill.origin.url}\n${check.error}` : skill.origin.url;
+    const revision = installedRevision(skill);
+    source.title = check?.error
+      ? `${skill.origin.url}\n${revision}\n${check.error}`
+      : `${skill.origin.url}\n${revision}`;
   };
 
   let recommended: Array<{ id: string; name: string; description: string }> = [];
@@ -203,6 +208,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
     const body = el('div', 'plugin-dialog-body');
     body.append(el('p', '', () => t('Check this GitHub source for changes. If it changed, CoS replaces the whole skill folder and moves the previous version to Trash. Local edits to resources will be replaced.')));
     body.append(el('p', 'skill-source-url', skill.origin.url));
+    body.append(el('p', 'skill-source-revision', installedRevision(skill)));
     const actions = el('div', 'pet-delete-actions');
     const cancel = el('button', 'btn', () => t('Cancel')) as HTMLButtonElement;
     cancel.type = 'button'; cancel.addEventListener('click', () => dialog.close());
