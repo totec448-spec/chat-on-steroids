@@ -78,6 +78,7 @@ function warnOnSharedTunnelIds(settings: TunnelSettings): void {
 
 /** Core-affecting transport settings the current run actually started with. */
 let activeCoreTransport: Pick<TunnelSettings, 'kind' | 'tunnelId' | 'binaryPath' | 'profileEpoch'> | null = null;
+let activePersistMcpTokens: boolean | null = null;
 let status: ConnectionStatus = {
   state: 'disconnected',
   detail: '',
@@ -316,6 +317,7 @@ async function connectImpl(): Promise<void> {
       return;
     }
     endpoint = startedEndpoint;
+    activePersistMcpTokens = config.ui.persistMcpTokens === true;
     if (generation !== connectionGeneration) {
       await disconnectImpl();
       return;
@@ -480,6 +482,12 @@ async function applySettingsImpl(): Promise<void> {
   if (!endpoint) return;
   const config = getConfig();
   const desiredCoreTransport = coreTransport(config.tunnel);
+  if (activePersistMcpTokens !== (config.ui.persistMcpTokens === true)) {
+    logInfo('MCP token persistence changed; reconnecting');
+    await disconnectImpl();
+    await connectImpl();
+    return;
+  }
   if (activeCoreTransport && !sameCoreTransport(activeCoreTransport, desiredCoreTransport)) {
     logInfo('core connection settings changed; reconnecting');
     await disconnectImpl();
@@ -555,6 +563,7 @@ async function disconnectResources(endpointForceAfterMs?: number): Promise<void>
     tunnel = null;
   }
   activeCoreTransport = null;
+  activePersistMcpTokens = null;
   if (status.state !== 'disconnected') logInfo('disconnected');
   setStatus({
     state: 'disconnected',

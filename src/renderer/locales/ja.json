@@ -1663,6 +1663,7 @@
   "Pet operation failed": "ペットの操作に失敗しました",
   "This removes the pet from your local library. You can import it again later.": "ペットをローカルライブラリから削除します。後でもう一度インポートできます。",
   "Playful status words: show rotating gym jokes instead of “Working”": "遊び心のあるステータス: 「Working」の代わりにジムネタを順番に表示",
+  "Keep MCP URL tokens between restarts (stored in secure storage)": "再起動後も MCP URL トークンを保持する（セキュアストレージに保存）",
   "GitHub URL": "GitHub URL",
   "https://github.com/owner/repo/tree/main/skill": "https://github.com/owner/repo/tree/main/skill",
   "Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.": "フォルダー、単独の SKILL.md、または公開 GitHub スキルをインポートできます。ローカルスキルを GitHub ソースへリンクして更新を確認できますが、更新のインストールは利用者が選択します。",

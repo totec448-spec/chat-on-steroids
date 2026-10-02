@@ -1663,6 +1663,7 @@
   "Pet operation failed": "寵物操作失敗",
   "This removes the pet from your local library. You can import it again later.": "這會將寵物從你的本機資料庫中移除。你可以稍後重新匯入。",
   "Playful status words: show rotating gym jokes instead of “Working”": "趣味狀態詞：以輪換的健身梗取代「Working」",
+  "Keep MCP URL tokens between restarts (stored in secure storage)": "在重新啟動之間保留 MCP URL 權杖（儲存在安全儲存空間中）",
   "GitHub URL": "GitHub 網址",
   "https://github.com/owner/repo/tree/main/skill": "https://github.com/owner/repo/tree/main/skill",
   "Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.": "匯入資料夾、單獨的 SKILL.md，或公開的 GitHub 技能。本機技能可連結 GitHub 來源以檢查更新；是否安裝由你決定。",

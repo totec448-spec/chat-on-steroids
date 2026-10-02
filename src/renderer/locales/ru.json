@@ -1662,6 +1662,7 @@
   "Pet operation failed": "Операция с питомцем завершилась ошибкой",
   "This removes the pet from your local library. You can import it again later.": "Питомец будет удалён из локальной библиотеки. Позже его можно импортировать снова.",
   "Playful status words: show rotating gym jokes instead of “Working”": "Шутливые статусы: показывать меняющиеся шутки про спортзал вместо «Работает»",
+  "Keep MCP URL tokens between restarts (stored in secure storage)": "Сохранять токены URL MCP между перезапусками (хранятся в защищённом хранилище)",
   "GitHub URL": "URL GitHub",
   "https://github.com/owner/repo/tree/main/skill": "https://github.com/owner/repo/tree/main/skill",
   "Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.": "Импортируйте папку, отдельный SKILL.md или публичный Skill с GitHub. Локальный Skill можно связать с источником на GitHub для проверки обновлений; устанавливать обновление или нет — решаете вы.",

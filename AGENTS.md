@@ -203,6 +203,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
 | Command policy | Off, in Allowlist mode, with no rules. | Missing legacy settings stay Off; a missing mode defaults to Allowlist. Rules and mode persist while Off. An enabled empty Allowlist rejects every launch; an enabled empty Denylist permits simple supported commands. |
 | Plugin auto-refresh | Off. | Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
+| Persistent MCP tokens | Off. | When enabled, each MCP surface reuses its path token across app/server restarts; tokens remain distinct per surface and are stored in OS-backed secure storage. Changing the setting reconnects the MCP endpoint. |
 | Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
 

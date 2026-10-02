@@ -25,6 +25,7 @@ import { createMcpHandler } from '@modelcontextprotocol/server';
 import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import { getConfig } from '../config.js';
 import { logError, logInfo, logWarn } from '../logger.js';
+import { getSecret, setSecret, type SecretKey } from '../secrets.js';
 import { buildServer, resetToolClock, type ToolContext } from './tools.js';
 import { SURFACE_IDS, surfaceDefinition, type SurfaceId } from './surfaces.js';
 
@@ -260,8 +261,9 @@ export function forgetExposedSurface(): void {
 }
 
 export async function startMcpServer(getContext: () => ToolContext): Promise<McpEndpoint> {
-  // A per-session token in the path is what authorises callers. It is regenerated on
-  // every app start, so a URL that leaks stops working when the app restarts.
+  // A secret token in each surface path is what authorises callers. It rotates with the
+  // local server by default; Advanced settings can instead retain it in secure storage for
+  // deployments whose public connector URL must survive app restarts.
   requestSeenAt = null;
   surfaceRequestAt.clear();
   resetToolClock();
@@ -271,9 +273,16 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
   // secret because the two connectors are configured separately in ChatGPT and may be
   // shared, revoked or re-pasted at different times; a single token would make "give me
   // Desktop" and "give me everything" the same act.
-  const surfacePaths = SURFACE_IDS.map((id) => ({
-    id,
-    basePath: `/mcp/${id}/${randomBytes(32).toString('base64url')}`
+  const persistTokens = getConfig().ui.persistMcpTokens === true;
+  const surfacePaths = await Promise.all(SURFACE_IDS.map(async (id) => {
+    let token = randomBytes(32).toString('base64url');
+    if (persistTokens) {
+      const key: SecretKey = `mcpSurface:${id}`;
+      const stored = await getSecret(key);
+      if (stored && /^[A-Za-z0-9_-]{43}$/.test(stored)) token = stored;
+      else await setSecret(key, token);
+    }
+    return { id, basePath: `/mcp/${id}/${token}` };
   }));
 
   // ChatGPT can keep a cached tools/list snapshot for the lifetime of a connector

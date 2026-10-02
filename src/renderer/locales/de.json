@@ -1663,6 +1663,7 @@
   "Pet operation failed": "Pet-Aktion fehlgeschlagen",
   "This removes the pet from your local library. You can import it again later.": "Damit wird das Pet aus deiner lokalen Bibliothek entfernt. Du kannst es später erneut importieren.",
   "Playful status words: show rotating gym jokes instead of “Working”": "Verspielte Statuswörter: wechselnde Gym-Sprüche statt „Working“ anzeigen",
+  "Keep MCP URL tokens between restarts (stored in secure storage)": "MCP-URL-Tokens zwischen Neustarts beibehalten (im sicheren Speicher abgelegt)",
   "GitHub URL": "GitHub-URL",
   "https://github.com/owner/repo/tree/main/skill": "https://github.com/owner/repo/tree/main/skill",
   "Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.": "Importiere einen Ordner, eine einzelne SKILL.md oder einen öffentlichen Skill von GitHub. Lokale Skills lassen sich mit ihrer GitHub-Quelle verknüpfen, um nach Updates zu suchen; ob du ein Update installierst, entscheidest du.",
