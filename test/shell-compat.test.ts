@@ -191,6 +191,27 @@ it.each(['in_progress', 'cancelled', 'complete', 'unknown', undefined])('does no
   const turn = (await f.ask()).turns[0];
   expect(turn.calls[0].answered).toBe(false); expect(turn.endMessageId).toBeNull();
 });
+it('captions the newest id-less commentary of a running turn, and nothing once it ends (#942)', async () => {
+  // A new chat's first turn: ChatGPT shows the model's sentences but publishes no message for them.
+  const f = fixture();
+  expect((await f.ask()).turns[0].preview).toBe('Commentary without a provider message id');
+  f.entry.turn.items[1].items.push({ type: 'reasoning', presentation: 'preamble', content: 'Now   reading\n the file.' });
+  expect((await f.ask()).turns[0].preview).toBe('Now reading the file.');
+  // A transient item and a step title are not the model's sentence.
+  f.entry.turn.items[1].items.push({ type: 'reasoning', presentation: 'preamble', content: 'Draft', isTransient: true },
+    { type: 'reasoning', presentation: 'thought', content: 'Reading a file' });
+  expect((await f.ask()).turns[0].preview).toBe('Now reading the file.');
+  f.entry.turn.items[1].items.push({ type: 'reasoning', presentation: 'preamble', content: 'x'.repeat(400) });
+  expect((await f.ask()).turns[0].preview).toBe('x'.repeat(300));
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  expect((await f.ask()).turns[0].preview).toBeUndefined();
+});
+it('gives no caption for commentary whose own message is readable, which is recorded instead (#942)', async () => {
+  const f = fixture(); liveShellMapping(f, true);
+  const turn = (await f.ask()).turns[0];
+  expect(turn.preview).toBeUndefined();
+  expect(turn.messages.map((m: any) => m.rawText)).toContain('I will inspect the project.');
+});
 it('requires the final item and successful turn, while retaining exact messages on reload', async () => {
   const f = fixture(); f.entry.turn.items[2].completed = true;
   expect((await f.ask()).turns[0].endMessageId).toBeNull();
@@ -345,27 +366,6 @@ function liveShellMapping(f: ReturnType<typeof fixture>, compiler = false) {
   return { mapping, owner, thought, preamble, snapshot };
 }
 
-it('captions the newest id-less commentary of a running turn, and nothing once it ends (#942)', async () => {
-  // A new chat's first turn: ChatGPT shows the model's sentences but publishes no message for them.
-  const f = fixture();
-  expect((await f.ask()).turns[0].preview).toBe('Commentary without a provider message id');
-  f.entry.turn.items[1].items.push({ type: 'reasoning', presentation: 'preamble', content: 'Now   reading\n the file.' });
-  expect((await f.ask()).turns[0].preview).toBe('Now reading the file.');
-  // A transient item and a step title are not the model's sentence.
-  f.entry.turn.items[1].items.push({ type: 'reasoning', presentation: 'preamble', content: 'Draft', isTransient: true },
-    { type: 'reasoning', presentation: 'thought', content: 'Reading a file' });
-  expect((await f.ask()).turns[0].preview).toBe('Now reading the file.');
-  f.entry.turn.items[1].items.push({ type: 'reasoning', presentation: 'preamble', content: 'x'.repeat(400) });
-  expect((await f.ask()).turns[0].preview).toBe('x'.repeat(300));
-  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
-  expect((await f.ask()).turns[0].preview).toBeUndefined();
-});
-it('gives no caption for commentary whose own message is readable, which is recorded instead (#942)', async () => {
-  const f = fixture(); liveShellMapping(f, true);
-  const turn = (await f.ask()).turns[0];
-  expect(turn.preview).toBeUndefined();
-  expect(turn.messages.map((m: any) => m.rawText)).toContain('I will inspect the project.');
-});
 it.each([false, true])('captures live shell request metadata and public activity before a history query exists (compiler=%s)', async compiler => {
   const f = fixture(), { thought, preamble } = liveShellMapping(f, compiler);
   const turn = (await f.ask()).turns[0];
