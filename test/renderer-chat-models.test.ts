@@ -5,6 +5,79 @@ import { readFile } from 'node:fs/promises';
 
 let dom: JSDOM;
 afterEach(() => { dom?.window.close(); vi.unstubAllGlobals(); vi.resetModules(); });
+it('opens the model list as presentation only and returns focus through both Escape boundaries', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const models = [
+    { id: 'sol', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'] },
+    { id: 'pro', label: 'GPT-6 Pro', efforts: ['pro'] },
+    { id: 'future', label: 'Future model', efforts: ['low', 'high'] }
+  ];
+  const requestChatModels = vi.fn();
+  Object.assign(dom.window, { api: {
+    getChatModels: async () => ({ ok: true, data: { state: 'ready', observedAt: 2, models } }), requestChatModels
+  } });
+  const { initChatModels, applyChatModels, composerSendModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  const doc = dom.window.document;
+  const menu = doc.getElementById('modelMenu') as HTMLDetailsElement;
+  const toggle = doc.getElementById('composerModelToggle') as HTMLButtonElement;
+  const list = doc.getElementById('composerModelChoices')!;
+  const input = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Preserve this draft';
+  const pair = composerSendModel();
+  menu.open = true;
+  expect(list.hidden).toBe(true);
+  expect(list.inert).toBe(true);
+  toggle.click();
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(list.hidden).toBe(false);
+  expect(list.inert).toBe(false);
+  expect([...list.querySelectorAll<HTMLElement>('[data-model]')].map(button => button.dataset.model)).toEqual(['sol', 'pro', 'future']);
+  expect(doc.activeElement?.getAttribute('data-model')).toBe('sol');
+  expect(composerSendModel()).toEqual(pair);
+  doc.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(list.hidden).toBe(true); expect(menu.open).toBe(true); expect(doc.activeElement).toBe(toggle);
+  expect(list.inert).toBe(true);
+  toggle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(menu.open).toBe(false); expect(doc.activeElement).toBe(menu.querySelector('summary'));
+  expect(composerSendModel()).toEqual(pair); expect(input.value).toBe('Preserve this draft');
+  expect(requestChatModels).not.toHaveBeenCalled();
+});
+it.each([false, true])('keeps the lightning joke visual, bounded and restartable (reduced motion=%s)', async reduced => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const requestChatModels = vi.fn(), sendInput = vi.fn();
+  Object.assign(dom.window, { matchMedia: () => ({ matches: reduced }), api: {
+    getChatModels: async () => ({ ok: true, data: { state: 'ready', observedAt: 2, models: [{ id: 'sol', label: 'GPT-5.6 Sol', efforts: ['high', 'xhigh'] }] } }), requestChatModels, sendInput
+  } });
+  const animations: Array<{ target: HTMLElement; frames: Keyframe[]; options: KeyframeAnimationOptions; cancelled: boolean }> = [];
+  Object.assign(dom.window.HTMLElement.prototype, {
+    getAnimations(this: HTMLElement) { return animations.filter(animation => animation.target === this && !animation.cancelled).map(animation => ({ cancel() { animation.cancelled = true; } })); },
+    animate(this: HTMLElement, frames: Keyframe[], options: KeyframeAnimationOptions) { animations.push({ target: this, frames, options, cancelled: false }); }
+  });
+  const { initChatModels, applyChatModels, composerSendModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  const doc = dom.window.document, spark = doc.getElementById('composerSpark') as HTMLButtonElement;
+  const input = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  const menu = doc.getElementById('modelMenu') as HTMLDetailsElement;
+  input.value = 'Do not send this draft'; menu.open = true; spark.focus();
+  const selected = composerSendModel();
+  const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+  spark.click();
+  expect(doc.querySelector('.toast')?.textContent).toBe('Just think faster bro 😂');
+  random.mockReturnValue(.9);
+  spark.click(); spark.click();
+  random.mockRestore();
+  expect([...doc.querySelectorAll('.toast')].map(node => node.textContent)).toEqual(['Mega brain loading… coffee required ☕']);
+  expect(animations.filter(animation => !animation.cancelled)).toHaveLength(reduced ? 1 : 5);
+  expect(animations.some(animation => animation.cancelled)).toBe(true);
+  expect(animations.every(animation => Number(animation.options.duration) <= 800 && !animation.options.iterations)).toBe(true);
+  if (reduced) expect(animations.every(animation => animation.frames.every(frame => !frame.transform))).toBe(true);
+  expect(composerSendModel()).toEqual(selected); expect(input.value).toBe('Do not send this draft');
+  expect(menu.open).toBe(true); expect(doc.activeElement).toBe(spark);
+  expect(requestChatModels).not.toHaveBeenCalled(); expect(sendInput).not.toHaveBeenCalled();
+});
 it('shows pending reasons and failed refresh separately from usable cached choices', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
@@ -188,7 +261,7 @@ it('renders the two observed Pro generations separately and sends their exact se
   expect(dom.window.document.getElementById('composerModelLabel')!.textContent).toBe('GPT-6 Pro');
   // Pro-only model: one effort, so no slider; the menu names it instead.
   expect(dom.window.document.querySelector('#composerPowerChoices input')).toBeNull();
-  expect(dom.window.document.getElementById('composerPowerModel')!.textContent).toBe('Pro');
+  expect(dom.window.document.getElementById('composerPowerTitle')!.textContent).toBe('Pro');
   expect(confirmedComposerModel()).toEqual({ model: 'gpt-6-pro', reasoningEffort: 'pro' });
   dom.window.document.querySelector<HTMLButtonElement>('[data-model="gpt-5.6-sol"]')!.click();
   expect(dom.window.document.getElementById('contextThreshold')!.textContent).toBe('400K');
@@ -268,7 +341,7 @@ it('offers only observed models, prefers supported GPT-6 High, and replaces a re
   expect(dom.window.document.getElementById('composerModelChoices')!.textContent).not.toContain('default');
   const reload = dom.window.document.getElementById('refreshComposerModels')!;
   expect(reload.querySelector('.ico.ph-arrow-clockwise')).not.toBeNull();
-  expect(reload.textContent).toBe('Reload ChatGPT models');
+  expect(reload.textContent).toBe('');
   expect(reload.getAttribute('aria-label')).toBe('Reload ChatGPT models');
   const slider = dom.window.document.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
   expect(slider.max).toBe('1');
@@ -288,7 +361,7 @@ it('offers only observed models, prefers supported GPT-6 High, and replaces a re
   dom.window.document.querySelector<HTMLButtonElement>('[data-model="actual-pro"]')!.click();
   expect(select('composerModel').value).toBe('actual-pro');
   expect(select('composerReasoning').value).toBe('pro');
-  expect(dom.window.document.getElementById('composerPowerModel')!.textContent).toBe('Pro');
+  expect(dom.window.document.getElementById('composerPowerTitle')!.textContent).toBe('Pro');
   expect(dom.window.document.getElementById('composerPowerChoices')!.textContent).not.toContain('Other');
   models = [{ id: 'limited-six', label: 'GPT-6', efforts: ['medium'] }];
   applyChatModels(config); await Promise.resolve();
@@ -314,9 +387,11 @@ it('keeps model provider order and restricts the slider to the selected model’
   expect([...doc.querySelectorAll<HTMLElement>('[data-model]')].map(row => row.dataset.model)).toEqual(['astra', 'old', 'sol']);
   // A single effort (Instant) is not a choice: no slider, the effort is named instead.
   expect(doc.querySelector('#composerPowerChoices input')).toBeNull();
-  expect(doc.getElementById('composerPowerModel')!.textContent).toBe('High');
+  expect(doc.getElementById('composerPowerTitle')!.textContent).toBe('High');
+  expect(doc.getElementById('composerPowerModel')!.textContent).toBe('GPT-6 Astra');
   const header = doc.querySelector('.power-header')!;
-  expect(header.querySelector('.power-icon') === null).toBe(true);
+  expect(header.querySelector('#composerSpark')?.getAttribute('type')).toBe('button');
+  expect(header.querySelector('#composerSpark .ph-lightning')?.getAttribute('aria-hidden')).toBe('true');
   expect(header.querySelector('#composerPowerTitle')).not.toBeNull();
   expect(header.querySelector('#composerPowerModel')).not.toBeNull();
   doc.querySelector<HTMLButtonElement>('[data-model="sol"]')!.click();

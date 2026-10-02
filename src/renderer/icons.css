@@ -68,6 +68,8 @@
 .ph.ph-house::before { content: '\e2c2'; }
 .ph.ph-image::before { content: '\e2ca'; }
 .ph.ph-lightning::before { content: '\e2de'; }
+.ph.ph-brain::before { content: '\e74e'; }
+.ph.ph-sparkle::before { content: '\e6a2'; }
 .ph.ph-list-checks::before { content: '\eadc'; }
 .ph.ph-lock-key::before { content: '\e2fe'; }
 .ph.ph-magnifying-glass::before { content: '\e30c'; }

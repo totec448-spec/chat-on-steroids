@@ -136,9 +136,10 @@ export function filterSettingsSections(view: HTMLElement, search: string): void 
 
 let toastTimer: number | undefined;
 
-export function toast(message: string): void {
+export function toast(message: string, className = ''): void {
   document.querySelector('.toast')?.remove();
   const node = el('div', 'toast', message);
+  if (className) node.classList.add(className);
   document.body.append(node);
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => node.remove(), 3200);

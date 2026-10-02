@@ -1758,6 +1758,7 @@
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "它的最后一轮失败了，之后也没有后续。在那里发送一条消息即可开始新的一轮。",
   "Recovery stopped": "恢复已停止",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "浏览器没有接手这个聊天的修复，因此应用已停止重试。重新打开它的标签页即可继续恢复。",
+  "Wake the tiny brain": "唤醒小脑瓜",
   "Healthy": "正常",
   "Degraded": "降级",
   "Unknown": "未知",

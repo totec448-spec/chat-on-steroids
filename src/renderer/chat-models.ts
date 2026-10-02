@@ -3,7 +3,7 @@ import type { ChatModelCatalog } from '../shared/chat-models.js';
 import { chatModelDisplayLabel, resolveChatModel } from '../shared/chat-models.js';
 import type { Config } from '../shared/types.js';
 import type { ReasoningEffort } from '../shared/session.js';
-import { $, el, icon, run } from './dom.js';
+import { $, el, icon, run, toast } from './dom.js';
 
 let catalog: ChatModelCatalog = { state: 'unknown', requestedAt: null, observedAt: null, models: [] };
 let generation = 0;
@@ -33,6 +33,12 @@ function currentModelChosen(): boolean {
 const pairs = [['composerModel', 'composerReasoning'], ['workerModel', 'workerReasoning'], ['helperModel', 'helperReasoning']] as const;
 const effortNames: Record<string, string> = { none: "Instant", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", pro: 'Pro' } satisfies Record<ReasoningEffort, string>;
 const composerEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'pro'] as const;
+const brainJokes = [
+  'Just think faster bro 😂',
+  'Mega brain activated. Still forgot why I opened this tab 😂',
+  'Mega brain, tiny attention span 🧠',
+  'Mega brain loading… coffee required ☕'
+] as const;
 const effortLabel = (effort: string): string => effortNames[effort] ? t(effortNames[effort]) : effort;
 function observedModel(value: string) {
   return resolveChatModel(catalog.models, value);
@@ -160,19 +166,25 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
 
 function paintComposerChoices(): void {
   const models = document.getElementById('composerModelChoices');
+  const modelOptions = document.getElementById('composerModelOptions');
   const powers = document.getElementById('composerPowerChoices');
-  if (!models || !powers) return;
+  if (!models || !modelOptions || !powers) return;
   const selected = $<HTMLSelectElement>('composerModel');
   const effort = $<HTMLSelectElement>('composerReasoning');
   const choices = composerModels();
   const signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
   if (models.dataset.signature === signature) return;
   models.dataset.signature = signature;
-  models.replaceChildren();
+  modelOptions.replaceChildren();
   powers.replaceChildren();
   const title = document.getElementById('composerPowerTitle');
   const subtitle = document.getElementById('composerPowerModel');
+  const toggle = document.getElementById('composerModelToggle') as HTMLButtonElement | null;
+  if (toggle) toggle.disabled = !choices.length;
   if (!choices.length) {
+    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+    models.hidden = true;
+    models.inert = true;
     if (currentModelChosen()) {
       if (title) ui(title, 'textContent', () => t("ChatGPT’s current model"));
       if (subtitle) ui(subtitle, 'textContent', () => t("Sent without choosing a model"));
@@ -209,17 +221,18 @@ function paintComposerChoices(): void {
       selected.dispatchEvent(new window.Event('change', { bubbles: true }));
       if (focused) models.querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus();
     });
-    models.append(button);
+    modelOptions.append(button);
   }
   const supported = choices.find(choice => choice.id === selected.value)?.efforts ?? [];
-  if (title) ui(title, 'textContent', () => t('Thinking effort'));
   const current = supported.findIndex(power => power === effort.value);
-  if (subtitle) ui(subtitle, 'textContent', () => current < 0 ? t('Previous selection unavailable') : effortLabel(effort.value));
+  if (title) ui(title, 'textContent', () => current < 0 ? t('Previous selection unavailable') : effortLabel(effort.value));
+  const selectedLabel = distinctModelChoices(choices).find(choice => choice.id === selected.value)?.label;
+  if (subtitle) ui(subtitle, 'textContent', () => typeof selectedLabel === 'function' ? selectedLabel() : selectedLabel ?? t('Select model'));
   if (!supported.length) return;
   const choose = (power: ReasoningEffort | string): void => {
     if (composerContext) composerContext.edited = true;
     effort.value = power;
-    if (subtitle) ui(subtitle, 'textContent', () => effortLabel(power));
+    if (title) ui(title, 'textContent', () => effortLabel(power));
     paintComposerLabel();
     models.dataset.signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
   };
@@ -414,8 +427,48 @@ export function initChatModels(onPaint?: () => void): void {
       paintComposerContext(); paintStatus();
     });
   }
-  document.getElementById('modelMenu')?.addEventListener('toggle', () => {
-    if (($('modelMenu') as HTMLDetailsElement).open && !catalog.models.length) $('refreshComposerModels').click();
+  const modelMenu = document.getElementById('modelMenu') as HTMLDetailsElement | null;
+  const modelToggle = document.getElementById('composerModelToggle') as HTMLButtonElement | null;
+  const modelChoices = document.getElementById('composerModelChoices');
+  const closeModelChoices = (): void => {
+    modelToggle?.setAttribute('aria-expanded', 'false');
+    if (modelChoices) { modelChoices.hidden = true; modelChoices.inert = true; }
+  };
+  modelToggle?.addEventListener('click', () => {
+    if (!modelChoices) return;
+    const open = modelChoices.hidden;
+    modelToggle.setAttribute('aria-expanded', String(open));
+    modelChoices.hidden = !open;
+    modelChoices.inert = !open;
+    if (open) modelChoices.querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus({ preventScroll: true });
+  });
+  document.getElementById('composerSpark')?.addEventListener('click', event => {
+    const spark = event.currentTarget as HTMLElement;
+    const glyphs = [...spark.querySelectorAll<HTMLElement>('.ico')];
+    // Finite, restartable visual feedback only: no selection, send or discovery authority.
+    for (const glyph of glyphs) for (const animation of glyph.getAnimations()) animation.cancel();
+    // Keep the English meme wording; reuse the existing bounded toast owner.
+    toast(brainJokes[Math.floor(Math.random() * brainJokes.length)]!, 'brain-joke');
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      glyphs[0]!.animate([{ opacity: 1 }, { opacity: .35 }, { opacity: 1 }], { duration: 250 });
+      return;
+    }
+    glyphs[0]!.animate([{ opacity: 1, transform: 'rotate(0)' }, { opacity: 0, transform: 'rotate(-25deg)', offset: .2 }, { opacity: 0, offset: .8 }, { opacity: 1, transform: 'rotate(0)' }], { duration: 800 });
+    glyphs[1]!.animate([{ opacity: 0, transform: 'scale(.4)' }, { opacity: 1, transform: 'scale(1.15) rotate(-12deg)', offset: .25 }, { opacity: 1, transform: 'scale(1) rotate(10deg)', offset: .55 }, { opacity: 0, transform: 'scale(.6)' }], { duration: 800 });
+    for (const [index, glyph] of glyphs.slice(2).entries()) {
+      const angle = (-150 + index * 75) * Math.PI / 180;
+      glyph.animate([{ opacity: 0, transform: 'translate(0, 0) scale(.3)' }, { opacity: 1, offset: .3 }, { opacity: 0, transform: `translate(${Math.cos(angle) * 18}px, ${Math.sin(angle) * 18}px) scale(.7) rotate(45deg)` }], { duration: 650, delay: 100 });
+    }
+  });
+  modelMenu?.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault(); event.stopPropagation();
+    if (modelChoices && !modelChoices.hidden) { closeModelChoices(); modelToggle?.focus(); }
+    else { modelMenu.open = false; modelMenu.querySelector('summary')?.focus(); }
+  });
+  modelMenu?.addEventListener('toggle', () => {
+    if (!modelMenu.open) closeModelChoices();
+    else if (!catalog.models.length) $('refreshComposerModels').click();
   });
   for (const [modelId, effortId] of pairs) {
     document.getElementById(modelId)?.addEventListener('change', () => {
