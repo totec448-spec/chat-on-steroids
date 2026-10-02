@@ -396,10 +396,10 @@
     "message": "$1: $2"
   },
   "content_goal_delivery_after_turn_finish": {
-    "message": "Nach diesem Durchlauf + Abschluss"
+    "message": "Zum Sitzungsende oder nach dem Durchlauf"
   },
   "content_goal_delivery_only_finish": {
-    "message": "Nur Abschluss"
+    "message": "Nur zum Sitzungsende"
   },
   "content_goal_loop_off": {
     "message": "Goal und Loop aus"

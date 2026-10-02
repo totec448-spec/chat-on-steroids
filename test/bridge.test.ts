@@ -884,6 +884,36 @@ describe('active agent tab discard projection', () => {
   });
 });
 
+describe('the running turn\'s caption (#942)', () => {
+  it('holds the newest unpublished sentence in memory and drops it when cleared or the page closes', async () => {
+    const { livePreview } = await import('../src/main/live-preview.js');
+    await pair();
+    const conversationId = 'f0f00942-1111-4111-8111-111111111111', other = 'f0f00942-1111-4111-8111-222222222222';
+    const send = (body: unknown) => request('POST', '/live-preview', { body });
+    expect((await send({ conversationId, text: 'First command printed one.' })).status).toBe(200);
+    expect(livePreview([other, conversationId])).toBe('First command printed one.');
+    expect(livePreview([other])).toBeNull();
+    expect((await send({ conversationId, text: null })).status).toBe(200);
+    expect(livePreview([conversationId])).toBeNull();
+    // Bounded and exact: one caption line, nothing else accepted.
+    for (const bad of [{ conversationId, text: 'x'.repeat(301) }, { conversationId, text: '' }, { conversationId },
+      { conversationId, text: 'ok', extra: true }, { conversationId: 'not a chat', text: 'ok' }]) {
+      expect((await send(bad)).status, JSON.stringify(bad).slice(0, 60)).toBe(400);
+    }
+    expect(livePreview([conversationId])).toBeNull();
+    await send({ conversationId, text: 'Second command printed two.' });
+    await request('POST', '/closed', { body: { conversationId, manual: true } });
+    expect(livePreview([conversationId])).toBeNull();
+  });
+
+  it('forgets a caption nobody refreshed for ten minutes', async () => {
+    const { livePreview, setLivePreview } = await import('../src/main/live-preview.js');
+    setLivePreview('f0f00942-1111-4111-8111-333333333333', 'Still going', 1_000);
+    expect(livePreview(['f0f00942-1111-4111-8111-333333333333'], 1_000 + 10 * 60_000)).toBe('Still going');
+    expect(livePreview(['f0f00942-1111-4111-8111-333333333333'], 1_001 + 10 * 60_000)).toBeNull();
+  });
+});
+
 // -------------------------------------------------------------------- auth
 
 describe('authorisation', () => {
@@ -895,6 +925,7 @@ describe('authorisation', () => {
       ['POST', '/events'],
       ['POST', '/correlations'],
       ['POST', '/closed'],
+      ['POST', '/live-preview'],
       ['POST', '/commands/ack']
     ] as const) {
       const reply = await request(method, path, { auth: null, ...(method === 'POST' ? { body: {} } : {}) });
@@ -9209,6 +9240,36 @@ describe('unattributed activity recovery', () => {
     const retry = failed.body.repairs?.[0] ?? await maintenance();
     expect(retry?.reason).toBe('assistant-error');
     expect((await request('POST', '/repairs/claim', { body: { token: retry!.token } })).body.allowed).toBe(true);
+  });
+
+  it('says a recovered answer is being waited for instead of a failed reload, and still retries after it', async () => {
+    await pair();
+    await events(PRIME, [openTurn('answering-again'), { kind: 'chat_error', time: Date.now(),
+      text: 'Connection interrupted', recoverable: true }]);
+    const session = await findSessionByConversation(PRIME);
+    const rows = async () => foldProgress((await readEvents(session!.id, { kinds: ['progress'] }))
+      .filter((event): event is Extract<SessionEvent, { kind: 'progress' }> => event.kind === 'progress'))
+      .map((event) => event.kind === 'progress' ? event.message.text : '');
+    const lines = (text: string) => getLog().filter((entry) => entry.message.includes(text)).length;
+    const failedBefore = lines('reported failed assistant-error recovery'), waitingBefore = lines('is answering again');
+    // ChatGPT resumed the answer by itself; the page keeps the reload for after it, twice in a row.
+    let handout = await maintenance();
+    for (let pass = 0; pass < 2; pass++) {
+      expect(handout?.reason).toBe('assistant-error');
+      expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(true);
+      const waiting = await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=streaming`);
+      expect(await rows()).toEqual(['ChatGPT is answering again; recovery waits until it finishes.']);
+      handout = waiting.body.repairs?.[0] ?? await maintenance();
+    }
+    // One info line for the episode, no warning, and no "Trying to reload" row while it waits.
+    expect(lines('is answering again') - waitingBefore).toBe(1);
+    expect(lines('reported failed assistant-error recovery') - failedBefore).toBe(0);
+    // A real failure afterwards still says so, with the page's reason.
+    expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(true);
+    await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=changed`);
+    expect(getLog().some((entry) => entry.message.includes(
+      `reported failed assistant-error recovery for ${PRIME} (reloaded: the page changed before the action)`))).toBe(true);
+    expect(await rows()).toEqual(['Reload failed while recovering an interrupted response; will retry.']);
   });
 
   it('preserves a recovered assistant-error page without spending a later reload on the same question', async () => {
