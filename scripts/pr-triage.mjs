@@ -31,7 +31,7 @@ Thanks for the PR! It changes about ${lines} lines outside tests, translations a
 
 export const WELCOME = `${WELCOME_MARK}
 Thanks for your first pull request, and welcome! 👋 The short version of [CONTRIBUTING.md](https://github.com/totec448-spec/chat-on-steroids/blob/main/CONTRIBUTING.md):
-1. Link the issue it solves (\`Fixes #123\`), and keep one topic per PR.
+1. Explain why and what in the description (no separate issue needed), and keep one topic per PR.
 2. Add a test that fails without your change; the "Fail-first test" check confirms it.
 3. For interface changes, add before and after screenshots.
 4. Keep "Allow edits by maintainers" on, so we can help with small fixes.
