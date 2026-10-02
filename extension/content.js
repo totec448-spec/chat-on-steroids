@@ -9301,6 +9301,17 @@
     });
   }
 
+  /**
+   * When a pickup first found the source answer broken while ChatGPT still showed Stop.
+   *
+   * ChatGPT can come back from "Connection interrupted. Waiting for the complete answer" on its
+   * own while Stop stays up, so the first such pickup still trusts the page. It did not in the
+   * field: Stop stayed beside that card for over half an hour while the model kept working on the
+   * server, the page never saw the results it waited for, and every pickup was "resumed" until
+   * the chat hit 100% (#825, 2026-10-02). A later pickup that finds it still broken declines.
+   */
+  const BROKEN_STREAM_PICKUP_MS = 60_000;
+  let brokenStreamSince = 0;
   function resumePendingCompactionFromRepair(expectedConversationId) {
     const source = job && job.stage === 'handoff-pending' ? job.sourceSend : null;
     if (!alive || !expectedConversationId || conversationId !== expectedConversationId ||
@@ -9310,7 +9321,11 @@
     // answer") never settles in this document, so the ticket cannot be sent from it. Declining
     // hands the pickup to its reload. Accepting kept a ticket unsent behind that card for over
     // half an hour (2026-10-02), five pickups at a time, each one "resumed" and none reloaded.
-    if (!CLF_DOM.generating() && currentAssistantError()) return false;
+    if (currentAssistantError()) {
+      if (!CLF_DOM.generating()) return false;
+      if (!brokenStreamSince) brokenStreamSince = Date.now();
+      else if (Date.now() - brokenStreamSince >= BROKEN_STREAM_PICKUP_MS) return false;
+    } else brokenStreamSince = 0;
     // The browser recovery claim proves only that this exact document may be nudged. It does not
     // own Stop or Send: those remain behind startCompact's source identity, settle and durable WAL
     // checkpoints. If an attempt is already alive, merely acknowledge the healthy document so the
@@ -11838,6 +11853,28 @@
   window.postMessage({ type: 'cos-usage-request' }, location.origin);
   let desktopDecision = null;
   let desktopDecisionSession = null;
+  /**
+   * The helper input this tab was opened to answer, kept for the tab's lifetime.
+   *
+   * The decision itself lives in this script's memory, which a failed decision clears and an
+   * extension update or reload replaces. Without it the tab no longer knew it was a helper: it
+   * refused every close request, stayed open for good, and the re-injected script recorded it as
+   * an ordinary chat in the app (2026-10-02, live). sessionStorage stays with this one tab.
+   */
+  const SERVED_PLANNER_STORAGE = 'clf-temporary-planner-v1';
+  let servedPlanner = null;
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(SERVED_PLANNER_STORAGE) || 'null');
+    if (stored && typeof stored.id === 'string' && typeof stored.owner === 'string' &&
+        stored.id && stored.id.length <= 200 && stored.owner.length <= 200) servedPlanner = { id: stored.id, owner: stored.owner };
+  } catch {
+    // Unreadable storage loses only this hint; the live decision still identifies the helper.
+  }
+  function rememberServedPlanner(id, owner) {
+    if (typeof id !== 'string' || !id || typeof owner !== 'string') return;
+    servedPlanner = { id, owner };
+    try { sessionStorage.setItem(SERVED_PLANNER_STORAGE, JSON.stringify(servedPlanner)); } catch { /* Memory still holds it. */ }
+  }
   let desktopInputBusy = false;
   /**
    * How long an app-owned Send waits for its exact user row after the click. Without a bound,
@@ -11854,7 +11891,8 @@
   function temporaryPlannerPage() {
     if (!alive || !window.document) return false;
     return new URL(location.href).searchParams.get('temporary-chat') === 'true' &&
-      (location.href.includes('cos-input=') || desktopDecisionSession?.temporary === true || desktopDecision?.temporary === true);
+      (location.href.includes('cos-input=') || desktopDecisionSession?.temporary === true || desktopDecision?.temporary === true ||
+        servedPlanner !== null);
   }
   function desktopDecisionChat() {
     return Boolean((desktopDecisionSession && desktopDecisionSession.conversationId === CLF_DOM.conversationId()) || desktopDecision?.onTarget());
@@ -12341,6 +12379,7 @@
           return route === boundConversation;
         };
         desktopDecisionSession = { conversationId: deliveredConversation, temporary };
+        if (temporary) rememberServedPlanner(message.id, input.owner);
         completeDesktopDecision();
       }
       // The claim remains inert if this ACK is lost; no duplicate send after a reload.
@@ -12780,15 +12819,17 @@
       }
       if (message.type === 'clf-close-temporary-planner') {
         const users = CLF_DOM.messages().filter(row => row.role === 'user');
-        const exact = desktopDecision?.id === message.id && desktopDecision?.owner === message.owner;
+        const exact = (desktopDecision?.id === message.id && desktopDecision?.owner === message.owner) ||
+          (servedPlanner?.id === message.id && servedPlanner?.owner === message.owner);
         // ChatGPT moves a sent temporary chat to /c/<id>?temporary-chat=true, dropping the
         // cos-input marker; the exact decision this page still holds proves the same helper.
-        const routedHelper = exact && desktopDecision.temporary === true && /^\/c\/[0-9a-f-]{36}$/i.test(location.pathname) &&
+        const routedHelper = exact && (desktopDecision?.temporary === true || servedPlanner?.id === message.id) && /^\/c\/[0-9a-f-]{36}$/i.test(location.pathname) &&
           new URL(location.href).searchParams.get('temporary-chat') === 'true';
         sendResponse({ safe: temporaryPlannerPage() && (location.href.includes(`cos-input=${message.id}`) || routedHelper) &&
           !generating && !CLF_DOM.generating() && pendingTools === 0 && !CLF_DOM.hasComposerAttachments() &&
           !(CLF_DOM.composer()?.textContent || '').trim() &&
-          (users.length === 0 || (exact && users.length === 1 && matchesSubmittedUser(users[0], desktopDecision.text))) });
+          // A remembered helper whose decision is gone may still show its own one prompt.
+          (users.length === 0 || (exact && users.length === 1 && (desktopDecision ? matchesSubmittedUser(users[0], desktopDecision.text) : !!servedPlanner))) });
         return false;
       }
       if (message.type === 'clf-render-stream') {

@@ -36,6 +36,9 @@ jobs:
     name: Build candidate
     needs: preflight
     uses: ./.github/workflows/release.yml
+    with:
+      # Only the targets most installs use; see scripts/release-targets.mjs.
+      platforms: common
 
   publish:
     name: Publish canary
@@ -74,6 +77,7 @@ jobs:
           short="${GITHUB_SHA::12}"
           cat > canary-notes.md <<NOTES
           Test build of \`main\` at ${short}, after ${version}. **Not a release.**
+          Built for the platforms most installs use: Windows x64, macOS on Apple silicon and Linux x64.
 
           - No release notes and no support. It can be broken.
           - Issues and pull requests are accepted only for problems that also happen on the [latest stable release](https://github.com/${GITHUB_REPOSITORY}/releases/latest).
@@ -82,18 +86,10 @@ jobs:
           if gh release view canary >/dev/null 2>&1; then
             gh release delete canary --cleanup-tag --yes
           fi
+          # Whatever the candidate packaged, without the native sources archive a release keeps.
+          mapfile -t assets < <(find publish -maxdepth 1 -name 'Chat-On-Steroids-*' ! -name '*Native-Sources*' | sort)
           gh release create canary \
-            publish/Chat-On-Steroids-Setup-x64.exe \
-            publish/Chat-On-Steroids-Setup-arm64.exe \
-            publish/Chat-On-Steroids-macOS-x64.dmg \
-            publish/Chat-On-Steroids-macOS-x64.zip \
-            publish/Chat-On-Steroids-macOS-arm64.dmg \
-            publish/Chat-On-Steroids-macOS-arm64.zip \
-            publish/Chat-On-Steroids-Linux-x64.AppImage \
-            publish/Chat-On-Steroids-Linux-x64.deb \
-            publish/Chat-On-Steroids-Linux-arm64.AppImage \
-            publish/Chat-On-Steroids-Linux-arm64.deb \
-            publish/Chat-On-Steroids-Extension.zip \
+            "${assets[@]}" \
             publish/SHA256SUMS.txt \
             --prerelease --latest=false --target "$GITHUB_SHA" \
             --title "Canary ${short} (not a release)" \

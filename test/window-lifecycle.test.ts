@@ -8,6 +8,7 @@ import {
   createWindowActivationGate,
   ownsAppRuntime,
   registerNativeWindowActivation,
+  trackNormalWindowBounds,
   shouldBeginAppBootstrap,
   shouldQuitOnWindowAllClosed
 } from '../src/main/window-lifecycle.js';
@@ -31,7 +32,7 @@ describe('native window activation', () => {
     if (platform === 'darwin') expect(options?.titleBarOverlay).toBe(true);
   });
 
-  it('maximizes only on initial presentation and preserves user-sized geometry on reopen', () => {
+  it('maximizes only without remembered geometry and preserves user-sized geometry on reopen', () => {
     const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
     const present = source.slice(source.indexOf('function showWindow()'), source.indexOf('\nsetFinishNotifier(', source.indexOf('function showWindow()'))).replace('function showWindow(): void', 'function showWindow()');
     const operations: string[] = [];
@@ -56,20 +57,30 @@ describe('native window activation', () => {
     const startupOperations: string[] = [];
     const startupState = { fullscreen: false };
     const showWindow = vi.fn(() => startupOperations.push('showWindow'));
+    const trackNormalWindowBounds = vi.fn(() => startupOperations.push('track'));
     const launch = vm.createContext({ window: {
       once: (_event: string, listener: () => void) => { ready = listener; },
       isFullScreen: () => startupState.fullscreen,
       maximize: () => startupOperations.push('maximize')
-    }, quitting: false, showWindow });
+    }, owner: {}, quitting: false, restored: false, restoreMaximized: false, showWindow, trackNormalWindowBounds });
     vm.runInContext(startup, launch);
     ready();
-    expect(startupOperations.splice(0)).toEqual(['maximize', 'showWindow']);
+    expect(startupOperations.splice(0)).toEqual(['maximize', 'showWindow', 'track']);
+    launch.restored = true;
+    ready();
+    expect(startupOperations.splice(0)).toEqual(['showWindow', 'track']);
+    launch.restoreMaximized = true;
+    ready();
+    expect(startupOperations.splice(0)).toEqual(['maximize', 'showWindow', 'track']);
+    launch.restored = false;
+    launch.restoreMaximized = false;
     startupState.fullscreen = true;
     ready();
-    expect(startupOperations.splice(0)).toEqual(['showWindow']);
+    expect(startupOperations.splice(0)).toEqual(['showWindow', 'track']);
     launch.quitting = true;
     ready();
-    expect(showWindow).toHaveBeenCalledTimes(2);
+    expect(showWindow).toHaveBeenCalledTimes(4);
+    expect(trackNormalWindowBounds).toHaveBeenCalledTimes(4);
   });
   it('passively observes on first visible use without opening a browser, never on repeat show or quit', async () => {
     const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
@@ -159,6 +170,67 @@ describe('native window activation', () => {
   it.each(['win32', 'linux'] as const)('keeps close-to-tray semantics on %s', (platform) => {
     expect(shouldQuitOnWindowAllClosed(platform, true)).toBe(false);
     expect(shouldQuitOnWindowAllClosed(platform, false)).toBe(true);
+  });
+
+  it('persists normal bounds plus maximized presentation and ignores other transient native states', () => {
+    const listeners = new Map<'move' | 'resize' | 'maximize' | 'unmaximize', () => void>();
+    const normal = { x: 120, y: 80, width: 1100, height: 720 };
+    const state = {
+      destroyed: false,
+      maximized: false,
+      minimized: false,
+      fullscreen: false,
+      bounds: { ...normal }
+    };
+    const owner = {
+      on: (event: 'move' | 'resize' | 'maximize' | 'unmaximize', listener: () => void) => { listeners.set(event, listener); },
+      isDestroyed: () => state.destroyed,
+      isMaximized: () => state.maximized,
+      isMinimized: () => state.minimized,
+      isFullScreen: () => state.fullscreen,
+      getNormalBounds: () => ({ ...state.bounds })
+    };
+    const save = vi.fn();
+
+    trackNormalWindowBounds(owner, save);
+    listeners.get('move')!();
+    expect(save).toHaveBeenLastCalledWith({ bounds: normal, maximized: false });
+
+    // Electron's getNormalBounds retains the user-sized rectangle while maximized.
+    state.maximized = true;
+    listeners.get('maximize')!();
+    expect(save).toHaveBeenLastCalledWith({ bounds: normal, maximized: true });
+
+    // Native maximize geometry churn must not replace the remembered normal rectangle.
+    state.bounds = { x: 0, y: 0, width: 1920, height: 1040 };
+    listeners.get('resize')!();
+    expect(save).toHaveBeenCalledTimes(2);
+
+    state.maximized = false;
+    state.bounds = { ...normal };
+    listeners.get('unmaximize')!();
+    expect(save).toHaveBeenLastCalledWith({ bounds: normal, maximized: false });
+
+    state.minimized = true;
+    listeners.get('move')!();
+    state.minimized = false;
+    state.fullscreen = true;
+    listeners.get('resize')!();
+    state.fullscreen = false;
+    state.destroyed = true;
+    listeners.get('move')!();
+
+    expect(save).toHaveBeenCalledTimes(3);
+  });
+
+  it('wires remembered bounds through dedicated durable state instead of shared settings', () => {
+    const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
+
+    expect(source).toContain("const WINDOW_BOUNDS_STATE = 'window-bounds';");
+    expect(source).toContain('savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);');
+    expect(source).toContain('const restoreMaximized = windowPlacementWasMaximized(savedWindowBounds);');
+    expect(source).toContain('trackNormalWindowBounds(owner, (placement) => {');
+    expect(source).toContain('writeDurableSoon(WINDOW_BOUNDS_STATE, placement);');
   });
 });
 
