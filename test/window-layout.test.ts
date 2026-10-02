@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { windowLayoutForDisplays, windowLayoutForWorkArea } from '../src/main/window-layout.js';
+import { windowLayoutForDisplays, windowLayoutForWorkArea, windowPlacementWasMaximized } from '../src/main/window-layout.js';
 
 describe('main window accessibility', () => {
   it('caps its initial outer bounds to a small Windows work area', () => {
@@ -58,6 +58,34 @@ describe('main window accessibility', () => {
         resizable: true,
         maximizable: true
       }
+    });
+  });
+
+  it('restores wrapped normal bounds and remembers whether that window was maximized', () => {
+    const primary = { x: 0, y: 0, width: 1920, height: 1040 };
+    const bounds = { x: 180, y: 90, width: 1100, height: 720 };
+    const saved = { bounds, maximized: true };
+
+    expect(windowLayoutForDisplays(primary, [primary], saved)).toEqual({
+      restored: true,
+      layout: {
+        ...bounds,
+        minWidth: 640,
+        minHeight: 480,
+        useContentSize: false,
+        resizable: true,
+        maximizable: true
+      }
+    });
+    expect(windowPlacementWasMaximized(saved)).toBe(true);
+    // Existing installs wrote the bare rectangle; it remains a normal-window restore.
+    expect(windowPlacementWasMaximized(bounds)).toBe(false);
+
+    const malformed = { bounds, maximized: 'yes' };
+    expect(windowPlacementWasMaximized(malformed)).toBe(false);
+    expect(windowLayoutForDisplays(primary, [primary], malformed)).toEqual({
+      restored: false,
+      layout: windowLayoutForWorkArea(primary)
     });
   });
 
