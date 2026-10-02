@@ -3254,24 +3254,37 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(textOf(stranger)).toContain('EXEC_SESSION_OWNER_MISMATCH');
     expect(textOf(stranger)).not.toContain('may already have delivered');
 
-    // An unresolved request can continue processes it opened itself, but a bare numeric id
-    // does not grant custody over a process that belongs to another request/session.
+    // An unresolved request from another turn has no authority from the numeric id alone.
+    // If exact proof never arrives, the bounded wait must still fail closed without sending
+    // input or reading process output.
     const unproven = await asChat('wfr_execown_unattributed', 'write_stdin', {
       session_id: sessionId,
-      chars: 'anon\r',
+      chars: 'unproven\r',
       yield_time_ms: 1_000
     });
     expect(unproven.body.result?.isError).toBe(true);
-    expect(textOf(unproven)).not.toContain('echo=anon');
+    expect(textOf(unproven)).not.toContain('echo=unproven');
     expect(textOf(unproven)).toContain('EXEC_CALLER_UNIDENTIFIED');
     expect(textOf(unproven)).toContain('not Read-only mode');
 
-    expect(prove('wfr_execown_unattributed', 'conv-execown-opener')).toBe('stored');
-    const recovered = await asChat('wfr_execown_unattributed', 'write_stdin', {
+    // A later request from the same durable session can race the page proof for its exact
+    // request id. The one call should recover when that proof arrives instead of making the
+    // model retry a session it already owns.
+    const lateRequestId = 'wfr_execown_late_same_owner';
+    let lateProofResult: string | undefined;
+    const lateProof = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        lateProofResult = prove(lateRequestId, 'conv-execown-opener');
+        resolve();
+      }, 250);
+    });
+    const recovered = await asChat(lateRequestId, 'write_stdin', {
       session_id: sessionId,
       chars: 'anon\r',
       yield_time_ms: 1_000
     });
+    await lateProof;
+    expect(lateProofResult).toBe('stored');
     expect(recovered.body.result?.isError).not.toBe(true);
     expect(textOf(recovered)).toContain('echo=anon');
 
