@@ -213,6 +213,9 @@ describe('MAIN-world usage projection', () => {
     await h.feedSse([`data: ${JSON.stringify({ conversation_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' })}\n\n`], { method: 'POST', body });
     const reports = h.posts.filter(row => row.type === 'cos-send-model');
     expect(reports).toEqual([{ type: 'cos-send-model', model: 'gpt-5-6-thinking', messageIds: [messageId], observedAt: expect.any(Number) }]);
+    // The same request confirms the Send when ChatGPT redraws a new chat without its question (#942).
+    expect(h.posts.filter(row => row.type === 'cos-send-request'))
+      .toEqual([{ type: 'cos-send-request', messageIds: [messageId], observedAt: expect.any(Number) }]);
     expect(JSON.stringify(h.posts)).not.toContain('private prompt');
     // A malformed model or a non-user message proves nothing.
     await h.feedSse([], { method: 'POST', body: JSON.stringify({ model: 'gpt 6 <b>', messages: [{ id: messageId, author: { role: 'user' } }] }) });
