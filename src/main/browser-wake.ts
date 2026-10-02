@@ -8,8 +8,9 @@ export function wakeBrowserWork(topic: 'wake' | 'browser-control' = 'wake'): voi
   for (const wake of subscribers) wake(topic);
 }
 
+/** `changed` hears an authenticated channel open or close: whether the browser is there at all. */
 export function attachBrowserWake(server: http.Server, allowed: (request: http.IncomingMessage) => boolean,
-  authenticate: (token: string) => Promise<boolean>): { connected(): boolean; revoke(): void; dispose(): void } {
+  authenticate: (token: string) => Promise<boolean>, changed: () => void = () => undefined): { connected(): boolean; revoke(): void; dispose(): void } {
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 512, perMessageDeflate: false });
   const authorized = new Map<WebSocket, number>();
   let epoch = 0;
@@ -23,7 +24,7 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
       client.on('error', () => client.terminate());
       client.on('close', () => {
         clearTimeout(deadline);
-        if (authorized.delete(client)) logInfo('bridge: browser wake channel disconnected');
+        if (authorized.delete(client)) { logInfo('bridge: browser wake channel disconnected'); changed(); }
       });
       client.on('message', (bytes, binary) => {
         if (binary) { client.terminate(); return; }
@@ -41,6 +42,7 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
           clearTimeout(deadline);
           authorized.set(client, Date.now());
           logInfo('bridge: browser wake channel authenticated');
+          changed();
           // Reconnection always reads current work; no lost notification is durable state.
           client.send('wake');
         }).catch(() => client.terminate());
@@ -64,7 +66,13 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
     }
   }, 20000);
   heartbeat.unref();
-  const revoke = () => { epoch++; for (const client of sockets.clients) client.terminate(); authorized.clear(); };
+  const revoke = () => {
+    epoch++;
+    const had = authorized.size > 0;
+    for (const client of sockets.clients) client.terminate();
+    authorized.clear();
+    if (had) changed();
+  };
   return { connected: () => [...authorized].some(([client, seen]) => client.readyState === WebSocket.OPEN &&
     client.bufferedAmount < 1024 && Date.now() - seen <= 45000), revoke, dispose() {
     subscribers.delete(wake); clearInterval(heartbeat); server.off('upgrade', upgrade); revoke(); sockets.close();

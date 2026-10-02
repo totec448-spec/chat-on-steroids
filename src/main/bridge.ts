@@ -847,7 +847,10 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     error: bridgeError,
     port,
     paired: stored !== null && stored !== BROWSER_DISCONNECTED,
-    present: browserPresent(),
+    // Seen for the user: a recent request, or the authenticated wake channel held open. The
+    // extension makes requests only while it has a chat to serve, so a browser with no ChatGPT
+    // tab open went "missing" a minute after start although it was connected all along.
+    present: browserPresent() || browserWakeConnected(),
     lastSeenAt,
     extensionVersion
   };
@@ -2988,6 +2991,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         context: contextView(!workerBlocked && !superseded && automaticCompactionAllowed(summary)),
         // "Follow new output" applies to the ChatGPT page too; the page owns the scrolling.
         followOutput: getConfig().ui.followOutput !== false,
+        mentionCore: getConfig().ui.mentionCore !== false,
         // This chat was opened by the app, so its first user message is not the user's —
         // it is the handoff brief or the worker bootstrap this app typed. The page uses
         // it to fold that message away. Read off the session record rather than remembered
@@ -3725,6 +3729,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       {
         context: contextView(),
         followOutput: getConfig().ui.followOutput !== false,
+        mentionCore: getConfig().ui.mentionCore !== false,
         goal: {
           enabled: getConfig().goal.enabled,
           // The app-wide setting is nobody's own answer, by definition: it is what a chat that
@@ -4868,7 +4873,7 @@ function attachBridgeWake(instance: http.Server): void {
     async candidate => {
       const stored = await getSecret('bridgeToken');
       return !!stored && stored !== BROWSER_DISCONNECTED && safeEqual(candidate, stored);
-    });
+    }, changed);
 }
 
 /** Called inside the serialized config transaction, with its validated latest proposal. */
