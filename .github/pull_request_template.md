@@ -1,6 +1,6 @@
 <!-- CI checks this description. A PR that fails "PR checklist" or CI is not reviewed. See CONTRIBUTING.md. -->
 
-Fixes #
+<!-- Optional: "Fixes #123" when this closes an issue. No issue is needed otherwise. -->
 
 ## Why
 
