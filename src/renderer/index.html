@@ -863,9 +863,11 @@
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan reasoning</b><em>Used with the ChatGPT model above; independent from API reasoning.</em></span><select id="helperReasoning" aria-label="Goal, Loop and Plan reasoning"></select></div>
                   <label class="setting"><span class="setting-text"><b>Include tool details in handoffs</b><em>Compact &amp; Resume briefs keep tool calls and their results. Goal and Loop always read only your messages and the assistant's updates and answers.</em></span><input id="goalIncludeToolCalls" type="checkbox" /></label>
                   </div>
-                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">ChatGPT models</h2><p>Use account-observed models for sub-agents.</p></div></header>
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">ChatGPT models</h2><p>Choose account-observed model and reasoning defaults for ordinary chats and sub-agents.</p></div></header>
                 <div class="settings-surface pane">
                   <div class="setting"><span class="setting-text"><b>Available ChatGPT models</b><em id="chatModelStatus">Read model choices from your account.</em></span><button class="btn" id="refreshChatModels" type="button">Refresh</button></div>
+                  <div class="setting"><span class="setting-text"><b>Default new-chat model</b><em>Used only for a fresh ordinary chat with no conversation selection.</em></span><select id="defaultChatModel"><option value="">Automatic</option></select></div>
+                  <div class="setting"><span class="setting-text"><b>Default new-chat reasoning</b><em>Used with the ordinary chat model above; workers and helpers keep their own defaults.</em></span><select id="defaultChatReasoning"><option value="">Automatic</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Default sub-agent model</b><em>Confirmed in ChatGPT before a worker starts.</em></span><select id="workerModel"><option value="" disabled>No observed choices</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Default sub-agent reasoning</b><em>Selected independently from the model.</em></span><select id="workerReasoning"><option value="" disabled>No observed choices</option></select></div>
                   </div>

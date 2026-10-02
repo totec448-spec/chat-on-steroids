@@ -308,6 +308,8 @@ const configSchema = z.object({
   ui: z.object({
     appearance: appearanceSchema.optional().catch(undefined),
     autoContinue: z.boolean().optional().default(true),
+    defaultChatModel: z.string().trim().min(1).max(80).optional().catch(undefined),
+    defaultChatReasoning: z.enum(REASONING_EFFORTS).optional().catch(undefined),
     chatBrowser: z.enum(CHAT_BROWSERS).optional().default('chrome'),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
