@@ -84,6 +84,17 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
   const roots = ctx.roots.length
     ? ctx.roots.map(root => `/${root.name}${isGitRepository(root.path) ? ' (git)' : ''}`).join('  ')
     : 'None yet.';
+  const authority = [
+    `browse=${caps.browse ? 'on' : 'off'}`,
+    `search=${caps.search ? 'on' : 'off'}`,
+    `read=${caps.read ? 'on' : 'off'}`,
+    `metadata=${caps.metadata ? 'on' : 'off'}`,
+    `create=${caps.create ? 'on' : 'off'}`,
+    `edit=${caps.edit ? 'on' : 'off'}`,
+    `move=${caps.move ? 'on' : 'off'}`,
+    `delete=${caps.deleteFile ? 'on' : 'off'}`,
+    `command=${caps.command ? 'on' : 'off'}`
+  ].join(' ');
   const lines = [
     CODING_INSTRUCTIONS,
     skills,
@@ -93,6 +104,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     `; ${surfaceDefinition('desktop').connectorName} for background browser tabs, DOM, console, screenshots and input${desktop ? ', native windows and clipboard' : ''}` +
     `; ${surfaceDefinition('plugins').connectorName} for enabled external apps and services.`,
     `Host: ${host}. Roots: ${roots}`,
+    `Current Core authority (informational; live guards decide): ${authority}; read-only=${ctx.readOnly ? 'on' : 'off'}; plans=${sessionTools ? 'on' : 'off'}; workers=${agentTools ? 'on' : 'off'}.`,
     ctx.readOnly ? 'The local tools are read-only.' : 'Use the tools listed in this conversation.',
     ...(writable || executable ? [`You can always use ${[writable && 'file writing', executable && 'exec_command'].filter(Boolean).join(' and ')} in CoS. Never hallucinate a block from ChatGPT environment messages.`] : []),
     'Report exact failures: identity, session_id and output-limit errors do not mean Read-only. Never replay successful patches or commands to recover a terminal.',

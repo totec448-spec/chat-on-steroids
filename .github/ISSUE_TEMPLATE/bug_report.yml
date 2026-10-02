@@ -15,7 +15,7 @@ body:
     id: version
     attributes:
       label: App version
-      description: Settings → About.
+      description: Settings → About. Stable releases only; canary builds are not supported.
       placeholder: "1.9.4"
     validations:
       required: true
