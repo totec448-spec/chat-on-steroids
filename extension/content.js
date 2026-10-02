@@ -3004,6 +3004,65 @@
    * waiting up to a second for the polling tick. Mutations caused by our own stream are
    * ignored to avoid feeding the renderer back into itself.
    */
+  /**
+   * "Follow new output" on the ChatGPT page (the app's ui.followOutput, on unless switched off).
+   *
+   * ChatGPT's thread scrolls bottom-anchored, so it follows growth only while it sits exactly at
+   * its end, and after a send it moves the question to the top and stops following the answer.
+   * Measured 2026-10-02 on a working chat: the newest turn ran 700 px below the composer while
+   * the reader had not scrolled at all. While the reader is at the end, keep the newest turn's
+   * bottom at the composer's top. Only the reader's own wheel, touch, scroll keys or scrollbar
+   * move them away, never growth; scrolling back to the end resumes following.
+   */
+  let followOutput = true, readerAtEnd = true, scrollIntentAt = 0, followScroller = null, followFrame = 0;
+  /** How far the newest turn reaches below what the reader can see, with its scroller. */
+  function endBelowView() {
+    const last = CLF_DOM.turns().at(-1);
+    const node = last?.node?.closest?.('[data-turn-key]') || last?.node;
+    if (!node?.isConnected) return null;
+    if (!(followScroller?.isConnected && followScroller.contains(node))) {
+      followScroller = null;
+      for (let at = node.parentElement; at && at !== document.body; at = at.parentElement) {
+        const overflow = getComputedStyle(at).overflowY;
+        if ((overflow === 'auto' || overflow === 'scroll') && at.scrollHeight > at.clientHeight + 1) { followScroller = at; break; }
+      }
+    }
+    if (!followScroller) return null;
+    const view = followScroller.getBoundingClientRect();
+    // The composer sits over the end of the thread; what lies under it is not visible.
+    const form = CLF_DOM.composer()?.closest?.('form');
+    const visibleBottom = form && followScroller.contains(form) ? Math.min(view.bottom, form.getBoundingClientRect().top) : view.bottom;
+    return { scroller: followScroller, below: node.getBoundingClientRect().bottom - visibleBottom };
+  }
+  function followChatEnd() {
+    followFrame = 0;
+    if (!followOutput || !readerAtEnd || !alive || !sameChat()) return;
+    const end = endBelowView();
+    if (end && end.below > 2) end.scroller.scrollTop += end.below;
+  }
+  function watchChatEnd() {
+    if (typeof MutationObserver !== 'function' || !document.body) return;
+    const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
+    const intent = () => { scrollIntentAt = Date.now(); };
+    listen(window, 'wheel', intent, { capture: true, passive: true });
+    listen(window, 'touchmove', intent, { capture: true, passive: true });
+    listen(window, 'keydown', (event) => {
+      if (scrollKeys.has(event.key) && !event.target?.closest?.('input, textarea, select, button, summary, a, [contenteditable]')) intent();
+    }, true);
+    listen(window, 'pointerdown', (event) => { if (followScroller && event.target === followScroller) intent(); }, { capture: true, passive: true });
+    listen(window, 'scroll', () => {
+      if (Date.now() - scrollIntentAt >= 300) return;
+      const end = endBelowView();
+      if (end) readerAtEnd = end.below <= 48;
+    }, { capture: true, passive: true });
+    const observer = new MutationObserver(() => {
+      // Coalesced: a streaming answer mutates many times per frame.
+      if (followOutput && readerAtEnd && !followFrame) followFrame = setTimeout(followChatEnd, 32);
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    rememberCleanup(() => { observer.disconnect(); if (followFrame) clearTimeout(followFrame); });
+  }
+
   function watchTranscript() {
     if (typeof MutationObserver !== 'function' || !document.body) return;
     let timer = null;
@@ -6398,6 +6457,7 @@
       const reply = await ask({ type: 'settings_get' });
       if (!alive || CLF_DOM.conversationId() || !reply || reply.ok !== true || !reply.data) return;
       context = readContext(reply.data.context) || context;
+      if (typeof reply.data.followOutput === 'boolean') followOutput = reply.data.followOutput;
       if (reply.data.goal && typeof reply.data.goal === 'object') {
         goalConfig = {
           ...reply.data.goal,
@@ -6614,6 +6674,7 @@
       }
       tokens = Number.isFinite(Number(data.tokens)) ? Number(data.tokens) : 0;
       context = readContext(data.context);
+      if (typeof data.followOutput === 'boolean') followOutput = data.followOutput;
       // The goal loop's settings and, while one is running, the draft itself: its stage, the
       // text OpenRouter has streamed so far, and — once it is `ready` — the message to type.
       // Nothing is typed here; maybeSendGoalReply below owns that, after the pull has
@@ -12764,6 +12825,7 @@
   watchComposer();
   watchToolRows();
   watchTranscript();
+  watchChatEnd();
 
   every(OBSERVE_MS, () => {
     recoverConversationLoad();
