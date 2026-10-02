@@ -400,7 +400,7 @@
   "Add attachments": "添加附件",
   "Chat mode": "聊天模式",
   "Chat automation": "聊天自动化",
-  "What should this chat achieve?": "此聊天要实现什么目标？",
+  "Optional. Leave empty to work toward what you asked in this chat.": "可选。留空则以你在此聊天中提出的请求为目标。",
   "Goal behavior": "目标行为",
   "Estimated session context": "会话上下文估算",
   "Reload ChatGPT models": "重新加载 ChatGPT 模型",
