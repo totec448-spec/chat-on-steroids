@@ -49,6 +49,20 @@ export function evaluateWorkerOverviewHealth(
       reason: 'The broker recorded this worker as failed.'
     };
   }
+  if (input.state === 'sleeping') {
+    return {
+      health: 'healthy',
+      activity: 'sleeping',
+      reason: 'The broker reports this worker as sleeping and reusable.'
+    };
+  }
+  if (input.state === 'finished') {
+    return {
+      health: 'healthy',
+      activity: 'done',
+      reason: 'The broker reports this worker in the finished lifecycle state.'
+    };
+  }
   if (input.working || input.activeTurn) {
     return {
       health: 'healthy',
