@@ -188,6 +188,8 @@ describe('Goal decision backends', () => {
     expect((await settled(id)).stage).toBe('ready');
     expect(browser.request.mock.calls[0]?.[2]).toEqual({ sourceSessionId: sessionId, conversationId: null, lifetime: 'temporary-planner', model: 'gpt-5.6-sol', reasoningEffort: 'high', publish: expect.any(Function) });
     expect(browser.request.mock.calls[0]?.[0]).toContain('Original reference only');
+    // ChatGPT offers connected apps in the helper chat too; the helper must not run them (2026-10-02).
+    expect(browser.request.mock.calls[0]?.[0]).toContain('Do not call any tools, apps or connectors');
     const saved = goal.snapshotGoalSwitches();
     goal.resetGoalStateForTests();
     goal.restoreGoalSwitches(saved);
