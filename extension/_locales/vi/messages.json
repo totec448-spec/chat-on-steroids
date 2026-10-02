@@ -396,10 +396,10 @@
     "message": "$1: $2"
   },
   "content_goal_delivery_after_turn_finish": {
-    "message": "Sau lượt này + finish"
+    "message": "Khi kết thúc phiên hoặc sau lượt"
   },
   "content_goal_delivery_only_finish": {
-    "message": "Chỉ finish"
+    "message": "Chỉ khi kết thúc phiên"
   },
   "content_goal_loop_off": {
     "message": "Goal và Loop tắt"
