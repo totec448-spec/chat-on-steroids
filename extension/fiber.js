@@ -1959,13 +1959,27 @@
     return { entry, messages, calls, slots, callSources, executionIds, images,
       endMessageId: imageAnswer ? imageEnd : turnEndMessageId(messages) };
   }
+  /**
+   * Whether a node belongs to an earlier page ChatGPT keeps mounted but undisplayed in this tab.
+   * After a Project resume the tab still holds the source chat that way; its turns name the
+   * source conversation and must not be read as this page's (same rule as chatgpt-dom.js).
+   */
+  function onKeptPage(node) {
+    for (let page = node?.closest?.('[data-app-shell-page-surface]'); page;
+      page = page.parentElement?.closest('[data-app-shell-page-surface]')) {
+      if (getComputedStyle(page).display === 'none') return true;
+    }
+    return false;
+  }
+
   function turnsOf(scanToken) {
     const out = [];
     let sections;
     try {
       sections = [...document.querySelectorAll(TURN_SECTION)].filter(section => {
         if (section.matches?.(SEARCH_TURN_ANCHOR) && section.closest?.(SHELL_TURN)) return false;
-        return !section.closest(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`);
+        return !section.closest(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`) &&
+          !onKeptPage(section);
       });
     } catch {
       return out;
