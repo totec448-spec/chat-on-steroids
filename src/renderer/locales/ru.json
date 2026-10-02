@@ -1761,5 +1761,7 @@
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Браузер не подхватил восстановление этого чата, поэтому приложение прекратило повторные попытки. Снова откройте его вкладку — восстановление продолжится.",
   "Healthy": "В норме",
   "Degraded": "Снижено",
-  "Unknown": "Неизвестно"
+  "Unknown": "Неизвестно",
+  "End background processes of workers asleep for more than 30 minutes": "Завершать фоновые процессы воркеров, которые спят больше 30 минут",
+  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Чат и история воркера остаются доступными для повторного использования. По умолчанию выключено; каждая очистка записывается в историю этого воркера."
 }
