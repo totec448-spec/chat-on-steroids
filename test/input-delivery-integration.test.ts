@@ -246,6 +246,55 @@ it('says why a page withdrew a Continue and ends it after three minutes of withd
   } finally { clock.mockRestore(); }
 });
 
+/** Files the automatic Continue for a silent turn exactly as the app does, and returns its row. */
+async function silentTurnContinue(title: string, advance: (ms: number) => number) {
+  const bridge = await import('../src/main/bridge.js');
+  const conversationId = randomUUID(), turnId = randomUUID(), questionId = randomUUID();
+  const session = await createSession({ title, conversationId });
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() },
+    { kind: 'user_message', messageId: questionId, text: 'Finish the task', time: Date.now() },
+    { kind: 'turn_start', turnId, time: Date.now() }
+  ] });
+  await attributedMcp(conversationId);
+  await bridge.sweepStaleSwarm(advance(120_000));
+  const repair = (await post('/status', { openConversations: [conversationId] })).body.repairs
+    .find((item: any) => item.conversationId === conversationId);
+  expect((await post('/repairs/claim', { token: repair.token })).body.allowed).toBe(true);
+  await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
+  const row = (await input.listInputs()).find(item => item.sessionId === session.id && item.recovery)!;
+  expect(row).toMatchObject({ state: 'queued' });
+  return { conversationId, turnId, session, row };
+}
+
+it('ends a Continue the page refuses before claiming because its answer is finished', async () => {
+  // Measured 2026-10-02: a Continue filed for a turn whose final the app had missed was refused by
+  // every page before claiming, because ChatGPT showed that final. Nothing was reported, so the
+  // app reloaded the chat every fifteen minutes for six hours.
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+    const { conversationId, turnId, session, row } = await silentTurnContinue('Finished before Continue', ms => now += ms);
+
+    // Only for its own chat.
+    expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId: randomUUID(), recoveryVeto: 'page-final' })).body.ok).toBe(false);
+    expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, recoveryVeto: 'page-final' })).body.ok).toBe(true);
+    expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'cancelled',
+      error: 'Automatic Continue was not needed: the page shows a finished answer.', recovery: { ended: 'page-final' } });
+
+    // Nothing changed since: the same turn does not get the same Continue back.
+    expect(await input.fileRecoveryInput(session.id, conversationId, turnId, false, () => true)).toBe(false);
+    // New work is a new situation, and may earn a restart again.
+    await attributedMcp(conversationId);
+    expect(await input.fileRecoveryInput(session.id, conversationId, turnId, false, () => true)).toBe(true);
+
+    // And only for an automatic Continue: a typed message is never ended by a page's verdict.
+    const typed = await input.enqueueInput({ ...message(session.id, 'off'), text: 'typed while waiting', mode: 'after-turn' });
+    expect((await post('/input/claim', { id: typed.id, owner: 'a-document', conversationId, recoveryVeto: 'page-final' })).body.ok).toBe(false);
+    expect((await input.listInputs()).find(item => item.id === typed.id)?.state).toBe('queued');
+  } finally { clock.mockRestore(); }
+});
+
 it.each([
   { model: 'gpt-5.6-sol', alias: false }, { model: 'gpt-5.6-sol', alias: true },
   { model: 'gpt-6-pro', alias: false }, { model: 'gpt-6-pro', alias: true }

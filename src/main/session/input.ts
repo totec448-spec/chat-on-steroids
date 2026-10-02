@@ -62,7 +62,9 @@ const entrySchema = inputArgs.extend({
   /** Shared unfinished-response fallback belongs to this question in every mode. */
   recovery: z.object({ questionId: z.string(), episode: z.string().max(200).optional(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional(),
     /** First release of an unbroken run of pages withdrawing this Continue before Send (#820). */
-    withdrawnSince: z.number().optional() }).optional(),
+    withdrawnSince: z.number().optional(),
+    /** A page refused this Continue before claiming it, so it ended unsent; see endRecoveryInput. */
+    ended: z.literal('page-final').optional() }).optional(),
   /** Exact tool-free turn this explicit browser correction may interrupt. */
   directTurn: z.object({ id: z.string().min(1).max(256), startedAt: z.number() }).optional(),
   finishOwner: z.object({ turnId: z.string().min(1).max(256), periodic: z.boolean(), mode: z.enum(['goal', 'loop']).optional(), userRequested: z.boolean().optional() }).optional(),
@@ -1158,6 +1160,9 @@ export function fileRecoveryInput(sessionId: string, conversationId: string, tur
     if (current.some(row => row.sessionId === sessionId && row.recovery && row.silenceBoundary?.turnId === turnId &&
         (row.sendAuthorizedAt !== undefined ||
           (!terminal(row) && (!row.recovery.episode || row.recovery.episode === episode))))) return refused('this turn already has its restart');
+    // A Continue a page already refused for this exact work is not filed again unchanged.
+    if (current.some(row => row.sessionId === sessionId && row.recovery?.ended && row.silenceBoundary?.turnId === turnId &&
+        row.silenceBoundary.workSeq === workSequence(work))) return refused('pages refused this restart and nothing has changed since');
     const now = Date.now();
     const row: InputEntry = { id: randomUUID(), sessionId, conversationId, owner: null, state: 'queued',
       mode: 'after-turn', dueAt: now, createdAt: now, model: null, reasoningEffort: null,
@@ -1591,6 +1596,29 @@ export function authorizeBrowserHelperRetry(id: string, sourceSessionId: string)
  * many minutes, its text left in the composer. Past this, the Continue ends and the log says why.
  */
 export const RECOVERY_WITHDRAW_LIMIT_MS = 3 * 60_000;
+
+/**
+ * Ends an automatic Continue that a page refuses before ever claiming it, because ChatGPT shows
+ * the native final of its turn.
+ *
+ * Measured 2026-10-02: a Continue was filed for a turn whose final the app had missed. Every page
+ * it was offered to saw that final and refused before claiming, and said nothing, so the withdraw
+ * limit above never started, and the pickup schedule reloaded the chat every fifteen minutes for
+ * six hours. A typed message is never ended here. Only an unsent, unclaimed automatic Continue is.
+ */
+export function endRecoveryInput(id: string, conversationId: string): Promise<boolean> {
+  return serial(async () => {
+    const current = await load();
+    const row = current.find(entry => entry.id === id && entry.recovery && entry.state === 'queued' &&
+      entry.offeredAt === undefined && entry.sendAuthorizedAt === undefined);
+    if (!row?.sessionId || !row.recovery || (await getSession(row.sessionId))?.conversationId !== conversationId) return false;
+    const error = 'Automatic Continue was not needed: the page shows a finished answer.';
+    logWarn(`input ${row.id}: ${error}`);
+    await commit(current.map(entry => entry === row
+      ? { ...entry, state: 'cancelled', owner: null, error, recovery: { ...row.recovery!, ended: 'page-final' } } : entry));
+    return true;
+  });
+}
 
 export function failBrowserInput(id: string, owner: string, error: string, detail?: string): Promise<boolean> {
   return serial(async () => {
