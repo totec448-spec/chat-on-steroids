@@ -165,7 +165,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -196,7 +196,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     },
     commandAllowlist: { enabled: false, mode: 'allow' as const, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false },
+    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }) },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
     multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
@@ -3669,20 +3669,26 @@ it('opens every selected chat at the bottom and preserves manual reading during 
     expect(pane.scrollTop).toBe(pane.scrollHeight); // Chromium clamps to the actual bottom.
   };
   await select(first.id);
+  // The reader's own scrolling: a wheel, then the position it lands on.
+  const readTo = (top: number) => {
+    pane.dispatchEvent(new w.WheelEvent('wheel'));
+    pane.scrollTop = top;
+    pane.dispatchEvent(new w.Event('scroll'));
+  };
   // A global notification from another chat still refreshes this idle selection.
   // A deliberate small scroll away from its bottom must remain a reading position.
-  pane.scrollTop = pane.scrollHeight - pane.clientHeight - 20;
+  readTo(pane.scrollHeight - pane.clientHeight - 20);
   const nearTail = pane.scrollTop;
   for (let index = 0; index < 3; index++) {
     await append([]);
     expect(pane.scrollTop).toBe(nearTail);
   }
   for (let i = 0; i < 3; i++) {
-    pane.scrollTop = 700;
+    readTo(700);
     await append([]);
     expect(pane.scrollTop).toBe(700);
     await select(second.id);
-    pane.scrollTop = 0;
+    readTo(0);
     await select(first.id);
   }
 
@@ -4259,6 +4265,31 @@ it('offers a way back to the end of the chat that clears any reserved space', as
   content.style.setProperty('--timeline-scroll-reserve', '300px');
   jump.click();
   expect(content.style.getPropertyValue('--timeline-scroll-reserve')).toBe('');
+});
+
+it.each([
+  { setting: undefined, reader: 'moved', follows: true },
+  { setting: undefined, reader: 'wheel', follows: false },
+  { setting: false, reader: 'moved', follows: false }
+])('follows new output unless the reader scrolled away (setting $setting, view $reader)', async ({ setting, reader, follows }) => {
+  // 2026-10-02: in a busy chat the view often stopped short of the end although the reader had not
+  // scrolled. Anything that moved it (an interrupted smooth scroll, a clamp during heavy repaints)
+  // made the next repaint read "scrolled away". With "Follow new output" only the reader's own
+  // scrolling counts; switched off, the per-repaint check stays as it was.
+  const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+    source: 'extension', kind: 'user_message', messageId: `follow-${i}`, message: text(`Follow item ${i + 1}`) }));
+  const { w, append } = await boot(rows, true, [], [], setting === undefined ? {} : { followOutput: setting });
+  const pane = w.document.getElementById('chatBody')!;
+  const timeline = w.document.getElementById('timeline')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+  pane.scrollTop = pane.scrollHeight; pane.dispatchEvent(new w.Event('scroll'));
+  await settle();
+  if (reader === 'wheel') pane.dispatchEvent(new w.WheelEvent('wheel'));
+  pane.scrollTop = 300;
+  pane.dispatchEvent(new w.Event('scroll'));
+  await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message', messageId: 'follow-answer', message: text('A growing answer'), final: false }]);
+  expect(pane.scrollTop).toBe(follows ? pane.scrollHeight : 300);
 });
 
 it('opens the next chat at its end after the reader scrolled away from a sent message', async () => {
