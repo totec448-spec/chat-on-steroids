@@ -1,3 +1,4 @@
+// @ts-expect-error The target planner is a plain Node script without type declarations.
 import { releaseTargets } from '../scripts/release-targets.mjs';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -161,7 +162,7 @@ describe('cross-platform packaging targets', () => {
   });
 
   it('builds canaries only for the targets most installs use, and releases for all of them', () => {
-    expect(releaseTargets('common').include.map(target => target.name)).toEqual(['Windows x64', 'macOS arm64', 'Linux x64']);
+    expect(releaseTargets('common').include.map((target: { name: string }) => target.name)).toEqual(['Windows x64', 'macOS arm64', 'Linux x64']);
     expect(releaseTargets('common').files).toEqual(['Chat-On-Steroids-Setup-x64.exe', 'Chat-On-Steroids-macOS-arm64.dmg',
       'Chat-On-Steroids-macOS-arm64.zip', 'Chat-On-Steroids-Linux-x64.AppImage', 'Chat-On-Steroids-Linux-x64.deb',
       'Chat-On-Steroids-Extension.zip', 'Chat-On-Steroids-Native-Sources.tar.gz']);
