@@ -2320,6 +2320,25 @@
         continue;
       }
     }
+    // A confirmed Send whose question ChatGPT no longer shows (#942). In a brand-new chat the
+    // shell redraws the first exchange after promoting its route, and the question can vanish
+    // from the page and the page model alike, while its answer arrives. The receipt then holds
+    // the only proof of that question: its exact native id, accepted by the app for this chat in
+    // this document. Waiting to see the question again opened no turn at all, so the answer
+    // arrived with no turn_start/turn_end, no tool ownership and no Copy or Export.
+    // Only a new answer or a live generation spends it, and never over a running turn.
+    if (!newUserMessage && !generating) {
+      const receipt = userSendReceipt, accepted = receipt?.accepted;
+      const baseline = new Set(receipt?.baseline?.sections || []);
+      if (accepted?.messageId && accepted.messageId !== openedUserMessageId &&
+          accepted.conversationId === CLF_DOM.conversationId() && accepted.epoch === epoch &&
+          !rendered.some(message => message.id === accepted.messageId) &&
+          (nowGenerating || CLF_DOM.turns().some(turn => turn.role === 'assistant' &&
+            !(turn.nodes || [turn.node]).some(node => baseline.has(node))))) {
+        userSendReceipt = null;
+        newUserMessage = { messageId: accepted.messageId, baseline: receipt.baseline };
+      }
+    }
     return newUserMessage;
   }
 
