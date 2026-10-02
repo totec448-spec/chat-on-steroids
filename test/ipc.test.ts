@@ -86,6 +86,18 @@ const removeRoot = (payload: unknown): Promise<any> => handlers.get('roots:remov
 const sessionEvents = (payload: unknown): Promise<any> => handlers.get('sessions:events')!(null, payload) as Promise<any>;
 const sessionList = (): Promise<any> => handlers.get('sessions:list')!(null, undefined) as Promise<any>;
 
+it.each(['playfulStatus', 'followOutput'] as const)('saves the %s display switch from Settings', async key => {
+  // Both are plain ui booleans saved by the general Settings save. The save schema dropped keys
+  // it did not list, so a switch that was not listed reverted on the next state push.
+  const base = getConfig();
+  const wanted = !(base.ui[key] ?? (key === 'followOutput'));
+  expect(await save({ ...base, ui: { ...base.ui, [key]: wanted } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui[key]).toBe(wanted);
+  // A stale snapshot that never touched the switch keeps the saved value.
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui[key]).toBe(wanted);
+});
+
 it('saves port choices, merges stale snapshots and serializes concurrent port edits', async () => {
   const ports = await import('../src/main/bridge-ports.js');
   const bridge = await import('../src/main/bridge.js');

@@ -1761,5 +1761,6 @@
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "瀏覽器沒有接手這個聊天的修復，因此應用程式已停止重試。重新開啟它的分頁即可繼續恢復。",
   "Healthy": "正常",
   "Degraded": "降級",
-  "Unknown": "未知"
+  "Unknown": "未知",
+  "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "跟隨新輸出：回答增長時停留在聊天末尾，包括這裡和 ChatGPT。向上捲動會暫停。"
 }

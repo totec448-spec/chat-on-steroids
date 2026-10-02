@@ -1761,5 +1761,6 @@
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Tarayıcı bu sohbetin onarımını almadı, bu yüzden uygulama yeniden denemeyi bıraktı. Sekmesini yeniden açın, kurtarma devam eder.",
   "Healthy": "Sağlıklı",
   "Degraded": "Bozulmuş",
-  "Unknown": "Bilinmiyor"
+  "Unknown": "Bilinmiyor",
+  "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Yeni çıktıyı takip et: yanıtlar uzarken sohbetin sonunda kal, burada ve ChatGPT'de. Yukarı kaydırmak duraklatır."
 }
