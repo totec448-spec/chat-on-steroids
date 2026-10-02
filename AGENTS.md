@@ -904,6 +904,12 @@ model/effort, due time, optional stages and attachments. `input.ts` serializes m
 publishes a new ledger only after its write. Reusing an id with different content is rejected.
 The frozen `deliveryText` includes executor setup only for a new-chat opening at claim time; displayed authored
 text remains separate. A failed write cannot later become a successful hidden enqueue.
+Browser Send puts a Chat On Steroids Core app mention in front of the text, because some accounts
+(Plus in Chat mode, #861) attach the app to a message only when the message mentions it.
+`ui.mentionCore` (Settings › App, default on, delivered to the page with the activity reply) can
+leave the mention off the user's own prompts, which on other accounts start plain questions with a
+probe tool call (#952). Workers, Continue recovery, Goal and Loop always keep it, because they need
+the app to answer. A Goal helper decision (`purpose: 'decision'`) never gets it.
 
 | Delivery choice | Eligibility and behavior |
 | --- | --- |
