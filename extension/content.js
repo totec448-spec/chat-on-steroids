@@ -604,6 +604,17 @@
     if (stagePanel?.root.dataset.clfStageKind === 'wait') removeStagePanel();
   }
   let stallReported = false;
+  /**
+   * Turns this document closed because a message was sent while ChatGPT kept working.
+   *
+   * ChatGPT now lets a message join the response that is running: the response keeps its
+   * request id, so the app files its tool calls under the turn that request opened, while this
+   * page has opened a turn for each new message. Measured 2026-10-02: four messages typed into a
+   * working chat, 112 tool calls filed under the first turn, and the newest turn saw none of
+   * that work, reported a stall at ten minutes, and earned a reload offer every thirty seconds.
+   * Work on these turns is the current run's work. The chain ends with the run and the chat.
+   */
+  const steeredTurns = new Set();
   // Request custody is document-local and bounded. Only the generation held at fetch start
   // may receive its later 404; this is not replayed when a recorder is restored.
   const pendingResumes = new Map();
@@ -1792,6 +1803,7 @@
     // across would re-read chat B's tree and attribute what it finds to chat A's turn.
     fiberSettleUntil = 0;
     fiberSettled = null;
+    steeredTurns.clear();
     pageToolsReported.clear();
     nativeImagesReported.clear();
     nativeImageCaptures.clear();
@@ -2583,6 +2595,12 @@
     // "Just authored" is `reportMessages`'s judgement, not this document's memory. The
     // version that asked only whether *this page load* had journalled the message closed a
     // live turn on every reload, and split every chat's opening turn in two.
+    // Stop stayed through the send: the running response took this message (see steeredTurns).
+    const steering = Boolean(generating && newUserMessage && nowGenerating && turnId);
+    if (steering) {
+      steeredTurns.add(turnId);
+      if (steeredTurns.size > 32) steeredTurns.delete(steeredTurns.values().next().value);
+    }
     if (generating && newUserMessage) {
       // A newly authored question closes the adopted turn before it. If its answer
       // and this question hydrated together, apply the original-question guard to
@@ -2636,6 +2654,7 @@
     // which is adoption and not opening — no second `turn_start` for one generation. A turn no
     // document ever recorded arrives by claimUnrecordedGeneration(), which is an opening.
     if (newUserMessage && !generating) {
+      if (!steering) steeredTurns.clear();
       openedUserMessageId = newUserMessage;
       generating = true;
       quietSince = 0;
@@ -6480,7 +6499,7 @@
       // the turn still working.
       const isWork = (entry) =>
         entry &&
-        entry.turnId === turnId &&
+        (entry.turnId === turnId || steeredTurns.has(entry.turnId)) &&
         !(entry.kind === 'tool_call' && entry.process && entry.process.completedAt !== undefined) &&
         !(entry.kind === 'assistant_message' && (entry.final === true || entry.state === 'final')) &&
         !(fiberSettled?.reason === 'thinking_failed' && entry.time <= fiberSettled.endedAt) &&
@@ -9180,11 +9199,27 @@
     await startCompact(automatic);
   }
 
+  /** The current generation's still-visible recoverable transport error, or a gone stream. */
+  function currentAssistantError() {
+    return Boolean(currentStreamGone()) || CLF_DOM.errors().some(error => {
+      if (error.recoverable !== true || isStale(error.node)) return false;
+      const owner = localErrorGeneration(error);
+      // Unknown ownership is conservative evidence that the current page is still broken.
+      // Only a concrete different generation proves this is an old historical failure.
+      return !turnId || owner === null || owner === turnId;
+    });
+  }
+
   function resumePendingCompactionFromRepair(expectedConversationId) {
     const source = job && job.stage === 'handoff-pending' ? job.sourceSend : null;
     if (!alive || !expectedConversationId || conversationId !== expectedConversationId ||
         CLF_DOM.conversationId() !== expectedConversationId || !source ||
         (source.state !== 'not-attempted' && source.state !== 'attempted-unresolved')) return false;
+    // A source answer ChatGPT broke off ("Connection interrupted. Waiting for the complete
+    // answer") never settles in this document, so the ticket cannot be sent from it. Declining
+    // hands the pickup to its reload. Accepting kept a ticket unsent behind that card for over
+    // half an hour (2026-10-02), five pickups at a time, each one "resumed" and none reloaded.
+    if (!CLF_DOM.generating() && currentAssistantError()) return false;
     // The browser recovery claim proves only that this exact document may be nudged. It does not
     // own Stop or Send: those remain behind startCompact's source identity, settle and durable WAL
     // checkpoints. If an attempt is already alive, merely acknowledge the healthy document so the
@@ -12567,13 +12602,7 @@
       }
       // Popup diagnostics. Ids and counters only — no prose, no transcript, no page text.
       if (message.type === 'clf-page-status') {
-        const assistantError = Boolean(currentStreamGone()) || CLF_DOM.errors().some(error => {
-          if (error.recoverable !== true || isStale(error.node)) return false;
-          const owner = localErrorGeneration(error);
-          // Unknown ownership is conservative evidence that the current page is still broken.
-          // Only a concrete different generation proves this is an old historical failure.
-          return !turnId || owner === null || owner === turnId;
-        });
+        const assistantError = currentAssistantError();
         sendResponse({
           ok: true,
           // ChatGPT's own account that a response is streaming right now, as opposed to the
