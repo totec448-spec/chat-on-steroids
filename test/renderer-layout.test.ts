@@ -62,7 +62,8 @@ it('limits the existing tool-detail preference to handoff briefs', () => {
   expect(toggle.type).toBe('checkbox');
   expect(toggle.checked).toBe(false);
   expect(toggle.closest('label')?.textContent).toContain('Include tool details in handoffs');
-  expect(toggle.closest('label')?.textContent).toContain('Goal and Loop use user messages and assistant updates and answers');
+  expect(toggle.closest('label')?.textContent).toContain('Compact & Resume briefs keep tool calls and their results');
+  expect(toggle.closest('label')?.textContent).toContain("Goal and Loop always read only your messages and the assistant's updates and answers");
   expect(chatSource).toContain("includeToolCalls: $<HTMLInputElement>('goalIncludeToolCalls').checked");
   expect(chatSource).toContain("applyChatChecked($<HTMLInputElement>('goalIncludeToolCalls')");
 });
