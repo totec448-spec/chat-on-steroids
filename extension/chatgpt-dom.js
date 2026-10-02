@@ -608,9 +608,14 @@ var CLF_DOM = (() => {
         const id = turnIdOf(node);
         if (node.matches?.(SHELL_TURN)) {
           const users = [...node.querySelectorAll('[data-content-search-unit-key$=":user"]')].filter(slot => slot.closest('[data-turn-key]') === node);
-          if (users.length !== 1 || !id) continue;
-          out.push({ node: users[0], nodes: [users[0]], id, role: 'user' });
-          if (node.querySelector('[data-chatgpt-agent-turn-start], [data-content-search-unit-key$=":assistant"]')) out.push({ node, nodes: [node], id, role: 'assistant' });
+          const answered = node.querySelector('[data-chatgpt-agent-turn-start], [data-content-search-unit-key$=":assistant"]');
+          // Two user slots in one exchange are ambiguous and stay unread. A missing one is not: ChatGPT
+          // unmounts the question while its answer stays (#900), and skipping the whole exchange then
+          // hid that answer's final, so its turn never ended (#910). The answer keeps the exchange's
+          // own key; nothing here is joined by text or position.
+          if (users.length > 1 || !id || (!users.length && !answered)) continue;
+          if (users.length) out.push({ node: users[0], nodes: [users[0]], id, role: 'user' });
+          if (answered) out.push({ node, nodes: [node], id, role: 'assistant' });
           previous = null; continue;
         }
         const role = node.getAttribute('data-turn') || searchUnitRole(node) || null;
