@@ -913,7 +913,9 @@
       const raw = composer?.innerText || composer?.textContent || '';
       if (raw.trim() && !raw.includes(GOAL_MARKER_INSTRUCTION.trim())) CLF_DOM.insertPrompt(raw + GOAL_MARKER_INSTRUCTION, true);
     }
-    const text = sendText(CLF_DOM.composer()?.textContent);
+    // The receipt is compared with the rendered message, which readers take without an app
+    // mention chip (#861); capture the same authored text, never the chip (#900).
+    const text = sendText(CLF_DOM.composerAuthoredText());
     const attachmentNames = CLF_DOM.composerAttachmentNames();
     if (!text && !attachmentNames.length) return;
     let previousMessageId = null;
