@@ -846,7 +846,10 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     error: bridgeError,
     port,
     paired: stored !== null && stored !== BROWSER_DISCONNECTED,
-    present: browserPresent(),
+    // Seen for the user: a recent request, or the authenticated wake channel held open. The
+    // extension makes requests only while it has a chat to serve, so a browser with no ChatGPT
+    // tab open went "missing" a minute after start although it was connected all along.
+    present: browserPresent() || browserWakeConnected(),
     lastSeenAt,
     extensionVersion
   };
@@ -4844,7 +4847,7 @@ function attachBridgeWake(instance: http.Server): void {
     async candidate => {
       const stored = await getSecret('bridgeToken');
       return !!stored && stored !== BROWSER_DISCONNECTED && safeEqual(candidate, stored);
-    });
+    }, changed);
 }
 
 /** Called inside the serialized config transaction, with its validated latest proposal. */
