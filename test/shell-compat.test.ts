@@ -925,6 +925,57 @@ it('delivers three successive shell inputs with exact receipts and completed ans
   expect(r.events().filter((e: any) => e.kind === 'turn_end' && e.outcome === 'completed')).toHaveLength(3);
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 }, 15000);
+it('keeps one lifecycle when the shell unmounts the question while its answer stays (#910)', async () => {
+  // #900 showed ChatGPT dropping an exchange's user slot while the answer stayed mounted. turns()
+  // then skipped the whole exchange, so its final and turn_end never arrived and the page stayed
+  // "Working". The answer keeps its exact data-turn-key identity; nothing is inferred from text.
+  const f = fixture(), edit = editing(f);
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  let offered: any, latest: ReturnType<typeof addExchange>, count = 0;
+  const submitted: string[] = [];
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); const text = edit.serialize(); submitted.push(text);
+    latest = addExchange(f, ++count, text); edit.box.replaceChildren();
+  });
+  const r = await recorder(f, { desktop_input: m => ({ ok: true, data: m.authorize || m.ack || m.fail ? { ok: true } : { input: offered } }) });
+  const deliver = async (at: number, text: string) => {
+    offered = { id: `88888888-1111-4111-8111-${String(at).padStart(12, '0')}`, owner: `owner-${at}`, text,
+      model: 'gpt-5-6-thinking', reasoningEffort: 'high', purpose: 'user', images: [] };
+    const pending = r.runtime({ type: 'clf-desktop-input', id: offered.id, conversationId: THREAD });
+    await vi.waitFor(() => expect(submitted).toHaveLength(at), { timeout: 5000 });
+    await r.hook.refreshFiber(); r.hook.observe();
+    expect(await pending).toEqual({ ok: true });
+  };
+  try {
+    await deliver(1, 'First request');
+    const started = r.events().filter((e: any) => e.kind === 'turn_start');
+    expect(started).toHaveLength(1);
+
+    // The question unmounts; the answer and its exchange stay.
+    const exchange = f.doc.querySelectorAll('[data-turn-key]')[1]!;
+    exchange.querySelector('[data-content-search-unit-key$=":user"]')!.remove();
+    expect(f.api.turns().at(-1)).toMatchObject({ role: 'assistant', id: latest!.userId });
+    latest!.finish(); await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+    await vi.waitFor(() => expect(r.events()).toContainEqual(expect.objectContaining({ kind: 'assistant_message', providerMessageId: latest!.answerId, final: true })), { timeout: 3000 });
+    const ended = r.events().filter((e: any) => e.kind === 'turn_end');
+    expect(ended).toEqual([expect.objectContaining({ turnId: started[0].turnId, outcome: 'completed' })]);
+    expect(f.api.generating()).toBe(false);
+
+    // And the next ordinary message is accepted and gets its own lifecycle.
+    await deliver(2, 'Second request');
+    expect(r.events().filter((e: any) => e.kind === 'turn_start')).toHaveLength(2);
+    expect(r.sent.filter(m => m.type === 'desktop_input' && m.fail)).toEqual([]);
+  } finally { (f.win as any).__CLF_CONTENT_RECORDER__.stop(); }
+}, 15000);
+
+it('still refuses an exchange whose user slot is ambiguous (#910)', () => {
+  const f = fixture();
+  const exchange = f.doc.querySelector('[data-turn-key]')!;
+  const user = exchange.querySelector('[data-content-search-unit-key$=":user"]')!;
+  user.after(user.cloneNode(true));
+  expect(f.api.turns()).toEqual([]);
+});
+
 it.each([false, true])('bootstraps a shell worker with literal instructions and the exact native conversation (cold=%s)', async cold => {
   const f = fixture(), edit = editing(f), commandId = 'shell-worker-command';
   const options = f.props.modelListConfig;
