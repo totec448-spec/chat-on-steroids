@@ -440,8 +440,12 @@ async function mountChat(
         keys.push({ method: 'setApiKey', value });
         return ok(state);
       },
-      listGoalModels: (offset: number) => {
-        const page = { models: models.slice(offset, offset + 20), total: models.length, offset };
+      listGoalModels: (offset: number, query = '') => {
+        const needle = query.trim().toLowerCase();
+        const matches = needle
+          ? models.filter(model => String(model.id).toLowerCase().includes(needle) || String(model.name).toLowerCase().includes(needle))
+          : models;
+        const page = { models: matches.slice(offset, offset + 20), total: matches.length, offset, query };
         modelPages.push(page);
         return ok(page);
       },
@@ -1673,6 +1677,32 @@ it('never pages the catalogue while the picker is closed', async () => {
 
   expect(mounted.modelPages).toHaveLength(1);
   expect(doc.querySelectorAll('.goal-model')).toHaveLength(20);
+});
+
+it('searches the whole OpenRouter catalogue and clearing restores newest-first paging', async () => {
+  const mounted = await mountChat({ hasGoalKey: true }, catalogue(45));
+  const doc = mounted.window.document;
+  (doc.getElementById('goalPick') as HTMLButtonElement).click();
+  await settle();
+  expect(doc.querySelectorAll('.goal-model')).toHaveLength(20);
+
+  const search = doc.getElementById('goalModelSearch') as HTMLInputElement | null;
+  expect(search).not.toBeNull();
+  search!.value = 'model-44';
+  search!.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+  await settle(); await settle();
+
+  expect(mounted.modelPages.at(-1)?.query).toBe('model-44');
+  expect([...doc.querySelectorAll<HTMLElement>('.goal-model')].map(row => row.dataset.model)).toEqual(['vendor44/model-44']);
+
+  search!.value = '';
+  search!.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+  await settle(); await settle();
+
+  expect(mounted.modelPages.at(-1)?.query).toBe('');
+  expect(doc.querySelectorAll('.goal-model')).toHaveLength(20);
+  expect((doc.querySelector('.goal-model .goal-model-name') as HTMLElement).textContent).toBe('Model 0');
+  expect((doc.getElementById('goalMore') as HTMLButtonElement).hidden).toBe(false);
 });
 
 /** Choosing one stores it verbatim: the id is what OpenRouter wants, not a display name. */
