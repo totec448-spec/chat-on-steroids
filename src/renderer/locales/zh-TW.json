@@ -1764,5 +1764,6 @@
   "Unknown": "未知",
   "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "跟隨新輸出：回答增長時停留在聊天末尾，包括這裡和 ChatGPT。向上捲動會暫停。",
   "End background processes of workers asleep for more than 30 minutes": "結束休眠超過 30 分鐘的 worker 背景程序",
-  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "worker 的聊天和歷史記錄仍可繼續重用。預設關閉；每次清理都會記錄在該 worker 的歷史中。"
+  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "worker 的聊天和歷史記錄仍可繼續重用。預設關閉；每次清理都會記錄在該 worker 的歷史中。",
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "在我的訊息中提及 Chat On Steroids Core：確保 ChatGPT 在每個聊天中都能使用此應用程式。如果 ChatGPT 在簡單問題前先進行不必要的工具呼叫，請關閉；工作者、Goal、Loop 和 Continue 始終保留提及。"
 }

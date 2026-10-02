@@ -1764,5 +1764,6 @@
   "Unknown": "Unbekannt",
   "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Neuer Ausgabe folgen: am Ende des Chats bleiben, während Antworten wachsen, hier und auf ChatGPT. Hochscrollen pausiert es.",
   "End background processes of workers asleep for more than 30 minutes": "Hintergrundprozesse von Workern beenden, die länger als 30 Minuten schlafen",
-  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Worker-Chat und Verlauf bleiben wiederverwendbar. Standardmäßig aus; jede Bereinigung wird im Verlauf dieses Workers aufgezeichnet."
+  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Worker-Chat und Verlauf bleiben wiederverwendbar. Standardmäßig aus; jede Bereinigung wird im Verlauf dieses Workers aufgezeichnet.",
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Chat On Steroids Core in meinen Nachrichten erwähnen: stellt sicher, dass ChatGPT diese App in jedem Chat nutzen kann. Ausschalten, wenn ChatGPT einfache Fragen mit einem unnötigen Tool-Aufruf beginnt; Worker, Goal, Loop und Continue behalten die Erwähnung."
 }

@@ -1764,5 +1764,6 @@
   "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Theo dõi nội dung mới: luôn ở cuối cuộc trò chuyện khi câu trả lời tiếp tục được tạo, cả tại đây và trên ChatGPT. Cuộn lên để tạm dừng.",
   "End background processes of workers asleep for more than 30 minutes": "Kết thúc tiến trình nền của worker đã ngủ hơn 30 phút",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Chat và lịch sử của worker vẫn có thể dùng lại. Mặc định tắt; mỗi lần dọn dẹp đều được ghi vào lịch sử của worker đó.",
-  "Wake the tiny brain": "Đánh thức bộ não tí hon"
+  "Wake the tiny brain": "Đánh thức bộ não tí hon",
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Nhắc đến Chat On Steroids Core trong tin nhắn của tôi: đảm bảo ChatGPT có thể dùng ứng dụng này trong mọi cuộc trò chuyện. Tắt nếu ChatGPT bắt đầu câu hỏi đơn giản bằng một lệnh gọi công cụ không cần thiết; worker, Goal, Loop và Continue vẫn giữ lời nhắc."
 }
