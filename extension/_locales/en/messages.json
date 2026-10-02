@@ -396,10 +396,10 @@
     "message": "$1: $2"
   },
   "content_goal_delivery_after_turn_finish": {
-    "message": "After this turn + finish"
+    "message": "At Session Finish or after the turn"
   },
   "content_goal_delivery_only_finish": {
-    "message": "Only finish"
+    "message": "At Session Finish only"
   },
   "content_goal_loop_off": {
     "message": "Goal and Loop off"

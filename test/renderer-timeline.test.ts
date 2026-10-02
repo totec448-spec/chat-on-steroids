@@ -3286,7 +3286,12 @@ it('shows Pro Loop delivery before sending and freezes changes made while the op
   expect(row.hidden).toBe(true);
   choose('pro'); expect(row.hidden).toBe(false);
   expect(delivery.value).toBe('finish');
+  // The choice names when Loop continues, and its title says what that means.
+  expect(row.firstChild!.textContent).toBe('When to continue');
+  expect([...delivery.options].map(option => option.textContent)).toEqual(['Session Finish only', 'Also after the turn']);
+  expect(delivery.title).toBe('Only inside the Session Finish tool result; never start a new turn');
   delivery.value = 'after-turn'; delivery.dispatchEvent(new w.Event('change'));
+  expect(delivery.title).toBe('At Session Finish, or as a new message after verified turn completion');
   choose('high'); expect(row.hidden).toBe(true);
   choose('pro'); expect(row.hidden).toBe(false);
   expect(delivery.value).toBe('after-turn');

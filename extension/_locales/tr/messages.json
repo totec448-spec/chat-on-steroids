@@ -396,10 +396,10 @@
     "message": "$1: $2"
   },
   "content_goal_delivery_after_turn_finish": {
-    "message": "Bu turdan sonra + bitişte"
+    "message": "Oturum bitişinde veya turdan sonra"
   },
   "content_goal_delivery_only_finish": {
-    "message": "Yalnızca bitişte"
+    "message": "Yalnızca oturum bitişinde"
   },
   "content_goal_loop_off": {
     "message": "Hedef ve Döngü kapalı"
