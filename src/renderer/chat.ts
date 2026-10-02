@@ -4294,6 +4294,7 @@ export function chatApply(state: AppState, previous?: Config): void {
     previous?.compaction.handoffPrompt
   );
   applyAutoCompactHint(config);
+  $<HTMLInputElement>('autoCompactTokens').disabled = !config.compaction.auto;
 
   applyChatValue($<HTMLInputElement>('maWorkers'), String(config.multiAgent.maxWorkers), previous?.multiAgent.maxWorkers);
   applyChatChecked(
