@@ -11053,6 +11053,9 @@
     }
   }
 
+  /** Matches the app's WORKER_REDEEM_MS: past it the app has already failed the command. */
+  const REDEEM_RETRY_WINDOW_MS = 20_000;
+
   async function deliverCommand(id, fromUrl = true, reportClaim = () => undefined, attempt = null) {
     // Which conversation, if any, this delivery is entitled to type into.
     //
@@ -11113,10 +11116,17 @@
       const timer = setTimeout(() => finish(null), 30_000);
       void ask(redeemRequest).then(finish, () => finish(null));
     });
+    // Retry for as long as the app still waits for this page, not three times in two seconds.
+    // A burst of fresh worker tabs can leave the service worker unreachable for a few seconds;
+    // a page that gave up after its third quick try stayed on `/?clf=` with an empty composer
+    // until the app's redeem window ran out and failed the worker (#882). A same-document
+    // redeem is idempotent, and the app's own deadline still ends the command.
+    const redeemStarted = Date.now();
     let reply = await redeemOnce();
-    for (let retry = 0; retry < 2 && (!reply || (reply.ok !== true && reply.retryable === true)); retry++) {
+    for (let delay = 1_000; (!reply || (reply.ok !== true && reply.retryable === true)) &&
+        Date.now() - redeemStarted < REDEEM_RETRY_WINDOW_MS; delay = Math.min(delay * 2, 4_000)) {
       if (!redeemStillCurrent()) break;
-      await new Promise(resolve => setTimeout(resolve, 1_000));
+      await new Promise(resolve => setTimeout(resolve, delay));
       if (!redeemStillCurrent()) break;
       reply = await redeemOnce();
     }
