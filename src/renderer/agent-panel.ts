@@ -16,7 +16,7 @@ export function createAgentPanel(options: {
   render: (events: SessionEvent[], id: string, current: () => boolean) => HTMLElement[];
   openMain: (id: string) => void;
   working: (summary: SessionSummary) => boolean;
-  agent?: (summary: SessionSummary) => Pick<AgentInfo, 'state' | 'task' | 'conversationId'> | null;
+  agent?: (summary: SessionSummary) => (Pick<AgentInfo, 'state' | 'task'> & { conversationId?: string | null }) | null;
 }) {
   const pane = el('aside', 'agent-panel'); pane.hidden = true;
   ui(pane, 'aria-label', () => t("Sub-agents"));
