@@ -8091,6 +8091,43 @@ describe('a stop button that goes missing while the turn is still running', () =
     });
   });
 
+  it.each(['steered', 'foreign'] as const)('counts the running work of a turn a message steered as progress, not as a stall (%s)', async kind => {
+    // 2026-10-02, live: four messages typed while ChatGPT worked joined its running response,
+    // which kept its request id. The app filed all 112 tool calls under the first turn (its
+    // request); the page had opened a turn per message and saw none of that work, reported a
+    // stall at ten minutes, and the app then offered a reload every thirty seconds mid-work.
+    let stream: unknown[] = [];
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream, nextSince: 0, pendingTools: 0,
+        userAnchors: [{ seq: 1, time: 1_787_165_090_500, messageId: 'm-older-user' }] } })
+    });
+    userTurn(live.document, 'older-user', 'the question before', { sent: false });
+    await live.hook.pullActivity();
+    userTurn(live.document, 'steer-first', 'run the import', { sent: false });
+    startGenerating(live.document, { send: false });
+    for (let tick = 0; tick < 3; tick++) { live.hook.observe(); await settle(); }
+    const first = emitted(live.sent, 'turn_start').at(-1)!.event.turnId;
+
+    // Typed while it works: Stop never goes away.
+    userTurn(live.document, 'steer-second', 'also keep the tag', { sent: false });
+    for (let tick = 0; tick < 3; tick++) { live.hook.observe(); await settle(); }
+    expect(emitted(live.sent, 'turn_end').map(row => row.event.turnId)).toEqual([first]);
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(2);
+
+    // Twelve minutes of real work, filed by the app under the turn the response's request owns.
+    const owner = kind === 'steered' ? first : 'g-another-document-0-9';
+    for (let minute = 1; minute <= 12; minute++) {
+      live.advance(60_000);
+      stream = [{ seq: 100 + minute, time: live.window.Date.now(), kind: 'tool_call', turnId: owner,
+        tool: 'exec_command', callId: `steer-call-${minute}`, attribution: 'request_id' }];
+      await live.hook.pullActivity();
+      live.hook.observe(); await settle();
+    }
+    const stalled = emitted(live.sent, 'chat_error').filter(row => /ten minutes/.test(String(row.event.text)));
+    expect(stalled, kind === 'steered' ? 'live steered work was reported stalled' : 'unrelated work hid a stall')
+      .toHaveLength(kind === 'steered' ? 0 : 1);
+  });
+
   it('keeps an in-flight Fiber scan owned by the generation that requested it', async () => {
     live = await harness();
     startGenerating(live.document);
