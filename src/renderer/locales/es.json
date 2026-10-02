@@ -356,9 +356,6 @@
   "Inject now": "Insertar ahora",
   "Send directly": "Enviar directamente",
   "After this turn": "Después de este turno",
-  "Continuation timing": "Cuándo continuar",
-  "Only finish": "Solo al finalizar",
-  "After this turn + finish": "Después de este turno y al finalizar",
   "Send": "Enviar",
   "All": "Todos",
   "Problems": "Problemas",
@@ -1763,5 +1760,8 @@
   "Unknown": "Desconocido",
   "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Seguir la nueva salida: permanecer al final del chat mientras crecen las respuestas, aquí y en ChatGPT. Desplazarse hacia arriba lo pausa.",
   "End background processes of workers asleep for more than 30 minutes": "Finalizar los procesos en segundo plano de workers inactivos durante más de 30 minutos",
-  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "El chat y el historial del worker siguen siendo reutilizables. Está desactivado de forma predeterminada; cada limpieza se registra en el historial de ese worker."
+  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "El chat y el historial del worker siguen siendo reutilizables. Está desactivado de forma predeterminada; cada limpieza se registra en el historial de ese worker.",
+  "When to continue": "Cuándo continuar",
+  "Session Finish only": "Solo en la finalización de sesión",
+  "Also after the turn": "También después del turno"
 }

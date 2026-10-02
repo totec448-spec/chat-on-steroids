@@ -356,9 +356,6 @@
   "Inject now": "Вставить сейчас",
   "Send directly": "Отправить напрямую",
   "After this turn": "После этого хода",
-  "Continuation timing": "Момент продолжения",
-  "Only finish": "Только при завершении",
-  "After this turn + finish": "После этого хода + завершение",
   "Send": "Отправить",
   "All": "Все",
   "Problems": "Проблемы",
@@ -1763,5 +1760,8 @@
   "Unknown": "Неизвестно",
   "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Следовать за новым выводом: оставаться в конце чата, пока ответы растут, здесь и в ChatGPT. Прокрутка вверх ставит на паузу.",
   "End background processes of workers asleep for more than 30 minutes": "Завершать фоновые процессы воркеров, которые спят больше 30 минут",
-  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Чат и история воркера остаются доступными для повторного использования. По умолчанию выключено; каждая очистка записывается в историю этого воркера."
+  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Чат и история воркера остаются доступными для повторного использования. По умолчанию выключено; каждая очистка записывается в историю этого воркера.",
+  "When to continue": "Когда продолжать",
+  "Session Finish only": "Только при завершении сеанса",
+  "Also after the turn": "Также после хода"
 }

@@ -396,10 +396,10 @@
     "message": "$1：$2"
   },
   "content_goal_delivery_after_turn_finish": {
-    "message": "このターンの後＋終了通知時"
+    "message": "セッション終了通知時またはターン後"
   },
   "content_goal_delivery_only_finish": {
-    "message": "終了通知時のみ"
+    "message": "セッション終了通知時のみ"
   },
   "content_goal_loop_off": {
     "message": "ゴールとループはオフ"
