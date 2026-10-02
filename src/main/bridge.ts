@@ -748,6 +748,14 @@ function diagnosticTab(value: unknown): CompanionTabDiagnostics | null {
   };
 }
 
+/** The extension's own preferences, kept so a reinstalled extension gets them back (see /status). */
+function rememberBrowserPreferences(preferences: { overwrite: boolean; durations: boolean }): void {
+  const kept = getConfig().ui.browserPreferences;
+  if (kept?.overwrite === preferences.overwrite && kept?.durations === preferences.durations) return;
+  void updateConfig(config => ({ ...config, ui: { ...config.ui, browserPreferences: { overwrite: preferences.overwrite, durations: preferences.durations } } }))
+    .catch(error => logWarn(`bridge: could not keep the extension preferences: ${(error as Error).message}`));
+}
+
 function sanitiseCompanionDiagnostics(value: unknown): CompanionDiagnostics | null {
   const root = diagnosticObject(value);
   const status = diagnosticObject(root?.status);
@@ -783,6 +791,9 @@ function sanitiseCompanionDiagnostics(value: unknown): CompanionDiagnostics | nu
 function recordCompanionDiagnostics(value: unknown): void {
   const next = sanitiseCompanionDiagnostics(value);
   if (!next) return;
+  // Remember what the extension holds, but only values it actually stored: a fresh install
+  // reports its defaults, and those must not overwrite the choices it is about to get back.
+  if (diagnosticObject(value)?.preferencesStored === true) rememberBrowserPreferences(next.preferences);
   latestCompanionDiagnostics = next;
   companionDiagnosticsRevision += 1;
   for (const waiter of companionDiagnosticsWaiters) waiter();
@@ -2190,7 +2201,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         recoveryMonitoring: browserRecoveryMonitoring(),
         // A newer extension build ships with this app. The extension reloads into it on its own
         // when nothing is running; see `/extension/update`.
-        extensionUpdate: extensionUpdateReply(extensionBuildOf(req))
+        extensionUpdate: extensionUpdateReply(extensionBuildOf(req)),
+        // The extension follows the app: its texts in the app's language, and preferences it lost
+        // with a reinstall (a new id starts with empty storage) taken back from here.
+        language: getConfig().ui.language ?? null,
+        browserPreferences: getConfig().ui.browserPreferences ?? null
       },
       origin
     );

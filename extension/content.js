@@ -12819,6 +12819,9 @@
   const commandStartup = startupCommandId && (!OPENED_CONVERSATION || OPENED_PROJECT_ENTRY) ? runCommand(startupCommandId) : Promise.resolve();
   void commandStartup
     .catch(() => undefined)
+    // The app's language catalog before the first injected control, so it never paints in Chrome's.
+    .then(() => globalThis.CLF_I18N?.ready)
+    .catch(() => undefined)
     .then(loadRenderPreference)
     .then(checkStatus)
     .then(() => resumeOpenTurn().catch(() => undefined))
