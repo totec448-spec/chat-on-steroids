@@ -9211,6 +9211,36 @@ describe('unattributed activity recovery', () => {
     expect((await request('POST', '/repairs/claim', { body: { token: retry!.token } })).body.allowed).toBe(true);
   });
 
+  it('says a recovered answer is being waited for instead of a failed reload, and still retries after it', async () => {
+    await pair();
+    await events(PRIME, [openTurn('answering-again'), { kind: 'chat_error', time: Date.now(),
+      text: 'Connection interrupted', recoverable: true }]);
+    const session = await findSessionByConversation(PRIME);
+    const rows = async () => foldProgress((await readEvents(session!.id, { kinds: ['progress'] }))
+      .filter((event): event is Extract<SessionEvent, { kind: 'progress' }> => event.kind === 'progress'))
+      .map((event) => event.kind === 'progress' ? event.message.text : '');
+    const lines = (text: string) => getLog().filter((entry) => entry.message.includes(text)).length;
+    const failedBefore = lines('reported failed assistant-error recovery'), waitingBefore = lines('is answering again');
+    // ChatGPT resumed the answer by itself; the page keeps the reload for after it, twice in a row.
+    let handout = await maintenance();
+    for (let pass = 0; pass < 2; pass++) {
+      expect(handout?.reason).toBe('assistant-error');
+      expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(true);
+      const waiting = await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=streaming`);
+      expect(await rows()).toEqual(['ChatGPT is answering again; recovery waits until it finishes.']);
+      handout = waiting.body.repairs?.[0] ?? await maintenance();
+    }
+    // One info line for the episode, no warning, and no "Trying to reload" row while it waits.
+    expect(lines('is answering again') - waitingBefore).toBe(1);
+    expect(lines('reported failed assistant-error recovery') - failedBefore).toBe(0);
+    // A real failure afterwards still says so, with the page's reason.
+    expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(true);
+    await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=changed`);
+    expect(getLog().some((entry) => entry.message.includes(
+      `reported failed assistant-error recovery for ${PRIME} (reloaded: the page changed before the action)`))).toBe(true);
+    expect(await rows()).toEqual(['Reload failed while recovering an interrupted response; will retry.']);
+  });
+
   it('preserves a recovered assistant-error page without spending a later reload on the same question', async () => {
     await pair();
     await events(PRIME, [
