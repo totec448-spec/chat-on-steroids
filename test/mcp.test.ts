@@ -933,6 +933,12 @@ describe('2025-era clients', () => {
     expect(instructions).toContain('/skills/<id>/SKILL.md');
     // The requested upstream collaboration prose replaces the old minimal tool preamble.
     expect(instructions).toContain('User authorization and preferences persist across turns.');
+    expect(instructions).toContain(
+      'Current Core authority (informational; live guards decide): ' +
+      'browse=on search=on read=on metadata=on create=off edit=off move=off delete=off command=on; ' +
+      'read-only=off; plans=off; workers=off.'
+    );
+    expect(instructions).not.toContain(approved);
     expect(instructions.length).toBeLessThan(18_000);
   });
 
