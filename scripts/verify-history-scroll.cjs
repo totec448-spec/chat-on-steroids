@@ -223,6 +223,7 @@ app.whenReady().then(async () => {
     const last=timeline.lastElementChild;
     const gap=pending.getBoundingClientRect().top-last.getBoundingClientRect().bottom;
     const before=pending.getBoundingClientRect().top,scrollBefore=pane.scrollTop;
+    pane.dispatchEvent(new WheelEvent('wheel',{deltaY:-80}));
     pane.scrollTop=Math.max(0,scrollBefore-80);await frame();
     const movement=pending.getBoundingClientRect().top-before;
     const pendingBeforeDelivery=pending.getBoundingClientRect().top;

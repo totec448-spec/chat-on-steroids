@@ -147,6 +147,8 @@ export interface UiPrefs {
   developerMode?: boolean;
   /** Rotating joke words instead of "Working" in a chat's status line. Off by default. */
   playfulStatus?: boolean;
+  /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */
+  followOutput?: boolean;
   minimizeToTray: boolean;
   autoConnect: boolean;
   startAtLogin?: boolean;
