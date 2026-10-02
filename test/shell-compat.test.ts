@@ -141,12 +141,13 @@ async function recorder(f: ReturnType<typeof fixture>, replies: Record<string, (
     events: () => sent.filter(m => m.type === 'events').flatMap(m => m.entries.map((entry: any) => entry.event)) };
 }
 
-function addExchange(f: ReturnType<typeof fixture>, ordinal: number, text: string) {
+function addExchange(f: ReturnType<typeof fixture>, ordinal: number, text: string, { userSlot = true } = {}) {
   const id = (part: number) => `99999999-1111-4111-8111-${String(ordinal * 10 + part).padStart(12, '0')}`;
   const userId = id(1), turnId = id(2), answerId = id(3);
   const node = f.doc.createElement('div'); node.setAttribute('data-turn-key', userId);
-  node.innerHTML = `<div data-content-search-turn-key="${turnId}"><div data-content-search-unit-key="${turnId}:0:user"><div data-user-message-bubble><div class="whitespace-pre-wrap"></div></div></div><span hidden data-chatgpt-agent-turn-start></span><div data-content-search-unit-key="${turnId}:1:assistant"><div data-markdown-text-style="assistant-message"></div></div></div>`;
-  node.querySelector('.whitespace-pre-wrap')!.textContent = text;
+  const user = userSlot ? `<div data-content-search-unit-key="${turnId}:0:user"><div data-user-message-bubble><div class="whitespace-pre-wrap"></div></div></div>` : '';
+  node.innerHTML = `<div data-content-search-turn-key="${turnId}">${user}<span hidden data-chatgpt-agent-turn-start></span><div data-content-search-unit-key="${turnId}:1:assistant"><div data-markdown-text-style="assistant-message"></div></div></div>`;
+  if (userSlot) node.querySelector('.whitespace-pre-wrap')!.textContent = text;
   const entry = { id: turnId, conversationId: THREAD, turn: { status: 'in_progress', messageIds: [userId, answerId], items: [
     { type: 'user-message', messageId: userId, serverMessageId: userId, message: text },
     { type: 'assistant-message', messageId: answerId, content: 'Working', phase: 'final_answer', completed: false }
@@ -967,6 +968,54 @@ it('keeps one lifecycle when the shell unmounts the question while its answer st
     expect(r.sent.filter(m => m.type === 'desktop_input' && m.fail)).toEqual([]);
   } finally { (f.win as any).__CLF_CONTENT_RECORDER__.stop(); }
 }, 15000);
+
+it('confirms an app send whose exchange ChatGPT draws without the user slot', async () => {
+  // 2026-10-02, live: a chat opened by Compact & Resume, a Goal helper and a Temporary Chat drew
+  // their first exchange with no user slot. The page model held the exact user message, but no
+  // reader saw one: the Send receipt was never confirmed, no turn opened, and the resumed chat
+  // later sat after a lost answer with nothing watching it.
+  const f = fixture(), edit = editing(f);
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  let offered: any, latest: ReturnType<typeof addExchange>;
+  const submitted: string[] = [];
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); const text = edit.serialize(); submitted.push(text);
+    latest = addExchange(f, 1, text, { userSlot: false }); edit.box.replaceChildren();
+  });
+  const r = await recorder(f, { desktop_input: m => ({ ok: true, data: m.authorize || m.ack || m.fail ? { ok: true } : { input: offered } }) });
+  try {
+    offered = { id: '88888888-1111-4111-8111-000000000001', owner: 'owner-1', text: 'Continue the recovery documentation',
+      model: 'gpt-5-6-thinking', reasoningEffort: 'high', purpose: 'user', images: [] };
+    const pending = r.runtime({ type: 'clf-desktop-input', id: offered.id, conversationId: THREAD });
+    await vi.waitFor(() => expect(submitted).toHaveLength(1), { timeout: 5000 });
+    await r.hook.refreshFiber(); r.hook.observe();
+    expect(await pending).toEqual({ ok: true });
+    expect(r.sent.filter(m => m.type === 'desktop_input' && m.ack && m.id === offered.id)).toHaveLength(1);
+    // The user message exists only once MAIN has stamped the exchange, so the turn opens on
+    // the next observation, as the live recorder's own observer does.
+    r.hook.observe(); await r.hook.flush();
+    const started = r.events().filter((e: any) => e.kind === 'turn_start');
+    expect(started).toHaveLength(1);
+    expect(r.events()).toContainEqual(expect.objectContaining({ kind: 'user_message', messageId: latest!.userId }));
+
+    latest!.finish(); await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+    await vi.waitFor(() => expect(r.events()).toContainEqual(expect.objectContaining({ kind: 'assistant_message', providerMessageId: latest!.answerId, final: true })), { timeout: 3000 });
+    expect(r.events().filter((e: any) => e.kind === 'turn_end')).toEqual([expect.objectContaining({ turnId: started[0].turnId, outcome: 'completed' })]);
+    expect(r.sent.filter(m => m.type === 'desktop_input' && m.fail)).toEqual([]);
+  } finally { (f.win as any).__CLF_CONTENT_RECORDER__.stop(); }
+}, 15000);
+
+it('names no unrendered user message for a stale or foreign stamp', async () => {
+  const f = fixture();
+  const exchange = f.doc.querySelector('[data-turn-key]')!;
+  exchange.querySelector('[data-content-search-unit-key$=":user"]')!.remove();
+  await f.ask();
+  const named = () => f.api.messages().filter((m: any) => m.role === 'user').map((m: any) => m.id);
+  expect(named()).toEqual([USER]);
+  // A stamp that does not belong to this exchange's current scan names nothing.
+  exchange.setAttribute('data-clf-fiber-user', `other-scan:0:${encodeURIComponent(OTHER)}`);
+  expect(named()).toEqual([]);
+});
 
 it('still refuses an exchange whose user slot is ambiguous (#910)', () => {
   const f = fixture();
