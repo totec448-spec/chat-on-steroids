@@ -1686,7 +1686,9 @@ function logRow(entry: LogEntry): HTMLElement {
   const line = el('p', entry.level === 'info' ? '' : 'bad');
   if (entry.agent) line.dataset.agent = entry.agent;
   const time = document.createElement('time');
-  time.textContent = new Date(entry.time).toLocaleTimeString(currentLanguage());
+  // Bound like other copy, so lines already shown follow a language change instead of keeping
+  // the old clock format next to new lines in the new one.
+  ui(time, 'textContent', () => new Date(entry.time).toLocaleTimeString(currentLanguage()));
   line.append(time, el('span', 'what', what), el('span', 'rest', rest));
   return line;
 }

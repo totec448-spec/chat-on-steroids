@@ -122,12 +122,14 @@
 .plugin-card:hover, .plugin-card:focus-within { background: var(--hover); }
 .plugin-entry { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 88px; padding: 15px 16px; border: 0; border-radius: inherit; background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
 .plugin-entry .plugin-icon { width: 36px; height: 36px; border-radius: 10px; }
-.plugin-entry h2 { padding-right: 32px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Two lines before an ellipsis: in a narrow window one line left "Commit messages and PR
+   descriptions" as "Commit mes…". */
+.plugin-entry h2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; padding-right: 32px; overflow: hidden; }
 .plugin-icon { display: block; width: 42px; height: 42px; border-radius: 12px; flex: 0 0 auto; object-fit: contain; }
 .plugin-card-title { display: block; flex: 1; min-width: 0; }
 .plugin-card-title h2, .plugin-card-title h3 { margin: 1px 0 5px; font-size: calc(14px * var(--text-scale, 1)); font-weight: 650; line-height: 1.3; overflow-wrap: anywhere; }
 .plugin-card-title p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; }
-.plugin-card-foot { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 9px; }
+.plugin-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; margin-top: 9px; }
 .plugin-card-foot .pill { flex-shrink: 0; max-width: 50%; margin-left: 0; padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(10px * var(--text-scale, 1)); font-weight: 450; }
 .plugin-tool-count { flex-shrink: 0; margin-left: auto; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); white-space: nowrap; }
 .plugin-menu { position: absolute; top: 7px; right: 7px; display: block; }
@@ -338,10 +340,11 @@ html:lang(zh) body, html:lang(ja) body { letter-spacing: 0; line-break: strict; 
 html:lang(zh-TW) body { font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft JhengHei UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans CJK TC", sans-serif); }
 html:lang(ja) body { font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, "Segoe UI", "Yu Gothic UI", "Yu Gothic", "Hiragino Sans", "Meiryo", "Noto Sans CJK JP", sans-serif); }
 .language-select { min-width: 8em; max-width: 100%; }
-.setup-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px 24px; margin-bottom: 20px; }
+.setup-heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; margin-bottom: 20px; }
+.setup-heading > div:first-child { flex: 1 1 260px; min-width: 0; }
 .setup-heading .settings-heading { margin-bottom: 0; padding: 0; }
 .setup-heading .settings-heading p { margin-bottom: 0; }
-.language-tabs { display: inline-flex; flex: none; flex-wrap: wrap; justify-self: start; max-width: 100%; padding: 3px; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.language-tabs { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; justify-self: start; max-width: 100%; padding: 3px; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
 .language-tabs button { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 36px; padding: 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .language-tabs button:hover { background: var(--hover); color: var(--ink); }
 .language-tabs button[aria-pressed='true'] { background: var(--hover); border-color: var(--line); color: var(--ink); }
@@ -756,6 +759,7 @@ main {
 
 .card > h2 {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-height: 45px;
@@ -769,13 +773,18 @@ main {
 
 /* Everything after the title lives in one right-aligned cluster.
    `flex: none` is what actually keeps a primary action on screen: without it the cluster
-   is allowed to shrink below its content and the last button is clipped away. */
+   is allowed to shrink below its content and the last button is clipped away. In a narrow
+   window the cluster moves under the title and wraps, capped at the card's width, instead of
+   running past its edge. */
 .acts {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 4px;
   flex: none;
+  max-width: 100%;
 }
 
 /* The title yields; the actions do not. */
@@ -1702,6 +1711,8 @@ details.connector[open] > summary::before { rotate: 90deg; }
 .field {
   margin-top: 12px;
   display: grid;
+  /* One column that may shrink below its content, so a path row wraps instead of overflowing. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
 }
 
@@ -1767,11 +1778,12 @@ input[readonly] {
 
 .row-inline {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .row-inline input {
-  flex: 1;
+  flex: 1 1 10rem;
   min-width: 0;
 }
 
@@ -2636,8 +2648,11 @@ input[readonly] {
    right. The rows are the whole settings sheet now, so they carry the separators
    instead of a stack of headings, and the explanation is one clause rather than a
    paragraph — anything longer than that was documentation filed in the wrong place. */
+/* In a narrow window the controls wrap under the explanation rather than past the row's edge;
+   the text keeps room for a readable line first. */
 .setting {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 13px 2px;
@@ -2648,7 +2663,7 @@ input[readonly] {
 }
 
 .setting-text {
-  flex: 1;
+  flex: 1 1 14rem;
   min-width: 0;
 }
 
@@ -2701,6 +2716,9 @@ input.num:disabled { opacity: .5; cursor: default; }
    it clipped to "Select mod" rather than letting the hint ellipsize. */
 .setting .btn {
   flex: 0 0 auto;
+  /* A long label ("Actualiser les préférences du navigateur") wraps inside the button. */
+  max-width: 100%;
+  white-space: normal;
 }
 
 /* Inside a settings row the switch is one of several controls, not the thing the
@@ -3666,7 +3684,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .connection-runtime > summary { cursor: pointer; color: var(--soft); padding: 4px 0; font-size: calc(10.5px * var(--text-scale, 1)); }
 .connect-prompt { background: var(--red); color: white; border: 0; padding: 8px 18px; font-weight: 600; }
 .connect-prompt[hidden] { display: none; }
-@media (max-width: 760px) { .setup-heading { grid-template-columns: minmax(0, 1fr); } }
 @media (prefers-reduced-motion: no-preference) { .skill-autocomplete:not([hidden]) { animation: skill-reveal 120ms ease-out; } }
 @keyframes skill-reveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 .slash-menu-section-title { padding: 6px 8px; color: var(--soft); font-size: 11px; }

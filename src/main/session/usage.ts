@@ -23,6 +23,7 @@ export function observeUsage(raw: unknown, capturedAt: unknown = Date.now()): vo
 // One derived cache owns token totals and verified sends. Display preferences project
 // this baseline; only changed canonical session revisions reread transcripts.
 const CACHE_VERSION = 9;
+const SLOW_OVERVIEW_MS = 250;
 const modelTokens = z.object({ model: z.string().min(1).max(100), reasoningEffort: z.string().max(100).nullable(), assumed: z.boolean(), tokens: z.number().finite().nonnegative() });
 const verifiedMessage = z.object({ id: z.string().min(1).max(512), time: z.number().finite().positive().max(8.64e15), model: z.enum(['gpt-5.6', 'gpt-6']) });
 type VerifiedMessage = z.infer<typeof verifiedMessage>;
@@ -168,7 +169,12 @@ async function computeOverview(signal?: AbortSignal): Promise<UsageOverview> {
     day[message.model === 'gpt-6' ? 'gpt6' : 'gpt56']++;
     messageDays.set(date, day);
   }
-  logInfo(`usage overview sessions=${sessions.length} reused=${sessions.length - rebuilt} rebuilt=${rebuilt} elapsed_ms=${Math.round(performance.now() - started)}`);
+  // The open Usage page refreshes this every few seconds. A pass that only reused the cache is
+  // not news; logging each one buried the real events in Activity under identical lines.
+  const elapsed = Math.round(performance.now() - started);
+  if (rebuilt > 0 || dirty || elapsed >= SLOW_OVERVIEW_MS) {
+    logInfo(`usage overview sessions=${sessions.length} reused=${sessions.length - rebuilt} rebuilt=${rebuilt} elapsed_ms=${elapsed}`);
+  }
   return {
     contextTokenCap,
     messages: { through, days: [...messageDays.values()].sort((a, b) => a.date.localeCompare(b.date)) },

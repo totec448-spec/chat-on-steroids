@@ -73,7 +73,7 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
   const ok = (data: any) => Promise.resolve({ ok: true, data });
   const api: any = new Proxy({
     getState: () => ok(state),
-    getLog: () => ok([]),
+    getLog: () => ok([{ time: Date.UTC(2026, 9, 2, 15, 4, 5), level: 'info', message: 'usage overview sessions=1 rebuilt=1' }]),
     getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
     onStateChanged: (fn: any) => { stateListener = fn; return () => undefined; },
     onLogEntry: () => () => undefined,
@@ -95,6 +95,14 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
 
   expect(w.document.activeElement).toBe(field);
   expect(field.value).toBe('tunnel_USER_IS_STILL_TYPING');
+
+  // Log lines already on screen follow a language change, not only the ones added after it.
+  const clock = () => w.document.querySelector('#fullFeed time')!.textContent!;
+  expect(clock()).toMatch(/AM|PM/);
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  expect(clock()).not.toMatch(/AM|PM/);
+  setLanguage('en');
 
   const multiAgent = w.document.getElementById('homeMaEnabled') as HTMLInputElement;
   multiAgent.focus();

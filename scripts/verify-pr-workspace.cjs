@@ -280,8 +280,14 @@ app.whenReady().then(async () => {
     assert.ok(Math.max(...heights)-Math.min(...heights)<2,JSON.stringify(heights));
     await screenshot('appearance-aligned');
     await js(`document.querySelector('[data-tab=setup]').click();window.fixture.setLanguage('es')`);
-    const setup=await js(`(()=>{const h=document.querySelector('.setup-heading');return {display:getComputedStyle(h).display,columns:getComputedStyle(h).gridTemplateColumns}})()`);
-    assert.equal(setup.display,'grid'); await screenshot('setup-spanish-aligned');
+    // Title and language flags share a row only while both fit; the flags never cover the title.
+    const setup=await js(`(()=>{const h=document.querySelector('.setup-heading'),t=h.querySelector('h1').getBoundingClientRect(),f=h.querySelector('.language-tabs').getBoundingClientRect();return {overlap:!(f.left>=t.right||f.top>=t.bottom),titleClipped:h.querySelector('h1').scrollWidth>h.querySelector('h1').clientWidth+1,flagsInside:f.right<=h.getBoundingClientRect().right+1}})()`);
+    assert.deepEqual(setup,{overlap:false,titleClipped:false,flagsInside:true}); await screenshot('setup-spanish-aligned');
+    // A laptop-sized window: the twelve flags no longer fit beside the title and must move below it.
+    win.setSize(1100,800); await new Promise(resolve=>setTimeout(resolve,300));
+    const narrowSetup=await js(`(()=>{const h=document.querySelector('.setup-heading'),t=h.querySelector('h1').getBoundingClientRect(),f=h.querySelector('.language-tabs').getBoundingClientRect();return {overlap:!(f.left>=t.right||f.top>=t.bottom),titleClipped:h.querySelector('h1').scrollWidth>h.querySelector('h1').clientWidth+1,flagsInside:f.right<=h.getBoundingClientRect().right+1}})()`);
+    assert.deepEqual(narrowSetup,{overlap:false,titleClipped:false,flagsInside:true}); await screenshot('setup-spanish-laptop');
+    win.setSize(1500,1000); await new Promise(resolve=>setTimeout(resolve,300));
     await js(`document.getElementById('backToChat').click();const input=document.getElementById('chatInput');input.value='/';input.setSelectionRange(1,1);input.dispatchEvent(new Event('input',{bubbles:true}));`);
     await until('!document.getElementById("skillPicker").hidden && document.querySelector(".skill-choice")');
     // The Skills library has its own sidebar entry since 2026-09-27; slash commands still work beside it.
