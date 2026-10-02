@@ -2676,6 +2676,8 @@ input.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+/* Matches `select:disabled`: a number its switch has turned off reads as inactive. */
+input.num:disabled { opacity: .5; cursor: default; }
 
 .unit {
   flex: 0 0 auto;

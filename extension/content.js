@@ -11837,7 +11837,14 @@
     const messages = CLF_DOM.messages();
     const userIndex = messages.findLastIndex(message => message.role === 'user');
     const assistant = messages.at(-1);
-    if (userIndex < 0 || messages[userIndex].id !== decision.messageId || assistant?.role !== 'assistant' ||
+    // A Temporary Chat helper is opened for this one decision, and its send was confirmed
+    // (decision.messageId). Once the answer completes, ChatGPT can redraw the only exchange with no
+    // user message at all, on the page and in its page model: 2026-10-02, live, every Goal helper
+    // then timed out with its answer on screen. A page holding nothing but one answer turn holds
+    // this decision's answer; the exact page-model terminal below still decides that it is done.
+    const pageTurns = CLF_DOM.turns();
+    const userDropped = decision.temporary && userIndex < 0 && pageTurns.length === 1 && pageTurns[0].role === 'assistant';
+    if ((!userDropped && (userIndex < 0 || messages[userIndex].id !== decision.messageId)) || assistant?.role !== 'assistant' ||
         !assistant.id || !assistant.node?.isConnected || isStale(assistant.node) || retiredMessages.has(assistant.id)) return;
     const pageTurn = CLF_DOM.turns().at(-1);
     const nodes = pageTurn?.nodes || (pageTurn?.node ? [pageTurn.node] : []);
@@ -11848,7 +11855,7 @@
     const turn = stampedFiberTurn(pageTurn, [...fiberTurns.values()], fiberScanToken);
     if (!turn?.endMessageId || turn.conversationConflict || turn.endMessageId !== assistant.id ||
         (turn.calls || []).some(call => call.answered !== true)) return;
-    if (decision.temporary) {
+    if (decision.temporary && !userDropped) {
       // Temporary Chat has no /c route, but its canonical messages carry a WEB: thread.
       // Join the final to the accepted user in this same scan instead of comparing that
       // provider identity to the deliberately null route identity.

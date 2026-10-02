@@ -1244,6 +1244,7 @@ function apply(next: AppState): void {
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
+  $<HTMLSelectElement>('finishLeadMinutes').disabled = config.ui.finishTool !== true;
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   const bridgePortControl = $<HTMLSelectElement>('browserBridgePort');
   applyValue(bridgePortControl, String(config.ui.browserBridgePort ?? 'auto'), String(previousState?.config.ui.browserBridgePort ?? 'auto'));

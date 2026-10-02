@@ -861,7 +861,7 @@
                   <div class="setting"><span class="setting-text"><b>Loop response source</b><em>Loop keeps going until you switch it off.</em></span><select id="loopBackend"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan reasoning</b><em>Used with the ChatGPT model above; independent from API reasoning.</em></span><select id="helperReasoning" aria-label="Goal, Loop and Plan reasoning"></select></div>
-                  <label class="setting"><span class="setting-text"><b>Include tool details in handoffs</b><em>Handoff briefs retain tool details. Goal and Loop use user messages and assistant updates and answers.</em></span><input id="goalIncludeToolCalls" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Include tool details in handoffs</b><em>Compact &amp; Resume briefs keep tool calls and their results. Goal and Loop always read only your messages and the assistant's updates and answers.</em></span><input id="goalIncludeToolCalls" type="checkbox" /></label>
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">ChatGPT models</h2><p>Use account-observed models for sub-agents.</p></div></header>
                 <div class="settings-surface pane">
@@ -904,6 +904,14 @@
                     <input id="waitForSubAgents" type="checkbox" />
                   </label>
 
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>End background processes of workers asleep for more than 30 minutes</b>
+                      <em>The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.</em>
+                    </span>
+                    <input id="endSleepingWorkerProcesses" type="checkbox" />
+                  </label>
+
                   <div id="swarmList"></div>
                   <div class="step-actions">
                     <button class="btn" id="swarmReset" type="button">Clear swarm</button>
@@ -912,9 +920,9 @@
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Keep the turn open</h2><p>Control plan generation and what happens near the end of a turn.</p></div></header>
                 <div class="settings-surface pane">
                   <label class="setting"><span class="setting-text"><b>Plan generation</b><em>Create staged tasks. ChatGPT uses the Goal, Loop and Plan model above; API uses the model and reasoning in API provider settings.</em></span><select id="planBackend"><option value="chatgpt">ChatGPT</option><option value="api">API provider</option></select></label>
-                  <label class="setting"><span class="setting-text"><b>Session finish</b><em>Ask Astra to keep the turn open for your next instruction. With Automatic plugin refresh enabled, tool changes refresh the connector after 20 seconds.</em></span><input id="finishTool" type="checkbox" /></label>
-                  <div class="setting"><span class="setting-text"><b>When ChatGPT is wrapping up</b><em>When Goal or Loop is enabled for this chat, finishing generates a follow-up using your Loop instructions and source. When Off, you receive a notification.</em></span></div>
-                  <div class="setting"><span class="setting-text"><b>Requested notice</b><em>A request to the model, not a guaranteed countdown.</em></span><select id="finishLeadMinutes"><option value="3">3 minutes</option><option value="5">5 minutes</option></select></div>
+                  <label class="setting"><span class="setting-text"><b>Session finish</b><em>Holds the turn open near its end so the next step arrives in the same turn. Goal and Loop use it with GPT-6 Pro (Astra), Loop also with older Pro models; other models only when your message asks. Turning it on changes the connector's tools, so ChatGPT needs a plugin refresh (automatic after 20 seconds with Automatic plugin refresh).</em></span><input id="finishTool" type="checkbox" /></label>
+                  <div class="setting"><span class="setting-text"><b>Requested notice</b><em>How long before its end the model should hold the turn. A request to the model, not a guaranteed countdown.</em></span><select id="finishLeadMinutes"><option value="3">3 minutes</option><option value="5">5 minutes</option></select></div>
+                  <p class="muted">When the model ends the turn this way with Goal or Loop on in this chat, the next step is written from that prompt and response source. Otherwise you get a notification.</p>
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Browser & history</h2><p>Manage background tabs, browser preferences, and history compaction.</p></div></header>
                 <div class="settings-surface pane">
