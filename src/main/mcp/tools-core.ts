@@ -972,8 +972,24 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           // The ownership registry decides both admission and the reason for refusal.
           // A request-scoped caller can continue a process it opened before proof. Another
           // request must wait for exact correlation; a numeric process id is not custody.
-          const asking = execPrincipal();
-          const denied = execOwnershipFailure(input.session_id, asking);
+          let asking = execPrincipal();
+          let denied = execOwnershipFailure(input.session_id, asking);
+          if (denied === 'unidentified') {
+            const caller = currentCaller();
+            if (caller.requestId) {
+              // A later turn in the same chat can reach Core before the page reports this
+              // request-id mate. Wait only for that exact correlation, then re-run the same
+              // ownership check; the numeric session id never becomes authority by itself.
+              await awaitFreshCallOrigin(
+                'write_stdin',
+                currentCall()?.startedAt ?? Date.now(),
+                IDENTITY_EVIDENCE_MS,
+                { exact: true, requestId: caller.requestId }
+              );
+              asking = execPrincipal();
+              denied = execOwnershipFailure(input.session_id, asking);
+            }
+          }
           if (denied) {
             const reason = {
               unavailable: 'EXEC_SESSION_UNAVAILABLE: This process id is not available to this call in the running app. Check the original exec_command response and earlier results for its exit/output before deciding what remains; do not rerun the command solely because its id is unavailable.',
