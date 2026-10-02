@@ -16106,6 +16106,9 @@ describe('the context meter and automatic compaction', () => {
     expect(sends()).toBe(1);
   });
 
+  // Each case waits out the real receipt settle loop: about 20 s on a laptop, and up to 110 s on
+  // the Intel macOS runner that only builds releases, where the global 30 s limit failed the 2.1.25
+  // publish twice with nothing wrong. The wait is the behavior under test, so it gets its own limit.
   it.each(['unanswered', 'missing', 'vanished', 'different-tool', 'different-request', 'duplicate', 'shared-request'])('keeps an automatic ticket unsent when native receipt is %s', async failure => {
     live = await harness(undefined, {
       activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0 }),
@@ -16134,7 +16137,7 @@ describe('the context meter and automatic compaction', () => {
     expect(stopped).not.toHaveBeenCalled();
     expect(startedCompactions(live)).toEqual([]);
     expect(live.sent.some(message => message.type === 'compact' && (message.sourceDispatch || message.sourceLost))).toBe(false);
-  });
+  }, 180_000);
 
   it('compacts once the turn ends by itself while a stale row still reads as unanswered', async () => {
     // Live 2026-10-01: the ticket was filed mid-turn, the turn finished on its own, and the
