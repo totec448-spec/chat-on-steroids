@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = process.cwd();
 const extension = path.join(root, 'extension');
-const expectedLocales = ['de', 'en', 'es', 'fr', 'ja', 'tr', 'zh_CN', 'zh_TW'];
+const expectedLocales = ['de', 'en', 'es', 'fr', 'ja', 'ru', 'tr', 'zh_CN', 'zh_TW'];
 
 type MessageEntry = {
   message: string;

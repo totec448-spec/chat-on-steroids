@@ -1,0 +1,1151 @@
+{
+  "content_app_did_not_answer": {
+    "message": "Приложение не ответило."
+  },
+  "content_app_did_not_answer_lower": {
+    "message": "приложение не ответило"
+  },
+  "content_app_not_running": {
+    "message": "Chat On Steroids не запущен на этом ПК."
+  },
+  "content_auto_compaction": {
+    "message": "Автосжатие"
+  },
+  "content_auto_compaction_blocked_off": {
+    "message": "здесь выключено: этот чат заблокирован в приложении"
+  },
+  "content_auto_compaction_manual": {
+    "message": "сжать этот чат вручную"
+  },
+  "content_auto_compaction_off": {
+    "message": "Автосжатие отключено"
+  },
+  "content_auto_compaction_on": {
+    "message": "Автосжатие включено$1"
+  },
+  "content_auto_compaction_threshold_app": {
+    "message": "порог задан в приложении"
+  },
+  "content_auto_compaction_worker_off": {
+    "message": "здесь выключено: чаты воркеров не сжимаются автоматически"
+  },
+  "content_bootstrap_composer_changed_authorizing": {
+    "message": "редактор сообщения изменился во время разрешения запуска; черновик сохранён, ничего не отправлено"
+  },
+  "content_bootstrap_composer_changed_before_send": {
+    "message": "редактор сообщения изменился перед отправкой запуска; черновик сохранён"
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "ChatGPT заменил редактор сообщения во время вставки запуска"
+  },
+  "content_bootstrap_composer_unavailable": {
+    "message": "после выбора модели ChatGPT так и не показал доступный редактор сообщения"
+  },
+  "content_bootstrap_fresh_chat_changed": {
+    "message": "отмеченный новый чат изменился перед отправкой запуска; ничего не отправлено"
+  },
+  "content_bootstrap_handoff": {
+    "message": "Краткая передача контекста, перенесённая приложением — это не ваш текст"
+  },
+  "content_bootstrap_insert_refused": {
+    "message": "ChatGPT отклонил вставленный текст$1"
+  },
+  "content_bootstrap_missing_target": {
+    "message": "предложено уже существующему чату без указания нужного чата"
+  },
+  "content_bootstrap_model_unavailable": {
+    "message": "Запрошенная модель или уровень рассуждений недоступны либо не удалось подтвердить их в ChatGPT"
+  },
+  "content_bootstrap_project_not_authorized": {
+    "message": "команда не разрешила вход в Project; ничего не отправлено"
+  },
+  "content_bootstrap_project_open_failed": {
+    "message": "ChatGPT не смог открыть исходный Project по встроенной ссылке; ничего не отправлено"
+  },
+  "content_bootstrap_project_source_changed": {
+    "message": "запись Project больше не соответствует исходному диалогу; ничего не отправлено"
+  },
+  "content_bootstrap_resume_marker_invalid": {
+    "message": "в запуске продолжения нет корректного маркера продолжения"
+  },
+  "content_bootstrap_send_not_accepted": {
+    "message": "ChatGPT не принял отправку запуска"
+  },
+  "content_bootstrap_target_changed": {
+    "message": "чат, для которого предназначалось сообщение, изменился до отправки; ничего не отправлено"
+  },
+  "content_bootstrap_worker": {
+    "message": "Это $1 — инструкция воркеру от приложения, а не ваш текст"
+  },
+  "content_bootstrap_wrong_conversation": {
+    "message": "открытая для него страница показывала другой диалог"
+  },
+  "content_browser_disconnected": {
+    "message": "Подключение браузера в Chat On Steroids разорвано."
+  },
+  "content_cancel": {
+    "message": "Отмена"
+  },
+  "content_chat_blocked": {
+    "message": "Чат заблокирован"
+  },
+  "content_chat_blocked_tip": {
+    "message": "Этот чат заблокирован в Chat On Steroids: вызовы инструментов отклоняются, а Цель, Цикл и автосжатие выключены. Чтобы разблокировать его, откройте вкладку Chat в приложении, наведите на этот чат в списке сессий и нажмите значок блокировки."
+  },
+  "content_chat_still_opening": {
+    "message": "чат ещё открывается — повторите"
+  },
+  "content_chatgpt_message_box_not_ready": {
+    "message": "Поле сообщения ChatGPT не готово ($1). Дождитесь загрузки страницы и повторите."
+  },
+  "content_chatgpt_tool": {
+    "message": "Инструмент ChatGPT"
+  },
+  "content_clear": {
+    "message": "Очистить"
+  },
+  "content_compact": {
+    "message": "Сжать"
+  },
+  "content_compact_already_underway": {
+    "message": "В этом чате уже идёт сжатие. Дождитесь его завершения или отмените."
+  },
+  "content_compact_app_opening_fresh": {
+    "message": "Приложение пытается открыть новый чат."
+  },
+  "content_compact_asking": {
+    "message": "Запрос…"
+  },
+  "content_compact_attempt_not_repeated": {
+    "message": "$1. Надёжная попытка не будет отправлена дважды."
+  },
+  "content_compact_attempt_owned": {
+    "message": "Надёжная попытка передачи контекста уже закреплена; сверяется отмеченное сообщение ChatGPT."
+  },
+  "content_compact_blocked_unavailable_hint": {
+    "message": "Заблокированный чат не сжимается и не продолжается: новый чат остался бы без его инструментов. Сначала разблокируйте чат в приложении."
+  },
+  "content_compact_cancel": {
+    "message": "Отменить сжатие"
+  },
+  "content_compact_cancel_aria": {
+    "message": "Отменить «Сжать и продолжить»"
+  },
+  "content_compact_cancel_failed": {
+    "message": "Не удалось отменить сжатие."
+  },
+  "content_compact_chat_changed_before_start": {
+    "message": "Чат изменился до начала сжатия."
+  },
+  "content_compact_chat_changed_preparing": {
+    "message": "Чат изменился во время подготовки передачи контекста. Ничего не отправлено."
+  },
+  "content_compact_chat_changed_stopping": {
+    "message": "Чат изменился, пока сжатие останавливало ход."
+  },
+  "content_compact_chat_changed_waiting_results": {
+    "message": "Чат изменился, пока сжатие ожидало результаты инструментов."
+  },
+  "content_compact_chat_changed_waiting_tools": {
+    "message": "Чат изменился, пока сжатие ожидало локальные инструменты."
+  },
+  "content_compact_chatgpt_writing": {
+    "message": "ChatGPT пишет передачу контекста"
+  },
+  "content_compact_existing_draft": {
+    "message": "В ChatGPT уже есть черновик; очистите поле сообщения перед запросом передачи контекста."
+  },
+  "content_compact_failed": {
+    "message": "Сжатие не удалось"
+  },
+  "content_compact_failed_request_unconfirmed": {
+    "message": "$1 Приложение ещё не подтвердило закрытие этого неудачного запроса."
+  },
+  "content_compact_fresh_open": {
+    "message": "Новый чат открыт"
+  },
+  "content_compact_handoff_already_submitted": {
+    "message": "Инструкция передачи контекста уже отправлена здесь. Она завершится сама; при необходимости отмените её."
+  },
+  "content_compact_handoff_incomplete_detail": {
+    "message": "Ответ передачи контекста не завершился. Отмените сжатие, чтобы вернуться в этот чат."
+  },
+  "content_compact_handoff_problem": {
+    "message": "ChatGPT сообщил о проблеме при подготовке передачи контекста."
+  },
+  "content_compact_handoff_request_failed": {
+    "message": "Не удалось запросить у ChatGPT передачу контекста: $1"
+  },
+  "content_compact_handoff_stopped_detail": {
+    "message": "Ответ передачи контекста остановлен. Отмените сжатие, чтобы вернуться в этот чат."
+  },
+  "content_compact_insert_failed": {
+    "message": "Браузеру не удалось вставить запрос передачи контекста ($1). Убедитесь, что поле сообщения доступно, и повторите."
+  },
+  "content_compact_message_box_changed": {
+    "message": "Поле сообщения изменилось до отправки инструкции передачи контекста. Черновик сохранён; сжатие не выполнено."
+  },
+  "content_compact_message_box_changed_preserved": {
+    "message": "Поле сообщения изменилось до отправки передачи контекста. Черновик сохранён."
+  },
+  "content_compact_missing_handoff_instruction": {
+    "message": "Приложение не отправило инструкцию передачи контекста."
+  },
+  "content_compact_missing_token": {
+    "message": "Приложение не отправило токен сжатия, поэтому отслеживание невозможно."
+  },
+  "content_compact_nothing_yet": {
+    "message": "Пока нечего сжимать — отправьте сообщение или задайте Цель, и она создаст его."
+  },
+  "content_compact_opening_fresh": {
+    "message": "Передача контекста сохранена, открывается новый чат"
+  },
+  "content_compact_policy_unverified": {
+    "message": "Не удалось проверить, можно ли сжать этот чат."
+  },
+  "content_compact_results_unconfirmed": {
+    "message": "ChatGPT не подтвердил получение последних результатов инструментов. Сжатие не выполнено."
+  },
+  "content_compact_resume_cancelled": {
+    "message": "Продолжение отменено"
+  },
+  "content_compact_resume_now": {
+    "message": "Сжать и продолжить сейчас"
+  },
+  "content_compact_send_ambiguous": {
+    "message": "Результат отправки неоднозначен. Повторной отправки не будет; отмените явно, если ChatGPT так и не принял запрос."
+  },
+  "content_compact_send_not_ready": {
+    "message": "Запрос передачи контекста не отправлен: кнопка Send или поле сообщения были не готовы. Повторите после загрузки страницы."
+  },
+  "content_compact_send_permission_unconfirmed": {
+    "message": "Ничего не отправлено: разрешение на отправку передачи контекста не подтверждено. Существующий запрос не будет отправлен дважды."
+  },
+  "content_compact_send_state_unverified": {
+    "message": "Не удалось проверить состояние отправки передачи контекста. Ничего не остановлено."
+  },
+  "content_compact_settling": {
+    "message": "Стабилизация…"
+  },
+  "content_compact_source_not_loaded": {
+    "message": "Исходный вопрос ещё не загрузился. Сжатие не выполнено; ожидание исходного диалога."
+  },
+  "content_compact_starting": {
+    "message": "Запуск…"
+  },
+  "content_compact_step_opening": {
+    "message": "Открытие нового чата"
+  },
+  "content_compact_step_preparing": {
+    "message": "Подготовка"
+  },
+  "content_compact_step_saving": {
+    "message": "Сохранение"
+  },
+  "content_compact_step_writing": {
+    "message": "Запись передачи контекста"
+  },
+  "content_compact_stop_failed": {
+    "message": "ChatGPT не остановил текущий ход. Сжатие не выполнено."
+  },
+  "content_compact_stopping": {
+    "message": "Остановка…"
+  },
+  "content_compact_ticket_store_failed": {
+    "message": "Не удалось сохранить заявку на сжатие."
+  },
+  "content_compact_tools_still_running": {
+    "message": "После тайм-аута стабилизации локальные инструменты всё ещё работали. Сжатие не выполнено."
+  },
+  "content_compact_tools_stop_unverified": {
+    "message": "Не удалось подтвердить остановку локальных инструментов. Сжатие не выполнено."
+  },
+  "content_compact_unavailable": {
+    "message": "«Сжать и продолжить» недоступно"
+  },
+  "content_compact_waiting_response": {
+    "message": "Ожидание ответа передачи контекста"
+  },
+  "content_compact_waiting_store": {
+    "message": "Краткое описание готово; ожидание сохранения приложением."
+  },
+  "content_compact_worker_unavailable_hint": {
+    "message": "Чаты воркеров остаются в своих диалогах и не сжимаются и не продолжаются вручную."
+  },
+  "content_connector_identity_ambiguous": {
+    "message": "Идентификатор установленного коннектора недоступен или неоднозначен"
+  },
+  "content_connector_refresh_claim_unconfirmed": {
+    "message": "Запрос обновления коннектора или владение страницей не подтверждены"
+  },
+  "content_connector_refresh_schema_unchanged": {
+    "message": "Обновление запрошено, но изменённая соответствующая схема не обнаружена"
+  },
+  "content_connector_refresh_unverified": {
+    "message": "Не удалось подтвердить обновление коннектора"
+  },
+  "content_connector_schema_no_refresh": {
+    "message": "Схема коннектора отличается, но в ChatGPT нет элемента Refresh. Пересоздайте или повторно опубликуйте это пользовательское приложение, чтобы загрузить текущую схему инструментов."
+  },
+  "content_connector_settings_unreadable": {
+    "message": "Не удалось прочитать карточку настроек коннектора на странице этого запроса"
+  },
+  "content_connector_settings_unverified": {
+    "message": "Не удалось проверить точные настройки коннектора"
+  },
+  "content_delivery_attachment_transfer_failed": {
+    "message": "Не удалось передать вложение. Сообщение не отправлено."
+  },
+  "content_delivery_attachment_transfer_incomplete": {
+    "message": "Передача вложения не завершена."
+  },
+  "content_delivery_attachment_upload_unconfirmed": {
+    "message": "Загрузка вложения не подтверждена. Перед повтором проверьте неотправленный черновик и ошибки файла в ChatGPT."
+  },
+  "content_delivery_chat_changed": {
+    "message": "Чат изменился до прямой доставки."
+  },
+  "content_delivery_chat_changed_or_busy": {
+    "message": "Чат изменился или не остановился. Сообщение не отправлено."
+  },
+  "content_delivery_composer_changed": {
+    "message": "Редактор сообщения ChatGPT изменился перед отправкой"
+  },
+  "content_delivery_composer_stuck": {
+    "message": "ChatGPT завершил ответ, но редактор сообщения всё ещё показывает Stop. Страница восстанавливается перед доставкой сообщения из очереди."
+  },
+  "content_delivery_draft_preserved": {
+    "message": "Редактор сообщения изменился; черновик сохранён"
+  },
+  "content_delivery_editor_not_writable": {
+    "message": "Редактор ChatGPT не стал доступен для ввода до отправки."
+  },
+  "content_delivery_existing_draft": {
+    "message": "В ChatGPT уже есть неотправленный черновик. Отправьте или очистите его в Chrome перед повтором."
+  },
+  "content_delivery_model_unconfirmed": {
+    "message": "Не удалось подтвердить выбранную модель или уровень рассуждений"
+  },
+  "content_delivery_stop_failed": {
+    "message": "Не удалось остановить текущий ответ."
+  },
+  "content_delivery_temporary_chat_unconfirmed": {
+    "message": "Temporary Chat не подтверждён. Откройте вспомогательную вкладку и завершите вводную настройку Temporary Chat."
+  },
+  "content_delivery_text_not_accepted": {
+    "message": "ChatGPT не принял текст$1"
+  },
+  "content_delivery_turn_changed": {
+    "message": "Ход изменился до прямой доставки."
+  },
+  "content_dismiss": {
+    "message": "Закрыть"
+  },
+  "content_empty": {
+    "message": "(пусто)"
+  },
+  "content_error_compaction_running": {
+    "message": "Сейчас сжимается другой чат."
+  },
+  "content_error_session_not_recorded": {
+    "message": "Для этого чата ещё нет локально записанной сессии."
+  },
+  "content_error_turn_still_generating": {
+    "message": "Сначала дождитесь завершения этого хода ChatGPT."
+  },
+  "content_failed": {
+    "message": "Сбой"
+  },
+  "content_goal_add_specific": {
+    "message": "добавить конкретную цель"
+  },
+  "content_goal_add_specific_hint": {
+    "message": "Укажите, чего должен достичь этот чат. Он будет продолжать до достижения Цели, затем остановится."
+  },
+  "content_goal_add_to_start": {
+    "message": "Добавьте Цель или Цикл, чтобы запустить этот чат"
+  },
+  "content_goal_answer_never_settled": {
+    "message": "ответ продолжал меняться, поэтому ничего не записано"
+  },
+  "content_goal_answering": {
+    "message": "$1 отвечает"
+  },
+  "content_goal_backend_chatgpt_helper": {
+    "message": "помощник ChatGPT"
+  },
+  "content_goal_backend_custom_endpoint": {
+    "message": "пользовательский эндпоинт"
+  },
+  "content_goal_backend_no_answer": {
+    "message": "$1 не ответил"
+  },
+  "content_goal_backend_offline_templates": {
+    "message": "офлайн-шаблоны"
+  },
+  "content_goal_backend_offline_templates_title": {
+    "message": "Офлайн-шаблоны"
+  },
+  "content_goal_checking_again": {
+    "message": "Повторная проверка через $1"
+  },
+  "content_goal_checking_finished": {
+    "message": "Проверка завершения ответа"
+  },
+  "content_goal_delivery": {
+    "message": "$1: $2"
+  },
+  "content_goal_delivery_after_turn_finish": {
+    "message": "После этого хода + завершение"
+  },
+  "content_goal_delivery_only_finish": {
+    "message": "Только при завершении"
+  },
+  "content_goal_loop_off": {
+    "message": "Цель и Цикл выключены"
+  },
+  "content_goal_loop_stopped": {
+    "message": "Цикл Цели остановлен"
+  },
+  "content_goal_message_box_in_use": {
+    "message": "поле сообщения было занято, поэтому ничего не отправлено"
+  },
+  "content_goal_mode_aria": {
+    "message": "Режим Цели"
+  },
+  "content_goal_new_chat_draft_refused": {
+    "message": "ChatGPT не заменил черновик New Chat"
+  },
+  "content_goal_no_api_key_unavailable": {
+    "message": "Нет API-ключа — Цель и Цикл недоступны"
+  },
+  "content_goal_nothing_sent": {
+    "message": "ничего не отправлено"
+  },
+  "content_goal_off_blocked": {
+    "message": "Цель выключена — этот чат заблокирован в приложении"
+  },
+  "content_goal_off_prime_writes": {
+    "message": "Цель выключена — этот чат ведёт главный агент"
+  },
+  "content_goal_on": {
+    "message": "Цель включена"
+  },
+  "content_goal_on_chasing": {
+    "message": "Цель включена — выполнение цели этого чата"
+  },
+  "content_goal_on_no_api_key": {
+    "message": "Цель включена — нет API-ключа"
+  },
+  "content_goal_opening_empty": {
+    "message": "модель не написала первое сообщение"
+  },
+  "content_goal_opening_on_goal": {
+    "message": "Открытие чата с его Целью"
+  },
+  "content_goal_placeholder": {
+    "message": "Чего должен достичь этот чат?"
+  },
+  "content_goal_reached": {
+    "message": "Цель достигнута"
+  },
+  "content_goal_retrying": {
+    "message": "Повтор Цели через $1 с"
+  },
+  "content_goal_save": {
+    "message": "Сохранить как Цель"
+  },
+  "content_goal_save_failed": {
+    "message": "не удалось сохранить Цель для этого чата"
+  },
+  "content_goal_send_failed": {
+    "message": "ChatGPT не отправил сообщение"
+  },
+  "content_goal_sending_answer_to": {
+    "message": "Отправка ответа в $1"
+  },
+  "content_goal_sending_to_chatgpt": {
+    "message": "Отправка в ChatGPT"
+  },
+  "content_goal_status_dismiss": {
+    "message": "Закрыть статус Цели"
+  },
+  "content_goal_step_reading": {
+    "message": "Чтение чата"
+  },
+  "content_goal_step_sending": {
+    "message": "Отправка"
+  },
+  "content_goal_step_settling": {
+    "message": "Стабилизация ответа"
+  },
+  "content_goal_step_writing": {
+    "message": "Запись ответа"
+  },
+  "content_goal_wait_recovery_activity": {
+    "message": "Ожидание активности после восстановления"
+  },
+  "content_goal_wait_recovery_reload": {
+    "message": "Ожидание перед перезагрузкой для восстановления"
+  },
+  "content_goal_wait_resumed": {
+    "message": "ChatGPT возобновил работу · ожидание перед повтором"
+  },
+  "content_goal_wait_running_tools": {
+    "message": "Ожидание работающих инструментов"
+  },
+  "content_goal_wait_tool_inactivity": {
+    "message": "Ожидание паузы в работе инструментов"
+  },
+  "content_goal_wait_workers": {
+    "message": "Ожидание субагентов этого чата"
+  },
+  "content_goal_writing_first_message": {
+    "message": "$1 пишет первое сообщение"
+  },
+  "content_goal_wrote_next_message": {
+    "message": "$1 написал следующее сообщение"
+  },
+  "content_loop_add_specific": {
+    "message": "добавить конкретный цикл"
+  },
+  "content_loop_add_specific_hint": {
+    "message": "Укажите, чего должен достичь этот чат. Он будет продолжать бесконечно — остановить его можно только переключателем Цикла."
+  },
+  "content_loop_continuation_paused": {
+    "message": "Продолжение Цикла приостановлено"
+  },
+  "content_loop_on_never_stops": {
+    "message": "Цикл включён — сам не останавливается"
+  },
+  "content_loop_on_no_api_key": {
+    "message": "Цикл включён — нет API-ключа"
+  },
+  "content_loop_save": {
+    "message": "Сохранить как Цикл"
+  },
+  "content_meter_status": {
+    "message": "$1/$2 · автосжатие $3"
+  },
+  "content_mode_goal": {
+    "message": "Цель"
+  },
+  "content_mode_goal_hint": {
+    "message": "Отвечает от вашего имени до достижения Цели этого чата, затем останавливается. Использует $1."
+  },
+  "content_mode_loop": {
+    "message": "Цикл"
+  },
+  "content_mode_loop_hint": {
+    "message": "Отвечает от вашего имени бесконечно — остановить можно только этим переключателем. Использует $1."
+  },
+  "content_mode_note_blocked": {
+    "message": "заблокировано в приложении"
+  },
+  "content_mode_note_goal": {
+    "message": "отвечает до достижения Цели"
+  },
+  "content_mode_note_key_required": {
+    "message": "нужен ключ OpenRouter"
+  },
+  "content_mode_note_loop": {
+    "message": "отвечает бесконечно"
+  },
+  "content_mode_note_off": {
+    "message": "здесь ответы не создаются"
+  },
+  "content_mode_note_prime_writes": {
+    "message": "здесь пишет главный агент"
+  },
+  "content_mode_off": {
+    "message": "Выкл."
+  },
+  "content_mode_off_hint": {
+    "message": "Здесь ничего не создаётся автоматически."
+  },
+  "content_model_generic": {
+    "message": "модель"
+  },
+  "content_off": {
+    "message": "выкл."
+  },
+  "content_on": {
+    "message": "вкл."
+  },
+  "content_opened": {
+    "message": "Открыто"
+  },
+  "content_opening": {
+    "message": "Открытие…"
+  },
+  "content_paused": {
+    "message": "Приостановлено"
+  },
+  "content_saving": {
+    "message": "Сохранение…"
+  },
+  "content_settings_aria": {
+    "message": "Настройки Chat On Steroids"
+  },
+  "content_stage_handoff_attention": {
+    "message": "Ответ передачи контекста требует внимания"
+  },
+  "content_stage_handoff_stopped": {
+    "message": "Ответ передачи контекста остановлен"
+  },
+  "content_stage_opening_fresh_chat": {
+    "message": "Открытие нового чата"
+  },
+  "content_stage_saving_handoff": {
+    "message": "Сохранение передачи контекста"
+  },
+  "content_stage_waiting_for_chrome": {
+    "message": "Ожидание Chrome"
+  },
+  "content_task_add": {
+    "message": "добавить задачу"
+  },
+  "content_task_api_key_unavailable": {
+    "message": "Сначала добавьте API-ключ OpenRouter в приложении."
+  },
+  "content_task_blocked_unavailable": {
+    "message": "Этот чат заблокирован в приложении. Разблокируйте его там, чтобы снова управлять им."
+  },
+  "content_task_change_hint": {
+    "message": "Измените или очистите цель этого чата. Он работает как $1."
+  },
+  "content_task_edit": {
+    "message": "редактировать задачу"
+  },
+  "content_task_pick_mode_first": {
+    "message": "Сначала выберите Цель или Цикл выше — при Выкл. ничего не создаётся."
+  },
+  "content_task_worker_unavailable": {
+    "message": "Чатом воркера уже управляет его главный агент."
+  },
+  "content_task_write_hint": {
+    "message": "Укажите, чего должен достичь этот чат. Он работает как $1."
+  },
+  "content_tokens_from": {
+    "message": "из $1 токенов"
+  },
+  "content_tool_calls_count": {
+    "message": "$1 вызовов инструментов"
+  },
+  "content_tool_details_loading": {
+    "message": "Загрузка записанных сведений…"
+  },
+  "content_tool_details_unavailable": {
+    "message": "Записанные сведения недоступны для этой версии активности."
+  },
+  "content_tool_more_changed_files": {
+    "message": "ещё изменённых файлов: $1"
+  },
+  "content_tool_outcome_completed": {
+    "message": "выполнено"
+  },
+  "content_tool_outcome_failed": {
+    "message": "сбой"
+  },
+  "content_tool_outcome_internal_error": {
+    "message": "внутренняя ошибка"
+  },
+  "content_tool_outcome_refused": {
+    "message": "отклонено"
+  },
+  "content_tool_outcome_unknown": {
+    "message": "неизвестно"
+  },
+  "content_tool_preview_truncated": {
+    "message": "Предпросмотр сокращён с $1 символов."
+  },
+  "content_tool_ran": {
+    "message": "Выполнено: $1"
+  },
+  "content_tool_recorded_arguments": {
+    "message": "Записанные аргументы (скрыты)"
+  },
+  "content_tool_recorded_result": {
+    "message": "Записанный результат (скрытый предпросмотр)"
+  },
+  "content_turn_auto_continue_stopped": {
+    "message": "Автоматический Continue остановил неизменившийся тихий ход."
+  },
+  "content_turn_chatgpt_interrupted": {
+    "message": "ChatGPT отметил ход как прерванный"
+  },
+  "content_turn_outcome": {
+    "message": "Ход $1"
+  },
+  "content_turn_replaced_by_user_message": {
+    "message": "новое сообщение пользователя заменило незавершённый ход"
+  },
+  "content_turn_stalled_detail": {
+    "message": "нет видимого вывода и прогресса десять минут"
+  },
+  "content_turn_stalled_error": {
+    "message": "Нет видимого прогресса уже десять минут. Приложение не смогло подтвердить завершение этого хода."
+  },
+  "content_turn_started": {
+    "message": "Ход начат"
+  },
+  "content_turn_stop_requested": {
+    "message": "Запрошен Stop; встроенная страница больше не показывает генерацию."
+  },
+  "content_unknown_error": {
+    "message": "неизвестная ошибка"
+  },
+  "content_waiting": {
+    "message": "Ожидание…"
+  },
+  "content_waiting_current_operation": {
+    "message": "Ожидание завершения текущей операции"
+  },
+  "content_waiting_local_tool": {
+    "message": "Ожидание завершения локального инструмента"
+  },
+  "content_waiting_local_tools": {
+    "message": "Ожидание завершения локальных инструментов: $1"
+  },
+  "content_worker_generic": {
+    "message": "воркер"
+  },
+  "content_worker_label": {
+    "message": "Воркер"
+  },
+  "content_worker_retired": {
+    "message": "$1 выведен из работы: $2. Этот чат больше не может использовать локальные инструменты."
+  },
+  "content_worker_still_running": {
+    "message": "Воркер ещё работает: $1"
+  },
+  "content_workers_still_running": {
+    "message": "Воркеры ещё работают: $1"
+  },
+  "content_workers_summary": {
+    "message": "$1 завершено · $2 работают"
+  },
+  "content_workers_summary_failed": {
+    "message": "$1 завершено · $2 работают · $3 с ошибкой"
+  },
+  "content_working": {
+    "message": "работа…"
+  },
+  "content_writing": {
+    "message": "Запись…"
+  },
+  "extension_action_title": {
+    "message": "Chat On Steroids"
+  },
+  "extension_description": {
+    "message": "Подключает ChatGPT к Chat On Steroids и управляет вкладками браузера в фоне через DOM, скриншоты и инструменты разработчика."
+  },
+  "extension_name": {
+    "message": "Компаньон Chat On Steroids"
+  },
+  "popup_advanced": {
+    "message": "Дополнительно"
+  },
+  "popup_attribution_agent_key": {
+    "message": "ключ агента"
+  },
+  "popup_attribution_exact_request_id": {
+    "message": "точный ID запроса"
+  },
+  "popup_attribution_not_placed_in_chat": {
+    "message": "не размещено в чате"
+  },
+  "popup_attribution_only_chat_generating": {
+    "message": "единственный генерирующий чат"
+  },
+  "popup_attribution_request_id_not_resolved": {
+    "message": "ID запроса не определён"
+  },
+  "popup_attribution_tool_block_on_page": {
+    "message": "блок инструмента на странице"
+  },
+  "popup_call_details": {
+    "message": "$1 — найдено $2 · получение приложением $3 · владелец $4 · активность инструментов $5"
+  },
+  "popup_chat_id": {
+    "message": "ID чата"
+  },
+  "popup_chatgpt_tab": {
+    "message": "Вкладка ChatGPT"
+  },
+  "popup_confirmed": {
+    "message": "подтверждено"
+  },
+  "popup_connect": {
+    "message": "Подключить"
+  },
+  "popup_copied": {
+    "message": "скопировано"
+  },
+  "popup_copy": {
+    "message": "Копировать"
+  },
+  "popup_copy_chat_id": {
+    "message": "Копировать ID чата"
+  },
+  "popup_copy_current_request_id": {
+    "message": "Копировать ID текущего запроса"
+  },
+  "popup_copy_failed": {
+    "message": "не удалось скопировать"
+  },
+  "popup_count_held": {
+    "message": "$1 удерживается"
+  },
+  "popup_count_held_in_page": {
+    "message": "$1 удерживается на странице"
+  },
+  "popup_count_queued": {
+    "message": "$1 в очереди"
+  },
+  "popup_current_request": {
+    "message": "Текущий запрос"
+  },
+  "popup_detail_app": {
+    "message": "приложение"
+  },
+  "popup_detail_app_session": {
+    "message": "сессия приложения"
+  },
+  "popup_detail_app_value": {
+    "message": "v$1 · порт $2"
+  },
+  "popup_detail_browser_queue_value": {
+    "message": "$1 удерживается · всего $2"
+  },
+  "popup_detail_chat_id": {
+    "message": "ID чата"
+  },
+  "popup_detail_delivered": {
+    "message": "доставлено"
+  },
+  "popup_detail_extension": {
+    "message": "расширение"
+  },
+  "popup_detail_extension_value": {
+    "message": "v$1 · протокол $2"
+  },
+  "popup_detail_in_this_browser": {
+    "message": "в этом браузере"
+  },
+  "popup_detail_last_delivery": {
+    "message": "последняя доставка"
+  },
+  "popup_detail_last_delivery_value": {
+    "message": "$1 · $2 · $3 назад"
+  },
+  "popup_detail_observed": {
+    "message": "наблюдается"
+  },
+  "popup_detail_observed_value": {
+    "message": "$1 событий · $2 вызовов"
+  },
+  "popup_detail_ownership": {
+    "message": "владение"
+  },
+  "popup_detail_page_sends": {
+    "message": "отправки страницы"
+  },
+  "popup_detail_page_sends_value": {
+    "message": "$1 · ошибок $2"
+  },
+  "popup_detail_recorder": {
+    "message": "рекордер"
+  },
+  "popup_detail_recorder_value": {
+    "message": "fiber v$1 · запуск $2"
+  },
+  "popup_detail_tab": {
+    "message": "вкладка"
+  },
+  "popup_detail_tab_value": {
+    "message": "$1 · эпоха $2"
+  },
+  "popup_detail_turn": {
+    "message": "ход"
+  },
+  "popup_detail_turn_live": {
+    "message": "$1 · активно"
+  },
+  "popup_no": {
+    "message": "нет"
+  },
+  "popup_no_record": {
+    "message": "нет записи"
+  },
+  "popup_overwrite_chatgpt": {
+    "message": "Перезаписывать ChatGPT"
+  },
+  "popup_owner_confirmed": {
+    "message": "Владелец подтверждён"
+  },
+  "popup_pending": {
+    "message": "ожидает"
+  },
+  "popup_pipeline_call_fallback_many": {
+    "message": "Приложение не смогло сопоставить $1 вызовов по ID запроса — использован резервный способ $2."
+  },
+  "popup_pipeline_call_fallback_one": {
+    "message": "Приложение не смогло сопоставить вызов по ID запроса — использован резервный способ $1."
+  },
+  "popup_pipeline_delivery_blocked": {
+    "message": "Доставка заблокирована, пока приложение не подключено и не подтверждена совместимость протокола."
+  },
+  "popup_pipeline_delivery_rejected": {
+    "message": "Приложение отклонило последнюю доставку ($1)."
+  },
+  "popup_pipeline_extension_blocked": {
+    "message": "Расширение не принимает наблюдения с этой вкладки ($1). Перезагрузите вкладку ChatGPT."
+  },
+  "popup_pipeline_id_found_waiting_receipt": {
+    "message": "ID найден в последнем ходе. Ожидание подтверждения получения приложением."
+  },
+  "popup_pipeline_no_recorder": {
+    "message": "В этой вкладке нет рекордера. Перезагрузите страницу."
+  },
+  "popup_pipeline_owner_confirmed_no_activity": {
+    "message": "Владелец запроса подтверждён. Соответствующая активность инструментов пока не записана."
+  },
+  "popup_pipeline_queued_retrying": {
+    "message": "Поставлено здесь в очередь. Повторная доставка в приложение."
+  },
+  "popup_pipeline_received_waiting_owner": {
+    "message": "Приложение получило ID. Ожидание подтверждения владельца."
+  },
+  "popup_pipeline_request_id_matched_many": {
+    "message": "$1 ID запросов сопоставлены с записанной активностью инструментов."
+  },
+  "popup_pipeline_request_id_matched_one": {
+    "message": "1 ID запроса сопоставлен с записанной активностью инструментов."
+  },
+  "popup_pipeline_waiting_first_message": {
+    "message": "Ожидание первого сообщения."
+  },
+  "popup_pipeline_waiting_latest_request_id": {
+    "message": "Чат записан. Ожидание ID запроса из последнего хода."
+  },
+  "popup_pipeline_waiting_session_receipt": {
+    "message": "Приложение доступно. Ожидание подтверждения сессии этого чата."
+  },
+  "popup_reaching_app": {
+    "message": "Связь с приложением"
+  },
+  "popup_recording_this_chat": {
+    "message": "Запись этого чата"
+  },
+  "popup_request_id": {
+    "message": "ID запроса"
+  },
+  "popup_request_id_found": {
+    "message": "ID запроса найден"
+  },
+  "popup_section_augment_chatgpt": {
+    "message": "Дополнять ChatGPT"
+  },
+  "popup_section_session_capture": {
+    "message": "Запись сессии"
+  },
+  "popup_secure_storage_unavailable": {
+    "message": "Защищённое хранилище учётных данных недоступно. Откройте Chat On Steroids для инструкций по настройке."
+  },
+  "popup_sent_to_app": {
+    "message": "Отправлено в приложение"
+  },
+  "popup_state_app_not_reachable": {
+    "message": "Приложение недоступно"
+  },
+  "popup_state_app_reachable_port": {
+    "message": "Приложение доступно · порт $1"
+  },
+  "popup_state_disconnected": {
+    "message": "Отключено"
+  },
+  "popup_state_looking_for_app": {
+    "message": "Поиск приложения"
+  },
+  "popup_state_port_connecting": {
+    "message": "Порт $1 · подключение"
+  },
+  "popup_state_version_mismatch": {
+    "message": "Версии не совпадают"
+  },
+  "popup_status_answering": {
+    "message": "отвечает"
+  },
+  "popup_status_blocked": {
+    "message": "заблокирован"
+  },
+  "popup_status_bound": {
+    "message": "привязано"
+  },
+  "popup_status_failed": {
+    "message": "сбой"
+  },
+  "popup_status_id_confirmed": {
+    "message": "ID подтверждён"
+  },
+  "popup_status_idle": {
+    "message": "простаивает"
+  },
+  "popup_status_new_chat": {
+    "message": "новый чат"
+  },
+  "popup_status_none_open": {
+    "message": "ничего не открыто"
+  },
+  "popup_status_none_yet": {
+    "message": "пока нет"
+  },
+  "popup_status_not_attached": {
+    "message": "не подключён"
+  },
+  "popup_status_ok": {
+    "message": "норма"
+  },
+  "popup_status_reload": {
+    "message": "перезагрузить"
+  },
+  "popup_status_retired": {
+    "message": "завершено"
+  },
+  "popup_status_tool_matched": {
+    "message": "инструмент сопоставлен"
+  },
+  "popup_status_unbound": {
+    "message": "не привязано"
+  },
+  "popup_status_waiting": {
+    "message": "ожидание"
+  },
+  "popup_time_hours_short": {
+    "message": "$1 ч"
+  },
+  "popup_time_minutes_short": {
+    "message": "$1 мин"
+  },
+  "popup_time_seconds_short": {
+    "message": "$1 с"
+  },
+  "popup_timestamps": {
+    "message": "Временные метки"
+  },
+  "popup_try_again": {
+    "message": "Повторить"
+  },
+  "popup_version_mismatch_help": {
+    "message": "Приложение v$1 (протокол $2); компаньон v$3 (протокол $4). Откройте страницу Extensions браузера, включите Developer mode, затем Update / Reload для компаньона. Если версии всё ещё не совпадают, используйте Open extension folder в Chat On Steroids и загрузите эту папку. Перезагрузите вкладки ChatGPT после завершения активной работы."
+  },
+  "popup_yes": {
+    "message": "да"
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "В последнем ответе не зафиксировано вызова MCP-инструмента, поэтому приложение не может определить, потеряно ли подключение инструментов. Автоматическое продолжение приостановлено; «Цикл» остаётся включён. Перед продолжением проверьте туннель и коннектор Core."
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "Для этого ответа нет ожидающего продолжения. Оно могло уже выполниться или быть заменено более новой работой. Перед повтором проверьте последнюю активность чата."
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "Задача и инструкции «Цели»/«Цикла» слишком длинные для отправки помощнику. Сократите задачу или пользовательские инструкции продолжения в настройках."
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "Помощник создал слишком длинное продолжение для отправки. Попросите более короткие инструкции продолжения или выберите другую модель помощника в настройках."
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "Провайдер вернул слишком большой ответ. Выберите другую модель продолжения или запросите более короткие ответы."
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "Ответ провайдера превысил допустимый размер. Выберите другую модель продолжения или запросите более короткие ответы."
+  },
+  "content_goal_error_no_api_key": {
+    "message": "Для провайдера продолжения не настроен API-ключ. Добавьте его в настройках или выберите ChatGPT как источник продолжения."
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "Провайдер продолжения отклонил учётные данные API. Проверьте API-ключ и права доступа в настройках."
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "На аккаунте провайдера продолжения нет доступного баланса. Пополните его или выберите другой источник продолжения в настройках."
+  },
+  "content_goal_error_unknown_model": {
+    "message": "Провайдер продолжения не нашёл выбранную модель. Обновите список моделей и выберите доступную модель в настройках."
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "Пользовательский адрес продолжения недействителен. Проверьте URL в настройках; используйте HTTPS или локальный HTTP-адрес."
+  },
+  "content_goal_error_rate_limited": {
+    "message": "Провайдер продолжения ограничивает частоту запросов. Дождитесь указанного повторения или выберите другую модель продолжения."
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "Запрос продолжения превысил время ожидания или был отменён. Перед повтором проверьте чат помощника или состояние провайдера."
+  },
+  "content_goal_error_request_failed": {
+    "message": "Запрос продолжения завершился ошибкой. Перед повтором проверьте выбранного помощника или API-адрес и диагностику приложения."
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "Запрос к помощнику уже выполняется. Дождитесь завершения или отмените его, прежде чем запускать новый."
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "Запрос к помощнику отменён. Запустите его снова, когда захотите продолжить."
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "Не удалось доставить промпт помощника в ChatGPT. Перед повтором откройте чат помощника и проверьте редактор или видимую ошибку."
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "Приложение не смогло подтвердить, получил ли ChatGPT промпт помощника. Перед повтором проверьте чат помощника, чтобы не отправить запрос дважды."
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "Это продолжение обрабатывает другая вкладка браузера. Проверьте ход работы там."
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "Приложение не подтвердило финальный ответ, подходящий для автоматического продолжения. Проверьте исходный чат: работа могла продолжаться или возникла ошибка."
+  },
+  "content_goal_error_astra_finish_only": {
+    "message": "Этот чат продолжается через инструмент finish. При текущей настройке финальный ответ браузера не запускает ещё одно сообщение."
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "Для этого чата «Цель»/«Цикл» отключены. Включите их, чтобы разрешить продолжение."
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "Воркеры не могут запускать собственную «Цель»/«Цикл». Включите продолжение в родительском чате."
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "Этот чат был заменён через «Сжать и продолжить». Продолжайте в новом чате."
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "Этот чат заблокирован в приложении. Сначала разблокируйте его там, затем включайте продолжение."
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "У приложения нет записанной истории этого чата. Включите запись и отправьте сообщение перед использованием автоматического продолжения."
+  },
+  "content_goal_error_no_conversation": {
+    "message": "Нет записанного диалога для продолжения. Сначала отправьте задачу."
+  },
+  "content_goal_error_no_objective": {
+    "message": "Задача не указана. Введите задачу перед запуском «Цели»/«Цикла»."
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "Помощник не создал первое сообщение. Уточните задачу и повторите попытку."
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "Помощник снова выбирает остановку вместо продолжения «Цикла». Проверьте инструкции «Цикла» или выберите другую модель помощника."
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "В ответе нет маркера завершения, обязательного для офлайн-шаблонов «Цели». Проверьте инструкции шаблона или выберите другой источник продолжения."
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "Не удалось сохранить ожидающее продолжение. Проверьте свободное место на диске и диагностику приложения."
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "Не удалось сохранить подтверждение доставки. Проверьте свободное место на диске; перед ручной повторной отправкой проверьте чат."
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "Не удалось сохранить настройку «Цели»/«Цикла». Проверьте свободное место на диске и повторите сохранение."
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "Не удалось сохранить задачу. Проверьте свободное место на диске и повторите сохранение."
+  }
+}
