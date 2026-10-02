@@ -1436,6 +1436,29 @@ describe('the model catalogue', () => {
     expect(goal.MODEL_PAGE_SIZE).toBe(20);
   });
 
+  it('searches the whole catalogue before paging matches', async () => {
+    const entries = Array.from({ length: 45 }, (_, index) => ({
+      id: `vendor/model-${index}`,
+      name: `Model ${index}`,
+      created: 10_000 - index
+    }));
+    entries[44] = { id: 'hidden/vendor-needle', name: 'Needle Model', created: 1 };
+    globalThis.fetch = vi.fn(async () => Response.json({ data: entries }));
+
+    const byName = await goal.listGoalModels(0, 20, 'needle');
+    expect(byName.total).toBe(1);
+    expect(byName.models.map(model => model.id)).toEqual(['hidden/vendor-needle']);
+
+    const byId = await goal.listGoalModels(0, 20, 'VENDOR-NEEDLE');
+    expect(byId.total).toBe(1);
+    expect(byId.models.map(model => model.id)).toEqual(['hidden/vendor-needle']);
+
+    const cleared = await goal.listGoalModels(0, 20, '   ');
+    expect(cleared.total).toBe(45);
+    expect(cleared.models).toHaveLength(20);
+    expect(cleared.models[0]?.id).toBe('vendor/model-0');
+  });
+
   it('returns catalogue reasoning metadata for the selected model even outside the requested page', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, model: 'selected/old-model' } });
     globalThis.fetch = vi.fn(async () => Response.json({ data: [
