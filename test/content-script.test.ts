@@ -21173,6 +21173,10 @@ describe('ordinary Continue native recovery', () => {
     }) }));
     expect(live.sent.filter(message => message.type === 'desktop_input' && message.fail)).toEqual(scenario === 'authorization'
       ? [expect.objectContaining({ id, owner: 'input-owner', error: 'After-turn pickup was withdrawn before Send.' })] : []);
+    // Refused before any claim, the app hears it once: unsaid, it reloaded this chat every fifteen
+    // minutes for six hours (2026-10-02). A claimed Continue says it in its release instead.
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.recoveryVeto)).toEqual(scenario === 'authorization'
+      ? [] : [expect.objectContaining({ id, conversationId: chat, recoveryVeto: 'page-final' })]);
   });
   it('names why a repair is held: an unsent draft in the message box, then nothing once it is cleared', async () => {
     live = await harness(`https://chatgpt.com/c/${chat}`);
