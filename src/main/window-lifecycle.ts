@@ -79,6 +79,50 @@ export function registerNativeWindowActivation(
   if (platform === 'darwin') source.on('activate', showWindow);
 }
 
+export interface NormalWindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface NormalWindowBoundsOwner {
+  on(event: 'move' | 'resize', listener: () => void): unknown;
+  isDestroyed(): boolean;
+  isMaximized(): boolean;
+  isMinimized(): boolean;
+  isFullScreen(): boolean;
+  getNormalBounds(): NormalWindowBounds;
+}
+
+/**
+ * Remember only the user-controlled normal rectangle. Native maximized/minimized/fullscreen
+ * transitions can report temporary geometry through the same move/resize events, and persisting
+ * those rectangles would make a later ordinary launch inherit a transient presentation state.
+ */
+export function trackNormalWindowBounds(
+  owner: NormalWindowBoundsOwner,
+  save: (bounds: NormalWindowBounds) => void
+): void {
+  const remember = (): void => {
+    if (owner.isDestroyed() || owner.isMaximized() || owner.isMinimized() || owner.isFullScreen()) return;
+    const bounds = owner.getNormalBounds();
+    if (
+      !Number.isFinite(bounds.x) || !Number.isFinite(bounds.y) ||
+      !Number.isFinite(bounds.width) || bounds.width <= 0 ||
+      !Number.isFinite(bounds.height) || bounds.height <= 0
+    ) return;
+    save({
+      x: Math.round(bounds.x),
+      y: Math.round(bounds.y),
+      width: Math.round(bounds.width),
+      height: Math.round(bounds.height)
+    });
+  };
+  owner.on('move', remember);
+  owner.on('resize', remember);
+}
+
 /** Login launch is distinct from tunnel auto-connect and ordinary app activation. */
 export function isBackgroundLaunch(argv: readonly string[]): boolean {
   return argv.includes('--background');
