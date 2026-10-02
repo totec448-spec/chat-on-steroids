@@ -396,10 +396,10 @@
     "message": "$1: $2"
   },
   "content_goal_delivery_after_turn_finish": {
-    "message": "Después de este turno y al finalizar"
+    "message": "En la finalización de sesión o después del turno"
   },
   "content_goal_delivery_only_finish": {
-    "message": "Solo al finalizar"
+    "message": "Solo en la finalización de sesión"
   },
   "content_goal_loop_off": {
     "message": "Objetivo y Bucle desactivados"
