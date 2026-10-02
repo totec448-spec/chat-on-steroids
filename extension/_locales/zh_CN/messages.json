@@ -396,10 +396,10 @@
     "message": "$1：$2"
   },
   "content_goal_delivery_after_turn_finish": {
-    "message": "本轮结束后或完成时"
+    "message": "在轮次结束通知时或轮后"
   },
   "content_goal_delivery_only_finish": {
-    "message": "仅在完成时"
+    "message": "仅在轮次结束通知时"
   },
   "content_goal_loop_off": {
     "message": "目标和循环已关闭"

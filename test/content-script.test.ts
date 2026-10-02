@@ -12885,8 +12885,8 @@ describe('the Compact & resume control', () => {
     await live.hook.pullActivity();
     live.hook.injectControl(); live.hook.toggleMenu();
     const timing = () => [...live!.document.querySelectorAll<HTMLButtonElement>('.clf-menu-action')]
-      .find(button => button.textContent?.includes('Only finish'));
-    expect(timing()?.textContent).toBe(`${mode === 'goal' ? 'Goal' : 'Loop'}: Only finish`);
+      .find(button => button.textContent?.includes('Session Finish'));
+    expect(timing()?.textContent).toBe(`${mode === 'goal' ? 'Goal' : 'Loop'}: At Session Finish only`);
     timing()!.click(); await settle();
     expect(live.sent.filter(message => message.type === 'settings_set').at(-1)).toMatchObject({ loopAfterTurn: true });
     finishAvailable = false;
