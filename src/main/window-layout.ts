@@ -59,6 +59,26 @@ function finiteWindowBounds(value: unknown): WindowBounds | null {
   };
 }
 
+interface WindowPlacement {
+  bounds: WindowBounds;
+  maximized: boolean;
+}
+
+/** Read the new placement envelope, while treating the legacy bare rectangle as normal state. */
+function finiteWindowPlacement(value: unknown): WindowPlacement | null {
+  const legacy = finiteWindowBounds(value);
+  if (legacy) return { bounds: legacy, maximized: false };
+  if (!value || typeof value !== 'object') return null;
+  const row = value as { bounds?: unknown; maximized?: unknown };
+  const bounds = finiteWindowBounds(row.bounds);
+  if (!bounds || typeof row.maximized !== 'boolean') return null;
+  return { bounds, maximized: row.maximized };
+}
+
+export function windowPlacementWasMaximized(value: unknown): boolean {
+  return finiteWindowPlacement(value)?.maximized === true;
+}
+
 function intersectionArea(a: WindowBounds, b: DisplayWorkArea): number {
   const width = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
   const height = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
@@ -103,7 +123,7 @@ export function windowLayoutForDisplays(
   workAreas: readonly DisplayWorkArea[],
   savedBounds: unknown
 ): { layout: MainWindowLayout; restored: boolean } {
-  const saved = finiteWindowBounds(savedBounds);
+  const saved = finiteWindowPlacement(savedBounds)?.bounds ?? null;
   if (!saved) return { layout: windowLayoutForWorkArea(primaryWorkArea), restored: false };
 
   let matched: DisplayWorkArea | null = null;
