@@ -61,3 +61,19 @@ it('keeps broker terminal failure authoritative over stale recorded work', () =>
     activeTurn: true
   })).toMatchObject({ health: 'degraded', activity: 'done' });
 });
+
+
+it('keeps broker sleeping and finished states authoritative over stale recorded work', () => {
+  expect(evaluateWorkerOverviewHealth({
+    state: 'sleeping',
+    exactIdentity: true,
+    working: true,
+    activeTurn: true
+  })).toMatchObject({ health: 'healthy', activity: 'sleeping' });
+  expect(evaluateWorkerOverviewHealth({
+    state: 'finished',
+    exactIdentity: true,
+    working: true,
+    activeTurn: true
+  })).toMatchObject({ health: 'healthy', activity: 'done' });
+});
