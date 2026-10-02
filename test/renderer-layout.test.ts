@@ -536,6 +536,12 @@ describe('the settings sheet', () => {
         expect(browserPreferencesSource).toContain(`${variable}.addEventListener('change'`);
         continue;
       }
+      // Search narrows a transient provider listing; it is not an app setting and must never
+      // enter config. Keep the exception explicit and prove the local input listener exists.
+      if (input.id === 'goalModelSearch') {
+        expect(chatSource).toMatch(/const modelSearch = \$<HTMLInputElement>\('goalModelSearch'\);[\s\S]{0,260}modelSearch\.addEventListener\('input'/);
+        continue;
+      }
       // A credential is the one exception, and it is an exception on purpose: it is written
       // on blur through its own channel rather than saved with the settings snapshot, so
       // that a half-typed key never travels. It still has to be wired to something.
