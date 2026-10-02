@@ -6,9 +6,9 @@ import { attachBrowserWake, wakeBrowserWork } from '../src/main/browser-wake.js'
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
-async function setup(auth: (token: string) => Promise<boolean> = async token => token === 'paired') {
+async function setup(auth: (token: string) => Promise<boolean> = async token => token === 'paired', changed: () => void = () => undefined) {
   const server = http.createServer();
-  const bridge = attachBrowserWake(server, req => req.headers.origin === 'chrome-extension://test', auth);
+  const bridge = attachBrowserWake(server, req => req.headers.origin === 'chrome-extension://test', auth, changed);
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const port = (server.address() as import('node:net').AddressInfo).port;
   cleanup.push(async () => { bridge.dispose(); await new Promise<void>(resolve => server.close(() => resolve())); });
@@ -30,6 +30,17 @@ describe('authenticated wake-only browser transport', () => {
     expect(String((await next)[0])).toBe('wake');
     const closed = once(client, 'close'); h.bridge.revoke(); await closed;
     expect(h.bridge.connected()).toBe(false);
+  });
+  it('tells the bridge when an authenticated browser comes and goes, so its presence can follow', async () => {
+    const seen: boolean[] = [];
+    const h = await setup(undefined, () => seen.push(h.bridge.connected()));
+    const client = h.client(); await once(client, 'open');
+    expect(seen).toEqual([]); // an open socket alone is nobody
+    const ready = once(client, 'message'); client.send('paired'); await ready;
+    expect(seen).toEqual([true]);
+    const closed = once(client, 'close'); client.close(); await closed;
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(seen).toEqual([true, false]);
   });
   it('rejects ordinary web origins before authentication', async () => {
     const h = await setup(); const client = h.client('https://chatgpt.com');
