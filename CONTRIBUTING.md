@@ -61,6 +61,10 @@ npm run dist:linux:arm64
 
 Release CI builds and smoke-tests every platform/architecture on a native runner. Packaging downloads/stages pinned external assets and verifies their checksums, so the first packaging run needs network access. Do not claim a cross-OS package is validated merely because electron-builder can sometimes emit it from another host.
 
+## Canary builds
+
+The `canary` prerelease is a test build of `main`, replaced on every run of `canary.yml`. It has no release notes and no support. Issues and pull requests are accepted only for problems that also happen on the latest stable release.
+
 ## Issues
 
 Issues are closed as soon as their fix is merged to `main`; the fix ships with the next release. When an issue is labeled `needs-info`, it waits for details from the reporter: after 7 days without a reply it gets one reminder, and 3 days later it is closed. Reply or reopen at any time with the details.
