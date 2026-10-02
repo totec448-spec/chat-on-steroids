@@ -93,6 +93,8 @@
   /** Aggregate authored text/HTML copied through MAIN -> isolated world in one scan. */
   const MAX_RESPONSE_TEXT = MAX_TURNS * 512 * 1024;
   const MAX_TURN_TEXT = 512 * 1024;
+  /** One live caption line; the full text is recorded once ChatGPT publishes its message. */
+  const MAX_PREVIEW_TEXT = 300;
 
   function budgetedText(value, budget, perValueLimit) {
     if (typeof value !== 'string' || !value || !budget || budget.remaining <= 0) return '';
@@ -1884,6 +1886,19 @@
     rendered.sort((a, b) => a.order - b.order);
     return { events, notifications: [] };
   }
+  /** The newest public preamble of a running shell turn whose source message ChatGPT has not
+   * published (#942: a new chat's first turn keeps them out of every mapping until history is
+   * fetched again). Presentation only: no identity, never recorded, gone once the turn ends or
+   * its source message becomes readable and is recorded the ordinary way. */
+  function shellLivePreview(shell, metadata) {
+    if (shell.endMessageId) return null;
+    const preambles = shell.entry.turn.items.flatMap(item => item?.type === 'chatgpt-reasoning-group' &&
+      Array.isArray(item.items) && item.reasoningRecap?.type !== 'hide_all' ? item.items : []).filter(item => item?.type === 'reasoning' &&
+        item.isTransient !== true && item.presentation === 'preamble' && typeof item.content === 'string');
+    const newest = preambles.at(-1);
+    if (!newest || metadata.some(source => source.preamble === newest.content)) return null;
+    return budgetedText(visibleText(newest.content), { remaining: MAX_PREVIEW_TEXT }, MAX_PREVIEW_TEXT) || null;
+  }
   /** Translate only publicly identified items in the mounted exchange. Missing item ids
    * stay missing; a stopped turn does not manufacture replies to its tool calls. */
   function shellTurnSource(fiber, section, turnId) {
@@ -2074,6 +2089,7 @@
         const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes, shell?.images);
         const activities = nativeActivities.events;
         const endMessageId = shell ? shell.endMessageId : turnEndMessageId(messages);
+        const preview = shell ? shellLivePreview(shell, metadata) : null;
         // The shell supplies the completed final item's own exact message id,
         // without the classic thought-parent/timestamp tuple. Preserve that
         // identity for handoff capture; streaming and cancelled items stay weak.
@@ -2085,7 +2101,7 @@
           codeModeCalls.length === 0 && calls.length === 0 &&
           requests.length === 0 &&
           renderedMessages.length === 0 &&
-          activities.length === 0 && nativeActivities.notifications.length === 0 && generatedImages.length === 0 && !endMessageId
+          activities.length === 0 && nativeActivities.notifications.length === 0 && generatedImages.length === 0 && !endMessageId && !preview
         ) continue;
         const index = out.length;
         entry = {
@@ -2101,7 +2117,8 @@
           messages: renderedMessages,
           activities,
           thoughtNotifications: nativeActivities.notifications,
-          images: generatedImages
+          images: generatedImages,
+          ...(preview ? { preview } : {})
         };
         // The isolated-world renderer needs to know which visible section this exact Fiber
         // turn descriptor came from. Remember the desired ephemeral scan index now and apply
