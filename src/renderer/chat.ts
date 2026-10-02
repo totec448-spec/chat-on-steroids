@@ -1769,7 +1769,9 @@ const WRITING_BLOCK: TokenizerAndRendererExtension = {
   name: 'writingBlock', level: 'block',
   start: value => value.match(/^:::writing\b/m)?.index,
   tokenizer(value) {
-    const match = value.match(/^:::writing(\{[^}\n]*\})?[ \t]*\n([\s\S]*?)\n:::[ \t]*(?:\n|$)/);
+    // Without its closing `:::` the block runs to the end of the message, as ChatGPT draws it:
+    // the block is still streaming, or the answer was stopped inside it.
+    const match = value.match(/^:::writing(\{[^}\n]*\})?[ \t]*\n([\s\S]*?)(?:\n:::[ \t]*(?:\n|$)|$)/);
     if (!match) return undefined;
     const title = match[1]?.match(/\btitle="([^"\n]*)"/)?.[1] ?? '';
     return { type: 'writingBlock', raw: match[0], title, tokens: this.lexer.blockTokens(match[2] ?? '', []) };
