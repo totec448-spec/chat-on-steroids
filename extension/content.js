@@ -8054,8 +8054,8 @@
         [
           goalConfig.mode === 'loop' ? t('content_mode_loop', 'Loop') : t('content_mode_goal', 'Goal'),
           goalConfig.afterTurn
-            ? t('content_goal_delivery_after_turn_finish', 'After this turn + finish')
-            : t('content_goal_delivery_only_finish', 'Only finish')
+            ? t('content_goal_delivery_after_turn_finish', 'At Session Finish or after the turn')
+            : t('content_goal_delivery_only_finish', 'At Session Finish only')
         ]
       );
       delivery.disabled = menuBusy || !!goalConfig.blocked;
