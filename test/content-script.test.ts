@@ -652,6 +652,82 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.ack)).toHaveLength(change === 'accepted' ? 1 : 0);
     if (change === 'draft') expect(composerText(live.document)).toBe('My own draft');
   });
+  it.each(['answered', 'generating'] as const)('opens a new chat\'s first turn from its accepted Send when ChatGPT drops the question (#942, %s)', async shape => {
+    // 2026-10-02, live: the app's first message in a new chat was confirmed with its exact native
+    // id, then ChatGPT redrew the chat without the question. Its answer arrived with no turn at
+    // all, so no turn_end, no tool ownership and no Copy or Export on the answer.
+    const submitted = 'First-turn test: reply with exactly the word ready.';
+    let holdActivity = false;
+    let releaseActivity!: (value: unknown) => void;
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      activity: () => holdActivity
+        ? new Promise(resolve => { releaseActivity = resolve; })
+        : ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: null, userAnchors: [] } }),
+      desktop_input: message => ({ ok: true, data: message.authorize
+        ? { ok: true } : message.ack ? { ok: true } : { input: claimed({ text: submitted }) } })
+    });
+    holdActivity = true;
+    live.dom.reconfigure({ url: `https://chatgpt.com/?cos-input=${inputId}` });
+    live.hook.observe();
+    let user!: HTMLElement;
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      user = userTurn(live!.document, 'vanishing-user', submitted, { sent: false });
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+    // The shell redraws the new chat: the question is gone, the answer is arriving.
+    user.remove();
+    const answer = assistantTurn(live.document, 'vanishing-answer', []);
+    prose(live.document, answer, 'vanishing-message', 'ready');
+    if (shape === 'generating') startGenerating(live.document, { send: false });
+    releaseActivity({ ok: true, data: { entries: [], stream: [], nextSince: 1, activeTurnId: null, userAnchors: [] } });
+    await settle(); live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+    // And it closes exactly once when the answer settles, so the answer gets its turn.
+    if (shape === 'generating') stopGenerating(live.document);
+    await bindFiberTurns([{ section: answer, turn: { turnId: 'vanishing-answer', conversationId: chatB, endMessageId: 'vanishing-message',
+      messages: [{ role: 'assistant', messageId: 'vanishing-message', rawMessageId: 'vanishing-message', rawText: 'ready' }] } }]);
+    for (let pass = 0; pass < 6; pass++) {
+      live.hook.observe(); await settle();
+      await new Promise(resolve => live!.window.setTimeout(resolve, 3_000));
+    }
+    await live.hook.flush();
+    const ends = emitted(live.sent, 'turn_end');
+    expect(ends).toHaveLength(1);
+    expect(ends[0]!.event).toMatchObject({ outcome: 'completed' });
+  });
+
+  it('does not open a turn from an accepted Send when no new answer or generation follows it', async () => {
+    const submitted = 'Nothing has answered this yet.';
+    let holdActivity = false;
+    let releaseActivity!: (value: unknown) => void;
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      activity: () => holdActivity
+        ? new Promise(resolve => { releaseActivity = resolve; })
+        : ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: null, userAnchors: [] } }),
+      desktop_input: message => ({ ok: true, data: message.authorize
+        ? { ok: true } : message.ack ? { ok: true } : { input: claimed({ text: submitted }) } })
+    });
+    holdActivity = true;
+    live.dom.reconfigure({ url: `https://chatgpt.com/?cos-input=${inputId}` });
+    live.hook.observe();
+    let user!: HTMLElement;
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      user = userTurn(live!.document, 'quiet-user', submitted, { sent: false });
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    user.remove();
+    releaseActivity({ ok: true, data: { entries: [], stream: [], nextSince: 1, activeTurnId: null, userAnchors: [] } });
+    await settle(); live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+  });
+
   it.each([false, true])('retains a reused-document send boundary when canonical Fiber text arrives before activity identity (promoted submit: %s)', async promotedSubmit => {
     const submitted = 'Keep [literal] #tags in the receipt.';
     const escaped = String.raw`Keep \[literal\] \#tags in the receipt\.`;
