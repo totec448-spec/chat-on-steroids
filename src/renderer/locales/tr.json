@@ -1762,6 +1762,7 @@
   "Healthy": "Sağlıklı",
   "Degraded": "Bozulmuş",
   "Unknown": "Bilinmiyor",
+  "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Yeni çıktıyı takip et: yanıtlar uzarken sohbetin sonunda kal, burada ve ChatGPT'de. Yukarı kaydırmak duraklatır.",
   "End background processes of workers asleep for more than 30 minutes": "30 dakikadan uzun süredir uyuyan worker'ların arka plan işlemlerini sonlandır",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Worker sohbeti ve geçmişi yeniden kullanılabilir kalır. Varsayılan olarak kapalıdır; her temizlik o worker'ın geçmişine kaydedilir."
 }

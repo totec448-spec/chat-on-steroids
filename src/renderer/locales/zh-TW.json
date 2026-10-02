@@ -1762,6 +1762,7 @@
   "Healthy": "正常",
   "Degraded": "降級",
   "Unknown": "未知",
+  "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "跟隨新輸出：回答增長時停留在聊天末尾，包括這裡和 ChatGPT。向上捲動會暫停。",
   "End background processes of workers asleep for more than 30 minutes": "結束休眠超過 30 分鐘的 worker 背景程序",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "worker 的聊天和歷史記錄仍可繼續重用。預設關閉；每次清理都會記錄在該 worker 的歷史中。"
 }
