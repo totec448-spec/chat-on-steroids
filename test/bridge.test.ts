@@ -884,6 +884,36 @@ describe('active agent tab discard projection', () => {
   });
 });
 
+describe('the running turn\'s caption (#942)', () => {
+  it('holds the newest unpublished sentence in memory and drops it when cleared or the page closes', async () => {
+    const { livePreview } = await import('../src/main/live-preview.js');
+    await pair();
+    const conversationId = 'f0f00942-1111-4111-8111-111111111111', other = 'f0f00942-1111-4111-8111-222222222222';
+    const send = (body: unknown) => request('POST', '/live-preview', { body });
+    expect((await send({ conversationId, text: 'First command printed one.' })).status).toBe(200);
+    expect(livePreview([other, conversationId])).toBe('First command printed one.');
+    expect(livePreview([other])).toBeNull();
+    expect((await send({ conversationId, text: null })).status).toBe(200);
+    expect(livePreview([conversationId])).toBeNull();
+    // Bounded and exact: one caption line, nothing else accepted.
+    for (const bad of [{ conversationId, text: 'x'.repeat(301) }, { conversationId, text: '' }, { conversationId },
+      { conversationId, text: 'ok', extra: true }, { conversationId: 'not a chat', text: 'ok' }]) {
+      expect((await send(bad)).status, JSON.stringify(bad).slice(0, 60)).toBe(400);
+    }
+    expect(livePreview([conversationId])).toBeNull();
+    await send({ conversationId, text: 'Second command printed two.' });
+    await request('POST', '/closed', { body: { conversationId, manual: true } });
+    expect(livePreview([conversationId])).toBeNull();
+  });
+
+  it('forgets a caption nobody refreshed for ten minutes', async () => {
+    const { livePreview, setLivePreview } = await import('../src/main/live-preview.js');
+    setLivePreview('f0f00942-1111-4111-8111-333333333333', 'Still going', 1_000);
+    expect(livePreview(['f0f00942-1111-4111-8111-333333333333'], 1_000 + 10 * 60_000)).toBe('Still going');
+    expect(livePreview(['f0f00942-1111-4111-8111-333333333333'], 1_001 + 10 * 60_000)).toBeNull();
+  });
+});
+
 // -------------------------------------------------------------------- auth
 
 describe('authorisation', () => {
@@ -895,6 +925,7 @@ describe('authorisation', () => {
       ['POST', '/events'],
       ['POST', '/correlations'],
       ['POST', '/closed'],
+      ['POST', '/live-preview'],
       ['POST', '/commands/ack']
     ] as const) {
       const reply = await request(method, path, { auth: null, ...(method === 'POST' ? { body: {} } : {}) });
