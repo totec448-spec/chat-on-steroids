@@ -61,7 +61,8 @@ app.whenReady().then(async () => {
       [1100, 900, 1, 'tr', 'dark'], [1100, 900, 1.5, 'tr', 'light'], [640, 720, 1, 'tr', 'dark'],
       [1100, 900, 1, 'fr', 'dark'], [1100, 900, 1.5, 'fr', 'light'], [640, 720, 1, 'fr', 'dark'],
       [1100, 900, 1, 'pt-PT', 'dark'], [1100, 900, 1.5, 'pt-PT', 'light'], [640, 720, 1, 'pt-PT', 'dark'],
-      [1100, 900, 1, 'ru', 'dark'], [1100, 900, 1.5, 'ru', 'light'], [640, 720, 1, 'ru', 'dark']
+      [1100, 900, 1, 'ru', 'dark'], [1100, 900, 1.5, 'ru', 'light'], [640, 720, 1, 'ru', 'dark'],
+      [1100, 900, 1, 'vi', 'dark'], [1100, 900, 1.5, 'vi', 'light'], [640, 720, 1, 'vi', 'dark']
     ]) {
       win.setSize(width, height);
       win.webContents.setZoomFactor(zoom);
