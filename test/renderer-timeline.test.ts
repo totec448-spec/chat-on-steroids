@@ -259,7 +259,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
         entry.state = 'cancelled'; entry.cancelledByUser = true;
         return ok(true);
       }),
-      runningTools: () => ok([]), listPausedHelpers: () => ok(pausedHelpers),
+      runningTools: () => ok([]), livePreview: () => ok(null), listPausedHelpers: () => ok(pausedHelpers),
       retryHelper: (id: string, sourceSessionId: string) => {
         live.controlCalls.push({ id: sourceSessionId, action: `retry:${id}` });
         pausedHelpers = pausedHelpers.filter(row => row.id !== id);
@@ -3286,7 +3286,12 @@ it('shows Pro Loop delivery before sending and freezes changes made while the op
   expect(row.hidden).toBe(true);
   choose('pro'); expect(row.hidden).toBe(false);
   expect(delivery.value).toBe('finish');
+  // The choice names when Loop continues, and its title says what that means.
+  expect(row.firstChild!.textContent).toBe('When to continue');
+  expect([...delivery.options].map(option => option.textContent)).toEqual(['Session Finish only', 'Also after the turn']);
+  expect(delivery.title).toBe('Only inside the Session Finish tool result; never start a new turn');
   delivery.value = 'after-turn'; delivery.dispatchEvent(new w.Event('change'));
+  expect(delivery.title).toBe('At Session Finish, or as a new message after verified turn completion');
   choose('high'); expect(row.hidden).toBe(true);
   choose('pro'); expect(row.hidden).toBe(false);
   expect(delivery.value).toBe('after-turn');
@@ -4176,6 +4181,34 @@ it('ends the running turn with a row saying what it is doing now', async () => {
   await new Promise(resolve => setTimeout(resolve, 2_600));
   await append([]);
   expect(shown()?.[0]).toBe('Thinking');
+});
+
+it('says what a new chat\'s first turn is writing before ChatGPT publishes it (#942)', async () => {
+  const asked = Date.now() - 12_000;
+  const { w, append } = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'held-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'held-turn', messageId: 'q-first', message: text('Run three commands') }
+  ]);
+  const now = () => w.document.querySelector<HTMLElement>('#timeline .turn-now')!;
+  const shown = () => now().hidden ? null : now().querySelector('.turn-now-text')!.textContent;
+  const asks: string[][] = [];
+  (w as any).api.livePreview = (ids: string[]) => {
+    asks.push(ids);
+    return Promise.resolve({ ok: true, data: 'First command printed one; now running the second.' });
+  };
+  await append([]); await append([]);
+  expect(asks.at(-1)).toEqual(['chat-b', 'chat-a']);
+  expect(shown()).toBe('First command printed one; now running the second.');
+  expect(now().classList.contains('is-thinking')).toBe(true);
+  // A call of this app that runs right now is what the turn is doing.
+  (w as any).api.runningTools = () => Promise.resolve({ ok: true, data: [{ title: 'Running echo two', kind: 'run', since: Date.now() }] });
+  await append([]); await append([]);
+  expect(shown()).toBe('Running echo two');
+  // Once the page clears it, the row is back to its ordinary state.
+  (w as any).api.runningTools = () => Promise.resolve({ ok: true, data: [] });
+  (w as any).api.livePreview = () => Promise.resolve({ ok: true, data: null });
+  await append([]); await append([]);
+  expect(shown()).toBe('Thinking');
 });
 
 it('shows a just-started turn working right after your message, never in the header first', async () => {
