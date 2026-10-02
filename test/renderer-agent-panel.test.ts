@@ -156,5 +156,5 @@ it('shows bounded worker health in the overview without changing lifecycle owner
   const card = host.querySelector<HTMLElement>('.agent-panel-row')!;
   expect(card.dataset.health).toBe('degraded');
   expect(card.querySelector('.agent-card-health')?.textContent).toBe('Degraded');
-  expect(card.querySelector<HTMLElement>('.agent-card-health')?.title).toContain('detached');
+  expect(card.querySelector<HTMLElement>('.agent-card-health')?.getAttribute('title')).toBeNull();
 });
