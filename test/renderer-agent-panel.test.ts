@@ -141,7 +141,7 @@ it('shows bounded worker health in the overview without changing lifecycle owner
     render: () => [],
     openMain: vi.fn(),
     working: () => false,
-    agent: () => ({ state: 'detached', task: 'Inspect the build', conversationId: 'chat-worker' } as any)
+    agent: () => ({ state: 'detached', task: 'Inspect the build', conversationId: 'chat-worker' })
   });
   panel.update('prime', [{
     id: 'worker',
