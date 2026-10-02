@@ -59,8 +59,10 @@
 #foldersCard { grid-row: 2; }
 .workspace-health { grid-row: 3; }
 .workspace-activity { grid-row: 4; }
-.settings-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; min-height: 48px; margin-bottom: 12px; padding: 0; border: 0; }
-.settings-section-head > div { min-width: 0; }
+/* The title keeps room for one long word ("Активность") before the actions give way and wrap
+   below it; squeezed beside them it was cut to a few letters in a narrow window. */
+.settings-section-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 16px; min-height: 48px; margin-bottom: 12px; padding: 0; border: 0; }
+.settings-section-head > div { flex: 1 1 12rem; min-width: 0; }
 .settings-section-head h2 { margin: 0; color: var(--ink); font-size: calc(16px * var(--text-scale, 1)); font-weight: 650; letter-spacing: -.15px; line-height: 1.35; }
 .settings-section-head p { max-width: 72ch; margin: 3px 0 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; }
 .settings-section-head > .btn, .workspace-section-actions { flex: 0 0 auto; }
@@ -331,8 +333,10 @@
 }
 
 /* Shared disclosure geometry and navigation motion. */
-.setup-heading.settings-page-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px 24px; margin-bottom: 20px; }
-.setup-heading > div:first-child { min-width: 0; }
+/* Title and language flags share a row only while both fit. A grid gave the flags their full
+   width and squeezed the title under them; wrapping moves the flags below the title instead. */
+.setup-heading.settings-page-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; margin-bottom: 20px; }
+.setup-heading > div:first-child { flex: 1 1 260px; min-width: 0; }
 .disclosure-chevron { display: block; width: 14px; height: 14px; flex: 0 0 auto; overflow: visible; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; transform: rotate(0deg); transform-box: view-box; transform-origin: 50% 50%; transition: transform 150ms cubic-bezier(.2, .8, .2, 1); }
 .details-chevron { width: 12px; height: 12px; }
 .dropdown-chevron { width: 14px; height: 14px; align-self: center; transform: rotate(90deg); }
