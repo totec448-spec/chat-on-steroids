@@ -223,6 +223,8 @@ export function projectTimeline<T extends Chronological>(
 
 /** Entries recorded from one read of the page land within this many milliseconds of each other. */
 const SAME_READ_MS = 50;
+/** A call ChatGPT issued reaches this app through the tunnel within this many milliseconds. */
+const CALL_TRANSIT_MS = 1_000;
 
 /** Where an entry sits in the log: its first appearance if it has revisions, else its seq. */
 export function positionOf(entry: Chronological): number {
@@ -298,12 +300,16 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
     entry.kind === 'turn_start' ? -1 : entry.kind === 'turn_end' ? 1 : entry === ends ? 0.5 : 0;
 
   /*
-   * A native ChatGPT step (a web search, a round's recap) carries only the moment it was read, and
-   * a call the moment it started, while prose carries the moment ChatGPT opened it — and ChatGPT
-   * opens a paragraph before it runs the work drawn above it, then writes the text. Compared as they
-   * are, that work fell after the paragraph that follows it on the page, and a round's recap headed
-   * the next round. Work that happened after a paragraph was opened but before its text could be
-   * read (a step read in the same pass included) is placed just before the paragraph, in its order.
+   * A native ChatGPT step (a web search, a round's recap) carries only the moment it was read,
+   * while prose carries the moment ChatGPT opened it — and ChatGPT opens a paragraph before the
+   * steps drawn above it can be read. Compared as they are, a round's recap fell after the paragraph
+   * that follows it and headed the next round. A step read after a paragraph was opened but no later
+   * than its text (the same pass included) is placed just before the paragraph.
+   *
+   * A call carries the moment it reached this app, after its trip through the tunnel. One ChatGPT
+   * issued just before opening the paragraph arrives a moment after it, so a call that arrived
+   * within CALL_TRANSIT_MS of the opening is placed before the paragraph too. A later one stays
+   * below it even when the paragraph was read later still: a hidden tab is read slowly.
    */
   const readBefore = new Map<T, number>();
   const placeBefore = (group: readonly T[]): void => {
@@ -314,10 +320,11 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
       .sort((a, b) => authoredTimeOf(a)! - authoredTimeOf(b)!);
     for (const work of group) {
       if ((work.kind !== 'page_tool' && work.kind !== 'tool_call') || authoredTimeOf(work) !== undefined) continue;
-      const slack = work.kind === 'page_tool' ? SAME_READ_MS : 0;
-      const prose = paragraphs.find(entry => authoredTimeOf(entry)! < work.time && work.time <= entry.time + slack);
+      const prose = paragraphs.find(entry => authoredTimeOf(entry)! < work.time && work.time <= (work.kind === 'page_tool'
+        ? entry.time + SAME_READ_MS : authoredTimeOf(entry)! + CALL_TRANSIT_MS));
       if (!prose) continue;
-      const opened = authoredTimeOf(prose)!, span = prose.time + slack - opened;
+      // One scale for steps and calls alike, so the ones moved before a paragraph keep their order.
+      const opened = authoredTimeOf(prose)!, span = Math.max(prose.time + SAME_READ_MS, opened + CALL_TRANSIT_MS) - opened;
       // Strictly between anything that happened before the paragraph opened and the paragraph itself.
       readBefore.set(work, opened - 1 + 0.9 * (work.time - opened) / span);
     }

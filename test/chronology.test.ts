@@ -51,8 +51,9 @@ describe('the order a recorded turn is read in', () => {
   /**
    * Work done after ChatGPT opened a paragraph but before its text could be read is drawn above it.
    * A live agentic turn: the second paragraph says the file "already got its fourth line", yet the
-   * edit started 119 ms after the paragraph was opened; and the round's recap, read 14 s before the
-   * third paragraph's text, headed the next round instead of closing its own.
+   * edit reached the app 119 ms after the paragraph was opened; and the round's recap, read 14 s
+   * before the third paragraph's text, headed the next round instead of closing its own. A call that
+   * arrived 10 s after a paragraph opened was issued after it, however late the hidden tab read it.
    */
   it('places work done before a paragraph was written above it, and its recap with it', () => {
     const prose = (seq: number, time: number, authoredAt: number, label: string): Row => ({ ...row(seq, time, 'assistant_message', 't1', label), authoredAt });
@@ -67,6 +68,7 @@ describe('the order a recorded turn is read in', () => {
       row(17, 1790959835467, 'page_tool', 't1', 'Validated and counted'),
       row(18, 1790959835234, 'tool_call', 't1', 'list windows'),
       row(19, 1790959849395, 'page_tool', 't1', 'Listed windows'),
+      row(20, 1790959845275, 'tool_call', 't1', 'call after the paragraph'),
       prose(23, 1790959849396, 1790959835275, 'validation closed'),
       row(24, 1790959858851, 'tool_call', 't1', 'list apps'),
       row(28, 1790959905874, 'tool_call', 't1', 'window state'),
@@ -76,7 +78,7 @@ describe('the order a recorded turn is read in', () => {
     ];
     expect(reading(rows)).toEqual(['start', 'plan paragraph', 'create', 'edit', 'Created, edited, and validated', 'already edited',
       'count lines', 'list windows', 'Validated and counted', 'Listed windows', 'validation closed',
-      'list apps', 'window state', 'Identified foreground', 'desktop revealed', 'chrome state']);
+      'call after the paragraph', 'list apps', 'window state', 'Identified foreground', 'desktop revealed', 'chrome state']);
   });
 
   /**
