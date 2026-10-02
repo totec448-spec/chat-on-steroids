@@ -313,15 +313,19 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
    */
   const readBefore = new Map<T, number>();
   const placeBefore = (group: readonly T[]): void => {
-    // Only prose read live: the turn went on after it. A paragraph first seen after a reload was
-    // read long after the work below it, and nothing it opened before moves above it.
-    const paragraphs = group.filter(entry => entry.kind === 'assistant_message' && authoredTimeOf(entry) !== undefined &&
-        group.some(later => later.kind !== 'turn_end' && later.time > entry.time))
+    const paragraphs = group.filter(entry => entry.kind === 'assistant_message' && authoredTimeOf(entry) !== undefined)
+      .sort((a, b) => position(a) - position(b) || a.seq - b.seq);
+    // A call only moves above prose read live: the turn went on after it. A paragraph first seen
+    // after a reload was read long after the work below it.
+    const live = paragraphs.filter(entry => group.some(later => later.kind !== 'turn_end' && later.time > entry.time))
       .sort((a, b) => authoredTimeOf(a)! - authoredTimeOf(b)!);
     for (const work of group) {
       if ((work.kind !== 'page_tool' && work.kind !== 'tool_call') || authoredTimeOf(work) !== undefined) continue;
-      const prose = paragraphs.find(entry => authoredTimeOf(entry)! < work.time && work.time <= (work.kind === 'page_tool'
-        ? entry.time + SAME_READ_MS : authoredTimeOf(entry)! + CALL_TRANSIT_MS));
+      // A step belongs to the paragraph after it on the page, which is read after it: when a whole
+      // turn is read late in one pass, every step still keeps to its own paragraph.
+      const prose = work.kind === 'page_tool'
+        ? paragraphs.find(entry => position(entry) > position(work) && authoredTimeOf(entry)! < work.time && work.time <= entry.time + SAME_READ_MS)
+        : live.find(entry => authoredTimeOf(entry)! < work.time && work.time <= authoredTimeOf(entry)! + CALL_TRANSIT_MS);
       if (!prose) continue;
       // One scale for steps and calls alike, so the ones moved before a paragraph keep their order.
       const opened = authoredTimeOf(prose)!, span = Math.max(prose.time + SAME_READ_MS, opened + CALL_TRANSIT_MS) - opened;
