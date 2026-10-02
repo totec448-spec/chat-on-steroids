@@ -319,8 +319,12 @@ bridge is available, then stop unnecessary bridge/publication resources.
 The BrowserWindow keeps context isolation, sandbox and web security on; Node integration and
 webviews off. CSP, permission denial, navigation/window restrictions and fixed preload methods
 remain intact. OS consent for Desktop is independent from the app's settings.
-The macOS window permits native fullscreen through its green titlebar control; Windows/Linux
-retain their existing maximize behavior.
+The macOS window permits native fullscreen through its green titlebar control. A fresh main window
+keeps the existing maximized first presentation until ordinary geometry has been observed. Normal
+bounds then live in the named
+`window-bounds` durable state: restore only onto an active display, clamp to its current work area,
+and fall back to the primary/maximized default for malformed or fully offscreen state. Maximized,
+minimized and fullscreen transitions never replace the remembered normal bounds.
 
 `durable.ts` serializes per filename, atomically replaces JSON and retries failed generations;
 lazy snapshots materialize at the write boundary. Independent files may flush concurrently.
