@@ -1081,7 +1081,11 @@ time alone cannot take this path. The same outbox expiry rule applies during nor
 Desktop delivery captures the native user-message identity inside the same Send acceptance
 operation that proves its text and route. It must not discard that receipt and rediscover the
 row after an await: React may already have replaced it. Navigation still revokes the operation;
-composer clear or a Stop button alone cannot supply a desktop delivery receipt. After the click,
+composer clear or a Stop button alone cannot supply a desktop delivery receipt. A new chat's
+shell can redraw its first exchange without the question before any read sees that row (#942);
+then the first `POST /backend-api/f/conversation` after this click, reported by `usage.js` as
+`cos-send-request` (exactly one user message id, never the prompt) within `SENT_REQUEST_MS`,
+supplies the id once the route is concrete. An older or later request cannot. After the click,
 the wait for that receipt is bounded (`DESKTOP_RECEIPT_MS`) and never clicks again. When it ends
 unproven, the page reports the fixed reason `Native Send receipt was not confirmed.` and frees its
 input slot. `failBrowserInput` then retires the authorized row as the same uncertain send the
