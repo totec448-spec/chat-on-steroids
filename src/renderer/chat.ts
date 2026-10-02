@@ -3945,7 +3945,7 @@ function paintGoalReasoning(selected?: Config['goal']['reasoning'], changingMode
 /** The release date OpenRouter publishes, as a person would date a model. */
 function releasedOn(created: number): string {
   if (!created) return t("release date not published");
-  return new Date(created * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  return new Date(created * 1000).toLocaleDateString(currentLanguage(), { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 /**
