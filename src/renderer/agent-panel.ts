@@ -1,6 +1,7 @@
 import { ui, t } from './i18n.js';
 import type { AgentInfo, SessionSummary, SessionEvent } from '../shared/session.js';
 import { workerReportedFinish } from '../shared/session-activity.js';
+import { evaluateWorkerOverviewHealth } from '../shared/agent-health.js';
 import { el, icon } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 
@@ -15,7 +16,7 @@ export function createAgentPanel(options: {
   render: (events: SessionEvent[], id: string, current: () => boolean) => HTMLElement[];
   openMain: (id: string) => void;
   working: (summary: SessionSummary) => boolean;
-  agent?: (summary: SessionSummary) => Pick<AgentInfo, 'state' | 'task'> | null;
+  agent?: (summary: SessionSummary) => (Pick<AgentInfo, 'state' | 'task'> & { conversationId?: string | null }) | null;
 }) {
   const pane = el('aside', 'agent-panel'); pane.hidden = true;
   ui(pane, 'aria-label', () => t("Sub-agents"));
@@ -55,6 +56,14 @@ export function createAgentPanel(options: {
         const owner = options.agent?.(worker);
         const state = owner?.state ?? (workerReportedFinish(worker) ? 'sleeping' : active ? 'working' : 'history');
         row.dataset.state = state;
+        const health = evaluateWorkerOverviewHealth({
+          state: owner?.state ?? null,
+          exactIdentity: Boolean(owner?.conversationId && worker.conversationId &&
+            owner.conversationId === worker.conversationId),
+          working: options.working(worker),
+          activeTurn: worker.activeTurnId !== null && worker.activeTurnId !== undefined
+        });
+        row.dataset.health = health.health;
         const identity = worker.origin?.agentId ?? worker.title.split(' · ')[0] ?? worker.title;
         const task = owner?.task?.trim();
         const original = worker.origin?.task || worker.title;
@@ -70,8 +79,15 @@ export function createAgentPanel(options: {
         heading.append(el('span', 'agent-status-dot'), el('strong', 'agent-card-name', identity));
         if (model) heading.append(el('span', 'agent-card-model', model));
         const statusLabel: Record<string, string> = { working: 'Working', history: 'History', invited: 'opening', detached: 'no tab' };
-        content.append(heading, el('span', 'agent-card-task', () => task || `${t('Original assignment')}: ${original}`),
-          el('span', 'agent-card-meta', () => `${t(statusLabel[state] ?? state)} · ${elapsed}`));
+        const meta = el('span', 'agent-card-meta');
+        const healthText = el('span', 'agent-card-health', () => {
+          if (health.health === 'healthy') return t('Healthy');
+          if (health.health === 'degraded') return t('Degraded');
+          return t('Unknown');
+        });
+        meta.append(document.createTextNode(`${t(statusLabel[state] ?? state)} · `), healthText,
+          document.createTextNode(` · ${elapsed}`));
+        content.append(heading, el('span', 'agent-card-task', () => task || `${t('Original assignment')}: ${original}`), meta);
         row.append(avatar, content);
         row.title = task || original;
         row.onclick = () => void open(worker.id); body.append(row);
