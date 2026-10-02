@@ -3051,7 +3051,17 @@ the Goal row opens the objective editor, including before the first message. The
 and Loop pencils open that editor without switching automation; Save applies objective and mode,
 then closes the menu. The Plan toolbar toggle only arms planning, even over an existing draft;
 Send/Enter generates. Queued and prepared plan stages show up to three lines. The model menu lists
-every observed model separately and the effort slider only adjusts the selected model. Hidden
+every observed model separately behind its model-name disclosure; the compact popover leads
+with the selected effort and the slider only adjusts that model. Closing the popover resets
+the disclosure; Escape closes the list before the popover and returns focus to its trigger.
+The list expands/collapses through one CSS grid transition; hidden choices are inert immediately.
+Reduced motion makes the disclosure instantaneous. The lightning button is a finite, restartable
+visual joke (brain and sparks), with gentle opacity feedback under reduced motion. Clicking also
+randomly shows one of four English memes, including the user's exact “Just think faster bro 😂”
+and three Mega brain jokes, through the existing 3.2-second single-toast owner in either motion
+mode; repeat clicks replace the message. Only these jokes use a bottom-positioned, non-interactive
+toast to keep the composer controls and longer copy clear in narrow windows. It owns no
+model, effort, send, discovery or saved setting. Hidden
 native selects retain send admission; stale selections still require an explicit choice.
 Unverified saved model preferences show their status beside the model select.
 The composer dock measures its natural inner body and animates only transient height changes;

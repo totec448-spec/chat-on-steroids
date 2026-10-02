@@ -1758,6 +1758,7 @@
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "Son dernier tour a échoué et rien n’a suivi. Envoyez-y un message pour lancer un nouveau tour.",
   "Recovery stopped": "Récupération arrêtée",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Le navigateur n’a pas pris en charge la réparation de ce chat, l’app a donc cessé de réessayer. Rouvrez son onglet et la récupération reprendra.",
+  "Wake the tiny brain": "Réveiller le petit cerveau",
   "Healthy": "Sain",
   "Degraded": "Dégradé",
   "Unknown": "Inconnu",

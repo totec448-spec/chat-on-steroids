@@ -1758,6 +1758,7 @@
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "最後のターンが失敗し、その後も何も続きませんでした。新しいターンを始めるには、そのチャットにメッセージを送ってください。",
   "Recovery stopped": "復旧を停止しました",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "ブラウザーがこのチャットの修復を引き受けなかったため、アプリは再試行を停止しました。タブを開き直すと復旧が再開されます。",
+  "Wake the tiny brain": "小さな脳を起こす",
   "Healthy": "正常",
   "Degraded": "低下",
   "Unknown": "不明",
