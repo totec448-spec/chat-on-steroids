@@ -11863,8 +11863,13 @@
     // The accepted user and its current assistant message survive that remount; a captured
     // section, reusable data-turn-id or previous terminal must never own the helper result.
     const turn = stampedFiberTurn(pageTurn, [...fiberTurns.values()], fiberScanToken);
+    // An unanswered call normally means the turn is still working. A collapsed helper page is the
+    // exception: ChatGPT drops the tool results of that only exchange together with its user
+    // message (2026-10-02, live: a helper that called a tool kept its call "unanswered" next to its
+    // final answer, and Goal timed out). Its turn has ended, so the final answer is the decision.
+    const callsOpen = (turn?.calls || []).some(call => call.answered !== true);
     if (!turn?.endMessageId || turn.conversationConflict || turn.endMessageId !== assistant.id ||
-        (turn.calls || []).some(call => call.answered !== true)) return;
+        (callsOpen && !(userDropped && !CLF_DOM.generating()))) return;
     if (decision.temporary && !userDropped) {
       // Temporary Chat has no /c route, but its canonical messages carry a WEB: thread.
       // Join the final to the accepted user in this same scan instead of comparing that

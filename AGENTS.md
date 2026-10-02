@@ -2993,8 +2993,8 @@ names render as plain chips; unresolved file citations do not gain invented loca
 Tool result rendering preserves structured text/image/resource distinctions within bounds.
 App-owned external/local links cross their validated main-process route.
 
-English, Spanish, Simplified Chinese, Traditional Chinese, Japanese, Turkish, French, European Portuguese, Brazilian Portuguese and German use the existing UI
-catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja,tr,fr,pt-PT,pt-BR,de}.json`), with the selected locale in
+English, Spanish, Simplified Chinese, Traditional Chinese, Japanese, Korean, Turkish, French, European Portuguese, Brazilian Portuguese, German, Russian and Vietnamese use the existing UI
+catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja,ko,tr,fr,pt-PT,pt-BR,de,ru,vi}.json`), with the selected locale in
 `cos.ui.language`. The main process has no catalogs: the renderer translates the allowlisted
 stopped-chat notice texts (`shared/stop-notice.ts`) and publishes them over `ui:stopNoticeTexts`
 at startup and on each language change; unknown keys are refused and untranslated notices stay English.
