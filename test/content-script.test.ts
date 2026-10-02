@@ -16694,6 +16694,29 @@ describe('the context meter and automatic compaction', () => {
     if (state === 'broken') expect(ticketCalls).toBe(before);
   });
 
+  it('declines the next pickup when the stream is still broken behind Stop a minute later (#825)', async () => {
+    // 2026-10-02, field log: Stop stayed beside "Connection interrupted" for over half an hour
+    // while the model kept working on the server. Each pickup was accepted and nothing was sent
+    // until the chat reached 100%. The first pickup still trusts the page; a later one reloads.
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true, threshold: 200_000 }), automaticTicket('not-attempted')),
+      // The page's own attempt stays open, waiting for results the broken stream never shows.
+      compact: (message: Record<string, unknown>) => message.ticket ? new Promise(() => {}) : { ok: false }
+    });
+    live.hook.injectControl();
+    void live.hook.pullActivity(); await settle();
+    alertBanner(live.document, 'Connection interrupted. Waiting for the complete answer');
+    startGenerating(live.document, { send: false });
+    live.hook.observe(); await settle();
+    const pickup = () => live!.runtimeMessage({ type: 'clf-resume-compaction', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    expect(await pickup()).toEqual({ accepted: true });
+    await settle(400);
+    live.advance(30_000);
+    expect(await pickup()).toEqual({ accepted: true });
+    live.advance(31_000);
+    expect(await pickup()).toEqual({ accepted: false });
+  });
+
   it('accepts a compaction repair poke without starting a second source attempt while one is busy', async () => {
     let releaseTicket!: (value: unknown) => void;
     const ticket = new Promise(resolve => { releaseTicket = resolve; });
