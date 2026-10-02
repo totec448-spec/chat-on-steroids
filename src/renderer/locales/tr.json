@@ -1763,5 +1763,11 @@
   "Unknown": "Bilinmiyor",
   "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Yeni çıktıyı takip et: yanıtlar uzarken sohbetin sonunda kal, burada ve ChatGPT'de. Yukarı kaydırmak duraklatır.",
   "End background processes of workers asleep for more than 30 minutes": "30 dakikadan uzun süredir uyuyan worker'ların arka plan işlemlerini sonlandır",
-  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Worker sohbeti ve geçmişi yeniden kullanılabilir kalır. Varsayılan olarak kapalıdır; her temizlik o worker'ın geçmişine kaydedilir."
+  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Worker sohbeti ve geçmişi yeniden kullanılabilir kalır. Varsayılan olarak kapalıdır; her temizlik o worker'ın geçmişine kaydedilir.",
+  "Automatic": "Otomatik",
+  "Choose account-observed model and reasoning defaults for ordinary chats and sub-agents.": "Normal sohbetler ve alt ajanlar için hesapta gözlemlenen model ve akıl yürütme varsayılanlarını seçin.",
+  "Default new-chat model": "Yeni sohbet varsayılan modeli",
+  "Used only for a fresh ordinary chat with no conversation selection.": "Yalnızca konuşmaya özel bir seçim bulunmayan yeni bir normal sohbette kullanılır.",
+  "Default new-chat reasoning": "Yeni sohbet varsayılan akıl yürütmesi",
+  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Yukarıdaki normal sohbet modeliyle kullanılır; worker ve yardımcılar kendi varsayılanlarını korur."
 }

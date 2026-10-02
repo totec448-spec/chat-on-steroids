@@ -1763,5 +1763,11 @@
   "Unknown": "Không xác định",
   "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Theo dõi nội dung mới: luôn ở cuối cuộc trò chuyện khi câu trả lời tiếp tục được tạo, cả tại đây và trên ChatGPT. Cuộn lên để tạm dừng.",
   "End background processes of workers asleep for more than 30 minutes": "Kết thúc tiến trình nền của worker đã ngủ hơn 30 phút",
-  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Chat và lịch sử của worker vẫn có thể dùng lại. Mặc định tắt; mỗi lần dọn dẹp đều được ghi vào lịch sử của worker đó."
+  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Chat và lịch sử của worker vẫn có thể dùng lại. Mặc định tắt; mỗi lần dọn dẹp đều được ghi vào lịch sử của worker đó.",
+  "Automatic": "Tự động",
+  "Choose account-observed model and reasoning defaults for ordinary chats and sub-agents.": "Chọn mặc định mô hình và mức suy luận đã quan sát từ tài khoản cho chat thông thường và tác nhân phụ.",
+  "Default new-chat model": "Mô hình mặc định cho chat mới",
+  "Used only for a fresh ordinary chat with no conversation selection.": "Chỉ dùng cho chat thông thường mới khi cuộc trò chuyện chưa có lựa chọn riêng.",
+  "Default new-chat reasoning": "Mức suy luận mặc định cho chat mới",
+  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Dùng với mô hình chat thông thường ở trên; worker và helper giữ mặc định riêng của chúng."
 }

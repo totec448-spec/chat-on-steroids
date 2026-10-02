@@ -963,6 +963,25 @@ describe('settings writes from more than one UI', () => {
     expect(getConfig().ui.tabsToKeepOpen).toBe(6);
     expect(getConfig().goal).toMatchObject({ helperModel: 'account-helper', helperReasoning: 'medium', model: base.goal.model });
   });
+  it('persists and clears ordinary new-chat defaults independently through settings merge', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    const configured = { ...base, ui: { ...base.ui, defaultChatModel: 'gpt-5.6-sol', defaultChatReasoning: 'xhigh' as const } };
+    expect((await save(configured, base)).ok).toBe(true);
+    expect(getConfig().ui).toMatchObject({ defaultChatModel: 'gpt-5.6-sol', defaultChatReasoning: 'xhigh' });
+
+    const withBoth = getConfig();
+    expect((await save({ ...withBoth, ui: { ...withBoth.ui, defaultChatModel: undefined } }, withBoth)).ok).toBe(true);
+    expect(getConfig().ui.defaultChatModel).toBeUndefined();
+    expect(getConfig().ui.defaultChatReasoning).toBe('xhigh');
+
+    const reasoningOnly = getConfig();
+    expect((await save({ ...reasoningOnly, ui: { ...reasoningOnly.ui, defaultChatReasoning: undefined } }, reasoningOnly)).ok).toBe(true);
+    expect(getConfig().ui.defaultChatReasoning).toBeUndefined();
+    const stored = JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8'));
+    expect(stored.ui).not.toHaveProperty('defaultChatModel');
+    expect(stored.ui).not.toHaveProperty('defaultChatReasoning');
+  });
   it('persists the planner backend and preserves it across an unrelated stale settings save', async () => {
     const base = defaultConfig();
     await saveConfig(base);

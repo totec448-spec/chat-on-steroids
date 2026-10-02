@@ -1763,5 +1763,11 @@
   "Unknown": "Unbekannt",
   "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Neuer Ausgabe folgen: am Ende des Chats bleiben, während Antworten wachsen, hier und auf ChatGPT. Hochscrollen pausiert es.",
   "End background processes of workers asleep for more than 30 minutes": "Hintergrundprozesse von Workern beenden, die länger als 30 Minuten schlafen",
-  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Worker-Chat und Verlauf bleiben wiederverwendbar. Standardmäßig aus; jede Bereinigung wird im Verlauf dieses Workers aufgezeichnet."
+  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Worker-Chat und Verlauf bleiben wiederverwendbar. Standardmäßig aus; jede Bereinigung wird im Verlauf dieses Workers aufgezeichnet.",
+  "Automatic": "Automatisch",
+  "Choose account-observed model and reasoning defaults for ordinary chats and sub-agents.": "Wähle im Konto beobachtete Standardwerte für Modell und Reasoning für normale Chats und Unteragenten.",
+  "Default new-chat model": "Standardmodell für neue Chats",
+  "Used only for a fresh ordinary chat with no conversation selection.": "Wird nur für einen neuen normalen Chat ohne eigene Auswahl für diese Unterhaltung verwendet.",
+  "Default new-chat reasoning": "Standard-Reasoning für neue Chats",
+  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Wird mit dem normalen Chatmodell oben verwendet; Worker und Hilfs-Chats behalten ihre eigenen Standardwerte."
 }

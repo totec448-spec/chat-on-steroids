@@ -30,7 +30,7 @@ import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
 
 import type { AppApi, SettingsPatch } from '../preload/index.js';
 import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
-import type { AppState, Capability, ChatBrowser, LogEntry, SurfaceStatus } from '../shared/types.js';
+import type { AppState, Capability, ChatBrowser, Config, LogEntry, SurfaceStatus } from '../shared/types.js';
 import {
   browserExtensionRequired,
   isNewer,
@@ -590,6 +590,8 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
     },
     ui: {
       ...previous.ui,
+      defaultChatModel: $<HTMLSelectElement>('defaultChatModel').value || undefined,
+      defaultChatReasoning: ($<HTMLSelectElement>('defaultChatReasoning').value || undefined) as Config['ui']['defaultChatReasoning'],
       chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       finishTool: $<HTMLInputElement>('finishTool').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
