@@ -1762,5 +1762,7 @@
   "Healthy": "정상",
   "Degraded": "저하",
   "Unknown": "알 수 없음",
-  "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "새 출력 따라가기: 답변이 늘어나는 동안 채팅 끝에 머뭅니다(여기와 ChatGPT). 위로 스크롤하면 일시 중지됩니다."
+  "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "새 출력 따라가기: 답변이 늘어나는 동안 채팅 끝에 머뭅니다(여기와 ChatGPT). 위로 스크롤하면 일시 중지됩니다.",
+  "End background processes of workers asleep for more than 30 minutes": "30분 넘게 잠든 워커의 백그라운드 프로세스 종료",
+  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "워커 채팅과 기록은 계속 재사용할 수 있습니다. 기본값은 꺼짐이며 각 정리 작업은 해당 워커의 기록에 남습니다."
 }

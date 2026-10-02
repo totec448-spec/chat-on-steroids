@@ -1762,5 +1762,7 @@
   "Healthy": "Sain",
   "Degraded": "Dégradé",
   "Unknown": "Inconnu",
-  "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Suivre les nouveaux contenus : rester en bas de la discussion pendant que les réponses s'allongent, ici et sur ChatGPT. Remonter le met en pause."
+  "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Suivre les nouveaux contenus : rester en bas de la discussion pendant que les réponses s'allongent, ici et sur ChatGPT. Remonter le met en pause.",
+  "End background processes of workers asleep for more than 30 minutes": "Arrêter les processus en arrière-plan des workers endormis depuis plus de 30 minutes",
+  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Le chat et l’historique du worker restent réutilisables. Désactivé par défaut ; chaque nettoyage est enregistré dans l’historique de ce worker."
 }
