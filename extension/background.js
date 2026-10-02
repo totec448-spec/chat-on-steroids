@@ -22,6 +22,8 @@
 
 import { createBrowserControl } from './browser-control.js';
 import { createActiveTabs } from './active-tabs.js';
+// Side-effect import: CLF_I18N serves catalogs to content scripts, which cannot read them.
+import './i18n.js';
 
 const activeTabs = globalThis.chrome?.debugger ? createActiveTabs(chrome) : null;
 
@@ -2567,6 +2569,28 @@ function maintain(woken = false) {
  * One attempt per (running build, offered build): an extension loaded from some other folder
  * would come back as the same old build, and must not reload again and again.
  */
+/**
+ * The extension follows the app it is paired with.
+ *
+ * Its texts use the app's interface language (i18n.js reads `appLanguage`), not Chrome's. And a
+ * reinstalled extension, whose new id starts with empty storage, takes back the preferences the
+ * app kept for it; values stored here always win over the app's copy.
+ */
+const APP_LANGUAGE_KEY = 'appLanguage';
+const APP_LANGUAGES = new Set(['en', 'de', 'es', 'fr', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'ja', 'ko', 'zh-CN', 'zh-TW']);
+async function followApp(data) {
+  const stored = await chrome.storage.local.get([APP_LANGUAGE_KEY, RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
+  const patch = {};
+  if (APP_LANGUAGES.has(data?.language) && stored[APP_LANGUAGE_KEY] !== data.language) patch[APP_LANGUAGE_KEY] = data.language;
+  const kept = data?.browserPreferences;
+  if (kept && typeof kept.overwrite === 'boolean' && typeof kept.durations === 'boolean' &&
+      !(RENDER_STREAM_KEY in stored) && !(SHOW_TIMES_KEY in stored)) {
+    patch[RENDER_STREAM_KEY] = kept.overwrite;
+    patch[SHOW_TIMES_KEY] = kept.durations;
+  }
+  if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+}
+
 let extensionReloadPending = false;
 async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands) {
   if (extensionReloadPending || !offer || typeof offer.build !== 'string' || !/^[0-9a-f]{12}$/.test(offer.build)) return;
@@ -2621,6 +2645,7 @@ async function maintainOnce() {
   const liveOpenings = new Set(Array.isArray(reply.data.inputOpeningIds) ? reply.data.inputOpeningIds : []);
   const liveCommands = new Set(Array.isArray(reply.data.commandIds) ? reply.data.commandIds : []);
   void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands).catch(() => undefined);
+  void followApp(reply.data).catch(() => undefined);
   const renderingWanted = tab => {
     if (intent !== connectionEpoch || !token || disconnected) return false;
     if (liveChats.has(conversationForTab(tab))) return true;
@@ -3261,6 +3286,10 @@ const HANDLERS = {
       } catch { /* already closed; the accepted app-side answer remains authoritative */ }
     }
     return result;
+  },
+  async i18n_catalog(message) {
+    const messages = await globalThis.CLF_I18N?.catalogFor?.(String(message?.language || '')).catch(() => null);
+    return messages ? { ok: true, messages } : { ok: false };
   },
   async register_document(_message, sender) {
     const result = await registerDocument(sender, _message);
@@ -3917,6 +3946,8 @@ async function companionDiagnosticSnapshot(found) {
         : null
     },
     preferences: { overwrite: preferences[RENDER_STREAM_KEY] !== false, durations: preferences[SHOW_TIMES_KEY] === true },
+    // Defaults on a fresh install are not choices; the app keeps only values someone stored.
+    preferencesStored: RENDER_STREAM_KEY in preferences || SHOW_TIMES_KEY in preferences,
     tab: await HANDLERS.tabStatus()
   };
 }

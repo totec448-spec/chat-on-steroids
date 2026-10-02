@@ -1,4 +1,4 @@
-import { currentLanguage, ui, uiText, t, initLanguage } from './i18n.js';
+import { currentLanguage, ui, uiText, t, initLanguage, onLanguageChange } from './i18n.js';
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
 import { initUsage, refreshUsage } from './usage.js';
@@ -54,6 +54,10 @@ declare global {
 const api = window.api;
 initLanguage();
 publishStopNoticeTexts(texts => api.setStopNoticeTexts(texts));
+// The browser extension shows its texts in the app's language, not Chrome's; the app hands it on.
+const publishUiLanguage = (): void => { void Promise.resolve(api.setUiLanguage?.(currentLanguage())).catch(() => undefined); };
+publishUiLanguage();
+onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
 initSetupGuide();
 // Escape the translucent sidebar's backdrop-filter containing block.
