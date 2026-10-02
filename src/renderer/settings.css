@@ -207,6 +207,9 @@
 .automation-content .setting { min-height: 64px; padding: 14px 0; gap: 16px; }
 .automation-content .setting-text b { line-height: 1.35; }
 .automation-content .setting-text em { color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; }
+/* A note between rows reads like their hints and keeps the row separators on both sides. */
+.automation-content > .pane > p.muted { margin: 0; padding: 12px 0 14px; border-top: 1px solid var(--line); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; }
+.automation-content > .pane > p.muted + .setting { border-top: 1px solid var(--line); }
 .automation-content #swarmList + .step-actions { justify-content: flex-end; margin: 0; padding: 12px 0 4px; border-top: 1px solid var(--line); }
 .automation-content :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 @media (max-width: 1100px) {

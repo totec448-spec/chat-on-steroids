@@ -125,6 +125,21 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
   stateListener(updatedThreshold);
   expect(compactionThreshold.value).toBe('320000');
 
+  // A value whose switch is off does nothing, so it must not look editable: the threshold
+  // follows automatic compaction, and the notice lead follows Session finish.
+  const finishLead = w.document.getElementById('finishLeadMinutes') as HTMLSelectElement;
+  expect(compactionThreshold.disabled).toBe(false);
+  expect(finishLead.disabled).toBe(true);
+  const switchedOver = structuredClone(updatedThreshold) as any;
+  switchedOver.config.compaction.auto = false;
+  switchedOver.config.ui.finishTool = true;
+  stateListener(switchedOver);
+  expect(compactionThreshold.disabled).toBe(true);
+  expect(finishLead.disabled).toBe(false);
+  stateListener(structuredClone(updatedThreshold));
+  expect(compactionThreshold.disabled).toBe(false);
+  expect(finishLead.disabled).toBe(true);
+
   const goalPrompt = w.document.getElementById('goalPrompt') as HTMLTextAreaElement;
   goalPrompt.focus();
   goalPrompt.value = 'USER IS STILL EDITING THIS PROMPT';
