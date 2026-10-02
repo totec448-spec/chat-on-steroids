@@ -9290,6 +9290,17 @@
     });
   }
 
+  /**
+   * When a pickup first found the source answer broken while ChatGPT still showed Stop.
+   *
+   * ChatGPT can come back from "Connection interrupted. Waiting for the complete answer" on its
+   * own while Stop stays up, so the first such pickup still trusts the page. It did not in the
+   * field: Stop stayed beside that card for over half an hour while the model kept working on the
+   * server, the page never saw the results it waited for, and every pickup was "resumed" until
+   * the chat hit 100% (#825, 2026-10-02). A later pickup that finds it still broken declines.
+   */
+  const BROKEN_STREAM_PICKUP_MS = 60_000;
+  let brokenStreamSince = 0;
   function resumePendingCompactionFromRepair(expectedConversationId) {
     const source = job && job.stage === 'handoff-pending' ? job.sourceSend : null;
     if (!alive || !expectedConversationId || conversationId !== expectedConversationId ||
@@ -9299,7 +9310,11 @@
     // answer") never settles in this document, so the ticket cannot be sent from it. Declining
     // hands the pickup to its reload. Accepting kept a ticket unsent behind that card for over
     // half an hour (2026-10-02), five pickups at a time, each one "resumed" and none reloaded.
-    if (!CLF_DOM.generating() && currentAssistantError()) return false;
+    if (currentAssistantError()) {
+      if (!CLF_DOM.generating()) return false;
+      if (!brokenStreamSince) brokenStreamSince = Date.now();
+      else if (Date.now() - brokenStreamSince >= BROKEN_STREAM_PICKUP_MS) return false;
+    } else brokenStreamSince = 0;
     // The browser recovery claim proves only that this exact document may be nudged. It does not
     // own Stop or Send: those remain behind startCompact's source identity, settle and durable WAL
     // checkpoints. If an attempt is already alive, merely acknowledge the healthy document so the
