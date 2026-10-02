@@ -51,3 +51,13 @@ it('reports a terminal failed worker as degraded history rather than healthy act
     activeTurn: false
   })).toMatchObject({ health: 'degraded', activity: 'done' });
 });
+
+
+it('keeps broker terminal failure authoritative over stale recorded work', () => {
+  expect(evaluateWorkerOverviewHealth({
+    state: 'failed',
+    exactIdentity: true,
+    working: true,
+    activeTurn: true
+  })).toMatchObject({ health: 'degraded', activity: 'done' });
+});
