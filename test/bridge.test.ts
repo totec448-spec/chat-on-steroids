@@ -491,6 +491,22 @@ describe('who is allowed to talk to it', () => {
     expect(await companionDiagnostics()).toBeNull();
   });
 
+  it('keeps the extension preferences it stored and hands them and the app language back in /status', async () => {
+    await pair();
+    const diagnostics = (preferences: { overwrite: boolean; durations: boolean }, stored: boolean) => ({ capturedAt: Date.now(),
+      status: { connected: true, paired: true }, preferences, preferencesStored: stored, tab: null });
+    // A fresh install reports defaults it never stored: not a choice, so nothing is kept.
+    expect((await request('POST', '/diagnostics', { body: diagnostics({ overwrite: true, durations: false }, false) })).status).toBe(200);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(getConfig().ui.browserPreferences).toBeUndefined();
+    expect((await request('POST', '/diagnostics', { body: diagnostics({ overwrite: false, durations: true }, true) })).status).toBe(200);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(getConfig().ui.browserPreferences).toEqual({ overwrite: false, durations: true });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'en' } });
+    const status = await request('POST', '/status', { body: { openConversations: [] } });
+    expect(status.body).toMatchObject({ language: 'en', browserPreferences: { overwrite: false, durations: true } });
+  });
+
   it('answers unknown rather than incompatible to a /hello without a protocol header (#568)', async () => {
     // A plain curl in a bug report read "compatible": false and pointed everyone the wrong way.
     const plain = await fetch(`${base}/hello`);
