@@ -75,6 +75,18 @@ var CLF_DOM = (() => {
     for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
     return text(clone);
   };
+  /**
+   * The composer's raw text without app mention chips (#900). A send receipt is compared with the
+   * message ChatGPT renders, which readers take without its chip; capturing the chip made the two
+   * differ and the first question of a mentioned send never opened its turn.
+   */
+  const composerAuthoredText = () => {
+    const box = composer();
+    if (!box?.querySelector?.(APP_MENTION_CHIP) || typeof box.cloneNode !== 'function') return box?.textContent ?? '';
+    const clone = box.cloneNode(true);
+    for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
+    return clone.textContent ?? '';
+  };
 
   function searchUnitRole(node) {
     const key = node?.getAttribute?.('data-chatgpt-search-unit-key') ||
@@ -589,6 +601,9 @@ var CLF_DOM = (() => {
       let previous = null;
       for (const node of document.querySelectorAll(TURN)) {
         if (node.closest?.(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`)) continue;
+        // An earlier page kept undisplayed in this tab (the source chat after a Project resume)
+        // holds another conversation's turns; they are not this page's.
+        if (onKeptPage(node)) continue;
         if (node.matches?.(SEARCH_TURN) && (node.closest?.(LEGACY_TURN) || node.closest?.(SHELL_TURN))) continue;
         const id = turnIdOf(node);
         if (node.matches?.(SHELL_TURN)) {
@@ -836,7 +851,8 @@ var CLF_DOM = (() => {
       // Historical interrupted exchanges can retain in_progress forever. Only the
       // latest native response can describe this composer's current generation.
       const latest = [...document.querySelectorAll(SHELL_TURN)].filter(node =>
-        !node.closest(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`)).at(-1);
+        !node.closest(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`) &&
+        !onKeptPage(node)).at(-1);
       if (latest?.getAttribute('data-clf-shell-running') !== location.pathname) return false;
       /*
        * The stamp alone is not enough, and the comment above understates why: `in_progress` is
@@ -3042,6 +3058,7 @@ var CLF_DOM = (() => {
     AUTHORED_SELECTOR: '[data-message-author-role="assistant"], .markdown, [data-content-search-unit-key], [data-markdown-text-style="assistant-message"]',
     turnIdOf,
     messageIdOf,
+    composerAuthoredText,
     userPromptText,
     userMessageReaction,
     presentUserPrompts,

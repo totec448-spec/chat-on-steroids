@@ -289,6 +289,8 @@ interface TurnFixture {
   staleStamp?: string;
   conversationProps?: Record<string, unknown>;
   rect?: { top: number; bottom: number; left: number; right: number } | 'throw';
+  /** Mounted on an earlier page ChatGPT keeps undisplayed in the same tab. */
+  keptPage?: boolean;
 }
 
 async function scan(
@@ -406,7 +408,11 @@ async function scan(
       };
       for (let clone = 0; clone < Math.max(1, entry.clones ?? 1); clone++) add();
     }
-    document.body.append(section);
+    if (turn.keptPage) {
+      const page = document.createElement('div');
+      page.setAttribute('data-app-shell-page-surface', 'true'); page.style.display = 'none';
+      page.append(section); document.body.append(page);
+    } else document.body.append(section);
   }
 
   const elements = fibers.map((fiber) => {
@@ -798,6 +804,20 @@ describe('the calls a turn says it made', () => {
       'requestId',
       'tool'
     ]);
+  });
+
+  it('ignores the turns of an earlier page ChatGPT keeps undisplayed in the same tab', async () => {
+    // Measured 2026-10-01: after a Project resume the tab kept the source chat as a hidden page.
+    // Its turns named the source conversation, the bridge refused every sighting as foreign to
+    // the URL, and the resumed chat's whole answer went unrecorded until a reload.
+    const { turns } = await scan([], [
+      { id: 'source-turn', messages: [authored('source-message', 'Old chat.')], rendered: ['Old chat.'],
+        conversationProps: { conversation: { id: '99999999-8888-4777-8666-555555555555' } }, keptPage: true },
+      { id: 'resumed-turn', messages: [authored('resumed-message', 'New chat.')], rendered: ['New chat.'],
+        conversationProps: { conversation: { id: THREAD } } }
+    ]);
+    expect(turns.map(turn => turn.turnId)).toEqual(['resumed-turn']);
+    expect(turns[0]).toMatchObject({ conversationId: THREAD, conversationConflict: false });
   });
 
   it('reads the mounted conversation object identity used by helper answers', async () => {
