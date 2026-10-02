@@ -149,6 +149,8 @@ export interface UiPrefs {
   playfulStatus?: boolean;
   /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */
   followOutput?: boolean;
+  /** Add the Chat On Steroids Core mention to the user's own prompts sent from the app. On unless false. */
+  mentionCore?: boolean;
   /** The interface language the window last reported; the browser extension follows it. */
   language?: import('./ui-language.js').UiLanguage;
   /**

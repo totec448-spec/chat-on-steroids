@@ -897,9 +897,18 @@
     const path = typeof event.data.path === 'string' && /^app:\/\/asdk_app_[A-Za-z0-9_-]{1,160}$/.test(event.data.path) ? event.data.path : null;
     coreMention = path && event.data.name === 'Chat On Steroids Core' ? { path, name: event.data.name } : null;
   });
+  /**
+   * Whether the user's own prompts carry the Core mention (the app's ui.mentionCore, on unless off).
+   *
+   * Some accounts attach an app to a chat only when a message mentions it (#861), so the mention
+   * stays on by default. On others ChatGPT reads it as "use this app now" and opens a plain
+   * question with a probe call (#952); those users can switch it off. Workers, Goal, Loop and
+   * Continue keep it regardless, and Goal's helper never gets it: it must not use tools.
+   */
+  let mentionCore = true;
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
-                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention: coreMention, explain,
+                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = coreMention) {
+    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -6477,6 +6486,7 @@
       if (!alive || CLF_DOM.conversationId() || !reply || reply.ok !== true || !reply.data) return;
       context = readContext(reply.data.context) || context;
       if (typeof reply.data.followOutput === 'boolean') followOutput = reply.data.followOutput;
+      if (typeof reply.data.mentionCore === 'boolean') mentionCore = reply.data.mentionCore;
       if (reply.data.goal && typeof reply.data.goal === 'object') {
         goalConfig = {
           ...reply.data.goal,
@@ -6694,6 +6704,7 @@
       tokens = Number.isFinite(Number(data.tokens)) ? Number(data.tokens) : 0;
       context = readContext(data.context);
       if (typeof data.followOutput === 'boolean') followOutput = data.followOutput;
+      if (typeof data.mentionCore === 'boolean') mentionCore = data.mentionCore;
       // The goal loop's settings and, while one is running, the draft itself: its stage, the
       // text OpenRouter has streamed so far, and — once it is `ready` — the message to type.
       // Nothing is typed here; maybeSendGoalReply below owns that, after the pull has
@@ -12331,7 +12342,8 @@
         // may replace it before this async operation resumes; do not rediscover it.
         receipt = { conversation, user: { id: user.id } };
         return true;
-      }, matchesSubmittedBootstrap, DESKTOP_RECEIPT_MS, noteWithdraw);
+      }, matchesSubmittedBootstrap, DESKTOP_RECEIPT_MS, noteWithdraw,
+      input.purpose === 'decision' ? null : input.recovery || agent || mentionCore ? coreMention : null);
       // #744: one retry when the editor was replaced before anything asked to send it.
       if (!(await nativeSend()) &&
           !(!authorizing && !sendAttempted && !receipt && !draft.current() && draftCurrent() && await nativeSend())) {
