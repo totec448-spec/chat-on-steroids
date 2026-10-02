@@ -44,6 +44,9 @@ app.whenReady().then(async () => {
   const capture = async name => { await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))'); fs.mkdirSync(output, {recursive:true}); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
   const startDisclosureSample = () => js(`(()=>{window.__composerDisclosureSample=new Promise(resolve=>{const start=performance.now(),frames=[];const sample=()=>{frames.push({time:performance.now()-start,list:document.getElementById('composerModelChoices').getBoundingClientRect().height,popover:document.querySelector('#modelMenu > .composer-popover').getBoundingClientRect().height});if(performance.now()-start>=320)resolve(frames);else requestAnimationFrame(sample)};sample()});return true})()`);
   const sampleDisclosure = () => js(`window.__composerDisclosureSample`);
+  // Exercise both motion preferences explicitly; hosted macOS defaults to reduce.
+  win.webContents.debugger.attach('1.3');
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
   await check('Renderer selected the fixture session', `document.getElementById('contextMeterCompact').textContent==='38%'`);
   await capture('composer');
   await click('#modelMenu > summary');
@@ -76,7 +79,6 @@ app.whenReady().then(async () => {
   await check('Lightning joke remains bounded and preserves composer state', `document.getElementById('modelMenu').open&&document.getElementById('chatInput').value==='Keep this draft'&&document.getElementById('composerModel').value===${JSON.stringify(jokePair.model)}&&document.getElementById('composerReasoning').value===${JSON.stringify(jokePair.effort)}&&document.getElementById('composerSpark').getAnimations({subtree:true}).length<=5`);
   await pause(900);
   await check('Lightning joke settles without background animation', `document.getElementById('composerSpark').getAnimations({subtree:true}).length===0`);
-  win.webContents.debugger.attach('1.3');
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
   await js(`document.getElementById('composerModelToggle').click();document.getElementById('composerSpark').click()`);
   await check('Reduced motion removes expansion and spatial joke motion', `matchMedia('(prefers-reduced-motion: reduce)').matches&&getComputedStyle(document.getElementById('composerModelChoices')).transitionDuration==='0s'&&document.getElementById('composerSpark').getAnimations({subtree:true}).every(animation=>animation.effect.getKeyframes().every(frame=>!frame.transform))`);
