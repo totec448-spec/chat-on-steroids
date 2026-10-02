@@ -19,7 +19,7 @@ interface DomApi {
   stopGeneration(current: () => boolean): boolean;
   inspectModelSettings(current?: () => boolean, failure?: (reason: string) => void): Promise<Array<{id: string; label: string; efforts: string[]}> | null>;
   send(options?: { acceptanceTimeoutMs?: number; stillCurrent?: () => boolean; beforeSend?: () => Promise<boolean>;
-    mention?: { path: string; name: string } | null }): Promise<boolean>;
+    mention?: { path: string; name: string } | null; explain?: (why: string) => void }): Promise<boolean>;
   selectModelSettings(model: string | null, effort: string | null, current?: () => boolean): Promise<boolean>;
   uploadImages(images: Array<{ name: string; dataUrl: string }>, current?: () => boolean, draft?: ReturnType<DomApi['captureComposerDraft']>, files?: File[]): Promise<boolean>;
   messages(): Array<{ id: string; role: 'user' | 'assistant'; text: string; turnId: string | null }>;
@@ -697,6 +697,37 @@ describe('Core app mention on app-owned sends (#861)', () => {
     button.addEventListener('click', () => { user('Exact app prompt'); box.replaceChildren(); });
     expect(await api.send()).toBe(true);
     expect(insert).not.toHaveBeenCalledWith('insertHTML', expect.anything(), expect.anything());
+  });
+});
+
+describe('why a Send ended without acceptance (#820)', () => {
+  it.each<[string, () => void]>([
+    ['page-busy', () => { const stop = document.createElement('button'); stop.setAttribute('data-testid', 'stop-button'); stop.textContent = 'Stop'; button.closest('div')!.append(stop); }],
+    ['editor-missing', () => { box.remove(); }],
+    ['draft-empty', () => { box.textContent = ''; }],
+    ['chat-changed', () => undefined]
+  ])('names %s at once', async (why, arrange) => {
+    arrange();
+    const said: string[] = [];
+    expect(await api.send({ explain: reason => said.push(reason), stillCurrent: () => why !== 'chat-changed' })).toBe(false);
+    expect(said).toEqual([why]);
+  });
+  it('names a refused authorization and a Send that never became ready', async () => {
+    const refused: string[] = [];
+    expect(await api.send({ explain: reason => refused.push(reason), beforeSend: async () => false })).toBe(false);
+    expect(refused).toEqual(['not-authorized']);
+    button.disabled = true;
+    const late: string[] = [];
+    const result = api.send({ explain: reason => late.push(reason), acceptanceTimeoutMs: 1000 });
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(await result).toBe(false);
+    expect(late).toEqual(['send-not-ready']);
+  });
+  it('says nothing for an accepted Send', async () => {
+    const said: string[] = [];
+    button.addEventListener('click', () => { user('Exact app prompt'); box.replaceChildren(); });
+    expect(await api.send({ explain: reason => said.push(reason) })).toBe(true);
+    expect(said).toEqual([]);
   });
 });
 

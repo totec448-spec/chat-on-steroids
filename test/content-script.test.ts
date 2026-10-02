@@ -21044,8 +21044,9 @@ describe('ordinary Continue native recovery', () => {
     expect(claims).toBe(1);
     expect(live.sent.filter(message => message.type === 'desktop_input' && message.authorize)).toHaveLength(0);
     expect(send).not.toHaveBeenCalled();
+    // The release says why (#820): native Send never became ready.
     expect(live.sent.filter(message => message.type === 'desktop_input' && message.fail)).toEqual([
-      expect.objectContaining({ id, owner: 'input-owner', error: 'After-turn pickup was withdrawn before Send.' })
+      expect.objectContaining({ id, owner: 'input-owner', error: 'After-turn pickup was withdrawn before Send.', detail: 'send-not-ready' })
     ]);
 
     sendButton.removeAttribute('aria-disabled');
