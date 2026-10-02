@@ -3866,7 +3866,8 @@ export function chatSettingsPatch(current: Config): {
       maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8),
       allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked,
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked,
-      waitForSubAgents: $<HTMLInputElement>('waitForSubAgents').checked
+      waitForSubAgents: $<HTMLInputElement>('waitForSubAgents').checked,
+      endSleepingWorkerProcesses: $<HTMLInputElement>('endSleepingWorkerProcesses').checked
     },
     goal: {
       enabled: current.goal.enabled, mode: current.goal.mode,
@@ -4253,6 +4254,7 @@ const CHAT_INPUTS = [
   'allowUnattributedCalls',
   'recoverAgentTabs',
   'waitForSubAgents',
+  'endSleepingWorkerProcesses',
   'autoContinue',
   'goalProvider',
   'goalBaseUrl',
@@ -4299,6 +4301,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLInputElement>('waitForSubAgents'),
     config.multiAgent.waitForSubAgents === true,
     previous?.multiAgent.waitForSubAgents
+  );
+  applyChatChecked(
+    $<HTMLInputElement>('endSleepingWorkerProcesses'),
+    config.multiAgent.endSleepingWorkerProcesses === true,
+    previous?.multiAgent.endSleepingWorkerProcesses
   );
 
   applyChatValue($<HTMLSelectElement>('workerModel'), config.multiAgent.defaultModel ?? '', previous?.multiAgent.defaultModel);

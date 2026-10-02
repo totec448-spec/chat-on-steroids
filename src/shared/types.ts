@@ -315,6 +315,12 @@ export interface MultiAgentSettings {
    * context that is about to change. Off by default; a chat with no workers is never held.
    */
   waitForSubAgents?: boolean;
+  /**
+   * Reclaim only terminal processes owned by an exactly identified worker that has remained
+   * sleeping beyond the runtime-retention threshold. Off by default; durable worker/chat
+   * identity and history are never reclaimed by this switch.
+   */
+  endSleepingWorkerProcesses?: boolean;
 }
 
 /** The user's own additions to what each MCP connector tells the model about itself. */
