@@ -5,7 +5,6 @@ import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
-import { initConnectionAdvanced } from './connection-popover.js';
 import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
 import { initPet } from './pet.js';
@@ -62,7 +61,6 @@ const pet = initPet(api, () => showTab('pets'));
 initSetupGuide();
 // Escape the translucent sidebar's backdrop-filter containing block.
 document.body.append($('connectionPopover'));
-const connectionAdvanced = initConnectionAdvanced();
 const appearance = initAppearance(patch => { void save(patch); });
 
 /** Same shape the platform uses; mirrored here only to grey out step 2 until it is valid. */
@@ -179,15 +177,12 @@ function setConnectionPopover(open: boolean): void {
   popover.hidden = !open;
   trigger.setAttribute('aria-expanded', String(open));
   if (open) {
-    $<HTMLDetailsElement>('connectionAdvanced').open = false;
-    $<HTMLDetailsElement>('connectionRuntime').open = false;
     positionConnectionPopover();
     paintClock();
-    connectionAdvanced.refreshIfOpen();
   }
 }
 
-/** Keep this diagnostic surface anchored to the status button and inside the viewport. */
+/** Keep the connection controls anchored to the status button and inside the viewport. */
 function positionConnectionPopover(): void {
   const popover = $('connectionPopover');
   if (popover.hidden) return;
@@ -1180,10 +1175,6 @@ function apply(next: AppState): void {
   connectBtn.disabled = disconnecting || (!running && missing !== null);
   connectBtn.title = !running && missing ? missing.text : '';
 
-  ui($('connectionPopoverExtension'), 'textContent', () => next.bridge.extensionVersion
-    ? `v${next.bridge.extensionVersion}`
-    : t("Not reported"));
-
   // ---- out of date, app or extension
   paintUpdate(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {});
@@ -1592,7 +1583,7 @@ function facts(next: AppState): HTMLElement[] {
 }
 
 /**
- * Repaints only what ages: the two numbers and the header note. Runs every second so
+ * Repaints only what ages: the two numbers and status tooltips. Runs every second so
  * "verified 8s ago" keeps counting between reports instead of freezing.
  */
 function paintClock(): void {
@@ -1628,13 +1619,7 @@ function paintClock(): void {
   browserRow.dataset.tone = bridge.present ? 'ok' : bridge.paired ? 'wait' : 'bad';
   ui(connectorRow, 'title', () => core?.lastRequestAt ? t("Reached {0}", [ago(core.lastRequestAt)]) : $('connectionPopoverConnector').textContent ?? '');
   ui(browserRow, 'title', () => bridge.lastSeenAt ? t("Seen {0}", [ago(bridge.lastSeenAt)]) : $('connectionPopoverBrowser').textContent ?? '');
-  $('connectionPopoverVerified').hidden = connected;
   ui($('connectionPopoverTitle'), 'title', () => disconnecting ? t('Closing connection…') : status.handshakeAt !== null ? t("verified {0}", [ago(status.handshakeAt)]) : t("no handshake yet"));
-  ui($('connectionPopoverVerified'), 'textContent', () => disconnecting ? t('Closing connection…') : running
-    ? status.handshakeAt === null
-      ? t("no handshake yet")
-      : t("verified {0}", [ago(status.handshakeAt)])
-    : t("Connection is off"));
 
   const triggerText = status.handshakeAt !== null && running
     ? `${t(STATUS_TEXT[status.state])} · ${t("verified {0}", [ago(status.handshakeAt)])}`
