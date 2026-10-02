@@ -2358,6 +2358,7 @@
     // other named turn by accident. Modern generations always mint/adopt an id; this is the
     // fail-closed guard for stale/legacy/reinjected state.
     const endedTurnId = turnId;
+    syncLivePreview(livePreviewSent.conversationId, null);
     streamGone = null;
     resumedOrder = 0;
     generating = false;
@@ -3671,8 +3672,10 @@
       codeIds.add(messageId);
       codeModeCalls.push({ messageId, tool: 'functions.exec', requestId: cap(entry.requestId, 100), answered: entry.answered === true });
     }
+    // Presentation only (#942): a caption line for a running turn, never a recorded message.
+    const preview = !endMessageId && typeof raw.preview === 'string' ? cap(raw.preview.trim(), 300) : null;
     if (codeModeCalls.length === 0 && kept.length === 0 && requests.length === 0 && keptMessages.length === 0 && keptActivities.length === 0 &&
-        keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId) {
+        keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId && !preview) {
       return null;
     }
     return {
@@ -3688,7 +3691,8 @@
       messages: keptMessages,
       activities: keptActivities,
       thoughtNotifications: keptThoughtNotifications,
-      images: keptImages
+      images: keptImages,
+      preview
     };
   }
 
@@ -4089,6 +4093,28 @@
     return fiberRepairing ? await fiberRepairing : null;
   }
 
+  /** The caption last sent for the running turn (#942), so an unchanged scan sends nothing. */
+  let livePreviewSent = { conversationId: null, text: null };
+  /**
+   * Tells the app the newest sentence ChatGPT shows for a running turn whose message it has not
+   * published yet. ChatGPT keeps a new chat's first-turn narration out of its page model until it
+   * fetches history again, so without this the app showed only the calls until the final answer.
+   * The app holds it in memory as a caption; the sentence is recorded the ordinary way, with its
+   * own message id, once ChatGPT publishes it.
+   */
+  function syncLivePreview(forConversation, text) {
+    const id = typeof forConversation === 'string' && /^[0-9a-f-]{8,64}$/i.test(forConversation) ? forConversation : null;
+    const next = id && typeof text === 'string' && text ? text : null;
+    const previous = livePreviewSent;
+    if (previous.conversationId === id && previous.text === next) return;
+    livePreviewSent = { conversationId: id, text: next };
+    // A route change must not leave the old chat's caption behind.
+    if (previous.text && previous.conversationId && previous.conversationId !== id) {
+      void ask({ type: 'live_preview', conversationId: previous.conversationId, text: null });
+    }
+    if (id && (next || previous.conversationId === id)) void ask({ type: 'live_preview', conversationId: id, text: next });
+  }
+
   async function refreshFiber(settled = null, presentationOnly = false) {
     // A bound chat can briefly lose its /c/<id> route during React/router churn, and a real
     // navigation to a fresh composer has the exact same pathname until ChatGPT assigns the
@@ -4291,6 +4317,11 @@
     }
     const activeTurnIndex =
       ownedPageTurn && activeLocalTurnId ? answer.turns.indexOf(ownedPageTurn) : -1;
+    // #942: a caption for the generation this document owns right now, never for a settled scan.
+    if (!presentationOnly && !settled) {
+      syncLivePreview(askedConversation || concreteConversation(CLF_DOM.conversationId()),
+        activeTurnIndex >= 0 && generating ? ownedPageTurn.preview : null);
+    }
     if (askedConversation) {
       // Ownership evidence is no longer gated on `activeTurnIndex`.
       //
