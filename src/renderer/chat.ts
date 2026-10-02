@@ -3926,6 +3926,7 @@ let selectedGoalModel: GoalModel | undefined;
 let goalCatalogEpoch = 0;
 let goalTotal = 0;
 let goalLoading = false;
+let goalModelQuery = '';
 
 function invalidateGoalModels(): void {
   goalCatalogEpoch++;
@@ -3955,17 +3956,24 @@ function releasedOn(created: number): string {
  * the question this list answers — what is new — is answered by the first screen of it.
  */
 async function loadGoalModels(reset: boolean): Promise<void> {
+  // A new query invalidates an older in-flight page immediately. The older request may still
+  // finish, but its epoch can no longer paint rows for the new query.
+  if (reset) invalidateGoalModels();
   if (goalLoading) return;
   goalLoading = true;
-  if (reset) {
-    invalidateGoalModels();
-  }
   const epoch = goalCatalogEpoch;
+  const query = goalModelQuery;
   ui($('goalModelsState'), 'textContent', () => t("Loading models from OpenRouter…"));
   $<HTMLButtonElement>('goalMore').disabled = true;
-  const page = await run(api.listGoalModels(goalModels.length));
+  const page = await run(api.listGoalModels(goalModels.length, query));
   goalLoading = false;
-  if (epoch !== goalCatalogEpoch) return;
+  if (epoch !== goalCatalogEpoch || query !== goalModelQuery) {
+    // If search changed while the request was in flight, service the newest query now that the
+    // old request released the single-flight guard. It starts at offset zero because reset()
+    // cleared the visible rows when the query changed.
+    void loadGoalModels(false);
+    return;
+  }
   if (!page) {
     // `run` has already shown the reason. Say what it means *here*: the list is empty and
     // the model in use has not changed.
@@ -4163,6 +4171,14 @@ function wireGoal(save: () => Promise<void>): void {
     panel.hidden = !panel.hidden;
     ui($('goalPick'), 'textContent', () => panel.hidden ? t('Select model') : t('Close'));
     if (!panel.hidden && goalModels.length === 0) void loadGoalModels(true);
+  });
+  const modelSearch = $<HTMLInputElement>('goalModelSearch');
+  modelSearch.maxLength = 160;
+  modelSearch.addEventListener('input', () => {
+    const next = modelSearch.value.slice(0, 160);
+    if (next === goalModelQuery) return;
+    goalModelQuery = next;
+    void loadGoalModels(true);
   });
   $('goalMore').addEventListener('click', () => void loadGoalModels(false));
   $('goalReasoning').addEventListener('focus', () => {
