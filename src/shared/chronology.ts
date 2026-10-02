@@ -298,23 +298,30 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
     entry.kind === 'turn_start' ? -1 : entry.kind === 'turn_end' ? 1 : entry === ends ? 0.5 : 0;
 
   /*
-   * A native ChatGPT step (a web search, a thinking headline) carries only the moment it was read,
-   * while prose carries the moment ChatGPT opened it — and ChatGPT opens a paragraph before it runs
-   * the steps drawn above it. Compared as they are, every step fell after the paragraph that
-   * follows it on the page. The page is read in ChatGPT's own order, so a step read in the same pass
-   * as the paragraph right after it is placed just before that paragraph was opened.
+   * A native ChatGPT step (a web search, a round's recap) carries only the moment it was read, and
+   * a call the moment it started, while prose carries the moment ChatGPT opened it — and ChatGPT
+   * opens a paragraph before it runs the work drawn above it, then writes the text. Compared as they
+   * are, that work fell after the paragraph that follows it on the page, and a round's recap headed
+   * the next round. Work that happened after a paragraph was opened but before its text could be
+   * read (a step read in the same pass included) is placed just before the paragraph, in its order.
    */
   const readBefore = new Map<T, number>();
-  for (let at = 0; at < bySeq.length; at++) {
-    const step = bySeq[at]!;
-    if (step.kind !== 'page_tool' || authoredTimeOf(step) !== undefined) continue;
-    let next = at + 1;
-    while (next < bySeq.length && bySeq[next]!.kind === 'page_tool' && Math.abs(bySeq[next]!.time - step.time) <= SAME_READ_MS) next++;
-    const prose = bySeq[next];
-    const opened = prose?.kind === 'assistant_message' ? authoredTimeOf(prose) : undefined;
-    if (opened === undefined || Math.abs(prose!.time - step.time) > SAME_READ_MS || (prose!.turnId ?? null) !== (step.turnId ?? null)) continue;
-    if (opened <= step.time) readBefore.set(step, opened - 1);
-  }
+  const placeBefore = (group: readonly T[]): void => {
+    // Only prose read live: the turn went on after it. A paragraph first seen after a reload was
+    // read long after the work below it, and nothing it opened before moves above it.
+    const paragraphs = group.filter(entry => entry.kind === 'assistant_message' && authoredTimeOf(entry) !== undefined &&
+        group.some(later => later.kind !== 'turn_end' && later.time > entry.time))
+      .sort((a, b) => authoredTimeOf(a)! - authoredTimeOf(b)!);
+    for (const work of group) {
+      if ((work.kind !== 'page_tool' && work.kind !== 'tool_call') || authoredTimeOf(work) !== undefined) continue;
+      const slack = work.kind === 'page_tool' ? SAME_READ_MS : 0;
+      const prose = paragraphs.find(entry => authoredTimeOf(entry)! < work.time && work.time <= entry.time + slack);
+      if (!prose) continue;
+      const opened = authoredTimeOf(prose)!, span = prose.time + slack - opened;
+      // Strictly between anything that happened before the paragraph opened and the paragraph itself.
+      readBefore.set(work, opened - 1 + 0.9 * (work.time - opened) / span);
+    }
+  };
 
   // An entry with no usable time is ordered by its stable position (`origin` for a mutable
   // canonical item, otherwise `seq`) rather than being flung to one end of its turn: a
@@ -359,6 +366,7 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
   for (const anchor of [...groups.keys()].sort((a, b) => a - b)) {
     const group = groups.get(anchor)!;
     const ends = closing(group);
+    placeBefore(group);
     group.sort((a, b) => rank(a, ends) - rank(b, ends) || byTime(a, b));
     out.push(...group);
   }
