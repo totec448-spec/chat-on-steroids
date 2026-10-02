@@ -595,6 +595,18 @@ var CLF_DOM = (() => {
     if (!turn || node.getAttribute('data-clf-fiber-turn') !== turn || !stamp?.startsWith(`${turn}:`)) return null;
     try { return decodeURIComponent(stamp.slice(turn.length + 1)) || null; } catch { return null; }
   }
+  /**
+   * The exact page-model user id of a shell exchange whose user slot is not rendered.
+   *
+   * MAIN names it with `data-clf-fiber-user` (fiber.js) only when the page model holds exactly
+   * one user message for the exchange. It counts only under the exchange's current turn stamp,
+   * like every other MAIN stamp: a stale or foreign one reads as no user message at all.
+   */
+  function unrenderedUserIdOf(section) {
+    const turn = section?.getAttribute?.('data-clf-fiber-turn'), stamp = section?.getAttribute?.('data-clf-fiber-user');
+    if (!turn || !stamp?.startsWith(`${turn}:`)) return null;
+    try { return decodeURIComponent(stamp.slice(turn.length + 1)) || null; } catch { return null; }
+  }
   function turns() {
     return safe(() => {
       const out = [];
@@ -613,8 +625,10 @@ var CLF_DOM = (() => {
           // unmounts the question while its answer stays (#900), and skipping the whole exchange then
           // hid that answer's final, so its turn never ended (#910). The answer keeps the exchange's
           // own key; nothing here is joined by text or position.
-          if (users.length > 1 || !id || (!users.length && !answered)) continue;
+          const unrendered = users.length ? null : unrenderedUserIdOf(node);
+          if (users.length > 1 || !id || (!users.length && !answered && !unrendered)) continue;
           if (users.length) out.push({ node: users[0], nodes: [users[0]], id, role: 'user' });
+          else if (unrendered) out.push({ node, nodes: [node], id, role: 'user', unrenderedUserId: unrendered });
           if (answered) out.push({ node, nodes: [node], id, role: 'assistant' });
           previous = null; continue;
         }
@@ -691,6 +705,13 @@ var CLF_DOM = (() => {
       const out = [];
       const nodes = turnNodes(turn);
       let explicit = 0;
+      // No slot to read: the id is the page model's, and content.js takes the exact text from
+      // that same page model (userMessageSource), never from what happens to be on screen.
+      if (turn.role === 'user' && turn.unrenderedUserId) {
+        if (seen.has(turn.unrenderedUserId)) return out;
+        seen.add(turn.unrenderedUserId);
+        return [{ id: turn.unrenderedUserId, role: 'user', text: '', turnId: turn.id, node: nodes[0], interrupted: false }];
+      }
       for (const section of nodes) {
         for (const row of sectionRows(section)) {
           if (seen.has(row.id)) continue;

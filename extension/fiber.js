@@ -1991,6 +1991,8 @@
     // desired stamp set first, then change only attributes whose value actually differs.
     const desiredTurnStamps = new Map();
     const desiredMessageStamps = new Map();
+    // An exchange whose user slot the shell did not render (see below, `data-clf-fiber-user`).
+    const desiredUserStamps = new Map();
     const desiredThoughtStamps = new Map();
     const desiredImageStamps = new Map();
     const groups = [];
@@ -2116,6 +2118,16 @@
             // both as placement anchors would make every shell final ambiguous.
             for (const [node, id] of exactAnchors) if (id === slot.id) exactAnchors.delete(node);
           }
+          // A fresh chat can draw its first exchange with no user slot at all, while the page
+          // model holds the exact user message (2026-10-02: a resumed chat, a Goal helper and a
+          // Temporary Chat). Without a slot there was no user message to read, so no Send receipt
+          // and no turn. Name that one exact provider id on the exchange; isolated readers accept
+          // it only under this scan's turn stamp. Several user messages stay unnamed.
+          const users = renderedMessages.filter(message => message.role === 'user');
+          const userSlot = shell.slots.some(slot => /:user$/.test(slot.node.getAttribute('data-content-search-unit-key') || ''));
+          if (!conversation.conflict && !userSlot && users.length === 1 && users[0].rawMessageId) {
+            desiredUserStamps.set(section, `${scanToken}:${index}:${encodeURIComponent(users[0].rawMessageId)}`);
+          }
           // Busy hint only, never a completion receipt or a Stop action target.
           const running = shell.entry.turn.status === 'in_progress' ? location.pathname : null;
           if (running && section.getAttribute('data-clf-shell-running') !== running) section.setAttribute('data-clf-shell-running', running);
@@ -2198,6 +2210,11 @@
           section.removeAttribute('data-clf-shell-running');
           section.removeAttribute('data-clf-temporary-chat');
         }
+        const wantedUser = desiredUserStamps.get(section);
+        const currentUser = section.getAttribute('data-clf-fiber-user');
+        if (wantedUser === undefined) {
+          if (currentUser !== null) section.removeAttribute('data-clf-fiber-user');
+        } else if (currentUser !== wantedUser) section.setAttribute('data-clf-fiber-user', wantedUser);
         for (const stamped of [section, ...section.querySelectorAll('[data-content-search-unit-key], [data-chatgpt-search-unit-key]')]) {
           const wanted = desiredTurnStamps.get(stamped);
           const current = stamped.getAttribute('data-clf-fiber-turn');
