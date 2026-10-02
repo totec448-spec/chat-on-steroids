@@ -1,0 +1,78 @@
+[
+  {
+    "name": "Windows x64",
+    "platform": "win32",
+    "arch": "x64",
+    "runner": "windows-2025",
+    "script": "dist:x64",
+    "artifact": "package-windows-x64",
+    "files": [
+      "Chat-On-Steroids-Setup-x64.exe"
+    ],
+    "common": true
+  },
+  {
+    "name": "Windows arm64",
+    "platform": "win32",
+    "arch": "arm64",
+    "runner": "windows-11-arm",
+    "script": "dist:arm64",
+    "artifact": "package-windows-arm64",
+    "files": [
+      "Chat-On-Steroids-Setup-arm64.exe"
+    ],
+    "common": false
+  },
+  {
+    "name": "macOS x64",
+    "platform": "darwin",
+    "arch": "x64",
+    "runner": "macos-15-intel",
+    "script": "dist:mac:x64",
+    "artifact": "package-macos-x64",
+    "files": [
+      "Chat-On-Steroids-macOS-x64.dmg",
+      "Chat-On-Steroids-macOS-x64.zip"
+    ],
+    "common": false
+  },
+  {
+    "name": "macOS arm64",
+    "platform": "darwin",
+    "arch": "arm64",
+    "runner": "macos-15",
+    "script": "dist:mac:arm64",
+    "artifact": "package-macos-arm64",
+    "files": [
+      "Chat-On-Steroids-macOS-arm64.dmg",
+      "Chat-On-Steroids-macOS-arm64.zip"
+    ],
+    "common": true
+  },
+  {
+    "name": "Linux x64",
+    "platform": "linux",
+    "arch": "x64",
+    "runner": "ubuntu-24.04",
+    "script": "dist:linux:x64",
+    "artifact": "package-linux-x64",
+    "files": [
+      "Chat-On-Steroids-Linux-x64.AppImage",
+      "Chat-On-Steroids-Linux-x64.deb"
+    ],
+    "common": true
+  },
+  {
+    "name": "Linux arm64",
+    "platform": "linux",
+    "arch": "arm64",
+    "runner": "ubuntu-24.04-arm",
+    "script": "dist:linux:arm64",
+    "artifact": "package-linux-arm64",
+    "files": [
+      "Chat-On-Steroids-Linux-arm64.AppImage",
+      "Chat-On-Steroids-Linux-arm64.deb"
+    ],
+    "common": false
+  }
+]
