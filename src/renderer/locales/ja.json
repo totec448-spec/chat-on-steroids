@@ -1764,5 +1764,6 @@
   "Unknown": "不明",
   "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "新しい出力を追う：回答が伸びる間、チャットの末尾にとどまります（ここと ChatGPT）。上にスクロールすると一時停止します。",
   "End background processes of workers asleep for more than 30 minutes": "30分以上スリープしているワーカーのバックグラウンドプロセスを終了",
-  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "ワーカーのチャットと履歴は再利用できます。既定では無効です。各クリーンアップはそのワーカーの履歴に記録されます。"
+  "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "ワーカーのチャットと履歴は再利用できます。既定では無効です。各クリーンアップはそのワーカーの履歴に記録されます。",
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "自分のメッセージで Chat On Steroids Core をメンションする：どのチャットでも ChatGPT がこのアプリを使えるようにします。簡単な質問で ChatGPT が不要なツール呼び出しから始める場合はオフにしてください。ワーカー、Goal、Loop、Continue は常にメンションします。"
 }

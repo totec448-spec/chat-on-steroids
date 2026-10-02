@@ -1764,5 +1764,6 @@
   "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Следовать за новым выводом: оставаться в конце чата, пока ответы растут, здесь и в ChatGPT. Прокрутка вверх ставит на паузу.",
   "End background processes of workers asleep for more than 30 minutes": "Завершать фоновые процессы воркеров, которые спят больше 30 минут",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Чат и история воркера остаются доступными для повторного использования. По умолчанию выключено; каждая очистка записывается в историю этого воркера.",
-  "Wake the tiny brain": "Разбудить маленький мозг"
+  "Wake the tiny brain": "Разбудить маленький мозг",
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Упоминать Chat On Steroids Core в моих сообщениях: ChatGPT сможет использовать это приложение в любом чате. Отключите, если ChatGPT начинает простые вопросы с ненужного вызова инструмента; воркеры, Goal, Loop и Continue сохраняют упоминание."
 }
