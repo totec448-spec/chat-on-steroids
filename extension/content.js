@@ -12841,9 +12841,12 @@
   // restore this existing chat's durable open turn first, otherwise a reload during a Stop-button
   // flicker could call the page idle before it has learned that the previous turn is still open.
   const commandStartup = startupCommandId && (!OPENED_CONVERSATION || OPENED_PROJECT_ENTRY) ? runCommand(startupCommandId) : Promise.resolve();
+  // The app's language catalog before the first injected control, so it never paints in Chrome's.
+  // Folded into the existing step: without a catalog to wait for, startup keeps its exact order.
+  const i18nReady = globalThis.CLF_I18N?.ready;
   void commandStartup
     .catch(() => undefined)
-    .then(loadRenderPreference)
+    .then(i18nReady ? () => Promise.resolve(i18nReady).then(loadRenderPreference, loadRenderPreference) : loadRenderPreference)
     .then(checkStatus)
     .then(() => resumeOpenTurn().catch(() => undefined))
     .then(() => {

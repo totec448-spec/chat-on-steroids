@@ -2998,6 +2998,14 @@ catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja,ko,tr,fr,pt-PT,pt-BR,de,ru,vi}.
 `cos.ui.language`. The main process has no catalogs: the renderer translates the allowlisted
 stopped-chat notice texts (`shared/stop-notice.ts`) and publishes them over `ui:stopNoticeTexts`
 at startup and on each language change; unknown keys are refused and untranslated notices stay English.
+The renderer also reports the language over `ui:language`; the main process keeps it as `ui.language`
+and hands it to the extension in the `/status` reply (`language`). The extension stores it as
+`appLanguage` and `i18n.js` then reads that catalog itself (content scripts get it from the service
+worker via `i18n_catalog`) instead of `chrome.i18n`, which only follows Chrome's language; a language
+with no extension catalog reads as English. The same reply carries `browserPreferences`, the
+extension's Overwrite and Timestamps values as it last reported them stored (`preferencesStored` in
+`/diagnostics`; defaults are never kept). An extension with neither value in its storage, such as a
+reinstall under a new id, takes them back; stored values always win.
 Setup uses SVG flags only, with native language names in tooltips and
 accessible labels; Appearance retains the named language dropdown. Both controls share the
 same persisted preference. `translate="no"` protects text and attributes, including native
