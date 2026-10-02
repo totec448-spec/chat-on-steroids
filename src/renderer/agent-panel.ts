@@ -79,10 +79,12 @@ export function createAgentPanel(options: {
         heading.append(el('span', 'agent-status-dot'), el('strong', 'agent-card-name', identity));
         if (model) heading.append(el('span', 'agent-card-model', model));
         const statusLabel: Record<string, string> = { working: 'Working', history: 'History', invited: 'opening', detached: 'no tab' };
-        const healthLabel = { healthy: 'Healthy', degraded: 'Degraded', unknown: 'Unknown' } as const;
         const meta = el('span', 'agent-card-meta');
-        const healthText = el('span', 'agent-card-health', () => t(healthLabel[health.health]));
-        healthText.title = health.reason;
+        const healthText = el('span', 'agent-card-health', () => {
+          if (health.health === 'healthy') return t('Healthy');
+          if (health.health === 'degraded') return t('Degraded');
+          return t('Unknown');
+        });
         meta.append(document.createTextNode(`${t(statusLabel[state] ?? state)} · `), healthText,
           document.createTextNode(` · ${elapsed}`));
         content.append(heading, el('span', 'agent-card-task', () => task || `${t('Original assignment')}: ${original}`), meta);
