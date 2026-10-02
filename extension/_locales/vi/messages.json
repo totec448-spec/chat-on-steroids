@@ -381,10 +381,10 @@
     "message": "$1 không phản hồi"
   },
   "content_goal_backend_offline_templates": {
-    "message": "template ngoại tuyến"
+    "message": "mẫu ngoại tuyến"
   },
   "content_goal_backend_offline_templates_title": {
-    "message": "Template ngoại tuyến"
+    "message": "Mẫu ngoại tuyến"
   },
   "content_goal_checking_again": {
     "message": "Kiểm tra lại sau $1"
@@ -417,7 +417,7 @@
     "message": "ChatGPT không thay thế bản nháp Cuộc trò chuyện mới"
   },
   "content_goal_no_api_key_unavailable": {
-    "message": "Không có API key — Goal và Loop không khả dụng"
+    "message": "Không có khóa API — Goal và Loop không khả dụng"
   },
   "content_goal_nothing_sent": {
     "message": "không có gì được gửi"
@@ -435,7 +435,7 @@
     "message": "Goal bật — đang theo đuổi mục tiêu của cuộc trò chuyện này"
   },
   "content_goal_on_no_api_key": {
-    "message": "Goal bật — không có API key"
+    "message": "Goal bật — không có khóa API"
   },
   "content_goal_opening_empty": {
     "message": "mô hình không viết nội dung mở đầu"
@@ -519,7 +519,7 @@
     "message": "Loop bật — không bao giờ tự dừng"
   },
   "content_loop_on_no_api_key": {
-    "message": "Loop bật — không có API key"
+    "message": "Loop bật — không có khóa API"
   },
   "content_loop_save": {
     "message": "Lưu làm Loop"
@@ -546,7 +546,7 @@
     "message": "trả lời cho đến khi đạt Goal"
   },
   "content_mode_note_key_required": {
-    "message": "cần OpenRouter key"
+    "message": "cần khóa OpenRouter"
   },
   "content_mode_note_loop": {
     "message": "trả lời mãi mãi"
@@ -606,7 +606,7 @@
     "message": "thêm tác vụ"
   },
   "content_task_api_key_unavailable": {
-    "message": "Trước tiên hãy thêm OpenRouter API key trong ứng dụng."
+    "message": "Trước tiên hãy thêm khóa API OpenRouter trong ứng dụng."
   },
   "content_task_blocked_unavailable": {
     "message": "Cuộc trò chuyện này bị chặn trong ứng dụng. Hãy bỏ chặn tại đó để điều khiển lại."
@@ -750,7 +750,7 @@
     "message": "khóa tác nhân"
   },
   "popup_attribution_exact_request_id": {
-    "message": "request ID chính xác"
+    "message": "ID yêu cầu chính xác"
   },
   "popup_attribution_not_placed_in_chat": {
     "message": "chưa được gắn vào cuộc trò chuyện"
@@ -759,7 +759,7 @@
     "message": "cuộc trò chuyện duy nhất đang tạo nội dung"
   },
   "popup_attribution_request_id_not_resolved": {
-    "message": "request ID chưa được phân giải"
+    "message": "ID yêu cầu chưa được phân giải"
   },
   "popup_attribution_tool_block_on_page": {
     "message": "khối công cụ trên trang"
@@ -789,7 +789,7 @@
     "message": "Sao chép ID cuộc trò chuyện"
   },
   "popup_copy_current_request_id": {
-    "message": "Sao chép request ID hiện tại"
+    "message": "Sao chép ID yêu cầu hiện tại"
   },
   "popup_copy_failed": {
     "message": "sao chép thất bại"
@@ -888,10 +888,10 @@
     "message": "đang chờ"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "Ứng dụng không thể gắn $1 lần gọi theo request ID — đã chuyển sang $2."
+    "message": "Ứng dụng không thể gắn $1 lần gọi theo ID yêu cầu — đã chuyển sang $2."
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "Ứng dụng không thể gắn một lần gọi theo request ID — đã chuyển sang $1."
+    "message": "Ứng dụng không thể gắn một lần gọi theo ID yêu cầu — đã chuyển sang $1."
   },
   "popup_pipeline_delivery_blocked": {
     "message": "Việc gửi bị chặn cho đến khi ứng dụng được kết nối và xác nhận khả năng tương thích giao thức."
@@ -918,16 +918,16 @@
     "message": "Ứng dụng đã nhận ID. Đang chờ xác nhận chủ sở hữu."
   },
   "popup_pipeline_request_id_matched_many": {
-    "message": "$1 request ID khớp với hoạt động công cụ đã ghi."
+    "message": "$1 ID yêu cầu khớp với hoạt động công cụ đã ghi."
   },
   "popup_pipeline_request_id_matched_one": {
-    "message": "1 request ID khớp với hoạt động công cụ đã ghi."
+    "message": "1 ID yêu cầu khớp với hoạt động công cụ đã ghi."
   },
   "popup_pipeline_waiting_first_message": {
     "message": "Đang chờ tin nhắn đầu tiên."
   },
   "popup_pipeline_waiting_latest_request_id": {
-    "message": "Đã ghi cuộc trò chuyện. Đang chờ request ID từ lượt mới nhất."
+    "message": "Đã ghi cuộc trò chuyện. Đang chờ ID yêu cầu từ lượt mới nhất."
   },
   "popup_pipeline_waiting_session_receipt": {
     "message": "Có thể kết nối ứng dụng. Đang chờ biên nhận phiên của cuộc trò chuyện này."
@@ -939,10 +939,10 @@
     "message": "Đang ghi cuộc trò chuyện này"
   },
   "popup_request_id": {
-    "message": "request ID"
+    "message": "ID yêu cầu"
   },
   "popup_request_id_found": {
-    "message": "Đã tìm thấy request ID"
+    "message": "Đã tìm thấy ID yêu cầu"
   },
   "popup_section_augment_chatgpt": {
     "message": "Mở rộng ChatGPT"
@@ -1056,31 +1056,31 @@
     "message": "Trợ lý đã viết nội dung tiếp tục quá dài để gửi. Hãy yêu cầu chỉ dẫn tiếp tục ngắn hơn hoặc chọn mô hình trợ lý khác trong Cài đặt."
   },
   "content_goal_error_stream_record_too_long": {
-    "message": "Provider trả về phản hồi quá lớn. Hãy chọn mô hình tiếp tục khác hoặc yêu cầu phản hồi ngắn hơn."
+    "message": "Nhà cung cấp trả về phản hồi quá lớn. Hãy chọn mô hình tiếp tục khác hoặc yêu cầu phản hồi ngắn hơn."
   },
   "content_goal_error_response_body_too_large": {
-    "message": "Phản hồi của provider vượt quá giới hạn kích thước. Hãy chọn mô hình tiếp tục khác hoặc yêu cầu phản hồi ngắn hơn."
+    "message": "Phản hồi của nhà cung cấp vượt quá giới hạn kích thước. Hãy chọn mô hình tiếp tục khác hoặc yêu cầu phản hồi ngắn hơn."
   },
   "content_goal_error_no_api_key": {
-    "message": "Chưa cấu hình API key cho provider tiếp tục. Hãy thêm key trong Cài đặt hoặc chọn nguồn tiếp tục ChatGPT."
+    "message": "Chưa cấu hình khóa API cho nhà cung cấp tiếp tục. Hãy thêm khóa trong Cài đặt hoặc chọn nguồn tiếp tục ChatGPT."
   },
   "content_goal_error_auth_rejected": {
-    "message": "Provider tiếp tục đã từ chối thông tin xác thực API. Hãy kiểm tra API key và quyền truy cập trong Cài đặt."
+    "message": "Nhà cung cấp tiếp tục đã từ chối thông tin xác thực API. Hãy kiểm tra khóa API và quyền truy cập trong Cài đặt."
   },
   "content_goal_error_out_of_credit": {
-    "message": "Tài khoản provider tiếp tục không còn credit. Hãy thêm credit hoặc chọn nguồn tiếp tục khác trong Cài đặt."
+    "message": "Tài khoản nhà cung cấp tiếp tục không còn credit. Hãy thêm credit hoặc chọn nguồn tiếp tục khác trong Cài đặt."
   },
   "content_goal_error_unknown_model": {
-    "message": "Provider tiếp tục không tìm thấy mô hình đã chọn. Hãy làm mới danh sách mô hình và chọn mô hình khả dụng trong Cài đặt."
+    "message": "Nhà cung cấp tiếp tục không tìm thấy mô hình đã chọn. Hãy làm mới danh sách mô hình và chọn mô hình khả dụng trong Cài đặt."
   },
   "content_goal_error_invalid_provider": {
     "message": "Endpoint tiếp tục tùy chỉnh không hợp lệ. Hãy kiểm tra URL trong Cài đặt; dùng HTTPS hoặc endpoint HTTP cục bộ."
   },
   "content_goal_error_rate_limited": {
-    "message": "Provider tiếp tục đang giới hạn tần suất yêu cầu. Hãy chờ lần thử lại được hiển thị hoặc chọn mô hình tiếp tục khác."
+    "message": "Nhà cung cấp tiếp tục đang giới hạn tần suất yêu cầu. Hãy chờ lần thử lại được hiển thị hoặc chọn mô hình tiếp tục khác."
   },
   "content_goal_error_timeout_or_cancelled": {
-    "message": "Yêu cầu tiếp tục đã hết thời gian chờ hoặc bị hủy. Hãy kiểm tra cuộc trò chuyện trợ lý hoặc trạng thái provider trước khi thử lại."
+    "message": "Yêu cầu tiếp tục đã hết thời gian chờ hoặc bị hủy. Hãy kiểm tra cuộc trò chuyện trợ lý hoặc trạng thái nhà cung cấp trước khi thử lại."
   },
   "content_goal_error_request_failed": {
     "message": "Yêu cầu tiếp tục thất bại. Hãy kiểm tra trợ lý hoặc API endpoint đã chọn cùng chẩn đoán của ứng dụng trước khi thử lại."
@@ -1134,7 +1134,7 @@
     "message": "Trợ lý liên tục chọn dừng thay vì viết nội dung tiếp tục cho Loop. Hãy xem lại chỉ dẫn Loop hoặc chọn mô hình trợ lý khác."
   },
   "content_goal_error_goal_marker_missing": {
-    "message": "Câu trả lời thiếu dấu hoàn tất mà các template Goal ngoại tuyến yêu cầu. Hãy kiểm tra chỉ dẫn template hoặc chọn nguồn tiếp tục khác."
+    "message": "Câu trả lời thiếu dấu hoàn tất mà các mẫu Goal ngoại tuyến yêu cầu. Hãy kiểm tra chỉ dẫn mẫu hoặc chọn nguồn tiếp tục khác."
   },
   "content_goal_error_goal_reply_not_durable": {
     "message": "Ứng dụng không thể lưu nội dung tiếp tục đang chờ. Hãy kiểm tra dung lượng đĩa trống và chẩn đoán của ứng dụng."
