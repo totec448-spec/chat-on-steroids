@@ -11894,7 +11894,15 @@
         (!turnId || turnId === sourceTurn)));
     if (!onTarget()) return false;
     if (message.recovery && (!sourceUser || sourceUser !== message.recovery.questionId || stopRequestedAt)) return false;
-    if (message.recovery && !await recoveryPageUnfinished(onTarget)) return false;
+    if (message.recovery) {
+      let veto = '';
+      if (!await recoveryPageUnfinished(onTarget, why => { veto = why; })) {
+        // Never claimed, so no release report follows. A visible native final will not go away,
+        // and unsaid it kept the app reloading this chat for hours (2026-10-02): say it once here.
+        if (veto === 'page-final' && onTarget()) await ask({ type: 'desktop_input', id: message.id, conversationId: target, recoveryVeto: 'page-final' });
+        return false;
+      }
+    }
     if (silencePickup && CLF_DOM.generating() && !await confirmedProviderTerminal()) {
       if (!onTarget()) return false;
       if (message.recovery?.stop === true) {
