@@ -1758,5 +1758,8 @@
   "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "Последний ход ничего не выдал, и продолжения не последовало. Отправьте сообщение в этом чате, чтобы начать новый ход.",
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "Последний ход завершился с ошибкой, и продолжения не последовало. Отправьте сообщение в этом чате, чтобы начать новый ход.",
   "Recovery stopped": "Восстановление остановлено",
-  "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Браузер не подхватил восстановление этого чата, поэтому приложение прекратило повторные попытки. Снова откройте его вкладку — восстановление продолжится."
+  "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Браузер не подхватил восстановление этого чата, поэтому приложение прекратило повторные попытки. Снова откройте его вкладку — восстановление продолжится.",
+  "Healthy": "В норме",
+  "Degraded": "Снижено",
+  "Unknown": "Неизвестно"
 }
