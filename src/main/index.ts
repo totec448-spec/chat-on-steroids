@@ -69,6 +69,7 @@ import {
   type ContinuationSnapshot
 } from './session/continuation.js';
 import { runShutdownSequence } from './shutdown.js';
+import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
 import { applyStagedUpdate, startUpdateChecks } from './update.js';
 import { UI_BASE_ZOOM, windowLayoutForWorkArea, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
@@ -432,6 +433,9 @@ void app.whenReady().then(async () => {
   if (windowActivation.isDisabled()) return;
   await reconcileAgentRequestOwners();
   if (windowActivation.isDisabled()) return;
+  // Runtime GC consumes restored broker/session/exec ownership only. It owns no worker lifecycle
+  // state and does not run until its first coarse interval after this point.
+  startAgentRuntimeGc();
 
   // Strict CSP for our own page. There is no remote content and no inline script.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -513,6 +517,7 @@ app.on('before-quit', () => {
   // that sequence drains must not recreate or reveal a window after the tray has disappeared.
   windowActivation.disable();
   usageWarmup.abort();
+  void stopAgentRuntimeGc();
 });
 
 app.on('window-all-closed', () => {
@@ -546,7 +551,7 @@ app.on('will-quit', (event) => {
       {
         name: 'admission/drain',
         budgetMs: 40_000,
-        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi()]
+        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi(), stopAgentRuntimeGc()]
       },
       // Phase 2: only after request handlers are done may their owned child processes go.
       {
