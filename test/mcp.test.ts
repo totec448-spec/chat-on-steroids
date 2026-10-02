@@ -3254,6 +3254,19 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(textOf(stranger)).toContain('EXEC_SESSION_OWNER_MISMATCH');
     expect(textOf(stranger)).not.toContain('may already have delivered');
 
+    // An unresolved request from another turn has no authority from the numeric id alone.
+    // If exact proof never arrives, the bounded wait must still fail closed without sending
+    // input or reading process output.
+    const unproven = await asChat('wfr_execown_unattributed', 'write_stdin', {
+      session_id: sessionId,
+      chars: 'unproven\r',
+      yield_time_ms: 1_000
+    });
+    expect(unproven.body.result?.isError).toBe(true);
+    expect(textOf(unproven)).not.toContain('echo=unproven');
+    expect(textOf(unproven)).toContain('EXEC_CALLER_UNIDENTIFIED');
+    expect(textOf(unproven)).toContain('not Read-only mode');
+
     // A later request from the same durable session can race the page proof for its exact
     // request id. The one call should recover when that proof arrives instead of making the
     // model retry a session it already owns.
