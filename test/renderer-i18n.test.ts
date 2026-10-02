@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import zhCN from '../src/renderer/locales/zh-CN.json';
 import type { Language } from '../src/renderer/i18n.js';
 
-const names = { en: 'English', es: 'Español', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', ja: '日本語', ko: '한국어', ru: 'Русский', tr: 'Türkçe', fr: 'Français', 'pt-PT': 'Português (Portugal)', 'pt-BR': 'Português (Brasil)', de: 'Deutsch' } as const;
+const names = { en: 'English', es: 'Español', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', ja: '日本語', ko: '한국어', ru: 'Русский', tr: 'Türkçe', vi: 'Tiếng Việt', fr: 'Français', 'pt-PT': 'Português (Portugal)', 'pt-BR': 'Português (Brasil)', de: 'Deutsch' } as const;
 const languages = Object.keys(names) as Language[];
 const catalogs = Object.fromEntries(languages.filter(locale => locale !== 'en').map(locale =>
   [locale, JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>]));
