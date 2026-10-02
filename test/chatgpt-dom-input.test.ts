@@ -196,6 +196,17 @@ describe('a workspace page kept mounted behind the current one', () => {
     expect(await api.send()).toBe(true);
     expect(clicked).toBe(true);
   });
+  it("reads only this page's turns, not those of an earlier page kept undisplayed", () => {
+    // After a Project resume the tab keeps the source chat hidden; its turns are another chat's.
+    const kept = keptPage();
+    const old = document.createElement('section');
+    old.setAttribute('data-testid', 'conversation-turn-1'); old.setAttribute('data-turn', 'user'); old.setAttribute('data-turn-id', 'old-turn');
+    const oldMessage = document.createElement('div');
+    oldMessage.setAttribute('data-message-id', 'old-message'); oldMessage.setAttribute('data-message-author-role', 'user');
+    oldMessage.textContent = 'Source chat question'; old.append(oldMessage); kept.append(old);
+    user('Resumed chat question');
+    expect(api.messages().map(message => message.text)).toEqual(['Resumed chat question']);
+  });
   it('still refuses two displayed editors', () => {
     keptPage(true);
     expect(api.composer()).toBeNull();

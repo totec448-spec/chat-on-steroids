@@ -21318,3 +21318,31 @@ describe('ordinary Continue native recovery', () => {
     expect(live.sent).toContainEqual(expect.objectContaining({ type: 'desktop_input', silenceBusyTurnId: 'source-turn' }));
   });
 });
+
+// #900: a send receipt captured with the Core mention chip never matched the rendered message
+// (read without its chip), so the first question of a mentioned send never opened its turn.
+it.each([false, true])('opens the first turn of a prompt sent with an app mention chip: %s', async chip => {
+  live = await harness(undefined, {
+    activity: () => ({ ok: true, data: { entries: [], stream: [], pendingTools: 0 } })
+  });
+  const box = live.document.querySelector('#prompt-textarea')!;
+  box.textContent = 'Reply OK';
+  const addChip = (parent: Element) => {
+    const node = live!.document.createElement('span');
+    node.setAttribute('data-prompt-link-href', 'app://asdk_app_fixture');
+    node.setAttribute('app-mention-path', 'app://asdk_app_fixture');
+    node.textContent = 'Chat On Steroids Core';
+    parent.append(node);
+  };
+  if (chip) addChip(box);
+  live.document.querySelector('#composer-form')!.dispatchEvent(new live.window.Event('submit', { bubbles: true }));
+  const user = userTurn(live.document, 'receipt-example', 'Reply OK', { sent: false });
+  if (chip) addChip(user.querySelector('.whitespace-pre-wrap')!);
+  box.replaceChildren();
+  live.hook.observe();
+  await settle();
+  live.hook.observe();
+  await live.hook.flush();
+  expect(emitted(live.sent, 'user_message')).toHaveLength(1);
+  expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+});
