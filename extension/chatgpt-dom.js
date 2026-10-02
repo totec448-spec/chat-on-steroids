@@ -589,6 +589,9 @@ var CLF_DOM = (() => {
       let previous = null;
       for (const node of document.querySelectorAll(TURN)) {
         if (node.closest?.(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`)) continue;
+        // An earlier page kept undisplayed in this tab (the source chat after a Project resume)
+        // holds another conversation's turns; they are not this page's.
+        if (onKeptPage(node)) continue;
         if (node.matches?.(SEARCH_TURN) && (node.closest?.(LEGACY_TURN) || node.closest?.(SHELL_TURN))) continue;
         const id = turnIdOf(node);
         if (node.matches?.(SHELL_TURN)) {
@@ -836,7 +839,8 @@ var CLF_DOM = (() => {
       // Historical interrupted exchanges can retain in_progress forever. Only the
       // latest native response can describe this composer's current generation.
       const latest = [...document.querySelectorAll(SHELL_TURN)].filter(node =>
-        !node.closest(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`)).at(-1);
+        !node.closest(`${OWN_SURFACES},.markdown,[data-markdown-text-style],[data-content-search-unit-key],[contenteditable]`) &&
+        !onKeptPage(node)).at(-1);
       if (latest?.getAttribute('data-clf-shell-running') !== location.pathname) return false;
       /*
        * The stamp alone is not enough, and the comment above understates why: `in_progress` is
