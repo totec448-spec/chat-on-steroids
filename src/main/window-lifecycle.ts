@@ -86,8 +86,13 @@ export interface NormalWindowBounds {
   height: number;
 }
 
+export interface WindowPlacement {
+  bounds: NormalWindowBounds;
+  maximized: boolean;
+}
+
 interface NormalWindowBoundsOwner {
-  on(event: 'move' | 'resize', listener: () => void): unknown;
+  on(event: 'move' | 'resize' | 'maximize' | 'unmaximize', listener: () => void): unknown;
   isDestroyed(): boolean;
   isMaximized(): boolean;
   isMinimized(): boolean;
@@ -96,31 +101,42 @@ interface NormalWindowBoundsOwner {
 }
 
 /**
- * Remember only the user-controlled normal rectangle. Native maximized/minimized/fullscreen
- * transitions can report temporary geometry through the same move/resize events, and persisting
- * those rectangles would make a later ordinary launch inherit a transient presentation state.
+ * Keep the user-controlled normal rectangle even while the native window is maximized. The
+ * maximized bit is presentation state; minimized/fullscreen geometry remains transient and is
+ * never allowed to replace the normal rectangle.
  */
 export function trackNormalWindowBounds(
   owner: NormalWindowBoundsOwner,
-  save: (bounds: NormalWindowBounds) => void
+  save: (placement: WindowPlacement) => void
 ): void {
-  const remember = (): void => {
-    if (owner.isDestroyed() || owner.isMaximized() || owner.isMinimized() || owner.isFullScreen()) return;
+  const normalBounds = (): NormalWindowBounds | null => {
     const bounds = owner.getNormalBounds();
     if (
       !Number.isFinite(bounds.x) || !Number.isFinite(bounds.y) ||
       !Number.isFinite(bounds.width) || bounds.width <= 0 ||
       !Number.isFinite(bounds.height) || bounds.height <= 0
-    ) return;
-    save({
+    ) return null;
+    return {
       x: Math.round(bounds.x),
       y: Math.round(bounds.y),
       width: Math.round(bounds.width),
       height: Math.round(bounds.height)
-    });
+    };
   };
-  owner.on('move', remember);
-  owner.on('resize', remember);
+  const rememberNormal = (): void => {
+    if (owner.isDestroyed() || owner.isMaximized() || owner.isMinimized() || owner.isFullScreen()) return;
+    const bounds = normalBounds();
+    if (bounds) save({ bounds, maximized: false });
+  };
+  const rememberMaximized = (): void => {
+    if (owner.isDestroyed() || owner.isMinimized() || owner.isFullScreen()) return;
+    const bounds = normalBounds();
+    if (bounds) save({ bounds, maximized: true });
+  };
+  owner.on('move', rememberNormal);
+  owner.on('resize', rememberNormal);
+  owner.on('maximize', rememberMaximized);
+  owner.on('unmaximize', rememberNormal);
 }
 
 /** Login launch is distinct from tunnel auto-connect and ordinary app activation. */
