@@ -61,6 +61,12 @@
    * for the shape it wants; this number only keeps a detached or cyclic tree from looping.
    */
   const MAX_CLIMB = 80;
+  /**
+   * How far a node may sit below React's root. ChatGPT's tree reached 405 levels on 2026-10-02
+   * (#969); at the old limit of 400 the committed root was never found, so the model picker and
+   * the shell's query client read as unavailable and Send failed to confirm its model.
+   */
+  const MAX_ROOT_DEPTH = 2048;
   const MAX_TEXT = 200;
   /** A page with more connector rows than this is not one we need to read exhaustively. */
   const MAX_ROWS = 400;
@@ -180,7 +186,7 @@
       currentPaths?.set(node, value);
       if (node.alternate) currentPaths?.set(node.alternate, value);
     };
-    while (at && path.length < 400) {
+    while (at && path.length < MAX_ROOT_DEPTH) {
       if (seen.has(at)) return null;
       seen.add(at);
       const cached = currentPaths?.get(at);
@@ -1585,7 +1591,7 @@
   /** Read the currently mounted query owner; never retain a client across navigation. */
   function shellQueries(fiber) {
     try {
-      for (let at = fiber, up = 0; at && up < 400; up++, at = at.return) {
+      for (let at = fiber, up = 0; at && up < MAX_ROOT_DEPTH; up++, at = at.return) {
         const client = at.memoizedProps?.client;
         if (typeof client?.getQueryCache !== 'function') continue;
         const queries = client.getQueryCache()?.getAll();
