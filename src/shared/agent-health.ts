@@ -42,6 +42,13 @@ export function evaluateWorkerOverviewHealth(
       reason: 'Exact worker/conversation binding is unavailable; health is not inferred.'
     };
   }
+  if (input.state === 'failed') {
+    return {
+      health: 'degraded',
+      activity: 'done',
+      reason: 'The broker recorded this worker as failed.'
+    };
+  }
   if (input.working || input.activeTurn) {
     return {
       health: 'healthy',
@@ -54,13 +61,6 @@ export function evaluateWorkerOverviewHealth(
       health: 'degraded',
       activity,
       reason: 'The worker is detached; browser absence does not prove its server-side work ended.'
-    };
-  }
-  if (input.state === 'failed') {
-    return {
-      health: 'degraded',
-      activity: 'done',
-      reason: 'The broker recorded this worker as failed.'
     };
   }
   if (input.state === null) {
