@@ -8091,6 +8091,52 @@ describe('a stop button that goes missing while the turn is still running', () =
     });
   });
 
+  it.each([true, false])('follows the end of the ChatGPT thread until the reader scrolls away (setting %s)', async enabled => {
+    // ChatGPT's thread is bottom-anchored and stops following once a send moves the question to
+    // the top. Measured 2026-10-02: the newest turn ran 700 px below the composer of a chat whose
+    // reader had not scrolled at all. jsdom has no layout, so the geometry is modelled here.
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: null, userAnchors: [], followOutput: enabled } })
+    });
+    const win = live.window as any, doc = live.document;
+    userTurn(doc, 'follow-user', 'build the report');
+    const section = assistantTurn(doc, 'follow-answer', []);
+    const scroller = doc.createElement('div');
+    scroller.style.overflowY = 'auto';
+    section.parentElement!.insertBefore(scroller, doc.querySelector('[data-turn-id]'));
+    for (const turn of [...doc.querySelectorAll('[data-turn-id]')]) scroller.append(turn);
+    scroller.append(doc.querySelector('form')!);
+    let top = 0, content = 1200;
+    Object.defineProperty(scroller, 'scrollTop', { get: () => top, set: (value: number) => { top = value; } });
+    Object.defineProperty(scroller, 'scrollHeight', { get: () => content });
+    Object.defineProperty(scroller, 'clientHeight', { get: () => 800 });
+    scroller.getBoundingClientRect = () => ({ top: 0, bottom: 800, left: 0, right: 600, width: 600, height: 800 }) as DOMRect;
+    doc.querySelector('form')!.getBoundingClientRect = () => ({ top: 760, bottom: 800, left: 0, right: 600, width: 600, height: 40 }) as DOMRect;
+    // The newest turn ends at the content's end, shifted by how far the thread is scrolled.
+    section.getBoundingClientRect = () => ({ top: 0, bottom: content - top, left: 0, right: 600, width: 600, height: content }) as DOMRect;
+    await live.hook.pullActivity();
+    const frame = () => new Promise(resolve => win.setTimeout(resolve, 80));
+    const grow = async (by: number) => { content += by; section.append(doc.createElement('p')); await frame(); };
+    const followed = () => content - top <= 760 + 2;
+
+    await grow(200);
+    expect(followed(), 'a reader at the end was left behind').toBe(enabled);
+    if (!enabled) return;
+
+    // The reader scrolls up: growth no longer moves the thread.
+    win.dispatchEvent(new win.WheelEvent('wheel', { deltaY: -400 }));
+    top -= 400; scroller.dispatchEvent(new win.Event('scroll'));
+    const held = top;
+    await grow(300);
+    expect(top, 'it scrolled a reader who had scrolled away').toBe(held);
+
+    // Back at the end, following resumes.
+    win.dispatchEvent(new win.WheelEvent('wheel', { deltaY: 900 }));
+    top = content - 760; scroller.dispatchEvent(new win.Event('scroll'));
+    await grow(250);
+    expect(followed()).toBe(true);
+  });
+
   it.each(['steered', 'foreign'] as const)('counts the running work of a turn a message steered as progress, not as a stall (%s)', async kind => {
     // 2026-10-02, live: four messages typed while ChatGPT worked joined its running response,
     // which kept its request id. The app filed all 112 tool calls under the first turn (its

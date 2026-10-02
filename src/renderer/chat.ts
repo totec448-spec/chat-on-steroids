@@ -1954,6 +1954,14 @@ const USER_MESSAGE_KEY = 'message:user_message\u0000';
 let sendAnchor: { key: string; inputId: string; messageId?: string; before: Set<string>; session: string | null; seen: boolean; smoothUntil: number } | null = null;
 /** The reader scrolled away from a held message: they are reading, not following the end. */
 let readingAfterSend = false;
+/**
+ * "Follow new output" (ui.followOutput, on unless switched off): the reader is at the end and has not
+ * scrolled away from it. Only the reader's own scrolling changes this, never growth, so a busy turn
+ * whose rows grow between repaints keeps following (2026-10-02: the view stopped short of the end
+ * whenever much moved at once). Off keeps the send hold and the per-repaint end check.
+ */
+let readerAtEnd = true;
+const followOutput = (): boolean => deps.state()?.config.ui.followOutput !== false;
 
 function userMessageKeys(): Set<string> {
   const keys = new Set<string>();
@@ -2020,7 +2028,7 @@ function paintJumpLatest(): void {
 }
 
 function jumpToLatest(): void {
-  sendAnchor = null; readingAfterSend = false;
+  sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   const pane = $('chatBody');
   $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
   scrollPane(pane, pane.scrollHeight, true);
@@ -3182,7 +3190,8 @@ function paintDetail(followBottom = historyBefore === null): void {
   const pane = $('chatBody');
   // Released by the reader, the reserve still fills the view to its bottom; that is a reading
   // position, not the end to follow.
-  const restoreViewport = preserveTimelineViewport(pane, $('timelineContent'), followBottom && !readingAfterSend);
+  const restoreViewport = preserveTimelineViewport(pane, $('timelineContent'), followBottom && !readingAfterSend,
+    followOutput() ? readerAtEnd : undefined);
   const timelineRows: HTMLElement[] = [];
   const keep = new Set<string>();
   let activityBoundary = '';
@@ -4777,7 +4786,8 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
   skillPicker?.restore();
   imageDrafts.delete(key); paintComposerImages();
   if (sessionId === null) pendingNewInput = { id, generation };
-  if (mode !== 'finish') { sendAnchor = { key: `input:${id}`, inputId: id, before: userMessageKeys(), session: selectedId, seen: false, smoothUntil: 0 }; readingAfterSend = false; }
+  if (mode !== 'finish' && followOutput()) { sendAnchor = null; readingAfterSend = false; readerAtEnd = true; }
+  else if (mode !== 'finish') { sendAnchor = { key: `input:${id}`, inputId: id, before: userMessageKeys(), session: selectedId, seen: false, smoothUntil: 0 }; readingAfterSend = false; }
   void refreshInputQueue();
   paintDeliveryControls();
   try {
@@ -4865,7 +4875,7 @@ function selectSession(id: string): void {
     // Retire the prior owner now; retain only its inert painted transcript until the
     // selected detail arrives. Existing async image/load generation fences still apply.
     // Reading away from a sent message belongs to the chat it happened in.
-    sendAnchor = null; readingAfterSend = false;
+    sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
     events = [];
     totalEvents = 0;
     historyBefore = null;
@@ -4892,7 +4902,7 @@ function selectNewChat(projectId: string | null = null): void {
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
-  sendAnchor = null; readingAfterSend = false;
+  sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   if (projectId) expandedProjects.add(projectId);
   applyComposerSessionModel(null, null);
   // New Chat selects its existing draft, just like a session. Navigation is not
@@ -5273,9 +5283,13 @@ export function initChat(next: Deps): void {
     pane.addEventListener('keydown', event => {
       if (scrollKeys.has(event.key) && !(event.target as Element).closest('summary, button, a, input, textarea, select, [contenteditable]')) intent = Date.now();
     });
-    pane.addEventListener('pointerdown', event => { if (event.target === pane) intent = Date.now(); }, { passive: true });
+    // The scrollbar itself, and middle-button autoscroll, which starts anywhere over the content.
+    pane.addEventListener('pointerdown', event => { if (event.target === pane || event.button === 1) intent = Date.now(); }, { passive: true });
     pane.addEventListener('scroll', () => {
       if (Date.now() - intent < 300) {
+        // The absolute end, reserve included: scrolling up out of an underfilled page's blank
+        // space is reading too, and must not be pulled back down by the next delivery.
+        readerAtEnd = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 2;
         if (sendAnchor) { sendAnchor = null; readingAfterSend = true; }
         if (readingAfterSend && distanceFromTail() <= 1) readingAfterSend = false;
       }
@@ -5372,7 +5386,16 @@ export function initChat(next: Deps): void {
   // content and the pane corrects the hold after layout and before paint, so the held message never
   // shows a clamped frame.
   if (typeof ResizeObserver === 'function') {
-    const observer = new ResizeObserver(() => { holdSentMessage(); });
+    const observer = new ResizeObserver(() => {
+      holdSentMessage();
+      // Growth that no repaint saw (a row expanding, an image loading, streamed text): follow it
+      // while the reader is at the end. Older history pages never follow.
+      const pane = $('chatBody');
+      if (followOutput() && readerAtEnd && !sendAnchor && !readingAfterSend && historyBefore === null && distanceFromTail() > 1) {
+        pane.scrollTop = pane.scrollHeight;
+        paintJumpLatest();
+      }
+    });
     observer.observe($('timelineContent')); observer.observe($('chatBody'));
   } else $('timeline').addEventListener('toggle', () => { holdSentMessage(); }, true);
 

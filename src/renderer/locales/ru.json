@@ -1761,5 +1761,6 @@
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Браузер не подхватил восстановление этого чата, поэтому приложение прекратило повторные попытки. Снова откройте его вкладку — восстановление продолжится.",
   "Healthy": "В норме",
   "Degraded": "Снижено",
-  "Unknown": "Неизвестно"
+  "Unknown": "Неизвестно",
+  "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Следовать за новым выводом: оставаться в конце чата, пока ответы растут, здесь и в ChatGPT. Прокрутка вверх ставит на паузу."
 }

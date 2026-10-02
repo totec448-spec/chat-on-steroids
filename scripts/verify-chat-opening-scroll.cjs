@@ -83,6 +83,8 @@ app.whenReady().then(async () => {
       pane.scrollTop=0;
       await select('a');
     }
+    // The reader's own scrolling arrives with input; "Follow new output" counts only that as reading.
+    pane.dispatchEvent(new WheelEvent('wheel',{deltaY:-20}));
     pane.scrollTop=pane.scrollHeight-pane.clientHeight-20;
     await frame();
     const nearTail=pane.scrollTop, nearTailRefreshes=[], unrelatedReads=[];
@@ -92,6 +94,7 @@ app.whenReady().then(async () => {
       await waitFor(()=>fixture.lists>lists);await frame();
       nearTailRefreshes.push(pane.scrollTop);unrelatedReads.push(fixture.reads.length-reads);
     }
+    pane.dispatchEvent(new WheelEvent('wheel',{deltaY:-100}));
     pane.scrollTop=700;
     await frame();
     const readBefore=fixture.reads.length;fixture.addLive();fixture.signal({sessionIds:['a']});
