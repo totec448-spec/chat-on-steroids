@@ -71,7 +71,7 @@ import {
 import { runShutdownSequence } from './shutdown.js';
 import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
 import { applyStagedUpdate, startUpdateChecks } from './update.js';
-import { UI_BASE_ZOOM, windowLayoutForWorkArea, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
+import { UI_BASE_ZOOM, windowLayoutForDisplays, windowPlacementWasMaximized, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
 import {
   applyLoginStartup,
@@ -79,6 +79,7 @@ import {
   createWindowActivationGate,
   ownsAppRuntime,
   registerNativeWindowActivation,
+  trackNormalWindowBounds,
   shouldBeginAppBootstrap,
   shouldQuitOnWindowAllClosed
 } from './window-lifecycle.js';
@@ -89,8 +90,10 @@ import { editContextMenuTemplate } from './edit-context-menu.js';
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
 const RETIRED_WORKERS_STATE = 'retired-workers';
+const WINDOW_BOUNDS_STATE = 'window-bounds';
 
 let window: BrowserWindow | null = null;
+let savedWindowBounds: unknown = null;
 let tray: Tray | null = null;
 let quitting = false;
 let shutdownStarted = false;
@@ -110,7 +113,13 @@ if (!hasSingleInstanceLock) {
 const BENIGN_RENDERER_ERRORS = new Set(['ResizeObserver loop completed with undelivered notifications.']);
 
 function createWindow(): void {
-  const layout = windowLayoutForWorkArea(screen.getPrimaryDisplay().workArea);
+  const primaryWorkArea = screen.getPrimaryDisplay().workArea;
+  const { layout, restored } = windowLayoutForDisplays(
+    primaryWorkArea,
+    screen.getAllDisplays().map(display => display.workArea),
+    savedWindowBounds
+  );
+  const restoreMaximized = windowPlacementWasMaximized(savedWindowBounds);
   const icon = browserWindowIconPath(process.platform, app.isPackaged, process.resourcesPath);
   window = new BrowserWindow({
     ...layout,
@@ -143,6 +152,7 @@ function createWindow(): void {
   });
 
   if (process.platform === 'win32') window.removeMenu();
+  const owner = window;
 
   // First use discovers the account once. A restored catalog is immediately usable;
   // showing the window again may observe an existing page, never open another browser attempt.
@@ -154,11 +164,17 @@ function createWindow(): void {
     // A renderer can finish loading after Cmd+Q has already entered bounded teardown. Never let
     // that late native event make the app visible again while `will-quit` is draining.
     if (!quitting) {
-      // Newly created windows intentionally start maximized. Keep that startup-only presentation
-      // here so later tray/Dock/native activation can show an existing user-sized window without
-      // overwriting its geometry.
-      if (!window?.isFullScreen()) window?.maximize();
+      // Fresh installs retain the existing maximized first presentation. A saved normal window
+      // stays normal; a window last used maximized restores that presentation over its saved
+      // normal rectangle so un-maximizing returns to the same user-sized geometry.
+      if ((!restored || restoreMaximized) && !window?.isFullScreen()) window?.maximize();
       showWindow();
+      // Start observing only after initial native presentation has settled. BrowserWindow
+      // construction/maximization can itself emit geometry events; those are not user choices.
+      trackNormalWindowBounds(owner, (placement) => {
+        savedWindowBounds = placement;
+        writeDurableSoon(WINDOW_BOUNDS_STATE, placement);
+      });
     }
   });
 
@@ -339,6 +355,8 @@ void app.whenReady().then(async () => {
   try { await initSkillsPath(userData); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
+  savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
+  if (windowActivation.isDisabled()) return;
   initControlApiPath(userData);
   initUvRuntime(userData);
   // Bundled pet packages: the packaged app's resources, or the repository's pets/ folder in dev.
