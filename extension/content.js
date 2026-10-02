@@ -9199,11 +9199,27 @@
     await startCompact(automatic);
   }
 
+  /** The current generation's still-visible recoverable transport error, or a gone stream. */
+  function currentAssistantError() {
+    return Boolean(currentStreamGone()) || CLF_DOM.errors().some(error => {
+      if (error.recoverable !== true || isStale(error.node)) return false;
+      const owner = localErrorGeneration(error);
+      // Unknown ownership is conservative evidence that the current page is still broken.
+      // Only a concrete different generation proves this is an old historical failure.
+      return !turnId || owner === null || owner === turnId;
+    });
+  }
+
   function resumePendingCompactionFromRepair(expectedConversationId) {
     const source = job && job.stage === 'handoff-pending' ? job.sourceSend : null;
     if (!alive || !expectedConversationId || conversationId !== expectedConversationId ||
         CLF_DOM.conversationId() !== expectedConversationId || !source ||
         (source.state !== 'not-attempted' && source.state !== 'attempted-unresolved')) return false;
+    // A source answer ChatGPT broke off ("Connection interrupted. Waiting for the complete
+    // answer") never settles in this document, so the ticket cannot be sent from it. Declining
+    // hands the pickup to its reload. Accepting kept a ticket unsent behind that card for over
+    // half an hour (2026-10-02), five pickups at a time, each one "resumed" and none reloaded.
+    if (!CLF_DOM.generating() && currentAssistantError()) return false;
     // The browser recovery claim proves only that this exact document may be nudged. It does not
     // own Stop or Send: those remain behind startCompact's source identity, settle and durable WAL
     // checkpoints. If an attempt is already alive, merely acknowledge the healthy document so the
@@ -12586,13 +12602,7 @@
       }
       // Popup diagnostics. Ids and counters only — no prose, no transcript, no page text.
       if (message.type === 'clf-page-status') {
-        const assistantError = Boolean(currentStreamGone()) || CLF_DOM.errors().some(error => {
-          if (error.recoverable !== true || isStale(error.node)) return false;
-          const owner = localErrorGeneration(error);
-          // Unknown ownership is conservative evidence that the current page is still broken.
-          // Only a concrete different generation proves this is an old historical failure.
-          return !turnId || owner === null || owner === turnId;
-        });
+        const assistantError = currentAssistantError();
         sendResponse({
           ok: true,
           // ChatGPT's own account that a response is streaming right now, as opposed to the
