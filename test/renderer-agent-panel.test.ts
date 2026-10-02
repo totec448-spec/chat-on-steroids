@@ -128,3 +128,33 @@ it('groups a failed broker worker under History even with recent session activit
   expect(host.textContent).toContain('Active · 0');
   expect(host.textContent).toContain('History · 1');
 });
+
+
+it('shows bounded worker health in the overview without changing lifecycle ownership', () => {
+  dom = new JSDOM('<main></main><button></button>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
+  const panel = createAgentPanel({
+    host,
+    toggle,
+    load: async () => ({ events: [] }),
+    render: () => [],
+    openMain: vi.fn(),
+    working: () => false,
+    agent: () => ({ state: 'detached', task: 'Inspect the build', conversationId: 'chat-worker' })
+  });
+  panel.update('prime', [{
+    id: 'worker',
+    title: 'worker-1 · Inspect the build',
+    conversationId: 'chat-worker',
+    startedAt: Date.now() - 5_000,
+    updatedAt: Date.now(),
+    activeTurnId: null,
+    origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-1', task: 'Inspect the build' }
+  } as SessionSummary]);
+  toggle.click();
+  const card = host.querySelector<HTMLElement>('.agent-panel-row')!;
+  expect(card.dataset.health).toBe('degraded');
+  expect(card.querySelector('.agent-card-health')?.textContent).toBe('Degraded');
+  expect(card.querySelector<HTMLElement>('.agent-card-health')?.getAttribute('title')).toBeNull();
+});
