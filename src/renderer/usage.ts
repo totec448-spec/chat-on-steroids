@@ -11,8 +11,10 @@ function saveFormula(): void {
   try { localStorage.setItem(FORMULA_KEY, JSON.stringify(formula)); } catch { /* Read-only storage still permits an in-memory comparison. */ }
 }
 
-const count = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
-const money = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+// In the app's language, like every other number on this page, not the system region's: an English
+// page read "4.082,99 $" and "8,5 Mrd." on a German Mac. Created per call so a language change applies.
+const count = { format: (value: number) => new Intl.NumberFormat(currentLanguage(), { notation: 'compact', maximumFractionDigits: 1 }).format(value) };
+const money = { format: (value: number) => new Intl.NumberFormat(currentLanguage(), { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value) };
 const featureLabels: Record<string, string> = { deep_research: "Deep research", file_upload: "File uploads", paste_text_to_file: "Pasted text files", image_gen: "Image generation" };
 function usageHint(node: HTMLElement, text: string | (() => string)): void {
   ui(node, 'data-usage-hint', typeof text === 'function' ? text : () => text);
@@ -44,7 +46,7 @@ function paintMessages(): void {
   ui($('usageMessages56'), 'textContent', () => totals.gpt56.toLocaleString(currentLanguage()));
   ui($('usageMessages6'), 'textContent', () => totals.gpt6.toLocaleString(currentLanguage()));
   const period = () => {
-    const format = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' });
+    const format = new Intl.DateTimeFormat(currentLanguage(), { dateStyle: 'short', timeStyle: 'short' });
     return t('Local time · {0} → {1}', [format.format(from), format.format(through)]);
   };
   ui($('usageMessagePeriod'), 'textContent', period);
@@ -65,7 +67,7 @@ export async function refreshUsage(): Promise<void> {
     paintMessages();
     const summary = $('usageSummary'); summary.replaceChildren();
     for (const [label, number] of [['Processed tokens · est.', value.tokens], ['Peak daily tokens', Math.max(0, ...value.days.map((day) => day.tokens))], ['Conversations', value.sessions], ['Active days', value.days.filter((day) => day.tokens > 0).length]] as const) {
-      const item = el('div'); item.dataset.usageMetric = label; usageHint(item, () => `${Math.round(number).toLocaleString(currentLanguage())} ${t(label).toLowerCase()}`); item.append(el('strong', '', count.format(number)), el('span', '', () => t(label))); summary.append(item);
+      const item = el('div'); item.dataset.usageMetric = label; usageHint(item, () => `${Math.round(number).toLocaleString(currentLanguage())} ${t(label).toLowerCase()}`); item.append(el('strong', '', () => count.format(number)), el('span', '', () => t(label))); summary.append(item);
     }
     const limits = $('usageLimits'); limits.replaceChildren();
     const modelRows = value.limits.filter((row) => row.scope === 'model');
@@ -127,7 +129,7 @@ function paintCost(): void {
   const daily = snapshot.days.map(day => ({ ...day, ...usageEstimate(day.models, formula) }));
   for (const [label, number] of [['Processed tokens · est.', total.tokens], ['Peak daily tokens', Math.max(0, ...daily.map(day => day.tokens))]] as const) {
     const item = [...$('usageSummary').children].find(node => (node as HTMLElement).dataset.usageMetric === label) as HTMLElement | undefined;
-    if (item) { item.querySelector('strong')!.textContent = count.format(number); ui(item, 'data-usage-hint', () => `${Math.round(number).toLocaleString(currentLanguage())} ${t(label).toLowerCase()}`); }
+    if (item) { ui(item.querySelector('strong')!, 'textContent', () => count.format(number)); ui(item, 'data-usage-hint', () => `${Math.round(number).toLocaleString(currentLanguage())} ${t(label).toLowerCase()}`); }
   }
   const heat = $('usageHeatmap'); heat.replaceChildren();
   const byDay = new Map(daily.map(day => [day.date, day.tokens])); const peak = Math.max(1, ...daily.map(day => day.tokens));
@@ -185,7 +187,7 @@ function paintCost(): void {
     const estimate = usageEstimate(entry.sources, formula); const row = el('tr');
     const name = el('td', '', () => `${entry.model} · ${entry.reasoningEffort ?? t("effort unknown")}${entry.assumed ? t(" (assumed)") : ''}`);
     usageHint(name, () => t("Recorded IDs: {0}", [[...new Set(entry.sources.map(source => source.model))].join(', ')]));
-    row.append(name, el('td', '', Math.round(estimate.tokens).toLocaleString(currentLanguage())), el('td', '', () => estimate.unpricedTokens > 0 && estimate.unpricedTokens === estimate.tokens ? t("Rate unknown") : costText(estimate))); modelTable.append(row);
+    row.append(name, el('td', '', () => Math.round(estimate.tokens).toLocaleString(currentLanguage())), el('td', '', () => estimate.unpricedTokens > 0 && estimate.unpricedTokens === estimate.tokens ? t("Rate unknown") : costText(estimate))); modelTable.append(row);
   }
   // The last 30 days as bars, one glance instead of a long table; the table stays one click away.
   const recent = daily.slice(-30);
@@ -200,14 +202,14 @@ function paintCost(): void {
     chart.append(bar);
   }
   // Scale and range at a glance: the peak day's amount on top, the first and last day below.
-  const scale = el('div', 'usage-bars-scale', money.format(top));
+  const scale = el('div', 'usage-bars-scale', () => money.format(top));
   const axis = el('div', 'usage-bars-axis');
   if (recent.length) axis.append(el('span', '', () => dayLabel(recent[0]!.date)), el('span', '', () => dayLabel(recent[recent.length - 1]!.date)));
   const breakdown = el('details', 'usage-breakdown');
   breakdown.append(el('summary', '', () => t("Daily breakdown")));
   const table = el('table', 'usage-table'); const head = el('tr');
   head.append(el('th', '', () => t("Day")), el('th', '', () => t("Estimated tokens")), el('th', '', () => t("Cached × {0}", [formula.multiplier]))); table.append(head);
-  for (const day of [...daily].reverse()) { const row = el('tr'); row.append(el('td', '', () => dayLabel(day.date)), el('td', '', Math.round(day.tokens).toLocaleString(currentLanguage())), el('td', '', costText(day))); table.append(row); }
+  for (const day of [...daily].reverse()) { const row = el('tr'); row.append(el('td', '', () => dayLabel(day.date)), el('td', '', () => Math.round(day.tokens).toLocaleString(currentLanguage())), el('td', '', () => costText(day))); table.append(row); }
   if (!snapshot.days.length) { const row = el('tr'); const cell = el('td', 'muted', () => t("No recorded tool calls yet.")); cell.setAttribute('colspan', '3'); row.append(cell); table.append(row); }
   breakdown.append(table);
   const modelSection = el('section', 'usage-days-model');
