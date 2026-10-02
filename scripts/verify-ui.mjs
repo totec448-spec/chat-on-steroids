@@ -55,7 +55,7 @@ for (const name of scripts) {
   if (flaky.includes(name) && process.env.GITHUB_ACTIONS) console.log(`::warning title=Flaky UI check::${name} failed once and passed on retry`);
   if (!ok) {
     const reason = outcome.output.split('\n').filter(line =>
-      /Error|assert|Timeout|timed out|expected|actual/i.test(line) && !/sandbox_extension|task_policy|js2c/.test(line)).slice(0, 6);
+      /Error|assert|Timeout|timed out|expected|actual/i.test(line) && !/sandbox_extension|task_policy|js2c|XPC error for connection/.test(line)).slice(0, 6);
     console.log((reason.length ? reason : outcome.output.split('\n').slice(-6)).map(line => `      ${line.slice(0, 240)}`).join('\n'));
   }
 }

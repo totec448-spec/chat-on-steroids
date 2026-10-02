@@ -2,13 +2,14 @@ import { ui, t } from './i18n.js';
 import type { AgentInfo, SessionSummary, SessionEvent } from '../shared/session.js';
 import { workerReportedFinish } from '../shared/session-activity.js';
 import { evaluateWorkerOverviewHealth } from '../shared/agent-health.js';
-import { el, icon } from './dom.js';
-import { attachWorkPanelResize } from './work-panel-resize.js';
+import { completedTurnIds } from '../shared/markdown-export.js';
+import { disclosureChevron, el, icon, run } from './dom.js';
 
-/** A read-only second pane. Its selection never changes the main chat's composer. */
+/** Read-only worker execution in the timeline or work dock. Local session ids own cards. */
 export function createAgentPanel(options: {
   host: HTMLElement;
   mount?: HTMLElement;
+  inline?: boolean;
   toggle?: HTMLButtonElement;
   onShow?: () => void;
   onEscape?: () => void;
@@ -18,123 +19,100 @@ export function createAgentPanel(options: {
   working: (summary: SessionSummary) => boolean;
   agent?: (summary: SessionSummary) => (Pick<AgentInfo, 'state' | 'task'> & { conversationId?: string | null }) | null;
 }) {
-  const pane = el('aside', 'agent-panel'); pane.hidden = true;
-  ui(pane, 'aria-label', () => t("Sub-agents"));
-  if (!options.mount) attachWorkPanelResize(options.host, pane);
-  const head = el('div', 'agent-panel-header'); head.hidden = true;
-  const back = el('button', 'btn btn-icon agent-back'); back.append(icon('i-back'));
-  ui(back, 'title', () => t("Back to sub-agents")); back.setAttribute('type', 'button');
-  ui(back, 'aria-label', () => t("Back to sub-agents"));
-  const title = el('strong');
-  const body = el('div', 'agent-panel-body');
-  head.append(back, title); pane.append(head, body); (options.mount ?? options.host).append(pane);
-  let parent: string | null = null, workers: SessionSummary[] = [], selected: string | null = null;
-  let generation = 0;
-  function hide(): void {
-    generation++; pane.hidden = true; selected = null;
-    if (!options.mount) options.host.classList.remove('has-agent-panel');
-    options.toggle?.setAttribute('aria-expanded', 'false');
-  }
-  function show(): void {
-    options.onShow?.();
-    pane.hidden = false;
-    if (!options.mount) options.host.classList.add('has-agent-panel');
-    options.toggle?.setAttribute('aria-expanded', 'true');
-  }
-  function list(): void {
-    generation++; selected = null; head.hidden = true; body.replaceChildren();
-    const isActive = (worker: SessionSummary): boolean => {
-      const state = options.agent?.(worker)?.state;
-      return state ? ['invited', 'active', 'detached', 'waking'].includes(state) : options.working(worker);
-    };
-    for (const active of [true, false]) {
-      const group = workers.filter(worker => isActive(worker) === active);
-      body.append(el('h3', '', () => `${active ? t("Active") : t("History")} · ${group.length}`));
-      if (!group.length) { body.append(el('p', 'meta', () => active ? t("No active sub-agents") : t("No recorded sub-agents"))); continue; }
-      for (const worker of group) {
-        const row = el('button', 'agent-panel-row'); row.setAttribute('type', 'button');
-        const owner = options.agent?.(worker);
-        const state = owner?.state ?? (workerReportedFinish(worker) ? 'sleeping' : active ? 'working' : 'history');
-        row.dataset.state = state;
-        const health = evaluateWorkerOverviewHealth({
-          state: owner?.state ?? null,
-          exactIdentity: Boolean(owner?.conversationId && worker.conversationId &&
-            owner.conversationId === worker.conversationId),
-          working: options.working(worker),
-          activeTurn: worker.activeTurnId !== null && worker.activeTurnId !== undefined
-        });
-        row.dataset.health = health.health;
-        const identity = worker.origin?.agentId ?? worker.title.split(' · ')[0] ?? worker.title;
-        const task = owner?.task?.trim();
-        const original = worker.origin?.task || worker.title;
-        // A worker still opening has no conversation yet; undefined === undefined must not read a model.
-        const model = worker.selectedModel && worker.conversationId && worker.selectedModel.conversationId === worker.conversationId
-          ? [worker.selectedModel.model, worker.selectedModel.reasoningEffort].filter(Boolean).join(' · ') : '';
-        const elapsedMs = Math.max(0, (active ? Date.now() : worker.endedAt ?? worker.updatedAt) - worker.startedAt);
-        const elapsed = elapsedMs < 60_000 ? `${Math.floor(elapsedMs / 1000)}s`
-          : elapsedMs < 3_600_000 ? `${Math.floor(elapsedMs / 60_000)}m` : `${Math.floor(elapsedMs / 3_600_000)}h`;
-        const avatar = el('span', 'agent-avatar', worker.origin?.agentId?.replace(/^worker-/, '') ?? '•');
-        const content = el('span', 'agent-card-content');
-        const heading = el('span', 'agent-card-heading');
-        heading.append(el('span', 'agent-status-dot'), el('strong', 'agent-card-name', identity));
-        if (model) heading.append(el('span', 'agent-card-model', model));
-        const statusLabel: Record<string, string> = { working: 'Working', history: 'History', invited: 'opening', detached: 'no tab' };
-        const meta = el('span', 'agent-card-meta');
-        const healthText = el('span', 'agent-card-health', () => {
-          if (health.health === 'healthy') return t('Healthy');
-          if (health.health === 'degraded') return t('Degraded');
-          return t('Unknown');
-        });
-        meta.append(document.createTextNode(`${t(statusLabel[state] ?? state)} · `), healthText,
-          document.createTextNode(` · ${elapsed}`));
-        content.append(heading, el('span', 'agent-card-task', () => task || `${t('Original assignment')}: ${original}`), meta);
-        row.append(avatar, content);
-        row.title = task || original;
-        row.onclick = () => void open(worker.id); body.append(row);
-      }
-    }
-  }
-  async function open(id: string, refresh = false): Promise<void> {
-    const worker = workers.find(row => row.id === id);
-    if (!worker) return;
-    const preserve = refresh && selected === id && !pane.hidden;
-    show(); selected = id; const request = ++generation;
-    head.hidden = false; title.textContent = worker.title;
-    if (!preserve) body.replaceChildren(el('p', 'meta', () => t("Loading conversation…")));
-    const current = () => request === generation && selected === id && !pane.hidden;
+  const pane = document.createElement('details'); pane.className = 'agent-panel'; pane.hidden = true;
+  const summary = el('summary', 'agent-panel-header');
+  const title = el('strong'); summary.append(icon('i-agents'), title, disclosureChevron('activity-chevron'));
+  const body = el('div', 'agent-panel-body'); pane.append(summary, body); (options.mount ?? options.host).append(pane);
+  let parent: string | null = null, workers: SessionSummary[] = [], generation = 0;
+  const cards = new Map<string, { card: HTMLDetailsElement; heading: HTMLElement; content: HTMLElement; revision: number; request: number }>();
+  function hide(): void { pane.open = false; options.toggle?.setAttribute('aria-expanded', 'false'); }
+  function show(): void { if (!parent || (!workers.length && options.inline !== false)) return; options.onShow?.(); pane.open = true; options.toggle?.setAttribute('aria-expanded', 'true'); }
+  async function loadWorker(id: string): Promise<void> {
+    const entry = cards.get(id); if (!entry) return;
+    const epoch = generation, request = ++entry.request;
+    const current = () => epoch === generation && cards.get(id) === entry && request === entry.request && entry.card.isConnected;
+    if (!entry.content.childElementCount) entry.content.append(el('p', 'meta', () => t('Loading conversation…')));
     const detail = await options.load(id);
     if (!current()) return;
-    if (!detail) { body.replaceChildren(el('p', 'meta', () => t("Conversation unavailable"))); return; }
-    const openMain = el('button', 'btn', () => t("Open full chat")); openMain.setAttribute('type', 'button');
-    openMain.onclick = () => { hide(); options.openMain(id); };
-    const position = body.scrollTop;
-    const follow = !preserve || position + body.clientHeight >= body.scrollHeight - 40;
-    body.replaceChildren(openMain, ...options.render(detail.events, id, current));
-    body.scrollTop = follow ? body.scrollHeight : position;
+    if (!detail) { entry.content.replaceChildren(el('p', 'meta', () => t('Conversation unavailable'))); return; }
+    const openMain = el('button', 'btn agent-chat-open', () => t('Open full chat')) as HTMLButtonElement;
+    openMain.type = 'button'; openMain.onclick = () => options.openMain(id);
+    const completed = completedTurnIds(detail.events);
+    const answer = detail.events.findLast(event => event.kind === 'assistant_message' && event.final && event.turnId && completed.has(event.turnId));
+    const report = document.createElement('details'); report.className = 'worker-report';
+    const reportTitle = el('summary', 'artifact-chip');
+    reportTitle.append(icon('i-file-text'), el('span', '', () => t('Inspect conversation')));
+    report.append(reportTitle);
+    let rendered = false;
+    report.addEventListener('toggle', () => {
+      if (!report.open || rendered || !current()) return;
+      rendered = true; report.append(...options.render(detail.events, id, current));
+    });
+    entry.content.replaceChildren(openMain);
+    if (answer?.kind === 'assistant_message' && answer.turnId) {
+      const download = el('button', 'artifact-chip') as HTMLButtonElement; download.type = 'button';
+      const name = `${workers.find(worker => worker.id === id)?.origin?.agentId ?? 'worker'}-report.md`;
+      download.append(el('span', 'artifact-type', 'MD'), el('span', '', name),
+        el('span', 'meta', `${(new TextEncoder().encode(answer.message.text).length / 1024).toFixed(1)} KB`), icon('i-export'));
+      ui(download, 'title', () => t('Save report as Markdown'));
+      download.onclick = () => void run(window.api.exportMarkdown({ id, scope: 'answer', turnId: answer.turnId!, target: 'file' }));
+      entry.content.append(download);
+    }
+    entry.content.append(report);
   }
-  back.onclick = list;
+  function paintWorker(worker: SessionSummary): void {
+    let entry = cards.get(worker.id);
+    if (!entry) {
+      const card = document.createElement('details'); card.className = 'agent-panel-row'; card.dataset.sessionId = worker.id;
+      const heading = el('summary', 'agent-card-heading');
+      const content = el('div', 'agent-worker-content'); card.append(heading, content);
+      entry = { card, heading, content, revision: worker.updatedAt, request: 0 }; cards.set(worker.id, entry);
+      card.addEventListener('toggle', () => { if (card.open && !content.childElementCount) void loadWorker(worker.id); });
+    }
+    const owner = options.agent?.(worker), working = options.working(worker);
+    const state = owner?.state ?? (workerReportedFinish(worker) ? 'sleeping' : working ? 'working' : 'history');
+    entry.card.dataset.state = state;
+    const health = evaluateWorkerOverviewHealth({ state: owner?.state ?? null,
+      exactIdentity: Boolean(owner?.conversationId && worker.conversationId && owner.conversationId === worker.conversationId),
+      working, activeTurn: worker.activeTurnId != null });
+    entry.card.dataset.health = health.health;
+    const model = worker.selectedModel && worker.conversationId && worker.selectedModel.conversationId === worker.conversationId
+      ? [worker.selectedModel.model, worker.selectedModel.reasoningEffort].filter(Boolean).join(' · ') : '';
+    const identity = worker.origin?.agentId ?? worker.title;
+    const statusLabel: Record<string, string> = { working: 'Working', history: 'History', invited: 'opening', detached: 'no tab' };
+    const healthLabel = () => health.health === 'healthy' ? t('Healthy') : health.health === 'degraded' ? t('Degraded') : t('Unknown');
+    entry.heading.replaceChildren(el('span', 'agent-status-dot'), el('strong', 'agent-card-name', identity),
+      el('span', 'agent-card-state', () => t(statusLabel[state] ?? state)),
+      el('span', 'agent-card-task', owner?.task?.trim() || worker.origin?.task || worker.title),
+      el('span', 'agent-card-model', model), el('span', 'agent-card-health', healthLabel), disclosureChevron('activity-chevron'));
+    entry.card.title = owner?.task?.trim() || worker.origin?.task || worker.title;
+    if (entry.revision !== worker.updatedAt && entry.card.open) void loadWorker(worker.id);
+    entry.revision = worker.updatedAt;
+    body.append(entry.card);
+  }
   pane.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
-    event.preventDefault(); hide();
-    if (options.onEscape) options.onEscape(); else options.toggle?.focus();
+    event.preventDefault(); hide(); if (options.onEscape) options.onEscape(); else options.toggle?.focus();
   });
-  if (options.toggle) options.toggle.onclick = () => { if (pane.hidden) { show(); list(); } else hide(); };
+  if (options.toggle) options.toggle.onclick = () => pane.open ? hide() : show();
   return {
-    hide,
-    show: () => { show(); list(); },
-    open,
+    hide, show,
+    async open(id: string): Promise<void> {
+      const entry = cards.get(id); if (!entry) return;
+      show(); entry.card.open = true; await loadWorker(id); entry.card.scrollIntoView?.({ block: 'nearest' });
+    },
     update(id: string | null, next: SessionSummary[]): void {
-      if (parent !== id) { hide(); parent = id; }
-      const previous = workers.find(worker => worker.id === selected);
+      if (parent !== id) { generation++; hide(); cards.clear(); body.replaceChildren(); parent = id; }
       workers = next;
-      if (options.toggle) {
-        options.toggle.hidden = id === null;
-        ui(options.toggle, 'title', () => t("Sub-agents · {0} recorded", [workers.length]));
-      }
-      if (pane.hidden) return;
-      const latest = workers.find(worker => worker.id === selected);
-      if (!selected || !latest) list();
-      else if (latest.updatedAt !== previous?.updatedAt) void open(latest.id, true);
+      const keep = new Set(next.map(worker => worker.id));
+      for (const [key, entry] of cards) if (!keep.has(key)) { entry.card.remove(); cards.delete(key); }
+      body.querySelector('.agent-panel-empty')?.remove();
+      if (!next.length && options.inline === false) body.append(el('p', 'meta agent-panel-empty', () => t('No recorded sub-agents')));
+      for (const worker of next) paintWorker(worker);
+      ui(title, 'textContent', () => t('Sub-agents · {0} recorded', [workers.length]));
+      pane.hidden = !id || (options.inline !== false && !next.length);
+      if (options.mount && options.inline !== false) options.mount.hidden = pane.hidden;
+      if (options.toggle) options.toggle.hidden = pane.hidden;
     }
   };
 }

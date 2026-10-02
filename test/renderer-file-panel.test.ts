@@ -939,14 +939,13 @@ it('closes immediately when the selected task no longer has a project', async ()
   expect(host.classList.contains('has-file-panel')).toBe(false);
 });
 
-it('shares the right work slot exclusively with the Sub-agents panel', async () => {
+it('keeps inline workers independent of the Files work slot', async () => {
   const agentToggle = document.createElement('button');
   document.body.append(agentToggle);
   let files: ReturnType<typeof createFilePanel>;
   const agents = createAgentPanel({
     host,
     toggle: agentToggle,
-    onShow: () => files.hide(),
     load: async () => ({ events: [] }),
     render: () => [],
     openMain: () => undefined,
@@ -955,7 +954,6 @@ it('shares the right work slot exclusively with the Sub-agents panel', async () 
   files = createFilePanel({
     host,
     toggle,
-    onShow: () => agents.hide(),
     onAttach: () => undefined
   });
   files.update(projectA);
@@ -972,17 +970,18 @@ it('shares the right work slot exclusively with the Sub-agents panel', async () 
   expect(host.classList.contains('has-agent-panel')).toBe(false);
 
   agentToggle.click(); await tick();
-  expect(files.visible()).toBe(false);
-  expect(host.classList.contains('has-file-panel')).toBe(false);
-  expect(host.classList.contains('has-agent-panel')).toBe(true);
-
-  toggle.click(); await tick();
   expect(files.visible()).toBe(true);
   expect(host.classList.contains('has-file-panel')).toBe(true);
   expect(host.classList.contains('has-agent-panel')).toBe(false);
+  expect(host.querySelector<HTMLDetailsElement>('.agent-panel')!.open).toBe(true);
+
+  toggle.click(); await tick();
+  expect(files.visible()).toBe(false);
+  expect(host.classList.contains('has-file-panel')).toBe(false);
+  expect(host.querySelector<HTMLDetailsElement>('.agent-panel')!.open).toBe(true);
 });
 
-it('gives Files and Sub-agents the same horizontally resizable work-panel width', async () => {
+it('resizes Files without adding a second divider or width owner for inline workers', async () => {
   Object.defineProperty(dom.window, 'innerWidth', { configurable: true, value: 1200 });
   const agentToggle = document.createElement('button');
   document.body.append(agentToggle);
@@ -1000,10 +999,8 @@ it('gives Files and Sub-agents the same horizontally resizable work-panel width'
   expect(width).toMatch(/^\d+px$/);
 
   agents.update('prime-session', []);
-  const agentHandle = host.querySelector<HTMLElement>('.agent-panel .work-panel-resize')!;
-  expect(agentHandle.getAttribute('aria-valuenow')).toBe(width.replace('px', ''));
-  agentHandle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-  expect(host.style.getPropertyValue('--work-panel-width')).not.toBe(width);
+  expect(host.querySelector('.agent-panel .work-panel-resize')).toBeNull();
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe(width);
 });
 async function editFile(): Promise<HTMLTextAreaElement> {
   host.querySelector<HTMLButtonElement>('[data-path="README.md"]')!.click(); await tick();

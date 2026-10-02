@@ -43,6 +43,9 @@
         <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong></div>
         <div class="sidebar-primary" id="sidebarPrimary">
           <button class="btn new-chat" id="newChat" type="button"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i>New chat</button>
+          <button class="btn sidebar-primary-link" id="sidebarProjects" type="button"><i class="ico ph ph-folder" aria-hidden="true"></i>Projects</button>
+          <button class="btn sidebar-primary-link" id="sidebarArtifacts" type="button"><i class="ico ph ph-file-text" aria-hidden="true"></i>Artifacts</button>
+          <button class="btn sidebar-primary-link" id="sidebarCustomize" data-sidebar-page="appearance" type="button"><i class="ico ph ph-sun" aria-hidden="true"></i>Customize</button>
           <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
           <button class="btn sidebar-primary-link" id="sidebarSkills" data-sidebar-page="skills" type="button"><i class="ico ph ph-cube" aria-hidden="true"></i>Skills</button>
           <button class="btn sidebar-primary-link" id="sidebarPets" data-sidebar-page="pets" type="button"><i class="ico ph ph-paw-print" aria-hidden="true"></i>Pets</button>
@@ -88,7 +91,7 @@
         </section>
 
         <div class="sidebar-bottom">
-          <button class="btn" id="workspaceSettings" type="button"><i class="ico ph ph-gear-six" aria-hidden="true"></i>Settings</button>
+          <button class="btn" id="workspaceSettings" type="button"><span class="workspace-avatar" aria-hidden="true">C</span><span class="workspace-profile"><strong>Local workspace</strong><small>Settings</small></span><i class="ico ph ph-gear-six" aria-hidden="true"></i></button>
           <div class="connection-anchor">
             <button
               class="sidebar-connection"
@@ -817,6 +820,7 @@
                 <!-- Only shown while a multi-agent run has agents in this session. -->
                 <div class="seg" id="chatAgentFilter" hidden></div>
                 <div id="timeline"></div>
+                <section id="inlineAgents" class="inline-agents" aria-label="Sub-agents" hidden></section>
                 <div id="inputQueue" class="input-queue" aria-live="polite"></div>
                 <p class="empty" id="timelineEmpty">
                   <svg class="ico welcome-mark" viewBox="0 0 24 24"><use href="#i-mark" /></svg><span>What would you like to build?</span>
@@ -1092,10 +1096,16 @@
             </div>
             <div class="composer-dock" id="composerDock"><div class="composer-dock-body"><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div></div>
             <form class="composer" id="composer">
+              <div class="composer-context" id="composerContext" hidden>
+                <button id="composerWorkspaceContext" type="button" title="Workspace"><i class="ico ph ph-folder" aria-hidden="true"></i><span id="composerWorkspaceName"></span><code id="composerBranch" hidden></code></button>
+                <span id="composerGitStats" class="composer-git-stats" hidden></span>
+                <button id="composerReview" type="button"></button>
+                <button id="composerContextDismiss" type="button" aria-label="Hide workspace context" title="Hide workspace context"><i class="ico ph ph-x" aria-hidden="true"></i></button>
+              </div>
               <div id="skillPicker" class="skill-autocomplete" aria-label="Skills" hidden></div>
               <div id="composerSelectedSkills" class="composer-selected-skills" aria-label="Selected skills" hidden></div>
               <label class="sr-only" for="chatInput">Message ChatGPT</label>
-              <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" placeholder="Ask anything…"></textarea>
+              <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" placeholder="Type / for commands"></textarea>
               <div class="composer-toolbar">
                 <div class="composer-primary-controls">
                 <details class="composer-menu" id="attachmentMenu">
@@ -1129,6 +1139,8 @@
               </div>
                     </div>
                   </details>
+                  <button id="composerWorkspace" type="button" aria-label="Workspace" title="Workspace"><i class="ico ph ph-folder" aria-hidden="true"></i></button>
+                  <button id="composerPolicy" type="button" aria-pressed="false" title="Read-only mode"><i class="ico ph ph-lock-key" aria-hidden="true"></i><span id="composerPolicyLabel">Read-only</span></button>
                   <button id="createPlan" type="button"><i class="ico ph ph-list-checks" aria-hidden="true"></i><span>Plan</span></button>
                 </div>
                 <div class="context-meter" id="contextMeter">
@@ -1156,6 +1168,7 @@
                   </div>
                 </details>
                 <button class="btn" id="generateFinishGoal" type="button" hidden>Generate Goal</button>
+                <span id="composerExecutionStatus" class="composer-execution-status" role="status" hidden></span>
                 <div class="send-control">
                   <div class="send-options" id="sendOptions" hidden>
                     <div class="delivery-choices" role="radiogroup" aria-label="Message delivery">

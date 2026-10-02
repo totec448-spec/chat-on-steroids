@@ -862,6 +862,12 @@ or duplicating a message after an ambiguous browser outcome. One outbox owns all
 
 ### Input from composition to receipt
 
+The compound composer keeps workspace/Git context, the growing draft and controls in separate
+rows. `composer-context.ts` projects only the selected local project's Git snapshot with
+selection generations; branch and counts come from main's existing Git owner. Dismissal is
+local presentation. Review opens the existing work dock. The policy button uses the existing
+read-only Settings merge owner; it grants no separate automatic tool-approval authority.
+
 New Chat selects a window-local draft; it does not reset it. Returning from another chat
 or clicking New Chat again preserves text, staged attachments, prepared workflows and the
 first-message Goal/Loop objective, mode and delivery choice. Each project and unfiled New Chat
@@ -2914,10 +2920,12 @@ dragging or Alt+Up/Down moves a parent and its worker children within its curren
 unfiled group. A drag beyond the group clamps to its first/last visible slot; it cannot change
 project ownership. Pointer custody defers row replacement during live refresh and revalidates
 membership before saving. Off-page order survives partial list refreshes.
-The worker drawer is a read-only split view of the selected worker's own recorded conversation;
-opening it never switches the prime composer. Its cards show the scoped worker id, task, observed
-current-conversation model and broker status when known, falling back to recorded session activity.
-Unknown models stay absent rather than borrowing a configured default.
+Worker children remain in the project/session sidebar. `agent-panel.ts` also projects compact,
+read-only worker cards inline and in the optional Sub-agents work dock. Opening either view
+preserves the prime composer. Transcript inspection loads only on request and fences session,
+selection generation and request revision. Cards show the exact worker conversation's model,
+broker status and current assignment; unknown models remain absent. Only a recorded completed
+turn with a final answer offers a Markdown download through the existing export owner.
 Whole project groups use the same bounded order owner in a separate scope. Dragging a
 project summary or pressing Alt+Up/Down moves the group without changing any chat's project;
 the summary handle keeps focus and disclosure state. Group order survives reload.
@@ -2934,8 +2942,14 @@ receipt. Native edit context menus respect the focused editable control and sele
 The timeline retains each exact tool row. It folds five or more consecutive successful agent
 status checks or waits on the same process inside the existing activity disclosure, preserving
 each row on expansion; a failed call breaks the fold. An immediately preceding recorded progress
-line may title that disclosure as the observed activity phase. Tool diff counts and shell/result
-headers are projections of recorded data, not new execution or completion evidence.
+line may title that disclosure as the observed activity phase. Every consecutive tool run has
+one expandable summary; exact commands and readable output
+remain nested. Raw arguments and structured results load only in explicit payload inspection.
+`tool-artifacts.ts` reads immutable per-call edit assets through the fixed preload API;
+`unified-diff.ts` projects bounded syntax-colored rows with old/new gutters. Missing assets stay
+visibly unavailable, never reconstructed from patch intent or today's filesystem. Counts and
+shell/result headers project recorded data, not new execution or completion evidence. Elapsed
+runtime comes from recorded durations; token counts are explicitly local text estimates.
 A working turn's timeline ends with one live row: the call this app is running for the chat,
 else a step ChatGPT's page names in the progressive, else Thinking. `sessions:runningTools`
 answers it from `mcp/call-context.ts` `runningToolActivity`, whose caption the kernel builds

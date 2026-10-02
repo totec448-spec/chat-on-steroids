@@ -18,6 +18,9 @@ import { renderGoalReasoning } from './goal-reasoning.js';
 import { preserveTimelineViewport } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
+import { createComposerContext } from './composer-context.js';
+import { renderEditCards } from './tool-artifacts.js';
+import { executionRecap, readableToolOutput, toolCommand } from './tool-presentation.js';
 import { toolResultText } from './tool-result.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
@@ -55,7 +58,6 @@ import type {
   TokenPressure
 } from '../shared/session.js';
 import {
-  ATTRIBUTION_LABELS,
   CHAT_ACTIVE_MS,
   continuationMarkerOf,
   TURN_OUTCOME_LABELS,
@@ -181,7 +183,9 @@ function ownsComposerDraft(owner: ComposerDraftOwner): boolean {
 }
 function replaceComposerDraft(): void { composerDraftGeneration++; skillPicker?.close(); }
 let pendingNewInput: { id: string; generation: number } | null = null;
+let composerContext: ReturnType<typeof createComposerContext> | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
+let agentSidebar: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
 let reviewPanel: ReturnType<typeof createFilePanel> | null = null;
 const expandedWorkers = new Set<string>();
@@ -775,7 +779,7 @@ function paintSessions(): void {
               if (images) imageDrafts.set(draftKey(), images);
               else imageDrafts.delete(draftKey());
               imageDrafts.delete(oldKey);
-              ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => t('Ask anything…'));
+              ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => t('Type / for commands'));
             } else selectedProjectId = null;
           }
           paintSessions(); void refreshInputQueue();
@@ -810,7 +814,10 @@ function paintSessions(): void {
   chatList.replaceChildren(...rows);
   if (focusedProject) projectSections.find(section => section.dataset.projectId === focusedProject)
     ?.querySelector<HTMLElement>('.project-heading')?.focus({ preventScroll: true });
-  agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
+  const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
+  agentPanel?.update(selectedId, workers);
+  agentSidebar?.update(selectedId, workers);
+  composerContext?.update(selectedLocalProject(), `${selectionGeneration}:${sessions.find(row => row.id === selectedId)?.lastToolCallAt ?? ''}`);
   filePanel?.update(selectedLocalProject());
   reviewPanel?.update(selectedLocalProject());
   workspaceDocks?.sync();
@@ -1070,7 +1077,7 @@ function paintTaskPlan(): void {
   const plan = taskPlans.get(draftKey());
   const preview = $('taskPlanPreview'); preview.replaceChildren();
   preview.hidden = !plan || (!plan.requestId && !plan.stages && !plan.error);
-  ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => plan && !plan.text ? t("Describe the task to turn into a plan…") : t("Ask anything…"));
+  ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => plan && !plan.text ? t("Describe the task to turn into a plan…") : t("Type / for commands"));
   if (plan?.stages) paintPreparedPlan();
   else if (plan?.error) {
     const failure = plan.error;
@@ -2064,11 +2071,18 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
   const box = document.createElement('details');
   box.className = `tool tone-${call.summary.tone}`;
   box.dataset.outcome = call.outcome;
+  box.dataset.toolKind = call.summary.kind;
+  box.dataset.durationMs = String(call.durationMs);
+  box.dataset.resultChars = String(call.result.chars);
+  box.dataset.fileCount = String(call.summary.kind === 'read' ? (() => { try { const args = JSON.parse(call.args.text); return Array.isArray(args.paths) ? args.paths.length : 1; } catch { return 1; } })() : 0);
   if (call.changes?.length || ['exec_command', 'write_stdin', 'apply_patch'].includes(call.tool)) box.classList.add('is-artifact');
   box.open = openTools.has(call.callId);
   box.addEventListener('toggle', () => {
-    if (box.open) openTools.add(call.callId);
-    else openTools.delete(call.callId);
+    if (box.open) {
+      openTools.add(call.callId);
+      const group = box.closest<HTMLDetailsElement>('.tool-group');
+      if (group) group.open = true;
+    } else openTools.delete(call.callId);
   });
 
   const head = document.createElement('summary');
@@ -2222,28 +2236,26 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
     panel.append(header, textBlock('pre', value, truncated, chars));
     raw.append(panel);
   };
-  const facts = el('p', 'raw-facts');
-  ui(facts, 'textContent', () => `${call.tool} · ${call.outcome} · ${Math.round(call.durationMs)} ms · ` +
-    t("placed by {0}", [ATTRIBUTION_LABELS[call.attribution] ?? call.attribution]));
-  raw.append(facts);
-
-  if (call.changes && call.changes.length > 0) {
-    const changes = el('ul', 'changes');
-    for (const change of call.changes) {
-      const li = el('li');
-      li.append(el('code', '', change.path));
-      const counts = toolMetric(`+${change.added} −${change.removed}`);
-      if (change.approximate) counts.append(t(" (approx.)"));
-      li.append(counts);
-      changes.append(li);
-    }
-    raw.append(changes);
-  }
-
-  appendText(() => `${t('Arguments')} · ${call.tool}`, call.args.text, call.args.truncated, call.args.chars);
+  const id = context?.id ?? selectedId, generation = selectionGeneration;
+  const current = () => context ? context.current() : id === selectedId && generation === selectionGeneration;
+  if (call.outcome === 'ok' && call.changes?.length && id) raw.append(renderEditCards(call, id, current));
+  const command = toolCommand(call);
+  if (command) appendText(() => t('Command'), `$ ${command}`, call.args.truncated, call.args.chars);
   const images = call.assets?.filter(asset => ['image/png', 'image/jpeg', 'image/webp'].includes(asset.mimeType)) ?? [];
-  const readable = toolResultText(call.result.text, call.result.truncated, images.length > 0);
-  if (readable) appendText(() => `${t('Result')} · ${call.tool} · ${Math.round(call.durationMs)} ms`, readable, call.result.truncated && images.length === 0, call.result.chars);
+  const readable = readableToolOutput(call, toolResultText(call.result.text, call.result.truncated, images.length > 0));
+  if (readable) appendText(() => `${t('Result')} · ${Math.round(call.durationMs)} ms`, readable, call.result.truncated && images.length === 0, call.result.chars);
+  const inspect = document.createElement('details'); inspect.className = 'tool-inspection';
+  inspect.append(el('summary', '', () => t('Inspect recorded payload')));
+  let inspected = false;
+  inspect.addEventListener('toggle', () => {
+    if (!inspect.open || inspected) return;
+    inspected = true;
+    const facts = el('p', 'raw-facts', `${call.tool} · ${call.outcome} · ${Math.round(call.durationMs)} ms`);
+    const argumentsBlock = textBlock('pre', call.args.text, call.args.truncated, call.args.chars);
+    const resultBlock = textBlock('pre', call.result.text, call.result.truncated, call.result.chars);
+    inspect.append(facts, el('h4', '', () => t('Arguments')), argumentsBlock, el('h4', '', () => t('Result')), resultBlock);
+  });
+  raw.append(inspect);
   // Older recordings did not retain the reason an image asset was omitted. Explain
   // the missing local preview without inferring a historical provider receipt.
   if (call.tool === 'view_image' && call.outcome === 'ok' && images.length === 0) {
@@ -3058,7 +3070,7 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     if (!rows[i]!.matches('.ev-tool_call, .ev-page_tool, .ev-agent_message')) { grouped.push(rows[i++]!); continue; }
     let end = i + 1;
     while (end < rows.length && rows[end]!.matches('.ev-tool_call, .ev-page_tool, .ev-agent_message') && rows[end]!.dataset.activityBoundary === rows[i]!.dataset.activityBoundary) end++;
-    if (end - i === 1) { markNativeStep(rows[i]!, false); grouped.push(rows[i++]!); continue; }
+    if (end - i === 1 && rows[i]!.matches('.ev-page_tool')) { markNativeStep(rows[i]!, false); grouped.push(rows[i++]!); continue; }
     // Paging can extend or trim the beginning of an activity group. Its first
     // member is therefore not a new disclosure/viewport identity.
     const previous = rows.slice(i, end).map(row => row.closest<HTMLElement>('.tool-group'))
@@ -3070,7 +3082,7 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
       group = document.createElement('details'); group.className = 'tool-group';
       group.dataset.timelineKey = key;
       const summary = document.createElement('summary');
-      summary.append(el('span', 'activity-symbol'), el('span', 'activity-title'), disclosureChevron('ico activity-chevron'));
+      summary.append(el('span', 'activity-symbol'), el('span', 'activity-title'), el('span', 'execution-metrics'), disclosureChevron('ico activity-chevron'));
       group.append(summary, el('div', 'tool-group-body'));
       group.addEventListener('toggle', () => { if (group!.open) openTools.add(key); else openTools.delete(key); });
       group.open = openTools.has(key) || rows.slice(i, end).some((row) => row.querySelector('details[open]')); groups.set(key, group);
@@ -3100,7 +3112,15 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     const label = observedPhase || latestHead?.querySelector('b')?.textContent
       || latestHead?.querySelector('span:not(.agent-avatar)')?.textContent || t("Activity");
     group.classList.toggle('has-activity-phase', !!observedPhase);
-    group.querySelector('.activity-title')!.textContent = label;
+    const calls = members.flatMap(row => [...row.querySelectorAll<HTMLElement>('.tool[data-tool-kind]')]);
+    group.querySelector('.activity-title')!.textContent = calls.length ? executionRecap(calls) : label;
+    const duration = calls.reduce((sum, call) => sum + Number(call.dataset.durationMs), 0);
+    const units = calls.reduce((sum, call) => sum + Number(call.dataset.resultChars), 0);
+    const metrics = group.querySelector<HTMLElement>('.execution-metrics')!;
+    metrics.textContent = calls.length ? `${(duration / 1000).toFixed(1)}s · ~${compactNumber(Math.ceil(units / 4))} ${t('tokens')}` : '';
+    ui(metrics, 'title', () => t('Tool runtime · result tokens estimated from recorded text'));
+    group.classList.toggle('is-running', !finished && groups === toolGroups && turnWorking);
+    group.classList.toggle('has-failures', calls.some(call => call.dataset.outcome !== 'ok'));
     const listed = members.filter(row => row !== recap || observedPhase);
     ui(group.querySelector('summary')!, 'title', () => t("{0} actions · {1}", [listed.length, label]));
     const symbol = latestHead?.querySelector('.ico, .agent-avatar');
@@ -3588,6 +3608,7 @@ function parkTurnStatus(working: boolean): void {
 }
 
 function paintTurnStatus(status: ReturnType<typeof stateLine>): void {
+  ui($('composerExecutionStatus'), 'aria-label', () => stateLine().text);
   ui(turnStatusLine.firstElementChild as HTMLElement, 'textContent', () => stateLine().text);
   turnStatusLine.classList.toggle('is-working', status.working === true);
   paintTurnNow();
@@ -3600,6 +3621,7 @@ function paintStateLine(): void {
   durationTimer = undefined;
   const note = $('chatState');
   const { tone, working, ticking } = stateLine();
+  $('composerExecutionStatus').hidden = working !== true;
   ui(note, 'textContent', () => stateLine().text);
   note.className = `subhead-note${tone ? ` ${tone}` : ''}`;
   // Running state and timer ownership cannot depend on a translated label.
@@ -4892,7 +4914,7 @@ function selectSession(id: string): void {
   if (parent) expandedWorkers.add(parent);
   selectedProjectId = projectGroup(parent ? sessions.find(row => row.id === parent)?.projectId : selected?.projectId);
   if (selectedProjectId) expandedProjects.add(selectedProjectId);
-  ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => t("Ask anything…"));
+  ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => t("Type / for commands"));
   restoreDraft();
   if (ownerChanged) {
     // Retire the prior owner now; retain only its inert painted transcript until the
@@ -4935,7 +4957,7 @@ function selectNewChat(projectId: string | null = null): void {
   if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
     $('composer').animate?.([{ opacity: 0.45 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' });
   }
-  ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => projectId ? t("Message in {0}…", [projects.find(project => project.id === projectId)?.name ?? 'project']) : t("Ask anything…"));
+  ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => projectId ? t("Message in {0}…", [projects.find(project => project.id === projectId)?.name ?? 'project']) : t("Type / for commands"));
   $<HTMLTextAreaElement>('chatInput').focus();
 }
 
@@ -4955,27 +4977,31 @@ export function initChat(next: Deps): void {
   const chatHost = document.querySelector<HTMLElement>('[data-panel="chat"]')!;
   const docks = createWorkspaceDocks(chatHost);
   workspaceDocks = docks;
-  const agentToolGroups = new Map<string, HTMLDetailsElement>();
-  agentPanel = createAgentPanel({
-    host: chatHost, mount: docks.body,
-    onShow: () => { filePanel?.hide(); docks.adopt('agents'); },
-    onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); },
-    load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
-    agent: worker => swarm?.agents.find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
-      !!entry.conversationId && entry.conversationId === worker.conversationId) ?? null,
-    render: (source, id, current) => {
-      let boundary = '';
-      const rows = foldAgentCommunication(source).flatMap(event => {
-        if (!['tool_call', 'page_tool', 'agent_message'].includes(event.kind)) boundary = `event:${event.seq}`;
-        if (!['user_message', 'assistant_message', 'native_image', 'tool_call', 'page_tool', 'agent_message', 'chat_error'].includes(event.kind)) return [];
-        const row = el('div', `ev ev-${event.kind}`); const body = el('div', 'ev-body');
-        tagImageRow(row, event);
-        row.dataset.timelineKey = `event:${event.seq}`; row.dataset.activityBoundary = boundary;
-        body.append(eventBody(event, { id, current, history: source })); row.append(body); return [row];
-      });
-      return groupImageRows(groupToolRows(rows, `pane:${id}`, agentToolGroups));
-    }
-  });
+  const makeAgentView = (mount: HTMLElement, onEscape: () => void, inline = true) => {
+    const agentToolGroups = new Map<string, HTMLDetailsElement>();
+    return createAgentPanel({
+      host: chatHost, mount, onEscape, inline,
+      load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
+      agent: worker => swarm?.agents.find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
+        !!entry.conversationId && entry.conversationId === worker.conversationId) ?? null,
+      render: (source, id, current) => {
+        let boundary = '';
+        const rows = foldAgentCommunication(source).flatMap(event => {
+          if (!['tool_call', 'page_tool', 'agent_message'].includes(event.kind)) boundary = `event:${event.seq}`;
+          if (!['user_message', 'assistant_message', 'native_image', 'tool_call', 'page_tool', 'agent_message', 'chat_error'].includes(event.kind)) return [];
+          const row = el('div', `ev ev-${event.kind}`); const body = el('div', 'ev-body');
+          tagImageRow(row, event);
+          row.dataset.timelineKey = `event:${event.seq}`; row.dataset.activityBoundary = boundary;
+          body.append(eventBody(event, { id, current, history: source })); row.append(body); return [row];
+        });
+        return groupImageRows(groupToolRows(rows, `pane:${id}`, agentToolGroups));
+      }
+    });
+  };
+  agentPanel = makeAgentView($('inlineAgents'), () => $<HTMLTextAreaElement>('chatInput').focus());
+  const agentSidebarMount = el('section', 'agent-sidebar'); agentSidebarMount.hidden = true;
+  docks.body.append(agentSidebarMount);
+  agentSidebar = makeAgentView(agentSidebarMount, () => { docks.setOpen(false); docks.rightToggle.focus(); }, false);
   initChatModels(() => {
     paintLoopDelivery();
     const config = deps.state()?.config;
@@ -5147,7 +5173,7 @@ export function initChat(next: Deps): void {
   };
   filePanel = createFilePanel({
     host: chatHost, mount: docks.body,
-    onShow: () => { agentPanel?.hide(); docks.adopt('files'); },
+    onShow: () => docks.adopt('files'),
     onOpenChanges: () => docks.activate('review'),
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); },
     captureAttachment: () => {
@@ -5184,7 +5210,15 @@ export function initChat(next: Deps): void {
   docks.register('files', 'Files', 'i-folder', mount => {
     filePanel?.mountAt(mount); void filePanel?.show();
   }, () => filePanel?.hide(), () => selectedLocalProject() !== null);
-  docks.register('agents', 'Sub-agents', 'i-agents', () => agentPanel?.show(), () => agentPanel?.hide(), () => selectedId !== null);
+  docks.register('agents', 'Sub-agents', 'i-agents', mount => {
+    mount.append(agentSidebarMount); agentSidebarMount.hidden = false; agentSidebar?.show();
+  }, () => { agentSidebar?.hide(); agentSidebarMount.hidden = true; }, () => selectedId !== null);
+  $('sidebarArtifacts').onclick = () => {
+    if (selectedLocalProject()) docks.activate('review');
+    else toast(t('Open a project to use Files and Review'));
+  };
+  composerContext = createComposerContext(() => docks.activate('review'));
+  $('composerWorkspaceContext').onclick = () => docks.activate('files');
   $('attachImages').addEventListener('click', async () => {
     const owner = composerDraftOwner();
     appendImages(owner, await run(api.chooseFiles()));
@@ -5301,10 +5335,18 @@ export function initChat(next: Deps): void {
     const pane = $('chatBody');
     let intent = 0;
     const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
-    pane.addEventListener('wheel', () => { intent = Date.now(); }, { passive: true });
+    pane.addEventListener('wheel', event => {
+      intent = Date.now();
+      // Layout observers can run before the scroll event. Reading toward older
+      // content must release follow immediately, or a repaint pulls it back down.
+      if (event.deltaY < 0) readerAtEnd = false;
+    }, { passive: true });
     pane.addEventListener('touchmove', () => { intent = Date.now(); }, { passive: true });
     pane.addEventListener('keydown', event => {
-      if (scrollKeys.has(event.key) && !(event.target as Element).closest('summary, button, a, input, textarea, select, [contenteditable]')) intent = Date.now();
+      if (scrollKeys.has(event.key) && !(event.target as Element).closest('summary, button, a, input, textarea, select, [contenteditable]')) {
+        intent = Date.now();
+        if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) readerAtEnd = false;
+      }
     });
     // The scrollbar itself, and middle-button autoscroll, which starts anywhere over the content.
     pane.addEventListener('pointerdown', event => { if (event.target === pane || event.button === 1) intent = Date.now(); }, { passive: true });

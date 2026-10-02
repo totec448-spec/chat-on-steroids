@@ -1407,7 +1407,7 @@ it.each([false, true])('removes a project group in one click, keeps its chats an
   expect(w.document.querySelector('#chatList > .worker-group [data-id="child-session"]')).not.toBeNull();
   expect(w.document.querySelector(`#projectList [data-id="${parent.id}"]`)).toBeNull();
   expect(input.value).toBe('Keep my draft');
-  expect(input.placeholder).toBe('Ask anything…');
+  expect(input.placeholder).toBe('Type / for commands');
   finishList({ ok: true, data: { sessions: [parent, child], activeId: null, pressure: [], blocked: [] } });
   await settle();
   expect(w.document.querySelector(`[data-project-id="${project.id}"]`)).toBeNull();
@@ -1713,8 +1713,8 @@ it('folds a whole Compact & Resume into one row that says the new chat opened', 
   expect(timeline.querySelectorAll('.ev-turn_start, .ev-turn_end')).toHaveLength(0);
   expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(2);
   // The card sits where the compaction happened, between the two calls.
-  const order = [...timeline.children].map((row) => row.className);
-  expect(order).toEqual(['ev ev-tool_call', 'ev ev-compaction', 'ev ev-tool_call']);
+  const order = [...timeline.children].map((row) => row.classList.contains('tool-group') ? 'tool-group' : row.className);
+  expect(order).toEqual(['tool-group', 'ev ev-compaction', 'tool-group']);
 
   // Everything is still there for whoever unfolds the card.
   card.toggleAttribute('open', true);
@@ -1743,7 +1743,7 @@ it('folds a Compact & Resume whose marker ChatGPT escaped as Markdown', async ()
   // Stripped in the form it was recorded in, so no half-removed marker survives either.
   expect(timeline.textContent).not.toContain('[[CLF-');
   expect(timeline.textContent).not.toContain('CLF-RESUME');
-  expect([...timeline.children].map((row) => row.className)).toEqual(['ev ev-tool_call', 'ev ev-compaction', 'ev ev-tool_call']);
+  expect([...timeline.children].map((row) => row.classList.contains('tool-group') ? 'tool-group' : row.className)).toEqual(['tool-group', 'ev ev-compaction', 'tool-group']);
 
   cards[0]!.toggleAttribute('open', true);
   expect(cards[0]!.textContent).toContain('Brief request');
@@ -2080,7 +2080,7 @@ it('folds the answer turn into the card when the request row has no turn id', as
     resume
   ]);
   const timeline = w.document.getElementById('timeline')!;
-  const order = [...timeline.children].map((row) => row.className);
+  const order = [...timeline.children].map((row) => row.classList.contains('tool-group') ? 'tool-group' : row.className);
   expect(order).toEqual(['ev ev-compaction']);
   expect(timeline.querySelector('details.compaction')!.className).toContain('tone-good');
 });
@@ -2186,7 +2186,7 @@ it('keeps an unfolded tool row as the same open node while the chat keeps append
   expect(detached.some(node => node === group || node === before || (node as Element).contains?.(before))).toBe(false);
   expect(timeline.querySelector('details.tool-group')).toBe(group);
   expect(group.open).toBe(false);
-  expect(group.querySelector('summary')!.textContent).toBe('Read README.md');
+  expect(group.querySelector('.activity-title')!.textContent).toBe('Read 4 files');
   expect(group.querySelector('summary')!.title).toContain('4 actions');
 });
 
@@ -2219,13 +2219,13 @@ it('colors removed lines separately from added lines without changing other tool
 
   rows[0]!.open = true;
   rows[0]!.dispatchEvent(new w.Event('toggle'));
-  expect(rows[0]!.querySelector('.changes .metric')?.textContent).toBe('+28 −11');
-  expect(rows[0]!.querySelector('.changes .metric-added')?.textContent).toBe('+28');
-  expect(rows[0]!.querySelector('.changes .metric-removed')?.textContent).toBe('−11');
+  expect(rows[0]!.querySelector('.edit-card-header')?.textContent).toContain('+28−11');
+  expect(rows[0]!.querySelector('.edit-card-header .metric-added')?.textContent).toBe('+28');
+  expect(rows[0]!.querySelector('.edit-card-header .metric-removed')?.textContent).toBe('−11');
   rows[1]!.open = true;
   rows[1]!.dispatchEvent(new w.Event('toggle'));
-  expect(rows[1]!.querySelector('.changes .metric')?.textContent).toBe('+0 −7 (approx.)');
-  expect(rows[1]!.querySelector('.changes .metric-removed')?.textContent).toBe('−7');
+  expect(rows[1]!.querySelector('.edit-card-header')?.textContent).toContain('+0−7(approx.)');
+  expect(rows[1]!.querySelector('.edit-card-header .metric-removed')?.textContent).toBe('−7');
 });
 
 it('keeps mixed tool and agent activity in one latest-action disclosure between authored messages', async () => {
@@ -2238,7 +2238,8 @@ it('keeps mixed tool and agent activity in one latest-action disclosure between 
   const timeline = w.document.getElementById('timeline')!;
   const group = timeline.querySelector<HTMLDetailsElement>('.tool-group')!;
   expect(group.open).toBe(false);
-  expect(group.querySelector('.activity-title')!.textContent).toBe('Checking the implementation');
+  expect(group.querySelector('.activity-title')!.textContent).toBe('Read 2 files');
+  expect(group.querySelector('summary')!.title).toContain('Checking the implementation');
   expect(group.querySelector('.agent-communication summary')!.textContent).toContain('Message from worker-2');
   expect(group.querySelector('.agent-avatar')).not.toBeNull();
   expect(group.querySelectorAll('.ev')).toHaveLength(3);
@@ -2294,7 +2295,7 @@ it('keeps an artifact action as the activity title rather than its tool tag', as
     changes: [{ path: 'src/app.ts', added: 2, removed: 1, approximate: true }]
   } }]);
   const group = w.document.querySelector('.tool-group')!;
-  expect(group.querySelector('.activity-title')!.textContent).toBe('Ran build checks');
+  expect(group.querySelector('.activity-title')!.textContent).toBe('Executed 1 command · Read 1 file');
   expect(group.querySelector('.tool-tag')!.textContent).toBe('shell');
   expect(group.querySelector('.tool-change-count')!.textContent).toContain('approx.');
 });
@@ -2742,7 +2743,7 @@ it('disables empty task actions and confirms saving without the old helper sente
   expect(plan.getAttribute('aria-pressed')).toBe('true');
   plan.click();
   expect(plan.getAttribute('aria-pressed')).toBe('false');
-  expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).placeholder).toBe('Ask anything…');
+  expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).placeholder).toBe('Type / for commands');
   expect(w.document.getElementById('chatSend')!.title).toBe('');
   const objective = w.document.getElementById('sessionObjective') as HTMLTextAreaElement;
   objective.value = 'Implement and verify'; objective.dispatchEvent(new w.Event('input'));
@@ -4244,7 +4245,8 @@ it('titles a finished round with the native step that ends it, by position and i
   const prose: SessionEvent = { kind: 'assistant_message', seq: 5, time: T0 + 5000, source: 'extension', messageId: 'after-round', message: text('Listo.'), final: true, state: 'final' };
   const { w } = await boot([note(1, 'Planificando la comprobación'), toolCall(2, 'call-a'), toolCall(3, 'call-b'), note(4, 'Se ejecutó la comprobación exacta'), prose]);
   const group = w.document.querySelector<HTMLDetailsElement>('#timeline details.tool-group')!;
-  expect(group.querySelector('.activity-title')!.textContent).toBe('Se ejecutó la comprobación exacta');
+  expect(group.querySelector('.activity-title')!.textContent).toBe('Read 2 files');
+  expect(group.querySelector('summary')!.title).toContain('Se ejecutó la comprobación exacta');
   expect(group.querySelector('.activity-symbol .ph-check-circle')).not.toBeNull();
   // The recap heads the group rather than repeating inside it; the calls and the earlier note stay,
   // and a step written before any call keeps the globe.
@@ -4266,20 +4268,21 @@ it('names a round still in progress after its latest real action, until prose en
   // The turn still works and nothing follows the step: it is a note, whatever it says, not a recap.
   const { w, append } = await boot([toolCall(2, 'call-a'), toolCall(3, 'call-b'), nativeStep(4, 'Executed exact command check')]);
   expect(latestCallTitle(w.document)).toBeTruthy();
-  expect(groupTitle(w.document)).toBe(latestCallTitle(w.document));
+  expect(groupTitle(w.document)).toBe('Read 2 files');
   const pending = [...w.document.querySelectorAll<HTMLElement>('#timeline .tool-group-body .thinking-line')];
   expect(pending.map(line => line.textContent)).toEqual(['Executed exact command check']);
   expect(pending[0]!.querySelector('.ph-check-circle')).toBeNull();
   // Once prose follows, the same step ends a finished round and titles it.
   await append([{ kind: 'assistant_message', seq: 5, time: T0 + 5000, source: 'extension', messageId: 'after-round', message: text('Done.'), final: true, state: 'final' }]);
-  expect(groupTitle(w.document)).toBe('Executed exact command check');
+  expect(groupTitle(w.document)).toBe('Read 2 files');
+  expect(w.document.querySelector('#timeline .tool-group > summary')?.getAttribute('title')).toContain('Executed exact command check');
 });
 
 it('names a finished round that ends in a call after that call, and keeps the globe on a step before its calls', async () => {
   const { w } = await boot([nativeStep(1, 'Searched 3 websites'), toolCall(2, 'call-a'), toolCall(3, 'call-b'),
     { kind: 'assistant_message', seq: 5, time: T0 + 5000, source: 'extension', messageId: 'after-search', message: text('Done.'), final: true, state: 'final' }]);
   expect(latestCallTitle(w.document)).toBeTruthy();
-  expect(groupTitle(w.document)).toBe(latestCallTitle(w.document));
+  expect(groupTitle(w.document)).toBe('Read 2 files');
   expect(w.document.querySelector('#timeline .tool-group-body .thinking-line .ph-globe-hemisphere-west')).not.toBeNull();
 });
 

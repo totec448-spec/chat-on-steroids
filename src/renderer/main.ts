@@ -212,6 +212,9 @@ $('sessionList').addEventListener('click', event => {
   if ((event.target as HTMLElement).closest('[data-id], [data-new-project]')) showTab('chat');
 }, { capture: true });
 $('newChat').addEventListener('click', () => showTab('chat'));
+$('sidebarArtifacts').addEventListener('click', () => showTab('chat'));
+$('sidebarCustomize').addEventListener('click', () => showTab('appearance'));
+$('sidebarProjects').addEventListener('click', () => { showTab('chat'); $<HTMLDetailsElement>('projectsSection').open = true; $('projectsSection').scrollIntoView({ block: 'nearest' }); });
 $('sidebarPlugins').addEventListener('click', () => showTab('plugins'));
 $('sidebarPets').addEventListener('click', () => showTab('pets'));
 $('sidebarSkills').addEventListener('click', () => showTab('skills'));
@@ -1193,6 +1196,8 @@ function apply(next: AppState): void {
   $('facts').replaceChildren(...facts(next));
 
   // ---- permissions
+  $('composerPolicy').setAttribute('aria-pressed', String(config.readOnly));
+  ui($('composerPolicyLabel'), 'textContent', () => config.readOnly ? t('Read-only') : t('Edits allowed'));
   $('readOnlyBtn').classList.toggle('is-on', config.readOnly);
   $('readOnlyBtn').setAttribute('aria-pressed', String(config.readOnly));
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
@@ -1904,11 +1909,13 @@ $('closeChecks').addEventListener('click', () => {
   $('checksBox').hidden = true;
 });
 
-$('readOnlyBtn').addEventListener('click', () => {
+const toggleReadOnly = () => {
   if (!state) return;
   const current = requestedSettings?.readOnly ?? state.config.readOnly;
   void save({ readOnly: !current });
-});
+};
+$('readOnlyBtn').addEventListener('click', toggleReadOnly);
+$('composerPolicy').addEventListener('click', toggleReadOnly);
 
 $('addFolder').addEventListener('click', () => void addFolder());
 $('wizAddFolder').addEventListener('click', () => void addFolder());

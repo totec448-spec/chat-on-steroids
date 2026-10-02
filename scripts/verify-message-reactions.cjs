@@ -56,6 +56,11 @@ app.whenReady().then(async () => {
     for(const zoom of [1,1.17,1.5]) for(const width of [1100,600]) {
       win.setSize(width,800);win.webContents.setZoomFactor(zoom);
       await js('window.reaction(null)');await until('!document.querySelector(".message-reaction")');
+      // Window/zoom changes have their own native layout and finite entry motion.
+      // Settle those before measuring whether a reaction itself moves the messages.
+      await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      await js('document.getAnimations().forEach(animation=>{if(animation.effect.getTiming().iterations!==Infinity)animation.finish()})');
+      await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
       const measure=`(()=>{const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return [r.x,r.y,r.width,r.height]};return {bubble:rect('.user-message-text'),answer:rect('.ev-assistant_message'),scroll:document.getElementById('chatBody').scrollTop}})()`;
       const before=await js(measure);
       await js('window.originalBubble=document.querySelector(".said.is-user");window.reaction("😂")');
