@@ -62,21 +62,25 @@ describe('native window activation', () => {
       once: (_event: string, listener: () => void) => { ready = listener; },
       isFullScreen: () => startupState.fullscreen,
       maximize: () => startupOperations.push('maximize')
-    }, owner: {}, quitting: false, restored: false, showWindow, trackNormalWindowBounds });
+    }, owner: {}, quitting: false, restored: false, restoreMaximized: false, showWindow, trackNormalWindowBounds });
     vm.runInContext(startup, launch);
     ready();
     expect(startupOperations.splice(0)).toEqual(['maximize', 'showWindow', 'track']);
     launch.restored = true;
     ready();
     expect(startupOperations.splice(0)).toEqual(['showWindow', 'track']);
+    launch.restoreMaximized = true;
+    ready();
+    expect(startupOperations.splice(0)).toEqual(['maximize', 'showWindow', 'track']);
     launch.restored = false;
+    launch.restoreMaximized = false;
     startupState.fullscreen = true;
     ready();
     expect(startupOperations.splice(0)).toEqual(['showWindow', 'track']);
     launch.quitting = true;
     ready();
-    expect(showWindow).toHaveBeenCalledTimes(3);
-    expect(trackNormalWindowBounds).toHaveBeenCalledTimes(3);
+    expect(showWindow).toHaveBeenCalledTimes(4);
+    expect(trackNormalWindowBounds).toHaveBeenCalledTimes(4);
   });
   it('passively observes on first visible use without opening a browser, never on repeat show or quit', async () => {
     const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
@@ -168,17 +172,18 @@ describe('native window activation', () => {
     expect(shouldQuitOnWindowAllClosed(platform, false)).toBe(true);
   });
 
-  it('persists only normal window bounds and ignores transient native states', () => {
-    const listeners = new Map<'move' | 'resize', () => void>();
+  it('persists normal bounds plus maximized presentation and ignores other transient native states', () => {
+    const listeners = new Map<'move' | 'resize' | 'maximize' | 'unmaximize', () => void>();
+    const normal = { x: 120, y: 80, width: 1100, height: 720 };
     const state = {
       destroyed: false,
       maximized: false,
       minimized: false,
       fullscreen: false,
-      bounds: { x: 120, y: 80, width: 1100, height: 720 }
+      bounds: { ...normal }
     };
     const owner = {
-      on: (event: 'move' | 'resize', listener: () => void) => { listeners.set(event, listener); },
+      on: (event: 'move' | 'resize' | 'maximize' | 'unmaximize', listener: () => void) => { listeners.set(event, listener); },
       isDestroyed: () => state.destroyed,
       isMaximized: () => state.maximized,
       isMinimized: () => state.minimized,
@@ -189,12 +194,23 @@ describe('native window activation', () => {
 
     trackNormalWindowBounds(owner, save);
     listeners.get('move')!();
-    expect(save).toHaveBeenLastCalledWith(state.bounds);
+    expect(save).toHaveBeenLastCalledWith({ bounds: normal, maximized: false });
 
+    // Electron's getNormalBounds retains the user-sized rectangle while maximized.
     state.maximized = true;
+    listeners.get('maximize')!();
+    expect(save).toHaveBeenLastCalledWith({ bounds: normal, maximized: true });
+
+    // Native maximize geometry churn must not replace the remembered normal rectangle.
     state.bounds = { x: 0, y: 0, width: 1920, height: 1040 };
     listeners.get('resize')!();
+    expect(save).toHaveBeenCalledTimes(2);
+
     state.maximized = false;
+    state.bounds = { ...normal };
+    listeners.get('unmaximize')!();
+    expect(save).toHaveBeenLastCalledWith({ bounds: normal, maximized: false });
+
     state.minimized = true;
     listeners.get('move')!();
     state.minimized = false;
@@ -204,7 +220,7 @@ describe('native window activation', () => {
     state.destroyed = true;
     listeners.get('move')!();
 
-    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(3);
   });
 
   it('wires remembered bounds through dedicated durable state instead of shared settings', () => {
@@ -212,8 +228,9 @@ describe('native window activation', () => {
 
     expect(source).toContain("const WINDOW_BOUNDS_STATE = 'window-bounds';");
     expect(source).toContain('savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);');
-    expect(source).toContain('trackNormalWindowBounds(owner, (bounds) => {');
-    expect(source).toContain('writeDurableSoon(WINDOW_BOUNDS_STATE, bounds);');
+    expect(source).toContain('const restoreMaximized = windowPlacementWasMaximized(savedWindowBounds);');
+    expect(source).toContain('trackNormalWindowBounds(owner, (placement) => {');
+    expect(source).toContain('writeDurableSoon(WINDOW_BOUNDS_STATE, placement);');
   });
 });
 
