@@ -8,7 +8,7 @@
  * brief.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Handoff } from '../../shared/session.js';
 import { continuationMarkerOf, unescapeMarkdown } from '../../shared/session.js';
 import { logInfo } from '../logger.js';
@@ -27,6 +27,34 @@ export interface PrepareHandoffInput {
   sourceTokens?: number;
   /** Reserve the exact replacement message's framing before persisting its brief. */
   continuationToken?: string;
+  /** Exact frontend/turn that authored this continuation brief. */
+  sourceConversationId?: string | null;
+  sourceTurnId?: string | null;
+}
+
+/** A public, non-authority id for provenance. The raw continuation token is never persisted here. */
+export function handoffContinuationId(token: string | null | undefined): string | null {
+  if (!token || !/^[A-Za-z0-9_-]{16,64}$/.test(token)) return null;
+  return createHash('sha256').update(token, 'utf8').digest('base64url');
+}
+
+/**
+ * New handoffs prove which continuation created them. Legacy handoffs have no such proof and
+ * remain readable for compatibility; callers must rely on the older transaction evidence.
+ */
+export function handoffMatchesContinuation(
+  handoff: Handoff,
+  token: string,
+  sourceConversationId: string,
+  sourceTurnId: string | null
+): boolean {
+  if (handoff.version === undefined && handoff.provenance === undefined) return true;
+  if (handoff.version !== 1 || !handoff.provenance) return false;
+  const continuationId = handoffContinuationId(token);
+  return !!continuationId &&
+    handoff.provenance?.continuationId === continuationId &&
+    handoff.provenance.sourceConversationId === sourceConversationId &&
+    handoff.provenance.sourceTurnId === sourceTurnId;
 }
 
 function handoffPlanNotice(plan: AgentPlan | null): string {
@@ -167,7 +195,12 @@ export async function prepareHandoff(input: PrepareHandoffInput): Promise<Handof
   // store is indistinguishable from a real brief for the rest of its life.
   const shortfall = briefShortfall(text, input.sourceTokens ?? summary.estimatedTokens);
   if (shortfall) throw new Error(shortfall);
+  const sourceConversationId = input.sourceConversationId === undefined
+    ? summary.conversationId
+    : input.sourceConversationId;
+  const sourceIndex = sourceConversationId ? summary.chatIds.indexOf(sourceConversationId) : -1;
   const handoff: Handoff = {
+    version: 1,
     id: newHandoffId(),
     sessionId: input.sessionId,
     createdAt: Date.now(),
@@ -177,7 +210,13 @@ export async function prepareHandoff(input: PrepareHandoffInput): Promise<Handof
     // The working folder is deliberately not here. It belongs to the durable local session
     // and moves with the session's rebind (see `moveChatWorkspace`), so writing it into the
     // brief as well would be a second, weaker copy of state the commit already carries.
-    notes: [...(input.notes ?? [])]
+    notes: [...(input.notes ?? [])],
+    provenance: {
+      sourceConversationId,
+      sourceGeneration: sourceIndex >= 0 ? sourceIndex + 1 : null,
+      sourceTurnId: input.sourceTurnId ?? null,
+      continuationId: handoffContinuationId(input.continuationToken)
+    }
   };
   await saveHandoff(handoff);
   logInfo(`handoff ${handoff.id} prepared (${handoff.text.length} characters)`);
