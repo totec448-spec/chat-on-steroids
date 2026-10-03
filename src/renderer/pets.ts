@@ -260,7 +260,7 @@ export function initPets(api: AppApi, runtime: PetController): void {
   $('petsFormatClose').addEventListener('click', () => formatDialog.close());
   $('petsCopyInstructions').addEventListener('click', () => void (async () => {
     const copied = await run(api.writeClipboard(PET_FORMAT_INSTRUCTIONS));
-    if (copied) toast(t('CoS Pets instructions copied'));
+    if (copied) toast(t('Pet instructions copied'));
   })());
   $('petsImport').addEventListener('click', () => void (async () => {
     const next = await run(api.petsImport());

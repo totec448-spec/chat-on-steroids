@@ -5890,6 +5890,27 @@ describe('delivering a bootstrap', () => {
     expect(pendingWorkerRevivals()[0]?.text).toContain('inspect the parser');
   });
 
+  it('leaves a worker awake while its page polls that the turn is still thinking (#882)', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'think for a long time' }], caller: { conversationId: PRIME_CHAT } });
+    const workerConversation = 'cafe1003-0000-4000-8000-000000000882';
+    expect(bindConversation('worker-1', workerConversation)).toBe(true);
+    const worker = () => swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((agent) => agent.id === 'worker-1')!;
+    const quietAt = Math.max(worker().activatedAt ?? 0, worker().lastSeenAt ?? 0) + WORKER_SILENCE_MS + 1_000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(quietAt);
+    try {
+      expect((await request('GET', `/activity?conversationId=${workerConversation}&generating=1`)).status).toBe(200);
+      expect(await sweepStaleSwarm(quietAt)).toBe(false);
+      expect(worker().state).toBe('active');
+      // The page's turn ended: the same silence now counts.
+      expect((await request('GET', `/activity?conversationId=${workerConversation}&generating=0`)).status).toBe(200);
+      expect(await sweepStaleSwarm(quietAt)).toBe(true);
+      expect(worker().state).toBe('sleeping');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('does not hand a slept worker its dead turn, nor count its replayed native rows as work', async () => {
     // Measured 2026-09-26 (worker-8): a turn left open the day before was adopted by the reopened
     // tab, which refused the wake as "generating" until a ten-minute stall, and its native rows —
