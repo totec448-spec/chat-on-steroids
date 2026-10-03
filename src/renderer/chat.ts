@@ -827,7 +827,7 @@ function paintSessions(): void {
           paintSessions();
         } finally { color.disabled = false; }
       });
-      heading.prepend(color);
+      heading.append(color);
       const create = el('button', 'btn project-new'); create.append(icon('i-pencil')); create.setAttribute('type', 'button'); create.dataset.newProject = id;
       ui(create, 'title', () => t("New chat in this project")); ui(create, 'aria-label', () => t("New chat in this project"));
       create.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); selectNewChat(id); }); heading.append(create);
