@@ -14,12 +14,22 @@ export const MAX_AUTO_SELECTED_SKILLS = 1;
 
 const STOP = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'is', 'it', 'of', 'on', 'or',
-  'that', 'the', 'this', 'to', 'with', 'your', 'my', 'please', 'task', 'work', 'use'
+  'that', 'the', 'this', 'to', 'with', 'your', 'my', 'please', 'task', 'work', 'use',
+  'any', 'before', 'component', 'does', 'help', 'react', 'user', 'using', 'want', 'when', 'why'
 ]);
 
 function normalizedToken(value: string): string {
-  const token = value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
-  if (token.length > 4 && token.endsWith('s') && !token.endsWith('ss')) return token.slice(0, -1);
+  let token = value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
+  if (STOP.has(token)) return '';
+  const undouble = (stem: string): string => {
+    const last = stem.at(-1), prior = stem.at(-2);
+    return last && last === prior && !/[aeiou]/.test(last) ? stem.slice(0, -1) : stem;
+  };
+  if (token.length >= 7 && token.endsWith('ing')) token = undouble(token.slice(0, -3));
+  else if (token.length >= 6 && token.endsWith('ed')) token = undouble(token.slice(0, -2));
+  else if (token.length >= 6 && token.endsWith('er')) token = undouble(token.slice(0, -2));
+  else if (token.length > 4 && token.endsWith('s') && !token.endsWith('ss')) token = token.slice(0, -1);
+  if (STOP.has(token)) return '';
   return token;
 }
 
@@ -32,14 +42,13 @@ function tokens(value: string): string[] {
 function score(text: Set<string>, candidate: SkillRoutingMetadata): { score: number; strong: boolean } {
   const identity = tokens([candidate.id.replace(/[-_.]+/g, ' '), candidate.name, candidate.displayName ?? ''].join(' '));
   const descriptive = tokens([candidate.description, candidate.shortDescription ?? ''].join(' '));
-  const all = new Set([...identity, ...descriptive]);
-  const overlap = [...all].filter(token => text.has(token));
   const identityOverlap = identity.filter(token => text.has(token));
-  const score = overlap.length + identityOverlap.length * 2;
-  const exactIdentity = identity.length >= 2 && identity.every(token => text.has(token));
-  // One generic word never routes a Skill. Require either the complete multi-word identity or
-  // at least three distinct metadata terms from the authored task.
-  return { score, strong: exactIdentity || overlap.length >= 3 };
+  const descriptiveOverlap = descriptive.filter(token => text.has(token));
+  const score = identityOverlap.length * 3 + descriptiveOverlap.length;
+  const exactIdentity = identity.length > 0 && identityOverlap.length === identity.length;
+  // Description words alone never route a Skill. A complete name/id match is already explicit
+  // enough; a partial identity match also needs supporting overlap from the description.
+  return { score, strong: identityOverlap.length > 0 && (exactIdentity || descriptiveOverlap.length > 0) };
 }
 
 /** Pure metadata-only routing. A close second candidate makes the result intentionally empty. */
