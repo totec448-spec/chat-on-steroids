@@ -75,7 +75,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
       install.type = 'button';
       install.addEventListener('click', () => void (async () => {
         install.disabled = true;
-        try { if (await update(api.installRecommendedSkill(entry.id))) toast(t('Skill imported into the CoS library')); }
+        try { if (await update(api.installRecommendedSkill(entry.id))) toast(t('Skill added to your library')); }
         finally { if (install.isConnected) install.disabled = false; }
       })());
       foot.append(install);
@@ -282,7 +282,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
       const button = $<HTMLButtonElement>(id); button.disabled = true;
       try {
         const imported = await update(api.skillsImport(kind));
-        if (imported) toast(t('Skill imported into the CoS library'));
+        if (imported) toast(t('Skill added to your library'));
       } finally { if (button.isConnected) button.disabled = false; }
     })());
   }
