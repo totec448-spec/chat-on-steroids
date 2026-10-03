@@ -1794,5 +1794,6 @@
   "Clear workers": "워커 지우기",
   "Workers cleared": "워커를 지웠습니다",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "실행 중인 워커가 없습니다. 기록은 워커를 시작한 채팅에서 계속 사용할 수 있으며, 워커 지우기를 누르면 완전히 삭제됩니다.",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "새 채팅과 하위 에이전트의 기본 모델과 추론을 계정에서 제공하는 항목 중에서 선택합니다."
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "새 채팅과 하위 에이전트의 기본 모델과 추론을 계정에서 제공하는 항목 중에서 선택합니다.",
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "모든 워커를 지울까요? 실행 중인 워커는 중지되고 저장된 기록은 완전히 삭제됩니다. 채팅은 ChatGPT에 남습니다."
 }

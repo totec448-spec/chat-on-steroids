@@ -1794,5 +1794,6 @@
   "Clear workers": "清除子代理",
   "Workers cleared": "已清除子代理",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "沒有正在執行的子代理。它們的歷史記錄仍可供啟動它們的聊天使用；「清除子代理」會永久刪除。",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "從你的帳戶提供的選項中，為新聊天和子代理選擇預設模型與推理強度。"
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "從你的帳戶提供的選項中，為新聊天和子代理選擇預設模型與推理強度。",
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "清除所有子代理？正在執行的會停止，其儲存的歷史記錄將被永久刪除。它們的聊天仍保留在 ChatGPT 中。"
 }
