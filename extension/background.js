@@ -2750,7 +2750,7 @@ async function maintainOnce() {
     recoveryMonitoring = monitoring;
     await persistLive().catch(() => undefined);
   }
-  if (await acceptBrowserRevival(reply.data.revival)) await recoverDeferredRevivals();
+  if (await acceptBrowserRevivals(reply.data)) await recoverDeferredRevivals();
   const nonDiscardable = new Set(
     (Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : [])
       .map(cleanConversationId)
@@ -2935,6 +2935,20 @@ async function performBrowserRepairs(repairs, policy) {
         }
         if (reason === 'assistant-error' && status?.ok === true && status.assistantError === false) {
           await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=preserved`);
+          continue;
+        }
+      }
+      if (target && reason === 'no-tab') {
+        // A no-tab repair exists to give the chat a tab. When it has one again by now, it is
+        // usually the tab a worker wake or another command just opened for it, and reloading that
+        // tab cut its page off in the middle of the send (#864, #882). A tab that is still loading
+        // or answers is the repair; only a silent one is reloaded.
+        const tab = await chrome.tabs.get(target.id);
+        const loading = tab.status === 'loading' || Boolean(tab.pendingUrl);
+        const status = loading ? null : await tabReply(target.id, { type: 'clf-page-status' },
+          documentId ? { documentId } : undefined);
+        if (loading || status?.ok === true) {
+          await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=present`);
           continue;
         }
       }
@@ -3595,7 +3609,7 @@ const HANDLERS = {
       // Forward only the helper states this document may report; these are diagnostics.
       (['absent', 'empty', 'ok'].includes(message.fiber) ? `&fiber=${message.fiber}` : '');
     const result = await call(`/activity${query}`);
-    if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevival(result.data.revival)) {
+    if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevivals(result.data)) {
       await recoverDeferredRevivals();
     }
     // A fresh chat the app wants opened beside this one. Offered only to the home chat's own
@@ -4438,6 +4452,17 @@ async function acceptBrowserRevival(raw) {
   const id = deferredRevivalId(raw?.id);
   const conversationId = cleanConversationId(raw?.conversationId);
   return id && conversationId ? rememberDeferredRevival(id, conversationId) : false;
+}
+
+/**
+ * Takes every wake an app reply hands out (#882). An app older than 2.1.27 sends only the oldest
+ * one as `revival`; taking just that one held the others behind it until their deadline.
+ */
+async function acceptBrowserRevivals(data) {
+  const list = Array.isArray(data?.revivals) ? data.revivals.slice(0, 16) : data?.revival ? [data.revival] : [];
+  let accepted = false;
+  for (const raw of list) if (await acceptBrowserRevival(raw)) accepted = true;
+  return accepted;
 }
 
 /**

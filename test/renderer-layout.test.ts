@@ -523,7 +523,14 @@ describe('the settings sheet', () => {
   it('asks for a single compaction threshold', () => {
     const pane = document.querySelector('.view[data-view="settings"]')!;
     const numbers = [...pane.querySelectorAll('input[type="number"]')].map((input) => input.id);
-    expect(numbers).toEqual(['maWorkers', 'autoCompactTokens']);
+    expect(numbers).toEqual(['maWorkers', 'globalMaWorkers', 'autoCompactTokens']);
+    const globalWorkers = document.getElementById('globalMaWorkers') as HTMLInputElement;
+    expect([globalWorkers.min, globalWorkers.max, globalWorkers.step]).toEqual(['0', '64', '1']);
+    const globalSetting = globalWorkers.closest('.setting')!;
+    expect(globalSetting.querySelector('b')?.textContent).toBe('Workers across all chats');
+    expect(globalSetting.querySelector('em')?.textContent).toBe(
+      'The most workers that may run at once over all your chats together. 0 means no extra limit; each chat still keeps the limit above.'
+    );
     for (const id of ['sessRecord', 'sessRetain', 'sessAdvisory', 'sessLimit']) {
       expect(document.getElementById(id), `#${id} is back`).toBeNull();
     }
