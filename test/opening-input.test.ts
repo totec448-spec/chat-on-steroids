@@ -9,6 +9,7 @@ import { enqueueInput, listInputs, pendingBrowserInputs, claimBrowserInput, auth
   cancelInput, failBrowserInput, resetInputForTests, configureInputDelivery, setInputAutomation, type InputArgs, type InputEntry } from '../src/main/session/input.js';
 import { addProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
+import { isChatTrusted, resetTrustedChatsForTests, setChatTrusted } from '../src/main/session/trusted-chats.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let directory: string;
@@ -19,11 +20,15 @@ const legacy = (over: Partial<InputEntry> = {}): InputEntry => ({ ...args(), sta
 beforeEach(async () => {
   directory = await makeTempDir('clf-openings-');
   initConfigPath(directory); initDurableStore(directory); initSessionStore(directory); resetInputForTests();
+  resetTrustedChatsForTests();
   await saveConfig(defaultConfig());
-  configureInputDelivery({ applyAutomation: async () => {}, changed: () => {} });
+  configureInputDelivery({
+    applyAutomation: async () => {}, changed: () => {},
+    trustOpening: async (_sessionId, conversationId) => { await setChatTrusted(conversationId, true); return true; }
+  });
 });
 afterEach(async () => {
-  vi.restoreAllMocks(); await flushDurable(); resetInputForTests(); resetSessionStoreForTests(); resetDurableForTests(); await removeTempDir(directory);
+  vi.restoreAllMocks(); await flushDurable(); resetTrustedChatsForTests(); resetInputForTests(); resetSessionStoreForTests(); resetDurableForTests(); await removeTempDir(directory);
 });
 
 it('admits twenty independent durable sessions before any native ACK and preserves exact retry identity', async () => {
@@ -162,6 +167,84 @@ it('binds an exact authorized opening before recording and acknowledges only its
   expect(await bindBrowserInputProject(row.id, 'owner', randomUUID())).toBe(false);
   expect(await acknowledgeBrowserInput(row.id, 'owner', conversation, 'native-message')).toBe(true);
   expect((await listInputs())[0]).toMatchObject({ sessionId: row.sessionId, deliveredSessionId: row.sessionId, state: 'sent', opening: true });
+});
+
+it('trusts a strict-mode CoS composer opening only after its exact authoritative bind', async () => {
+  const config = defaultConfig();
+  await saveConfig({ ...config, multiAgent: { ...config.multiAgent, strictChatAllowlist: true } });
+  const row = await enqueueInput(args());
+  const conversation = randomUUID();
+  expect(await claimBrowserInput(row.id, 'strict-opening-owner', null, true)).toMatchObject({ opening: true, sessionId: row.sessionId });
+  expect(await authorizeBrowserInput(row.id, 'strict-opening-owner', null)).toBe(true);
+  expect(isChatTrusted(conversation)).toBe(false);
+
+  expect(await bindBrowserInputProject(row.id, 'strict-opening-owner', conversation)).toBe(true);
+  expect((await getSession(row.sessionId!))?.conversationId).toBe(conversation);
+  expect(isChatTrusted(conversation)).toBe(true);
+});
+
+it('keeps browser-created direct chats untrusted while strict mode is enabled', async () => {
+  const config = defaultConfig();
+  await saveConfig({ ...config, multiAgent: { ...config.multiAgent, strictChatAllowlist: true } });
+  const conversation = randomUUID();
+  await createSession({ title: 'Direct browser chat', conversationId: conversation });
+  expect(isChatTrusted(conversation)).toBe(false);
+});
+
+it('does not create an unnecessary Trust bit for a CoS opening while strict mode is off', async () => {
+  const row = await enqueueInput(args());
+  const conversation = randomUUID();
+  await claimBrowserInput(row.id, 'ordinary-opening-owner', null, true);
+  await authorizeBrowserInput(row.id, 'ordinary-opening-owner', null);
+  expect(await bindBrowserInputProject(row.id, 'ordinary-opening-owner', conversation)).toBe(true);
+  expect((await getSession(row.sessionId!))?.conversationId).toBe(conversation);
+  expect(isChatTrusted(conversation)).toBe(false);
+  const config = defaultConfig();
+  await saveConfig({ ...config, multiAgent: { ...config.multiAgent, strictChatAllowlist: true } });
+  expect(await bindBrowserInputProject(row.id, 'ordinary-opening-owner', conversation)).toBe(true);
+  expect(isChatTrusted(conversation)).toBe(false);
+});
+
+it('fails closed instead of trusting a recovered opening whose durable attach outran its outbox ACK', async () => {
+  const row = await enqueueInput(args());
+  const conversation = randomUUID();
+  await claimBrowserInput(row.id, 'recovered-opening-owner', null, true);
+  await authorizeBrowserInput(row.id, 'recovered-opening-owner', null);
+
+  // Model a crash boundary after the authoritative reserved-session bind but before the outbox
+  // ACK transition records that same conversation id.
+  expect(await rebindSession(row.sessionId!, null, conversation)).toBe(true);
+  expect((await listInputs()).find(entry => entry.id === row.id)?.conversationId).toBeNull();
+  expect(isChatTrusted(conversation)).toBe(false);
+  resetInputForTests(); resetSessionStoreForTests(); initSessionStore(directory);
+
+  const config = defaultConfig();
+  await saveConfig({ ...config, multiAgent: { ...config.multiAgent, strictChatAllowlist: true } });
+  await expect(acknowledgeBrowserInput(row.id, 'recovered-opening-owner', conversation, 'recovered-message'))
+    .rejects.toThrow('Reserved opening session belongs to another ChatGPT conversation');
+  expect((await getSession(row.sessionId!))?.conversationId).toBe(conversation);
+  expect(isChatTrusted(conversation)).toBe(false);
+});
+
+it('does not trust a recovered /input/bind when the reserved session already attached while strict mode was off', async () => {
+  const row = await enqueueInput(args());
+  const conversation = randomUUID();
+  await claimBrowserInput(row.id, 'recovered-bind-owner', null, true);
+  await authorizeBrowserInput(row.id, 'recovered-bind-owner', null);
+
+  // Crash boundary: session metadata reached A under strict-Off, but the opening outbox row did
+  // not publish its conversationId. A later /input/bind may reconcile that row, but it did not
+  // perform the authoritative null -> A session bind and therefore must not create Trust.
+  expect(await rebindSession(row.sessionId!, null, conversation)).toBe(true);
+  expect((await listInputs()).find(entry => entry.id === row.id)?.conversationId).toBeNull();
+  expect(isChatTrusted(conversation)).toBe(false);
+  resetInputForTests(); resetSessionStoreForTests(); initSessionStore(directory);
+
+  const config = defaultConfig();
+  await saveConfig({ ...config, multiAgent: { ...config.multiAgent, strictChatAllowlist: true } });
+  expect(await bindBrowserInputProject(row.id, 'recovered-bind-owner', conversation)).toBe(true);
+  expect((await getSession(row.sessionId!))?.conversationId).toBe(conversation);
+  expect(isChatTrusted(conversation)).toBe(false);
 });
 
 it('rejects another recording collision and never binds a cancelled unauthorized opening', async () => {

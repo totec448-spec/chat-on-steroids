@@ -343,6 +343,11 @@
   "Chat list width": "채팅 목록 너비",
   "Settings navigation": "설정 탐색",
   "Add a project folder": "프로젝트 폴더 추가",
+  "Project folders": "프로젝트 폴더",
+  "Primary project folder": "기본 프로젝트 폴더",
+  "Add folder": "폴더 추가",
+  "Add folder to project {0}": "프로젝트 {0}에 폴더 추가",
+  "Remove folder {0} from project {1}": "프로젝트 {1}에서 폴더 {0} 제거",
   "Switch to dark mode": "다크 모드로 전환",
   "Search plugins": "플러그인 검색",
   "Add a plugin": "플러그인 추가",
@@ -1758,6 +1763,10 @@
   "How strongly text stands out from its background.": "텍스트가 배경에서 얼마나 뚜렷하게 보이는지 조절합니다.",
   "Used when you start a new chat. A chat you continue keeps its own model.": "새 채팅을 시작할 때 사용합니다. 이어서 하는 채팅은 자신의 모델을 유지합니다.",
   "Lets tools run, including computer use, file editing and JavaScript, even when the app can’t tell which chat called them. Sub-agents and other chat actions still need a known chat. These calls are listed under Unattributed activity.": "앱이 어느 채팅에서 호출했는지 알 수 없어도 컴퓨터 제어, 파일 편집, JavaScript를 포함한 도구 실행을 허용합니다. 서브에이전트와 기타 채팅 작업에는 여전히 확인된 채팅이 필요합니다. 이 호출은 \"귀속되지 않은 활동\"에 표시됩니다.",
+  "Trust only selected chats": "선택한 채팅만 신뢰",
+  "Untrust this chat: strict mode refuses its tool calls": "이 채팅 신뢰 해제: 엄격 모드에서 도구 호출을 거부합니다",
+  "Trust this chat: strict mode lets its tool calls run": "이 채팅 신뢰: 엄격 모드에서 도구 호출을 허용합니다",
+  "Only chats you trust can use this computer's tools. Existing chats start untrusted; hover a chat in the sidebar and choose Trust (✓). Workers and resumed chats follow the chat they came from. Calls the app can't link to a chat are refused.": "신뢰한 채팅만 이 컴퓨터의 도구를 사용할 수 있습니다. 기존 채팅은 신뢰되지 않은 상태로 시작합니다. 사이드바에서 채팅 위에 마우스를 올리고 신뢰 (✓)를 선택하세요. 워커와 재개된 채팅은 자신이 나온 채팅을 따릅니다. 앱이 채팅에 연결할 수 없는 호출은 거부됩니다.",
   "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "읽기 전용으로 전환: ChatGPT는 파일과 화면을 계속 볼 수 있지만 파일 생성, 편집, 이동, 삭제, 프로그램 실행, 이 컴퓨터 제어는 할 수 없습니다.",
   "Read-only is on: ChatGPT can only look. Click to allow changes again.": "읽기 전용 켜짐: ChatGPT는 보기만 할 수 있습니다. 클릭하면 변경을 다시 허용합니다.",
   "General": "일반",
@@ -1798,5 +1807,6 @@
   "Choose whether imported Skills can be matched to ordinary messages.": "가져온 Skills를 일반 메시지와 자동으로 연결할지 선택합니다.",
   "Auto-select Skills": "Skills 자동 선택",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "가져온 Skill 하나가 메타데이터상 명확히 일치할 때만 해당 메시지에 추가합니다. 명시적으로 선택한 Skill이 항상 우선합니다.",
-  "Auto-selected Skill: /{0}": "자동 선택된 Skill: /{0}"
+  "Auto-selected Skill: /{0}": "자동 선택된 Skill: /{0}",
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "모든 워커를 지울까요? 실행 중인 워커는 중지되고 저장된 기록은 완전히 삭제됩니다. 채팅은 ChatGPT에 남습니다."
 }

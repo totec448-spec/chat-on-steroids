@@ -162,11 +162,21 @@ describe('the session card header', () => {
    * because the chat is what writes the brief — a button here would be a second way to
    * start the one thing that must happen exactly once.
    */
-  it('keeps global connection status out of the chat header and in the sidebar footer', () => {
+  it('keeps global theme and connection actions in the title bar while details stay in the sidebar popover', () => {
     const header = document.querySelector('#chatTitle')!.closest('header')!;
+    const topbar = document.querySelector('.app-topbar')!;
+    const theme = document.getElementById('themeBtn')!;
+    const topbarConnection = document.getElementById('headerConnect')!;
     const connection = document.getElementById('sidebarConnection')!;
     const footer = connection.closest('.sidebar-bottom')!;
     expect(header.contains(connection)).toBe(false);
+    expect(header.contains(theme)).toBe(false);
+    expect(header.contains(topbarConnection)).toBe(false);
+    expect(topbar.contains(theme)).toBe(true);
+    expect(topbar.contains(topbarConnection)).toBe(true);
+    expect(theme.getAttribute('aria-label')).toBe('Switch to light mode');
+    expect(theme.querySelector('.ph-sun')).not.toBeNull();
+    expect(rule('.app-topbar > .btn, .view-menu')).toContain('-webkit-app-region: no-drag');
     expect(footer).not.toBeNull();
     expect([...footer.children].map((node) => (node as HTMLElement).id || (node as HTMLElement).className)).toEqual([
       'workspaceSettings',
@@ -294,8 +304,8 @@ describe('the session-row chat actions', () => {
   });
 
   it('opens and blocks only recorded conversations, and never selects or deletes the adjacent row', () => {
-    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,2000}openSessionChat\(summary\.id\)/);
-    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,2000}toggleSessionBlock\(summary\.id/);
+    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]*?openSessionChat\(summary\.id\)/);
+    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]*?toggleSessionBlock\(summary\.id/);
     expect(chatSource).toMatch(/open\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
     expect(chatSource).toMatch(/block\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
   });
@@ -318,7 +328,10 @@ describe('the session-row chat actions', () => {
    */
   it('blocks the Unattributed row through the one switch that can answer for it', () => {
     expect(chatSource).toMatch(
-      /if \(summary\.conversationId === null\)[\s\S]{0,1200}toggleUnattributedBlock\(!blocked\)/
+      /if \(summary\.conversationId === null\)[\s\S]{0,2200}toggleUnattributedBlock\(!blocked\)/
+    );
+    expect(chatSource).toMatch(
+      /strictChatAllowlist === true[\s\S]{0,300}actionBar\.append\(remove\)[\s\S]{0,120}return row/
     );
     expect(chatSource).toMatch(
       /toggleUnattributedBlock[\s\S]{0,400}\$<HTMLInputElement>\('allowUnattributedCalls'\)\.checked = !blocked/

@@ -70,7 +70,7 @@ losing the project, history, workers or queued instructions when a chat grows to
 | ChatGPT conversation | Replaceable provider frontend; its id is not the durable session id. |
 | Turn | One authored user-message generation and its exact response/work. Interim prose is not a final boundary. |
 | Approved root | Filesystem access the user granted; may be a parent containing several projects. |
-| Local project | Explicit folder association and sidebar grouping; grants no new permission. |
+| Local project | One primary folder plus optional additional folder associations and sidebar grouping; grants no new permission. |
 | Native ChatGPT project | Provider `/g/.../c/...` context; separate from the app's local folder catalog. |
 | Goal objective | The requested finish line for one chat. It persists independently of a provider attempt. |
 | Goal / Loop | Mutually exclusive modes of one driver. Goal can decide no further message is needed; Loop continues within scope. |
@@ -80,7 +80,7 @@ losing the project, history, workers or queued instructions when a chat grows to
 | Prime / worker | One owning conversation and its reusable subordinate chats. Several prime families may run independently. |
 | Decision helper / planner | A role-specific chat that produces a continuation decision or workflow; it must not execute the reference task. |
 | Code-mode `exec` | Bounded JavaScript composition of one MCP surface's tools. `exec_command` runs an OS process. |
-| Stop / End turn / Block | Stop requests native generation cancellation; End turn releases a finish hold; Block revokes exact-chat local tool access. |
+| Stop / End turn / Block / Trust | Stop requests native generation cancellation; End turn releases a finish hold; Block revokes exact-chat local tool access. Trust is the separate explicit allow entry used only when strict chat allowlisting is on; broker-owned workers and committed resumed chats derive effective trust from their exact parent provenance rather than receiving copied Trust entries. |
 
 ### Product-wide invariants
 
@@ -199,6 +199,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Wait for sub-agents | Off. | When on, a Goal/Loop chat's next automatic step waits for the workers that exact chat started. A chat with no run, or a run with no workers, waits either way. See §16. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
 | Auto-select Skills | Off. | When on, ordinary human-authored input with no explicit Skill directive may select at most one managed/imported Skill from already-published metadata. Weak or ambiguous matches select none; explicit `/id` or `/prompt id` always wins. |
+| Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution. Existing/direct browser chats require explicit Trust from the chat list. A fresh chat opened by the CoS composer gains an explicit Trust entry only after its exact opening row authoritatively binds to the new conversation. Broker-owned workers follow their exact owning prime and a committed Compact & Resume successor follows its durable source lineage. Block still wins, revocation is dynamic, and unattributed calls are refused even when the ordinary unattributed allowance is on. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-5.6-sol` High. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
@@ -285,7 +286,7 @@ second-instance/tray/Dock is gated until restore, CSP, permissions and IPC are r
 begins, no delayed startup callback may re-enable window creation.
 
 Startup initializes config/secrets/session/durable paths, restores the saved model catalog and
-plugin manager, loads Goal ledgers, exact correlations and blocked chats, then retired workers
+plugin manager, loads Goal ledgers, exact correlations and blocked/trusted chat policy, then retired workers
 and every active/dormant prime family. Persistence hooks exist even when multi-agent is Off.
 Continuation restore follows swarm restore because it may repair prime ownership. IPC/input
 hooks precede browser traffic. Then the secure window/tray, bridge for recording or agents,
@@ -624,6 +625,51 @@ A positively known blocked, retired, ended or superseded caller is refused regar
 preference. Refused historical calls must not revive workers, acknowledge inboxes or grant
 activity to a successor chat.
 
+`multiAgent.strictChatAllowlist` is an independent, opt-in default-deny boundary. Its explicit allow
+set is `state/trusted-chats.json`, keyed only by exact ChatGPT conversation id and restored before MCP
+traffic. Missing/corrupt trust state therefore means no explicitly trusted chats. Strict mode waits
+through the same request-id evidence window used by blocked-chat enforcement, refuses
+unknown/unattributed callers even if `allowUnattributedCalls` is true, and runs no handler or
+worker-liveness side effect for a denied caller. Block always outranks Trust and Unblocking does not
+trust.
+
+A fresh ordinary chat explicitly started from the CoS composer is the one automatic explicit Trust
+entry. The durable outbox row must still be `opening`, its exact browser owner must bind that row to
+the provider conversation, and the reserved session's initial null→conversation rebind must commit
+before `trusted-chats` is written. Strict mode must already be on at that authoritative bind. Direct
+browser chats and openings bound while strict mode is off stay out of the Trust registry. Cancelled,
+retried and recovered openings keep their existing exact outbox/session identity rules; this path
+never infers intent from a URL, title, request time or nearby session.
+
+Effective trust may additionally be derived from two exact app-owned provenance links; neither
+copies a Trust bit into the child. A broker-owned worker follows the owning prime recorded by its
+published active/dormant family, including sleeping and terminal worker history. Direct Trust of a
+worker is refused by the chat-list IPC/UI, ambiguous or provisional ownership fails closed, and every call
+re-resolves the parent so Untrust, Block or a committed prime transfer takes effect immediately. A
+worker session keeps its durable `origin.kind=worker` classification even after bounded broker and
+retired-worker history expires; without a unique broker owner that identity stays fail-closed and a
+stale/direct Trust bit is never treated as ordinary-chat authority. A
+Compact & Resume successor stays untrusted before commit, then may inherit effective trust from the
+durable session `chatIds` lineage only after the continuation commit atomically rebinds the session
+and records `lastCommittedResumeHandoffId`. Ordinary new/browser chats and anything without either
+exact provenance link do not inherit. The chat list projects that inherited state onto the current row;
+Untrust there atomically removes every explicit Trust entry in its committed lineage, while Trust on
+an otherwise-untrusted successor deliberately makes only that current conversation explicit. Session
+deletion performs the same atomic lineage revoke before detach/delete so a hidden predecessor cannot
+survive as orphan authority. Block is projected independently onto the same current row: a predecessor
+Block still wins over derived Trust, and Release on the current resumed row clears committed-lineage
+blocks without changing Trust. Blocking the exact caller still wins over every derived path.
+
+Deleting the session row removes both explicit policies for that conversation. Trust/Untrust IPC
+carries the row's expected conversation id and refuses a stale A→B rebind; each trust mutation is
+serialized and published only after `writeDurableNow()` commits its exact snapshot, so an
+acknowledged revoke cannot be undone by crash.
+If that durable commit fails, the failed proposed generation is superseded by the still-published
+trust set before background retry. Session deletion durably revokes Trust before releasing Block,
+detaching the conversation or deleting the row; a failed revoke therefore leaves all prior authority intact.
+While deletion is in flight, IPC keeps a session-id tombstone and Trust checks it both before and
+after its async session lookup, so a still-visible row cannot recreate permission behind deletion.
+
 ### Three lifetimes and five outcomes
 
 `runningToolCalls()` covers a handler that can still mutate; it is the compaction safety barrier.
@@ -690,11 +736,35 @@ escapes, live revocation during an await, and preserving an unrelated user's new
 **Intent:** a chat consistently works in its selected local folder, and workers/resumed chats
 retain that choice. Sidebar organization must not destroy work or grant access.
 
-`projects.ts` owns a bounded catalog of canonical absolute local folders with stable UUIDs.
-Adding uses the native folder selection/approved-root flow, resolves the real directory and
-deduplicates it. Session metadata owns `projectId`. Before send/use, `projectWorkspace()` and
-`getSessionProject()` re-resolve it under current roots and reject moved/unavailable folders.
+`projects.ts` owns a bounded catalog with stable UUIDs. The legacy `path` field remains the
+authoritative primary workspace; optional `additionalPaths` are canonical project members and
+old single-folder rows require no rewrite. Adding either kind uses the native folder
+selection/approved-root flow, resolves the real directory and keeps canonical/native-case folder
+identity unique across the entire catalog. Direct project mutation never approves a root. `projects:addFolder` and
+`projects:removeFolder` are the fixed IPC mutations for additional membership; removing membership
+does not remove its approved root. The sidebar project disclosure lists the primary and additional
+folders, adds through that same independently approved picker flow, and exposes removal only for
+additional membership. Session metadata owns only `projectId`, never a member path.
+
+Catalog restore fails closed on duplicate project ids or duplicate **primary** workspace identity.
+Duplicate optional member identities are compatibility noise instead: primaries take precedence,
+then restore keeps the first additional native identity in stored catalog order and ignores later
+duplicates/case aliases. This cleanup is a read projection; the next catalog mutation persists the
+cleaned shape. Downgrading to an older build that does not understand `additionalPaths` can drop
+those memberships if that build rewrites the project catalog; it does not change the primary path.
+
+Before send/use, `projectWorkspace(id)` and `getSessionProject()` re-resolve the primary under
+current roots and reject moved/unavailable folders. `projectWorkspace(id, folder)` is the explicit
+member lookup: it re-resolves that folder under current roots and accepts it only when its canonical
+identity is the primary or one of `additionalPaths`. Revoking or losing an additional folder makes
+that lookup fail closed and never changes the primary cwd; the stored member can still be detached.
 Null means no project; a broken explicit binding is an error, not a reason to infer a new cwd.
+Project Skill scope, Files and default project terminals continue to use the primary only;
+additional folders do not merge their `AGENTS.md` files or become implicit cwd candidates. The
+opening project/worker prompt is the bounded discoverability consumer: it names currently approved
+additional folders by virtual path while still naming the primary as the sole default cwd and
+instruction directory. Unapproved/unavailable additional members are omitted, never treated as
+permission or as a reason to fail an otherwise valid primary project.
 
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary
@@ -2880,9 +2950,10 @@ Current persistence/publication exceptions are in §21.
 
 ## 18. Desktop workspace, plugins, connection and native control
 
-Dark is the default theme. Theme selection belongs in Appearance settings; the main header
-has no light/dark shortcut. Files and worker-panel controls attach to the header independently
-of appearance controls.
+Dark is the default theme. Appearance settings remain the durable theme owner; the app title bar
+also exposes a compact light/dark shortcut through that same settings-save path. The chat header
+has no theme or connection action. Files and worker-panel controls attach to the chat header
+independently of appearance controls.
 
 ### Renderer and IPC
 
@@ -3177,10 +3248,11 @@ refresh complete or starts a browser action.
 
 ### Project Files workspace
 
-The Files panel projects the current session's LocalProject through fixed IPC using a project
-UUID and relative paths. It does not change the main composer or grant additional filesystem
-access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
-and project-root mutation. The renderer's `workspace-docks.ts` owns the right tool dock and
+The Files panel projects the current session's LocalProject primary workspace through fixed IPC
+using a project UUID and relative paths; additional project folders never become implicit Files
+roots. It does not change the main composer or grant additional filesystem access. Main re-resolves
+current approved roots and rejects traversal, symbolic links/junctions and project-root mutation.
+The renderer's `workspace-docks.ts` owns the right tool dock and
 bottom terminal dock; Files, Review, Sub-agents and each Terminal view retain their own content
 and async lifetimes. Closing the right dock hides its active tool but retains its tab selection.
 Every dock track change (right column, bottom row) goes through `moveWorkDock`, which animates
@@ -3435,17 +3507,20 @@ Late startup results retire their own handles without publishing them; late tunn
 for the accepted-response drain first. Activity logs record Disconnect admission and the
 accepted-response count.
 
-The sidebar footer owns global connection controls in a compact popover outside the translucent
-sidebar stacking context. Its sidebar-themed surface is 160 CSS pixels wide, with
+The app title bar exposes a compact Connect shortcut only before a connection is running: it stays
+visible as disabled `Connecting…` during server/tunnel startup and is hidden once connected,
+offline or disconnecting. The sidebar footer owns the compact connection-status popover outside
+the translucent sidebar stacking context and is the running-state Disconnect surface. The popover's
+sidebar-themed surface is 160 CSS pixels wide, with
 single-line labels and status dots. Status text remains accessible to screen readers and in
 tooltips. The header states connection status once; no redundant off/verification subtitle
 appears. Verification/last-seen ages remain in tooltips. Advanced session capture, request IDs
 and runtime diagnostics belong to the companion extension, not this desktop popover. Its only
 action is Connect/Disconnect; opening it does not request companion diagnostics.
-Extension-only Overwrite/Timestamps and the redundant settings link are absent. A red header
-Connect action remains visible while disconnected and disappears only on confirmed connection,
-briefly highlighting the footer status (respecting reduced motion). Setup stays reachable from
-Settings and from Connect when configuration is incomplete. The View menu has its own foreground
+Extension-only Overwrite/Timestamps and the redundant settings link are absent. The title-bar
+Connect shortcut briefly highlights the footer status on a newly confirmed connection (respecting
+reduced motion); it never becomes a Disconnect action. Setup stays reachable from Settings and from
+Connect when configuration is incomplete, and that click focuses the exact missing step. The View menu has its own foreground
 stacking layer; Appearance rows align controls at a shared minimum height and Setup uses a stable
 responsive title/language grid across locales.
 The companion sends a bounded snapshot on the authenticated `/diagnostics` route, outside the

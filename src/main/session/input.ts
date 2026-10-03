@@ -136,6 +136,8 @@ type InputDeliveryHooks = {
   activity?: (session: SessionSummary) => InputActivity;
   wakeDecision?: (entry: Readonly<InputEntry>, signal: AbortSignal) => Promise<void>;
   bindHelper?: (conversationId: string, sourceSessionId: string | null) => Promise<void>;
+  /** Trust an exact CoS composer opening under the same session-policy fence as Trust IPC. */
+  trustOpening?: (sessionId: string, conversationId: string) => Promise<boolean>;
   recordDelivered?: (entry: Readonly<InputEntry>, anchorCommitted: (seq: number) => void) => Promise<boolean>;
   prepareText?: (entry: Readonly<InputEntry>, limits: PromptLimits, authored: string) => string | Promise<string>;
   applyAutomation: (conversationId: string, automation: NonNullable<InputArgs['automation']>, phase: 'before-send' | 'after-send', objective?: string, loopAfterTurn?: boolean) => Promise<void>;
@@ -1419,7 +1421,21 @@ async function bindOpening(entry: InputEntry, conversationId: string): Promise<b
   await materializeOpening(entry);
   const session = await getSession(entry.sessionId);
   if (!session || (session.conversationId && session.conversationId !== conversationId)) return false;
-  if (!session.conversationId && !await rebindSession(session.id, null, conversationId)) return false;
+  const strictAtAuthoritativeBind = !session.conversationId && getConfig().multiAgent.strictChatAllowlist === true;
+  let boundSessionNow = false;
+  if (!session.conversationId) {
+    if (!await rebindSession(session.id, null, conversationId)) return false;
+    boundSessionNow = true;
+  }
+  // This is the first exact provider attachment that can prove the chat was opened by the CoS
+  // composer: the durable outbox row is an opening, the browser proved its exact owner/id pair,
+  // and this operation committed the reserved session's null -> conversation bind while strict
+  // mode was already on. Recovered outbox rows whose session attached earlier may reconcile their
+  // row here, but that stale first outbox binding cannot mint Trust. Direct/browser-created chats
+  // never traverse this boundary. Keep strict-off openings out of the explicit Trust registry.
+  if (boundSessionNow && strictAtAuthoritativeBind && getConfig().multiAgent.strictChatAllowlist === true) {
+    if (!deliveryHooks?.trustOpening || !await deliveryHooks.trustOpening(session.id, conversationId)) return false;
+  }
   return true;
 }
 /** Bind exact opening/project ownership before the document publishes request evidence. */

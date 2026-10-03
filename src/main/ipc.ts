@@ -11,7 +11,7 @@ import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
 import { installRecommendedSkill, listRecommendedSkills } from './recommended-skills.js';
 import { noteChatOrigin } from './session/recorder.js';
-import { REASONING_EFFORTS, type SessionChange } from '../shared/session.js';
+import { committedResumeAncestorsFromSummary, REASONING_EFFORTS, type SessionChange } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { wakeBrowserWork } from './browser-wake.js';
 import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } from './chat-models.js';
@@ -70,7 +70,7 @@ import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, getSessionProject, listProjects, projectWorkspace, removeProject } from './projects.js';
+import { addProject, addProjectFolder, getProject, getSessionProject, listProjects, projectWorkspace, removeProject, removeProjectFolder } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -102,17 +102,20 @@ import {
   getSession,
   getImageStorage,
   readHandoff,
-  readToolEditReview
+  readToolEditReview,
+  withSessionMutationFence
 } from './session/store.js';
 import { forgetSession, onSessionChange } from './session/recorder.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
-import { blockedChatIds, setChatBlocked } from './session/blocked-chats.js';
+import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
+import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
 import {
   clearAgent,
   onSwarmChange,
   pauseSwarmForDisable,
   persistAgentAuthorityNow,
+  workerPrimeOwner,
   resetSwarm,
   swarmState
 } from './agents.js';
@@ -221,6 +224,7 @@ const settingsPatch = z.object({
     maxWorkers: z.number().int().min(1).max(8),
     globalMaxWorkers: z.number().int().min(0).max(64).optional(),
     allowUnattributedCalls: z.boolean(),
+    strictChatAllowlist: z.boolean().optional(),
     recoverAgentTabs: z.boolean(),
     waitForSubAgents: z.boolean().optional(),
     endSleepingWorkerProcesses: z.boolean().optional()
@@ -404,6 +408,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         base.multiAgent.allowUnattributedCalls,
         wanted.multiAgent.allowUnattributedCalls
       ),
+      strictChatAllowlist: pick(
+        current.multiAgent.strictChatAllowlist ?? false,
+        base.multiAgent.strictChatAllowlist ?? false,
+        wanted.multiAgent.strictChatAllowlist ?? false
+      ),
       recoverAgentTabs: pick(
         current.multiAgent.recoverAgentTabs,
         base.multiAgent.recoverAgentTabs,
@@ -507,6 +516,9 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerWorkspaceTerminalIpc(getWindow);
+  // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
+  // in flight so a second click cannot recreate permission after the row's durable revoke.
+  const deletingSessionIds = new Set<string>();
   let watchedWindow: BrowserWindow | null = null;
   const projectFileWatches = new ProjectFileWatchSet(event => {
     const target = getWindow();
@@ -804,6 +816,30 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       push('state:changed', state);
     }
     const project = await addProject(folder);
+    push('session:changed');
+    return project;
+  });
+  handle('projects:addFolder', async payload => {
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    if (!(await getProject(id))) throw new Error('Project not found');
+    const window = getWindow();
+    if (!window) throw new Error('No window');
+    const result = await dialog.showOpenDialog(window, { title: 'Choose an additional project folder', properties: ['openDirectory'] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const folder = result.filePaths[0];
+    try { await resolvePath(getConfig().roots, folder); }
+    catch (error) {
+      if (!(error instanceof SandboxError)) throw error;
+      const state = await approveRoot(folder);
+      push('state:changed', state);
+    }
+    const project = await addProjectFolder(id, folder);
+    push('session:changed');
+    return project;
+  });
+  handle('projects:removeFolder', async payload => {
+    const { id, path: folder } = z.object({ id: z.string().uuid(), path: z.string().min(1).max(32768) }).strict().parse(payload);
+    const project = await removeProjectFolder(id, folder);
     push('session:changed');
     return project;
   });
@@ -1226,12 +1262,25 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id, blocked } = z
       .object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), blocked: z.boolean() })
       .parse(payload);
-    const summary = await getSession(id);
-    const conversationId = summary?.conversationId;
-    if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
-      throw new Error('This session has no valid ChatGPT conversation');
+    if (deletingSessionIds.has(id)) {
+      throw new Error('This session is being deleted; its block cannot be changed');
     }
-    setChatBlocked(conversationId, blocked);
+    const conversationId = await withSessionMutationFence(id, async (summary) => {
+      if (deletingSessionIds.has(id)) {
+        throw new Error('This session is being deleted; its block cannot be changed');
+      }
+      const currentConversationId = summary.conversationId;
+      if (!currentConversationId || !/^[0-9a-z-]{8,64}$/i.test(currentConversationId)) {
+        throw new Error('This session has no valid ChatGPT conversation');
+      }
+      setChatsBlocked(
+        blocked
+          ? [currentConversationId]
+          : [currentConversationId, ...committedResumeAncestorsFromSummary(summary, currentConversationId)],
+        blocked
+      );
+      return currentConversationId;
+    });
     logInfo(
       blocked
         ? `conversation ${conversationId} blocked; its tool calls are refused until it is released`
@@ -1244,25 +1293,90 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return blockedChatIds();
   });
 
+  handle('sessions:trust', async (payload) => {
+    const { id, expectedConversationId, trusted } = z
+      .object({
+        id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+        expectedConversationId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+        trusted: z.boolean()
+      })
+      .parse(payload);
+    if (deletingSessionIds.has(id)) {
+      throw new Error('This session is being deleted; its trust cannot be changed');
+    }
+    const conversationId = await withSessionMutationFence(id, async (summary) => {
+      // Delete may have started while this operation was waiting behind an earlier session write.
+      // If Trust entered this queue first it linearizes before Delete; otherwise the tombstone wins.
+      if (deletingSessionIds.has(id)) {
+        throw new Error('This session is being deleted; its trust cannot be changed');
+      }
+      const currentConversationId = summary.conversationId;
+      if (!currentConversationId || !/^[0-9a-z-]{8,64}$/i.test(currentConversationId)) {
+        throw new Error('This session has no valid ChatGPT conversation');
+      }
+      if (currentConversationId !== expectedConversationId) {
+        throw new Error('This session moved to another ChatGPT conversation; refresh the chat list before changing trust');
+      }
+      const workerOwner = workerPrimeOwner(currentConversationId);
+      if (trusted && (workerOwner.owned || summary.origin?.kind === 'worker')) {
+        throw new Error('Worker chats cannot be trusted directly; trust the owning prime chat instead');
+      }
+      // The current resumed row is the only UI handle left after A -> B. Its Untrust action must
+      // remove every explicit Trust entry that can still grant B through committed provenance;
+      // deleting only B would immediately fall through to a still-trusted A. Worker Untrust is
+      // deliberately exact-only so stale pre-fix worker entries can be cleaned without touching
+      // the owning prime.
+      const trustTargets = !trusted && !workerOwner.owned
+        ? [currentConversationId, ...committedResumeAncestorsFromSummary(summary, currentConversationId)]
+        : [currentConversationId];
+      await setChatsTrusted(trustTargets, trusted);
+      return currentConversationId;
+    });
+    logInfo(trusted
+      ? `conversation ${conversationId} trusted for strict chat allowlisting`
+      : `conversation ${conversationId} removed from strict chat allowlisting`);
+    return trustedChatIds();
+  });
+
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
-    // Detach first. The recorder maps live ChatGPT conversations to session ids, so
-    // deleting the folder underneath a live one left it appending to a session that no
-    // longer existed — the events went to a resurrected half-session with no summary.
-    // Forgetting the mapping makes the next observation open a fresh session instead.
-    const detached = forgetSession(id);
-    // Release first. The block button lives on this row, so a block left behind by the row's
-    // deletion would refuse that conversation's tools with nothing left in the app that could
-    // ever release it.
-    const summary = await getSession(id);
-    if (summary?.conversationId) setChatBlocked(summary.conversationId, false);
-    await deleteSession(id);
-    logInfo(
-      detached.length > 0
-        ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
-        : `session ${id} deleted`
-    );
-    return true;
+    if (deletingSessionIds.has(id)) throw new Error('This session is already being deleted');
+    deletingSessionIds.add(id);
+    try {
+      const summary = await getSession(id);
+      // Trust is permission. Revoke it durably before any other deletion side effect; otherwise
+      // a failed disk commit could leave this chat both trusted and newly unblocked, with its row
+      // already gone and no user control left to repair that authority.
+      if (summary?.conversationId) {
+        await setChatsTrusted([
+          summary.conversationId,
+          ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
+        ], false);
+      }
+      // Detach first. The recorder maps live ChatGPT conversations to session ids, so
+      // deleting the folder underneath a live one left it appending to a session that no
+      // longer existed — the events went to a resurrected half-session with no summary.
+      // Forgetting the mapping makes the next observation open a fresh session instead.
+      const detached = forgetSession(id);
+      // Release first. The current resumed row is also the only UI handle for a Block on one of
+      // its committed predecessors, so deleting the row must clear that whole policy lineage.
+      // Otherwise a hidden source block survives with no remaining row that can release it.
+      if (summary?.conversationId) {
+        setChatsBlocked([
+          summary.conversationId,
+          ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
+        ], false);
+      }
+      await deleteSession(id);
+      logInfo(
+        detached.length > 0
+          ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
+          : `session ${id} deleted`
+      );
+      return true;
+    } finally {
+      deletingSessionIds.delete(id);
+    }
   });
 
   handle('handoff:get', async (payload) => {
@@ -1383,6 +1497,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       const source = fromSessionId ? await getSession(fromSessionId) : null;
       if (source?.conversationId === conversationId || source?.chatIds.includes(conversationId)) return;
       await noteChatOrigin(conversationId, { kind: 'helper', fromSessionId, agentId: null, task: '' });
+    },
+    trustOpening: async (sessionId, conversationId) => {
+      // Composer openings use the same deletion/rebind fence as an explicit Trust click. The
+      // second tombstone check and synchronous queue admission ensure Delete either wins before
+      // this grant or durably revokes it afterwards; no orphan permission can survive the row.
+      if (deletingSessionIds.has(sessionId)) return false;
+      return withSessionMutationFence(sessionId, async (summary) => {
+        if (deletingSessionIds.has(sessionId) || summary.conversationId !== conversationId || summary.origin?.kind === 'worker') return false;
+        await setChatsTrusted([conversationId], true);
+        return true;
+      });
     },
     changed: () => push('session:changed'),
     recordDelivered: (entry, anchorCommitted) => getConfig().sessions.record ? recordDeliveredInput(entry, anchorCommitted) : Promise.resolve(true),

@@ -544,6 +544,11 @@
   "Chat list width": "聊天清單寬度",
   "Settings navigation": "設定導覽",
   "Add a project folder": "新增專案資料夾",
+  "Project folders": "專案資料夾",
+  "Primary project folder": "主要專案資料夾",
+  "Add folder": "新增資料夾",
+  "Add folder to project {0}": "將資料夾新增至專案 {0}",
+  "Remove folder {0} from project {1}": "從專案 {1} 移除資料夾 {0}",
   "Switch to dark mode": "切換到深色模式",
   "Search plugins": "搜尋外掛",
   "Add a plugin": "新增外掛",
@@ -1758,6 +1763,10 @@
   "How strongly text stands out from its background.": "文字在背景上的醒目程度。",
   "Used when you start a new chat. A chat you continue keeps its own model.": "在開始新聊天時使用。繼續的聊天會保留自己的模型。",
   "Lets tools run, including computer use, file editing and JavaScript, even when the app can’t tell which chat called them. Sub-agents and other chat actions still need a known chat. These calls are listed under Unattributed activity.": "即使應用程式無法判斷是哪個聊天呼叫的，也允許執行工具，包括電腦操作、檔案編輯和 JavaScript。子代理和其他聊天操作仍需要已知的聊天。這些呼叫會列在「未歸屬活動」下。",
+  "Trust only selected chats": "僅信任選取的聊天",
+  "Untrust this chat: strict mode refuses its tool calls": "取消信任此聊天：嚴格模式會拒絕其工具呼叫",
+  "Trust this chat: strict mode lets its tool calls run": "信任此聊天：嚴格模式會允許其工具呼叫",
+  "Only chats you trust can use this computer's tools. Existing chats start untrusted; hover a chat in the sidebar and choose Trust (✓). Workers and resumed chats follow the chat they came from. Calls the app can't link to a chat are refused.": "只有你信任的聊天才能使用這台電腦的工具。現有聊天一開始都不受信任；將滑鼠停在側邊欄中的聊天上，然後選擇「信任」(✓)。Worker 與續接聊天會跟隨它們來源的聊天。應用程式無法連結到聊天的呼叫會被拒絕。",
   "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "切換為唯讀：ChatGPT 仍可檢視檔案和螢幕，但無法建立、編輯、移動或刪除檔案，無法執行程式，也無法控制這台電腦。",
   "Read-only is on: ChatGPT can only look. Click to allow changes again.": "唯讀已開啟：ChatGPT 只能檢視。按一下即可重新允許變更。",
   "General": "一般",
@@ -1798,5 +1807,6 @@
   "Choose whether imported Skills can be matched to ordinary messages.": "選擇是否允許將已匯入的 Skills 自動配對到一般訊息。",
   "Auto-select Skills": "自動選擇 Skills",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "只有一個已匯入 Skill 在中繼資料上明確符合時，才會加入該訊息。明確選擇的 Skill 永遠優先。",
-  "Auto-selected Skill: /{0}": "已自動選擇 Skill：/{0}"
+  "Auto-selected Skill: /{0}": "已自動選擇 Skill：/{0}",
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "清除所有子代理？正在執行的會停止，其儲存的歷史記錄將被永久刪除。它們的聊天仍保留在 ChatGPT 中。"
 }

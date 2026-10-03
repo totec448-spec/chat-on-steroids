@@ -38,7 +38,7 @@ vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: vi.fn(async (
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, resetSecretsCacheForTests } = await import('../src/main/secrets.js');
-const { appendEvent, createSession, initSessionStore, rebindSession, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
+const { appendEvent, createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { pendingCommands, resetBridgeForTests, setBrowserOpener, startBridge, stopBridge } = await import(
   '../src/main/bridge.js'
@@ -67,7 +67,7 @@ const { openInPreferredBrowser } = await import('../src/main/browser.js');
 const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
 const { extensionDownloadUrl } = await import('../src/main/version.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceEntries } = await import('../src/main/workspace.js');
-const { makeTempDir, removeTempDir } = await import('./helpers.js');
+const { faultGate, makeTempDir, removeTempDir } = await import('./helpers.js');
 
 let dir: string;
 let currentWindow: {
@@ -119,6 +119,45 @@ it('saves Auto-select Skills through Settings and preserves it across a stale un
   expect(getConfig().ui.autoSelectSkills).toBe(wanted);
   expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
   expect(getConfig().ui.autoSelectSkills).toBe(wanted);
+});
+
+it('enabling strict chat allowlisting keeps existing chats untrusted', async () => {
+  const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+  resetTrustedChatsForTests();
+  const conversationId = 'strict-existing-chat-stays-untrusted';
+  await createSession({ title: 'Existing chat before strict mode', conversationId });
+  const base = getConfig();
+  try {
+    expect(await save({ ...base, multiAgent: { ...base.multiAgent, strictChatAllowlist: true } }, base)).toMatchObject({ ok: true });
+    expect(getConfig().multiAgent.strictChatAllowlist).toBe(true);
+    expect(isChatTrusted(conversationId)).toBe(false);
+  } finally {
+    resetTrustedChatsForTests();
+  }
+});
+
+it('trusts a strict CoS opening through the configured session-policy fence only after exact bind', async () => {
+  const outbox = await import('../src/main/session/input.js');
+  const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+  resetTrustedChatsForTests();
+  const original = await outbox.listInputs();
+  await writeDurableNow('session-input', []); outbox.resetInputForTests();
+  const base = getConfig();
+  const id = 'f0f00015-1111-4111-8111-111111111111';
+  const conversationId = 'f0f00016-1111-4111-8111-111111111111';
+  try {
+    expect(await save({ ...base, multiAgent: { ...base.multiAgent, strictChatAllowlist: true } }, base)).toMatchObject({ ok: true });
+    const row = await outbox.enqueueInput({ id, sessionId: null, text: 'Strict composer opening', mode: 'auto',
+      dueAt: Date.now(), model: null, reasoningEffort: null });
+    expect(await outbox.claimBrowserInput(row.id, 'strict-ipc-opening', null, true)).not.toBeNull();
+    expect(await outbox.authorizeBrowserInput(row.id, 'strict-ipc-opening', null)).toBe(true);
+    expect(isChatTrusted(conversationId)).toBe(false);
+    expect(await outbox.bindBrowserInputProject(row.id, 'strict-ipc-opening', conversationId)).toBe(true);
+    expect(isChatTrusted(conversationId)).toBe(true);
+  } finally {
+    await writeDurableNow('session-input', original); outbox.resetInputForTests();
+    resetTrustedChatsForTests();
+  }
 });
 
 it('saves port choices, merges stale snapshots and serializes concurrent port edits', async () => {
@@ -449,9 +488,24 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   expect(getConfig().roots).toHaveLength(1);
   const listed = await handlers.get('projects:list')!(null, {}) as any;
   expect(listed.data).toHaveLength(2);
+  const related = path.join(dir, 'picker-related');
+  await fs.mkdir(related);
+  vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [related] });
+  const addFolder = () => handlers.get('projects:addFolder')!(null, { id: first.data.id }) as Promise<any>;
+  const withRelated = await addFolder();
+  expect(withRelated).toMatchObject({ ok: true, data: { id: first.data.id } });
+  expect(withRelated.data.additionalPaths).toHaveLength(1);
+  const storedRelated = withRelated.data.additionalPaths[0];
+  expect(path.isAbsolute(storedRelated)).toBe(true);
+  expect((await addFolder()).data.additionalPaths).toEqual([storedRelated]);
+  expect(getConfig().roots).toHaveLength(2);
+  const withoutRelated = await handlers.get('projects:removeFolder')!(null, { id: first.data.id, path: storedRelated }) as any;
+  expect(withoutRelated).toMatchObject({ ok: true, data: { id: first.data.id } });
+  expect(withoutRelated.data.additionalPaths).toBeUndefined();
+  expect(getConfig().roots).toHaveLength(2);
   const removed = await handlers.get('projects:remove')!(null, { id: first.data.id }) as any;
   expect(removed).toMatchObject({ ok: true, data: { id: first.data.id, ungrouped: true } });
-  expect(getConfig().roots).toHaveLength(1);
+  expect(getConfig().roots).toHaveLength(2);
   expect((await fs.stat(folder)).isDirectory()).toBe(true);
   expect(await handlers.get('projects:remove')!(null, { id: folder })).toMatchObject({ ok: false });
   expect(await handlers.get('projectGit:snapshot')!(null, { projectId: folder })).toMatchObject({ ok: false });
@@ -1453,6 +1507,218 @@ describe('session IPC contracts', () => {
     resetBlockedChatsForTests();
   });
 
+  it('trusts and untrusts only the stored conversation for strict allowlisting', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const conversationId = 'dddddddd-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'trusted chat', conversationId });
+
+    const trusted = (await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: conversationId, trusted: true
+    })) as any;
+    expect(trusted.ok, trusted.error).toBe(true);
+    expect(trusted.data).toEqual([conversationId]);
+    expect(isChatTrusted(conversationId)).toBe(true);
+
+    const untrusted = (await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: conversationId, trusted: false
+    })) as any;
+    expect(untrusted.ok, untrusted.error).toBe(true);
+    expect(untrusted.data).toEqual([]);
+    expect(isChatTrusted(conversationId)).toBe(false);
+
+    const unattributed = await createSession({ title: 'no conversation to trust', conversationId: null });
+    const refused = (await handlers.get('sessions:trust')!(null, {
+      id: unattributed.id, expectedConversationId: conversationId, trusted: true
+    })) as any;
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/no valid ChatGPT conversation/i);
+    resetTrustedChatsForTests();
+  });
+
+  it('refuses direct worker Trust while allowing its prime and stale worker Untrust cleanup', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests, setChatTrusted } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const primeConversationId = 'strict-prime-ipc-owner';
+    const workerConversationId = 'strict-worker-ipc-owned';
+    const primeSession = await createSession({ title: 'strict prime owner', conversationId: primeConversationId });
+    const run = spawn({ caller: { conversationId: primeConversationId }, workers: [{ task: 'owned work' }] });
+    expect(bindConversation('worker-1', workerConversationId, run.runId)).toBe(true);
+    const workerSession = await createSession({
+      title: 'strict owned worker',
+      conversationId: workerConversationId,
+      origin: { kind: 'worker', fromSessionId: primeSession.id, agentId: 'worker-1', task: 'owned work' }
+    });
+
+    try {
+      const workerTrust = (await handlers.get('sessions:trust')!(null, {
+        id: workerSession.id, expectedConversationId: workerConversationId, trusted: true
+      })) as any;
+      expect(workerTrust.ok).toBe(false);
+      expect(workerTrust.error).toMatch(/worker chats cannot be trusted directly/i);
+      expect(isChatTrusted(workerConversationId)).toBe(false);
+
+      const primeTrust = (await handlers.get('sessions:trust')!(null, {
+        id: primeSession.id, expectedConversationId: primeConversationId, trusted: true
+      })) as any;
+      expect(primeTrust.ok, primeTrust.error).toBe(true);
+      expect(isChatTrusted(primeConversationId)).toBe(true);
+
+      // A pre-fix durable worker bit is not authority anymore, but Untrust must remain usable to
+      // clean it up rather than trapping stale state behind the new guard.
+      await setChatTrusted(workerConversationId, true);
+      const cleanup = (await handlers.get('sessions:trust')!(null, {
+        id: workerSession.id, expectedConversationId: workerConversationId, trusted: false
+      })) as any;
+      expect(cleanup.ok, cleanup.error).toBe(true);
+      expect(isChatTrusted(workerConversationId)).toBe(false);
+    } finally {
+      resetTrustedChatsForTests();
+    }
+  });
+
+  it('refuses direct Trust for durable worker identity after broker ownership is gone', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const workerConversationId = 'strict-worker-durable-only';
+    const workerSession = await createSession({
+      title: 'durable worker without retained broker owner',
+      conversationId: workerConversationId,
+      origin: { kind: 'worker', fromSessionId: null, agentId: 'worker-7', task: 'old retained work' }
+    });
+
+    const refused = (await handlers.get('sessions:trust')!(null, {
+      id: workerSession.id, expectedConversationId: workerConversationId, trusted: true
+    })) as any;
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/worker chats cannot be trusted directly/i);
+    expect(isChatTrusted(workerConversationId)).toBe(false);
+    resetTrustedChatsForTests();
+  });
+
+  it('refuses stale trust intent after Compact & Resume rebinds the same session to a new chat', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const chatA = '11111111-aaaa-bbbb-cccc-111111111111';
+    const chatB = '22222222-aaaa-bbbb-cccc-222222222222';
+    const session = await createSession({ title: 'rebound trust', conversationId: chatA });
+    expect(await rebindSession(session.id, chatA, chatB)).toBe(true);
+
+    const stale = (await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: chatA, trusted: true
+    })) as any;
+    expect(stale.ok).toBe(false);
+    expect(stale.error).toMatch(/moved to another ChatGPT conversation/i);
+    expect(isChatTrusted(chatA)).toBe(false);
+    expect(isChatTrusted(chatB)).toBe(false);
+
+    const current = (await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: chatB, trusted: true
+    })) as any;
+    expect(current.ok, current.error).toBe(true);
+    expect(isChatTrusted(chatB)).toBe(true);
+    resetTrustedChatsForTests();
+  });
+
+  it('serializes Trust with Compact & Resume so an in-flight stale A action cannot authorize B', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const chatA = '12121212-aaaa-bbbb-cccc-121212121212';
+    const chatB = '34343434-aaaa-bbbb-cccc-343434343434';
+    const session = await createSession({ title: 'trust raced with resume', conversationId: chatA });
+    const gate = faultGate();
+    const originalRename = fs.rename.bind(fs);
+    const rename = vi.spyOn(fs, 'rename').mockImplementationOnce(async (...args: Parameters<typeof fs.rename>) => {
+      await gate.hold();
+      return originalRename(...args);
+    });
+    try {
+      const moving = rebindSession(session.id, chatA, chatB, 'handoff-trust-race-0001');
+      await gate.entered;
+      let trustSettled = false;
+      const trusting = (handlers.get('sessions:trust')!(null, {
+        id: session.id, expectedConversationId: chatA, trusted: true
+      }) as Promise<any>).then((result) => { trustSettled = true; return result; });
+      await Promise.resolve();
+      expect(trustSettled).toBe(false);
+
+      gate.release();
+      expect(await moving).toBe(true);
+      const stale = await trusting;
+      expect(stale.ok).toBe(false);
+      expect(stale.error).toMatch(/moved to another ChatGPT conversation/i);
+      expect(isChatTrusted(chatA)).toBe(false);
+      expect(isChatTrusted(chatB)).toBe(false);
+    } finally {
+      gate.release();
+      rename.mockRestore();
+      resetTrustedChatsForTests();
+    }
+  });
+
+  it('Untrust on the current resumed row revokes the explicit source instead of leaving inherited authority', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    const { conversationAccessRefusal } = await import('../src/main/session/conversation-access.js');
+    resetTrustedChatsForTests();
+    const chatA = '33333333-aaaa-bbbb-cccc-333333333333';
+    const chatB = '44444444-aaaa-bbbb-cccc-444444444444';
+    const session = await createSession({ title: 'inherited resumed trust', conversationId: chatA });
+    getConfig().multiAgent.strictChatAllowlist = true;
+    try {
+      const trustA = (await handlers.get('sessions:trust')!(null, {
+        id: session.id, expectedConversationId: chatA, trusted: true
+      })) as any;
+      expect(trustA.ok, trustA.error).toBe(true);
+      expect(await rebindSession(session.id, chatA, chatB, 'handoff-resume-trust-0001')).toBe(true);
+      expect(await conversationAccessRefusal(chatB)).toBeNull();
+      expect(isChatTrusted(chatA)).toBe(true);
+      expect(isChatTrusted(chatB)).toBe(false);
+
+      const untrustB = (await handlers.get('sessions:trust')!(null, {
+        id: session.id, expectedConversationId: chatB, trusted: false
+      })) as any;
+      expect(untrustB.ok, untrustB.error).toBe(true);
+      expect(untrustB.data).toEqual([]);
+      expect(isChatTrusted(chatA)).toBe(false);
+      expect(isChatTrusted(chatB)).toBe(false);
+      expect(await conversationAccessRefusal(chatB)).toMatch(/^CHAT_NOT_TRUSTED:/);
+    } finally {
+      getConfig().multiAgent.strictChatAllowlist = false;
+      resetTrustedChatsForTests();
+    }
+  });
+
+  it('Release on the current resumed row clears a blocking source without removing its Trust', async () => {
+    const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    const { conversationAccessRefusal } = await import('../src/main/session/conversation-access.js');
+    resetBlockedChatsForTests();
+    resetTrustedChatsForTests();
+    const chatA = '77777777-aaaa-bbbb-cccc-777777777777';
+    const chatB = '88888888-aaaa-bbbb-cccc-888888888888';
+    const session = await createSession({ title: 'blocked resumed source', conversationId: chatA });
+    getConfig().multiAgent.strictChatAllowlist = true;
+    try {
+      expect(((await handlers.get('sessions:trust')!(null, {
+        id: session.id, expectedConversationId: chatA, trusted: true
+      })) as any).ok).toBe(true);
+      expect(((await handlers.get('sessions:block')!(null, { id: session.id, blocked: true })) as any).ok).toBe(true);
+      expect(await rebindSession(session.id, chatA, chatB, 'handoff-release-block-0001')).toBe(true);
+      expect(await conversationAccessRefusal(chatB)).toMatch(/^CHAT_NOT_TRUSTED:/);
+
+      const released = (await handlers.get('sessions:block')!(null, { id: session.id, blocked: false })) as any;
+      expect(released.ok, released.error).toBe(true);
+      expect(isChatBlocked(chatA)).toBe(false);
+      expect(isChatBlocked(chatB)).toBe(false);
+      expect(isChatTrusted(chatA)).toBe(true);
+      expect(await conversationAccessRefusal(chatB)).toBeNull();
+    } finally {
+      getConfig().multiAgent.strictChatAllowlist = false;
+      resetBlockedChatsForTests();
+      resetTrustedChatsForTests();
+    }
+  });
+
   it('releases a block when the row that carries its button is deleted', async () => {
     const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
     resetBlockedChatsForTests();
@@ -1467,6 +1733,176 @@ describe('session IPC contracts', () => {
     expect(isChatBlocked(conversationId)).toBe(false);
   });
 
+  it('removes trust when the row that carries its button is deleted', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const conversationId = 'eeeeeeee-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'trusted then deleted', conversationId });
+    await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: conversationId, trusted: true
+    });
+    expect(isChatTrusted(conversationId)).toBe(true);
+
+    const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+    expect(deleted.ok, deleted.error).toBe(true);
+    expect(isChatTrusted(conversationId)).toBe(false);
+    resetTrustedChatsForTests();
+  });
+
+  it('deleting a resumed row atomically revokes hidden explicit source trust', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    const { conversationAccessRefusal } = await import('../src/main/session/conversation-access.js');
+    resetTrustedChatsForTests();
+    const chatA = '55555555-aaaa-bbbb-cccc-555555555555';
+    const chatB = '66666666-aaaa-bbbb-cccc-666666666666';
+    const session = await createSession({ title: 'resumed trust deleted', conversationId: chatA });
+    getConfig().multiAgent.strictChatAllowlist = true;
+    try {
+      const trusted = (await handlers.get('sessions:trust')!(null, {
+        id: session.id, expectedConversationId: chatA, trusted: true
+      })) as any;
+      expect(trusted.ok, trusted.error).toBe(true);
+      expect(await rebindSession(session.id, chatA, chatB, 'handoff-delete-trust-0001')).toBe(true);
+      expect(await conversationAccessRefusal(chatB)).toBeNull();
+
+      const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+      expect(deleted.ok, deleted.error).toBe(true);
+      expect(isChatTrusted(chatA)).toBe(false);
+      expect(isChatTrusted(chatB)).toBe(false);
+
+      await createSession({ title: 'old source returned', conversationId: chatA });
+      expect(await conversationAccessRefusal(chatA)).toMatch(/^CHAT_NOT_TRUSTED:/);
+    } finally {
+      getConfig().multiAgent.strictChatAllowlist = false;
+      resetTrustedChatsForTests();
+    }
+  });
+
+  it('deleting a resumed row releases a hidden committed source Block', async () => {
+    const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    resetBlockedChatsForTests();
+    const chatA = '99999999-aaaa-bbbb-cccc-999999999999';
+    const chatB = 'aaaaaaaa-aaaa-bbbb-cccc-aaaaaaaaaaaa';
+    const session = await createSession({ title: 'resumed source block deleted', conversationId: chatA });
+    try {
+      expect(((await handlers.get('sessions:block')!(null, { id: session.id, blocked: true })) as any).ok).toBe(true);
+      expect(isChatBlocked(chatA)).toBe(true);
+      expect(await rebindSession(session.id, chatA, chatB, 'handoff-delete-block-0001')).toBe(true);
+
+      const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+      expect(deleted.ok, deleted.error).toBe(true);
+      expect(isChatBlocked(chatA)).toBe(false);
+      expect(isChatBlocked(chatB)).toBe(false);
+    } finally {
+      resetBlockedChatsForTests();
+    }
+  });
+
+  it('preserves the session, Block and Trust when durable trust revocation fails during delete', async () => {
+    const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetBlockedChatsForTests();
+    resetTrustedChatsForTests();
+    const conversationId = 'abababab-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'policy survives failed delete', conversationId });
+    await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: conversationId, trusted: true
+    });
+    await handlers.get('sessions:block')!(null, { id: session.id, blocked: true });
+    expect(isChatTrusted(conversationId)).toBe(true);
+    expect(isChatBlocked(conversationId)).toBe(true);
+
+    const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('simulated trust revoke failure'), { code: 'EIO' }));
+    try {
+      const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+      expect(deleted.ok).toBe(false);
+      expect(deleted.error).toMatch(/simulated trust revoke failure/i);
+      expect(isChatTrusted(conversationId)).toBe(true);
+      expect(isChatBlocked(conversationId)).toBe(true);
+      expect(await getSession(session.id)).not.toBeNull();
+      await flushDurable();
+    } finally {
+      rename.mockRestore();
+      resetBlockedChatsForTests();
+      resetTrustedChatsForTests();
+    }
+  });
+
+  it('fences concurrent Trust while session deletion is waiting on its durable revoke', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const conversationId = 'cdcdcdcd-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'trust raced with delete', conversationId });
+    await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: conversationId, trusted: true
+    });
+    expect(isChatTrusted(conversationId)).toBe(true);
+
+    const gate = faultGate();
+    const originalRename = fs.rename.bind(fs);
+    const rename = vi.spyOn(fs, 'rename').mockImplementationOnce(async (...args: Parameters<typeof fs.rename>) => {
+      await gate.hold();
+      return originalRename(...args);
+    });
+    try {
+      const deleting = handlers.get('sessions:delete')!(null, { id: session.id }) as Promise<any>;
+      await gate.entered;
+
+      const racedTrust = (await handlers.get('sessions:trust')!(null, {
+        id: session.id, expectedConversationId: conversationId, trusted: true
+      })) as any;
+      expect(racedTrust.ok).toBe(false);
+      expect(racedTrust.error).toMatch(/being deleted/i);
+
+      gate.release();
+      const deleted = await deleting;
+      expect(deleted.ok, deleted.error).toBe(true);
+      expect(await getSession(session.id)).toBeNull();
+      expect(isChatTrusted(conversationId)).toBe(false);
+    } finally {
+      gate.release();
+      rename.mockRestore();
+      resetTrustedChatsForTests();
+    }
+  });
+
+  it('fences concurrent Block while session deletion is waiting on filesystem removal', async () => {
+    const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    resetBlockedChatsForTests();
+    const conversationId = 'efefefef-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'block raced with delete', conversationId });
+    await handlers.get('sessions:block')!(null, { id: session.id, blocked: true });
+    expect(isChatBlocked(conversationId)).toBe(true);
+
+    const gate = faultGate();
+    const originalRm = fs.rm.bind(fs);
+    const rm = vi.spyOn(fs, 'rm').mockImplementationOnce(async (...args: Parameters<typeof fs.rm>) => {
+      await gate.hold();
+      return originalRm(...args);
+    });
+    try {
+      const deleting = handlers.get('sessions:delete')!(null, { id: session.id }) as Promise<any>;
+      await gate.entered;
+      expect(isChatBlocked(conversationId)).toBe(false);
+
+      const racedBlock = (await handlers.get('sessions:block')!(null, {
+        id: session.id, blocked: true
+      })) as any;
+      expect(racedBlock.ok).toBe(false);
+      expect(racedBlock.error).toMatch(/being deleted/i);
+
+      gate.release();
+      const deleted = await deleting;
+      expect(deleted.ok, deleted.error).toBe(true);
+      expect(await getSession(session.id)).toBeNull();
+      expect(isChatBlocked(conversationId)).toBe(false);
+    } finally {
+      gate.release();
+      rm.mockRestore();
+      resetBlockedChatsForTests();
+    }
+  });
+
   it('reports the blocked set with every session list, so one paint marks every row', async () => {
     const { resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
     resetBlockedChatsForTests();
@@ -1477,6 +1913,20 @@ describe('session IPC contracts', () => {
     await handlers.get('sessions:block')!(null, { id: session.id, blocked: true });
     expect((await sessionList()).data.blocked).toEqual([conversationId]);
     resetBlockedChatsForTests();
+  });
+
+  it('reports the trusted set with every session list as live access policy', async () => {
+    const { resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const conversationId = 'ffffffff-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'listed while trusted', conversationId });
+
+    expect((await sessionList()).data.trusted).toEqual([]);
+    await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: conversationId, trusted: true
+    });
+    expect((await sessionList()).data.trusted).toEqual([conversationId]);
+    resetTrustedChatsForTests();
   });
 
   it('opens only the stored conversation URL in Chrome', async () => {

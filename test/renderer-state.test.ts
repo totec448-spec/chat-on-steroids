@@ -315,13 +315,16 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   pending.shift()!({ ok: true, data: current });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  // Appearance changes must request dark then light in order,
-  // even though the first dark save has not answered yet.
-  const theme = w.document.getElementById('appearanceTheme') as HTMLSelectElement;
-  theme.value = 'dark'; theme.dispatchEvent(new w.Event('change', { bubbles: true }));
+  // The title-bar theme action uses the same serialized settings owner as Appearance. Two
+  // quick presses must request dark then light even though the first save has not answered.
+  const theme = w.document.getElementById('themeBtn') as HTMLButtonElement;
+  expect(theme.getAttribute('aria-label')).toBe('Switch to dark mode');
+  theme.click();
   await vi.waitFor(() => expect(calls).toHaveLength(4));
   expect(calls[3].ui.theme).toBe('dark');
-  theme.value = 'light'; theme.dispatchEvent(new w.Event('change', { bubbles: true }));
+  expect(w.document.documentElement.dataset.theme).toBe('dark');
+  expect(theme.getAttribute('aria-label')).toBe('Switch to light mode');
+  theme.click();
   expect(calls).toHaveLength(4);
 
   current = appState({ ...baseConfig, readOnly: false, ui: { ...baseConfig.ui, autoConnect: true, theme: 'dark' } });
@@ -520,6 +523,128 @@ it('commits a project summary click before an immediate state repaint replaces i
   expect(group().open).toBe(true);
 });
 
+it('keeps strict chat allowlisting separate from Block and exposes explicit Trust on session rows', async () => {
+  const session = {
+    id: 'strict-session', title: 'Strict policy chat', conversationId: 'strict-chat-0001', chatIds: ['strict-chat-0001'],
+    startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+    lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastHandoffId: null, lastHandoffAt: null,
+    lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null
+  };
+  const workerSession = {
+    ...session,
+    id: 'strict-worker-session', title: 'Strict worker chat', conversationId: 'strict-worker-chat-0001',
+    chatIds: ['strict-worker-chat-0001'],
+    origin: { kind: 'worker' as const, fromSessionId: null, agentId: 'worker-1', task: 'owned work' }
+  };
+  const setSessionTrusted = vi.fn(async () => ({ ok: true, data: [session.conversationId] }));
+  const setSessionBlocked = vi.fn(async () => ({ ok: true, data: [session.conversationId] }));
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [] }),
+    listSessions: async () => ({ ok: true, data: {
+      sessions: [session, workerSession], activeId: null, pressure: [], blocked: [], trusted: []
+    } }),
+    setSessionTrusted,
+    setSessionBlocked
+  });
+  const doc = mounted.window.document;
+  mounted.state.config.multiAgent.strictChatAllowlist = true;
+  mounted.push(structuredClone(mounted.state));
+  const primeRow = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
+  const workerRow = () => doc.querySelector<HTMLElement>(`[data-id="${workerSession.id}"]`)!;
+  await vi.waitFor(() => expect(primeRow().querySelector('.sess-trust')).not.toBeNull());
+  expect(workerRow().querySelector('.sess-trust')).toBeNull();
+  expect(workerRow().querySelector('.sess-block')).not.toBeNull();
+
+  (primeRow().querySelector('.sess-trust') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(setSessionTrusted).toHaveBeenCalledWith(session.id, session.conversationId, true));
+  expect(setSessionBlocked).not.toHaveBeenCalled();
+
+  (primeRow().querySelector('.sess-block') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(setSessionBlocked).toHaveBeenCalledWith(session.id, true));
+});
+
+it('shows committed resume inheritance as trusted and revokes it through the current row', async () => {
+  const source = 'strict-resume-source-0001';
+  const current = 'strict-resume-current-0001';
+  const session = {
+    id: 'strict-resume-session', title: 'Resumed trusted chat', conversationId: current, chatIds: [source, current],
+    startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+    lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastHandoffId: 'handoff-resume-0001', lastHandoffAt: 1,
+    lastCommittedResumeHandoffId: 'handoff-resume-0001',
+    lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null
+  };
+  const setSessionTrusted = vi.fn(async () => ({ ok: true, data: [] }));
+  const setSessionBlocked = vi.fn(async () => ({ ok: true, data: [] }));
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [] }),
+    listSessions: async () => ({ ok: true, data: {
+      sessions: [session], activeId: null, pressure: [], blocked: [], trusted: [source]
+    } }),
+    setSessionTrusted,
+    setSessionBlocked
+  });
+  const doc = mounted.window.document;
+  mounted.state.config.multiAgent.strictChatAllowlist = true;
+  mounted.push(structuredClone(mounted.state));
+  const row = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
+  await vi.waitFor(() => expect(row().querySelector('.sess-trust')).not.toBeNull());
+  const trust = row().querySelector('.sess-trust') as HTMLButtonElement;
+  expect(trust.classList.contains('is-trusted')).toBe(true);
+  const block = row().querySelector('.sess-block') as HTMLButtonElement;
+  expect(block.classList.contains('is-blocked')).toBe(false);
+  trust.click();
+  await vi.waitFor(() => expect(setSessionTrusted).toHaveBeenCalledWith(session.id, current, false));
+});
+
+it('shows an inherited Block ahead of Trust on a committed resumed row', async () => {
+  const source = 'strict-resume-blocked-source-0001';
+  const current = 'strict-resume-blocked-current-0001';
+  const session = {
+    id: 'strict-resume-blocked-session', title: 'Resumed blocked chat', conversationId: current, chatIds: [source, current],
+    startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+    lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastHandoffId: 'handoff-resume-blocked-0001', lastHandoffAt: 1,
+    lastCommittedResumeHandoffId: 'handoff-resume-blocked-0001',
+    lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null
+  };
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [] }),
+    listSessions: async () => ({ ok: true, data: {
+      sessions: [session], activeId: null, pressure: [], blocked: [source], trusted: [source]
+    } })
+  });
+  const doc = mounted.window.document;
+  mounted.state.config.multiAgent.strictChatAllowlist = true;
+  mounted.push(structuredClone(mounted.state));
+  const row = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
+  await vi.waitFor(() => expect(row().querySelector('.sess-trust')).not.toBeNull());
+  expect((row().querySelector('.sess-block') as HTMLButtonElement).classList.contains('is-blocked')).toBe(true);
+  expect((row().querySelector('.sess-trust') as HTMLButtonElement).classList.contains('is-trusted')).toBe(false);
+});
+
+it('saves strict chat allowlisting and disables the unattributed switch while strict mode is on', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const strict = doc.getElementById('strictChatAllowlist') as HTMLInputElement;
+  const unattributed = doc.getElementById('allowUnattributedCalls') as HTMLInputElement;
+  const copy = strict.closest('.setting')!.textContent ?? '';
+  expect(copy).toContain("Only chats you trust can use this computer's tools.");
+  expect(copy).toContain('Existing chats start untrusted');
+  expect(copy).toMatch(/sidebar.*Trust/i);
+  expect(copy).not.toContain('Sessions');
+
+  strict.checked = true;
+  strict.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls.some(call => call.multiAgent?.strictChatAllowlist === true)).toBe(true));
+
+  const next = structuredClone(mounted.state);
+  next.config.multiAgent.strictChatAllowlist = true;
+  mounted.push(next);
+  expect(unattributed.disabled).toBe(true);
+});
+
 it('keeps project keyboard focus across activity repaint without taking composer focus or reloading on disclosure', async () => {
   const { project, session } = projectSidebarFixture();
   const listSessions = vi.fn(async () => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } }));
@@ -550,7 +675,7 @@ it('keeps project keyboard focus across activity repaint without taking composer
 
 // Adapted from @Haz4rdovisk's #345: typed Setup values used to reach the app only on blur, so a
 // Connect click right after typing did nothing.
-it.each(['wizConnect', 'connectionPopoverToggle'])(
+it.each(['headerConnect', 'wizConnect', 'connectionPopoverToggle'])(
   'persists valid Setup drafts before %s starts the tunnel',
   async (buttonId) => {
     let live: any;
@@ -597,6 +722,61 @@ it.each(['wizConnect', 'connectionPopoverToggle'])(
   }
 );
 
+it('keeps titlebar Connect clickable with incomplete setup and focuses the missing Setup step', async () => {
+  const connect = vi.fn();
+  const mounted = await mountChat({}, [], { connect });
+  const doc = mounted.window.document;
+  const header = doc.getElementById('headerConnect') as HTMLButtonElement;
+  const popover = doc.getElementById('connectionPopoverToggle') as HTMLButtonElement;
+  const wizard = doc.getElementById('wizConnect') as HTMLButtonElement;
+  const missing = doc.querySelector<HTMLElement>('[data-step="key"]')!;
+
+  expect(header.textContent).toBe('Connect');
+  expect(header.disabled).toBe(false);
+  expect(popover.disabled).toBe(true);
+  expect(wizard.disabled).toBe(true);
+  header.click();
+
+  await vi.waitFor(() => expect(doc.querySelector('[data-panel="setup"]')?.classList.contains('is-active')).toBe(true));
+  expect(missing.classList.contains('is-current')).toBe(true);
+  expect(doc.activeElement).toBe(missing);
+  expect(connect).not.toHaveBeenCalled();
+});
+
+it('shows titlebar Connect only before connection and never turns it into Disconnect', async () => {
+  const connect = vi.fn();
+  const disconnect = vi.fn();
+  const mounted = await mountChat({ hasApiKey: true }, [], { connect, disconnect });
+  const header = mounted.window.document.getElementById('headerConnect') as HTMLButtonElement;
+  const pushState = (state: any) => mounted.push({ ...mounted.state, status: { ...mounted.state.status, state } });
+
+  for (const state of ['disconnected', 'auth-failed', 'tunnel-unavailable'] as const) {
+    pushState(state);
+    expect(header.hidden).toBe(false);
+    expect(header.textContent).toBe('Connect');
+    expect(header.disabled).toBe(false);
+    expect(header.classList.contains('is-running')).toBe(false);
+  }
+  for (const state of ['starting-server', 'connecting-tunnel'] as const) {
+    pushState(state);
+    expect(header.hidden).toBe(false);
+    expect(header.textContent).toBe('Connecting…');
+    expect(header.disabled).toBe(true);
+    expect(header.classList.contains('is-running')).toBe(false);
+  }
+  for (const state of ['connected', 'offline', 'disconnecting'] as const) {
+    pushState(state);
+    expect(header.hidden).toBe(true);
+    expect(header.classList.contains('is-running')).toBe(false);
+  }
+
+  pushState('connected');
+  header.click();
+  await settle();
+  expect(disconnect).not.toHaveBeenCalled();
+  expect(connect).not.toHaveBeenCalled();
+});
+
 it('keeps global connection controls in a compact sidebar popover', async () => {
   const mounted = await mountChat({ hasApiKey: true });
   const doc = mounted.window.document;
@@ -614,8 +794,12 @@ it('keeps global connection controls in a compact sidebar popover', async () => 
   mounted.push(connected);
 
   const trigger = doc.getElementById('sidebarConnection') as HTMLButtonElement;
+  const topbarAction = doc.getElementById('headerConnect') as HTMLButtonElement;
   const popover = doc.getElementById('connectionPopover') as HTMLElement;
   expect(doc.querySelector('#chatTitle')!.closest('header')!.querySelector('#connectBtn')).toBeNull();
+  expect(topbarAction.closest('.app-topbar')).not.toBeNull();
+  expect(topbarAction.hidden).toBe(true);
+  expect(topbarAction.classList.contains('is-running')).toBe(false);
   expect(trigger.closest('.sidebar-bottom')).not.toBeNull();
   expect(trigger.textContent?.trim()).toBe('');
   expect(trigger.getAttribute('aria-label')).toMatch(/Connected.*verified/i);
@@ -1593,6 +1777,24 @@ it('opens, saves and restores the editable goal prompt', async () => {
   await settle();
   expect(prompt.value).toBe(DEFAULT_GOAL_SYSTEM_PROMPT);
   expect(mounted.calls.at(-1)?.goal.prompt).toBe(DEFAULT_GOAL_SYSTEM_PROMPT);
+});
+
+it('asks before Clear workers ends running workers and removes their histories', async () => {
+  const resetSwarm = vi.fn(async () => ({ ok: true as const, data: { running: false, agents: [], retainedHistory: false } }));
+  const mounted = await mountChat({ hasGoalKey: true }, [], { resetSwarm });
+  const w = mounted.window;
+  const button = w.document.getElementById('swarmReset') as HTMLButtonElement;
+  button.disabled = false;
+  const confirm = vi.fn(() => false);
+  w.confirm = confirm;
+  button.click();
+  await settle();
+  expect(confirm).toHaveBeenCalledWith(expect.stringContaining('removed for good'));
+  expect(resetSwarm).not.toHaveBeenCalled();
+  confirm.mockReturnValue(true);
+  button.click();
+  await settle();
+  expect(resetSwarm).toHaveBeenCalledTimes(1);
 });
 
 it('opens, saves and restores the editable handoff prompt', async () => {
