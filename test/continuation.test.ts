@@ -1297,6 +1297,26 @@ describe('the window in which a replacement chat is expected', () => {
     expect((await store.findSessionByConversation(destination))?.id).toBe(sessionId);
   });
 
+  it('re-arms the destination ownership gate when Send is dispatched after a long post-claim wait', async () => {
+    const { sessionId, token } = await readyContinuation();
+    const destination = '93939393-2222-4333-8444-555555555555';
+    await claimContinuationNow(token, 'slow-picker-resume-command');
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    await vi.advanceTimersByTimeAsync(RESUME_CLAIM_WINDOW_MS + 100);
+    expect(resumeOpeningChat()).toBe(false);
+
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    expect(resumeOpeningChat()).toBe(true);
+
+    const create = vi.spyOn(store, 'createSession');
+    const observation = sessionForConversation(destination);
+    expect(await commitContinuation(token, destination)).toBe(true);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(await observation).toBe(sessionId);
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it.each(['abort', 'expiry'] as const)('releases unrelated new recording when the resume claim ends by %s', async reason => {
     const { token } = await readyContinuation();
     await claimContinuationNow(token, 'unfinished-resume-command');
