@@ -1794,5 +1794,9 @@
   "Clear workers": "Borrar subagentes",
   "Workers cleared": "Subagentes borrados",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "No hay subagentes en ejecución. Sus historiales siguen disponibles para los chats que los iniciaron; Borrar subagentes los elimina definitivamente.",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Elige el modelo y el razonamiento predeterminados para chats nuevos y subagentes, entre lo que ofrece tu cuenta."
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Elige el modelo y el razonamiento predeterminados para chats nuevos y subagentes, entre lo que ofrece tu cuenta.",
+  "Choose whether imported Skills can be matched to ordinary messages.": "Elige si las Skills importadas pueden asociarse automáticamente con mensajes normales.",
+  "Auto-select Skills": "Seleccionar Skills automáticamente",
+  "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Cuando una sola Skill importada coincida claramente por sus metadatos, se añade a ese mensaje. Las selecciones explícitas de Skills siempre tienen prioridad.",
+  "Auto-selected Skill: /{0}": "Skill seleccionada automáticamente: /{0}"
 }

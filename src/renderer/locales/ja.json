@@ -1794,5 +1794,9 @@
   "Clear workers": "ワーカーを消去",
   "Workers cleared": "ワーカーを消去しました",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "実行中のワーカーはありません。履歴は起動したチャットから引き続き利用できます。「ワーカーを消去」で完全に削除されます。",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "新しいチャットとサブエージェントの既定のモデルと推論を、アカウントで利用できるものから選びます。"
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "新しいチャットとサブエージェントの既定のモデルと推論を、アカウントで利用できるものから選びます。",
+  "Choose whether imported Skills can be matched to ordinary messages.": "インポートした Skills を通常のメッセージに自動で対応付けるか選びます。",
+  "Auto-select Skills": "Skills を自動選択",
+  "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "インポートした Skill がメタデータ上ひとつだけ明確に一致するとき、そのメッセージに追加します。明示的な Skill 選択が常に優先されます。",
+  "Auto-selected Skill: /{0}": "自動選択した Skill: /{0}"
 }

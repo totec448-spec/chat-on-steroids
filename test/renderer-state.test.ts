@@ -882,6 +882,20 @@ it('saves the ChatGPT browser choice from its settings control and restores it o
   expect(browser.value).toBe('chrome');
 });
 
+it('saves Auto-select Skills from Settings and restores it on state push', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const toggle = w.document.getElementById('autoSelectSkills') as HTMLInputElement;
+  expect(toggle).not.toBeNull();
+  expect(toggle.checked).toBe(false);
+  toggle.checked = true;
+  toggle.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].ui.autoSelectSkills).toBe(true);
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, autoSelectSkills: false } } });
+  expect(toggle.checked).toBe(false);
+});
+
 it('saves and restores the global worker admission cap from Settings', async () => {
   const mounted = await mountChat();
   const w = mounted.window;
@@ -1884,6 +1898,54 @@ it('gives twenty rapid New Chat sends independent visible local chats before any
   expect(new Set(rows.map(row => row.sessionId)).size).toBe(20);
   expect(rows.every(row => row.state === 'queued' && row.deliveredAt === undefined)).toBe(true);
   expect(sendInput.mock.calls.every(([request]) => request.sessionId === null)).toBe(true);
+});
+
+it('shows the frozen Auto-selected Skill receipt for an accepted ordinary send', async () => {
+  const rows: any[] = [], summaries: any[] = [];
+  const ok = (data: any) => ({ ok: true, data });
+  const sendInput = vi.fn(async (request: any) => {
+    const row = {
+      ...request,
+      sessionId: request.id,
+      opening: true,
+      autoSkills: [{ id: 'code-review', revision: 'a'.repeat(64) }],
+      state: 'queued',
+      owner: null,
+      createdAt: Date.now(),
+      conversationId: null
+    };
+    rows.push(row);
+    summaries.push({
+      id: row.sessionId,
+      title: row.text,
+      conversationId: null,
+      origin: { kind: 'desktop' },
+      createdAt: row.createdAt,
+      updatedAt: row.createdAt,
+      eventCount: 0,
+      projectId: null,
+      selectedModel: null,
+      usage: {}
+    });
+    return ok(row);
+  });
+  const mounted = await mountChat({}, [], {
+    sendInput,
+    getChatModels: async () => ok({ state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['high'] }] }),
+    listInputs: async () => ok([...rows]),
+    runningTools: async () => ok([]),
+    livePreview: async () => ok(null),
+    listPausedHelpers: async () => ok([]),
+    listSessions: async () => ok({ sessions: [...summaries], activeId: null, pressure: [] }),
+    getSession: async (id: string) => ok({ summary: summaries.find(row => row.id === id), events: [], nextCursor: null })
+  });
+  const w = mounted.window, doc = w.document, field = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  (doc.getElementById('newChat') as HTMLButtonElement).click();
+  await settle();
+  field.value = 'Review this source code change for correctness.';
+  doc.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(doc.querySelector('.toast')?.textContent).toContain('Auto-selected Skill: /code-review'));
 });
 
 it('does not steal a newer New Chat draft when an older admission response arrives', async () => {

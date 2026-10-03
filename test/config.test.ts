@@ -185,6 +185,14 @@ describe('settings migration', () => {
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: true } });
     expect((await loadConfig()).ui.autoRefreshPlugins).toBe(true);
   });
+  it('defaults automatic Skill selection off for fresh and legacy settings while preserving explicit opt-in', async () => {
+    expect(defaultConfig().ui.autoSelectSkills).toBe(false);
+    const legacy = defaultConfig(); delete legacy.ui.autoSelectSkills;
+    await saveConfig(legacy);
+    expect((await loadConfig()).ui.autoSelectSkills).toBe(false);
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoSelectSkills: true } });
+    expect((await loadConfig()).ui.autoSelectSkills).toBe(true);
+  });
   it('defaults Goal and Loop to ChatGPT while preserving explicit backend choices', async () => {
     expect(defaultConfig().goal).toMatchObject({ backend: 'chatgpt', loopBackend: 'chatgpt' });
     for (const backend of ['api', 'templates', 'chatgpt'] as const) {

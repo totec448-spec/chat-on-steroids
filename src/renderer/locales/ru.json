@@ -1794,5 +1794,9 @@
   "Clear workers": "Очистить воркеров",
   "Workers cleared": "Воркеры очищены",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "Воркеры не запущены. Их истории остаются доступны чатам, которые их запустили; «Очистить воркеров» удаляет их навсегда.",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Выберите модель и рассуждение по умолчанию для новых чатов и субагентов из того, что предлагает ваш аккаунт."
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Выберите модель и рассуждение по умолчанию для новых чатов и субагентов из того, что предлагает ваш аккаунт.",
+  "Choose whether imported Skills can be matched to ordinary messages.": "Выберите, можно ли автоматически сопоставлять импортированные Skills с обычными сообщениями.",
+  "Auto-select Skills": "Автоматически выбирать Skills",
+  "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Если по метаданным однозначно подходит один импортированный Skill, он добавляется к сообщению. Явный выбор Skill всегда имеет приоритет.",
+  "Auto-selected Skill: /{0}": "Автоматически выбран Skill: /{0}"
 }

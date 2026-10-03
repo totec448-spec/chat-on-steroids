@@ -5,10 +5,11 @@ import { createHash } from 'node:crypto';
 import { rawPromises as fs } from './rawfs.js';
 import { effectiveCapabilities, getConfig } from './config.js';
 import { isContained, resolvePath } from './sandbox.js';
-import { listSkills, readSkill, readSkillTextSnapshot, skillsDirectory, type SkillDocument } from './skills.js';
+import { listSkills, readSkill, readSkillTextSnapshot, skillCatalogSnapshot, skillsDirectory, type SkillDocument } from './skills.js';
 import { approvedManagedSkillLink, sameSkillLink } from './skill-links.js';
 import { parseSkillConfiguration, parseSkillFrontmatter, parseSkillInterface, type SkillConfiguration } from './skill-metadata.js';
 import type { SkillLibrary, SkillMetadata, SkillScope, SkillSource } from '../shared/skills.js';
+import type { SkillRoutingMetadata } from '../shared/skill-routing.js';
 
 export interface SkillLibraryScope { projectPath?: string | null }
 type Candidate = { file: string; scope: SkillScope; source: SkillSource };
@@ -118,6 +119,73 @@ async function locations(scope: SkillLibraryScope): Promise<{ roots: Candidate[]
     { file: path.join(admin, 'skills'), scope: 'admin', source: 'admin' }
   );
   return { roots, configs };
+}
+
+async function routingRules(scope: SkillLibraryScope): Promise<{
+  valid: boolean;
+  rules: SkillConfiguration['rules'];
+  includeInstructions: boolean;
+  maxContextTokens?: number;
+}> {
+  const rules: SkillConfiguration['rules'] = [];
+  let includeInstructions = true, maxContextTokens: number | undefined;
+  if (!effectiveCapabilities(getConfig()).read) return { valid: true, rules, includeInstructions };
+  const search = await locations(scope);
+  for (const file of [...new Set(search.configs)]) {
+    try { await approved(file, true); } catch { continue; }
+    try {
+      const candidate = await approved(file, true);
+      if (!(await fs.lstat(candidate.real)).isFile()) throw new Error('Skills configuration must be a regular file');
+      const layer = parseSkillConfiguration((await readApproved(file)).text);
+      if (layer.includeInstructions !== undefined) includeInstructions = layer.includeInstructions;
+      if (layer.maxContextTokens !== undefined) maxContextTokens = layer.maxContextTokens;
+      rules.push(...layer.rules.map(rule => rule.path ? { ...rule, path: path.resolve(path.dirname(file), rule.path) } : rule));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return { valid: false, rules: [], includeInstructions: false };
+    }
+  }
+  return { valid: true, rules, includeInstructions, ...(maxContextTokens === undefined ? {} : { maxContextTokens }) };
+}
+
+/** Lightweight managed metadata for automatic routing; never scans or reads SKILL.md bodies. */
+export async function managedSkillRoutingMetadata(scope: SkillLibraryScope = {}): Promise<SkillRoutingMetadata[]> {
+  const root = skillsDirectory();
+  if (!root) return [];
+  const configured = await routingRules(scope);
+  if (!configured.valid) return [];
+  const enabled = (name: string, file: string): boolean => {
+    let value = true;
+    for (const rule of configured.rules) if (rule.name === name || (rule.path && samePath(rule.path, file))) value = rule.enabled;
+    return value;
+  };
+  const result: SkillRoutingMetadata[] = [];
+  for (const summary of skillCatalogSnapshot()) {
+    const directory = path.join(root, summary.id), file = path.join(directory, 'SKILL.md');
+    if (!enabled(summary.name, file)) continue;
+    const errors: string[] = [];
+    const metadata = await interfaceFor(directory, true, errors, summary.id);
+    result.push({ id: summary.id, revision: summary.revision, name: summary.name, description: summary.description, ...metadata });
+  }
+  return result;
+}
+
+/** Managed metadata-only catalog for auto-routed prompt framing; no SKILL.md body is read here. */
+export async function managedSkillMetadataLibrary(scope: SkillLibraryScope = {}): Promise<SkillLibrary> {
+  const root = skillsDirectory();
+  const empty: SkillLibrary = { skills: [], roots: root ? [{ path: '/skills', scope: 'managed', source: 'managed' }] : [], errors: [], includeInstructions: true };
+  if (!root) return empty;
+  const configured = await routingRules(scope);
+  if (!configured.valid) return { ...empty, includeInstructions: false };
+  const metadata = await managedSkillRoutingMetadata(scope);
+  return {
+    skills: metadata.map(({ revision: _revision, ...skill }) => ({
+      ...skill, path: `/skills/${skill.id}/SKILL.md`, scope: 'managed' as const, source: 'managed' as const, managed: true
+    })),
+    roots: empty.roots,
+    errors: [],
+    includeInstructions: configured.includeInstructions,
+    ...(configured.maxContextTokens === undefined ? {} : { maxContextTokens: configured.maxContextTokens })
+  };
 }
 
 export async function listSkillLibrary(scope: SkillLibraryScope = {}): Promise<SkillLibrary> {
