@@ -1458,6 +1458,24 @@ it('lists primary and additional project folders in the sidebar and mutates only
   expect(w.document.querySelector(`[data-project-id="${project.id}"]`)?.textContent).toContain('C:\\workspace\\primary');
 });
 
+it('cycles project color through the fixed palette without changing project membership', async () => {
+  const project = {
+    id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary',
+    additionalPaths: ['C:\\workspace\\shared'], createdAt: 1
+  };
+  const { w } = await boot([], false, [], [project]);
+  const api = (w as any).api;
+  api.setProjectColor = vi.fn(async (_id: string, color: string | null) => ({ ok: true, data: { ...project, ...(color ? { color } : {}) } }));
+  const group = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  const color = group.querySelector<HTMLButtonElement>('.project-color')!;
+  expect(color.dataset.color).toBe('');
+  color.click(); await settle();
+  expect(api.setProjectColor).toHaveBeenCalledExactlyOnceWith(project.id, 'blue');
+  const refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  expect(refreshed.dataset.projectColor).toBe('blue');
+  expect(refreshed.querySelector('.project-folder-path')?.textContent).toBe('C:\\workspace\\primary');
+});
+
 it('Share a folder creates a sidebar project and keeps it when an older list refresh finishes', async () => {
   const { w, live } = await boot([], false);
   const api = (w as any).api;
