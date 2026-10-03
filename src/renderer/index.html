@@ -104,10 +104,7 @@
             </button>
             <section class="connection-popover scroll" id="connectionPopover" role="dialog" aria-label="Connection" hidden>
               <div class="connection-popover-head">
-                <div>
-                  <strong id="connectionPopoverTitle">Not connected</strong>
-                  <span id="connectionPopoverVerified" hidden>Connection is off</span>
-                </div>
+                <strong id="connectionPopoverTitle">Not connected</strong>
                 <span class="connection-popover-status-dot" aria-hidden="true"></span>
               </div>
               <div class="connection-popover-card">
@@ -122,39 +119,6 @@
                   <i aria-hidden="true"></i>
                 </div>
               </div>
-              <details class="connection-advanced" id="connectionAdvanced">
-                <summary aria-label="Advanced" title="Advanced">
-                  <i class="ico ph ph-plus" aria-hidden="true"></i>
-                </summary>
-                <div class="connection-advanced-body">
-                  <p class="connection-advanced-alert" id="connectionAdvancedAlert" hidden></p>
-
-                  <div class="connection-advanced-caption"><span>Session capture</span><span id="connectionPopoverExtension">—</span></div>
-                  <div class="connection-advanced-card">
-                    <div class="connection-advanced-row" id="connectionAdvancedTab"><span>ChatGPT tab</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
-                    <div class="connection-advanced-row" id="connectionAdvancedRecording"><span>Recording this chat</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
-                    <div class="connection-advanced-row" id="connectionAdvancedChat"><button class="copy" type="button">Chat ID</button><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
-                    <div class="connection-advanced-row" id="connectionAdvancedRequest"><button class="copy" type="button">Current request</button><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
-                    <div class="connection-advanced-row" id="connectionAdvancedApp"><span>Reaching the app</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
-                  </div>
-
-                  <details class="connection-runtime" id="connectionRuntime"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Runtime diagnostics</summary>
-                  <span class="connection-advanced-age" id="connectionAdvancedAge">Runtime diagnostics</span>
-                  <div class="connection-pipeline" id="connectionPipeline">
-                    <div class="connection-pipeline-stage" id="connectionPipelineRead"><i></i><span>Request ID found</span><em></em></div>
-                    <div class="connection-pipeline-stage" id="connectionPipelineSent"><i></i><span>Sent to app</span><em></em></div>
-                    <div class="connection-pipeline-stage" id="connectionPipelineOwner"><i></i><span>Owner confirmed</span><em></em></div>
-                    <p id="connectionPipelineWhy"></p>
-                    <div class="connection-pipeline-calls" id="connectionPipelineCalls"></div>
-                  </div>
-
-                  <dl class="connection-advanced-grid" id="connectionAdvancedGrid"></dl>
-                  <div class="connection-advanced-actions">
-                    <button class="btn" id="connectionAdvancedCopy" type="button">Copy</button>
-                    <button class="btn" id="connectionAdvancedRefresh" type="button">Refresh</button>
-                  </div></details>
-                </div>
-              </details>
               <div class="connection-popover-actions">
                 <button class="btn btn-solid" id="connectionPopoverToggle" type="button">Connect</button>
               </div>
@@ -998,6 +962,10 @@
                   </div>
 
                   <div class="field" id="goalModels" hidden>
+                    <label class="plugin-search goal-model-search">
+                      <i class="ico ph ph-magnifying-glass" aria-hidden="true"></i>
+                      <input id="goalModelSearch" type="search" placeholder="Model" aria-label="Model" />
+                    </label>
                     <div id="goalModelList" class="goal-models"></div>
                     <p class="hint" id="goalModelsState"></p>
                     <div class="step-actions">
