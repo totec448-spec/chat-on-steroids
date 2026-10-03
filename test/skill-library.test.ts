@@ -140,7 +140,7 @@ it('prefers a local Codex plugin install and ignores disabled, unconfigured and 
   await write(path.join(cache, 'wrong-name/1.0.0/skills/wrong/SKILL.md'), contents('Wrong'));
   const entry = (name: string, version: string, enabled: boolean) => ({
     pluginId: `${name}@team-market`, pluginName: name, marketplaceName: 'team-market', version,
-    installed: true as const, enabled, source: { source: 'local' as const, path: path.join(root, 'marketplace', name) }
+    installed: true as const, enabled, source: { source: 'local' as const }
   });
   const library = await listSkillLibrary({ projectPath: project }, { codexPlugins: async () => [
     entry('review-pack', 'local', true), entry('disabled-pack', '1.0.0', false), entry('wrong-name', '1.0.0', true)

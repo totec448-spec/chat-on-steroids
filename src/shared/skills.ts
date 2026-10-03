@@ -89,7 +89,7 @@ export type SkillScope = 'managed' | 'repo' | 'user' | 'system' | 'admin';
 export type SkillSource = 'managed' | 'repo-agents' | 'project-codex' | 'user-agents' | 'codex-home' | 'codex-plugin' | 'bundled' | 'admin';
 export type CodexPluginSource =
   | { source: 'remote'; id: string }
-  | { source: 'local'; path: string }
+  | { source: 'local' }
   | { source: 'git'; url: string; ref?: string; sha?: string }
   | { source: 'git-subdir'; url: string; path: string; ref?: string; sha?: string }
   | { source: 'npm'; package: string; version?: string; registry?: string };
@@ -101,7 +101,7 @@ export interface CodexPluginRuntimeEntry {
   installed: true;
   enabled: boolean;
   source: CodexPluginSource;
-  marketplaceSource?: { sourceType: string; source: string };
+  marketplaceSource?: { sourceType: string; source?: string };
 }
 export interface CodexPluginSkillProvenance {
   pluginId: string;
@@ -109,7 +109,7 @@ export interface CodexPluginSkillProvenance {
   marketplaceName: string;
   version: string;
   source: CodexPluginSource;
-  marketplaceSource?: { sourceType: string; source: string };
+  marketplaceSource?: { sourceType: string; source?: string };
   /** Package-relative directory below the plugin's `skills/` root. */
   skillPath: string;
 }

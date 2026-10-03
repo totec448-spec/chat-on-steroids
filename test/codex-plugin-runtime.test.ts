@@ -25,3 +25,13 @@ it('rejects inconsistent identities and unsafe runtime versions instead of selec
   expect(() => parseCodexPluginList(JSON.stringify({ installed: [{ ...base, pluginId: 'other@team-market', version: '1.0.0' }] }))).toThrow(/identity/i);
   expect(() => parseCodexPluginList(JSON.stringify({ installed: [{ ...base, pluginId: 'review-pack@team-market', version: '../1.0.0' }] }))).toThrow(/version/i);
 });
+
+it('keeps local provenance without exposing native source paths', () => {
+  const [plugin] = parseCodexPluginList(JSON.stringify({ installed: [{
+    pluginId: 'review-pack@team-market', name: 'review-pack', marketplaceName: 'team-market', version: 'local',
+    installed: true, enabled: true, source: { source: 'local', path: 'C:/private/marketplace/review' },
+    marketplaceSource: { sourceType: 'local', source: 'C:/private/marketplace' }
+  }] }));
+  expect(plugin).toMatchObject({ source: { source: 'local' }, marketplaceSource: { sourceType: 'local' } });
+  expect(JSON.stringify(plugin)).not.toContain('C:/private');
+});
