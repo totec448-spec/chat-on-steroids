@@ -88,17 +88,31 @@ app.whenReady().then(async () => {
   await js(`document.getElementById('composerModelToggle').click();document.getElementById('composerSpark').click()`);
   await check('Reduced motion preserves effort changes without disclosure or spatial icon motion', `matchMedia('(prefers-reduced-motion: reduce)').matches&&getComputedStyle(document.getElementById('composerModelChoices')).transitionDuration==='0s'&&getComputedStyle(document.querySelector('#composerModelToggle .picker-chevron')).transitionDuration==='0s'&&document.getElementById('composerReasoning').value==='low'&&document.getElementById('composerSpark').getAnimations({subtree:true}).every(animation=>animation.effect.getKeyframes().every(frame=>!frame.transform))`);
   await js(`document.getElementById('composerModelToggle').click();document.getElementById('composerReasoning').value=window.__composerShortcutPair.effort;document.getElementById('composerReasoning').dispatchEvent(new Event('change',{bubbles:true}));document.getElementById('chatInput').value=''`); await pause(300);
-  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]}); win.webContents.debugger.detach();
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]});
   await js(`window.__composerSelection={model:document.getElementById('composerModel').value,effort:document.getElementById('composerReasoning').value}`);
+  const { result: appearanceWindow } = await win.webContents.debugger.sendCommand('Runtime.evaluate', { expression: 'window' });
   for (const width of [1440, 900]) for (const zoom of [1, 1.25]) for (const theme of ['dark', 'light']) for (const language of ['en', 'pt-BR', 'ja']) {
     win.setContentSize(width, 960); win.webContents.setZoomFactor(zoom);
-    await js(`(async()=>{const language=document.getElementById('uiLanguage');language.value=${JSON.stringify(language)};language.dispatchEvent(new Event('change',{bubbles:true}));const {data}=await window.api.getState();await window.api.saveSettings({patch:{ui:{...data.config.ui,theme:${JSON.stringify(theme)},language:${JSON.stringify(language)}}}})})()`);
+    // CDP arguments carry data without constructing executable code from string values.
+    const appearance = await win.webContents.debugger.sendCommand('Runtime.callFunctionOn', {
+      objectId: appearanceWindow.objectId, arguments: [{ value: theme }, { value: language }], awaitPromise: true,
+      functionDeclaration: `async function(theme, language) {
+        window.__composerAppearanceCase = { theme, language };
+        const select = document.getElementById('uiLanguage'); select.value = language;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        const { data } = await window.api.getState();
+        await window.api.saveSettings({ patch: { ui: { ...data.config.ui, theme, language } } });
+      }`
+    });
+    assert(!appearance.exceptionDetails, 'Theme/language fixture update succeeded');
     await pause(100);
     await check('Effort text contrast '+[theme,language].join('/'), `(()=>{const luminance=color=>{const c=color.match(/[\\d.]+/g).slice(0,3).map(Number).map(n=>{n/=255;return n<=.04045?n/12.92:((n+.055)/1.055)**2.4});return c[0]*.2126+c[1]*.7152+c[2]*.0722},rgb=color=>{const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');canvas.width=canvas.height=1;ctx.fillStyle=color;ctx.fillRect(0,0,1,1);return 'rgb('+[...ctx.getImageData(0,0,1,1).data].slice(0,3).join(',')+')'},background=luminance(rgb(getComputedStyle(document.querySelector('#modelMenu > .composer-popover')).backgroundColor));return ['composerPowerTitle','composerModelToggle'].every(id=>{const ink=luminance(rgb(getComputedStyle(document.getElementById(id)).color));return (Math.max(ink,background)+.05)/(Math.min(ink,background)+.05)>=4.5})})()`);
-    await check('Effort layout '+[width,zoom,theme,language].join('/'), `(()=>{const p=document.querySelector('#modelMenu > .composer-popover'),r=p.getBoundingClientRect(),track=document.querySelector('.power-track'),s=track.getBoundingClientRect(),title=document.getElementById('composerPowerTitle'),model=document.getElementById('composerModelToggle');return document.documentElement.lang===${JSON.stringify(language)}&&document.documentElement.dataset.theme===${JSON.stringify(theme)}&&r.left>=0&&r.right<=innerWidth+.5&&r.top>=0&&r.bottom<=innerHeight&&p.scrollWidth<=p.clientWidth+1&&title.scrollWidth<=title.clientWidth+1&&model.scrollWidth<=model.clientWidth+1&&s.height>=28&&document.getElementById('composerModel').value===window.__composerSelection.model&&document.getElementById('composerReasoning').value===window.__composerSelection.effort})()`);
+    await check('Effort layout '+[width,zoom,theme,language].join('/'), `(()=>{const p=document.querySelector('#modelMenu > .composer-popover'),r=p.getBoundingClientRect(),track=document.querySelector('.power-track'),s=track.getBoundingClientRect(),title=document.getElementById('composerPowerTitle'),model=document.getElementById('composerModelToggle');return document.documentElement.lang===window.__composerAppearanceCase.language&&document.documentElement.dataset.theme===window.__composerAppearanceCase.theme&&r.left>=0&&r.right<=innerWidth+.5&&r.top>=0&&r.bottom<=innerHeight&&p.scrollWidth<=p.clientWidth+1&&title.scrollWidth<=title.clientWidth+1&&model.scrollWidth<=model.clientWidth+1&&s.height>=28&&document.getElementById('composerModel').value===window.__composerSelection.model&&document.getElementById('composerReasoning').value===window.__composerSelection.effort})()`);
     if (zoom===1&&width===1440&&language==='en') await capture('effort-'+theme);
     if (zoom===1.25&&width===900&&theme==='dark'&&language==='pt-BR') await capture('effort-narrow-pt-BR');
   }
+  await win.webContents.debugger.sendCommand('Runtime.releaseObject', { objectId: appearanceWindow.objectId });
+  win.webContents.debugger.detach();
   win.setContentSize(1440, 960); win.webContents.setZoomFactor(1);
   await js(`(async()=>{const language=document.getElementById('uiLanguage');language.value='en';language.dispatchEvent(new Event('change',{bubbles:true}));const {data}=await window.api.getState();await window.api.saveSettings({patch:{ui:{...data.config.ui,theme:'dark',language:'en'}}})})()`); await pause(150);
   await click('#composerModelToggle');
