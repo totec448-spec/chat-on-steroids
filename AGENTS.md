@@ -2663,6 +2663,10 @@ Attached and detached workers share `WORKER_SILENCE_MS` (three minutes). Only ac
 assistant output, native work or exactly attributed tool activity renews this clock. Page
 presence, reloads, metadata revisions and replayed starts do not. A currently running tool
 protects its exact worker; another chat's or unidentified request cannot hold all worker slots.
+So does the worker page's own open turn, reported as `generating` on its `/activity` poll
+(`notePageGenerating`): ChatGPT can think for half an hour between calls (#882). That report
+renews no clock and revives nobody; it only defers the sleep while it is fresher than
+`PAGE_GENERATING_FRESH_MS` and the worker's last real work is within `WORKER_THINKING_MAX_MS`.
 Recorder activity distinguishes an accepted new `turn_start` from later captured output.
 Output alone cannot retract an explicit completed worker report, even when first captured
 after `finish`. A real new turn or exact tool call can wake that worker; fresh output may

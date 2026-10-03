@@ -167,6 +167,7 @@ import {
   retiredWorkerForConversation,
   waitingForSubAgents,
   sleepSilentWorkers,
+  notePageGenerating,
   occupiesSlot,
   sleepWorker,
   stageQueuedWorkerRevivals,
@@ -2667,6 +2668,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // is the only thing that lifts it.
     pagelessChats.delete(id);
     noteFiberHealth(id, url.searchParams.get('fiber'));
+    // Older extensions omit it; they keep the plain three-minute silence rule.
+    const pageGenerating = url.searchParams.get('generating');
+    if (pageGenerating === '1' || pageGenerating === '0') notePageGenerating(id, pageGenerating === '1');
     const retiredWorker = retiredWorkerForConversation(id);
     const superseded = await conversationWasSuperseded(id);
     /**
