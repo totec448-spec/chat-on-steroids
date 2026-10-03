@@ -115,6 +115,7 @@ import { unattributedRepairEta } from '../bridge.js';
 import {
   conversationAttachment,
   findSessionByConversation,
+  getSession,
   readOverflowText,
   requestBelongsToActiveTurn,
   requestTurnOwnershipCutoff
@@ -164,9 +165,12 @@ async function recordUntrustedRefusalNotice(context: CallContext): Promise<void>
     return;
   }
   const worker = workerPrimeOwner(caller.conversationId);
+  const durableWorker = worker.owned
+    ? false
+    : (await getSession(caller.sessionId).catch(() => null))?.origin?.kind === 'worker';
   const message = worker.owned
     ? worker.primeConversationId ? UNTRUSTED_WORKER_NOTICE : UNPROVEN_WORKER_NOTICE
-    : UNTRUSTED_NOTICE;
+    : durableWorker ? UNPROVEN_WORKER_NOTICE : UNTRUSTED_NOTICE;
   // A progress id is a presentation identity: reusing it would make foldProgress() collapse a
   // later refusal episode into the old row. The in-memory exact-pair map does deduplication;
   // the durable row therefore gets a fresh identity for each episode.
