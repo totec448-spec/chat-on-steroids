@@ -3800,7 +3800,7 @@ function paintSwarm(state: SwarmState): void {
         'p',
         'hint',
         () => state.retainedHistory
-          ? t("No workers are running. Reusable worker histories are parked and remain available to their prime chats; Clear swarm permanently removes them.")
+          ? t("No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.")
           : t("No agents. The prime agent creates workers with the agents tool’s spawn action.")
       )
     );
@@ -5498,7 +5498,7 @@ export function initChat(next: Deps): void {
     const state = await run(api.resetSwarm());
     if (state) {
       paintSwarm(state);
-      toast(t('Swarm cleared'));
+      toast(t('Workers cleared'));
     }
   });
 
