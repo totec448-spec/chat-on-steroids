@@ -14,6 +14,8 @@ import { getChatModels, restoreChatModels, startChatModelDiscovery } from './cha
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
+import { mainText, onMainTextsChange } from './main-texts.js';
+import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
 import { pluginManager } from './plugins/manager.js';
 import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
@@ -258,8 +260,9 @@ setFinishNotifier((title, body, sessionId, turnId) => {
     const open = (): void => { if (!target.isDestroyed()) target.send('session:write', sessionId); };
     if (target.isLoadingMainFrame()) target.once('did-finish-load', open); else open();
   };
-  const notice = new Notification({ title, body, actions: [
-    { type: 'button', text: 'Send Automatic Goal' }, { type: 'button', text: 'Write Directly' }
+  const shown = (text: string): string => isMainText(text) ? mainText(text) : text;
+  const notice = new Notification({ title: shown(title), body: shown(body), actions: [
+    { type: 'button', text: mainText('Send Automatic Goal') }, { type: 'button', text: mainText('Write Directly') }
   ] });
   notice.on('click', write);
   notice.on('action', (details) => {
@@ -314,21 +317,22 @@ function refreshTray(): void {
   const offline = state === 'offline';
   // Offline keeps the running icon: the bridge is up, the internet is not.
   const running = connected || offline;
-  const label = connected ? 'Connected' : offline ? 'No internet' : 'Not connected';
+  const label = mainText(connected ? 'Connected' : offline ? 'No internet' : 'Not connected');
   tray.setImage(trayIcon(running));
-  tray.setToolTip(`Chat On Steroids — ${label.toLowerCase()}`);
+  // Not lowercased: that would break translated nouns ("Keine Internetverbindung").
+  tray.setToolTip(`Chat On Steroids — ${label}`);
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label, enabled: false },
       { type: 'separator' },
-      { label: 'Open', click: windowActivation.request },
+      { label: mainText('Open'), click: windowActivation.request },
       {
-        label: running ? 'Disconnect' : 'Connect',
+        label: mainText(running ? 'Disconnect' : 'Connect'),
         click: () => void (running ? disconnect() : connect())
       },
       { type: 'separator' },
       {
-        label: 'Quit',
+        label: mainText('Quit'),
         click: () => {
           quitting = true;
           app.quit();
@@ -507,6 +511,7 @@ void app.whenReady().then(async () => {
   tray.on('click', windowActivation.request);
   refreshTray();
   onStatusChange(refreshTray);
+  onMainTextsChange(refreshTray);
 
   logInfo('app started');
 

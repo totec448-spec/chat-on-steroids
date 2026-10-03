@@ -123,6 +123,7 @@ const api = {
   petsSetOverlayVisible: (visible: boolean) => call<PetOverlayControlState>('pets:overlayVisible', { visible }),
   /** The selected language's texts for the stopped-chat desktop notices (#855). */
   setStopNoticeTexts: (texts: Record<string, string>) => call<void>('ui:stopNoticeTexts', texts),
+  setMainTexts: (texts: Record<string, string>) => call<void>('ui:mainTexts', texts),
   /** The interface language, kept by the app for the browser extension. */
   setUiLanguage: (language: string) => call<void>('ui:language', language),
   petsImport: () => call<PetLibraryState | null>('pets:import'),
