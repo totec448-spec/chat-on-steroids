@@ -1775,5 +1775,7 @@
   "Trust only selected chats": "Nur ausgewählten Chats vertrauen",
   "Untrust this chat: strict mode refuses its tool calls": "Vertrauen für diesen Chat aufheben: Im strikten Modus werden seine Tool-Aufrufe abgelehnt",
   "Trust this chat: strict mode lets its tool calls run": "Diesem Chat vertrauen: Im strikten Modus dürfen seine Tool-Aufrufe ausgeführt werden",
-  "Default-deny local tools to chats you explicitly Trust in Sessions. Workers and resumed chats follow their trusted parent; unattributed calls stay blocked.": "Lokale Tools standardmäßig verweigern und nur Chats zulassen, denen Sie in Sitzungen ausdrücklich vertrauen. Worker und fortgesetzte Chats folgen ihrem vertrauenswürdigen übergeordneten Chat; nicht zugeordnete Aufrufe bleiben blockiert."
+  "Default-deny local tools to chats you explicitly Trust in Sessions. Workers and resumed chats follow their trusted parent; unattributed calls stay blocked.": "Lokale Tools standardmäßig verweigern und nur Chats zulassen, denen Sie in Sitzungen ausdrücklich vertrauen. Worker und fortgesetzte Chats folgen ihrem vertrauenswürdigen übergeordneten Chat; nicht zugeordnete Aufrufe bleiben blockiert.",
+  "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "Auf Nur-Lesen umschalten: ChatGPT kann weiterhin Dateien und den Bildschirm ansehen, aber keine Dateien erstellen, bearbeiten, verschieben oder löschen, keine Programme ausführen und diesen Computer nicht steuern.",
+  "Read-only is on: ChatGPT can only look. Click to allow changes again.": "Nur-Lesen ist an: ChatGPT kann nur ansehen. Klicken, um Änderungen wieder zu erlauben."
 }

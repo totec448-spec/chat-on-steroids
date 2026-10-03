@@ -1775,5 +1775,7 @@
   "Trust only selected chats": "僅信任選取的聊天",
   "Untrust this chat: strict mode refuses its tool calls": "取消信任此聊天：嚴格模式會拒絕其工具呼叫",
   "Trust this chat: strict mode lets its tool calls run": "信任此聊天：嚴格模式會允許其工具呼叫",
-  "Default-deny local tools to chats you explicitly Trust in Sessions. Workers and resumed chats follow their trusted parent; unattributed calls stay blocked.": "預設拒絕本機工具，只允許你在「工作階段」中明確設為信任的聊天。Worker 與續接聊天會跟隨其受信任的父聊天；無法歸屬到聊天的呼叫仍會被封鎖。"
+  "Default-deny local tools to chats you explicitly Trust in Sessions. Workers and resumed chats follow their trusted parent; unattributed calls stay blocked.": "預設拒絕本機工具，只允許你在「工作階段」中明確設為信任的聊天。Worker 與續接聊天會跟隨其受信任的父聊天；無法歸屬到聊天的呼叫仍會被封鎖。",
+  "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "切換為唯讀：ChatGPT 仍可檢視檔案和螢幕，但無法建立、編輯、移動或刪除檔案，無法執行程式，也無法控制這台電腦。",
+  "Read-only is on: ChatGPT can only look. Click to allow changes again.": "唯讀已開啟：ChatGPT 只能檢視。按一下即可重新允許變更。"
 }
