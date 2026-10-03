@@ -1765,6 +1765,7 @@
   "When to continue": "Quando continuar",
   "Session Finish only": "Apenas no fim da sessão",
   "Also after the turn": "Também após o turno",
+  "Search models": "Pesquisar modelos",
   "Trust only selected chats": "Confiar apenas nos chats selecionados",
   "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "Negar ferramentas locais por predefinição e permitir apenas chats em que confie explicitamente em Sessões. As chamadas não atribuídas permanecem bloqueadas enquanto esta opção estiver ativa.",
   "Untrust this chat: strict mode refuses its tool calls": "Retirar a confiança deste chat: o modo estrito recusa as chamadas de ferramentas",

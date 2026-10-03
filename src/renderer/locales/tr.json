@@ -1765,8 +1765,9 @@
   "When to continue": "Ne zaman devam edilsin",
   "Session Finish only": "Yalnızca oturum bitişinde",
   "Also after the turn": "Turdan sonra da",
+  "Search models": "Model ara",
   "Trust only selected chats": "Yalnızca seçili sohbetlere güven",
-  "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "Yerel araçları varsayılan olarak reddeder ve yalnızca Oturumlar'da açıkça güvendiğiniz sohbetlere izin verir. Bu açıkken ilişkilendirilemeyen çağrılar engelli kalır.",
+  "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "Yerel araçları varsayılan olarak reddeder ve yalnızca Oturumlar’da açıkça güvendiğiniz sohbetlere izin verir. Bu açıkken ilişkilendirilemeyen çağrılar engelli kalır.",
   "Untrust this chat: strict mode refuses its tool calls": "Bu sohbetin güvenini kaldır: katı mod araç çağrılarını reddeder",
   "Trust this chat: strict mode lets its tool calls run": "Bu sohbete güven: katı mod araç çağrılarına izin verir"
 }
