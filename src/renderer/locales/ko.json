@@ -310,7 +310,6 @@
   "Allow unattributed calls": "귀속되지 않은 호출 허용",
   "Recover other chats’ tabs": "다른 채팅의 탭 복구",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "사라졌거나 응답하지 않는 작업 채팅을 복구합니다. Goal과 Loop 채팅은 자동으로 복구됩니다.",
-  "Clear swarm": "스웜 지우기",
   "Message ChatGPT": "ChatGPT에 메시지",
   "Add photos & files": "사진 및 파일 추가",
   "Share a folder": "폴더 공유",
@@ -592,7 +591,6 @@
   "{0} workers": "워커 {0}개",
   "Extension folder: {0}": "확장 프로그램 폴더: {0}",
   "The extension folder is missing from this installation. Reinstall the app, or use the extension/ folder from a source checkout.": "이 설치에 확장 프로그램 폴더가 없습니다. 앱을 다시 설치하거나 소스 체크아웃의 extension/ 폴더를 사용하세요.",
-  "No workers are running. Reusable worker histories are parked and remain available to their prime chats; Clear swarm permanently removes them.": "실행 중인 워커가 없습니다. 재사용 가능한 워커 기록은 대기 상태로 유지되며 해당 Prime 채팅에서 다시 사용할 수 있습니다. ‘스웜 지우기’를 사용하면 영구적으로 삭제됩니다.",
   "No agents. The prime agent creates workers with the agents tool’s spawn action.": "에이전트가 없습니다. Prime 에이전트가 agents 도구의 spawn 작업으로 워커를 만듭니다.",
   "Clear session — ends this run and every worker in it": "세션 지우기 — 이 실행과 포함된 모든 워커를 종료",
   "Clear session — ends {0} and frees its slot": "세션 지우기 — {0} 종료 후 슬롯 해제",
@@ -678,7 +676,6 @@
   "Files": "파일",
   "Attach up to 20 files per message": "메시지당 최대 20개 파일 첨부 가능",
   "Handoff copied": "인수인계 복사됨",
-  "Swarm cleared": "스웜 지워짐",
   "Run cleared — every worker ended": "실행 지워짐 — 모든 워커 종료",
   "{0} cleared — its slot is free": "{0} 지워짐 — 슬롯 사용 가능",
   "Browser disconnected": "브라우저 연결 해제됨",
@@ -1748,7 +1745,6 @@
   "End background processes of workers asleep for more than 30 minutes": "30분 넘게 잠든 워커의 백그라운드 프로세스 종료",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "워커 채팅과 기록은 계속 재사용할 수 있습니다. 기본값은 꺼짐이며 각 정리 작업은 해당 워커의 기록에 남습니다.",
   "Automatic": "자동",
-  "Choose account-observed model and reasoning defaults for ordinary chats and sub-agents.": "일반 채팅과 하위 에이전트에 계정에서 확인된 모델 및 추론 기본값을 선택합니다.",
   "Default new-chat model": "새 채팅 기본 모델",
   "Default new-chat reasoning": "새 채팅 기본 추론 수준",
   "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "위의 일반 채팅 모델과 함께 사용합니다. 워커와 헬퍼는 각자의 기본값을 유지합니다.",
@@ -1792,5 +1788,9 @@
   "Needs the browser extension to be connected. This sets the most worker chats one run may open.": "연결된 브라우저 확장 프로그램이 필요합니다. 한 번의 실행에서 열 수 있는 워커 채팅의 최대 수를 설정합니다.",
   "Add the browser extension": "브라우저 확장 프로그램 추가",
   "In the browser, click Load unpacked, paste the copied folder path and select that folder.": "브라우저에서 Load unpacked를 클릭하고 복사한 폴더 경로를 붙여넣은 뒤 해당 폴더를 선택하세요.",
-  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "Goal과 Loop는 이 채팅의 워커가 보고할 때까지 기다렸다가 다음 단계를 시작하므로 그 결과로 판단합니다. 직접 입력하거나 대기열에 넣은 메시지는 평소처럼 전송됩니다."
+  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "Goal과 Loop는 이 채팅의 워커가 보고할 때까지 기다렸다가 다음 단계를 시작하므로 그 결과로 판단합니다. 직접 입력하거나 대기열에 넣은 메시지는 평소처럼 전송됩니다.",
+  "Clear workers": "워커 지우기",
+  "Workers cleared": "워커를 지웠습니다",
+  "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "실행 중인 워커가 없습니다. 기록은 워커를 시작한 채팅에서 계속 사용할 수 있으며, 워커 지우기를 누르면 완전히 삭제됩니다.",
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "새 채팅과 하위 에이전트의 기본 모델과 추론을 계정에서 제공하는 항목 중에서 선택합니다."
 }

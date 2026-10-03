@@ -329,7 +329,6 @@
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "Восстанавливать отсутствующие или зависшие рабочие чаты. Чаты Цели и Цикла восстанавливаются автоматически.",
   "Wait for sub-agents": "Ждать субагентов",
   "Waiting for this chat’s sub-agents": "Ожидание субагентов этого чата",
-  "Clear swarm": "Очистить группу агентов",
   "Message ChatGPT": "Сообщение ChatGPT",
   "Add photos & files": "Добавить фото и файлы",
   "Share a folder": "Поделиться папкой",
@@ -611,7 +610,6 @@
   "{0} workers": "{0} воркеров",
   "Extension folder: {0}": "Папка расширения: {0}",
   "The extension folder is missing from this installation. Reinstall the app, or use the extension/ folder from a source checkout.": "В этой установке отсутствует папка расширения. Переустановите приложение или используйте папку extension/ из исходного репозитория.",
-  "No workers are running. Reusable worker histories are parked and remain available to their prime chats; Clear swarm permanently removes them.": "Сейчас ни один воркер не запущен. Истории повторно используемых воркеров припаркованы и остаются доступны их главным чатам; «Очистить группу агентов» удалит их навсегда.",
   "No agents. The prime agent creates workers with the agents tool’s spawn action.": "Агентов нет. Главный агент создаёт воркеров действием spawn инструмента agents.",
   "Clear session — ends this run and every worker in it": "Очистить сессию — завершить этот запуск и всех его воркеров",
   "Clear session — ends {0} and frees its slot": "Очистить сессию — завершить {0} и освободить его слот",
@@ -697,7 +695,6 @@
   "Files": "Файлы",
   "Attach up to 20 files per message": "Прикрепляйте до 20 файлов на сообщение",
   "Handoff copied": "Передача контекста скопирована",
-  "Swarm cleared": "Рой очищен",
   "Run cleared — every worker ended": "Запуск очищен — все воркеры завершены",
   "{0} cleared — its slot is free": "{0} очищен — его слот свободен",
   "Browser disconnected": "Браузер отключён",
@@ -1748,7 +1745,6 @@
   "End background processes of workers asleep for more than 30 minutes": "Завершать фоновые процессы воркеров, которые спят больше 30 минут",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Чат и история воркера остаются доступными для повторного использования. По умолчанию выключено; каждая очистка записывается в историю этого воркера.",
   "Automatic": "Автоматически",
-  "Choose account-observed model and reasoning defaults for ordinary chats and sub-agents.": "Выберите наблюдаемые в аккаунте значения модели и рассуждения по умолчанию для обычных чатов и субагентов.",
   "Default new-chat model": "Модель по умолчанию для нового чата",
   "Default new-chat reasoning": "Рассуждение по умолчанию для нового чата",
   "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Используется с указанной выше моделью обычного чата; воркеры и помощники сохраняют свои настройки по умолчанию.",
@@ -1792,5 +1788,9 @@
   "Needs the browser extension to be connected. This sets the most worker chats one run may open.": "Нужно подключённое расширение браузера. Здесь задаётся максимальное число чатов воркеров, которое может открыть один запуск.",
   "Add the browser extension": "Добавить расширение браузера",
   "In the browser, click Load unpacked, paste the copied folder path and select that folder.": "В браузере нажмите Load unpacked, вставьте скопированный путь к папке и выберите эту папку.",
-  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "«Цель» и «Цикл» ждут отчётов воркеров этого чата перед следующим шагом и решают с учётом результатов. Ваши сообщения и очередь отправляются как обычно."
+  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "«Цель» и «Цикл» ждут отчётов воркеров этого чата перед следующим шагом и решают с учётом результатов. Ваши сообщения и очередь отправляются как обычно.",
+  "Clear workers": "Очистить воркеров",
+  "Workers cleared": "Воркеры очищены",
+  "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "Воркеры не запущены. Их истории остаются доступны чатам, которые их запустили; «Очистить воркеров» удаляет их навсегда.",
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Выберите модель и рассуждение по умолчанию для новых чатов и субагентов из того, что предлагает ваш аккаунт."
 }

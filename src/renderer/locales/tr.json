@@ -329,7 +329,6 @@
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "Kaybolan veya yanıt vermeyen çalışma sohbetlerini geri getir. Hedef ve Döngü sohbetleri otomatik kurtarılır.",
   "Wait for sub-agents": "Yardımcı ajanları bekle",
   "Waiting for this chat’s sub-agents": "Bu sohbetin yardımcı ajanları bekleniyor",
-  "Clear swarm": "Ajan grubunu temizle",
   "Message ChatGPT": "ChatGPT'ye mesaj yaz",
   "Add photos & files": "Fotoğraf ve dosya ekle",
   "Share a folder": "Klasör paylaş",
@@ -611,7 +610,6 @@
   "{0} workers": "{0} yardımcı ajan",
   "Extension folder: {0}": "Tarayıcı eklentisinin klasörü: {0}",
   "The extension folder is missing from this installation. Reinstall the app, or use the extension/ folder from a source checkout.": "Bu kurulumda tarayıcı eklentisinin klasörü eksik. Uygulamayı yeniden yükleyin veya kaynak kodundaki extension/ klasörünü kullanın.",
-  "No workers are running. Reusable worker histories are parked and remain available to their prime chats; Clear swarm permanently removes them.": "Çalışan yardımcı ajan yok. Yeniden kullanılabilir yardımcı ajan geçmişleri beklemede tutulur ve ana sohbetleri tarafından kullanılabilir; Ajan grubunu temizle işlemi bunları kalıcı olarak siler.",
   "No agents. The prime agent creates workers with the agents tool’s spawn action.": "Ajan yok. Ana ajan, agents aracının spawn eylemiyle yardımcı ajanlar oluşturur.",
   "Clear session — ends this run and every worker in it": "Oturumu temizle — bu çalıştırmayı ve içindeki tüm yardımcı ajanları sonlandırır",
   "Clear session — ends {0} and frees its slot": "Oturumu temizle — {0} sonlandırılır ve yeri boşaltılır",
@@ -697,7 +695,6 @@
   "Files": "Dosyalar",
   "Attach up to 20 files per message": "Mesaj başına en fazla 20 dosya ekleyin",
   "Handoff copied": "Devir özeti kopyalandı",
-  "Swarm cleared": "Ajan grubu temizlendi",
   "Run cleared — every worker ended": "Çalıştırma temizlendi — tüm yardımcı ajanlar sonlandırıldı",
   "{0} cleared — its slot is free": "{0} temizlendi — yeri boş",
   "Browser disconnected": "Tarayıcı bağlantısı kesildi",
@@ -1748,7 +1745,6 @@
   "End background processes of workers asleep for more than 30 minutes": "30 dakikadan uzun süredir uyuyan worker'ların arka plan işlemlerini sonlandır",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Worker sohbeti ve geçmişi yeniden kullanılabilir kalır. Varsayılan olarak kapalıdır; her temizlik o worker'ın geçmişine kaydedilir.",
   "Automatic": "Otomatik",
-  "Choose account-observed model and reasoning defaults for ordinary chats and sub-agents.": "Normal sohbetler ve alt ajanlar için hesapta gözlemlenen model ve akıl yürütme varsayılanlarını seçin.",
   "Default new-chat model": "Yeni sohbet varsayılan modeli",
   "Default new-chat reasoning": "Yeni sohbet varsayılan akıl yürütmesi",
   "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Yukarıdaki normal sohbet modeliyle kullanılır; worker ve yardımcılar kendi varsayılanlarını korur.",
@@ -1792,5 +1788,9 @@
   "Needs the browser extension to be connected. This sets the most worker chats one run may open.": "Bağlı tarayıcı eklentisi gerekir. Bir çalıştırmada açılabilecek en fazla yardımcı ajan sohbeti sayısını belirler.",
   "Add the browser extension": "Tarayıcı eklentisini ekleyin",
   "In the browser, click Load unpacked, paste the copied folder path and select that folder.": "Tarayıcıda Paketlenmemiş öğe yükle (Load unpacked) düğmesine tıklayın, kopyaladığınız klasör yolunu yapıştırıp klasörü seçin.",
-  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "Hedef ve Döngü, bir sonraki adıma geçmeden önce bu sohbetin yardımcı ajanlarının rapor vermesini bekler; böylece sonuçlarla karar verir. Yazdığınız veya kuyruğa aldığınız mesajlar her zamanki gibi gönderilir."
+  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "Hedef ve Döngü, bir sonraki adıma geçmeden önce bu sohbetin yardımcı ajanlarının rapor vermesini bekler; böylece sonuçlarla karar verir. Yazdığınız veya kuyruğa aldığınız mesajlar her zamanki gibi gönderilir.",
+  "Clear workers": "Yardımcı ajanları temizle",
+  "Workers cleared": "Yardımcı ajanlar temizlendi",
+  "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "Çalışan yardımcı ajan yok. Geçmişleri, onları başlatan sohbetlerde kullanılabilir kalır; Yardımcı ajanları temizle bunları kalıcı olarak siler.",
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Yeni sohbetler ve yardımcı ajanlar için varsayılan modeli ve akıl yürütmeyi hesabınızın sunduklarından seçin."
 }

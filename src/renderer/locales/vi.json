@@ -316,7 +316,6 @@
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "Khôi phục cuộc trò chuyện công việc bị thiếu hoặc không phản hồi. Cuộc trò chuyện Goal và Loop tự khôi phục.",
   "Wait for sub-agents": "Chờ tác nhân phụ",
   "Waiting for this chat’s sub-agents": "Đang chờ tác nhân phụ của cuộc trò chuyện này",
-  "Clear swarm": "Xóa swarm",
   "Message ChatGPT": "Nhắn ChatGPT",
   "Add photos & files": "Thêm ảnh & tệp",
   "Share a folder": "Chia sẻ thư mục",
@@ -598,7 +597,6 @@
   "{0} workers": "{0} worker",
   "Extension folder: {0}": "Thư mục tiện ích mở rộng: {0}",
   "The extension folder is missing from this installation. Reinstall the app, or use the extension/ folder from a source checkout.": "Thư mục tiện ích mở rộng bị thiếu trong bản cài này. Cài lại ứng dụng hoặc dùng thư mục extension/ từ source checkout.",
-  "No workers are running. Reusable worker histories are parked and remain available to their prime chats; Clear swarm permanently removes them.": "Không có worker nào đang chạy. Lịch sử worker có thể tái sử dụng đang được đỗ và vẫn khả dụng cho các cuộc trò chuyện prime; Xóa swarm sẽ xóa vĩnh viễn chúng.",
   "No agents. The prime agent creates workers with the agents tool’s spawn action.": "Không có tác nhân. Tác nhân prime tạo worker bằng action spawn của công cụ agents.",
   "Clear session — ends this run and every worker in it": "Xóa phiên — kết thúc lần chạy này và mọi worker trong đó",
   "Clear session — ends {0} and frees its slot": "Xóa phiên — kết thúc {0} và giải phóng slot của nó",
@@ -684,7 +682,6 @@
   "Files": "Tệp",
   "Attach up to 20 files per message": "Đính kèm tối đa 20 tệp mỗi tin nhắn",
   "Handoff copied": "Đã sao chép Handoff",
-  "Swarm cleared": "Đã xóa swarm",
   "Run cleared — every worker ended": "Đã xóa lần chạy — mọi worker đã kết thúc",
   "{0} cleared — its slot is free": "Đã xóa {0} — slot của nó đã trống",
   "Browser disconnected": "Đã ngắt kết nối trình duyệt",
@@ -1748,7 +1745,6 @@
   "End background processes of workers asleep for more than 30 minutes": "Kết thúc tiến trình nền của worker đã ngủ hơn 30 phút",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Chat và lịch sử của worker vẫn có thể dùng lại. Mặc định tắt; mỗi lần dọn dẹp đều được ghi vào lịch sử của worker đó.",
   "Automatic": "Tự động",
-  "Choose account-observed model and reasoning defaults for ordinary chats and sub-agents.": "Chọn mặc định mô hình và mức suy luận đã quan sát từ tài khoản cho chat thông thường và tác nhân phụ.",
   "Default new-chat model": "Mô hình mặc định cho chat mới",
   "Default new-chat reasoning": "Mức suy luận mặc định cho chat mới",
   "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Dùng với mô hình chat thông thường ở trên; worker và helper giữ mặc định riêng của chúng.",
@@ -1792,5 +1788,9 @@
   "Needs the browser extension to be connected. This sets the most worker chats one run may open.": "Cần tiện ích mở rộng trình duyệt đã kết nối. Thiết lập số cuộc trò chuyện worker tối đa mà một lần chạy có thể mở.",
   "Add the browser extension": "Thêm tiện ích mở rộng trình duyệt",
   "In the browser, click Load unpacked, paste the copied folder path and select that folder.": "Trong trình duyệt, nhấp Load unpacked, dán đường dẫn thư mục đã sao chép và chọn thư mục đó.",
-  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "Goal và Loop chờ các worker của cuộc trò chuyện này báo cáo rồi mới làm bước tiếp theo, để quyết định dựa trên kết quả. Tin nhắn bạn nhập hoặc xếp hàng vẫn được gửi như thường."
+  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "Goal và Loop chờ các worker của cuộc trò chuyện này báo cáo rồi mới làm bước tiếp theo, để quyết định dựa trên kết quả. Tin nhắn bạn nhập hoặc xếp hàng vẫn được gửi như thường.",
+  "Clear workers": "Xóa worker",
+  "Workers cleared": "Đã xóa worker",
+  "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "Không có worker nào đang chạy. Lịch sử của chúng vẫn dùng được cho các cuộc trò chuyện đã khởi chạy chúng; Xóa worker sẽ xóa vĩnh viễn.",
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Chọn mô hình và suy luận mặc định cho cuộc trò chuyện mới và tác tử phụ, từ những gì tài khoản của bạn cung cấp."
 }
