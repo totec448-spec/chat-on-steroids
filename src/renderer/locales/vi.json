@@ -343,9 +343,6 @@
   "Inject now": "Chèn ngay",
   "Send directly": "Gửi trực tiếp",
   "After this turn": "Sau lượt này",
-  "Continuation timing": "Thời điểm tiếp tục",
-  "Only finish": "Chỉ khi kết thúc",
-  "After this turn + finish": "Sau lượt này + khi kết thúc",
   "Send": "Gửi",
   "All": "Tất cả",
   "Problems": "Sự cố",
@@ -1766,5 +1763,8 @@
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Chat và lịch sử của worker vẫn có thể dùng lại. Mặc định tắt; mỗi lần dọn dẹp đều được ghi vào lịch sử của worker đó.",
   "Use minimum effort: {0}": "Dùng mức suy luận thấp nhất: {0}",
   "Use maximum effort: {0}": "Dùng mức suy luận cao nhất: {0}",
-  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Nhắc đến Chat On Steroids Core trong tin nhắn của tôi: đảm bảo ChatGPT có thể dùng ứng dụng này trong mọi cuộc trò chuyện. Tắt nếu ChatGPT bắt đầu câu hỏi đơn giản bằng một lệnh gọi công cụ không cần thiết; worker, Goal, Loop và Continue vẫn giữ lời nhắc."
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Nhắc đến Chat On Steroids Core trong tin nhắn của tôi: đảm bảo ChatGPT có thể dùng ứng dụng này trong mọi cuộc trò chuyện. Tắt nếu ChatGPT bắt đầu câu hỏi đơn giản bằng một lệnh gọi công cụ không cần thiết; worker, Goal, Loop và Continue vẫn giữ lời nhắc.",
+  "When to continue": "Khi nào tiếp tục",
+  "Session Finish only": "Chỉ khi kết thúc phiên",
+  "Also after the turn": "Đồng thời sau lượt"
 }

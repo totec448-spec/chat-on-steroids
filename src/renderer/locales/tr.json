@@ -356,9 +356,6 @@
   "Inject now": "Etkin tura ilet",
   "Send directly": "Doğrudan gönder",
   "After this turn": "Bu turdan sonra",
-  "Continuation timing": "Devam mesajının zamanlaması",
-  "Only finish": "Yalnızca bitişte",
-  "After this turn + finish": "Bu turdan sonra + bitişte",
   "Send": "Gönder",
   "All": "Tümü",
   "Problems": "Sorunlar",
@@ -1766,5 +1763,8 @@
   "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Yeni çıktıyı takip et: yanıtlar uzarken sohbetin sonunda kal, burada ve ChatGPT'de. Yukarı kaydırmak duraklatır.",
   "End background processes of workers asleep for more than 30 minutes": "30 dakikadan uzun süredir uyuyan worker'ların arka plan işlemlerini sonlandır",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Worker sohbeti ve geçmişi yeniden kullanılabilir kalır. Varsayılan olarak kapalıdır; her temizlik o worker'ın geçmişine kaydedilir.",
-  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Mesajlarımda Chat On Steroids Core'dan bahset: ChatGPT'nin bu uygulamayı her sohbette kullanabilmesini sağlar. ChatGPT basit sorulara gereksiz bir araç çağrısıyla başlıyorsa kapatın; worker'lar, Goal, Loop ve Continue bahsetmeyi korur."
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Mesajlarımda Chat On Steroids Core'dan bahset: ChatGPT'nin bu uygulamayı her sohbette kullanabilmesini sağlar. ChatGPT basit sorulara gereksiz bir araç çağrısıyla başlıyorsa kapatın; worker'lar, Goal, Loop ve Continue bahsetmeyi korur.",
+  "When to continue": "Ne zaman devam edilsin",
+  "Session Finish only": "Yalnızca oturum bitişinde",
+  "Also after the turn": "Turdan sonra da"
 }

@@ -3148,6 +3148,9 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .composer-popover button:hover { background: var(--hover); }
 .composer-popover label { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
 .composer-popover select { width: 145px; color: var(--ink); background: var(--sunk); border: 1px solid var(--edge); padding: 6px; border-radius: 7px; }
+/* The continuation timing names a choice too long for the side-by-side row; it sits under its label. */
+#loopDeliveryRow { flex-direction: column; align-items: stretch; gap: 6px; }
+#loopDeliveryRow select { width: 100%; }
 .composer :is(#attachmentMenu > summary, #composerSettings > summary, #createPlan, #contextMeterButton, #modelMenu > summary) { box-sizing: border-box; height: 36px; min-height: 36px; border-radius: 8px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 .composer #attachmentMenu > summary { padding: 0; }
 .composer :is(#createPlan, #contextMeterButton):disabled { cursor: default; }

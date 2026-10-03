@@ -356,9 +356,6 @@
   "Inject now": "Вставить сейчас",
   "Send directly": "Отправить напрямую",
   "After this turn": "После этого хода",
-  "Continuation timing": "Момент продолжения",
-  "Only finish": "Только при завершении",
-  "After this turn + finish": "После этого хода + завершение",
   "Send": "Отправить",
   "All": "Все",
   "Problems": "Проблемы",
@@ -1766,5 +1763,8 @@
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Чат и история воркера остаются доступными для повторного использования. По умолчанию выключено; каждая очистка записывается в историю этого воркера.",
   "Use minimum effort: {0}": "Использовать минимальный уровень рассуждений: {0}",
   "Use maximum effort: {0}": "Использовать максимальный уровень рассуждений: {0}",
-  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Упоминать Chat On Steroids Core в моих сообщениях: ChatGPT сможет использовать это приложение в любом чате. Отключите, если ChatGPT начинает простые вопросы с ненужного вызова инструмента; воркеры, Goal, Loop и Continue сохраняют упоминание."
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Упоминать Chat On Steroids Core в моих сообщениях: ChatGPT сможет использовать это приложение в любом чате. Отключите, если ChatGPT начинает простые вопросы с ненужного вызова инструмента; воркеры, Goal, Loop и Continue сохраняют упоминание.",
+  "When to continue": "Когда продолжать",
+  "Session Finish only": "Только при завершении сеанса",
+  "Also after the turn": "Также после хода"
 }
