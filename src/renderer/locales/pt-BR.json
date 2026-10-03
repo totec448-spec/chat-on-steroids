@@ -310,7 +310,6 @@
   "Allow unattributed calls": "Permitir chamadas sem atribuição",
   "Recover other chats’ tabs": "Recuperar abas de outros chats",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "Restaurar chats de trabalho ausentes ou que não respondem. Chats em Goal e Loop são recuperados automaticamente.",
-  "Clear swarm": "Limpar grupo de workers",
   "Message ChatGPT": "Enviar mensagem ao ChatGPT",
   "Add photos & files": "Adicionar fotos e arquivos",
   "Share a folder": "Compartilhar uma pasta",
@@ -592,7 +591,6 @@
   "{0} workers": "{0} workers",
   "Extension folder: {0}": "Pasta da extensão: {0}",
   "The extension folder is missing from this installation. Reinstall the app, or use the extension/ folder from a source checkout.": "A pasta da extensão não está nesta instalação. Reinstale o aplicativo ou use a pasta extension/ de uma cópia do código-fonte.",
-  "No workers are running. Reusable worker histories are parked and remain available to their prime chats; Clear swarm permanently removes them.": "Não há workers em execução. Os históricos reutilizáveis dos workers ficam arquivados e continuam disponíveis nos chats prime correspondentes; a ação “Limpar grupo de workers” exclui esses históricos permanentemente.",
   "No agents. The prime agent creates workers with the agents tool’s spawn action.": "Nenhum agente. O agente prime cria workers usando a ação spawn da ferramenta agents.",
   "Clear session — ends this run and every worker in it": "Limpar sessão — encerra esta execução e todos os workers dela",
   "Clear session — ends {0} and frees its slot": "Limpar sessão — encerra {0} e libera sua vaga",
@@ -678,7 +676,6 @@
   "Files": "Arquivos",
   "Attach up to 20 files per message": "Anexe até 20 arquivos por mensagem",
   "Handoff copied": "Transferência copiada",
-  "Swarm cleared": "Grupo de workers removido",
   "Run cleared — every worker ended": "Execução encerrada — todos os workers foram finalizados",
   "{0} cleared — its slot is free": "{0} removido — vaga liberada",
   "Browser disconnected": "Navegador desconectado",
@@ -1748,7 +1745,6 @@
   "End background processes of workers asleep for more than 30 minutes": "Encerrar processos em segundo plano de workers inativos há mais de 30 minutos",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "O chat e o histórico do worker continuam reutilizáveis. Desativado por padrão; cada limpeza é registrada no histórico desse worker.",
   "Automatic": "Automático",
-  "Choose account-observed model and reasoning defaults for ordinary chats and sub-agents.": "Escolha padrões de modelo e raciocínio observados na conta para chats comuns e subagentes.",
   "Default new-chat model": "Modelo padrão para novos chats",
   "Default new-chat reasoning": "Raciocínio padrão para novos chats",
   "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Usado com o modelo de chat comum acima; workers e auxiliares mantêm seus próprios padrões.",
@@ -1792,5 +1788,9 @@
   "Needs the browser extension to be connected. This sets the most worker chats one run may open.": "Requer a extensão do navegador conectada. Define o número máximo de chats de workers que uma execução pode abrir.",
   "Add the browser extension": "Adicionar a extensão do navegador",
   "In the browser, click Load unpacked, paste the copied folder path and select that folder.": "No navegador, clique em Load unpacked, cole o caminho copiado e selecione a pasta.",
-  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "Goal e Loop esperam os workers deste chat informarem antes do próximo passo, para decidir com os resultados. As mensagens que você digitar ou colocar na fila são enviadas normalmente."
+  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "Goal e Loop esperam os workers deste chat informarem antes do próximo passo, para decidir com os resultados. As mensagens que você digitar ou colocar na fila são enviadas normalmente.",
+  "Clear workers": "Limpar workers",
+  "Workers cleared": "Workers limpos",
+  "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "Nenhum worker em execução. Os históricos continuam disponíveis para os chats que os iniciaram; Limpar workers os remove de vez.",
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Escolha o modelo e o raciocínio padrão para novos chats e subagentes, entre o que sua conta oferece."
 }

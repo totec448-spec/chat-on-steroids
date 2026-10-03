@@ -511,7 +511,6 @@
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "恢復遺失或無回應的工作聊天。目標和循環聊天會自動恢復。",
   "Wait for sub-agents": "等待子代理完成",
   "Waiting for this chat’s sub-agents": "正在等待此聊天的子代理",
-  "Clear swarm": "清除代理群組",
   "Message ChatGPT": "給 ChatGPT 發訊息",
   "Add photos & files": "新增照片和檔案",
   "Share a folder": "共用資料夾",
@@ -796,7 +795,6 @@
   "{0} workers": "{0} 個子代理",
   "Extension folder: {0}": "擴充功能資料夾：{0}",
   "The extension folder is missing from this installation. Reinstall the app, or use the extension/ folder from a source checkout.": "此安裝缺少擴充功能資料夾。請重新安裝應用程式，或使用原始碼中的 extension/ 資料夾。",
-  "No workers are running. Reusable worker histories are parked and remain available to their prime chats; Clear swarm permanently removes them.": "沒有執行中的子代理。可重複使用的歷史已保留，主聊天仍可存取；「清除代理群組」會永久移除它們。",
   "No agents. The prime agent creates workers with the agents tool’s spawn action.": "尚無代理。主代理透過 agents 工具的 spawn 操作建立子代理。",
   "Clear session — ends this run and every worker in it": "清除對話 — 結束本次執行及其全部子代理",
   "Clear session — ends {0} and frees its slot": "清除對話 — 結束 {0} 並釋放名額",
@@ -882,7 +880,6 @@
   "Files": "檔案",
   "Attach up to 20 files per message": "每則訊息最多附加 20 個檔案",
   "Handoff copied": "交接摘要已複製",
-  "Swarm cleared": "代理群組已清除",
   "Run cleared — every worker ended": "執行已清除 — 所有子代理已結束",
   "{0} cleared — its slot is free": "{0} 已清除 — 名額已釋放",
   "Browser disconnected": "瀏覽器已中斷連線",
@@ -1748,7 +1745,6 @@
   "End background processes of workers asleep for more than 30 minutes": "結束休眠超過 30 分鐘的 worker 背景程序",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "worker 的聊天和歷史記錄仍可繼續重用。預設關閉；每次清理都會記錄在該 worker 的歷史中。",
   "Automatic": "自動",
-  "Choose account-observed model and reasoning defaults for ordinary chats and sub-agents.": "為一般聊天和子代理選擇帳戶中已偵測到的預設模型與推理強度。",
   "Default new-chat model": "新聊天預設模型",
   "Default new-chat reasoning": "新聊天預設推理強度",
   "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "與上方的一般聊天模型搭配使用；工作代理與輔助代理保留各自的預設值。",
@@ -1792,5 +1788,9 @@
   "Needs the browser extension to be connected. This sets the most worker chats one run may open.": "需要已連線的瀏覽器擴充功能。此設定限制一次執行可開啟的子代理聊天數量。",
   "Add the browser extension": "新增瀏覽器擴充功能",
   "In the browser, click Load unpacked, paste the copied folder path and select that folder.": "在瀏覽器中點選 Load unpacked（載入未封裝項目），貼上複製的資料夾路徑並選擇該資料夾。",
-  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "目標和循環會等待此聊天的子代理回報後再進行下一步，以便根據結果做決定。你輸入或排隊的訊息仍會照常送出。"
+  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "目標和循環會等待此聊天的子代理回報後再進行下一步，以便根據結果做決定。你輸入或排隊的訊息仍會照常送出。",
+  "Clear workers": "清除子代理",
+  "Workers cleared": "已清除子代理",
+  "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "沒有正在執行的子代理。它們的歷史記錄仍可供啟動它們的聊天使用；「清除子代理」會永久刪除。",
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "從你的帳戶提供的選項中，為新聊天和子代理選擇預設模型與推理強度。"
 }
