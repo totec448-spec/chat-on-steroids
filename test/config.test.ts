@@ -511,6 +511,7 @@ describe('shipped defaults', () => {
       expect(enabled, capability).toBe(expectedFreshCapability(capability, process.platform));
     }
     expect(loaded.multiAgent.enabled).toBe(true);
+    expect(loaded.multiAgent.globalMaxWorkers).toBe(0);
     expect(loaded.multiAgent.allowUnattributedCalls).toBe(true);
     expect(loaded.multiAgent.recoverAgentTabs).toBe(false);
     // Waiting for a run's own workers is a workflow preference, not a first-launch exposure
@@ -529,6 +530,7 @@ describe('shipped defaults', () => {
       }
       expect(config.multiAgent.enabled).toBe(true);
       expect(config.multiAgent.maxWorkers).toBe(2);
+      expect(config.multiAgent.globalMaxWorkers).toBe(0);
       expect(config.multiAgent.allowUnattributedCalls).toBe(true);
       expect(config.multiAgent.recoverAgentTabs).toBe(false);
       expect(config.multiAgent.waitForSubAgents).toBe(false);
@@ -549,6 +551,7 @@ describe('shipped defaults', () => {
     expect(loaded.capabilities.command).toBe(false);
     expect(loaded.capabilities.control).toBe(false);
     expect(loaded.multiAgent.enabled).toBe(false);
+    expect(loaded.multiAgent.globalMaxWorkers).toBe(0);
     expect(loaded.multiAgent.allowUnattributedCalls).toBe(false);
     expect(loaded.multiAgent.recoverAgentTabs).toBe(false);
     expect(loaded.multiAgent.waitForSubAgents).toBe(false);
@@ -563,6 +566,16 @@ describe('shipped defaults', () => {
     expect(loaded.capabilities.command).toBe(false);
     expect(loaded.capabilities.control).toBe(false);
     expect(loaded.multiAgent.enabled).toBe(false);
+  });
+
+  it('keeps the global worker admission cap off for legacy configs and preserves an explicit opt-in', async () => {
+    const config = defaultConfig();
+    expect(config.multiAgent.globalMaxWorkers).toBe(0);
+    await saveConfig({
+      ...config,
+      multiAgent: { ...config.multiAgent, globalMaxWorkers: 5 }
+    });
+    expect((await loadConfig()).multiAgent.globalMaxWorkers).toBe(5);
   });
 
   it('does not persist obsolete recording-off or age-retention choices', async () => {

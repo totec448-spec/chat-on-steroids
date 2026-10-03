@@ -509,6 +509,8 @@
   "Sub-agent workers": "子代理",
   "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "需要載入並連線 Chrome 擴充功能。此設定限制一次執行可開啟的子代理聊天數量。",
   "max": "上限",
+  "Global worker admission cap": "全域 Worker 准入上限",
+  "Across all prime families. 0 keeps this cap off, so only the per-family worker limit applies.": "適用於所有主代理家族。設為 0 會停用此上限，只套用各家族的 Worker 上限。",
   "Allow unattributed calls": "允許未歸屬的呼叫",
   "Recover other chats’ tabs": "恢復其他聊天的分頁",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "恢復遺失或無回應的工作聊天。目標和循環聊天會自動恢復。",

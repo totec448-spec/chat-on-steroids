@@ -52,7 +52,7 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000, handoffPrompt: DEFAULT_HANDOFF_PROMPT },
-    multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
+    multiAgent: { enabled: false, maxWorkers: 2, globalMaxWorkers: 0, allowUnattributedCalls: false, recoverAgentTabs: true },
     goal: {
       enabled: false,
       model: 'deepseek/deepseek-v4-flash',
@@ -232,7 +232,7 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as 'light' | 'dark' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000, handoffPrompt: DEFAULT_HANDOFF_PROMPT },
-    multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
+    multiAgent: { enabled: false, maxWorkers: 2, globalMaxWorkers: 0, allowUnattributedCalls: false, recoverAgentTabs: true },
     goal: {
       enabled: false,
       model: 'deepseek/deepseek-v4-flash',
@@ -389,7 +389,7 @@ async function mountChat(
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as const },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000, handoffPrompt: DEFAULT_HANDOFF_PROMPT },
-    multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
+    multiAgent: { enabled: false, maxWorkers: 2, globalMaxWorkers: 0, allowUnattributedCalls: false, recoverAgentTabs: true },
     goal: {
       enabled: false,
       model: 'deepseek/deepseek-v4-flash',
@@ -880,6 +880,27 @@ it('saves the ChatGPT browser choice from its settings control and restores it o
   expect(browser.value).toBe('edge');
   mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, chatBrowser: 'chrome' } } });
   expect(browser.value).toBe('chrome');
+});
+
+it('saves and restores the global worker admission cap from Settings', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const globalWorkers = w.document.getElementById('globalMaWorkers') as HTMLInputElement;
+  expect(globalWorkers.value).toBe('0');
+
+  globalWorkers.value = '5';
+  globalWorkers.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].multiAgent.globalMaxWorkers).toBe(5);
+
+  mounted.push({
+    ...mounted.state,
+    config: {
+      ...mounted.state.config,
+      multiAgent: { ...mounted.state.config.multiAgent, globalMaxWorkers: 7 }
+    }
+  });
+  expect(globalWorkers.value).toBe('7');
 });
 
 it('saves and clears ordinary new-chat model defaults from either selector independently', async () => {

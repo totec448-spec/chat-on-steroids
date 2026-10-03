@@ -326,6 +326,8 @@
   "Sub-agent workers": "Субагенты",
   "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "Требуется загруженное и подключённое расширение Chrome. Здесь задаётся максимальное число чатов воркеров, которое может открыть один запуск.",
   "max": "max",
+  "Global worker admission cap": "Глобальный лимит допуска воркеров",
+  "Across all prime families. 0 keeps this cap off, so only the per-family worker limit applies.": "Применяется ко всем семействам основных агентов. 0 отключает этот лимит, и действует только лимит воркеров для каждого семейства.",
   "Allow unattributed calls": "Разрешить вызовы без привязки",
   "Recover other chats’ tabs": "Восстанавливать вкладки других чатов",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "Восстанавливать отсутствующие или зависшие рабочие чаты. Чаты Цели и Цикла восстанавливаются автоматически.",
