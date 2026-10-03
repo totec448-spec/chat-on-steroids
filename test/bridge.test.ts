@@ -3962,6 +3962,8 @@ describe('delivering a bootstrap', () => {
     spawn({ workers: [{ task: 'audit the compaction' }], caller: { conversationId: PRIME_CHAT } });
     const command = await redeem();
     const conversationId = 'abcdef12-3456-7890-abcd-ef1234567890';
+    expect(command.expiresAt).toBeGreaterThan(Date.now());
+    expect(command.expiresAt).toBeLessThanOrEqual(Date.now() + COMMAND_DEADLINE_MS);
     expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('invited');
 
     await request('POST', '/commands/ack', {

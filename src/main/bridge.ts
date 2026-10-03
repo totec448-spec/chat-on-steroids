@@ -474,6 +474,8 @@ interface DurableCommandSnapshot {
 /** The wire form the extension receives. */
 export interface BridgeCommand {
   id: string;
+  /** Absolute browser-delivery deadline for this leased command. */
+  expiresAt: number;
   /** Project entry is navigation authority only; the source composer must never receive the brief. */
   projectEntry?: { id: string; sourceConversationId: string };
   kind: 'open-chat' | 'stop-turn';
@@ -9357,7 +9359,8 @@ function revivalFor(agent: string, runId: string): WorkerRevival | null {
 function describe(command: Command, client: string | null, claimedSummary?: string): BridgeCommand {
   const spec = command.spec;
   const selection = spec.type === 'resume' ? continuationByToken(spec.token)?.requestedModel : null;
-  if (spec.type === 'stop') return { id: command.id, kind: 'stop-turn', type: 'stop', text: '', agent: null, model: null, reasoningEffort: null, conversationId: spec.conversationId, turnId: spec.turnId, ...(spec.userMessageId ? { userMessageId: spec.userMessageId } : {}) };
+  const expiresAt = Date.now() + Math.max(1, commandDeadlineDelay(command));
+  if (spec.type === 'stop') return { id: command.id, expiresAt, kind: 'stop-turn', type: 'stop', text: '', agent: null, model: null, reasoningEffort: null, conversationId: spec.conversationId, turnId: spec.turnId, ...(spec.userMessageId ? { userMessageId: spec.userMessageId } : {}) };
   // A resume's claim is persisted by /commands/redeem before this renderer is called. A
   // command shown to app/UI code without a browser document still carries no brief at all.
   const text = spec.type === 'resume'
@@ -9367,6 +9370,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
     : bootstrapText(spec, '');
   return {
     id: command.id,
+    expiresAt,
     kind: 'open-chat',
     ...(spec.type === 'resume' && commandProject(command) ? {
       projectEntry: { id: commandProject(command)!, sourceConversationId: continuationByToken(spec.token)!.from }
