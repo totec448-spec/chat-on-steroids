@@ -1794,5 +1794,9 @@
   "Clear workers": "Xóa worker",
   "Workers cleared": "Đã xóa worker",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "Không có worker nào đang chạy. Lịch sử của chúng vẫn dùng được cho các cuộc trò chuyện đã khởi chạy chúng; Xóa worker sẽ xóa vĩnh viễn.",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Chọn mô hình và suy luận mặc định cho cuộc trò chuyện mới và tác tử phụ, từ những gì tài khoản của bạn cung cấp."
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Chọn mô hình và suy luận mặc định cho cuộc trò chuyện mới và tác tử phụ, từ những gì tài khoản của bạn cung cấp.",
+  "Choose whether imported Skills can be matched to ordinary messages.": "Chọn có tự động ghép Skills đã nhập với tin nhắn thông thường hay không.",
+  "Auto-select Skills": "Tự động chọn Skills",
+  "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Khi chỉ một Skill đã nhập khớp rõ ràng theo metadata, thêm Skill đó vào tin nhắn. Skill được chọn trực tiếp luôn được ưu tiên.",
+  "Auto-selected Skill: /{0}": "Skill được tự động chọn: /{0}"
 }

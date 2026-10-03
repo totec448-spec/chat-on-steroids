@@ -40,6 +40,7 @@ const SIMPLE_SCALAR_UNSAFE = /^(?:[\[\]{}|>&*!%@`]|[-?:]\s)|:\s/;
 
 let root: string | null = null;
 let catalog: SkillSummary[] = [];
+let catalogRevisions = new Map<string, string>();
 let operations: Promise<unknown> = Promise.resolve();
 
 function serial<T>(work: () => Promise<T>): Promise<T> {
@@ -338,6 +339,7 @@ async function recoverSkillBackups(candidateRoot: string): Promise<void> {
 
 function publish(records: SkillRecord[]): void {
   catalog = records.map(record => ({ ...record.summary }));
+  catalogRevisions = new Map(records.map(record => [record.summary.id, record.revision]));
 }
 
 export function skillsDirectory(): string | null {
@@ -352,7 +354,7 @@ export async function readSkillTextSnapshot(filename: string): Promise<{ bytes: 
 export function initSkillsPath(userData: string): Promise<void> {
   return serial(async () => {
     if (!path.isAbsolute(userData)) throw new Error('Skills storage requires an absolute user-data path');
-    root = null; catalog = [];
+    root = null; catalog = []; catalogRevisions = new Map();
     await fs.mkdir(userData, { recursive: true });
     const realUserData = process.platform === 'win32' ? await rawRealpathNative(userData) : await fs.realpath(userData);
     const candidate = path.join(realUserData, 'skills');
@@ -372,6 +374,14 @@ export function listSkills(): Promise<SkillSummary[]> {
     const records = await scan(requiredRoot());
     publish(records);
     return catalog.map(summary => ({ ...summary }));
+  });
+}
+
+/** Metadata already published by init/import/update. Never rescans SKILL.md at send time. */
+export function skillCatalogSnapshot(): Array<SkillSummary & { revision: string }> {
+  return catalog.flatMap(summary => {
+    const revision = catalogRevisions.get(summary.id);
+    return revision ? [{ ...summary, revision }] : [];
   });
 }
 
@@ -396,6 +406,21 @@ export function readSkill(id: string): Promise<SkillDocument> {
     const record = await recordAt(directory, id);
     if (!sameIdentity(before, await assertManagedRoot(directory))) throw new Error('The managed Skills folder changed while being read');
     if (!record) throw new Error(`Skill "${id}" was not found or is invalid`);
+    return { summary: { ...record.summary }, text: record.text };
+  });
+}
+
+/** Read exactly one routed body and prove it still matches the metadata snapshot that selected it. */
+export function readSkillAtRevision(id: string, expectedRevision: string): Promise<SkillDocument> {
+  return serial(async () => {
+    assertSkillId(id);
+    if (!/^[0-9a-f]{64}$/i.test(expectedRevision)) throw new Error('Auto-selected Skill revision is invalid');
+    const directory = requiredRoot();
+    const before = await assertManagedRoot(directory);
+    const record = await recordAt(directory, id);
+    if (!sameIdentity(before, await assertManagedRoot(directory))) throw new Error('The managed Skills folder changed while being read');
+    if (!record) throw new Error(`Auto-selected Skill "${id}" was removed or became invalid`);
+    if (record.revision !== expectedRevision) throw new Error(`Auto-selected Skill "${id}" changed after routing; send the message again`);
     return { summary: { ...record.summary }, text: record.text };
   });
 }

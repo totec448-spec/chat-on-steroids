@@ -196,6 +196,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8; global worker admission cap Off (`0`, configurable through 64). | Legacy absent enabled/allow-unattributed fields remain false; an absent global cap remains Off. Existing choices stay exact. |
 | Wait for sub-agents | Off. | When on, a Goal/Loop chat's next automatic step waits for the workers that exact chat started. A chat with no run, or a run with no workers, waits either way. See §16. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
+| Auto-select Skills | Off. | When on, ordinary human-authored input with no explicit Skill directive may select at most one managed/imported Skill from already-published metadata. Weak or ambiguous matches select none; explicit `/id` or `/prompt id` always wins. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-5.6-sol` High. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
@@ -463,6 +464,21 @@ Explicit follow-ups add only selected Skills. `deliveryText` freezes exact bytes
 subsequent library changes cannot alter an already prepared send. No new MCP tool, executable
 hook, watcher, or provider reconnect is introduced. The catalog refreshes on list/import and
 before opening preparation; provider-cached initialize instructions remain a snapshot.
+
+Optional `ui.autoSelectSkills` defaults off. When enabled, admission of an ordinary human-authored
+input with no explicit Skill directive scores only the already-published managed/imported catalog
+metadata plus bounded `agents/openai.yaml` policy. It never calls `listSkills()`/`listSkillLibrary()`
+or reads every `SKILL.md` to make the routing decision; discovered repo/user/system/admin Skills
+remain explicit-only in this first slice because their descriptive metadata lives in `SKILL.md`.
+`allow_implicit_invocation=false`, invalid policy/config, weak relevance and close competing
+matches all fail to no selection. A routed choice is frozen in the durable input row as exact
+Skill id + published SKILL.md revision before delivery, including an explicit empty decision.
+Retries/restarts reuse that record instead of rerouting. Prompt preparation reads only the chosen
+managed body through the existing selected-Skill path and rejects it if its revision changed.
+An explicit queued-message edit clears the automatic record rather than silently rerouting changed
+text; a new explicit Skill directive in that edited text is still authoritative at preparation.
+Explicit slash/picker selection never combines with the automatic record. Routing grants no root,
+capability, cwd, tool or execution permission; the existing live guards remain authoritative.
 
 ### `exec({code})` composes tools; it is not a shell
 

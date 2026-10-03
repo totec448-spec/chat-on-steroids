@@ -142,6 +142,8 @@ export interface UiPrefs {
   browserBridgePort?: import('./browser-bridge.js').BrowserBridgePort;
   /** Opt-in browser automation for changed connector tool schemas. */
   autoRefreshPlugins?: boolean;
+  /** Opt-in deterministic metadata routing for managed Skills on ordinary user input. */
+  autoSelectSkills?: boolean;
   /** Actual app-owned tabs to retain; active work and drafts stay protected. Omitted uses workers + 2. */
   tabsToKeepOpen?: number;
   finishTool?: boolean;

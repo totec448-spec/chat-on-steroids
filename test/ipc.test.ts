@@ -112,6 +112,15 @@ it.each(['playfulStatus', 'followOutput'] as const)('saves the %s display switch
   expect(getConfig().ui[key]).toBe(wanted);
 });
 
+it('saves Auto-select Skills through Settings and preserves it across a stale unrelated save', async () => {
+  const base = getConfig();
+  const wanted = !(base.ui.autoSelectSkills ?? false);
+  expect(await save({ ...base, ui: { ...base.ui, autoSelectSkills: wanted } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.autoSelectSkills).toBe(wanted);
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.autoSelectSkills).toBe(wanted);
+});
+
 it('saves port choices, merges stale snapshots and serializes concurrent port edits', async () => {
   const ports = await import('../src/main/bridge-ports.js');
   const bridge = await import('../src/main/bridge.js');

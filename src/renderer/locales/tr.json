@@ -1794,5 +1794,9 @@
   "Clear workers": "Yardımcı ajanları temizle",
   "Workers cleared": "Yardımcı ajanlar temizlendi",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "Çalışan yardımcı ajan yok. Geçmişleri, onları başlatan sohbetlerde kullanılabilir kalır; Yardımcı ajanları temizle bunları kalıcı olarak siler.",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Yeni sohbetler ve yardımcı ajanlar için varsayılan modeli ve akıl yürütmeyi hesabınızın sunduklarından seçin."
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Yeni sohbetler ve yardımcı ajanlar için varsayılan modeli ve akıl yürütmeyi hesabınızın sunduklarından seçin.",
+  "Choose whether imported Skills can be matched to ordinary messages.": "İçe aktarılan Skills'in normal mesajlarla otomatik eşleştirilip eşleştirilmeyeceğini seçin.",
+  "Auto-select Skills": "Skills'i otomatik seç",
+  "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Meta verilere göre yalnızca bir içe aktarılmış Skill açıkça eşleşirse o mesaja eklenir. Açık Skill seçimleri her zaman önceliklidir.",
+  "Auto-selected Skill: /{0}": "Otomatik seçilen Skill: /{0}"
 }

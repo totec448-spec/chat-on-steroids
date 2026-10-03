@@ -1794,5 +1794,9 @@
   "Clear workers": "Limpar workers",
   "Workers cleared": "Workers limpos",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "Nenhum worker em execução. Os históricos continuam disponíveis para os chats que os iniciaram; Limpar workers remove-os definitivamente.",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Escolha o modelo e o raciocínio predefinidos para novos chats e subagentes, entre o que a sua conta oferece."
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Escolha o modelo e o raciocínio predefinidos para novos chats e subagentes, entre o que a sua conta oferece.",
+  "Choose whether imported Skills can be matched to ordinary messages.": "Escolha se as Skills importadas podem ser associadas automaticamente a mensagens normais.",
+  "Auto-select Skills": "Selecionar Skills automaticamente",
+  "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Quando uma única Skill importada corresponder claramente pelos metadados, é adicionada à mensagem. As escolhas explícitas de Skill têm sempre prioridade.",
+  "Auto-selected Skill: /{0}": "Skill selecionada automaticamente: /{0}"
 }

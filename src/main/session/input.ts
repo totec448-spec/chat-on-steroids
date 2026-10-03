@@ -24,6 +24,9 @@ import { attachmentSchema, validateInputAttachments, normalizeInputAttachments }
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../../shared/user-prompt.js';
 import type { PromptLimits } from './prompt.js';
 import { recoveryMessage, recoveryBusyMs } from '../../shared/recovery.js';
+import { invokedSkills } from '../../shared/skill-invocation.js';
+import { SKILL_ID_PATTERN } from '../../shared/skills.js';
+import { autoSelectManagedSkills } from '../skill-routing.js';
 
 export const inputArgs = z.object({
   projectId: z.string().uuid().nullable().optional(),
@@ -53,6 +56,8 @@ const entrySchema = inputArgs.extend({
   opening: z.literal(true).optional(),
   /** An explicit retry can keep its unbound local chat instead of reserving another. */
   requestedSessionId: inputArgs.shape.sessionId.optional(),
+  /** Frozen automatic routing decision. Empty means routing ran and deliberately chose none. */
+  autoSkills: z.array(z.object({ id: z.string().regex(SKILL_ID_PATTERN), revision: z.string().regex(/^[0-9a-f]{64}$/i) }).strict()).max(1).optional(),
   /** Frozen image projection; authored attachment IDs remain the replay identity. */
   toolImages: inputArgs.shape.images,
   /** One after-turn pickup earned by confirmed silence or settled Thinking failed. */
@@ -701,6 +706,13 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
         await getSessionProject(input.sessionId);
       }
     }
+    const authoredOrdinary = (input.authoredSource ?? 'text') === 'text' && input.mode !== 'finish' &&
+      !finishOwner && !input.stages?.length;
+    if (getConfig().ui.autoSelectSkills === true && authoredOrdinary && invokedSkills(input.text).length === 0) {
+      const folder = input.sessionId ? await getSessionProject(input.sessionId)
+        : input.projectId ? await projectWorkspace(input.projectId) : null;
+      entry.autoSkills = await autoSelectManagedSkills(input.text, { projectPath: folder?.real ?? null });
+    }
     if (retryOpening) { entry.opening = true; entry.requestedSessionId = input.sessionId; }
     entry.conversationId = await target(entry);
     if (!input.sessionId) {
@@ -878,7 +890,8 @@ export function editQueuedInput(id: string, text: string, afterTurn?: boolean): 
     const row = current.find(entry => entry.id === id && entry.state === 'queued' && queuedFollowup(entry) && !entry.recovery);
     if (!row) return false;
     if (current.filter(entry => !terminal(entry)).reduce((sum, entry) => sum + Buffer.byteLength(entry === row ? value : entry.text), 0) > 1024000) throw new Error('Queued messages exceed the text limit');
-    await commit(current.map(entry => entry === row ? { ...row, text: value, authoredSource: 'text', ...(afterTurn === undefined ? {} : { afterTurn }), deliveryText: undefined } : entry));
+    await commit(current.map(entry => entry === row ? { ...row, text: value, authoredSource: 'text',
+      ...(afterTurn === undefined ? {} : { afterTurn }), deliveryText: undefined, autoSkills: undefined } : entry));
     return true;
   });
 }

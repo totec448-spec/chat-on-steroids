@@ -870,6 +870,10 @@
                   <div class="setting"><span class="setting-text"><b>Default sub-agent model</b><em>Confirmed in ChatGPT before a worker starts.</em></span><select id="workerModel"><option value="" disabled>No observed choices</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Default sub-agent reasoning</b><em>Selected independently from the model.</em></span><select id="workerReasoning"><option value="" disabled>No observed choices</option></select></div>
                   </div>
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Skills</h2><p>Choose whether imported Skills can be matched to ordinary messages.</p></div></header>
+                <div class="settings-surface pane">
+                  <label class="setting"><span class="setting-text"><b>Auto-select Skills</b><em>When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.</em></span><input id="autoSelectSkills" type="checkbox" /></label>
+                </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Workers & recovery</h2><p>Set worker limits and which chats can resume after interruptions.</p></div></header>
                 <div class="settings-surface pane">
                   <div class="setting">
