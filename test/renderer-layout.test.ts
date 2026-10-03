@@ -178,8 +178,9 @@ describe('the session card header', () => {
     expect(rule('.connection-popover::-webkit-scrollbar-track')).toContain('margin-block: 10px');
     expect(rule('#workspaceSettings')).toContain('height: 36px');
     expect(rule('.sidebar-connection')).toContain('width: 36px; height: 36px');
-    expect(document.getElementById('connectionAdvanced')).not.toBeNull();
-    expect(document.getElementById('connectionAdvancedGrid')).not.toBeNull();
+    expect(document.getElementById('connectionPopover')!.querySelector('details')).toBeNull();
+    expect(document.getElementById('connectionAdvanced')).toBeNull();
+    expect(document.getElementById('connectionPopoverVerified')).toBeNull();
     expect(document.getElementById('sessionControls')!.closest('#composerSettings')).not.toBeNull();
     expect(header.querySelector('.session-controls')).toBeNull();
   });
@@ -534,6 +535,12 @@ describe('the settings sheet', () => {
         const variable = input.id === 'browserOverwrite' ? 'overwrite' : 'durations';
         expect(browserPreferencesSource).toContain(`('${input.id}')`);
         expect(browserPreferencesSource).toContain(`${variable}.addEventListener('change'`);
+        continue;
+      }
+      // Search narrows a transient provider listing; it is not an app setting and must never
+      // enter config. Keep the exception explicit and prove the local input listener exists.
+      if (input.id === 'goalModelSearch') {
+        expect(chatSource).toMatch(/const modelSearch = \$<HTMLInputElement>\('goalModelSearch'\);[\s\S]{0,260}modelSearch\.addEventListener\('input'/);
         continue;
       }
       // A credential is the one exception, and it is an exception on purpose: it is written

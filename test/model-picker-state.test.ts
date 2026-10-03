@@ -92,6 +92,19 @@ function fixture(versionCaption = '', closeDelay: number | null = 0) {
   win.eval(fiberSource); win.eval(domSource);
   return { api: (win as any).CLF_DOM, state, props, selections, actions, freeze: () => { frozen = true; } };
 }
+it('confirms the exact selected pair without moving through other model versions', async () => {
+  const f = fixture('', 30);
+  f.freeze(); // Unrelated version changes cannot be completed by this native owner.
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
+  expect(f.actions).not.toHaveBeenCalled();
+  expect(f.state.currentBucket).toBe(2);
+  expect(page.window.document.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
+});
+it('does not treat an exact but denied current choice as selection proof', async () => {
+  const f = fixture();
+  f.props.modelSwitcherDenialsBySlug = { 'gpt-5-6-thinking': true };
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(false);
+});
 it('waits for the model picker to close before allowing composer insertion', async () => {
   const f = fixture('', 30);
   expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(true);
