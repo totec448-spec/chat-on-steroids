@@ -481,7 +481,6 @@
   "Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop": "帰属未確定の呼び出しをブロック：チャットに紐づけられない呼び出しをすべて拒否し、チャットに停止を指示します",
   "Release this chat: its tool calls run again": "このチャットのブロックを解除：ツール呼び出しを再び許可します",
   "Block this chat: every tool call it makes is refused and it is told to stop": "このチャットをブロック：すべてのツール呼び出しを拒否し、停止を指示します",
-  "Open this chat in Chrome": "このチャットを Chrome で開く",
   "Session deleted": "セッションを削除しました",
   "{0} sub-agents · {1} active": "サブエージェント {0}件 · 実行中 {1}件",
   "{0} {1} sub-agents": "{0} {1} サブエージェント",
@@ -1808,5 +1807,11 @@
   "Auto-select Skills": "Skills を自動選択",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "インポートした Skill がメタデータ上ひとつだけ明確に一致するとき、そのメッセージに追加します。明示的な Skill 選択が常に優先されます。",
   "Auto-selected Skill: /{0}": "自動選択した Skill: /{0}",
-  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "すべてのワーカーを消去しますか？実行中のワーカーは停止し、保存された履歴は完全に削除されます。チャットは ChatGPT に残ります。"
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "すべてのワーカーを消去しますか？実行中のワーカーは停止し、保存された履歴は完全に削除されます。チャットは ChatGPT に残ります。",
+  "Quit": "終了",
+  "Astra is wrapping up": "Astra がまとめに入っています",
+  "Send an automatic Goal or write your next instruction.": "自動ゴールを送るか、次の指示を書いてください。",
+  "Send Automatic Goal": "自動ゴールを送信",
+  "Write Directly": "直接書く",
+  "Open this chat in your browser": "このチャットをブラウザーで開く"
 }

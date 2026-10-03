@@ -1,5 +1,6 @@
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
+import { setMainTextTranslations } from './main-texts.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -711,6 +712,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('ui:stopNoticeTexts', async payload => {
     // The renderer's catalogs translate the stopped-chat notices (#855); bounded and allowlisted.
     setStopNoticeTranslations(z.record(z.string().max(200), z.string().max(400)).refine(value => Object.keys(value).length <= 16).parse(payload));
+  });
+  handle('ui:mainTexts', async payload => {
+    // The tray menu and Session finish notice in the interface language; bounded and allowlisted.
+    setMainTextTranslations(z.record(z.string().max(200), z.string().max(200)).refine(value => Object.keys(value).length <= 32).parse(payload));
   });
   handle('pets:list', async () => petLibraryState());
   handle('pets:overlayState', async () => petOverlayControlState());

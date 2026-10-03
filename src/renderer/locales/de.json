@@ -459,7 +459,6 @@
   "Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop": "Nicht zugeordnete Aufrufe blockieren: Jeder Aufruf, den die App keinem Chat zuordnen kann, wird abgelehnt, und der Chat wird zum Anhalten aufgefordert",
   "Release this chat: its tool calls run again": "Diesen Chat freigeben: seine Tool-Aufrufe laufen wieder",
   "Block this chat: every tool call it makes is refused and it is told to stop": "Diesen Chat blockieren: Jeder seiner Tool-Aufrufe wird abgelehnt, und er wird zum Anhalten aufgefordert",
-  "Open this chat in Chrome": "Diesen Chat in Chrome öffnen",
   "Session deleted": "Sitzung gelöscht",
   "{0} sub-agents · {1} active": "{0} Unteragenten · {1} aktiv",
   "{0} {1} sub-agents": "{0} {1} Unteragenten",
@@ -1808,5 +1807,11 @@
   "Auto-select Skills": "Skills automatisch auswählen",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Wenn genau ein importierter Skill anhand seiner Metadaten eindeutig passt, wird er dieser Nachricht hinzugefügt. Eine ausdrückliche Skill-Auswahl hat immer Vorrang.",
   "Auto-selected Skill: /{0}": "Automatisch ausgewählter Skill: /{0}",
-  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Alle Worker leeren? Laufende Worker werden beendet und ihre gespeicherten Verläufe endgültig entfernt. Ihre Chats bleiben in ChatGPT."
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Alle Worker leeren? Laufende Worker werden beendet und ihre gespeicherten Verläufe endgültig entfernt. Ihre Chats bleiben in ChatGPT.",
+  "Quit": "Beenden",
+  "Astra is wrapping up": "Astra schließt ab",
+  "Send an automatic Goal or write your next instruction.": "Sende ein automatisches Goal oder schreibe deine nächste Anweisung.",
+  "Send Automatic Goal": "Automatisches Goal senden",
+  "Write Directly": "Selbst schreiben",
+  "Open this chat in your browser": "Diesen Chat im Browser öffnen"
 }

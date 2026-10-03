@@ -472,7 +472,6 @@
   "Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop": "Sohbeti belirlenemeyen çağrıları engelle: uygulamanın bir sohbetle ilişkilendiremediği tüm çağrılar reddedilir ve sohbete durması söylenir",
   "Release this chat: its tool calls run again": "Bu sohbetin engelini kaldır: araç çağrıları yeniden çalışabilir",
   "Block this chat: every tool call it makes is refused and it is told to stop": "Bu sohbeti engelle: tüm araç çağrıları reddedilir ve durması söylenir",
-  "Open this chat in Chrome": "Bu sohbeti Chrome'da aç",
   "Session deleted": "Oturum silindi",
   "{0} sub-agents · {1} active": "{0} yardımcı ajan · {1} etkin",
   "{0} {1} sub-agents": "{1} yardımcı ajan · {0}",
@@ -1808,5 +1807,11 @@
   "Auto-select Skills": "Skills'i otomatik seç",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Meta verilere göre yalnızca bir içe aktarılmış Skill açıkça eşleşirse o mesaja eklenir. Açık Skill seçimleri her zaman önceliklidir.",
   "Auto-selected Skill: /{0}": "Otomatik seçilen Skill: /{0}",
-  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Tüm yardımcı ajanlar temizlensin mi? Çalışanlar durur ve kayıtlı geçmişleri kalıcı olarak silinir. Sohbetleri ChatGPT’de kalır."
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Tüm yardımcı ajanlar temizlensin mi? Çalışanlar durur ve kayıtlı geçmişleri kalıcı olarak silinir. Sohbetleri ChatGPT’de kalır.",
+  "Quit": "Çık",
+  "Astra is wrapping up": "Astra toparlıyor",
+  "Send an automatic Goal or write your next instruction.": "Otomatik bir Hedef gönderin veya sonraki talimatınızı yazın.",
+  "Send Automatic Goal": "Otomatik Hedef gönder",
+  "Write Directly": "Doğrudan yaz",
+  "Open this chat in your browser": "Bu sohbeti tarayıcınızda açın"
 }

@@ -472,7 +472,6 @@
   "Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop": "Bloquear llamadas sin atribución: se rechaza cada llamada que no se pueda atribuir a un chat y se le indica al chat que se detenga",
   "Release this chat: its tool calls run again": "Desbloquear este chat: sus llamadas a herramientas vuelven a ejecutarse",
   "Block this chat: every tool call it makes is refused and it is told to stop": "Bloquear este chat: se rechazan todas sus llamadas a herramientas y se le indica que se detenga",
-  "Open this chat in Chrome": "Abrir este chat en Chrome",
   "Session deleted": "Sesión eliminada",
   "{0} sub-agents · {1} active": "{0} subagentes · {1} activos",
   "{0} {1} sub-agents": "{0} {1} subagentes",
@@ -1808,5 +1807,11 @@
   "Auto-select Skills": "Seleccionar Skills automáticamente",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Cuando una sola Skill importada coincida claramente por sus metadatos, se añade a ese mensaje. Las selecciones explícitas de Skills siempre tienen prioridad.",
   "Auto-selected Skill: /{0}": "Skill seleccionada automáticamente: /{0}",
-  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "¿Borrar todos los subagentes? Los que están en ejecución se detienen y sus historiales guardados se eliminan definitivamente. Sus chats siguen en ChatGPT."
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "¿Borrar todos los subagentes? Los que están en ejecución se detienen y sus historiales guardados se eliminan definitivamente. Sus chats siguen en ChatGPT.",
+  "Quit": "Salir",
+  "Astra is wrapping up": "Astra está terminando",
+  "Send an automatic Goal or write your next instruction.": "Envía un Objetivo automático o escribe tu siguiente instrucción.",
+  "Send Automatic Goal": "Enviar Objetivo automático",
+  "Write Directly": "Escribir directamente",
+  "Open this chat in your browser": "Abrir este chat en tu navegador"
 }
