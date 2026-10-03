@@ -546,6 +546,7 @@ describe('shipped defaults', () => {
       expect(config.multiAgent.maxWorkers).toBe(2);
       expect(config.multiAgent.globalMaxWorkers).toBe(0);
       expect(config.multiAgent.allowUnattributedCalls).toBe(true);
+      expect(config.multiAgent.strictChatAllowlist).toBe(false);
       expect(config.multiAgent.recoverAgentTabs).toBe(false);
       expect(config.multiAgent.waitForSubAgents).toBe(false);
       expect(config.multiAgent.endSleepingWorkerProcesses).toBe(false);
@@ -567,6 +568,7 @@ describe('shipped defaults', () => {
     expect(loaded.multiAgent.enabled).toBe(false);
     expect(loaded.multiAgent.globalMaxWorkers).toBe(0);
     expect(loaded.multiAgent.allowUnattributedCalls).toBe(false);
+    expect(loaded.multiAgent.strictChatAllowlist).toBe(false);
     expect(loaded.multiAgent.recoverAgentTabs).toBe(false);
     expect(loaded.multiAgent.waitForSubAgents).toBe(false);
     expect(loaded.multiAgent.endSleepingWorkerProcesses).toBe(false);
@@ -627,6 +629,16 @@ describe('shipped defaults', () => {
       multiAgent: { ...config.multiAgent, allowUnattributedCalls: true }
     });
     expect((await loadConfig()).multiAgent.allowUnattributedCalls).toBe(true);
+  });
+
+  it('keeps strict chat allowlisting opt-in across save and reload', async () => {
+    const config = defaultConfig();
+    expect(config.multiAgent.strictChatAllowlist).toBe(false);
+    await saveConfig({
+      ...config,
+      multiAgent: { ...config.multiAgent, strictChatAllowlist: true }
+    });
+    expect((await loadConfig()).multiAgent.strictChatAllowlist).toBe(true);
   });
 });
 

@@ -51,6 +51,7 @@ import { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDura
 import { initControlApiPath, shutdownControlApi, startControlApi } from './control-api.js';
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
+import { restoreTrustedChats } from './session/trusted-chats.js';
 import { stopComputerHelper } from './computer/index.js';
 import {
   GOAL_OBJECTIVES_STATE,
@@ -395,6 +396,10 @@ void app.whenReady().then(async () => {
   // And the user's blocks, for the same reason: a chat blocked yesterday is still the rogue
   // turn today, and a block that loads after the first call is a tool the turn already got.
   await restoreBlockedChats();
+  if (windowActivation.isDisabled()) return;
+  // Strict allowlisting is fail-closed: restore the exact trust set before model-facing
+  // endpoints can accept work, just as blocked-chat policy is restored above.
+  await restoreTrustedChats();
   if (windowActivation.isDisabled()) return;
   setAgentConversationLookup(agentConversation);
   // The prime's chat is the user's own, so no extension report can name it. It is bound

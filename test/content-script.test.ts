@@ -15308,6 +15308,98 @@ describe('the fresh chat the app opened', () => {
     }
   });
 
+  it('waits for the post-picker composer to become writable when React only changes attributes', async () => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const workerChat = '25252525-3434-4545-8787-909090909090';
+    let submitted = '';
+    live = await harness('https://chatgpt.com/?clf=cmd-model-writable', {
+      redeem: () => redeemed,
+      ack: () => ({ ok: true })
+    }, (document, dom) => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        submitted = composerText(document);
+        dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+        userTurn(document, 'model-writable-user', 'Worker task after writable transition', { sent: false });
+      });
+    });
+    const instantTimer = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => globalThis.setTimeout(fn, ms)) as unknown as typeof live.window.setTimeout;
+    (live.window as any).CLF_DOM.selectModelSettings = vi.fn(async () => {
+      const editor = live!.document.querySelector('#prompt-textarea')!;
+      editor.setAttribute('contenteditable', 'false');
+      editor.setAttribute('aria-disabled', 'true');
+      live!.window.setTimeout(() => {
+        editor.setAttribute('contenteditable', 'true');
+        editor.removeAttribute('aria-disabled');
+      }, 50);
+      return true;
+    });
+    try {
+      release({ ok: true, command: {
+        id: 'cmd-model-writable',
+        type: 'worker',
+        text: 'Worker task after writable transition',
+        agent: 'worker-1',
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'high'
+      } });
+      await vi.waitFor(() => expect(submitted).toBe('Worker task after writable transition'), { timeout: 10_000, interval: 20 });
+      await vi.waitFor(() => expect(live!.sent.filter((message) => message.type === 'ack')).toContainEqual(expect.objectContaining({
+        id: 'cmd-model-writable', status: 'sent', conversationId: workerChat
+      })), { timeout: 10_000, interval: 20 });
+    } finally {
+      live.window.setTimeout = instantTimer;
+    }
+  });
+
+  it('keeps waiting past the old 12s post-picker cutoff while the redeemed worker lease is live', async () => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const workerChat = '24242424-3434-4545-8787-909090909090';
+    let submitted = '';
+    live = await harness('https://chatgpt.com/?clf=cmd-model-slow-remount', {
+      redeem: () => redeemed,
+      ack: () => ({ ok: true })
+    }, (document, dom) => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        submitted = composerText(document);
+        dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+        userTurn(document, 'model-slow-remount-user', 'Worker task after slow remount', { sent: false });
+      });
+    });
+    const instantTimer = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => {
+      const wallMs = ms === 12_000 ? 5 : ms === 13_000 ? 15 : Number(ms) >= 60_000 ? 100 : 50;
+      return globalThis.setTimeout(fn, wallMs);
+    }) as unknown as typeof live.window.setTimeout;
+    (live.window as any).CLF_DOM.selectModelSettings = vi.fn(async () => {
+      const old = live!.document.querySelector('#prompt-textarea')!;
+      const parent = old.parentElement!;
+      const replacement = old.cloneNode(true);
+      old.remove();
+      live!.window.setTimeout(() => parent.prepend(replacement), 13_000);
+      return true;
+    });
+    try {
+      release({ ok: true, command: {
+        id: 'cmd-model-slow-remount',
+        type: 'worker',
+        text: 'Worker task after slow remount',
+        agent: 'worker-1',
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'high',
+        expiresAt: live.window.Date.now() + 90_000
+      } });
+      await vi.waitFor(() => expect(submitted).toBe('Worker task after slow remount'), { timeout: 10_000, interval: 20 });
+      await vi.waitFor(() => expect(live!.sent.filter((message) => message.type === 'ack')).toContainEqual(expect.objectContaining({
+        id: 'cmd-model-slow-remount', status: 'sent', conversationId: workerChat
+      })), { timeout: 10_000, interval: 20 });
+    } finally {
+      live.window.setTimeout = instantTimer;
+    }
+  });
+
   it.each([true, false])('confirms resume selection before Send and journals it only for B (%s)', async confirmed => {
     let release!: (value: unknown) => void;
     const redeemed = new Promise(resolve => { release = resolve; });

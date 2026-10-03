@@ -196,6 +196,16 @@ describe('a workspace page kept mounted behind the current one', () => {
     expect(await api.send()).toBe(true);
     expect(clicked).toBe(true);
   });
+  it.each([
+    ['display', 'none'],
+    ['visibility', 'hidden']
+  ] as const)('ignores a model-transition editor hidden only by computed %s', (property, value) => {
+    const stale = document.createElement('div');
+    stale.style[property] = value;
+    stale.innerHTML = '<form><div id="prompt-textarea" contenteditable="true">Old transition editor</div></form>';
+    document.body.prepend(stale);
+    expect(api.composer()).toBe(box);
+  });
   it("reads only this page's turns, not those of an earlier page kept undisplayed", () => {
     // After a Project resume the tab keeps the source chat hidden; its turns are another chat's.
     const kept = keptPage();

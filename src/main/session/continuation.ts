@@ -959,6 +959,7 @@ export async function dispatchContinuationDestinationSendNow(token: string): Pro
       ...current,
       destinationSend: { state: 'dispatched-unresolved', conversationId: null, messageId: null }
     }));
+    noteResumeClaim(entry.token);
     return true;
   });
 }

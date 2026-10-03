@@ -4104,6 +4104,40 @@ export function primeForOwnedConversation(conversationId: string): string | null
   return dormantAgentForConversation(conversationId)?.owner.primeConversationId ?? null;
 }
 
+export interface WorkerPrimeOwner {
+  /** True only when this exact conversation is durably/presently owned by a worker slot. */
+  owned: boolean;
+  /** Null for ambiguous/provisional ownership: strict authorization must fail closed. */
+  primeConversationId: string | null;
+  /** Current family incarnation, useful for diagnostics only; never an authorization token. */
+  runId: string | null;
+}
+
+/**
+ * Exact worker -> prime provenance across active, terminal and dormant worker history.
+ *
+ * Unlike the presentation helpers above, authorization must not lose a worker merely because it
+ * finished, slept or parked. Inspect the published families directly, exclude unpublished staged
+ * runs, and refuse to guess if corrupted/restored state names the same worker chat twice.
+ */
+export function workerPrimeOwner(conversationId: string): WorkerPrimeOwner {
+  if (!conversationId) return { owned: false, primeConversationId: null, runId: null };
+  const owners = allFamilies().filter((owner) => {
+    if ('runId' in owner && unpublishedRuns.has(owner)) return false;
+    return [...owner.agents.values()].some(
+      (agent) => agent.info.role === 'worker' && agent.info.conversationId === conversationId
+    );
+  });
+  if (owners.length === 0) return { owned: false, primeConversationId: null, runId: null };
+  if (owners.length !== 1) return { owned: true, primeConversationId: null, runId: null };
+  const owner = owners[0]!;
+  return {
+    owned: true,
+    primeConversationId: owner.primeConversationId ?? null,
+    runId: familyKey(owner)
+  };
+}
+
 /** A currently occupied slot; parked history must not grant or refuse browser recovery. */
 export function liveAgentForOwnedConversation(conversationId: string): AgentInfo | null {
   const agent = agentForConversationId(conversationId);

@@ -24,6 +24,7 @@ describe('portable browser-backed feature parity', () => {
         maxWorkers: 2,
         globalMaxWorkers: 0,
         allowUnattributedCalls: true,
+        strictChatAllowlist: false,
         recoverAgentTabs: false,
         waitForSubAgents: false,
         endSleepingWorkerProcesses: false
