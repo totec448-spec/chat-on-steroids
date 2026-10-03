@@ -56,6 +56,9 @@ const {
   pendingWorkerSpawns,
   pauseSwarmForDisable,
   WORKER_SILENCE_MS,
+  PAGE_GENERATING_FRESH_MS,
+  WORKER_THINKING_MAX_MS,
+  notePageGenerating,
   endedWorkerNotice,
   sleepSilentWorkers,
   sleepWorker,
@@ -944,6 +947,52 @@ describe('a worker whose chat closed', () => {
       noteAgentAlive('c-worker-1', 'turn', started);
       expect(swarmState().agents.find(agent => agent.id === 'worker-1')).toMatchObject({ state: 'sleeping', lastSeenAt: started });
       expect(sleepSilentWorkers()).toEqual([]);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('keeps a worker awake while its own page says the turn is still thinking (#882)', () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    const started = Date.now(), clock = vi.spyOn(Date, 'now');
+    try {
+      clock.mockReturnValue(started);
+      noteAgentAlive('c-worker-1', 'call');
+      // A long think: no call and no new output for half an hour, but the page polls on.
+      for (let at = 60_000; at <= 30 * 60_000; at += 60_000) {
+        clock.mockReturnValue(started + at);
+        notePageGenerating('c-worker-1', true);
+        expect(sleepSilentWorkers()).toEqual([]);
+      }
+      // The page saying so is not work: it never renews the work clock.
+      expect(swarmState().agents.find(agent => agent.id === 'worker-1')).toMatchObject({ state: 'active', lastSeenAt: started });
+      // The turn ended; silence counts again at once.
+      notePageGenerating('c-worker-1', false);
+      expect(sleepSilentWorkers()).toHaveLength(1);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('does not let a page that went quiet or a turn open for hours hold a worker awake', () => {
+    startSwarm(2);
+    startWorker('worker-1');
+    startWorker('worker-2');
+    const started = Date.now(), clock = vi.spyOn(Date, 'now');
+    try {
+      clock.mockReturnValue(started);
+      noteAgentAlive('c-worker-1', 'call');
+      noteAgentAlive('c-worker-2', 'call');
+      notePageGenerating('c-worker-1', true);
+      // worker-1's page stopped polling (tab gone, browser closed): its last word goes stale.
+      expect(PAGE_GENERATING_FRESH_MS).toBeLessThan(WORKER_SILENCE_MS);
+      clock.mockReturnValue(started + WORKER_SILENCE_MS);
+      notePageGenerating('c-worker-2', true);
+      expect(sleepSilentWorkers().map(slept => slept.info.id)).toEqual(['worker-1']);
+      // worker-2 keeps saying it is generating, but past the cap that alone no longer counts.
+      clock.mockReturnValue(started + WORKER_THINKING_MAX_MS - 1);
+      notePageGenerating('c-worker-2', true);
+      expect(sleepSilentWorkers()).toEqual([]);
+      clock.mockReturnValue(started + WORKER_THINKING_MAX_MS);
+      notePageGenerating('c-worker-2', true);
+      expect(sleepSilentWorkers().map(slept => slept.info.id)).toEqual(['worker-2']);
     } finally { clock.mockRestore(); }
   });
 
