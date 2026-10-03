@@ -1810,5 +1810,8 @@
   "Chat removed from the app": "Chat quitado de la app",
   "Pet instructions copied": "Instrucciones de mascotas copiadas",
   "Skill added to your library": "Skill añadida a tu biblioteca",
-  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Cambia los ID de túnel y la clave de API del túnel guardados, por ejemplo para otra cuenta de ChatGPT."
+  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Cambia los ID de túnel y la clave de API del túnel guardados, por ejemplo para otra cuenta de ChatGPT.",
+  "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "La página de ChatGPT perdió la transmisión en vivo de esta respuesta. Puede que siga en curso: la recarga vuelve a conectar la página sin detenerla.",
+  "Don't reload this answer": "No recargar esta respuesta",
+  "The reload has already started.": "La recarga ya empezó."
 }
