@@ -1771,5 +1771,7 @@
   "Fine-tune background and accent colors for the selected theme.": "微调所选主题的背景色和强调色。",
   "How strongly text stands out from its background.": "文字在背景上的醒目程度。",
   "Used when you start a new chat. A chat you continue keeps its own model.": "在开始新聊天时使用。继续的聊天保留它自己的模型。",
-  "Lets tools run, including computer use, file editing and JavaScript, even when the app can’t tell which chat called them. Sub-agents and other chat actions still need a known chat. These calls are listed under Unattributed activity.": "即使应用无法判断是哪个聊天调用的，也允许运行工具，包括电脑操作、文件编辑和 JavaScript。子智能体和其他聊天操作仍需要已知的聊天。这些调用会列在“未归属活动”下。"
+  "Lets tools run, including computer use, file editing and JavaScript, even when the app can’t tell which chat called them. Sub-agents and other chat actions still need a known chat. These calls are listed under Unattributed activity.": "即使应用无法判断是哪个聊天调用的，也允许运行工具，包括电脑操作、文件编辑和 JavaScript。子智能体和其他聊天操作仍需要已知的聊天。这些调用会列在“未归属活动”下。",
+  "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "切换为只读：ChatGPT 仍可查看文件和屏幕，但无法创建、编辑、移动或删除文件，无法运行程序，也无法控制这台电脑。",
+  "Read-only is on: ChatGPT can only look. Click to allow changes again.": "只读已开启：ChatGPT 只能查看。点击可重新允许更改。"
 }

@@ -1771,5 +1771,7 @@
   "Fine-tune background and accent colors for the selected theme.": "選択中のテーマの背景色とアクセントカラーを調整します。",
   "How strongly text stands out from its background.": "文字が背景からどれだけはっきり見えるか。",
   "Used when you start a new chat. A chat you continue keeps its own model.": "新しいチャットを始めるときに使います。続きのチャットは自分のモデルを保ちます。",
-  "Lets tools run, including computer use, file editing and JavaScript, even when the app can’t tell which chat called them. Sub-agents and other chat actions still need a known chat. These calls are listed under Unattributed activity.": "どのチャットから呼ばれたか分からない場合でも、コンピューター操作、ファイル編集、JavaScript を含むツールの実行を許可します。サブエージェントやその他のチャット操作には、引き続き特定済みのチャットが必要です。これらの呼び出しは「帰属未確定のアクティビティ」に表示されます。"
+  "Lets tools run, including computer use, file editing and JavaScript, even when the app can’t tell which chat called them. Sub-agents and other chat actions still need a known chat. These calls are listed under Unattributed activity.": "どのチャットから呼ばれたか分からない場合でも、コンピューター操作、ファイル編集、JavaScript を含むツールの実行を許可します。サブエージェントやその他のチャット操作には、引き続き特定済みのチャットが必要です。これらの呼び出しは「帰属未確定のアクティビティ」に表示されます。",
+  "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "読み取り専用に切り替え：ChatGPT はファイルと画面を見ることはできますが、ファイルの作成・編集・移動・削除、プログラムの実行、このコンピューターの操作はできなくなります。",
+  "Read-only is on: ChatGPT can only look. Click to allow changes again.": "読み取り専用がオン：ChatGPT は見ることだけができます。クリックすると変更を再び許可します。"
 }
