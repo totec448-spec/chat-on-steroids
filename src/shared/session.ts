@@ -656,6 +656,13 @@ export interface SessionSummary {
   toolCalls: number;
   /** Start time of the newest exact attributed tool call, independent of later page noise. */
   lastToolCallAt: number | null;
+  /**
+   * Compact projection of the newest recorded tool action.
+   *
+   * The full tool row remains in session history. This exists so overview surfaces can show
+   * useful worker activity without loading each worker transcript.
+   */
+  lastToolActivity?: Pick<ActivitySummary, 'kind' | 'title'> | null;
   /** Observation time of the newest stable final assistant message. */
   lastAssistantFinalAt?: number | null;
   /**

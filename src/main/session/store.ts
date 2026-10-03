@@ -321,6 +321,7 @@ function emptySummary(id: string, title: string, conversationId: string | null):
     userMessages: 0,
     toolCalls: 0,
     lastToolCallAt: null,
+    lastToolActivity: null,
     lastAssistantFinalAt: null,
     lastTurnEndAt: null,
     lastFinishReportAt: null,
@@ -846,6 +847,7 @@ async function rebuildSummaryFromHistory(
         userMessages: rebuilt.userMessages,
         toolCalls: rebuilt.toolCalls,
         lastToolCallAt: rebuilt.lastToolCallAt,
+        lastToolActivity: rebuilt.lastToolActivity,
         lastAssistantFinalAt: rebuilt.lastAssistantFinalAt,
         lastTurnEndAt: rebuilt.lastTurnEndAt,
         lastFinishReportAt: rebuilt.lastFinishReportAt,
@@ -1020,7 +1022,16 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   if (event.kind === 'user_message') summary.userMessages += 1;
   if (event.kind === 'tool_call') {
     summary.toolCalls += 1;
-    summary.lastToolCallAt = Math.max(summary.lastToolCallAt ?? 0, event.time);
+    const priorToolAt = summary.lastToolCallAt ?? 0;
+    summary.lastToolCallAt = Math.max(priorToolAt, event.time);
+    // Attribution repair can append an older call after newer activity. Keep the projection
+    // aligned with lastToolCallAt rather than letting append order make an old action look latest.
+    if (event.time >= priorToolAt) {
+      summary.lastToolActivity = {
+        kind: event.call.summary.kind,
+        title: event.call.summary.title.slice(0, 200)
+      };
+    }
     if (event.call.endsActivity === true) {
       summary.lastFinishReportAt = Math.max(summary.lastFinishReportAt ?? 0, event.time);
     }
@@ -2290,6 +2301,7 @@ export async function rewriteUnattributedToolCalls(
       userMessages: 0,
       toolCalls: 0,
       lastToolCallAt: null,
+      lastToolActivity: null,
       lastAssistantFinalAt: null,
       lastTurnEndAt: null,
       lastFinishReportAt: null,
@@ -2351,6 +2363,14 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         !/^[a-zA-Z0-9 ._-]{1,80}$/.test(selected.model) || !Number.isFinite(selected.observedAt))) {
       delete publicSummary.selectedModel;
     }
+    const lastToolActivity = publicSummary.lastToolActivity;
+    if (lastToolActivity !== undefined && lastToolActivity !== null && (
+      typeof lastToolActivity !== 'object' ||
+      typeof lastToolActivity.title !== 'string' ||
+      lastToolActivity.title.length === 0 ||
+      lastToolActivity.title.length > 200 ||
+      !/^(?:edit|create|delete|move|read|search|browse|run|process|screen|input|clipboard|session|agent|other)$/.test(lastToolActivity.kind)
+    )) delete publicSummary.lastToolActivity;
     const finish = publicSummary.finishTurn;
     if (finish !== undefined && finish !== null && (!finish || typeof finish !== 'object' ||
         typeof finish.turnId !== 'string' || !Number.isFinite(finish.startedAt) ||
@@ -2387,6 +2407,7 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
           typeof publicSummary.lastToolCallAt === 'number' && Number.isFinite(publicSummary.lastToolCallAt)
             ? publicSummary.lastToolCallAt
             : null,
+        lastToolActivity: publicSummary.lastToolActivity ?? null,
         lastAssistantFinalAt:
           typeof publicSummary.lastAssistantFinalAt === 'number' && Number.isFinite(publicSummary.lastAssistantFinalAt)
             ? publicSummary.lastAssistantFinalAt
