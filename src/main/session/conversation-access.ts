@@ -6,8 +6,9 @@ import { findSessionByConversation } from './store.js';
 import { isChatTrusted } from './trusted-chats.js';
 
 export const STRICT_CHAT_REFUSAL =
-  'CHAT_NOT_TRUSTED: strict chat allowlisting is enabled and this call is not from an explicitly trusted ChatGPT conversation. ' +
-  'No tool was run. Ask the user to allow this chat in Sessions (Trust it and make sure it is not Blocked), or allow its owning prime if this is an app-created worker, before retrying.';
+  'CHAT_NOT_TRUSTED: strict chat allowlisting is enabled and this call is not currently allowed. No tool was run. ' +
+  'For an attributed chat, ask the user to hover its row in the sidebar chat list and choose Trust (✓); if that row is blocked, choose Release there. ' +
+  'For an app-created worker, use the owning prime row instead. Calls the app cannot link to a chat are refused in strict mode. Retry only after the user changes that policy.';
 
 export function strictChatAllowlistEnabled(): boolean {
   return getConfig().multiAgent.strictChatAllowlist === true;

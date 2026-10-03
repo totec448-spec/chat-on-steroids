@@ -1775,7 +1775,7 @@
   "Trust only selected chats": "選択したチャットのみ信頼",
   "Untrust this chat: strict mode refuses its tool calls": "このチャットの信頼を解除: 厳格モードではツール呼び出しを拒否します",
   "Trust this chat: strict mode lets its tool calls run": "このチャットを信頼: 厳格モードではツール呼び出しを許可します",
-  "Default-deny local tools to chats you explicitly Trust in Sessions. Workers and resumed chats follow their trusted parent; unattributed calls stay blocked.": "ローカルツールを既定で拒否し、セッションで明示的に信頼したチャットだけを許可します。ワーカーと再開されたチャットは信頼済みの親チャットに従い、帰属不明の呼び出しは引き続きブロックされます。",
+  "Only chats you trust can use this computer's tools. Existing chats start untrusted; hover a chat in the sidebar and choose Trust (✓). Workers and resumed chats follow the chat they came from. Calls the app can't link to a chat are refused.": "信頼したチャットだけがこのコンピューターのツールを使用できます。既存のチャットは未信頼で始まります。サイドバーでチャットにカーソルを合わせ、信頼 (✓) を選んでください。ワーカーと再開されたチャットは元のチャットに従います。アプリがチャットに関連付けられない呼び出しは拒否されます。",
   "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "読み取り専用に切り替え：ChatGPT はファイルと画面を見ることはできますが、ファイルの作成・編集・移動・削除、プログラムの実行、このコンピューターの操作はできなくなります。",
   "Read-only is on: ChatGPT can only look. Click to allow changes again.": "読み取り専用がオン：ChatGPT は見ることだけができます。クリックすると変更を再び許可します。"
 }

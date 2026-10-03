@@ -126,11 +126,12 @@ import type { StoredText, ToolOutcome } from '../../shared/session.js';
 /** The page's exact proof of a request id, by which a running call counts for its chat. */
 const requestOwner = (requestId: string): string | null => requestCorrelation(requestId)?.conversationId ?? null;
 
-const UNTRUSTED_NOTICE = 'A tool call from an untrusted chat was refused. Trust this chat in Sessions to allow it.';
+const UNTRUSTED_NOTICE =
+  'A tool call from an untrusted chat was refused. In the chat list, hover this chat in the sidebar and choose Trust (✓) to allow it.';
 const UNTRUSTED_WORKER_NOTICE =
-  'A tool call from a worker whose owning prime is not currently allowed was refused. In Sessions, Trust the owning prime if it is untrusted or Release it if it is blocked.';
+  'A tool call from a worker whose owning prime is not currently allowed was refused. In the chat list, hover the owning prime row in the sidebar and choose Trust (✓) if it is untrusted, or Release there if it is blocked.';
 const UNPROVEN_WORKER_NOTICE =
-  'A tool call from an app-created worker was refused because no unique owning prime is currently proven. Return to the owning prime chat and retry after the worker is attached or recovered there.';
+  'A tool call from an app-created worker was refused because no unique owning prime is currently proven. Return to the owning prime in the chat list; once its row is known, hover it in the sidebar and choose Trust (✓), or Release there if it is blocked, then retry after the worker is attached or recovered there.';
 const untrustedNoticeEpisodes = new Map<string, true>();
 const UNTRUSTED_NOTICE_MAX = 128;
 
