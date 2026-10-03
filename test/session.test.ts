@@ -2358,14 +2358,16 @@ describe('handoff storage', () => {
     expect(chunkText('short brief', 1000)).toEqual(['short brief']);
   });
 
-  it('asks for user-authoritative handoffs up to the documented 30k-token ceiling', () => {
+  it('asks for compact user-authoritative handoffs within the documented normal budget', () => {
     const prompt = nativeHandoffPrompt();
     expect(prompt).toContain(DEFAULT_HANDOFF_PROMPT);
-    expect(prompt).toMatch(/user's messages as the highest-authority source/i);
-    expect(prompt).toMatch(/10,000[–-]30,000 tokens/i);
-    expect(prompt).toMatch(/~6,000-token brief is normally too short/i);
-    expect(prompt).toMatch(/Never exceed 30,000 tokens/i);
-    expect(prompt).toMatch(/lossless operational compression/i);
+    expect(prompt).toMatch(/user messages are authoritative/i);
+    expect(prompt).toMatch(/2,000[–-]6,000 tokens/i);
+    expect(prompt).toMatch(/shortest handoff that preserves all continuation-critical state/i);
+    expect(prompt).toMatch(/go longer only when correctness needs it/i);
+    expect(prompt).not.toMatch(/10,000[–-]30,000 tokens/i);
+    expect(DEFAULT_HANDOFF_PROMPT.length).toBeLessThanOrEqual(3_000);
+    expect(prompt.length).toBeLessThanOrEqual(4_000);
     expect(prompt).toMatch(/failure.*root cause.*change.*verification/i);
     expect(prompt).toMatch(/PLANNED \/ DECIDED/i);
     expect(prompt).toMatch(/FAILED \/ UNRESOLVED/i);
@@ -4071,10 +4073,9 @@ describe('activity windows', () => {
   });
 });
 
-it('ships the long-standing handoff brief rules as the editable default, unchanged', () => {
-  // Making the prompt editable must not quietly change Compact & Resume for everyone who never
-  // opens the editor: the default is the brief the app has always asked for.
-  expect(DEFAULT_HANDOFF_PROMPT).toContain('target roughly 10,000–30,000 tokens');
+it('ships the compact continuation-critical handoff policy as the editable default', () => {
+  expect(DEFAULT_HANDOFF_PROMPT).toContain('target roughly 2,000–6,000 tokens');
+  expect(DEFAULT_HANDOFF_PROMPT).toContain('shortest handoff that preserves all continuation-critical state');
   for (const heading of ['TASK —', 'USER SPECIFICATION —', 'CURRENT STATE —', 'DONE —', 'IN PROGRESS —', 'PLANNED / DECIDED —',
     'FAILED / UNRESOLVED —', 'FILES —', 'VERIFICATION —', 'ENVIRONMENT —', 'NEXT —', 'DO NOT —']) {
     expect(DEFAULT_HANDOFF_PROMPT, heading).toContain(heading);

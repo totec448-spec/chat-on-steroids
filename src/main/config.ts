@@ -41,6 +41,7 @@ import {
   SUPERSEDED_GOAL_SYSTEM_PROMPTS
 } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_PROMPT, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
+import { SUPERSEDED_HANDOFF_PROMPTS } from '../shared/handoff-prompt-history.js';
 import { logError } from './logger.js';
 import { RESERVED_ROOT_NAMES } from './sandbox.js';
 import { capabilitiesForPlatform } from './platform.js';
@@ -581,6 +582,15 @@ function adoptCurrentGoalPrompt(config: Config): Config {
   return { ...config, goal };
 }
 
+/** Move only an untouched shipped handoff policy to the current compact default. */
+function adoptCurrentHandoffPrompt(config: Config): Config {
+  if (!SUPERSEDED_HANDOFF_PROMPTS.includes(config.compaction.handoffPrompt)) return config;
+  return {
+    ...config,
+    compaction: { ...config.compaction, handoffPrompt: DEFAULT_HANDOFF_PROMPT }
+  };
+}
+
 let configPath = '';
 let current: Config = defaultConfig();
 // Every UI mutation ultimately lands in the same tiny JSON file. Keep those
@@ -600,7 +610,9 @@ export async function loadConfig(): Promise<Config> {
       logError('Settings file was invalid and has been reset to defaults');
       current = conservativeRecoveryConfig();
     } else {
-      current = adoptCurrentGoalPrompt(adoptWiderWindow(adoptAutoCompaction(recalibrateTokens(parsed.data))));
+      current = adoptCurrentGoalPrompt(
+        adoptCurrentHandoffPrompt(adoptWiderWindow(adoptAutoCompaction(recalibrateTokens(parsed.data))))
+      );
       // Duplicate root names would make a virtual path ambiguous.
       const seen = new Set<string>();
       current.roots = current.roots.filter((r) => {
