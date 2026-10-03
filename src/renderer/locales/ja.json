@@ -1806,7 +1806,7 @@
   "Send Automatic Goal": "自動ゴールを送信",
   "Write Directly": "直接書く",
   "Open this chat in your browser": "このチャットをブラウザーで開く",
-  "Remove this chat from the app. It stays in ChatGPT.": "このチャットをアプリから削除します。ChatGPT には残ります。",
+  "Remove this chat and its saved history from the app. The chat stays in ChatGPT.": "このチャットと保存済みの履歴をアプリから削除します。チャットは ChatGPT に残ります。",
   "Chat removed from the app": "チャットをアプリから削除しました",
   "Pet instructions copied": "ペットの手順をコピーしました",
   "Skill added to your library": "スキルをライブラリに追加しました"

@@ -1806,7 +1806,7 @@
   "Send Automatic Goal": "发送自动目标",
   "Write Directly": "直接写",
   "Open this chat in your browser": "在浏览器中打开此聊天",
-  "Remove this chat from the app. It stays in ChatGPT.": "从应用中移除此聊天。它仍保留在 ChatGPT 中。",
+  "Remove this chat and its saved history from the app. The chat stays in ChatGPT.": "从应用中移除此聊天及其保存的历史记录。聊天仍保留在 ChatGPT 中。",
   "Chat removed from the app": "已从应用中移除聊天",
   "Pet instructions copied": "已复制宠物说明",
   "Skill added to your library": "技能已添加到你的技能库"

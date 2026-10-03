@@ -1806,7 +1806,7 @@
   "Send Automatic Goal": "Отправить автоматическую «Цель»",
   "Write Directly": "Написать самому",
   "Open this chat in your browser": "Открыть этот чат в браузере",
-  "Remove this chat from the app. It stays in ChatGPT.": "Убрать этот чат из приложения. В ChatGPT он останется.",
+  "Remove this chat and its saved history from the app. The chat stays in ChatGPT.": "Убрать этот чат и его сохранённую историю из приложения. В ChatGPT чат останется.",
   "Chat removed from the app": "Чат убран из приложения",
   "Pet instructions copied": "Инструкции для питомцев скопированы",
   "Skill added to your library": "Skill добавлен в вашу библиотеку"
