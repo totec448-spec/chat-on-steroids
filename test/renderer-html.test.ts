@@ -174,6 +174,8 @@ describe('captured ChatGPT rendered HTML', () => {
     expect(rendered.textContent).not.toContain('chatgpt-content-reference');
     const card = rendered.querySelector<HTMLElement>('.citation-card')!;
     expect(card.hidden).toBe(true);
+    // It holds buttons and a link, so it is not a tooltip.
+    expect(card.hasAttribute('role')).toBe(false);
     pill.parentElement!.dispatchEvent(new window.Event('pointerenter'));
     vi.advanceTimersByTime(200);
     expect(card.hidden).toBe(false);
