@@ -1472,6 +1472,15 @@ it('picks and clears project color without changing project membership', async (
   expect(color.getAttribute('aria-expanded')).toBe('false');
   color.click(); await settle();
   expect(color.getAttribute('aria-expanded')).toBe('true');
+  const none = group.querySelector<HTMLButtonElement>('[data-project-color-choice=""]')!;
+  const blue = group.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
+  expect(w.document.activeElement).toBe(none);
+  none.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  expect(w.document.activeElement).toBe(blue);
+  blue.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(color.getAttribute('aria-expanded')).toBe('false');
+  expect(w.document.activeElement).toBe(color);
+  color.click(); await settle();
   group.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!.click(); await settle();
   expect(api.setProjectColor).toHaveBeenNthCalledWith(1, project.id, 'blue');
   let refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
