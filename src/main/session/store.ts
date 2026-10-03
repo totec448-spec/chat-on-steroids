@@ -3813,7 +3813,30 @@ export async function readHandoff(sessionId: string, handoffId: string): Promise
   try {
     const raw = await fs.readFile(path.join(sessionDir(sessionId), 'handoffs', `${handoffId}.json`), 'utf8');
     const parsed = JSON.parse(raw) as Handoff;
-    return typeof parsed?.text === 'string' ? parsed : null;
+    if (typeof parsed?.text !== 'string') return null;
+    // Legacy files had no version/provenance and remain readable. New files fail closed if
+    // identity metadata is malformed; recovery must never repair a transaction from guessed
+    // provenance.
+    if (parsed.version !== undefined || parsed.provenance !== undefined) {
+      const provenance = parsed.provenance;
+      if (
+        parsed.version !== 1 ||
+        parsed.id !== handoffId ||
+        parsed.sessionId !== sessionId ||
+        !provenance ||
+        (provenance.sourceConversationId !== null &&
+          (typeof provenance.sourceConversationId !== 'string' ||
+            provenance.sourceConversationId.length === 0 ||
+            provenance.sourceConversationId.length > 256)) ||
+        (provenance.sourceGeneration !== null &&
+          (!Number.isSafeInteger(provenance.sourceGeneration) || provenance.sourceGeneration < 1)) ||
+        (provenance.sourceTurnId !== null &&
+          (typeof provenance.sourceTurnId !== 'string' || provenance.sourceTurnId.length > 256)) ||
+        (provenance.continuationId !== null &&
+          (typeof provenance.continuationId !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(provenance.continuationId)))
+      ) return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
