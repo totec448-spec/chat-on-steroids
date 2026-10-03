@@ -132,7 +132,7 @@ describe('app interface localization', () => {
       const text = document.getElementById('newChat')!.textContent!.trim();
       expect(text).toBe(catalogs[locale]?.['New chat'] ?? 'New chat');
       const globalWorkerLabel = document.getElementById('globalMaWorkers')!.closest('.setting')!.querySelector('b')!.textContent!;
-      expect(globalWorkerLabel).toBe(catalogs[locale]?.['Global worker admission cap'] ?? 'Global worker admission cap');
+      expect(globalWorkerLabel).toBe(catalogs[locale]?.['Workers across all chats'] ?? 'Workers across all chats');
       const shell = document.querySelector('.plugin-refresh-guide')!.textContent!;
       if (snapshots.has(locale)) expect(shell).toBe(snapshots.get(locale));
       else snapshots.set(locale, shell);
