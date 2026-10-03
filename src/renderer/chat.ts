@@ -3447,7 +3447,17 @@ function paintHandoff(): void {
 function paintRecoveryStatus(): boolean {
   const host = $('recoveryStatus');
   const countdowns = selectedId && controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledRecovery : [];
-  if (renderRecoveryCountdowns(host, countdowns)) return true;
+  const sessionForCountdown = controlledSessionId;
+  // #1032: the user may keep a visibly working answer from being reloaded. Main refuses once the
+  // browser has claimed the reload, and a later question gets its own again.
+  const cancelReload = (countdown: RecoveryCountdown) => countdown.kind === 'assistant-error' && sessionForCountdown
+    ? dockAction(() => t("Don't reload this answer"), 'i-x', async () => {
+      const cancelled = await run(api.cancelRecovery(sessionForCountdown));
+      if (cancelled === false) toast(t('The reload has already started.'));
+      await refreshSessionControls();
+    })
+    : null;
+  if (renderRecoveryCountdowns(host, countdowns, Date.now(), cancelReload)) return true;
   const recovery = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'progress' && event.progressId?.startsWith('browser-repair:')) : undefined;
   const sessionId = selectedId;
   const revision = recovery?.kind === 'progress' ? JSON.stringify([recovery.progressId, recovery.time, recovery.message.text]) : '';

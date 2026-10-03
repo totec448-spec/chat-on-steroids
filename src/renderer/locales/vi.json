@@ -1810,5 +1810,8 @@
   "Chat removed from the app": "Đã xóa cuộc trò chuyện khỏi ứng dụng",
   "Pet instructions copied": "Đã sao chép hướng dẫn thú cưng",
   "Skill added to your library": "Đã thêm kỹ năng vào thư viện của bạn",
-  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Chuyển đổi ID tunnel và khóa API tunnel đã lưu, ví dụ cho một tài khoản ChatGPT khác."
+  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Chuyển đổi ID tunnel và khóa API tunnel đã lưu, ví dụ cho một tài khoản ChatGPT khác.",
+  "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "Trang ChatGPT đã mất luồng trực tiếp của câu trả lời này. Câu trả lời có thể vẫn đang chạy: tải lại sẽ kết nối lại trang mà không dừng nó.",
+  "Don't reload this answer": "Không tải lại câu trả lời này",
+  "The reload has already started.": "Quá trình tải lại đã bắt đầu."
 }
