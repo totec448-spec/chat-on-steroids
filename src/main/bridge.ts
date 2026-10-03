@@ -167,6 +167,7 @@ import {
   retiredWorkerForConversation,
   waitingForSubAgents,
   sleepSilentWorkers,
+  notePageGenerating,
   occupiesSlot,
   sleepWorker,
   stageQueuedWorkerRevivals,
@@ -474,6 +475,8 @@ interface DurableCommandSnapshot {
 /** The wire form the extension receives. */
 export interface BridgeCommand {
   id: string;
+  /** Absolute browser-delivery deadline for this leased command. */
+  expiresAt: number;
   /** Project entry is navigation authority only; the source composer must never receive the brief. */
   projectEntry?: { id: string; sourceConversationId: string };
   kind: 'open-chat' | 'stop-turn';
@@ -2179,7 +2182,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const repairFailed = url.searchParams.get('repairFailed');
     const repairAction = url.searchParams.get('repairAction');
     const action = repairAction === 'reloaded' || repairAction === 'reopened' || repairAction === 'resumed' ||
-      repairAction === 'preserved' ? repairAction : null;
+      repairAction === 'preserved' || repairAction === 'present' ? repairAction : null;
     if (repaired) {
       await confirmRepair(repaired.slice(0, 64), action);
     } else if (repairFailed) {
@@ -2187,7 +2190,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const repairHeld = url.searchParams.get('repairHeld');
     if (repairHeld) noteRepairHeld(repairHeld.slice(0, 64), url.searchParams.get('why'));
-    const revival = pendingBrowserRevival();
+    const revivals = pendingBrowserRevivals();
+    const revival = revivals[0] ?? null;
     const inputRows = await listInputs();
     const browser = browserOf(req);
     if (browser) browserSeenAt.set(browser, Date.now());
@@ -2219,6 +2223,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // Rendering custody follows the actual command ledger, including its retirement.
         commandIds: commands.map(command => command.id),
         revival,
+        revivals,
         placement: pendingBrowserPlacement(null, browser),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
@@ -2663,6 +2668,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // is the only thing that lifts it.
     pagelessChats.delete(id);
     noteFiberHealth(id, url.searchParams.get('fiber'));
+    // Older extensions omit it; they keep the plain three-minute silence rule.
+    const pageGenerating = url.searchParams.get('generating');
+    if (pageGenerating === '1' || pageGenerating === '0') notePageGenerating(id, pageGenerating === '1');
     const retiredWorker = retiredWorkerForConversation(id);
     const superseded = await conversationWasSuperseded(id);
     /**
@@ -3066,6 +3074,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // Returning the same inert id here makes a live page the fast path; /status remains the
         // service-worker/restart path. Redeem is still the exclusive ownership boundary.
         revival: pendingBrowserRevival(),
+        revivals: pendingBrowserRevivals(),
         // Recovery only. A placement is normally collected by the `/compact` reply that
         // produced it; this is where it is still found if that reply never reached the page —
         // a navigation, a dropped socket — so a lost response becomes a correctly placed tab
@@ -3405,7 +3414,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           ? nativeHandoffPrompt(
               already.token,
               getConfig().goal.includeToolCalls === true,
-              getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT
+              getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
+              getConfig().compaction.handoffLength
             )
           : null;
       return json(
@@ -3448,7 +3458,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         prompt: nativeHandoffPrompt(
           opened.token,
           getConfig().goal.includeToolCalls === true,
-          getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT
+          getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
+          getConfig().compaction.handoffLength
         ),
         job: resumeJobFor(sessionId)
       },
@@ -4409,8 +4420,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         };
       }
     } else if (command.spec.type === 'revive') {
+      // An error comes from the worker's own page, so the chat did open: what failed is the message.
       const why = error
-        ? `the browser could not reopen the worker's chat — ${error}`
+        ? `the worker's chat did not take the message — ${error}`
         : "the browser could not reopen the worker's chat";
       failWorkerRevival(command.spec.agent, why, command.spec.runId);
       receipt = {
@@ -5853,18 +5865,31 @@ async function abortRejectedResume(token: string, reason: string): Promise<boole
   }
 }
 
-/** The one existing-chat command the extension may route after a fresh tab scan. */
-function pendingBrowserRevival(): {
-  id: string;
-  conversationId: string;
-} | null {
+/** Most wakes handed to the browser in one reply; more than any one run can wake at once. */
+const MAX_REVIVALS_PER_REPLY = 16;
+
+/**
+ * Every existing-chat wake the extension may route after a fresh tab scan, oldest first.
+ *
+ * Handing out only the oldest one held every later wake behind it: a wake whose chat had no tab
+ * and was slow to get one kept the head of the queue, the next status pass handed out the same
+ * one again, and the rest timed out at the revival deadline without reaching the browser at all
+ * (#882: "the browser did not claim this command before its deadline", eight workers in #864).
+ */
+function pendingBrowserRevivals(): Array<{ id: string; conversationId: string }> {
   tidyCommands();
-  const command = commands.find(
-    (entry) => entry.spec.type === 'revive' && entry.owner === null && !revivalDeliveryProven(entry)
-  );
-  return command && command.spec.type === 'revive'
-    ? { id: command.id, conversationId: command.spec.conversationId }
-    : null;
+  const waiting: Array<{ id: string; conversationId: string }> = [];
+  for (const entry of commands) {
+    if (waiting.length >= MAX_REVIVALS_PER_REPLY) break;
+    if (entry.spec.type === 'revive' && entry.owner === null && !revivalDeliveryProven(entry))
+      waiting.push({ id: entry.id, conversationId: entry.spec.conversationId });
+  }
+  return waiting;
+}
+
+/** The oldest of them, for an extension older than 2.1.27 that reads one `revival`. */
+function pendingBrowserRevival(): { id: string; conversationId: string } | null {
+  return pendingBrowserRevivals()[0] ?? null;
 }
 
 // ------------------------------------------------- where a fresh chat is opened
@@ -7503,7 +7528,11 @@ function noticeRefusal(key: string, message: string): void {
 async function browserTabPolicy(openConversations: Set<string>) {
   // Existing cached metadata is the ownership index; never scan transcripts per browser poll.
   const summaries = await listUsageSessions();
-  const managed = new Set(summaries.filter(row => row.origin && row.conversationId && openConversations.has(row.conversationId)).map(row => row.conversationId!));
+  // A Compact & Resume destination is stamped `resume`, but it is the user's own chat moved to a
+  // new conversation, not a page this app owns: idle cleanup must never close it (#1012). The
+  // superseded source chat stays closable through supersededSourceConversations() below.
+  const managed = new Set(summaries.filter(row => row.origin && row.origin.kind !== 'resume' && row.conversationId &&
+    openConversations.has(row.conversationId)).map(row => row.conversationId!));
   for (const id of [...supersededSourceConversations(), ...closableWorkerConversations(0)]) if (openConversations.has(id)) managed.add(id);
   for (const agent of swarmState().agents) if (agent.conversationId && openConversations.has(agent.conversationId)) managed.add(agent.conversationId);
   const protectedChats = new Set(nonDiscardableAgentConversations());
@@ -8711,10 +8740,18 @@ function attributionRepairCurrent(repair: Repair, session: SessionSummary | null
  * this app is no longer waiting on - an older turn's, or one already re-queued - matches
  * nothing and closes nothing, which is the only safe reading of it.
  */
-async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | null): Promise<void> {
+async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state === 'handed' && repair.token === token) {
       if (!compactionRepairCurrent(conversationId, repair)) { repairsInFlight.delete(conversationId); return; }
+      if (action === 'present') {
+        // The chat had a tab again by the time the browser acted, usually the one a worker wake
+        // just opened. Nothing was reloaded, so nothing is waiting to come back (#864).
+        logInfo(`bridge: ${conversationId} was already open again; the browser left its tab as it was`);
+        repair.state = 'done';
+        repairsInFlight.delete(conversationId);
+        return;
+      }
       if (action === 'preserved' && repair.reason === 'assistant-error') {
         logInfo(`bridge: the browser preserved the recovered page for ${conversationId} without spending its assistant-error reload`);
         await updateRepairProgress(
@@ -8810,7 +8847,7 @@ const REPAIR_FAIL_REASONS: Record<string, string> = {
 
 async function failRepairAttempt(
   token: string,
-  action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | null,
+  action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null,
   why: string | null = null
 ): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
@@ -9326,7 +9363,8 @@ function revivalFor(agent: string, runId: string): WorkerRevival | null {
 function describe(command: Command, client: string | null, claimedSummary?: string): BridgeCommand {
   const spec = command.spec;
   const selection = spec.type === 'resume' ? continuationByToken(spec.token)?.requestedModel : null;
-  if (spec.type === 'stop') return { id: command.id, kind: 'stop-turn', type: 'stop', text: '', agent: null, model: null, reasoningEffort: null, conversationId: spec.conversationId, turnId: spec.turnId, ...(spec.userMessageId ? { userMessageId: spec.userMessageId } : {}) };
+  const expiresAt = Date.now() + Math.max(1, commandDeadlineDelay(command));
+  if (spec.type === 'stop') return { id: command.id, expiresAt, kind: 'stop-turn', type: 'stop', text: '', agent: null, model: null, reasoningEffort: null, conversationId: spec.conversationId, turnId: spec.turnId, ...(spec.userMessageId ? { userMessageId: spec.userMessageId } : {}) };
   // A resume's claim is persisted by /commands/redeem before this renderer is called. A
   // command shown to app/UI code without a browser document still carries no brief at all.
   const text = spec.type === 'resume'
@@ -9336,6 +9374,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
     : bootstrapText(spec, '');
   return {
     id: command.id,
+    expiresAt,
     kind: 'open-chat',
     ...(spec.type === 'resume' && commandProject(command) ? {
       projectEntry: { id: commandProject(command)!, sourceConversationId: continuationByToken(spec.token)!.from }

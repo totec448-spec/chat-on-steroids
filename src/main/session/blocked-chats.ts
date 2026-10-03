@@ -125,18 +125,28 @@ export function chatBlockedAt(conversationId: string): number | null {
  * Blocks or releases one conversation. Idempotent in both directions: the user pressing the
  * button twice must not move a block's timestamp or resurrect a released one.
  */
-export function setChatBlocked(conversationId: string, next: boolean): void {
-  if (!validConversationId(conversationId)) throw new Error('Not a ChatGPT conversation id');
-  if (next === blocked.has(conversationId)) return;
+export function setChatsBlocked(conversationIds: readonly string[], next: boolean): void {
+  const ids = [...new Set(conversationIds)];
+  if (ids.length === 0 || ids.some((conversationId) => !validConversationId(conversationId))) {
+    throw new Error('Not a ChatGPT conversation id');
+  }
+  const additions = next ? ids.filter((conversationId) => !blocked.has(conversationId)) : [];
+  if (next && blocked.size + additions.length > MAX_BLOCKED_CHATS) {
+    throw new Error(`Too many blocked chats (${MAX_BLOCKED_CHATS}). Release one before blocking another.`);
+  }
+  const changed = next ? additions.length > 0 : ids.some((conversationId) => blocked.has(conversationId));
+  if (!changed) return;
   if (next) {
-    if (blocked.size >= MAX_BLOCKED_CHATS) {
-      throw new Error(`Too many blocked chats (${MAX_BLOCKED_CHATS}). Release one before blocking another.`);
-    }
-    blocked.set(conversationId, Date.now());
+    const blockedAt = Date.now();
+    for (const conversationId of additions) blocked.set(conversationId, blockedAt);
   } else {
-    blocked.delete(conversationId);
+    for (const conversationId of ids) blocked.delete(conversationId);
   }
   writeDurableSoon(BLOCKED_STATE, snapshot());
+}
+
+export function setChatBlocked(conversationId: string, next: boolean): void {
+  setChatsBlocked([conversationId], next);
 }
 
 export function resetBlockedChatsForTests(): void {

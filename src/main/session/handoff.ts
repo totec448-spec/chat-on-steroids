@@ -100,14 +100,14 @@ export function resumeBootstrapMatches(recorded: string, summary: string): boole
 /**
  * The shortest a brief may be before it is refused, for any session at all.
  *
- * Far below what the brief rules normally ask for — they target 2,000-6,000 tokens — because this
+ * Far below what the brief rules ask for — they target 10,000-30,000 tokens — because this
  * is not a quality bar. It is the line under which a document cannot be a handoff of
  * anything, whatever the session held.
  */
 const MIN_BRIEF_CHARS = 200;
 /** Above this much recorded context, a session's brief has real work to describe. */
 const SUBSTANTIAL_SESSION_TOKENS = 20_000;
-/** The floor that applies to those sessions. Still well below the normal target. */
+/** The floor that applies to those sessions. Still roughly a fortieth of the target. */
 const MIN_SUBSTANTIAL_BRIEF_CHARS = 1_000;
 
 /**

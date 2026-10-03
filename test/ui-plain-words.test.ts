@@ -5,7 +5,7 @@ import { expect, it } from 'vitest';
 // Settings and controls explain themselves in the user's words. These internal terms reached the
 // interface before ("no conversation selection", "without chat attribution", "surfaces") and read as
 // jargon to users. Names the interface shows as labels ("Unattributed activity") stay allowed.
-const INTERNAL = /\b(conversation selection|chat attribution|provenance|ledger|epoch|custody|tombstone|surfaces)\b/i;
+const INTERNAL = /\b(conversation selection|chat attribution|provenance|ledger|epoch|custody|tombstone|surfaces|swarm|account-observed)\b/i;
 
 it('keeps internal terms out of the text users read in the app', () => {
   const dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'));

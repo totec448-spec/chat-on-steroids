@@ -57,6 +57,7 @@ import type {
 import {
   ATTRIBUTION_LABELS,
   CHAT_ACTIVE_MS,
+  committedResumeAncestorsFromSummary,
   continuationMarkerOf,
   TURN_OUTCOME_LABELS,
   foldProgress,
@@ -71,7 +72,7 @@ import {
   DEFAULT_GOAL_SYSTEM_PROMPT,
   MAX_GOAL_SYSTEM_PROMPT_CHARS
 } from '../shared/goal.js';
-import { DEFAULT_HANDOFF_PROMPT, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
+import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, filterSettingsSections, icon, run, setIcon, toast } from './dom.js';
 
@@ -276,6 +277,8 @@ let swarm: SwarmState | null = null;
  * main process and repaints from the answer it gets back.
  */
 let blockedChats = new Set<string>();
+/** Exact conversations explicitly allowed while strict chat allowlisting is enabled. */
+let trustedChats = new Set<string>();
 /** Badges the list is currently drawn with. See repaintBadges. */
 let badgeKey = '';
 
@@ -356,7 +359,8 @@ function syncSessionSpinner(indicator: HTMLElement): void {
  * the row draws it with the same button and the same word as a blocked chat.
  */
 function unattributedBlocked(): boolean {
-  return deps.state()?.config.multiAgent.allowUnattributedCalls === false;
+  const multiAgent = deps.state()?.config.multiAgent;
+  return multiAgent?.strictChatAllowlist === true || multiAgent?.allowUnattributedCalls === false;
 }
 
 function sessionBadges(summary: SessionSummary): Badge[] {
@@ -450,7 +454,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   const remove = document.createElement('button');
   remove.className = 'btn sess-action sess-del';
   remove.type = 'button';
-  ui(remove, 'title', () => t("Delete this recorded session"));
+  ui(remove, 'title', () => t("Remove this chat and its saved history from the app. The chat stays in ChatGPT."));
   remove.append(icon('i-trash'));
   remove.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -459,6 +463,14 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 
   const actions: HTMLButtonElement[] = [];
   if (summary.conversationId === null) {
+    // Strict mode cannot trust an unattributed stream by definition. Do not render an
+    // "Allow" button that the kernel will intentionally ignore; the Settings checkbox
+    // explains that unattributed calls stay blocked until strict mode is turned off.
+    if (deps.state()?.config.multiAgent?.strictChatAllowlist === true) {
+      actionBar.append(remove);
+      row.append(top, actionBar);
+      return row;
+    }
     // The same button in the same column as a chat's, because it is the same decision: may
     // this activity use local tools? It has no conversation to be stored against, so it moves
     // the app-wide switch — the checkbox on the settings sheet — and nothing else.
@@ -481,10 +493,32 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     return row;
   }
   if (summary.conversationId) {
+    const policyLineage = [
+      summary.conversationId,
+      ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
+    ];
+    const strictAllowlist = deps.state()?.config.multiAgent?.strictChatAllowlist === true;
+    // Mirror main's exact decision order for presentation: exact Block wins; in strict mode an
+    // exact Trust wins before inherited lineage, then each committed predecessor is considered
+    // nearest-first with Block ahead of Trust. An older policy hidden behind a nearer decision is
+    // not the current effective state and must not paint this row inconsistently with the kernel.
+    let effectivePolicy: 'blocked' | 'trusted' | null = blockedChats.has(summary.conversationId)
+      ? 'blocked'
+      : strictAllowlist && trustedChats.has(summary.conversationId)
+        ? 'trusted'
+        : null;
+    if (strictAllowlist && effectivePolicy === null) {
+      for (const conversationId of policyLineage.slice(1)) {
+        if (blockedChats.has(conversationId)) { effectivePolicy = 'blocked'; break; }
+        if (trustedChats.has(conversationId)) { effectivePolicy = 'trusted'; break; }
+      }
+    }
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
     // here can — it takes this chat's tools away, and a model whose every call is refused with
     // an instruction to stop finishes its turn on its own.
-    const blocked = blockedChats.has(summary.conversationId);
+    // A resumed row is the only control left for its committed predecessors. Project a source
+    // Block onto that row so Release can clear the exact lineage that currently fences tools.
+    const blocked = effectivePolicy === 'blocked';
     const block = document.createElement('button');
     block.className = `btn sess-action sess-block${blocked ? ' is-blocked' : ''}`;
     block.type = 'button';
@@ -498,10 +532,29 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     });
     actions.push(block);
 
+    if (strictAllowlist && summary.origin?.kind !== 'worker') {
+      // `trustedChats` is the explicit durable registry. A committed resumed chat can be
+      // effectively trusted by one of those historical ids, so project the same durable lineage
+      // that main enforces. This only chooses the button state; IPC remains authoritative.
+      const trusted = effectivePolicy === 'trusted';
+      const trust = document.createElement('button');
+      trust.className = `btn sess-action sess-trust${trusted ? ' is-trusted' : ''}`;
+      trust.type = 'button';
+      ui(trust, 'title', () => trusted
+        ? t("Untrust this chat: strict mode refuses its tool calls")
+        : t("Trust this chat: strict mode lets its tool calls run"));
+      trust.append(icon(trusted ? 'i-lock' : 'i-check'));
+      trust.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void toggleSessionTrust(summary.id, summary.conversationId!, !trusted);
+      });
+      actions.push(trust);
+    }
+
     const open = document.createElement('button');
     open.className = 'btn sess-action sess-open';
     open.type = 'button';
-    ui(open, 'title', () => t("Open this chat in Chrome"));
+    ui(open, 'title', () => t("Open this chat in your browser"));
     open.append(icon('i-out'));
     open.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -535,6 +588,13 @@ async function toggleSessionBlock(id: string, blocked: boolean): Promise<void> {
   paintSessions();
 }
 
+async function toggleSessionTrust(id: string, expectedConversationId: string, trusted: boolean): Promise<void> {
+  const next = await run(api.setSessionTrusted(id, expectedConversationId, trusted));
+  if (next === null) return;
+  trustedChats = new Set(next);
+  paintSessions();
+}
+
 async function deleteSession(id: string): Promise<void> {
   const done = await run(api.deleteSession(id));
   if (done === null) return;
@@ -552,7 +612,7 @@ async function deleteSession(id: string): Promise<void> {
     detailLoadGeneration++;
     handoffLoadGeneration++;
   }
-  toast(t("Session deleted"));
+  toast(t("Chat removed from the app"));
   await loadSessions();
 }
 
@@ -605,6 +665,7 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   // Whole-set replacement on every page, older pages included: a block belongs to a
   // conversation, not to whichever page happened to carry its row.
   blockedChats = new Set(list.blocked);
+  trustedChats = new Set(list.trusted ?? []);
   if (loadedOlderSessions) {
     for (const entry of list.pressure) pressure.set(entry.id, entry);
   } else {
@@ -635,6 +696,7 @@ async function loadMoreSessions(): Promise<void> {
     sessionTotal = page.total;
     sessionPageCursor = page.nextCursor;
     blockedChats = new Set(page.blocked);
+    trustedChats = new Set(page.trusted ?? []);
     for (const entry of page.pressure) pressure.set(entry.id, entry);
     paintSessions();
   } finally {
@@ -784,6 +846,55 @@ function paintSessions(): void {
         } finally { remove.disabled = false; }
       });
       heading.append(remove);
+
+      const folderList = el('div', 'project-folders');
+      folderList.setAttribute('role', 'list');
+      ui(folderList, 'aria-label', () => t('Project folders'));
+      const renderFolder = (folder: string, primary: boolean): HTMLElement => {
+        const row = el('div', 'project-folder-row'); row.setAttribute('role', 'listitem');
+        const value = el('span', 'project-folder-path', folder); value.setAttribute('translate', 'no'); value.title = folder;
+        row.append(icon('i-folder'), value);
+        if (primary) row.append(ui(el('span', 'project-folder-primary'), 'textContent', () => t('Primary project folder')));
+        else {
+          const detach = el('button', 'btn project-folder-remove') as HTMLButtonElement;
+          detach.type = 'button'; detach.append(icon('i-x'));
+          ui(detach, 'title', () => t('Remove folder {0} from project {1}', [folder, project.name]));
+          ui(detach, 'aria-label', () => t('Remove folder {0} from project {1}', [folder, project.name]));
+          detach.addEventListener('click', async event => {
+            event.preventDefault(); event.stopPropagation();
+            if (detach.disabled) return;
+            detach.disabled = true;
+            try {
+              const updated = await run(api.removeProjectFolder(id, folder));
+              if (!updated) return;
+              ++sessionsLoadGeneration;
+              projects = projects.map(row => row.id === id ? updated : row);
+              expandedProjects.add(id); paintSessions();
+            } finally { detach.disabled = false; }
+          });
+          row.append(detach);
+        }
+        return row;
+      };
+      folderList.append(renderFolder(project.path, true), ...(project.additionalPaths ?? []).map(folder => renderFolder(folder, false)));
+      const addFolder = el('button', 'btn project-folder-add') as HTMLButtonElement;
+      const addLabel = el('span'); ui(addLabel, 'textContent', () => t('Add folder'));
+      addFolder.type = 'button'; addFolder.append(icon('i-plus'), addLabel);
+      ui(addFolder, 'title', () => t('Add folder to project {0}', [project.name]));
+      ui(addFolder, 'aria-label', () => t('Add folder to project {0}', [project.name]));
+      addFolder.addEventListener('click', async event => {
+        event.preventDefault(); event.stopPropagation();
+        if (addFolder.disabled) return;
+        addFolder.disabled = true;
+        try {
+          const updated = await run(api.addProjectFolder(id));
+          if (!updated) return;
+          ++sessionsLoadGeneration;
+          projects = projects.map(row => row.id === id ? updated : row);
+          expandedProjects.add(id); paintSessions();
+        } finally { addFolder.disabled = false; }
+      });
+      folderList.append(addFolder); section.append(folderList);
     }
     const tasks = projectRows.get(id) ?? [];
     const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;
@@ -3800,7 +3911,7 @@ function paintSwarm(state: SwarmState): void {
         'p',
         'hint',
         () => state.retainedHistory
-          ? t("No workers are running. Reusable worker histories are parked and remain available to their prime chats; Clear swarm permanently removes them.")
+          ? t("No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.")
           : t("No agents. The prime agent creates workers with the agents tool’s spawn action.")
       )
     );
@@ -3888,16 +3999,21 @@ export function chatSettingsPatch(current: Config): {
     compaction: {
       auto: $<HTMLInputElement>('autoCompact').checked,
       autoTokens: threshold,
-      handoffPrompt: $<HTMLTextAreaElement>('handoffPrompt').value.trim() || DEFAULT_HANDOFF_PROMPT
+      handoffPrompt: $<HTMLTextAreaElement>('handoffPrompt').value.trim() || DEFAULT_HANDOFF_PROMPT,
+      handoffLength: (HANDOFF_LENGTHS as readonly string[]).includes($<HTMLSelectElement>('handoffLength').value)
+        ? $<HTMLSelectElement>('handoffLength').value as HandoffLength
+        : DEFAULT_HANDOFF_LENGTH
     },
     multiAgent: {
       defaultModel: $<HTMLSelectElement>('workerModel').value,
       defaultReasoning: $<HTMLSelectElement>('workerReasoning').value as Config['multiAgent']['defaultReasoning'],
-      // The exposure switch lives with every other ChatGPT tool switch, on Home. This
-      // panel keeps only the worker count, so it reads the one control that exists.
+      // The exposure switch lives with every other ChatGPT tool switch, on Home. Settings owns
+      // the per-family worker limit and the optional broker-wide admission cap below.
       enabled: $<HTMLInputElement>('homeMaEnabled').checked,
       maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8),
+      globalMaxWorkers: number('globalMaWorkers', current.multiAgent.globalMaxWorkers ?? 0, 0, 64),
       allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked,
+      strictChatAllowlist: $<HTMLInputElement>('strictChatAllowlist').checked,
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked,
       waitForSubAgents: $<HTMLInputElement>('waitForSubAgents').checked,
       endSleepingWorkerProcesses: $<HTMLInputElement>('endSleepingWorkerProcesses').checked
@@ -4299,8 +4415,9 @@ const CHAT_INPUTS = [
   'helperModel', 'helperReasoning',
   'autoCompact',
   'autoCompactTokens',
-  'maWorkers',
+  'maWorkers', 'globalMaWorkers',
   'allowUnattributedCalls',
+  'strictChatAllowlist',
   'recoverAgentTabs',
   'waitForSubAgents',
   'endSleepingWorkerProcesses',
@@ -4310,6 +4427,7 @@ const CHAT_INPUTS = [
   'goalCustomModel',
   'goalReasoning',
   'handoffPrompt',
+  'handoffLength',
   'goalPrompt',
   'goalObjectivePrompt',
   'goalLoopPrompt'
@@ -4333,15 +4451,31 @@ export function chatApply(state: AppState, previous?: Config): void {
     config.compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
     previous?.compaction.handoffPrompt
   );
+  applyChatValue(
+    $<HTMLSelectElement>('handoffLength'),
+    config.compaction.handoffLength ?? DEFAULT_HANDOFF_LENGTH,
+    previous?.compaction.handoffLength
+  );
   applyAutoCompactHint(config);
   $<HTMLInputElement>('autoCompactTokens').disabled = !config.compaction.auto;
 
   applyChatValue($<HTMLInputElement>('maWorkers'), String(config.multiAgent.maxWorkers), previous?.multiAgent.maxWorkers);
+  applyChatValue(
+    $<HTMLInputElement>('globalMaWorkers'),
+    String(config.multiAgent.globalMaxWorkers ?? 0),
+    previous?.multiAgent.globalMaxWorkers
+  );
   applyChatChecked(
     $<HTMLInputElement>('allowUnattributedCalls'),
     config.multiAgent.allowUnattributedCalls,
     previous?.multiAgent.allowUnattributedCalls
   );
+  applyChatChecked(
+    $<HTMLInputElement>('strictChatAllowlist'),
+    config.multiAgent.strictChatAllowlist === true,
+    previous?.multiAgent.strictChatAllowlist
+  );
+  $<HTMLInputElement>('allowUnattributedCalls').disabled = config.multiAgent.strictChatAllowlist === true;
   applyChatChecked(
     $<HTMLInputElement>('recoverAgentTabs'),
     config.multiAgent.recoverAgentTabs,
@@ -5480,10 +5614,13 @@ export function initChat(next: Deps): void {
   });
 
   $('swarmReset').addEventListener('click', async () => {
+    // Permanent, like removing recorded images: ask first. A misclick used to end running
+    // workers and delete every worker history at once.
+    if (!window.confirm(t('Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.'))) return;
     const state = await run(api.resetSwarm());
     if (state) {
       paintSwarm(state);
-      toast(t('Swarm cleared'));
+      toast(t('Workers cleared'));
     }
   });
 

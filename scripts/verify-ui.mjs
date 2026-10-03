@@ -54,9 +54,14 @@ for (const name of scripts) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}  (${results.at(-1).seconds}s)${flaky.includes(name) ? '  (failed once, passed on retry)' : ''}`);
   if (flaky.includes(name) && process.env.GITHUB_ACTIONS) console.log(`::warning title=Flaky UI check::${name} failed once and passed on retry`);
   if (!ok) {
-    const reason = outcome.output.split('\n').filter(line =>
-      /Error|assert|Timeout|timed out|expected|actual/i.test(line) && !/sandbox_extension|task_policy|js2c/.test(line)).slice(0, 6);
-    console.log((reason.length ? reason : outcome.output.split('\n').slice(-6)).map(line => `      ${line.slice(0, 240)}`).join('\n'));
+    // macOS runners print Electron Helper XPC/sandbox complaints on every check. They are never the
+    // reason, and as the last lines of a silent failure they used to hide it completely.
+    const noise = /sandbox_extension|task_policy|js2c|XPC error|com\.apple\.|Connection invalid/;
+    const lines = outcome.output.split('\n').filter(line => line.trim() && !noise.test(line));
+    const reason = lines.filter(line => /Error|assert|Timeout|timed out|expected|actual/i.test(line)).slice(0, 6);
+    const shown = reason.length ? reason : lines.slice(-8);
+    console.log((shown.length ? shown : [outcome.code === 'timeout' ? 'timed out with no output' : `exited with ${outcome.code} and no output`])
+      .map(line => `      ${line.slice(0, 240)}`).join('\n'));
   }
 }
 const failed = results.filter(result => !result.ok);

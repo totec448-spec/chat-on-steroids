@@ -56,6 +56,9 @@ const {
   pendingWorkerSpawns,
   pauseSwarmForDisable,
   WORKER_SILENCE_MS,
+  PAGE_GENERATING_FRESH_MS,
+  WORKER_THINKING_MAX_MS,
+  notePageGenerating,
   endedWorkerNotice,
   sleepSilentWorkers,
   sleepWorker,
@@ -93,6 +96,7 @@ const {
   swarmStateForCaller,
   statusForCaller,
   waitingForSubAgents,
+  workerPrimeOwner,
   workerConversationGone,
   workerRevivalClaimed
 } = await import('../src/main/agents.js');
@@ -109,11 +113,16 @@ const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
 let dir: string;
 
-async function setEnabled(enabled: boolean, maxWorkers = 3, allowUnattributedCalls = false): Promise<void> {
+async function setEnabled(
+  enabled: boolean,
+  maxWorkers = 3,
+  allowUnattributedCalls = false,
+  globalMaxWorkers = 0
+): Promise<void> {
   const base = defaultConfig();
   await saveConfig({
     ...base,
-    multiAgent: { ...base.multiAgent, enabled, maxWorkers, allowUnattributedCalls }
+    multiAgent: { ...base.multiAgent, enabled, maxWorkers, allowUnattributedCalls, globalMaxWorkers }
   });
 }
 
@@ -205,6 +214,85 @@ function startWorker(id: string, conversationId = `c-${id}`): { caller: Caller }
 function fillContext(conversationId: string): void {
   noteAgentContextTokens(conversationId, WORKER_CONTEXT_CEILING_TOKENS);
 }
+
+describe('exact worker prime provenance', () => {
+  it('keeps the same exact prime through active, sleeping and dormant worker states', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1', 'c-worker-provenance');
+    expect(workerPrimeOwner('c-worker-provenance')).toMatchObject({
+      owned: true, primeConversationId: PRIME_CHAT
+    });
+
+    finishAgent(worker.caller, 'done for now');
+    expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.state).toBe('sleeping');
+    expect(workerPrimeOwner('c-worker-provenance')).toMatchObject({
+      owned: true, primeConversationId: PRIME_CHAT
+    });
+
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(workerPrimeOwner('c-worker-provenance')).toMatchObject({
+      owned: true, primeConversationId: PRIME_CHAT
+    });
+  });
+
+  it('keeps terminal worker ownership after its slot is over and the family parks', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1', 'c-worker-terminal-provenance');
+    fillContext('c-worker-terminal-provenance');
+    expect(finishAgent(worker.caller, 'finished at the ceiling').info.state).toBe('finished');
+    expect(workerPrimeOwner('c-worker-terminal-provenance')).toMatchObject({
+      owned: true, primeConversationId: PRIME_CHAT
+    });
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(workerPrimeOwner('c-worker-terminal-provenance')).toMatchObject({
+      owned: true, primeConversationId: PRIME_CHAT
+    });
+  });
+
+  it('distinguishes same-named workers in independent prime families by exact conversation', async () => {
+    await setEnabled(true, 3);
+    const primeB = { conversationId: 'c-prime-provenance-b' };
+    const a = spawn({ caller: prime, workers: [{ task: 'A work' }] });
+    const b = spawn({ caller: primeB, workers: [{ task: 'B work' }] });
+    expect(bindConversation('worker-1', 'c-worker-provenance-a', a.runId)).toBe(true);
+    expect(bindConversation('worker-1', 'c-worker-provenance-b', b.runId)).toBe(true);
+
+    expect(workerPrimeOwner('c-worker-provenance-a')).toMatchObject({
+      owned: true, primeConversationId: PRIME_CHAT, runId: a.runId
+    });
+    expect(workerPrimeOwner('c-worker-provenance-b')).toMatchObject({
+      owned: true, primeConversationId: primeB.conversationId, runId: b.runId
+    });
+  });
+
+  it('moves worker authority with the broker prime transfer instead of retaining the source chat', async () => {
+    const { beginPrimeTransfer, freezePrimeTransfer, commitPrimeTransfer } = await import('../src/main/agents.js');
+    startSwarm(1);
+    startWorker('worker-1', 'c-worker-transfer-provenance');
+    expect(workerPrimeOwner('c-worker-transfer-provenance').primeConversationId).toBe(PRIME_CHAT);
+
+    expect(beginPrimeTransfer(PRIME_CHAT)).toBe(true);
+    expect(freezePrimeTransfer(PRIME_CHAT)).toBe('frozen');
+    expect(commitPrimeTransfer(PRIME_CHAT, 'c-prime-resumed-provenance')).toBe(true);
+    expect(workerPrimeOwner('c-worker-transfer-provenance')).toMatchObject({
+      owned: true, primeConversationId: 'c-prime-resumed-provenance'
+    });
+  });
+
+  it('fails closed for a published worker whose prime is still provisional and reports no owner for strangers', async () => {
+    await setEnabled(true, 3, true);
+    try {
+      const run = spawn({ caller: { requestId: 'provisional-prime-request' }, workers: [{ task: 'provisional work' }] });
+      expect(bindConversation('worker-1', 'c-worker-provisional', run.runId)).toBe(true);
+      expect(workerPrimeOwner('c-worker-provisional')).toMatchObject({
+        owned: true, primeConversationId: null, runId: run.runId
+      });
+      expect(workerPrimeOwner('c-never-owned')).toEqual({ owned: false, primeConversationId: null, runId: null });
+    } finally {
+      await setEnabled(true);
+    }
+  });
+});
 
 describe('worker chats the browser may close', () => {
   it('names the stopped worker chats beyond the ones most recently used, and no working one', async () => {
@@ -859,6 +947,52 @@ describe('a worker whose chat closed', () => {
       noteAgentAlive('c-worker-1', 'turn', started);
       expect(swarmState().agents.find(agent => agent.id === 'worker-1')).toMatchObject({ state: 'sleeping', lastSeenAt: started });
       expect(sleepSilentWorkers()).toEqual([]);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('keeps a worker awake while its own page says the turn is still thinking (#882)', () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    const started = Date.now(), clock = vi.spyOn(Date, 'now');
+    try {
+      clock.mockReturnValue(started);
+      noteAgentAlive('c-worker-1', 'call');
+      // A long think: no call and no new output for half an hour, but the page polls on.
+      for (let at = 60_000; at <= 30 * 60_000; at += 60_000) {
+        clock.mockReturnValue(started + at);
+        notePageGenerating('c-worker-1', true);
+        expect(sleepSilentWorkers()).toEqual([]);
+      }
+      // The page saying so is not work: it never renews the work clock.
+      expect(swarmState().agents.find(agent => agent.id === 'worker-1')).toMatchObject({ state: 'active', lastSeenAt: started });
+      // The turn ended; silence counts again at once.
+      notePageGenerating('c-worker-1', false);
+      expect(sleepSilentWorkers()).toHaveLength(1);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('does not let a page that went quiet or a turn open for hours hold a worker awake', () => {
+    startSwarm(2);
+    startWorker('worker-1');
+    startWorker('worker-2');
+    const started = Date.now(), clock = vi.spyOn(Date, 'now');
+    try {
+      clock.mockReturnValue(started);
+      noteAgentAlive('c-worker-1', 'call');
+      noteAgentAlive('c-worker-2', 'call');
+      notePageGenerating('c-worker-1', true);
+      // worker-1's page stopped polling (tab gone, browser closed): its last word goes stale.
+      expect(PAGE_GENERATING_FRESH_MS).toBeLessThan(WORKER_SILENCE_MS);
+      clock.mockReturnValue(started + WORKER_SILENCE_MS);
+      notePageGenerating('c-worker-2', true);
+      expect(sleepSilentWorkers().map(slept => slept.info.id)).toEqual(['worker-1']);
+      // worker-2 keeps saying it is generating, but past the cap that alone no longer counts.
+      clock.mockReturnValue(started + WORKER_THINKING_MAX_MS - 1);
+      notePageGenerating('c-worker-2', true);
+      expect(sleepSilentWorkers()).toEqual([]);
+      clock.mockReturnValue(started + WORKER_THINKING_MAX_MS);
+      notePageGenerating('c-worker-2', true);
+      expect(sleepSilentWorkers().map(slept => slept.info.id)).toEqual(['worker-2']);
     } finally { clock.mockRestore(); }
   });
 
@@ -3968,6 +4102,85 @@ describe('simultaneous independent prime families', () => {
   const primeB: Caller = { conversationId: 'parallel-prime-b' };
   const recruit = (caller: Caller, count = 2) => spawn({ caller,
     workers: Array.from({ length: count }, (_, i) => ({ task: `parallel task ${i}` })) });
+
+  it('enforces one optional admission cap across independent prime families', async () => {
+    await setEnabled(true, 2, false, 3);
+    try {
+      const a = recruit(prime, 2);
+      const b = recruit(primeB, 1);
+      expect(a.runId).not.toBe(b.runId);
+      // B still has room under its own per-family limit. The refusal comes only from the
+      // separately configured global admission cap shared by all prime families.
+      expect(freeWorkerSlots(b.runId)).toBe(1);
+      const nextB = () => spawn({ caller: primeB, workers: [{ task: 'B second global task' }] });
+      expect(nextB).toThrow(/GLOBAL_WORKER_LIMIT|global worker/i);
+
+      expect(bindConversation('worker-1', 'parallel-global-worker-a', a.runId)).toBe(true);
+      finishAgent({ conversationId: 'parallel-global-worker-a' }, 'A freed one global slot');
+      expect(nextB().runId).toBe(b.runId);
+    } finally {
+      await setEnabled(true);
+    }
+  });
+
+  it('counts an unpublished staged spawn as a global admission reservation', async () => {
+    await setEnabled(true, 2, false, 1);
+    try {
+      const a = stageSpawn({ caller: prime, workers: [{ task: 'A staged reservation' }] });
+      expect(() => stageSpawn({ caller: primeB, workers: [{ task: 'B cannot overbook it' }] }))
+        .toThrow(/GLOBAL_WORKER_LIMIT|global worker/i);
+      a.rollback();
+      const b = stageSpawn({ caller: primeB, workers: [{ task: 'B after rollback' }] });
+      b.rollback();
+    } finally {
+      await setEnabled(true);
+    }
+  });
+
+  it('uses the same global admission cap when another family wakes a sleeping worker', async () => {
+    await setEnabled(true, 2, false, 1);
+    try {
+      const a = recruit(prime, 1);
+      expect(bindConversation('worker-1', 'parallel-global-sleeper-a', a.runId)).toBe(true);
+      finishAgent({ conversationId: 'parallel-global-sleeper-a' }, 'A sleeps');
+      expect(releaseQuiescentRun({}, a.runId)).toBe(true);
+
+      const b = recruit(primeB, 1);
+      expect(() => stageMessages(prime, [{ to: 'worker-1', text: 'wake A while B owns the global slot' }]))
+        .toThrow(/GLOBAL_WORKER_LIMIT|global worker/i);
+      expect(currentRunId(PRIME_CHAT)).toBeNull();
+
+      expect(bindConversation('worker-1', 'parallel-global-worker-b', b.runId)).toBe(true);
+      finishAgent({ conversationId: 'parallel-global-worker-b' }, 'B frees the global slot');
+      const wake = stageMessages(prime, [{ to: 'worker-1', text: 'wake A after B stops' }]);
+      expect(wake.waking).toEqual(['worker-1']);
+      wake.rollback();
+    } finally {
+      await setEnabled(true);
+    }
+  });
+
+  it('does not auto-revive queued worker work past the global admission cap', async () => {
+    await setEnabled(true, 2, false, 1);
+    try {
+      const a = recruit(prime, 1);
+      expect(bindConversation('worker-1', 'parallel-global-queued-a', a.runId)).toBe(true);
+      sendMessage(prime, 'worker-1', 'queued work for A');
+      finishAgent({ conversationId: 'parallel-global-queued-a' }, 'A pauses before queued work');
+
+      const b = recruit(primeB, 1);
+      expect(stageQueuedWorkerRevivals(['worker-1'], a.runId).waking).toEqual([]);
+      expect(statusForCaller(prime).state.agents.find(agent => agent.id === 'worker-1')?.state).toBe('sleeping');
+
+      expect(bindConversation('worker-1', 'parallel-global-queued-b', b.runId)).toBe(true);
+      finishAgent({ conversationId: 'parallel-global-queued-b' }, 'B frees the global slot');
+      const wake = stageQueuedWorkerRevivals(['worker-1'], a.runId);
+      expect(wake.waking).toEqual(['worker-1']);
+      wake.rollback();
+    } finally {
+      await setEnabled(true);
+    }
+  });
 
   it('admits two workers for each of two primes and refuses only the full owner', async () => {
     await setEnabled(true, 2);

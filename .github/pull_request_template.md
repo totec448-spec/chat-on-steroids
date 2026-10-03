@@ -12,8 +12,8 @@
 
 ## Test
 
-<!-- Name the test you added or changed and confirm it fails without your change.
-     The "Fail-first test" check runs it against main's code to prove that.
+<!-- Name the test you added or changed. The "Fail-first test" check runs it against main's code
+     and proves it fails there, so you don't have to.
      If a test is truly impossible, write: No test: <reason>
      If your tests only follow a refactor, write: Fail-first: n/a <reason> -->
 
