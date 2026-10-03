@@ -2353,6 +2353,11 @@ silence wait. Trying/failed receipts do not prove a reload; only actual completi
 The canonical authored question owns one error reload, not document-local generation ids or
 ended-turn counts. Without a recorded question, the latest durable start is the legacy owner.
 A queued error repair retires when a new question or a newly recovered final supersedes it.
+The user can also cancel it from its countdown row (× → `sessions:cancelRecovery`,
+`cancelAssistantRecovery`) until the browser claims it (#1032). The cancel is recorded for that
+authored question, so repeated notices of the same lost stream do not re-offer it; the next
+question owns its own reload. Attributed tool calls never cancel it: they prove the request-id
+join, not the page's stream (2026-08-31 trace).
 Its exact token is claimed after the extension's tab scan; unclaimed offers retain that token,
 and that claim reserves the authored question's error budget before the browser action. A lost
 acknowledgement cannot refund it, including when a later silence repair replaces the old repair.
