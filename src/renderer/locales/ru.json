@@ -467,7 +467,6 @@
   "Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop": "Блокировать вызовы без привязки: любой вызов, который приложение не может привязать к чату, отклоняется, а чату сообщается остановиться",
   "Release this chat: its tool calls run again": "Разблокировать этот чат: его вызовы инструментов снова выполняются",
   "Block this chat: every tool call it makes is refused and it is told to stop": "Блокировать этот чат: все его вызовы инструментов отклоняются, а чату сообщается остановиться",
-  "Open this chat in Chrome": "Открыть этот чат в Chrome",
   "Session deleted": "Сессия удалена",
   "{0} sub-agents · {1} active": "{0} субагентов · {1} активных",
   "{0} {1} sub-agents": "{0} {1} субагентов",
@@ -1794,5 +1793,11 @@
   "Clear workers": "Очистить воркеров",
   "Workers cleared": "Воркеры очищены",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "Воркеры не запущены. Их истории остаются доступны чатам, которые их запустили; «Очистить воркеров» удаляет их навсегда.",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Выберите модель и рассуждение по умолчанию для новых чатов и субагентов из того, что предлагает ваш аккаунт."
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Выберите модель и рассуждение по умолчанию для новых чатов и субагентов из того, что предлагает ваш аккаунт.",
+  "Quit": "Выйти",
+  "Astra is wrapping up": "Astra завершает работу",
+  "Send an automatic Goal or write your next instruction.": "Отправьте автоматическую «Цель» или напишите следующую инструкцию.",
+  "Send Automatic Goal": "Отправить автоматическую «Цель»",
+  "Write Directly": "Написать самому",
+  "Open this chat in your browser": "Открыть этот чат в браузере"
 }

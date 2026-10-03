@@ -649,7 +649,6 @@
   "Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop": "阻止未歸屬呼叫：拒絕所有無法歸屬到聊天的呼叫，並通知聊天停止",
   "Release this chat: its tool calls run again": "解除阻止：恢復此聊天的工具呼叫",
   "Block this chat: every tool call it makes is refused and it is told to stop": "阻止此聊天：拒絕其所有工具呼叫，並通知它停止",
-  "Open this chat in Chrome": "在 Chrome 中開啟此聊天",
   "Session deleted": "對話已刪除",
   "{0} sub-agents · {1} active": "{0} 個子代理 · {1} 個活躍",
   "{0} {1} sub-agents": "{0} {1} 個子代理",
@@ -1794,5 +1793,11 @@
   "Clear workers": "清除子代理",
   "Workers cleared": "已清除子代理",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "沒有正在執行的子代理。它們的歷史記錄仍可供啟動它們的聊天使用；「清除子代理」會永久刪除。",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "從你的帳戶提供的選項中，為新聊天和子代理選擇預設模型與推理強度。"
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "從你的帳戶提供的選項中，為新聊天和子代理選擇預設模型與推理強度。",
+  "Quit": "結束",
+  "Astra is wrapping up": "Astra 正在收尾",
+  "Send an automatic Goal or write your next instruction.": "傳送自動目標，或寫下你的下一則指令。",
+  "Send Automatic Goal": "傳送自動目標",
+  "Write Directly": "直接寫",
+  "Open this chat in your browser": "在瀏覽器中開啟此聊天"
 }

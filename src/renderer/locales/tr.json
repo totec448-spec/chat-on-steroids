@@ -467,7 +467,6 @@
   "Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop": "Sohbeti belirlenemeyen çağrıları engelle: uygulamanın bir sohbetle ilişkilendiremediği tüm çağrılar reddedilir ve sohbete durması söylenir",
   "Release this chat: its tool calls run again": "Bu sohbetin engelini kaldır: araç çağrıları yeniden çalışabilir",
   "Block this chat: every tool call it makes is refused and it is told to stop": "Bu sohbeti engelle: tüm araç çağrıları reddedilir ve durması söylenir",
-  "Open this chat in Chrome": "Bu sohbeti Chrome'da aç",
   "Session deleted": "Oturum silindi",
   "{0} sub-agents · {1} active": "{0} yardımcı ajan · {1} etkin",
   "{0} {1} sub-agents": "{1} yardımcı ajan · {0}",
@@ -1794,5 +1793,11 @@
   "Clear workers": "Yardımcı ajanları temizle",
   "Workers cleared": "Yardımcı ajanlar temizlendi",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "Çalışan yardımcı ajan yok. Geçmişleri, onları başlatan sohbetlerde kullanılabilir kalır; Yardımcı ajanları temizle bunları kalıcı olarak siler.",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Yeni sohbetler ve yardımcı ajanlar için varsayılan modeli ve akıl yürütmeyi hesabınızın sunduklarından seçin."
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Yeni sohbetler ve yardımcı ajanlar için varsayılan modeli ve akıl yürütmeyi hesabınızın sunduklarından seçin.",
+  "Quit": "Çık",
+  "Astra is wrapping up": "Astra toparlıyor",
+  "Send an automatic Goal or write your next instruction.": "Otomatik bir Hedef gönderin veya sonraki talimatınızı yazın.",
+  "Send Automatic Goal": "Otomatik Hedef gönder",
+  "Write Directly": "Doğrudan yaz",
+  "Open this chat in your browser": "Bu sohbeti tarayıcınızda açın"
 }
