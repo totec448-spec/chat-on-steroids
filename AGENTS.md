@@ -240,7 +240,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Extension | `extension/{manifest.json,chatgpt-dom.js,content.js,fiber.js,background.js,usage.js,overlay.css,popup.html,popup.css,popup.js}`: injection worlds, native observations/actions, journal and UI. |
 | Models/usage | `src/main/chat-models.ts`, `session/usage.ts`; `src/shared/{chat-models,usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
 | External plugins | `src/main/plugins/{catalog,installer,manager,exposure,oauth}.ts`, `plugins-ipc.ts`, `plugin-refresh.ts`, `src/shared/{plugins,plugin-refresh}.ts`, `src/renderer/plugins.ts`. |
-| Renderer boundary | `src/main/ipc.ts`, `edit-context-menu.ts`, `src/preload/index.ts`; `src/renderer/{main,chat,dom,tool-result,timeline-scroll,sidebar-resize,browser-preferences,connection-popover,i18n}.ts`, `locales/{es,zh-CN,zh-TW,ja,tr,fr,pt-PT}.json`, `index.html`, `styles.css`. |
+| Renderer boundary | `src/main/ipc.ts`, `edit-context-menu.ts`, `src/preload/index.ts`; `src/renderer/{main,chat,dom,tool-result,timeline-scroll,sidebar-resize,browser-preferences,i18n}.ts`, `locales/{es,zh-CN,zh-TW,ja,tr,fr,pt-PT}.json`, `index.html`, `styles.css`. |
 | Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography, field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. |
 | Native Desktop | `src/main/computer/{index,helper,browser-chords,windows-api,windows-capture,windows-apps,windows-keys}.ts`, `src/shared/windows-computer.ts`, `mcp/tools-desktop-{windows,macos}.ts`, `native/macos-desktop-helper/*`, `native/macos-desktop-addon/*`. |
 | Direct browser control | `src/main/browser-control.ts`, `mcp/tools-browser.ts`, `src/shared/browser-control.ts`, `extension/browser-control{,-page}.js`: short-lived RPCs, session-owned debugger tabs, bounded DOM/diagnostics and background input. |
@@ -1081,7 +1081,11 @@ time alone cannot take this path. The same outbox expiry rule applies during nor
 Desktop delivery captures the native user-message identity inside the same Send acceptance
 operation that proves its text and route. It must not discard that receipt and rediscover the
 row after an await: React may already have replaced it. Navigation still revokes the operation;
-composer clear or a Stop button alone cannot supply a desktop delivery receipt. After the click,
+composer clear or a Stop button alone cannot supply a desktop delivery receipt. A new chat's
+shell can redraw its first exchange without the question before any read sees that row (#942);
+then the first `POST /backend-api/f/conversation` after this click, reported by `usage.js` as
+`cos-send-request` (exactly one user message id, never the prompt) within `SENT_REQUEST_MS`,
+supplies the id once the route is concrete. An older or later request cannot. After the click,
 the wait for that receipt is bounded (`DESKTOP_RECEIPT_MS`) and never clicks again. When it ends
 unproven, the page reports the fixed reason `Native Send receipt was not confirmed.` and frees its
 input slot. `failBrowserInput` then retires the authorized row as the same uncertain send the
@@ -1734,7 +1738,9 @@ replacement editor or a user's intervening edit never grants cleanup authority.
 
 `chat-models.ts` owns the app catalog and selection validation. The existing MAIN bridge reads
 bounded account-evaluated metadata, then the native picker confirms the actual model/effort for
-Send. A visible option, an English label, a remembered release name or “Upgrade required” is not
+Send. An already selected, account-evaluated exact model/effort pair closes the picker without
+visiting unrelated versions; a display caption or denied choice cannot take that path.
+A visible option, an English label, a remembered release name or “Upgrade required” is not
 entitlement. Do not enumerate every model × effort or create helper tabs to compensate for an
 uncertain catalog. Exact family rules live in `shared/chat-models.ts`.
 
@@ -2743,7 +2749,9 @@ narrow. Goal stops at the requested outcome; Loop raises the quality of the same
 recursively shrinking to the latest detail or repeating settled reports. Verbatim old defaults
 live in `shared/goal-prompt-history.ts` only for exact-match migration; custom wording is preserved.
 API model discovery is bounded and cached by endpoint/key; a list entry does not prove an
-execution succeeded. The API reasoning picker uses OpenRouter's per-model `reasoning` metadata,
+execution succeeded. Search stays on that main-process catalogue: a bounded name/id query filters
+the complete cached listing before results are paged back to the renderer, while an empty query
+retains the existing newest-first twenty-at-a-time view. The API reasoning picker uses OpenRouter's per-model `reasoning` metadata,
 including supported efforts, mandatory reasoning and the default effort. Absent effort metadata
 does not imply support; an explicit null list accepts the gateway's efforts. The selected model's
 metadata accompanies every catalogue page, even when its row is on a later page. Saved unsupported
@@ -3378,10 +3386,10 @@ accepted-response count.
 The sidebar footer owns global connection controls in a compact popover outside the translucent
 sidebar stacking context. Its sidebar-themed surface is 160 CSS pixels wide, with
 single-line labels and status dots. Status text remains accessible to screen readers and in
-tooltips; Advanced chat/request labels retain their copy action, with full values in tooltips
-and Runtime diagnostics. Verification/last-seen ages remain in tooltips. A small plus opens Advanced, including
-the extension version and session capture. The request pipeline lives inside Runtime diagnostics.
-Every opening collapses Advanced and its nested Runtime diagnostics.
+tooltips. The header states connection status once; no redundant off/verification subtitle
+appears. Verification/last-seen ages remain in tooltips. Advanced session capture, request IDs
+and runtime diagnostics belong to the companion extension, not this desktop popover. Its only
+action is Connect/Disconnect; opening it does not request companion diagnostics.
 Extension-only Overwrite/Timestamps and the redundant settings link are absent. A red header
 Connect action remains visible while disconnected and disappears only on confirmed connection,
 briefly highlighting the footer status (respecting reduced motion). Setup stays reachable from
@@ -3396,6 +3404,9 @@ activity remain distinct evidence. Optional embedded-host presentation does not 
 implement an embedded browser.
 
 `tunnel/*` owns pinned-client discovery, child lifetime, health metrics and confirmed outages;
+development discovery uses Electron's app root for `resources/tunnel`, independent of source
+nesting, bundle layout and the launching shell's working directory. Restore missing binaries
+with `npm run tunnel`, which verifies the pinned archive checksum before staging it.
 `diagnostics.ts` tests the chain hop by hop. Transient health evidence must not produce repeated
 replacement tunnels or claim a broken provider was repaired. Update checks (§20), browser wake
 and MCP connection have separate lifecycles.

@@ -225,6 +225,7 @@ function restoreDraft(): void {
   const task = selectedId === null ? newChatTasks.get(draftKey()) : undefined;
   const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = task?.automation ?? 'off'; delete automation.dataset.edited;
   $<HTMLSelectElement>('loopDelivery').value = task?.loopDelivery ?? 'finish';
+  paintLoopDeliveryTitle();
   $<HTMLTextAreaElement>('sessionObjective').value = task?.objective ?? '';
   delete $('sessionObjective').dataset.edited; delete $('sessionObjective').dataset.sessionId; delete $('sessionObjective').dataset.saved;
   paintTaskPlan(); paintComposerImages();
@@ -1194,6 +1195,13 @@ async function queuePreparedPlan(key: string, plan: TaskPlanDraft & { stages: st
     if (taskPlans.get(key) === plan && draftKey() === key) paintTaskPlan();
   }
 }
+/** The option names stay short; the title says what the chosen timing does. */
+function paintLoopDeliveryTitle(): void {
+  const select = $<HTMLSelectElement>('loopDelivery');
+  ui(select, 'title', () => select.value === 'after-turn'
+    ? t("At Session Finish, or as a new message after verified turn completion")
+    : t("Only inside the Session Finish tool result; never start a new turn"));
+}
 function paintTaskActions(): void {
   const objective = $<HTMLTextAreaElement>('sessionObjective');
   const save = $<HTMLButtonElement>('saveSessionObjective');
@@ -1272,6 +1280,7 @@ async function refreshSessionControls(): Promise<void> {
     goalDraftView = null; goalWaitView = null; finishGoalDraftView = null; controlledRecovery = [];
     $<HTMLSelectElement>('chatAutomation').value = opening?.automation ?? 'off';
     $<HTMLSelectElement>('loopDelivery').value = opening?.loopAfterTurn ? 'after-turn' : 'finish';
+    paintLoopDeliveryTitle();
     const objective = $<HTMLTextAreaElement>('sessionObjective');
     objective.value = opening?.objective ?? ''; objective.disabled = true;
     objective.dataset.sessionId = id;
@@ -1313,6 +1322,7 @@ async function refreshSessionControls(): Promise<void> {
   if (!draftMode.dataset.edited) draftMode.value = controls.automation;
   if (!$<HTMLSelectElement>('loopDelivery').disabled)
     $<HTMLSelectElement>('loopDelivery').value = controls.loopAfterTurn ? 'after-turn' : 'finish';
+  paintLoopDeliveryTitle();
   paintAutomationSwitch();
   $<HTMLButtonElement>('compactSession').disabled = !!controls.blocked || !!controls.job?.busy;
   $('cancelCompaction').hidden = !controls.job?.busy;
@@ -3940,6 +3950,7 @@ let selectedGoalModel: GoalModel | undefined;
 let goalCatalogEpoch = 0;
 let goalTotal = 0;
 let goalLoading = false;
+let goalModelQuery = '';
 
 function invalidateGoalModels(): void {
   goalCatalogEpoch++;
@@ -3969,17 +3980,24 @@ function releasedOn(created: number): string {
  * the question this list answers — what is new — is answered by the first screen of it.
  */
 async function loadGoalModels(reset: boolean): Promise<void> {
+  // A new query invalidates an older in-flight page immediately. The older request may still
+  // finish, but its epoch can no longer paint rows for the new query.
+  if (reset) invalidateGoalModels();
   if (goalLoading) return;
   goalLoading = true;
-  if (reset) {
-    invalidateGoalModels();
-  }
   const epoch = goalCatalogEpoch;
+  const query = goalModelQuery;
   ui($('goalModelsState'), 'textContent', () => t("Loading models from OpenRouter…"));
   $<HTMLButtonElement>('goalMore').disabled = true;
-  const page = await run(api.listGoalModels(goalModels.length));
+  const page = await run(api.listGoalModels(goalModels.length, query));
   goalLoading = false;
-  if (epoch !== goalCatalogEpoch) return;
+  if (epoch !== goalCatalogEpoch || query !== goalModelQuery) {
+    // If search changed while the request was in flight, service the newest query now that the
+    // old request released the single-flight guard. It starts at offset zero because reset()
+    // cleared the visible rows when the query changed.
+    void loadGoalModels(false);
+    return;
+  }
   if (!page) {
     // `run` has already shown the reason. Say what it means *here*: the list is empty and
     // the model in use has not changed.
@@ -4177,6 +4195,14 @@ function wireGoal(save: () => Promise<void>): void {
     panel.hidden = !panel.hidden;
     ui($('goalPick'), 'textContent', () => panel.hidden ? t('Select model') : t('Close'));
     if (!panel.hidden && goalModels.length === 0) void loadGoalModels(true);
+  });
+  const modelSearch = $<HTMLInputElement>('goalModelSearch');
+  modelSearch.maxLength = 160;
+  modelSearch.addEventListener('input', () => {
+    const next = modelSearch.value.slice(0, 160);
+    if (next === goalModelQuery) return;
+    goalModelQuery = next;
+    void loadGoalModels(true);
   });
   $('goalMore').addEventListener('click', () => void loadGoalModels(false));
   $('goalReasoning').addEventListener('focus', () => {
@@ -5037,9 +5063,11 @@ export function initChat(next: Deps): void {
       paintAutomationSwitch();
     }
   });
+  paintLoopDeliveryTitle();
   $('loopDelivery').addEventListener('change', async () => {
     const id = selectedId, generation = selectionGeneration;
     const select = $<HTMLSelectElement>('loopDelivery');
+    paintLoopDeliveryTitle();
     const opening = id && pendingComposerInputs.find(row => row.sessionId === id && row.opening && !row.deliveredAt && ['queued', 'browser'].includes(row.state));
     if (opening) {
       inputQueueGeneration++;

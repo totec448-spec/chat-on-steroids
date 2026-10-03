@@ -701,6 +701,42 @@ describe('desktop input delivery and helper ownership', () => {
     expect(ends[0]!.event).toMatchObject({ outcome: 'completed' });
   });
 
+  it('confirms a new chat\'s first Send from ChatGPT\'s own request when the question is never readable (#942)', async () => {
+    // 2026-10-02, live (Chrome and the built-in browser): when ChatGPT was slow, the first question
+    // of a new chat left the page in the `/` → `/c/<id>` redraw before any read saw it. The Send
+    // receipt then never settled, the app reported "Stopped waiting for delivery confirmation",
+    // and the answer had no turn, so no Copy or Export. The Send request still named it exactly.
+    const submitted = 'Request-proven question: reply with exactly the word ready.';
+    const questionId = '6ac024bb-486c-83e8-bf8e-4be1147847d0';
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize
+        ? { ok: true } : message.ack ? { ok: true } : { input: claimed({ text: submitted }) } })
+    });
+    live.dom.reconfigure({ url: `https://chatgpt.com/?cos-input=${inputId}` });
+    live.hook.observe();
+    const sendRequest = (id: string) => live!.window.dispatchEvent(new live!.window.MessageEvent('message', {
+      source: live!.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-send-request', messageIds: [id], observedAt: Date.now() } }));
+    // A request from before this Send's click proves nothing about it.
+    sendRequest('11111111-2222-4333-8444-555555555555');
+    await new Promise(resolve => live!.window.setTimeout(resolve, 5));
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      // The question is never drawn: the route is promoted and only the request names it.
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+      sendRequest(questionId);
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(live.sent.filter(message => message.fail)).toHaveLength(0);
+    expect(live.sent.filter(message => message.ack)).toEqual([expect.objectContaining({ messageId: questionId, conversationId: chatB })]);
+    // Its answer then opens the first turn, the path an accepted receipt already owns.
+    const answer = assistantTurn(live.document, 'request-proven-answer', []);
+    prose(live.document, answer, 'request-proven-message', 'ready');
+    startGenerating(live.document, { send: false });
+    await settle(); live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+  });
+
   it('does not open a turn from an accepted Send when no new answer or generation follows it', async () => {
     const submitted = 'Nothing has answered this yet.';
     let holdActivity = false;
@@ -12885,8 +12921,8 @@ describe('the Compact & resume control', () => {
     await live.hook.pullActivity();
     live.hook.injectControl(); live.hook.toggleMenu();
     const timing = () => [...live!.document.querySelectorAll<HTMLButtonElement>('.clf-menu-action')]
-      .find(button => button.textContent?.includes('Only finish'));
-    expect(timing()?.textContent).toBe(`${mode === 'goal' ? 'Goal' : 'Loop'}: Only finish`);
+      .find(button => button.textContent?.includes('Session Finish'));
+    expect(timing()?.textContent).toBe(`${mode === 'goal' ? 'Goal' : 'Loop'}: At Session Finish only`);
     timing()!.click(); await settle();
     expect(live.sent.filter(message => message.type === 'settings_set').at(-1)).toMatchObject({ loopAfterTurn: true });
     finishAvailable = false;
