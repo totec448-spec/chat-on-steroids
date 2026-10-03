@@ -129,6 +129,37 @@ it('groups a failed broker worker under History even with recent session activit
   expect(host.textContent).toContain('History · 1');
 });
 
+it('summarizes running, done and failed workers from existing worker state', () => {
+  dom = new JSDOM('<main></main><button></button>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
+  const panel = createAgentPanel({
+    host,
+    toggle,
+    load: async () => ({ events: [] }),
+    render: () => [],
+    openMain: vi.fn(),
+    working: worker => worker.id === 'fallback-running',
+    agent: worker => worker.id === 'active' ? { state: 'active', task: 'Run tests', conversationId: 'chat-active' }
+      : worker.id === 'done' ? { state: 'sleeping', task: 'Review code', conversationId: 'chat-done' }
+        : worker.id === 'failed' ? { state: 'failed', task: 'Check build', conversationId: 'chat-failed' }
+          : null
+  });
+  panel.update('prime', [
+    { id: 'active', title: 'worker-1', conversationId: 'chat-active', startedAt: 1, updatedAt: 2,
+      origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-1', task: 'Run tests' } },
+    { id: 'fallback-running', title: 'worker-2', conversationId: 'chat-fallback', startedAt: 1, updatedAt: 2,
+      origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-2', task: 'Inspect current work' } },
+    { id: 'done', title: 'worker-3', conversationId: 'chat-done', startedAt: 1, updatedAt: 2,
+      origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-3', task: 'Review code' } },
+    { id: 'failed', title: 'worker-4', conversationId: 'chat-failed', startedAt: 1, updatedAt: 2,
+      origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-4', task: 'Check build' } }
+  ] as SessionSummary[]);
+  toggle.click();
+  expect(host.querySelector('.agent-panel-summary')?.textContent)
+    .toBe('4 workers · 2 running · 1 done · 1 failed');
+});
+
 
 it('shows bounded worker health in the overview without changing lifecycle ownership', () => {
   dom = new JSDOM('<main></main><button></button>');
