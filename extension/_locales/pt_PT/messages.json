@@ -396,10 +396,10 @@
     "message": "$1: $2"
   },
   "content_goal_delivery_after_turn_finish": {
-    "message": "Após este turno + fim"
+    "message": "No fim da sessão ou após o turno"
   },
   "content_goal_delivery_only_finish": {
-    "message": "Apenas no fim"
+    "message": "Apenas no fim da sessão"
   },
   "content_goal_loop_off": {
     "message": "Goal e Loop desativados"
