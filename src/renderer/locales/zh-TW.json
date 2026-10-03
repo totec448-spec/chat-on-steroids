@@ -1810,5 +1810,8 @@
   "Chat removed from the app": "已從應用程式中移除聊天",
   "Pet instructions copied": "已複製寵物說明",
   "Skill added to your library": "技能已新增到你的技能庫",
-  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "切換已儲存的隧道 ID 與隧道 API 金鑰，例如用於另一個 ChatGPT 帳號。"
+  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "切換已儲存的隧道 ID 與隧道 API 金鑰，例如用於另一個 ChatGPT 帳號。",
+  "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "ChatGPT 頁面遺失了這則回答的即時串流。回答可能仍在進行：重新整理會重新連接頁面，而不會停止回答。",
+  "Don't reload this answer": "不要重新整理這則回答",
+  "The reload has already started.": "重新整理已經開始。"
 }

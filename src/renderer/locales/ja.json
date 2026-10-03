@@ -1810,5 +1810,8 @@
   "Chat removed from the app": "チャットをアプリから削除しました",
   "Pet instructions copied": "ペットの手順をコピーしました",
   "Skill added to your library": "スキルをライブラリに追加しました",
-  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "保存したトンネル ID とトンネル API キーを切り替えます。別の ChatGPT アカウントを使うときなどに。"
+  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "保存したトンネル ID とトンネル API キーを切り替えます。別の ChatGPT アカウントを使うときなどに。",
+  "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "ChatGPT のページがこの回答のライブストリームを失いました。回答はまだ続いている可能性があります。再読み込みは回答を止めずにページを再接続します。",
+  "Don't reload this answer": "この回答を再読み込みしない",
+  "The reload has already started.": "再読み込みはすでに始まっています。"
 }

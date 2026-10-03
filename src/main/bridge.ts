@@ -6934,6 +6934,34 @@ const lastBrowserRecoveryAt = new Map<string, number>();
  * refund it when another recovery takes over. Only a positive no-action failure can release it.
  */
 const turnRepairSpent = new Map<string, { sessionId: string; turnKey: string; token: string; at: number }>();
+
+/**
+ * Answers whose interrupted-response reload the user cancelled (#1032). Keyed like the spent
+ * budget, by the question that owns the answer: the page keeps re-reporting the same lost stream,
+ * and each notice must not bring the countdown back. The next question is a new answer.
+ */
+const assistantRecoveryCancelled = new Map<string, { sessionId: string; turnKey: string }>();
+
+function assistantRecoveryCancelledFor(conversationId: string, sessionId: string, turnKey: string): boolean {
+  const cancelled = assistantRecoveryCancelled.get(conversationId);
+  return cancelled?.sessionId === sessionId && cancelled.turnKey === turnKey;
+}
+
+/**
+ * The user's "don't reload this answer". Only a reload the browser has not claimed can be
+ * withdrawn; a claimed one is already happening. Returns whether a countdown was cancelled.
+ */
+export async function cancelAssistantRecovery(sessionId: string): Promise<boolean> {
+  const conversationId = (await getSession(sessionId))?.conversationId;
+  if (!conversationId) return false;
+  const repair = repairsInFlight.get(conversationId);
+  if (!repair || repair.reason !== 'assistant-error' || repair.sessionId !== sessionId || repair.state === 'done' ||
+      repair.claimed || !repair.assistantSource) return false;
+  assistantRecoveryCancelled.set(conversationId, { sessionId, turnKey: repair.assistantSource.key });
+  repairsInFlight.delete(conversationId);
+  logInfo(`bridge: the user cancelled the interrupted-response reload for ${conversationId}`);
+  return true;
+}
 /**
  * Chats whose last turn ended `failed` or `stalled` and which have produced nothing since.
  *
@@ -7064,6 +7092,7 @@ function queueBrowserRecovery(
   if (reason === 'assistant-error') {
     const spent = turnRepairSpent.get(conversationId);
     if (!assistantSource) return false;
+    if (assistantRecoveryCancelledFor(conversationId, sessionId, assistantSource.key)) return false;
     // A reload that brought the answer back to work was not a failed remedy. The question does
     // not move while one long answer runs, so without this a stream that dropped twice in an
     // hour was treated as the same broken turn: measured 2026-09-26, a reload at 17:44 resumed
@@ -8949,6 +8978,7 @@ function clearUnattributedIncident(): void {
   repairsInFlight.clear();
   lastBrowserRecoveryAt.clear();
   turnRepairSpent.clear();
+  assistantRecoveryCancelled.clear();
   pagelessChats.clear();
   // The told-once set belongs to the incident state this tears down. Left behind, a give-up
   // already reported keeps a later one silent — across a bridge restart in production, and
