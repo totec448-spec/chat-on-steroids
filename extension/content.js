@@ -3429,16 +3429,21 @@
     if (!Array.isArray(raw)) return null;
     const out = [];
     const indexes = new Set();
-    for (const entry of raw.slice(0, 64)) {
+    // One budget for the whole reply, as the app applies it again: see MAX_REFERENCES_CHARS.
+    let budget = 32000;
+    for (const entry of raw.slice(0, 32)) {
       if (!entry || typeof entry !== 'object' || !Number.isInteger(entry.index) || entry.index < 0 || entry.index > 9999) continue;
       if (indexes.has(entry.index) || !Array.isArray(entry.sources)) continue;
       const sources = [];
-      for (const source of entry.sources.slice(0, 12)) {
+      for (const source of entry.sources.slice(0, 8)) {
         const url = source && typeof source.url === 'string' && source.url.length <= 2000 && /^https?:\/\/\S+$/i.test(source.url) ? source.url : null;
         if (!url) continue;
         const title = cap(source.title, 300) || url;
         const name = cap(source.source, 80);
         const snippet = cap(source.snippet, 300);
+        const size = title.length + url.length + (name ? name.length : 0) + (snippet ? snippet.length : 0);
+        if (size > budget) break;
+        budget -= size;
         const date = typeof source.date === 'number' && Number.isFinite(source.date) && source.date > 0 && source.date < 1e13 ? Math.round(source.date) : 0;
         sources.push({ title, url, ...(name ? { source: name } : {}), ...(date ? { date } : {}), ...(snippet ? { snippet } : {}) });
       }
@@ -3569,6 +3574,7 @@
         typeof entry.renderedHtml === 'string' && entry.renderedHtml.length <= 120_000 ? entry.renderedHtml : '';
       if (!rawText && !renderedHtml && !attachments.length &&
           !(entry.role === 'assistant' && entry.rawMessageId && entry.rawMessageId === raw.endMessageId)) continue;
+      const references = entry.role === 'assistant' ? readReferences(entry.references) : null;
       const message = {
         messageId,
         rawMessageId: cap(entry.rawMessageId, 200),
@@ -3584,7 +3590,7 @@
             : null,
         ...(entry.role === 'assistant' && typeof entry.resolvedModel === 'string' &&
           /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(entry.resolvedModel) ? { resolvedModel: entry.resolvedModel } : {}),
-        ...(entry.role === 'assistant' && readReferences(entry.references) ? { references: readReferences(entry.references) } : {}),
+        ...(references ? { references } : {}),
         rawText,
         ...(attachments.length ? { attachments } : {}),
         renderedHtml,
