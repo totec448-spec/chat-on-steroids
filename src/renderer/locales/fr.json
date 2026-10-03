@@ -1786,5 +1786,6 @@
   "Local control API": "API de contrôle locale",
   "Let agents on this computer read app status and chats.": "Permettre aux agents de cet ordinateur de lire l’état de l’app et les chats.",
   "Allow actions": "Autoriser les actions",
-  "Let those agents also send and cancel messages. Needs the local control API.": "Ces agents peuvent aussi envoyer et annuler des messages. Nécessite l’API de contrôle locale."
+  "Let those agents also send and cancel messages. Needs the local control API.": "Ces agents peuvent aussi envoyer et annuler des messages. Nécessite l’API de contrôle locale.",
+  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "Après chaque mise à jour, macOS demande une fois votre mot de passe pour que cette version puisse ouvrir ses clés enregistrées. Saisissez le mot de passe de session de votre Mac et choisissez « Toujours autoriser ». Les discussions et la connexion au navigateur reprennent dès que vous répondez."
 }

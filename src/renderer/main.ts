@@ -7,6 +7,7 @@ import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
 import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
+import { initKeychainNotice } from './keychain-notice.js';
 import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
@@ -51,6 +52,8 @@ declare global {
 }
 
 const api = window.api;
+// First: main announces a Keychain read before it starts and may not get through again until it ends.
+initKeychainNotice(api);
 initLanguage();
 publishStopNoticeTexts(texts => api.setStopNoticeTexts(texts));
 // The browser extension shows its texts in the app's language, not Chrome's; the app hands it on.
