@@ -73,6 +73,17 @@ it('keeps a shorter AGENTS complete and trims skills in followups without droppi
   expect(followup).toContain('START');
   expect(userPromptText(followup)).toBe('Task');
 });
+
+it('drops optional additional-folder discoverability before sacrificing the AGENTS minimum or Skill references', () => {
+  const agents = { directory: '/work', text: 'A'.repeat(5000), truncated: false };
+  const skills = [{ id: 'review', text: 'B'.repeat(1000) }];
+  const withoutAdditional = fitSessionPrompt('Task', 'Core', agents, { maxChars: Infinity, maxBytes: Infinity }, skills);
+  const withAdditional = { ...agents, additionalDirectories: [`/linked/${'x'.repeat(1000)}`] };
+  const result = fitSessionPrompt('Task', 'Core', withAdditional, { maxChars: withoutAdditional.length, maxBytes: Infinity }, skills);
+  expect(result).not.toContain('Additional project folders:');
+  expect(result).toContain('A'.repeat(5000));
+  expect(result).toContain('# Selected skill: /review');
+});
 beforeEach(async () => {
   directory = await makeTempDir('cos-session-prompt-');
   initConfigPath(directory); initDurableStore(directory); initSessionStore(directory);
@@ -131,6 +142,7 @@ it('reads only the linked folder, refreshes its contents, and leaves unfiled cha
   await addProjectFolder(project.id, path.join(directory, 'related'));
   const scoped = await prepareSessionPrompt('Work here', { projectId: project.id });
   expect(scoped).toContain('# AGENTS.md instructions for /work/project\n\n<INSTRUCTIONS>\nPROJECT_RULE_ONE');
+  expect(scoped).toContain('Additional project folders: /work/related');
   expect(scoped).not.toMatch(/PARENT_DO_NOT_INJECT|CHILD_DO_NOT_INJECT|RELATED_RULE_DO_NOT_INJECT/);
   expect(userPromptText(scoped)).toBe('Work here');
   expect(await currentCoreInstructions()).toBe(core);
@@ -138,6 +150,28 @@ it('reads only the linked folder, refreshes its contents, and leaves unfiled cha
   expect(await prepareSessionPrompt('Next', { projectId: project.id })).toContain('PROJECT_RULE_TWO');
   await fs.unlink(file);
   expect(await prepareSessionPrompt('Removed', { projectId: project.id })).toContain('Selected project directory: /work/project');
+});
+
+it('projects only currently approved additional folders into the opening prompt without changing the primary cwd', async () => {
+  const primaryRoot = path.join(directory, 'primary-root');
+  const relatedRoot = path.join(directory, 'related-root');
+  const primary = path.join(primaryRoot, 'project');
+  const related = path.join(relatedRoot, 'shared');
+  await fs.mkdir(primary, { recursive: true });
+  await fs.mkdir(related, { recursive: true });
+  await saveConfig({ ...defaultConfig(), roots: [{ name: 'primary', path: primaryRoot }, { name: 'related', path: relatedRoot }] });
+  const project = await addProject(primary);
+  await addProjectFolder(project.id, related);
+
+  const linked = await prepareSessionPrompt('Use the linked folder', { projectId: project.id });
+  expect(linked).toContain('Selected project directory: /primary/project');
+  expect(linked).toContain('Additional project folders: /related/shared');
+  expect(linked).toContain('additional folders do not change the default working directory or grant filesystem permission');
+
+  await saveConfig({ ...defaultConfig(), roots: [{ name: 'primary', path: primaryRoot }] });
+  const revoked = await prepareSessionPrompt('Keep working', { projectId: project.id });
+  expect(revoked).toContain('Selected project directory: /primary/project');
+  expect(revoked).not.toContain('/related/shared');
 });
 
 it('uses durable session ownership through resume and worker inheritance, never an unrelated selected project', async () => {

@@ -44,10 +44,25 @@ it('loads legacy single-folder records as primary-only projects without requirin
   expect(await projectWorkspace(legacy.id)).toMatchObject({ real: legacy.path, virtual: '/work/first' });
 });
 
-it('rejects ambiguous canonical folder ownership in a persisted catalog', async () => {
+it('drops duplicate additional folder identities on read while primary ownership stays authoritative', async () => {
   const first = { id: randomUUID(), name: 'First', path: path.join(approved, 'first'), createdAt: 1 };
-  const second = { id: randomUUID(), name: 'Second', path: path.join(approved, 'second'), additionalPaths: [first.path], createdAt: 2 };
+  const related = path.join(approved, 'related');
+  const duplicateAlias = process.platform === 'win32' ? related.toUpperCase() : related;
+  const second = {
+    id: randomUUID(), name: 'Second', path: path.join(approved, 'second'),
+    additionalPaths: [first.path, related, duplicateAlias, related], createdAt: 2
+  };
   await writeDurableNow('projects', [first, second]);
+  expect(await listProjects()).toEqual([first, { ...second, additionalPaths: [related] }]);
+});
+
+it('still rejects duplicate primary ownership and duplicate project ids in a persisted catalog', async () => {
+  const id = randomUUID();
+  const first = { id, name: 'First', path: path.join(approved, 'first'), createdAt: 1 };
+  const duplicatePrimary = { id: randomUUID(), name: 'Second', path: first.path, createdAt: 2 };
+  await writeDurableNow('projects', [first, duplicatePrimary]);
+  await expect(listProjects()).rejects.toThrow(/catalog is invalid/);
+  await writeDurableNow('projects', [first, { ...duplicatePrimary, id, path: path.join(approved, 'second') }]);
   await expect(listProjects()).rejects.toThrow(/catalog is invalid/);
 });
 
