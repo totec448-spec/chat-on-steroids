@@ -47,6 +47,13 @@ export function createAgentPanel(options: {
       const state = options.agent?.(worker)?.state;
       return state ? ['invited', 'active', 'detached', 'waking'].includes(state) : options.working(worker);
     };
+    const running = workers.filter(isActive).length;
+    const failed = workers.filter(worker => options.agent?.(worker)?.state === 'failed').length;
+    const done = workers.length - running - failed;
+    if (workers.length) {
+      body.append(el('div', 'meta agent-panel-summary', () =>
+        `${workers.length === 1 ? t('1 worker') : t('{0} workers', [workers.length])} · ${t('{0} running', [running])} · ${t('{0} done', [done])} · ${t('{0} failed', [failed])}`));
+    }
     for (const active of [true, false]) {
       const group = workers.filter(worker => isActive(worker) === active);
       body.append(el('h3', '', () => `${active ? t("Active") : t("History")} · ${group.length}`));
