@@ -1733,9 +1733,21 @@ var CLF_DOM = (() => {
     return false;
   }
 
+  /** Reject stale transition editors that are hidden only by CSS. */
+  function composerCssVisible(node) {
+    return safe(() => {
+      if (!node || onKeptPage(node)) return false;
+      for (let parent = node; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+      }
+      return true;
+    }, false);
+  }
+
   function composer() {
     return safe(() => {
-      const classic = [...document.querySelectorAll('#prompt-textarea')].filter(node => !onKeptPage(node));
+      const classic = [...document.querySelectorAll('#prompt-textarea')].filter(composerCssVisible);
       if (classic.length) return classic.length === 1 ? classic[0] : null;
       // The current rich editor can remount before its surrounding form regains
       // data-chatgpt-composer. Accept that stable editor identity, but only while
@@ -1745,7 +1757,7 @@ var CLF_DOM = (() => {
         'form [data-composer-markdown][contenteditable="true"][role="textbox"]'
       )]
         .filter(node => !node.closest(`${OWN_SURFACES},[data-turn-key],.markdown,[hidden],[aria-hidden="true"],[inert]`) &&
-          !onKeptPage(node));
+          composerCssVisible(node));
       return candidates.length === 1 ? candidates[0] : null;
     }, null);
   }
