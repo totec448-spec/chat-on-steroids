@@ -86,7 +86,33 @@ export function validGitHubSkillOrigin(value: unknown): value is GitHubSkillOrig
 }
 
 export type SkillScope = 'managed' | 'repo' | 'user' | 'system' | 'admin';
-export type SkillSource = 'managed' | 'repo-agents' | 'project-codex' | 'user-agents' | 'codex-home' | 'bundled' | 'admin';
+export type SkillSource = 'managed' | 'repo-agents' | 'project-codex' | 'user-agents' | 'codex-home' | 'codex-plugin' | 'bundled' | 'admin';
+export type CodexPluginSource =
+  | { source: 'remote'; id: string }
+  | { source: 'local'; path: string }
+  | { source: 'git'; url: string; ref?: string; sha?: string }
+  | { source: 'git-subdir'; url: string; path: string; ref?: string; sha?: string }
+  | { source: 'npm'; package: string; version?: string; registry?: string };
+export interface CodexPluginRuntimeEntry {
+  pluginId: string;
+  pluginName: string;
+  marketplaceName: string;
+  version: string;
+  installed: true;
+  enabled: boolean;
+  source: CodexPluginSource;
+  marketplaceSource?: { sourceType: string; source: string };
+}
+export interface CodexPluginSkillProvenance {
+  pluginId: string;
+  pluginName: string;
+  marketplaceName: string;
+  version: string;
+  source: CodexPluginSource;
+  marketplaceSource?: { sourceType: string; source: string };
+  /** Package-relative directory below the plugin's `skills/` root. */
+  skillPath: string;
+}
 export interface SkillMetadata {
   displayName?: string;
   shortDescription?: string;
@@ -99,6 +125,8 @@ export interface LibrarySkill extends SkillSummary, SkillMetadata {
   scope: SkillScope;
   source: SkillSource;
   managed: boolean;
+  /** Present only for a Skill projected from Codex's active installed plugin package. */
+  codexPlugin?: CodexPluginSkillProvenance;
 }
 export interface SkillLibrary {
   skills: LibrarySkill[];
