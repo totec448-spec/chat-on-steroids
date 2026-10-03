@@ -84,6 +84,24 @@ const MODEL_SLUG_RE = /^[A-Za-z0-9._-]{1,80}$/;
 export const WORKER_SILENCE_MS = 3 * 60_000;
 
 /**
+ * How recent a page's "my turn is still running" must be to hold off the silence sleep.
+ *
+ * A generating page polls every two seconds at most, but Chrome throttles a long-hidden tab's
+ * timers to about once a minute, and worker tabs are usually hidden. Shorter than
+ * {@link WORKER_SILENCE_MS}, so a page that stops polling never adds more than this to it.
+ */
+export const PAGE_GENERATING_FRESH_MS = 150_000;
+
+/**
+ * The longest an open turn alone keeps a worker awake without a call or new output.
+ *
+ * ChatGPT can think for half an hour between two tool calls (#882: 30m 18s, slept three
+ * times while it worked). The page's own lifecycle already closes a turn that shows no
+ * progress for ten minutes; this is the backstop for one that never closes.
+ */
+export const WORKER_THINKING_MAX_MS = 2 * 60 * 60_000;
+
+/**
  * The context a worker chat may reach before it stops being worth reviving.
  *
  * The same 400k figure the app uses for its own context ceiling, and for the same reason: it
@@ -3761,6 +3779,26 @@ export function endedWorkerNotice(conversationId: string | null | undefined): st
 
 /** Sleep an inactive bound worker in its existing chat, independent of attachment.
  * Running tools protect only their exact worker. Invites/wakes retain their delivery deadline. */
+/** When each chat's own page last said its turn is still running. Not work, and never persisted. */
+const pageGenerating = new Map<string, number>();
+
+/**
+ * The page's own word on whether this chat's turn is still running, from its activity poll.
+ *
+ * Deliberately not {@link noteAgentAlive}: it renews no work clock and revives nobody. All it
+ * does is keep the silence sweep from calling a worker asleep while ChatGPT is visibly still
+ * thinking, which it can do for many minutes without a call or a word of output.
+ */
+export function notePageGenerating(conversationId: string, generating: boolean, at = Date.now()): void {
+  if (generating) pageGenerating.set(conversationId, at);
+  else pageGenerating.delete(conversationId);
+}
+
+function pageStillGenerating(conversationId: string, since: number, now: number): boolean {
+  const at = pageGenerating.get(conversationId);
+  return at !== undefined && now - at < PAGE_GENERATING_FRESH_MS && now - since < WORKER_THINKING_MAX_MS;
+}
+
 export function sleepSilentWorkers(
   now = Date.now(),
   runId?: string,
@@ -3774,6 +3812,7 @@ export function sleepSilentWorkers(
     if (isWorking(agent.info.conversationId)) continue;
     const since = Math.max(agent.info.activatedAt ?? 0, agent.info.lastSeenAt ?? 0, livenessFloor);
     if (now - since < WORKER_SILENCE_MS) continue;
+    if (pageStillGenerating(agent.info.conversationId, since, now)) continue;
     const observedRecoveryTurn = unresolvedTurn?.(agent.info.conversationId);
     const observedRequestOriginMax = requestOriginMax?.(agent.info.conversationId);
     // A caller-scoped sweep may know nothing about another worker's durable turn. Unknown is not
@@ -4865,6 +4904,7 @@ export function resetAgentsForTests(): void {
   runs.clear();
   dormantRuns.clear();
   consecutiveWakeFailures.clear();
+  pageGenerating.clear();
   unpublishedRuns.clear();
   activeSpawnStages.clear();
   activeFinishStages.clear();
