@@ -1810,5 +1810,8 @@
   "Chat removed from the app": "Sohbet uygulamadan kaldırıldı",
   "Pet instructions copied": "Evcil hayvan talimatları kopyalandı",
   "Skill added to your library": "Beceri kitaplığınıza eklendi",
-  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Kayıtlı tünel kimliklerini ve tünel API anahtarını değiştirir; örneğin başka bir ChatGPT hesabı için."
+  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Kayıtlı tünel kimliklerini ve tünel API anahtarını değiştirir; örneğin başka bir ChatGPT hesabı için.",
+  "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "ChatGPT sayfası bu yanıtın canlı akışını kaybetti. Yanıt hâlâ sürüyor olabilir: yeniden yükleme, yanıtı durdurmadan sayfayı yeniden bağlar.",
+  "Don't reload this answer": "Bu yanıtı yeniden yükleme",
+  "The reload has already started.": "Yeniden yükleme zaten başladı."
 }
