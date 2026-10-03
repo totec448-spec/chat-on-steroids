@@ -7295,7 +7295,7 @@ describe('unattributed activity recovery', () => {
    */
   async function maintenanceBatch(
     repaired?: string,
-    repairAction?: 'reloaded' | 'reopened'
+    repairAction?: 'reloaded' | 'reopened' | 'present'
   ): Promise<Array<{ conversationId: string; token: string; reason: string }>> {
     const path = repaired
       ? `/status?repaired=${encodeURIComponent(repaired)}${repairAction ? `&repairAction=${repairAction}` : ''}`
@@ -7314,7 +7314,7 @@ describe('unattributed activity recovery', () => {
    */
   async function maintenance(
     repaired?: string,
-    repairAction?: 'reloaded' | 'reopened'
+    repairAction?: 'reloaded' | 'reopened' | 'present'
   ): Promise<{ conversationId: string; token: string; reason: string } | null> {
     const batch = await maintenanceBatch(repaired, repairAction);
     expect(batch.length).toBeLessThanOrEqual(1);
@@ -8735,6 +8735,26 @@ describe('unattributed activity recovery', () => {
     const handout = await maintenance();
     expect(chatOf(handout)).toBe(WORKER);
     expect(handout!.reason).toBe('no-tab');
+  });
+
+  it('closes a no-tab repair without a reload when the browser finds the chat open again (#864)', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+    const bootstrap = await redeem();
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+    });
+    await events(WORKER, [openTurn('turn-worker-gone'), endTurn('turn-worker-gone', 'completed')]);
+    await request('POST', '/closed', { body: { conversationId: WORKER } });
+    const handout = await maintenance();
+    expect(handout!.reason).toBe('no-tab');
+    const priorLogs = new Set(getLog());
+
+    // By the time the browser acted, a wake had opened the chat's tab itself; it was left alone.
+    expect(await maintenance(handout!.token, 'present')).toBeNull();
+    const fresh = getLog().filter(entry => !priorLogs.has(entry)).map(entry => entry.message);
+    expect(fresh).toContain(`bridge: ${WORKER} was already open again; the browser left its tab as it was`);
+    expect(fresh.some(message => message.includes('confirmed no-tab recovery'))).toBe(false);
   });
 
   it('reopens the chat of a prime whose run ended long ago', async () => {
