@@ -1147,5 +1147,8 @@
   },
   "content_goal_error_goal_objective_not_durable": {
     "message": "應用程式無法儲存任務。請檢查可用磁碟空間後再試一次。"
+  },
+  "popup_app_not_running_help": {
+    "message": "請確認 Chat On Steroids 已在這台電腦上開啟。擴充功能會自動連線。"
   }
 }

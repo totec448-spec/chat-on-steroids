@@ -1147,5 +1147,8 @@
   },
   "content_goal_error_goal_objective_not_durable": {
     "message": "タスクをアプリが保存できませんでした。空きディスク容量を確認して、もう一度保存してください。"
+  },
+  "popup_app_not_running_help": {
+    "message": "このコンピューターで Chat On Steroids が開いていることを確認してください。拡張機能は自動的に接続します。"
   }
 }
