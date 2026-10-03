@@ -2484,7 +2484,12 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    `short` (2k-6k) swap the default prompt's two length sentences when present and always append
    one code-owned line that overrides any other length target, so an edited prompt follows the
    choice too (`handoffPromptForLength`). The brief floors in `session/handoff.ts` are far below
-   all three. Preparing a brief does not yet publish a rebind.
+   all three. New handoff files are versioned and carry bounded source chat/generation/turn
+   provenance plus a non-authority fingerprint instead of the raw continuation token in that
+   metadata. Legacy handoffs remain readable. On restart, a versioned handoff
+   whose provenance contradicts its WAL continuation cannot repair or resume a pre-commit move;
+   a durable rebind that already landed is never rolled back because of later handoff-file
+   damage. Preparing a brief does not yet publish a rebind.
 4. **Elect B and commit.** Destination creation/claim has one opening owner. B opens in the
    browser that holds A: the capture reply places it beside the capturing page, and a resume
    queued with no page waiting is offered to a browser still reporting A open (§13). Only when
