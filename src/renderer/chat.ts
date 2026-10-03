@@ -3945,10 +3945,11 @@ export function chatSettingsPatch(current: Config): {
     multiAgent: {
       defaultModel: $<HTMLSelectElement>('workerModel').value,
       defaultReasoning: $<HTMLSelectElement>('workerReasoning').value as Config['multiAgent']['defaultReasoning'],
-      // The exposure switch lives with every other ChatGPT tool switch, on Home. This
-      // panel keeps only the worker count, so it reads the one control that exists.
+      // The exposure switch lives with every other ChatGPT tool switch, on Home. Settings owns
+      // the per-family worker limit and the optional broker-wide admission cap below.
       enabled: $<HTMLInputElement>('homeMaEnabled').checked,
       maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8),
+      globalMaxWorkers: number('globalMaWorkers', current.multiAgent.globalMaxWorkers ?? 0, 0, 64),
       allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked,
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked,
       waitForSubAgents: $<HTMLInputElement>('waitForSubAgents').checked,
@@ -4351,7 +4352,7 @@ const CHAT_INPUTS = [
   'helperModel', 'helperReasoning',
   'autoCompact',
   'autoCompactTokens',
-  'maWorkers',
+  'maWorkers', 'globalMaWorkers',
   'allowUnattributedCalls',
   'recoverAgentTabs',
   'waitForSubAgents',
@@ -4395,6 +4396,11 @@ export function chatApply(state: AppState, previous?: Config): void {
   $<HTMLInputElement>('autoCompactTokens').disabled = !config.compaction.auto;
 
   applyChatValue($<HTMLInputElement>('maWorkers'), String(config.multiAgent.maxWorkers), previous?.multiAgent.maxWorkers);
+  applyChatValue(
+    $<HTMLInputElement>('globalMaWorkers'),
+    String(config.multiAgent.globalMaxWorkers ?? 0),
+    previous?.multiAgent.globalMaxWorkers
+  );
   applyChatChecked(
     $<HTMLInputElement>('allowUnattributedCalls'),
     config.multiAgent.allowUnattributedCalls,

@@ -309,6 +309,8 @@
   "Sub-agent workers": "서브에이전트 워커",
   "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "Chrome 확장 프로그램이 로드되고 연결되어 있어야 합니다. 한 번의 실행에서 열 수 있는 워커 채팅의 최대 수를 설정합니다.",
   "max": "최대",
+  "Workers across all chats": "모든 채팅의 워커",
+  "The most workers that may run at once over all your chats together. 0 means no extra limit; each chat still keeps the limit above.": "모든 채팅을 합쳐 동시에 실행할 수 있는 워커의 최대 수입니다. 0은 추가 제한이 없음을 뜻하며, 각 채팅에는 위의 제한이 계속 적용됩니다.",
   "Allow unattributed calls": "귀속되지 않은 호출 허용",
   "Recover other chats’ tabs": "다른 채팅의 탭 복구",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "사라졌거나 응답하지 않는 작업 채팅을 복구합니다. Goal과 Loop 채팅은 자동으로 복구됩니다.",
