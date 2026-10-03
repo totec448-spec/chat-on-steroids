@@ -453,7 +453,6 @@
   "Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop": "귀속되지 않은 호출 차단: 앱이 채팅에 귀속할 수 없는 모든 호출을 거부하고 해당 채팅에 중지하도록 알립니다",
   "Release this chat: its tool calls run again": "이 채팅 차단 해제: 도구 호출을 다시 실행합니다",
   "Block this chat: every tool call it makes is refused and it is told to stop": "이 채팅 차단: 모든 도구 호출을 거부하고 중지하도록 알립니다",
-  "Open this chat in Chrome": "Chrome에서 이 채팅 열기",
   "Session deleted": "세션 삭제됨",
   "{0} sub-agents · {1} active": "서브에이전트 {0}개 · 활성 {1}개",
   "{0} {1} sub-agents": "{0} {1} 서브에이전트",
@@ -1808,5 +1807,11 @@
   "Auto-select Skills": "Skills 자동 선택",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "가져온 Skill 하나가 메타데이터상 명확히 일치할 때만 해당 메시지에 추가합니다. 명시적으로 선택한 Skill이 항상 우선합니다.",
   "Auto-selected Skill: /{0}": "자동 선택된 Skill: /{0}",
-  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "모든 워커를 지울까요? 실행 중인 워커는 중지되고 저장된 기록은 완전히 삭제됩니다. 채팅은 ChatGPT에 남습니다."
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "모든 워커를 지울까요? 실행 중인 워커는 중지되고 저장된 기록은 완전히 삭제됩니다. 채팅은 ChatGPT에 남습니다.",
+  "Quit": "종료",
+  "Astra is wrapping up": "Astra가 마무리하는 중입니다",
+  "Send an automatic Goal or write your next instruction.": "자동 Goal을 보내거나 다음 지시를 작성하세요.",
+  "Send Automatic Goal": "자동 Goal 보내기",
+  "Write Directly": "직접 작성",
+  "Open this chat in your browser": "브라우저에서 이 채팅 열기"
 }

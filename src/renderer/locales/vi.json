@@ -459,7 +459,6 @@
   "Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop": "Chặn lệnh gọi chưa gán: mọi lệnh gọi ứng dụng không thể gán cho cuộc trò chuyện đều bị từ chối và cuộc trò chuyện được yêu cầu dừng",
   "Release this chat: its tool calls run again": "Giải phóng cuộc trò chuyện này: các lệnh gọi công cụ của nó được chạy lại",
   "Block this chat: every tool call it makes is refused and it is told to stop": "Chặn cuộc trò chuyện này: mọi lệnh gọi công cụ của nó bị từ chối và nó được yêu cầu dừng",
-  "Open this chat in Chrome": "Mở cuộc trò chuyện này trong Chrome",
   "Session deleted": "Đã xóa phiên",
   "{0} sub-agents · {1} active": "{0} tác nhân phụ · {1} đang hoạt động",
   "{0} {1} sub-agents": "{0} {1} tác nhân phụ",
@@ -1808,5 +1807,11 @@
   "Auto-select Skills": "Tự động chọn Skills",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Khi chỉ một Skill đã nhập khớp rõ ràng theo metadata, thêm Skill đó vào tin nhắn. Skill được chọn trực tiếp luôn được ưu tiên.",
   "Auto-selected Skill: /{0}": "Skill được tự động chọn: /{0}",
-  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Xóa tất cả worker? Các worker đang chạy sẽ dừng và lịch sử đã lưu bị xóa vĩnh viễn. Các cuộc trò chuyện vẫn còn trong ChatGPT."
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Xóa tất cả worker? Các worker đang chạy sẽ dừng và lịch sử đã lưu bị xóa vĩnh viễn. Các cuộc trò chuyện vẫn còn trong ChatGPT.",
+  "Quit": "Thoát",
+  "Astra is wrapping up": "Astra đang hoàn tất",
+  "Send an automatic Goal or write your next instruction.": "Gửi Goal tự động hoặc viết hướng dẫn tiếp theo của bạn.",
+  "Send Automatic Goal": "Gửi Goal tự động",
+  "Write Directly": "Tự viết",
+  "Open this chat in your browser": "Mở cuộc trò chuyện này trong trình duyệt"
 }

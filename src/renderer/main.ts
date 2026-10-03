@@ -44,6 +44,7 @@ import type { SwarmState } from '../shared/session.js';
 import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom.js';
 import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatView } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
+import { publishMainTexts } from './main-texts.js';
 
 declare global {
   interface Window {
@@ -56,6 +57,8 @@ const api = window.api;
 initKeychainNotice(api);
 initLanguage();
 publishStopNoticeTexts(texts => api.setStopNoticeTexts(texts));
+// The tray menu and desktop notices come from the main process, which has no catalogs.
+publishMainTexts(texts => api.setMainTexts?.(texts));
 // The browser extension shows its texts in the app's language, not Chrome's; the app hands it on.
 const publishUiLanguage = (): void => { void Promise.resolve(api.setUiLanguage?.(currentLanguage())).catch(() => undefined); };
 publishUiLanguage();

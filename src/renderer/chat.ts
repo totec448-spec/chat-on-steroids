@@ -554,7 +554,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     const open = document.createElement('button');
     open.className = 'btn sess-action sess-open';
     open.type = 'button';
-    ui(open, 'title', () => t("Open this chat in Chrome"));
+    ui(open, 'title', () => t("Open this chat in your browser"));
     open.append(icon('i-out'));
     open.addEventListener('click', (event) => {
       event.stopPropagation();

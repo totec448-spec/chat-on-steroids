@@ -472,7 +472,6 @@
   "Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop": "Блокировать вызовы без привязки: любой вызов, который приложение не может привязать к чату, отклоняется, а чату сообщается остановиться",
   "Release this chat: its tool calls run again": "Разблокировать этот чат: его вызовы инструментов снова выполняются",
   "Block this chat: every tool call it makes is refused and it is told to stop": "Блокировать этот чат: все его вызовы инструментов отклоняются, а чату сообщается остановиться",
-  "Open this chat in Chrome": "Открыть этот чат в Chrome",
   "Session deleted": "Сессия удалена",
   "{0} sub-agents · {1} active": "{0} субагентов · {1} активных",
   "{0} {1} sub-agents": "{0} {1} субагентов",
@@ -1808,5 +1807,11 @@
   "Auto-select Skills": "Автоматически выбирать Skills",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Если по метаданным однозначно подходит один импортированный Skill, он добавляется к сообщению. Явный выбор Skill всегда имеет приоритет.",
   "Auto-selected Skill: /{0}": "Автоматически выбран Skill: /{0}",
-  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Очистить всех воркеров? Работающие воркеры остановятся, а их сохранённые истории будут удалены навсегда. Их чаты останутся в ChatGPT."
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Очистить всех воркеров? Работающие воркеры остановятся, а их сохранённые истории будут удалены навсегда. Их чаты останутся в ChatGPT.",
+  "Quit": "Выйти",
+  "Astra is wrapping up": "Astra завершает работу",
+  "Send an automatic Goal or write your next instruction.": "Отправьте автоматическую «Цель» или напишите следующую инструкцию.",
+  "Send Automatic Goal": "Отправить автоматическую «Цель»",
+  "Write Directly": "Написать самому",
+  "Open this chat in your browser": "Открыть этот чат в браузере"
 }

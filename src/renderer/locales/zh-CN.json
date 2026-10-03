@@ -481,7 +481,6 @@
   "Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop": "阻止未归属调用：拒绝所有无法归属到聊天的调用，并通知聊天停止",
   "Release this chat: its tool calls run again": "解除阻止：恢复此聊天的工具调用",
   "Block this chat: every tool call it makes is refused and it is told to stop": "阻止此聊天：拒绝其所有工具调用，并通知它停止",
-  "Open this chat in Chrome": "在 Chrome 中打开此聊天",
   "Session deleted": "会话已删除",
   "{0} sub-agents · {1} active": "{0} 个子智能体 · {1} 个活跃",
   "{0} {1} sub-agents": "{0} {1} 个子智能体",
@@ -1808,5 +1807,11 @@
   "Auto-select Skills": "自动选择 Skills",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "当且仅当一个已导入 Skill 在元数据上明确匹配时，将它加入该消息。显式选择的 Skill 始终优先。",
   "Auto-selected Skill: /{0}": "已自动选择 Skill：/{0}",
-  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "清除所有子智能体？正在运行的会停止，其保存的历史记录将被永久删除。它们的聊天仍保留在 ChatGPT 中。"
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "清除所有子智能体？正在运行的会停止，其保存的历史记录将被永久删除。它们的聊天仍保留在 ChatGPT 中。",
+  "Quit": "退出",
+  "Astra is wrapping up": "Astra 正在收尾",
+  "Send an automatic Goal or write your next instruction.": "发送自动目标，或写下你的下一条指令。",
+  "Send Automatic Goal": "发送自动目标",
+  "Write Directly": "直接写",
+  "Open this chat in your browser": "在浏览器中打开此聊天"
 }
