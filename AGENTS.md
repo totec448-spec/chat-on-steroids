@@ -3067,13 +3067,14 @@ every observed model separately behind its model-name disclosure; the compact po
 with the selected effort and the slider only adjusts that model. Closing the popover resets
 the disclosure; Escape closes the list before the popover and returns focus to its trigger.
 The list expands/collapses through one CSS grid transition; hidden choices are inert immediately.
-Reduced motion makes the disclosure instantaneous. The lightning button is a finite, restartable
-visual joke (brain and sparks), with gentle opacity feedback under reduced motion. Clicking also
-randomly shows one of four English memes, including the user's exact “Just think faster bro 😂”
-and three Mega brain jokes, through the existing 3.2-second single-toast owner in either motion
-mode; repeat clicks replace the message. Only these jokes use a bottom-positioned, non-interactive
-toast to keep the composer controls and longer copy clear in narrow windows. It owns no
-model, effort, send, discovery or saved setting. Hidden
+Reduced motion makes the disclosure instantaneous. The model-name chevron uses the app's
+existing disclosure rotation, driven by that button's `aria-expanded` state.
+The lightning shortcut selects the current model's lowest observed effort; its brain icon
+then offers the highest observed effort, not the previous selection. It never switches models
+to obtain Instant or Pro. The existing hidden effort select owns the choice, and slider,
+session and catalog changes repaint the next action. Without two observed efforts it is disabled.
+Selection changes immediately; a finite, interruptible 200ms icon transition supplies feedback,
+using only opacity under reduced motion. It has no send, discovery or saved-setting side effect. Hidden
 native selects retain send admission; stale selections still require an explicit choice.
 Unverified saved model preferences show their status beside the model select.
 The composer dock measures its natural inner body and animates only transient height changes;
