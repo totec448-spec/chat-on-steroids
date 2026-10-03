@@ -61,6 +61,12 @@
    * for the shape it wants; this number only keeps a detached or cyclic tree from looping.
    */
   const MAX_CLIMB = 80;
+  /**
+   * How far a node may sit below React's root. ChatGPT's tree reached 405 levels on 2026-10-02
+   * (#969); at the old limit of 400 the committed root was never found, so the model picker and
+   * the shell's query client read as unavailable and Send failed to confirm its model.
+   */
+  const MAX_ROOT_DEPTH = 2048;
   const MAX_TEXT = 200;
   /** A page with more connector rows than this is not one we need to read exhaustively. */
   const MAX_ROWS = 400;
@@ -180,7 +186,7 @@
       currentPaths?.set(node, value);
       if (node.alternate) currentPaths?.set(node.alternate, value);
     };
-    while (at && path.length < 400) {
+    while (at && path.length < MAX_ROOT_DEPTH) {
       if (seen.has(at)) return null;
       seen.add(at);
       const cached = currentPaths?.get(at);
@@ -860,7 +866,7 @@
         const messageId = context && typeof context.messageId === 'string' && context.messageId.length <= 200 ? context.messageId : null;
         if (!sources || index < 0 || !messageId) continue;
         const kept = [];
-        for (const source of sources.slice(0, 12)) {
+        for (const source of sources.slice(0, 8)) {
           if (!source || typeof source !== 'object') continue;
           const url = typeof source.url === 'string' && source.url.length <= 2000 && /^https?:\/\//i.test(source.url) ? source.url : null;
           if (!url) continue;
@@ -874,7 +880,7 @@
         }
         if (!kept.length) continue;
         const references = byMessage.get(messageId) || [];
-        if (!references.some(entry => entry.index === index)) references.push({ index, sources: kept });
+        if (references.length < 32 && !references.some(entry => entry.index === index)) references.push({ index, sources: kept });
         byMessage.set(messageId, references);
       }
     }
@@ -1585,7 +1591,7 @@
   /** Read the currently mounted query owner; never retain a client across navigation. */
   function shellQueries(fiber) {
     try {
-      for (let at = fiber, up = 0; at && up < 400; up++, at = at.return) {
+      for (let at = fiber, up = 0; at && up < MAX_ROOT_DEPTH; up++, at = at.return) {
         const client = at.memoizedProps?.client;
         if (typeof client?.getQueryCache !== 'function') continue;
         const queries = client.getQueryCache()?.getAll();
