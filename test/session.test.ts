@@ -1335,6 +1335,26 @@ describe('session store', () => {
         summary: { title: 'Read a.ts', tone: 'neutral', kind: 'read' }
       }
     });
+    // A repaired historical call can be appended later even though it started earlier. It
+    // counts as an action, but it must not replace the latest-activity projection.
+    await appendEvent(summary.id, {
+      time: toolAt - 5,
+      source: 'mcp',
+      kind: 'tool_call',
+      call: {
+        callId: 'call-tool-clock-older',
+        tool: 'find',
+        attribution: 'request_id',
+        requestId: 'wfr-tool-clock-older',
+        conversationId: 'c-tool-clock',
+        attributionMethod: 'request_id',
+        args: { text: '{"query":"older"}', truncated: false, chars: 17 },
+        result: { text: 'ok', truncated: false, chars: 2 },
+        outcome: 'ok',
+        durationMs: 1,
+        summary: { title: 'Searched older history', tone: 'neutral', kind: 'search' }
+      }
+    });
     await appendEvent(summary.id, {
       time: laterAt,
       source: 'extension',
@@ -1342,7 +1362,19 @@ describe('session store', () => {
       message: { text: 'later but not a tool call', truncated: false, chars: 25 }
     });
 
-    expect(await getSession(summary.id)).toMatchObject({ updatedAt: laterAt, lastToolCallAt: toolAt });
+    expect(await getSession(summary.id)).toMatchObject({
+      updatedAt: laterAt,
+      toolCalls: 2,
+      lastToolCallAt: toolAt,
+      lastToolActivity: { kind: 'read', title: 'Read a.ts' }
+    });
+    await flushSessions();
+    resetSessionStoreForTests();
+    expect(await getSession(summary.id)).toMatchObject({
+      toolCalls: 2,
+      lastToolCallAt: toolAt,
+      lastToolActivity: { kind: 'read', title: 'Read a.ts' }
+    });
   });
 
   /**
