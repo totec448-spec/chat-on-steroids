@@ -424,6 +424,18 @@ it.each([false, true])('reads committed shell metadata across real React double-
   expect((await f.ask()).turns[0].calls[0].requestId).toBe(OTHER);
 });
 
+it('reads committed shell metadata when the turn sits more than 400 levels below React\'s root (#969)', async () => {
+  // ChatGPT's tree measured 405 levels on 2026-10-02; the old 400-level walk never reached the root.
+  const f = fixture(), tree = bufferedShell(f);
+  let parent: any = tree.oldRoot;
+  for (let depth = 0; depth < 450; depth++) {
+    const wrapper: any = { tag: 0, memoizedProps: {}, return: parent };
+    parent.child = wrapper; parent = wrapper;
+  }
+  parent.child = tree.owner; tree.owner.return = parent;
+  expect((await f.ask()).turns[0].calls[0].requestId).toBe(OTHER);
+});
+
 it.each(['foreign-current', 'unmounted', 'inconsistent-root', 'sibling-cycle'])('does not substitute stale React evidence for %s', async state => {
   const f = fixture(), tree = bufferedShell(f);
   await f.ask();
