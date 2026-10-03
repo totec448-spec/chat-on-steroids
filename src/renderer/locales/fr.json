@@ -261,7 +261,7 @@
   "Selected independently from the model.": "Sélectionné indépendamment du modèle.",
   "Browser & history": "Navigateur et historique",
   "ChatGPT browser": "Navigateur ChatGPT",
-  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.": "Utilisé lorsque l'application lance un navigateur. Installez le compagnon et connectez-vous à ChatGPT dans le profil actif de ce navigateur. Les onglets déjà connectés restent dans leur navigateur.",
+  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "Utilisé lorsque l'application lance un navigateur. Installez le compagnon et connectez-vous à ChatGPT dans le profil actif de ce navigateur. Les onglets déjà connectés restent dans leur navigateur. Le navigateur intégré de Chat On Steroids ne demande aucune installation et tourne masqué dans la zone de notification.",
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
@@ -1771,5 +1771,11 @@
   "When to continue": "Quand continuer",
   "Session Finish only": "Uniquement en fin de session",
   "Also after the turn": "Aussi après le tour",
-  "Search models": "Rechercher des modèles"
+  "Search models": "Rechercher des modèles",
+  "Chat On Steroids browser (built-in)": "Navigateur Chat On Steroids (intégré)",
+  "ChatGPT can run hidden in the built-in Chat On Steroids browser, out of your taskbar.": "ChatGPT peut tourner masqué dans le navigateur intégré de Chat On Steroids, hors de la barre des tâches.",
+  "Choose in Settings": "Choisir dans les paramètres",
+  "Dismiss": "Ignorer",
+  "You are signed out of ChatGPT in the built-in browser, so messages cannot be sent.": "Vous êtes déconnecté de ChatGPT dans le navigateur intégré : aucun message ne peut être envoyé.",
+  "Sign in to ChatGPT": "Se connecter à ChatGPT"
 }

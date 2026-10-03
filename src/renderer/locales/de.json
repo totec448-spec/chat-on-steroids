@@ -248,7 +248,7 @@
   "Selected independently from the model.": "Wird unabhängig vom Modell gewählt.",
   "Browser & history": "Browser & Verlauf",
   "ChatGPT browser": "Browser für ChatGPT",
-  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.": "Wird verwendet, wenn die App einen Browser startet. Installiere die Begleit-Erweiterung und melde dich im aktiven Profil dieses Browsers bei ChatGPT an. Bereits verbundene Tabs bleiben in ihrem Browser.",
+  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "Wird verwendet, wenn die App einen Browser startet. Installiere die Begleit-Erweiterung und melde dich im aktiven Profil dieses Browsers bei ChatGPT an. Bereits verbundene Tabs bleiben in ihrem Browser. Der integrierte Chat-On-Steroids-Browser braucht keine Installation und läuft verborgen im Infobereich.",
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
@@ -1771,5 +1771,11 @@
   "When to continue": "Wann fortsetzen",
   "Session Finish only": "Nur zum Sitzungsende",
   "Also after the turn": "Auch nach dem Durchlauf",
-  "Search models": "Modelle suchen"
+  "Search models": "Modelle suchen",
+  "Chat On Steroids browser (built-in)": "Chat-On-Steroids-Browser (integriert)",
+  "ChatGPT can run hidden in the built-in Chat On Steroids browser, out of your taskbar.": "ChatGPT kann verborgen im integrierten Chat-On-Steroids-Browser laufen, ohne Eintrag in der Taskleiste.",
+  "Choose in Settings": "In den Einstellungen wählen",
+  "Dismiss": "Schließen",
+  "You are signed out of ChatGPT in the built-in browser, so messages cannot be sent.": "Du bist im integrierten Browser von ChatGPT abgemeldet, daher können keine Nachrichten gesendet werden.",
+  "Sign in to ChatGPT": "Bei ChatGPT anmelden"
 }

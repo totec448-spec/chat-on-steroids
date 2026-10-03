@@ -444,7 +444,7 @@
   "Selected independently from the model.": "獨立於模型選擇。",
   "Browser & history": "瀏覽器與歷程記錄",
   "ChatGPT browser": "ChatGPT 瀏覽器",
-  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.": "應用程式啟動瀏覽器時使用此選項。請在該瀏覽器的目前設定中安裝配套擴充功能並登入 ChatGPT。已連線的分頁仍保留在原瀏覽器中。",
+  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "應用程式啟動瀏覽器時使用此選項。請在該瀏覽器的目前設定中安裝配套擴充功能並登入 ChatGPT。已連線的分頁仍保留在原瀏覽器中。內建的 Chat On Steroids 瀏覽器無需安裝，在系統匣中隱藏執行。",
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
@@ -1771,5 +1771,11 @@
   "When to continue": "何時繼續",
   "Session Finish only": "僅在回合結束通知時",
   "Also after the turn": "也可在回合後傳送",
-  "Search models": "搜尋模型"
+  "Search models": "搜尋模型",
+  "Chat On Steroids browser (built-in)": "Chat On Steroids 瀏覽器（內建）",
+  "ChatGPT can run hidden in the built-in Chat On Steroids browser, out of your taskbar.": "ChatGPT 可以在內建的 Chat On Steroids 瀏覽器中隱藏執行，不佔用工作列。",
+  "Choose in Settings": "在設定中選擇",
+  "Dismiss": "關閉",
+  "You are signed out of ChatGPT in the built-in browser, so messages cannot be sent.": "你已在內建瀏覽器中登出 ChatGPT，因此無法傳送訊息。",
+  "Sign in to ChatGPT": "登入 ChatGPT"
 }

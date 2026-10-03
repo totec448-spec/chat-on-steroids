@@ -261,7 +261,7 @@
   "Selected independently from the model.": "Modelden bağımsız olarak seçilir.",
   "Browser & history": "Tarayıcı ve geçmiş",
   "ChatGPT browser": "ChatGPT tarayıcısı",
-  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.": "Uygulama bir tarayıcı başlattığında kullanılır. Bu tarayıcının etkin profiline yardımcı eklentiyi yükleyip ChatGPT'ye giriş yapın. Zaten bağlı olan sekmeler kendi tarayıcılarında kalır.",
+  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "Uygulama bir tarayıcı başlattığında kullanılır. Bu tarayıcının etkin profiline yardımcı eklentiyi yükleyip ChatGPT'ye giriş yapın. Zaten bağlı olan sekmeler kendi tarayıcılarında kalır. Yerleşik Chat On Steroids tarayıcısı kurulum gerektirmez ve sistem tepsisinde gizli çalışır.",
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
@@ -1771,5 +1771,11 @@
   "When to continue": "Ne zaman devam edilsin",
   "Session Finish only": "Yalnızca oturum bitişinde",
   "Also after the turn": "Turdan sonra da",
-  "Search models": "Model ara"
+  "Search models": "Model ara",
+  "Chat On Steroids browser (built-in)": "Chat On Steroids tarayıcısı (yerleşik)",
+  "ChatGPT can run hidden in the built-in Chat On Steroids browser, out of your taskbar.": "ChatGPT, yerleşik Chat On Steroids tarayıcısında görev çubuğunda görünmeden gizli çalışabilir.",
+  "Choose in Settings": "Ayarlarda seç",
+  "Dismiss": "Kapat",
+  "You are signed out of ChatGPT in the built-in browser, so messages cannot be sent.": "Yerleşik tarayıcıda ChatGPT oturumunuz kapalı, bu yüzden mesaj gönderilemiyor.",
+  "Sign in to ChatGPT": "ChatGPT'de oturum açın"
 }

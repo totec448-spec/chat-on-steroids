@@ -1477,8 +1477,10 @@ describe('session IPC contracts', () => {
     });
     const reply = await handlers.get('sessions:openChat')!(null, { id: session.id }) as any;
     expect(reply.ok, reply.error).toBe(true);
+    // An explicit user action: only the CoS browser uses `reveal`, to bring its window forward.
     expect(openInPreferredBrowser).toHaveBeenCalledWith(
-      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { reveal: true }
     );
 
     const unattributed = await createSession({ title: 'no conversation', conversationId: null });

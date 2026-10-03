@@ -59,6 +59,7 @@
 .ph.ph-dots-three::before { content: '\e1fe'; }
 .ph.ph-download-simple::before { content: '\e20c'; }
 .ph.ph-eye::before { content: '\e220'; }
+.ph.ph-eye-slash::before { content: '\e224'; }
 .ph.ph-file::before { content: '\e230'; }
 .ph.ph-file-text::before { content: '\e23a'; }
 .ph.ph-folder::before { content: '\e24a'; }

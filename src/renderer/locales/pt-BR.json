@@ -248,7 +248,7 @@
   "Selected independently from the model.": "Escolhido independentemente do modelo.",
   "Browser & history": "Navegador e histórico",
   "ChatGPT browser": "Navegador do ChatGPT",
-  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.": "Usado quando o aplicativo abre um navegador. Instale a extensão complementar e entre no ChatGPT pelo perfil ativo desse navegador. As abas já conectadas permanecem no navegador em que estão abertas.",
+  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "Usado quando o aplicativo abre um navegador. Instale a extensão complementar e entre no ChatGPT pelo perfil ativo desse navegador. As abas já conectadas permanecem no navegador em que estão abertas. O navegador integrado do Chat On Steroids não precisa de instalação e roda escondido na bandeja.",
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
@@ -1771,5 +1771,11 @@
   "When to continue": "Quando continuar",
   "Session Finish only": "Somente no fim da sessão",
   "Also after the turn": "Também após este turno",
-  "Search models": "Pesquisar modelos"
+  "Search models": "Pesquisar modelos",
+  "Chat On Steroids browser (built-in)": "Navegador do Chat On Steroids (integrado)",
+  "ChatGPT can run hidden in the built-in Chat On Steroids browser, out of your taskbar.": "O ChatGPT pode rodar escondido no navegador integrado do Chat On Steroids, fora da barra de tarefas.",
+  "Choose in Settings": "Escolher nas Configurações",
+  "Dismiss": "Dispensar",
+  "You are signed out of ChatGPT in the built-in browser, so messages cannot be sent.": "Você saiu do ChatGPT no navegador integrado, então as mensagens não podem ser enviadas.",
+  "Sign in to ChatGPT": "Entrar no ChatGPT"
 }

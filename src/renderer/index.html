@@ -166,6 +166,17 @@
         <span>Chat On Steroids connector tools changed. Refresh the affected connector in ChatGPT; this is separate from the browser extension.</span>
         <button class="btn btn-icon" id="dismissPluginRefreshReminder" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><i class="ico ph ph-x" aria-hidden="true"></i></button>
       </div>
+      <div class="notice is-warn" id="cosSignInNotice" role="alert" hidden>
+        <i class="ico ph ph-lock-key" aria-hidden="true"></i>
+        <span>You are signed out of ChatGPT in the built-in browser, so messages cannot be sent.</span>
+        <button class="btn btn-quiet" id="cosSignInNoticeOpen" type="button">Sign in to ChatGPT</button>
+      </div>
+      <div class="notice" id="cosBrowserNotice" role="status" hidden>
+        <i class="ico ph ph-eye-slash" aria-hidden="true"></i>
+        <span>ChatGPT can run hidden in the built-in Chat On Steroids browser, out of your taskbar.</span>
+        <button class="btn btn-quiet" id="cosBrowserNoticeChoose" type="button">Choose in Settings</button>
+        <button class="btn btn-icon" id="dismissCosBrowserNotice" type="button" title="Dismiss" aria-label="Dismiss"><i class="ico ph ph-x" aria-hidden="true"></i></button>
+      </div>
       </div>
 
       <main>
@@ -893,7 +904,7 @@
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Browser & history</h2><p>Manage background tabs, browser preferences, and history compaction.</p></div></header>
                 <div class="settings-surface pane">
-                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option></select></label>
+                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option><option value="cos">Chat On Steroids browser (built-in)</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Browser bridge port</b><em id="browserBridgePortHint">Auto uses the first available port. A fixed port must be available.</em></span><select id="browserBridgePort"><option value="auto">Auto</option><option value="8765">8765</option><option value="8766">8766</option><option value="8767">8767</option><option value="8768">8768</option><option value="8769">8769</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
                   <label class="setting"><span class="setting-text"><b>Automatic plugin refresh</b><em>Let the companion refresh changed connector tools in ChatGPT. Off by default; manual refresh remains available in ChatGPT.</em></span><input id="autoRefreshPlugins" type="checkbox" /></label>

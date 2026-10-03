@@ -941,6 +941,10 @@ main {
 
 #dismissPluginRefreshReminder { flex: none; }
 
+/* A state that blocks sending, not a tip: stated in weight, as `.hint.is-warn` does. */
+.notice.is-warn span { font-weight: 600; }
+.notice.is-warn .ico { color: var(--ink); }
+
 /* ------------------------------------------------------------- permissions */
 
 .perm + .perm {
@@ -2612,6 +2616,21 @@ input[readonly] {
 
 .setting + .setting {
   border-top: 1px solid var(--line);
+}
+
+/* A notice sent the user here: mark the row once, then let it settle. */
+.setting.is-attention {
+  border-radius: 8px;
+  animation: setting-attention 1.8s ease-out;
+}
+
+@keyframes setting-attention {
+  0%, 35% { background: var(--accent-wash); box-shadow: 0 0 0 1px var(--accent-edge); }
+  100% { background: transparent; box-shadow: 0 0 0 1px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setting.is-attention { animation-timing-function: steps(1, end); }
 }
 
 .setting-text {

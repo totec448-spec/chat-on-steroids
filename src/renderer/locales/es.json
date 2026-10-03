@@ -261,7 +261,7 @@
   "Selected independently from the model.": "Se selecciona independientemente del modelo.",
   "Browser & history": "Navegador e historial",
   "ChatGPT browser": "Navegador para ChatGPT",
-  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.": "Se usa cuando la aplicación abre un navegador. Instala la extensión complementaria e inicia sesión en ChatGPT en el perfil activo de este navegador. Las pestañas ya conectadas permanecen en su navegador.",
+  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "Se usa cuando la aplicación abre un navegador. Instala la extensión complementaria e inicia sesión en ChatGPT en el perfil activo de este navegador. Las pestañas ya conectadas permanecen en su navegador. El navegador integrado de Chat On Steroids no necesita instalación y se ejecuta oculto en la bandeja.",
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
@@ -1771,5 +1771,11 @@
   "When to continue": "Cuándo continuar",
   "Session Finish only": "Solo en la finalización de sesión",
   "Also after the turn": "También después del turno",
-  "Search models": "Buscar modelos"
+  "Search models": "Buscar modelos",
+  "Chat On Steroids browser (built-in)": "Navegador de Chat On Steroids (integrado)",
+  "ChatGPT can run hidden in the built-in Chat On Steroids browser, out of your taskbar.": "ChatGPT puede ejecutarse oculto en el navegador integrado de Chat On Steroids, fuera de la barra de tareas.",
+  "Choose in Settings": "Elegir en Ajustes",
+  "Dismiss": "Descartar",
+  "You are signed out of ChatGPT in the built-in browser, so messages cannot be sent.": "Has cerrado sesión en ChatGPT en el navegador integrado, así que no se pueden enviar mensajes.",
+  "Sign in to ChatGPT": "Inicia sesión en ChatGPT"
 }

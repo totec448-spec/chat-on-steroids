@@ -1,6 +1,7 @@
 import { currentLanguage, ui, uiText, t, initLanguage, onLanguageChange } from './i18n.js';
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
+import { paintCosBrowserNotice, paintCosSignInNotice } from './cos-browser-notice.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
@@ -137,6 +138,20 @@ let setupKeySave: Promise<boolean> = Promise.resolve(true);
 // ------------------------------------------------------------------- tabs
 
 let openSkillsLibrary: () => void = () => undefined;
+
+/** Settings, at the ChatGPT browser choice, marked once so the eye finds it. */
+function revealBrowserChoice(): void {
+  showTab('settings');
+  const choice = $<HTMLSelectElement>('chatBrowser');
+  const row = choice.closest<HTMLElement>('.setting');
+  choice.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  choice.focus({ preventScroll: true });
+  if (!row) return;
+  row.classList.remove('is-attention');
+  void row.offsetWidth;
+  row.classList.add('is-attention');
+  row.addEventListener('animationend', () => row.classList.remove('is-attention'), { once: true });
+}
 
 function showTab(name: string): void {
   if (name === 'skills') openSkillsLibrary();
@@ -1180,6 +1195,8 @@ function apply(next: AppState): void {
   // ---- out of date, app or extension
   paintUpdate(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {});
+  paintCosBrowserNotice({ chatBrowser: next.config.ui.chatBrowser, browserConnected: next.bridge.present === true }, revealBrowserChoice);
+  paintCosSignInNotice({ chatBrowser: next.config.ui.chatBrowser, signedIn: next.cosBrowserSignedIn }, () => void run(api.showCosBrowser()));
 
   // ---- health numbers and facts
   paintClock();
