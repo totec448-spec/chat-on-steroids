@@ -362,6 +362,11 @@
   "Chat list width": "Ширина списка чатов",
   "Settings navigation": "Навигация по настройкам",
   "Add a project folder": "Добавить папку проекта",
+  "Project folders": "Папки проекта",
+  "Primary project folder": "Основная папка проекта",
+  "Add folder": "Добавить папку",
+  "Add folder to project {0}": "Добавить папку в проект {0}",
+  "Remove folder {0} from project {1}": "Удалить папку {0} из проекта {1}",
   "Switch to dark mode": "Переключиться на тёмную тему",
   "Search plugins": "Искать плагины",
   "Add a plugin": "Добавить плагин",
@@ -1758,6 +1763,10 @@
   "How strongly text stands out from its background.": "Насколько сильно текст выделяется на фоне.",
   "Used when you start a new chat. A chat you continue keeps its own model.": "Используется, когда вы начинаете новый чат. Продолжаемый чат сохраняет свою модель.",
   "Lets tools run, including computer use, file editing and JavaScript, even when the app can’t tell which chat called them. Sub-agents and other chat actions still need a known chat. These calls are listed under Unattributed activity.": "Разрешает запуск инструментов, включая управление компьютером, редактирование файлов и JavaScript, даже если приложение не знает, какой чат их вызвал. Субагентам и другим действиям чата по-прежнему нужен известный чат. Такие вызовы показываются в разделе «Активность без привязки».",
+  "Trust only selected chats": "Доверять только выбранным чатам",
+  "Untrust this chat: strict mode refuses its tool calls": "Отозвать доверие к этому чату: строгий режим отклоняет его вызовы инструментов",
+  "Trust this chat: strict mode lets its tool calls run": "Доверять этому чату: строгий режим разрешает его вызовы инструментов",
+  "Only chats you trust can use this computer's tools. Existing chats start untrusted; hover a chat in the sidebar and choose Trust (✓). Workers and resumed chats follow the chat they came from. Calls the app can't link to a chat are refused.": "Только доверенные чаты могут использовать инструменты этого компьютера. Существующие чаты изначально не доверены; наведите указатель на чат в боковой панели и выберите «Доверять» (✓). Воркеры и возобновлённые чаты следуют чату, из которого они появились. Вызовы, которые приложение не может связать с чатом, отклоняются.",
   "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "Включить режим «только чтение»: ChatGPT по-прежнему видит файлы и экран, но не может создавать, изменять, перемещать или удалять файлы, запускать программы и управлять этим компьютером.",
   "Read-only is on: ChatGPT can only look. Click to allow changes again.": "Режим «только чтение» включён: ChatGPT может только смотреть. Нажмите, чтобы снова разрешить изменения.",
   "General": "Общие",
@@ -1798,5 +1807,6 @@
   "Choose whether imported Skills can be matched to ordinary messages.": "Выберите, можно ли автоматически сопоставлять импортированные Skills с обычными сообщениями.",
   "Auto-select Skills": "Автоматически выбирать Skills",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Если по метаданным однозначно подходит один импортированный Skill, он добавляется к сообщению. Явный выбор Skill всегда имеет приоритет.",
-  "Auto-selected Skill: /{0}": "Автоматически выбран Skill: /{0}"
+  "Auto-selected Skill: /{0}": "Автоматически выбран Skill: /{0}",
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Очистить всех воркеров? Работающие воркеры остановятся, а их сохранённые истории будут удалены навсегда. Их чаты останутся в ChatGPT."
 }

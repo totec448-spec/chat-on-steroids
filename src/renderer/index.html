@@ -36,6 +36,8 @@
           <button class="btn" id="zoomOut" type="button">Zoom Out <kbd>Ctrl+−</kbd></button>
           <button class="btn" id="zoomActualSize" type="button">Actual Size <span id="zoomReset">100%</span><kbd>Ctrl+0</kbd></button>
         </div></details>
+        <button class="btn topbar-theme" id="themeBtn" type="button" aria-label="Switch to light mode" title="Switch to light mode"><i class="ico ph ph-sun" id="themeIcon" aria-hidden="true"></i></button>
+        <button class="btn topbar-connection" id="headerConnect" type="button" hidden>Connect</button>
       </div>
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
@@ -140,7 +142,6 @@
           <span id="headerSub">Not set up yet</span>
         </span>
         <span class="state">
-          <button class="btn connect-prompt" id="headerConnect" type="button" hidden>Connect</button>
           <!-- Only ever visible with a downloaded, digest-checked update waiting. This app
                lives in the tray and is closed to it, so "installs the next time you start it"
                can mean days. This is the press that means now. -->
@@ -899,6 +900,14 @@
                       <em>Lets tools run, including computer use, file editing and JavaScript, even when the app can’t tell which chat called them. Sub-agents and other chat actions still need a known chat. These calls are listed under Unattributed activity.</em>
                     </span>
                     <input id="allowUnattributedCalls" type="checkbox" />
+                  </label>
+
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Trust only selected chats</b>
+                      <em>Only chats you trust can use this computer's tools. Existing chats start untrusted; hover a chat in the sidebar and choose Trust (✓). Workers and resumed chats follow the chat they came from. Calls the app can't link to a chat are refused.</em>
+                    </span>
+                    <input id="strictChatAllowlist" type="checkbox" />
                   </label>
 
                   <label class="setting">

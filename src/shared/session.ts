@@ -735,6 +735,21 @@ export interface SessionSummary {
 }
 
 /**
+ * Committed Compact & Resume predecessors for the conversation currently attached to this
+ * session, nearest first. This is pure projection of durable metadata: callers that need an
+ * authorization decision must first obtain the unique authoritative session summary.
+ */
+export function committedResumeAncestorsFromSummary(
+  summary: Pick<SessionSummary, 'conversationId' | 'chatIds' | 'lastCommittedResumeHandoffId'>,
+  conversationId: string
+): string[] {
+  if (!conversationId || summary.conversationId !== conversationId || !summary.lastCommittedResumeHandoffId) return [];
+  const current = summary.chatIds.lastIndexOf(conversationId);
+  if (current !== summary.chatIds.length - 1 || current < 1) return [];
+  return summary.chatIds.slice(0, current).reverse();
+}
+
+/**
  * What one `session:changed` push says about transcripts. A push without it refreshes only
  * the session catalog and controls; the selected transcript is reread only for its owner.
  */

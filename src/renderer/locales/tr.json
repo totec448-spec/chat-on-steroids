@@ -362,6 +362,11 @@
   "Chat list width": "Sohbet listesi genişliği",
   "Settings navigation": "Ayarlar menüsü",
   "Add a project folder": "Proje klasörü ekle",
+  "Project folders": "Proje klasörleri",
+  "Primary project folder": "Birincil proje klasörü",
+  "Add folder": "Klasör ekle",
+  "Add folder to project {0}": "{0} projesine klasör ekle",
+  "Remove folder {0} from project {1}": "{0} klasörünü {1} projesinden kaldır",
   "Switch to dark mode": "Koyu moda geç",
   "Search plugins": "Eklenti ara",
   "Add a plugin": "Eklenti ekle",
@@ -1758,6 +1763,10 @@
   "How strongly text stands out from its background.": "Metnin arka planından ne kadar belirgin ayrıldığı.",
   "Used when you start a new chat. A chat you continue keeps its own model.": "Yeni bir sohbet başlattığında kullanılır. Devam ettiğin bir sohbet kendi modelini korur.",
   "Lets tools run, including computer use, file editing and JavaScript, even when the app can’t tell which chat called them. Sub-agents and other chat actions still need a known chat. These calls are listed under Unattributed activity.": "Uygulama araçları hangi sohbetin çağırdığını bilmese bile bilgisayar kontrolü, dosya düzenleme ve JavaScript dahil araçların çalışmasına izin verir. Yardımcı ajanlar ve diğer sohbet işlemleri yine de bilinen bir sohbet gerektirir. Bu çağrılar İlişkilendirilmemiş etkinlik altında listelenir.",
+  "Trust only selected chats": "Yalnızca seçili sohbetlere güven",
+  "Untrust this chat: strict mode refuses its tool calls": "Bu sohbetin güvenini kaldır: katı mod araç çağrılarını reddeder",
+  "Trust this chat: strict mode lets its tool calls run": "Bu sohbete güven: katı mod araç çağrılarına izin verir",
+  "Only chats you trust can use this computer's tools. Existing chats start untrusted; hover a chat in the sidebar and choose Trust (✓). Workers and resumed chats follow the chat they came from. Calls the app can't link to a chat are refused.": "Yalnızca güvendiğiniz sohbetler bu bilgisayarın araçlarını kullanabilir. Mevcut sohbetler güvenilmez olarak başlar; kenar çubuğunda bir sohbetin üzerine gelin ve Güven (✓) seçeneğini seçin. Worker’lar ve devam ettirilen sohbetler geldikleri sohbeti izler. Uygulamanın bir sohbetle ilişkilendiremediği çağrılar reddedilir.",
   "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "Salt okunura geç: ChatGPT dosyaları ve ekranı görmeye devam eder ama dosya oluşturamaz, düzenleyemez, taşıyamaz veya silemez, program çalıştıramaz ve bu bilgisayarı kontrol edemez.",
   "Read-only is on: ChatGPT can only look. Click to allow changes again.": "Salt okunur açık: ChatGPT yalnızca görebilir. Değişikliklere yeniden izin vermek için tıklayın.",
   "General": "Genel",
@@ -1798,5 +1807,6 @@
   "Choose whether imported Skills can be matched to ordinary messages.": "İçe aktarılan Skills'in normal mesajlarla otomatik eşleştirilip eşleştirilmeyeceğini seçin.",
   "Auto-select Skills": "Skills'i otomatik seç",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Meta verilere göre yalnızca bir içe aktarılmış Skill açıkça eşleşirse o mesaja eklenir. Açık Skill seçimleri her zaman önceliklidir.",
-  "Auto-selected Skill: /{0}": "Otomatik seçilen Skill: /{0}"
+  "Auto-selected Skill: /{0}": "Otomatik seçilen Skill: /{0}",
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Tüm yardımcı ajanlar temizlensin mi? Çalışanlar durur ve kayıtlı geçmişleri kalıcı olarak silinir. Sohbetleri ChatGPT’de kalır."
 }

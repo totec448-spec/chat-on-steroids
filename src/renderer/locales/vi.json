@@ -349,6 +349,11 @@
   "Chat list width": "Chiều rộng danh sách cuộc trò chuyện",
   "Settings navigation": "Điều hướng Cài đặt",
   "Add a project folder": "Thêm thư mục dự án",
+  "Project folders": "Các thư mục dự án",
+  "Primary project folder": "Thư mục dự án chính",
+  "Add folder": "Thêm thư mục",
+  "Add folder to project {0}": "Thêm thư mục vào dự án {0}",
+  "Remove folder {0} from project {1}": "Xóa thư mục {0} khỏi dự án {1}",
   "Switch to dark mode": "Chuyển sang chế độ tối",
   "Search plugins": "Tìm plugin",
   "Add a plugin": "Thêm plugin",
@@ -1758,6 +1763,10 @@
   "How strongly text stands out from its background.": "Mức độ chữ nổi bật so với nền.",
   "Used when you start a new chat. A chat you continue keeps its own model.": "Dùng khi bạn bắt đầu một cuộc trò chuyện mới. Cuộc trò chuyện bạn tiếp tục vẫn giữ mô hình riêng.",
   "Lets tools run, including computer use, file editing and JavaScript, even when the app can’t tell which chat called them. Sub-agents and other chat actions still need a known chat. These calls are listed under Unattributed activity.": "Cho phép công cụ chạy, kể cả điều khiển máy tính, chỉnh sửa tệp và JavaScript, ngay cả khi ứng dụng không biết cuộc trò chuyện nào đã gọi chúng. Tác nhân phụ và các thao tác trò chuyện khác vẫn cần một cuộc trò chuyện đã xác định. Các lệnh gọi này được liệt kê trong Hoạt động chưa gán.",
+  "Trust only selected chats": "Chỉ tin cậy các cuộc trò chuyện đã chọn",
+  "Untrust this chat: strict mode refuses its tool calls": "Bỏ tin cậy cuộc trò chuyện này: chế độ nghiêm ngặt sẽ từ chối các lệnh gọi công cụ của nó",
+  "Trust this chat: strict mode lets its tool calls run": "Tin cậy cuộc trò chuyện này: chế độ nghiêm ngặt cho phép các lệnh gọi công cụ của nó",
+  "Only chats you trust can use this computer's tools. Existing chats start untrusted; hover a chat in the sidebar and choose Trust (✓). Workers and resumed chats follow the chat they came from. Calls the app can't link to a chat are refused.": "Chỉ những cuộc trò chuyện bạn tin cậy mới có thể dùng các công cụ trên máy tính này. Các cuộc trò chuyện hiện có bắt đầu ở trạng thái chưa tin cậy; di chuột lên một cuộc trò chuyện trong thanh bên và chọn Tin cậy (✓). Worker và cuộc trò chuyện được tiếp tục sẽ theo cuộc trò chuyện mà chúng xuất phát từ đó. Các lệnh gọi mà ứng dụng không thể liên kết với một cuộc trò chuyện sẽ bị từ chối.",
   "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "Chuyển sang chỉ đọc: ChatGPT vẫn xem được tệp và màn hình, nhưng không thể tạo, sửa, di chuyển hay xóa tệp, chạy chương trình hoặc điều khiển máy tính này.",
   "Read-only is on: ChatGPT can only look. Click to allow changes again.": "Chỉ đọc đang bật: ChatGPT chỉ có thể xem. Nhấp để cho phép thay đổi trở lại.",
   "General": "Chung",
@@ -1798,5 +1807,6 @@
   "Choose whether imported Skills can be matched to ordinary messages.": "Chọn có tự động ghép Skills đã nhập với tin nhắn thông thường hay không.",
   "Auto-select Skills": "Tự động chọn Skills",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Khi chỉ một Skill đã nhập khớp rõ ràng theo metadata, thêm Skill đó vào tin nhắn. Skill được chọn trực tiếp luôn được ưu tiên.",
-  "Auto-selected Skill: /{0}": "Skill được tự động chọn: /{0}"
+  "Auto-selected Skill: /{0}": "Skill được tự động chọn: /{0}",
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Xóa tất cả worker? Các worker đang chạy sẽ dừng và lịch sử đã lưu bị xóa vĩnh viễn. Các cuộc trò chuyện vẫn còn trong ChatGPT."
 }

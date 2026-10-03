@@ -328,6 +328,8 @@ export interface MultiAgentSettings {
   globalMaxWorkers?: number;
   /** Permit self-contained calls when browser evidence cannot identify their conversation. */
   allowUnattributedCalls: boolean;
+  /** Default-deny local tools to exact trusted conversations. */
+  strictChatAllowlist?: boolean;
   /**
    * Reopen/reload chats that are not Goal/Loop driven — workers, primes, plain chats that have
    * called tools — once when their tab disappears or goes silent. Goal/Loop chats are always

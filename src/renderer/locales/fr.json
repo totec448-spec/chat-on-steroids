@@ -362,6 +362,11 @@
   "Chat list width": "Largeur de la liste des chats",
   "Settings navigation": "Navigation des paramètres",
   "Add a project folder": "Ajouter un dossier de projet",
+  "Project folders": "Dossiers du projet",
+  "Primary project folder": "Dossier principal du projet",
+  "Add folder": "Ajouter un dossier",
+  "Add folder to project {0}": "Ajouter un dossier au projet {0}",
+  "Remove folder {0} from project {1}": "Retirer le dossier {0} du projet {1}",
   "Switch to dark mode": "Passer au thème sombre",
   "Search plugins": "Rechercher des plugins",
   "Add a plugin": "Ajouter un plugin",
@@ -1758,6 +1763,10 @@
   "How strongly text stands out from its background.": "À quel point le texte ressort sur son fond.",
   "Used when you start a new chat. A chat you continue keeps its own model.": "Utilisé quand vous commencez une nouvelle discussion. Une discussion que vous poursuivez garde son propre modèle.",
   "Lets tools run, including computer use, file editing and JavaScript, even when the app can’t tell which chat called them. Sub-agents and other chat actions still need a known chat. These calls are listed under Unattributed activity.": "Permet d’exécuter des outils, y compris le contrôle de l’ordinateur, la modification de fichiers et JavaScript, même quand l’app ne sait pas quelle discussion les a appelés. Les sous-agents et les autres actions de discussion nécessitent toujours une discussion connue. Ces appels apparaissent sous Activité non attribuée.",
+  "Trust only selected chats": "Faire confiance uniquement aux chats sélectionnés",
+  "Untrust this chat: strict mode refuses its tool calls": "Retirer la confiance à ce chat : le mode strict refuse ses appels d’outils",
+  "Trust this chat: strict mode lets its tool calls run": "Faire confiance à ce chat : le mode strict autorise ses appels d’outils",
+  "Only chats you trust can use this computer's tools. Existing chats start untrusted; hover a chat in the sidebar and choose Trust (✓). Workers and resumed chats follow the chat they came from. Calls the app can't link to a chat are refused.": "Seuls les chats auxquels vous faites confiance peuvent utiliser les outils de cet ordinateur. Les chats existants commencent sans confiance ; survolez un chat dans la barre latérale et choisissez Faire confiance (✓). Les workers et les chats repris suivent le chat dont ils proviennent. Les appels que l’app ne peut pas rattacher à un chat sont refusés.",
   "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "Passer en lecture seule : ChatGPT peut toujours consulter les fichiers et l’écran, mais ne peut plus créer, modifier, déplacer ou supprimer de fichiers, lancer de programmes ni contrôler cet ordinateur.",
   "Read-only is on: ChatGPT can only look. Click to allow changes again.": "Lecture seule activée : ChatGPT peut seulement consulter. Cliquez pour autoriser à nouveau les modifications.",
   "General": "Général",
@@ -1798,5 +1807,6 @@
   "Choose whether imported Skills can be matched to ordinary messages.": "Choisissez si les Skills importés peuvent être associés automatiquement aux messages ordinaires.",
   "Auto-select Skills": "Sélection automatique des Skills",
   "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Lorsqu’un seul Skill importé correspond clairement d’après ses métadonnées, ajoutez-le à ce message. Un choix explicite de Skill reste toujours prioritaire.",
-  "Auto-selected Skill: /{0}": "Skill sélectionné automatiquement : /{0}"
+  "Auto-selected Skill: /{0}": "Skill sélectionné automatiquement : /{0}",
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Effacer tous les workers ? Ceux en cours s’arrêtent et leurs historiques enregistrés sont supprimés définitivement. Leurs chats restent dans ChatGPT."
 }
