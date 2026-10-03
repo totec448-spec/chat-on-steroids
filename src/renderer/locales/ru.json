@@ -1788,5 +1788,6 @@
   "Local control API": "Локальный API управления",
   "Let agents on this computer read app status and chats.": "Разрешить агентам на этом компьютере читать состояние приложения и чаты.",
   "Allow actions": "Разрешить действия",
-  "Let those agents also send and cancel messages. Needs the local control API.": "Эти агенты смогут также отправлять и отменять сообщения. Нужен локальный API управления."
+  "Let those agents also send and cancel messages. Needs the local control API.": "Эти агенты смогут также отправлять и отменять сообщения. Нужен локальный API управления.",
+  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "После каждого обновления macOS один раз запрашивает пароль, чтобы эта версия могла открыть сохранённые ключи. Введите пароль для входа в Mac и выберите «Разрешать всегда». Чаты и подключение к браузеру продолжат работу, как только вы ответите."
 }
