@@ -30,6 +30,7 @@ const { initConfigPath } = await import('../src/main/config.js');
 const { initSecretsPath } = await import('../src/main/secrets.js');
 const { initDurableStore, flushDurable } = await import('../src/main/durable.js');
 const { appendEvent, createSession, initSessionStore, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
+const { createUserActionRequest, listUserActionRequests, recordUserActionReceipt } = await import('../src/main/session/user-actions.js');
 const { cancelInput, deliveryProof, enqueueInput } = await import('../src/main/session/input.js');
 const { logInfo, logWarn, logError } = await import('../src/main/logger.js');
 const { redactSecretText } = await import('../src/main/redaction.js');
@@ -85,6 +86,7 @@ let sessionId: string;
 let liveSessionId: string;
 let firstAssistantSeq = 0;
 let revisionSeq = 0;
+let pendingUserActionId = '';
 const allIds: string[] = [];
 
 beforeAll(async () => {
@@ -105,6 +107,20 @@ beforeAll(async () => {
   await appendEvent(sessionId, { kind: 'turn_end', source: 'extension', time: 50, outcome: 'completed', turnId: 'turn-1' });
   // A revision keeps the message's first position but takes the newest seq.
   revisionSeq = (await upsertMessageEvent(sessionId, { ...assistant, renderedHtml: text('<p>x</p>') })).event.seq;
+  const pending = await createUserActionRequest(sessionId, {
+    command: `curl -H "Authorization: Bearer ${apiKey}" https://example.test`,
+    shell: 'powershell', cwd: 'C:\\workspace', purpose: `Run a local check ${apiKey}`,
+    reportedProviderReason: `Reporter says provider refused ${apiKey}`,
+    reportedRiskNote: 'Reporter says this command reads one endpoint',
+    constraints: ['Run once'], expectedEvidence: ['exit code']
+  });
+  pendingUserActionId = pending.id;
+  const reported = await createUserActionRequest(sessionId, {
+    command: 'npm test', shell: 'powershell', cwd: 'C:\\workspace', purpose: 'Run tests'
+  });
+  await recordUserActionReceipt(sessionId, reported.id, {
+    outcome: 'reported_executed', note: `Reporter note ${apiKey}`, evidence: [`exit=0 ${apiKey}`]
+  });
 
   const others = [await createSession({ title: 'Second' }), await createSession({ title: 'Third' })];
   liveSessionId = (await createSession({ title: 'Has a chat', conversationId: 'chat-live-1' })).id;
@@ -128,9 +144,11 @@ describe('read routes', () => {
   it('are listed by health and need the token like every other route', async () => {
     const health = await call('/v1/health');
     expect(health.body.routes).toEqual([
-      '/v1/health', '/v1/status', '/v1/sessions', '/v1/sessions/{id}', '/v1/sessions/{id}/events', '/v1/inputs', '/v1/agents', '/v1/log'
+      '/v1/health', '/v1/status', '/v1/sessions', '/v1/sessions/{id}', '/v1/sessions/{id}/events',
+      '/v1/sessions/{id}/user-actions', '/v1/inputs', '/v1/agents', '/v1/log'
     ]);
-    for (const route of ['/v1/sessions', `/v1/sessions/${sessionId}`, `/v1/sessions/${sessionId}/events`, '/v1/inputs', '/v1/agents', '/v1/log']) {
+    for (const route of ['/v1/sessions', `/v1/sessions/${sessionId}`, `/v1/sessions/${sessionId}/events`,
+      `/v1/sessions/${sessionId}/user-actions`, '/v1/inputs', '/v1/agents', '/v1/log']) {
       expect((await call(route, {})).status).toBe(401);
       expect((await call(route)).status).toBe(200);
     }
@@ -154,6 +172,7 @@ describe('read routes', () => {
       `/v1/sessions/${sessionId}/events?kinds=`,
       `/v1/sessions/${sessionId}/events?from=1&before=5`,
       `/v1/sessions/${sessionId}/events?from=1&after=0`,
+      `/v1/sessions/${sessionId}/user-actions?x=1`,
       '/v1/inputs?state=deleted',
       '/v1/inputs?state=decision',
       '/v1/inputs?limit=501',
@@ -173,6 +192,7 @@ describe('read routes', () => {
     expect(missing.status).toBe(404);
     expect(missing.body.error).toBe('session_not_found');
     expect((await call('/v1/sessions/2026-01-01-deadbeef/events')).body.error).toBe('session_not_found');
+    expect((await call('/v1/sessions/2026-01-01-deadbeef/user-actions')).body.error).toBe('session_not_found');
     for (const route of ['/v1/sessions/short', '/v1/sessions/..%2F..%2Fconfig', `/v1/sessions/${sessionId}/other`, '/v1/sessions/a/b/c']) {
       expect((await call(route)).status, route).toBe(404);
     }
@@ -186,12 +206,35 @@ describe('read routes', () => {
     for (let attempt = 0; cased.toUpperCase() === cased && attempt < 50; attempt++) cased = (await createSession({ title: 'Cased' })).id;
     expect(cased.toUpperCase()).not.toBe(cased);
     const before = (await call('/v1/sessions?limit=50')).body.total;
-    for (const route of [`/v1/sessions/${cased.toUpperCase()}`, `/v1/sessions/${cased.toUpperCase()}/events`]) {
+    for (const route of [`/v1/sessions/${cased.toUpperCase()}`, `/v1/sessions/${cased.toUpperCase()}/events`,
+      `/v1/sessions/${cased.toUpperCase()}/user-actions`]) {
       const response = await call(route);
       expect(response.status, route).toBe(404);
       expect(response.body.error).toBe('not_found');
     }
     expect((await call('/v1/sessions?limit=50')).body.total).toBe(before);
+  });
+
+  it('projects user-action requests as reporter status without mutating the ledger', async () => {
+    const before = await listUserActionRequests(sessionId);
+    const response = await call(`/v1/sessions/${sessionId}/user-actions`);
+    expect(response.status).toBe(200);
+    expect(response.body.total).toBe(2);
+    expect(response.body.actions[0]).toMatchObject({
+      id: pendingUserActionId,
+      state: 'pending',
+      command: { text: expect.stringContaining('[redacted]'), truncated: false },
+      cwd: { text: 'C:\\workspace' },
+      receipt: null
+    });
+    expect(response.body.actions[1]).toMatchObject({
+      state: 'reported_executed',
+      receipt: { outcome: 'reported_executed', reportedAt: expect.any(Number), note: { text: expect.stringContaining('[redacted]') } }
+    });
+    expect(JSON.stringify(response.body)).not.toContain(apiKey);
+    expect(await listUserActionRequests(sessionId)).toEqual(before);
+
+    expect(await call(`/v1/sessions/${liveSessionId}/user-actions`)).toMatchObject({ status: 200, body: { actions: [], total: 0 } });
   });
 
   it('turn away a burst of journal reads instead of holding them all in memory', async () => {

@@ -10,7 +10,9 @@ import type {
   ControlApiSession,
   ControlApiSessionDetail,
   ControlApiSessionList,
-  ControlApiText
+  ControlApiText,
+  ControlApiUserAction,
+  ControlApiUserActions
 } from '../shared/control-api.js';
 import { positionOf } from '../shared/chronology.js';
 import { normalizedToolOutcome, toolCallSummary } from '../shared/session.js';
@@ -25,6 +27,11 @@ import { redactSecretText } from './redaction.js';
 import { deliveryProof, listInputs } from './session/input.js';
 import type { InputEntry } from './session/input.js';
 import { readSession, readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
+import {
+  listUserActionRequests,
+  UserActionSessionNotFoundError
+} from './session/user-actions.js';
+import type { UserActionRequest } from '../shared/user-action.js';
 
 /**
  * The read routes of the local control API: sessions, their events, the input outbox, agents
@@ -276,6 +283,46 @@ async function sessionDetail(id: string, params: URLSearchParams): Promise<Contr
   });
 }
 
+// ---------------------------------------------------------- user actions
+
+export function projectUserAction(row: UserActionRequest): ControlApiUserAction {
+  const receipt = row.receipt;
+  return {
+    id: row.id,
+    createdAt: row.createdAt,
+    state: receipt?.outcome ?? 'pending',
+    // The durable ledger retains the reporter's exact text. This projection does not: a trusted
+    // local observer receives the same known-secret redaction and size bounds as other free text.
+    command: plain(row.command, TOOL_TEXT_CAP),
+    shell: line(row.shell, TITLE_CAP),
+    cwd: plain(row.cwd, TASK_CAP),
+    purpose: plain(row.purpose, TASK_CAP),
+    reportedProviderReason: row.reportedProviderReason ? plain(row.reportedProviderReason, TASK_CAP) : null,
+    reportedRiskNote: row.reportedRiskNote ? plain(row.reportedRiskNote, TASK_CAP) : null,
+    constraints: row.constraints.map(value => plain(value, SUMMARY_CAP)),
+    expectedEvidence: row.expectedEvidence.map(value => plain(value, SUMMARY_CAP)),
+    receipt: receipt
+      ? {
+          outcome: receipt.outcome,
+          reportedAt: receipt.reportedAt,
+          note: receipt.note ? plain(receipt.note, TASK_CAP) : null,
+          evidence: receipt.evidence.map(value => plain(value, SUMMARY_CAP))
+        }
+      : null
+  };
+}
+
+async function userActions(id: string, params: URLSearchParams): Promise<ControlApiUserActions> {
+  parseQuery(params, {});
+  try {
+    const rows = await listUserActionRequests(id);
+    return { actions: rows.map(projectUserAction), total: rows.length };
+  } catch (error) {
+    if (error instanceof UserActionSessionNotFoundError) throw new RequestError(404, 'session_not_found');
+    throw error;
+  }
+}
+
 // ---------------------------------------------------------------- events
 
 export function projectEvent(event: SessionEvent): ControlApiEvent {
@@ -506,7 +553,7 @@ function activityLog(params: URLSearchParams): ControlApiLog {
 
 // ---------------------------------------------------------------- routes
 
-const SESSION_ROUTE = /^\/v1\/sessions\/([0-9a-z-]{8,64})(\/events)?$/;
+const SESSION_ROUTE = /^\/v1\/sessions\/([0-9a-z-]{8,64})(\/events|\/user-actions)?$/;
 
 /**
  * Undefined when the path is not one of these routes. Ids are generated lowercase, and a
@@ -522,6 +569,10 @@ export async function serveRead(route: string, params: URLSearchParams): Promise
   }
   if (route === '/v1/log') return activityLog(params);
   const session = SESSION_ROUTE.exec(route);
-  if (session) return session[2] ? sessionEvents(session[1]!, params) : sessionDetail(session[1]!, params);
+  if (session) {
+    if (session[2] === '/events') return sessionEvents(session[1]!, params);
+    if (session[2] === '/user-actions') return userActions(session[1]!, params);
+    return sessionDetail(session[1]!, params);
+  }
   return undefined;
 }

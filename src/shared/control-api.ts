@@ -15,6 +15,7 @@ export const CONTROL_API_ROUTES = [
   '/v1/sessions',
   '/v1/sessions/{id}',
   '/v1/sessions/{id}/events',
+  '/v1/sessions/{id}/user-actions',
   '/v1/inputs',
   '/v1/agents',
   '/v1/log'
@@ -211,6 +212,36 @@ export interface ControlApiSessionDetail {
    * session moved to another chat while it was being read.
    */
   live?: ControlApiLive | null;
+}
+
+/**
+ * One human-execution request projected for a trusted local observer. Every free-text field is
+ * redacted/cut by main before it reaches this wire shape. `state` is reporter status only; it is
+ * never proof that the command ran or that its result was verified.
+ */
+export interface ControlApiUserAction {
+  id: string;
+  createdAt: number;
+  state: 'pending' | 'reported_executed' | 'reported_failed' | 'cancelled';
+  command: ControlApiText;
+  shell: string;
+  cwd: ControlApiText;
+  purpose: ControlApiText;
+  reportedProviderReason: ControlApiText | null;
+  reportedRiskNote: ControlApiText | null;
+  constraints: ControlApiText[];
+  expectedEvidence: ControlApiText[];
+  receipt: null | {
+    outcome: 'reported_executed' | 'reported_failed' | 'cancelled';
+    reportedAt: number;
+    note: ControlApiText | null;
+    evidence: ControlApiText[];
+  };
+}
+
+export interface ControlApiUserActions {
+  actions: ControlApiUserAction[];
+  total: number;
 }
 
 export type ControlApiEvent = {
