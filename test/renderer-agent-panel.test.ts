@@ -18,6 +18,7 @@ it('keeps Prime selection independent and rejects late results after parent navi
   const worker = { id: 'worker-session', title: 'Worker', updatedAt: 1 } as SessionSummary;
   panel.update('prime-session', [worker]); toggle.click();
   expect(host.textContent).toContain('History · 1');
+  expect(host.textContent).not.toContain('0 failed');
   // A worker with no conversation or model yet still gets its row (undefined === undefined once threw here).
   expect(host.querySelectorAll('.agent-panel-row')).toHaveLength(1);
   const opening = panel.open(worker.id);
@@ -28,6 +29,34 @@ it('keeps Prime selection independent and rejects late results after parent navi
   expect(host.querySelector('aside')!.hidden).toBe(true);
   await panel.open(worker.id);
   expect(load).toHaveBeenCalledTimes(1);
+});
+
+it('translates the optional failed suffix in the History heading', async () => {
+  dom = new JSDOM('<main></main><button></button>', { url: 'https://local.test/' });
+  Object.assign(globalThis, { window: dom.window, document: dom.window.document, Node: dom.window.Node });
+  const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  const panel = createAgentPanel({
+    host,
+    toggle,
+    load: async () => ({ events: [] }),
+    render: () => [],
+    openMain: vi.fn(),
+    working: () => true,
+    agent: () => ({ state: 'failed', task: 'Placeholder failure', conversationId: 'placeholder-failed' })
+  });
+  panel.update('prime', [{
+    id: 'worker',
+    title: 'worker-1',
+    conversationId: 'placeholder-failed',
+    startedAt: 1,
+    updatedAt: 2,
+    origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-1', task: 'Placeholder failure' }
+  } as SessionSummary]);
+  toggle.click();
+  expect(host.textContent).toContain('Verlauf · 1 · 1 fehlgeschlagen');
+  setLanguage('en');
 });
 
 it('renders a selected worker and offers an explicit full-chat navigation', async () => {
@@ -113,7 +142,7 @@ it('uses the exact broker worker state and reused assignment over stale session 
   const card = host.querySelector<HTMLElement>('.agent-panel-row')!;
   expect(card.dataset.state).toBe('failed');
   expect(card.querySelector('.agent-card-task')!.textContent).toBe('Review the final package');
-  expect(host.textContent).toContain('History · 1');
+  expect(host.textContent).toContain('History · 1 · 1 failed');
 });
 
 it('groups a failed broker worker under History even with recent session activity', () => {
@@ -126,10 +155,10 @@ it('groups a failed broker worker under History even with recent session activit
     updatedAt: Date.now(), origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-2', task: 'Review' } } as SessionSummary]);
   toggle.click();
   expect(host.textContent).toContain('Active · 0');
-  expect(host.textContent).toContain('History · 1');
+  expect(host.textContent).toContain('History · 1 · 1 failed');
 });
 
-it('summarizes running, done and failed workers from existing worker state', () => {
+it('adds failures to the existing History heading without a standalone summary row', () => {
   dom = new JSDOM('<main></main><button></button>');
   Object.assign(globalThis, { document: dom.window.document });
   const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
@@ -156,8 +185,10 @@ it('summarizes running, done and failed workers from existing worker state', () 
       origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-4', task: 'Check build' } }
   ] as SessionSummary[]);
   toggle.click();
-  expect(host.querySelector('.agent-panel-summary')?.textContent)
-    .toBe('4 workers · 2 running · 1 done · 1 failed');
+  expect(host.querySelector('.agent-panel-summary')).toBeNull();
+  expect(host.textContent).toContain('Active · 2');
+  expect(host.textContent).toContain('History · 2 · 1 failed');
+  expect(host.textContent).not.toContain('4 workers · 2 running · 1 done · 1 failed');
 });
 
 
