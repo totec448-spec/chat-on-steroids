@@ -1,0 +1,224 @@
+/*
+ * Tab strip of a CoS browser window. It is also the window's title bar: the app sends its own
+ * palette tokens (the sidebar color, accent and contrast) and the room the system window controls
+ * take, so the bar matches the app in either theme. The fallbacks only cover the first frame.
+ */
+:root {
+  --page: #1a2129;
+  --ink: #ffffff;
+  --hover: #2a3139;
+  --raise: #2a3139;
+  --soft: #aab3bd;
+  --faint: #8d96a0;
+  --line: #313942;
+  --accent: #b0cbed;
+  --green: #4cc38a;
+  --amber: #e0a43a;
+  --inset-left: 8px;
+  --inset-right: 138px;
+}
+* { box-sizing: border-box; }
+/* Icon classes set their own display; hidden must still win. */
+[hidden] { display: none !important; }
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--page);
+  color: var(--ink);
+  font: 12.5px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  user-select: none;
+}
+
+/* The whole bar drags the window; everything clickable opts out. */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 var(--inset-right) 0 var(--inset-left);
+  -webkit-app-region: drag;
+}
+.navigation { display: flex; gap: 2px; flex: none; }
+.tool, .companion, .tab, .close { -webkit-app-region: no-drag; }
+
+.tool {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--soft);
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color .12s, color .12s;
+}
+.tool:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.tool:disabled { color: var(--faint); opacity: .45; cursor: default; }
+.tool:focus-visible, .companion:focus-visible, .close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 232px;
+  min-width: 44px;
+  height: 30px;
+  padding: 0 4px 0 10px;
+  border-radius: 9px;
+  color: var(--soft);
+  cursor: default;
+  transition: background-color .12s, color .12s;
+}
+.tab:hover { background: var(--hover); color: var(--ink); }
+.tab[aria-selected="true"] { background: var(--raise); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+/* A thin divider between inactive neighbours, as tab strips do. */
+.tab:not([aria-selected="true"]):not(:hover) + .tab:not([aria-selected="true"]):not(:hover)::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 9px;
+  bottom: 9px;
+  width: 1px;
+  background: var(--line);
+}
+
+.glyph { position: relative; display: grid; place-items: center; flex: none; width: 16px; height: 16px; }
+.favicon { width: 16px; height: 16px; border-radius: 4px; }
+.glyph .ph { font-size: 15px; }
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .75s linear infinite;
+}
+/*
+ * The companion is driving a turn in this tab: a dot on the favicon, and the sheen the app's own
+ * Working line wears passing through the title, readable at a glance on inactive tabs too. Both
+ * stay mounted and only fade, and the fade-out waits a second, so the short gap between sending
+ * and ChatGPT starting does not blink.
+ */
+.activity {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--page);
+  border-radius: 50%;
+  background: var(--accent);
+}
+.tab[aria-selected="true"] .activity, .tab:hover .activity { border-color: var(--raise); }
+
+/*
+ * The title is painted through its background so the sheen can pass through the words. Its colour
+ * follows the tab instantly; only how far it is working fades, and that is what waits.
+ */
+@property --working { syntax: '<number>'; inherits: true; initial-value: 0; }
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+  --title-ink: var(--soft);
+  /* What the words dim to while working; on a bright tab only to the inactive colour, so the glint still reads. */
+  --title-dim: var(--faint);
+  --title-base: color-mix(in srgb, var(--title-dim) calc(var(--working) * 100%), var(--title-ink));
+  --title-glint: color-mix(in srgb, var(--ink) calc(var(--working) * 100%), var(--title-ink));
+  color: transparent;
+  background: linear-gradient(100deg, var(--title-base) 38%, var(--title-glint) 50%, var(--title-base) 62%) 0 0 / 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: sheen 4.2s ease-in-out infinite paused;
+  transition: --working .3s 1s;
+}
+.tab:hover .title, .tab[aria-selected="true"] .title { --title-ink: var(--ink); --title-dim: var(--soft); }
+.tab[data-working="true"] .title { --working: 1; animation-play-state: running; transition-delay: 0s; }
+.activity { opacity: 0; transition: opacity .3s 1s; }
+.tab[data-working="true"] .activity { opacity: 1; transition-delay: 0s; }
+.tab:has(.title:empty) .title { display: none; }
+
+.close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--soft);
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s, background-color .12s;
+}
+.tab:hover .close, .tab[aria-selected="true"] .close, .close:focus-visible { opacity: 1; }
+.close:hover { background: var(--hover); color: var(--ink); }
+
+.companion {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--soft);
+  font-size: 17px;
+  cursor: pointer;
+  transition: background-color .12s;
+}
+.companion:hover { background: var(--hover); }
+.companion .mark {
+  width: 18px;
+  height: 18px;
+  background: var(--soft);
+  mask: center / contain no-repeat;
+  -webkit-mask: center / contain no-repeat;
+  transition: background-color .12s;
+}
+.companion:hover .mark { background: var(--ink); }
+.status {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--page);
+  border-radius: 50%;
+  background: var(--faint);
+  transition: background-color .2s;
+}
+.companion:hover .status { border-color: var(--hover); }
+.status[data-state="connected"] { background: var(--green); }
+.status[data-state="disconnected"] { background: var(--amber); animation: pulse 1.6s ease-in-out infinite; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+/* As the app's turn-sheen. */
+@keyframes sheen { from { background-position: 130% 0; } to { background-position: -130% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.4s; }
+  .status { animation: none; }
+  .title { animation: none; }
+  .activity, .title { transition-duration: 0s; }
+}

@@ -261,7 +261,7 @@
   "Selected independently from the model.": "Выбирается независимо от модели.",
   "Browser & history": "Браузер и история",
   "ChatGPT browser": "Браузер ChatGPT",
-  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.": "Используется, когда приложение запускает браузер. Установите сопутствующее расширение и войдите в ChatGPT в активном профиле этого браузера. Уже подключённые вкладки остаются в своём браузере.",
+  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "Используется, когда приложение запускает браузер. Установите расширение и войдите в ChatGPT в активном профиле этого браузера. Уже подключённые вкладки остаются в своём браузере. Встроенный браузер Chat On Steroids не требует установки и работает скрыто в трее.",
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
@@ -1771,5 +1771,6 @@
   "When to continue": "Когда продолжать",
   "Session Finish only": "Только при завершении сеанса",
   "Also after the turn": "Также после хода",
-  "Search models": "Поиск моделей"
+  "Search models": "Поиск моделей",
+  "Chat On Steroids browser (built-in)": "Браузер Chat On Steroids (встроенный)"
 }

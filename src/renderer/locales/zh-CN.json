@@ -271,7 +271,7 @@
   "Selected independently from the model.": "独立于模型选择。",
   "Browser & history": "浏览器与历史",
   "ChatGPT browser": "ChatGPT 浏览器",
-  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.": "应用启动浏览器时使用此选项。请在该浏览器的当前配置中安装配套扩展并登录 ChatGPT。已连接的标签页仍保留在原浏览器中。",
+  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "应用启动浏览器时使用此选项。请在该浏览器的当前配置中安装配套扩展并登录 ChatGPT。已连接的标签页仍保留在原浏览器中。内置的 Chat On Steroids 浏览器无需安装，在托盘中隐藏运行。",
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
@@ -1771,5 +1771,6 @@
   "When to continue": "何时继续",
   "Session Finish only": "仅在轮次结束通知时",
   "Also after the turn": "也可在轮后发送",
-  "Search models": "搜索模型"
+  "Search models": "搜索模型",
+  "Chat On Steroids browser (built-in)": "Chat On Steroids 浏览器（内置）"
 }

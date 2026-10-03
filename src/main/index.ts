@@ -6,7 +6,7 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
  */
 
 import path from 'node:path';
-import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, screen, session } from 'electron';
+import { app, Notification, BrowserWindow, Menu, Tray, ipcMain, nativeImage, nativeTheme, screen, session } from 'electron';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { connect, disconnect, getStatus, onStatusChange, shutdownConnection } from './connection.js';
 import { registerIpc } from './ipc.js';
@@ -15,7 +15,7 @@ import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLo
 import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
 import { pluginManager } from './plugins/manager.js';
-import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
+import { bridgeStatus, onBridgeChange, setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
 import { flushSessions, initSessionStore } from './session/store.js';
 import { initSkillsPath } from './skills.js';
@@ -25,6 +25,8 @@ import { shutdownPetOverlay, startPetOverlay } from './pet-overlay.js';
 import { usageOverview } from './session/usage.js';
 import {
   flushRecorder,
+  liveConversations,
+  onSessionChange,
   queueDeterministicAttributionRepair,
   setAgentBinder,
   setAgentConversationLookup
@@ -73,6 +75,7 @@ import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
 import { applyStagedUpdate, startUpdateChecks } from './update.js';
 import { UI_BASE_ZOOM, windowLayoutForDisplays, windowPlacementWasMaximized, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
+import { cosBrowser, syncCosBrowser } from './cos-browser/index.js';
 import {
   applyLoginStartup,
   isBackgroundLaunch,
@@ -320,6 +323,14 @@ function refreshTray(): void {
       { label, enabled: false },
       { type: 'separator' },
       { label: 'Open', click: windowActivation.request },
+      // The CoS browser lives in the tray: its windows never sit in a taskbar or dock.
+      ...(getConfig().ui.chatBrowser === 'cos' ? [{
+        label: cosBrowser.visible() ? 'Hide browser' : 'Show browser',
+        click: () => {
+          if (cosBrowser.visible()) cosBrowser.hide();
+          else void cosBrowser.show().catch(error => logWarn(`cos browser: could not show: ${error instanceof Error ? error.message : String(error)}`));
+        }
+      }] : []),
       {
         label: running ? 'Disconnect' : 'Connect',
         click: () => void (running ? disconnect() : connect())
@@ -496,6 +507,15 @@ void app.whenReady().then(async () => {
   tray.on('click', windowActivation.request);
   refreshTray();
   onStatusChange(refreshTray);
+  cosBrowser.onChange(refreshTray);
+  // The dot on the CoS browser's companion button: does its extension reach the app right now.
+  onBridgeChange(() => { void bridgeStatus().then(status => cosBrowser.setAppConnected(status.present === true)).catch(() => undefined); });
+  // And the pulse on a tab whose chat is answering.
+  onSessionChange(() => cosBrowser.setGeneratingConversations(
+    new Set(liveConversations().filter(chat => chat.generating).map(chat => chat.conversationId))));
+  ipcMain.on('cos-browser:toolbar', (event, action: unknown, tabId: unknown) => {
+    if (typeof action === 'string') cosBrowser.toolbarAction(event.sender, action, tabId);
+  });
 
   logInfo('app started');
 
@@ -506,9 +526,11 @@ void app.whenReady().then(async () => {
 
   // Recording, workers and direct browser tools share one extension transport.
   // ipc.ts uses the same eligibility rule when settings change.
+  // The CoS browser starts once the bridge listens: its extension looks for the app as soon as it
+  // loads, and a miss would leave it waiting for its next retry.
   if (browserExtensionRequired(getConfig())) {
-    void startBridge();
-  }
+    void startBridge().finally(syncCosBrowser);
+  } else syncCosBrowser();
   // Opt-in, and only once every fact it projects has been restored. ipc.ts starts and stops it
   // when the setting changes; a failed bind is logged and leaves the rest of the app untouched.
   if (getConfig().controlApi.enabled) {
@@ -575,7 +597,8 @@ app.on('will-quit', (event) => {
       {
         name: 'process cleanup',
         budgetMs: 15_000,
-        run: () => [unifiedExecManager.terminateAllProcesses(), stopComputerHelper(), shutdownPetOverlay(), pluginManager.close()]
+        run: () => [unifiedExecManager.terminateAllProcesses(), stopComputerHelper(), shutdownPetOverlay(), pluginManager.close(),
+          Promise.resolve().then(() => cosBrowser.stop())]
       },
       // Phase 3: recorder work can enqueue both session projections and named durable state.
       { name: 'recorder flush', budgetMs: 10_000, run: () => [flushRecorder()] },
@@ -607,7 +630,10 @@ app.on('will-quit', (event) => {
 
 // Belt and braces: no web contents anywhere in this app may open a window or
 // navigate. External links go through the vetted allowlist in ipc.ts instead.
+// The CoS browser's pages are the one exception: a browser has to navigate, and signing in to
+// ChatGPT is nothing but navigations and redirects. Its host sets their window rules itself.
 app.on('web-contents-created', (_event, contents) => {
+  if (cosBrowser.browses(contents)) return;
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   contents.on('will-navigate', (event) => event.preventDefault());
   contents.on('will-redirect', (event) => event.preventDefault());

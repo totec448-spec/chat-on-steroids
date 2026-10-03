@@ -248,7 +248,7 @@
   "Selected independently from the model.": "Được chọn độc lập với mô hình.",
   "Browser & history": "Trình duyệt & lịch sử",
   "ChatGPT browser": "Trình duyệt ChatGPT",
-  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.": "Dùng khi ứng dụng khởi chạy trình duyệt. Cài companion và đăng nhập ChatGPT trong hồ sơ đang hoạt động của trình duyệt này. Các tab đã kết nối vẫn ở trình duyệt của chúng.",
+  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "Dùng khi ứng dụng khởi chạy trình duyệt. Cài companion và đăng nhập ChatGPT trong hồ sơ đang hoạt động của trình duyệt này. Các tab đã kết nối vẫn ở trình duyệt của chúng. Trình duyệt tích hợp của Chat On Steroids không cần cài đặt và chạy ẩn trong khay hệ thống.",
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
@@ -1771,5 +1771,6 @@
   "When to continue": "Khi nào tiếp tục",
   "Session Finish only": "Chỉ khi kết thúc phiên",
   "Also after the turn": "Đồng thời sau lượt",
-  "Search models": "Tìm mô hình"
+  "Search models": "Tìm mô hình",
+  "Chat On Steroids browser (built-in)": "Trình duyệt Chat On Steroids (tích hợp)"
 }

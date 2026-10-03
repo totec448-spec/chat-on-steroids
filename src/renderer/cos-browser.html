@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src data:; base-uri 'none'; form-action 'none'" />
+  <link rel="stylesheet" href="./icons.css" />
+  <link rel="stylesheet" href="./cos-browser.css" />
+  <title>Chat On Steroids browser</title>
+</head>
+<body>
+  <nav class="bar">
+    <div class="navigation">
+      <button class="tool" id="back" type="button" title="Back" aria-label="Back" disabled><i class="ph ph-arrow-left" aria-hidden="true"></i></button>
+      <button class="tool" id="forward" type="button" title="Forward" aria-label="Forward" disabled><i class="ph ph-arrow-right" aria-hidden="true"></i></button>
+      <button class="tool" id="reload" type="button" title="Reload" aria-label="Reload" disabled><i class="ph ph-arrow-clockwise" id="reloadGlyph" aria-hidden="true"></i></button>
+    </div>
+    <div class="tabs" id="tabs" role="tablist" aria-label="Tabs"></div>
+    <button class="companion" id="companion" type="button" title="Chat On Steroids" aria-label="Chat On Steroids">
+      <span class="mark" id="companionMark" aria-hidden="true" hidden></span>
+      <i class="ph ph-puzzle-piece" id="companionFallback" aria-hidden="true"></i>
+      <span class="status" id="companionStatus" data-state="unknown"></span>
+    </button>
+  </nav>
+  <script type="module" src="./cos-browser.ts"></script>
+</body>
+</html>

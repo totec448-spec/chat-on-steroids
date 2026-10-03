@@ -122,6 +122,7 @@ import {
   MAX_COMMAND_ALLOWLIST_RULE_CHARS,
   validateCommandAllowlistRule
 } from '../shared/command-allowlist.js';
+import { cosBrowserSignedIn, onCosBrowserSignInChange } from './cos-browser/sign-in.js';
 import { openInPreferredBrowser } from './browser.js';
 import { manualDownloadUrl, markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
 import {
@@ -466,6 +467,7 @@ async function buildState(): Promise<AppState> {
     resolvedBinary: resolvedBinary(config),
     bundledTunnelVersion: bundledVersion(),
     bridge: await bridgeStatus(),
+    cosBrowserSignedIn: cosBrowserSignedIn(),
     update: updateStatus(),
     desktopAccess: getMacOSDesktopAccess()
   };
@@ -615,6 +617,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // Startup and settings saves use one eligibility rule.
     if (browserExtensionRequired(next)) await startBridge();
     else await stopBridge();
+    if (before.ui.chatBrowser !== next.ui.chatBrowser) (await import('./cos-browser/index.js')).syncCosBrowser();
     if (before.capabilities.screen !== next.capabilities.screen || before.capabilities.control !== next.capabilities.control || before.readOnly !== next.readOnly) wakeBrowserWork('browser-control');
     // Permissions and the second tunnel id both decide whether the optional Desktop
     // connector should be published. Without this, enabling desktop access or pasting its
@@ -1050,6 +1053,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return true;
   });
 
+  // The built-in browser on screen, on ChatGPT: signing in, or showing a chat that runs there.
+  handle('cosBrowser:show', async () => {
+    if (getConfig().ui.chatBrowser !== 'cos') throw new Error('The CoS browser is not the selected ChatGPT browser');
+    await (await import('./cos-browser/index.js')).cosBrowser.show();
+    return true;
+  });
+
   // ------------------------------------------------------------- sessions
 
   handle('sessions:list', async (payload) => {
@@ -1193,7 +1203,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
       throw new Error('This session has no valid ChatGPT conversation');
     }
-    await openInPreferredBrowser(chatUrl(conversationId));
+    await openInPreferredBrowser(chatUrl(conversationId), { reveal: true });
     return true;
   });
 
@@ -1409,6 +1419,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   };
   onStatusChange(pushState);
   onBridgeChange(pushState);
+  onCosBrowserSignInChange(pushState);
   registerPluginIpc(handle, getWindow, pushState);
   // Draft stages belong to session controls; state:changed only refreshes settings.
   onGoalChange(() => push('session:changed'));

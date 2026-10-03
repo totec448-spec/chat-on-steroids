@@ -16,6 +16,7 @@ export async function isPreferredBrowserRunning(
   browser: ChatBrowser = getConfig().ui.chatBrowser ?? 'chrome',
   command: typeof runCommand = runCommand
 ): Promise<boolean | null> {
+  if (browser === 'cos') return (await import('./cos-browser/index.js')).cosBrowser.running();
   try {
     if (platform !== 'win32') {
       if (platform !== 'darwin' && platform !== 'linux') return null;
@@ -43,6 +44,11 @@ export interface PreferredBrowserOpenOptions {
   browser?: ChatBrowser;
   /** Start the owned helper without activating its Windows startup window. */
   backgroundStartup?: boolean;
+  /**
+   * An explicit user action such as "open this chat". Only the CoS browser distinguishes it: it
+   * brings its window forward, while every other URL opens in a window that stays hidden.
+   */
+  reveal?: boolean;
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
   home?: string;
@@ -216,6 +222,12 @@ export async function openInPreferredBrowser(
   const usable = options.usable ?? ((candidate: string) => isExecutableBrowser(candidate, platform));
   const launch = options.launch ?? launchCommand;
   const selected = options.browser ?? getConfig().ui.chatBrowser ?? 'chrome';
+  if (selected === 'cos') {
+    // Loaded on demand: this module also serves tests and paths that never use the CoS browser.
+    const { cosBrowser } = await import('./cos-browser/index.js');
+    await cosBrowser.open(url, { reveal: options.reveal === true });
+    return 'cos';
+  }
   const label = selected === 'edge' ? 'Microsoft Edge' : selected === 'brave' ? 'Brave Browser' : 'Google Chrome / Chromium';
   const bounds = browserWindowBounds();
   // These switches only affect a newly started Chrome process; handing a URL to an

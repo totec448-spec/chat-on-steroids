@@ -271,7 +271,7 @@
   "Selected independently from the model.": "モデルとは別に選択します。",
   "Browser & history": "ブラウザーと履歴",
   "ChatGPT browser": "ChatGPT 用ブラウザー",
-  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.": "アプリがブラウザーを起動するときに使用します。このブラウザーの使用中のプロファイルに連携用拡張機能をインストールし、ChatGPT にサインインしてください。接続済みのタブは、元のブラウザーに残ります。",
+  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "アプリがブラウザーを起動するときに使用します。このブラウザーの使用中のプロファイルに連携用拡張機能をインストールし、ChatGPT にサインインしてください。接続済みのタブは、元のブラウザーに残ります。内蔵の Chat On Steroids ブラウザーはインストール不要で、トレイに隠れたまま動作します。",
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
@@ -1771,5 +1771,6 @@
   "When to continue": "続行するタイミング",
   "Session Finish only": "セッション終了通知時のみ",
   "Also after the turn": "ターン後にも送信",
-  "Search models": "モデルを検索"
+  "Search models": "モデルを検索",
+  "Chat On Steroids browser (built-in)": "Chat On Steroids ブラウザー（内蔵）"
 }

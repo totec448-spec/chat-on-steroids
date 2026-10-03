@@ -238,6 +238,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Automation | `src/main/goal.ts`, `src/shared/{goal,goal-templates}.ts`: objectives, switches, obligations, provider/helper decisions. |
 | Agents | `src/main/agents.ts`, `src/renderer/{agent-panel,agent-communication}.ts`: independent prime families, staged mutations and addressed messages. |
 | Browser orchestration | `src/main/bridge.ts`, `browser.ts`, `browser-startup.ts`, `browser-wake.ts`, `browser-window-layout.ts`, `browser-preferences.ts`; `src/shared/browser-preferences.ts`. |
+| Built-in browser | `src/main/cos-browser/` (`host.ts` window/tabs/extension/sign-in, `index.ts` lifecycle, `tab-model.ts`, `chrome-api.ts`, `extension-worker.ts`, `match-pattern.ts`, `sign-in.ts`); `src/preload/cos-browser{,-worker,-sign-in}.ts`; `src/renderer/cos-browser.{html,ts,css}` toolbar; `src/shared/cos-browser-sites.ts`. See §5 Built-in browser. |
 | Extension | `extension/{manifest.json,chatgpt-dom.js,content.js,fiber.js,background.js,usage.js,overlay.css,popup.html,popup.css,popup.js}`: injection worlds, native observations/actions, journal and UI. |
 | Models/usage | `src/main/chat-models.ts`, `session/usage.ts`; `src/shared/{chat-models,usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
 | External plugins | `src/main/plugins/{catalog,installer,manager,exposure,oauth}.ts`, `plugins-ipc.ts`, `plugin-refresh.ts`, `src/shared/{plugins,plugin-refresh}.ts`, `src/renderer/plugins.ts`. |
@@ -1916,6 +1917,32 @@ origins remain conservative, and a later manual close supersedes a pending autom
 An unexpected lost/discarded page retains its existing recovery contract. A newer observation
 of the exact departed page clears the dismissal; unresolved work reuses its last exact MCP
 timestamp and normal deadline. A tab close never fabricates provider completion.
+
+### Built-in browser
+
+`ui.chatBrowser: 'cos'` runs ChatGPT and the unchanged companion extension in the app's own
+browser (`src/main/cos-browser`). Existing and new configs keep `chrome` until the user picks it in
+Settings. `syncCosBrowser()` starts it after the bridge listens (the extension looks for the app
+as soon as it loads), stops it when another browser is chosen, and the app stops it on quit.
+
+- **Session.** One persistent partition (`persist:cos-browser`). Its windows are `BaseWindow`s
+  with a toolbar view and one `WebContentsView` per tab; they live in the tray, and closing or
+  minimizing one hides it. `cosBrowser:show` (preload `showCosBrowser()`) brings its last window
+  forward, or opens one on ChatGPT; opening a chat from the app reveals that chat's window.
+- **Extension.** Loaded unchanged. Its `chrome.tabs`, `chrome.windows` and `chrome.debugger` are
+  answered by `TabModel` + `callChromeApi` through the worker preload; messaging, scripting,
+  storage, alarms and runtime stay Electron's. `ExtensionWorkerLink` keeps its worker alive and
+  queues events while none can take them.
+- **Navigation lock.** The app-wide `will-navigate`/`will-redirect`/window-open lockdown exempts
+  only web contents the host owns (`cosBrowser.browses(contents)`): a browser has to navigate, and
+  signing in is redirects. The host sets their rules: ChatGPT, OpenAI and sign-in pages open as its
+  own tabs (`opensInCosBrowser`); every other link opens in the system browser.
+- **Sign-in.** `AppState.cosBrowserSignedIn` is read from ChatGPT's session cookie in that
+  partition (null while the browser is not running) and pushed on every change. On OpenAI's and
+  Google's sign-in hosts a tab presents a Firefox agent, strips `Sec-CH-UA*` request headers and
+  hides `navigator.userAgentData` (frame preload): Google refuses an embedded Chromium otherwise.
+  The agent changes only after a document commits, then that page loads once more; changing it
+  while a navigation is in flight aborts the navigation and takes the app down.
 
 Several browsers can run the extension against one app. Each sends a random
 `x-extension-browser` id; its `/status` pass reports the chats it has open, and a browser that

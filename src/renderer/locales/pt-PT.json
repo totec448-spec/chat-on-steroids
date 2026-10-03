@@ -261,7 +261,7 @@
   "Selected independently from the model.": "Selecionado independentemente do modelo.",
   "Browser & history": "Navegador e histórico",
   "ChatGPT browser": "Navegador do ChatGPT",
-  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.": "Utilizado quando a aplicação inicia um navegador. Instale a extensão companion e inicie sessão no ChatGPT no perfil ativo deste navegador. Os separadores já ligados permanecem no respetivo navegador.",
+  "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "Utilizado quando a aplicação inicia um navegador. Instale a extensão companion e inicie sessão no ChatGPT no perfil ativo deste navegador. Os separadores já ligados permanecem no respetivo navegador. O navegador integrado do Chat On Steroids não precisa de instalação e corre oculto na área de notificação.",
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
@@ -1771,5 +1771,6 @@
   "When to continue": "Quando continuar",
   "Session Finish only": "Apenas no fim da sessão",
   "Also after the turn": "Também após o turno",
-  "Search models": "Pesquisar modelos"
+  "Search models": "Pesquisar modelos",
+  "Chat On Steroids browser (built-in)": "Navegador do Chat On Steroids (integrado)"
 }
