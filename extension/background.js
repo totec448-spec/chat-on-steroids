@@ -2750,7 +2750,7 @@ async function maintainOnce() {
     recoveryMonitoring = monitoring;
     await persistLive().catch(() => undefined);
   }
-  if (await acceptBrowserRevival(reply.data.revival)) await recoverDeferredRevivals();
+  if (await acceptBrowserRevivals(reply.data)) await recoverDeferredRevivals();
   const nonDiscardable = new Set(
     (Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : [])
       .map(cleanConversationId)
@@ -3609,7 +3609,7 @@ const HANDLERS = {
       // Forward only the helper states this document may report; these are diagnostics.
       (['absent', 'empty', 'ok'].includes(message.fiber) ? `&fiber=${message.fiber}` : '');
     const result = await call(`/activity${query}`);
-    if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevival(result.data.revival)) {
+    if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevivals(result.data)) {
       await recoverDeferredRevivals();
     }
     // A fresh chat the app wants opened beside this one. Offered only to the home chat's own
@@ -4452,6 +4452,17 @@ async function acceptBrowserRevival(raw) {
   const id = deferredRevivalId(raw?.id);
   const conversationId = cleanConversationId(raw?.conversationId);
   return id && conversationId ? rememberDeferredRevival(id, conversationId) : false;
+}
+
+/**
+ * Takes every wake an app reply hands out (#882). An app older than 2.1.27 sends only the oldest
+ * one as `revival`; taking just that one held the others behind it until their deadline.
+ */
+async function acceptBrowserRevivals(data) {
+  const list = Array.isArray(data?.revivals) ? data.revivals.slice(0, 16) : data?.revival ? [data.revival] : [];
+  let accepted = false;
+  for (const raw of list) if (await acceptBrowserRevival(raw)) accepted = true;
+  return accepted;
 }
 
 /**

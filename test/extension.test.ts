@@ -2745,6 +2745,32 @@ describe('extension revival delivery', () => {
     expect(local.data.deferredRevivals).toMatchObject([revival]);
   });
 
+  it('takes every wake in one reply and opens a marked tab for each chat that has none (#882)', async () => {
+    const OTHER_CHAT = 'ffffffff-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const second = { id: 'cmd-wake-2', conversationId: OTHER_CHAT };
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/status') return response(200, { ok: true, recoveryMonitoring: true, repairs: [], revival, revivals: [revival, second] });
+      if (url.pathname === '/commands/revivals/pending') {
+        const body = JSON.parse(String(init.body || '{}'));
+        return response(200, { pending: body.entries.map((entry: { id: string }) => entry.id) });
+      }
+      return response(404, {});
+    });
+    const local = new FakeStorageArea(paired);
+    const worker = loadWorker({ local, session: new FakeStorageArea({ recoveryMonitoring: true }), fetch });
+    await worker.createTab({ id: 41, url: `https://chatgpt.com/c/${PRIME}` });
+
+    await worker.fireAlarm();
+
+    const opened = worker.tabsCreate.mock.calls.map(call => String(call[0]?.url || ''));
+    expect(opened).toHaveLength(2);
+    expect(opened.some(url => url.includes(`/c/${CHAT}`) && url.includes(`clf=${revival.id}`))).toBe(true);
+    expect(opened.some(url => url.includes(`/c/${OTHER_CHAT}`) && url.includes(`clf=${second.id}`))).toBe(true);
+    expect(local.data.deferredRevivals).toMatchObject([revival, second]);
+  });
+
   it('opens one marked exact-chat tab only when the fresh scan finds none', async () => {
     const worker = loadWorker({
       local: new FakeStorageArea(paired),

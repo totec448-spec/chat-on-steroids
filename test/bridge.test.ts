@@ -4789,6 +4789,23 @@ describe('delivering a bootstrap', () => {
     expect(storedAfterRetry?.commands?.some((entry: any) => entry?.id === id)).toBe(false);
   });
 
+  it('hands the browser every pending wake, not only the oldest (#882)', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'first audit' }, { task: 'second audit' }], caller: { conversationId: PRIME_CHAT } });
+    const chats = ['abababab-7654-3210-fedc-ba9876543210', 'cdcdcdcd-7654-3210-fedc-ba9876543210'];
+    for (const [index, conversationId] of chats.entries()) {
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: `worker-${index + 1}` } });
+      finishAgent({ conversationId }, 'reported, waiting for more');
+    }
+    wake([{ to: 'worker-1', text: 'one more thing' }, { to: 'worker-2', text: 'and you too' }]);
+    await waitForRevival();
+    const status = await request('GET', '/status');
+    // The second wake reaches the browser now, not only after the first one's page claims it.
+    expect(status.body.revivals.map((entry: { conversationId: string }) => entry.conversationId).sort()).toEqual([...chats].sort());
+    expect(status.body.revival).toEqual(status.body.revivals[0]);
+  });
+
   it('puts the worker back to sleep, with its slot and its message intact, when the browser cannot wake it', async () => {
     await pair();
     spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });

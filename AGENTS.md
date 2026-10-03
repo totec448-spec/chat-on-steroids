@@ -2614,6 +2614,10 @@ response, a current canonical final, user block/clear/disable, or other durable 
 evidence still ends it normally.
 Status/message remeasure sleepers before revival. A terminal worker can be replaced deliberately;
 raising the user's worker cap is not a substitute for lifecycle correctness.
+`/status` and `/activity` hand the browser every unclaimed wake as `revivals` (oldest first, at
+most 16) beside the legacy single `revival`; the extension remembers each one and routes or opens
+them in one pass. Handing out only the oldest held every later wake behind a slow one until the
+revival deadline (#882). Redeem stays the one ownership boundary per wake.
 
 Detached means browser attachment is missing, not necessarily that tool execution died. An
 exact call can prove the worker server-side alive; a new page can reattach it. During waking,
