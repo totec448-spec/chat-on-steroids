@@ -465,7 +465,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     // Strict mode cannot trust an unattributed stream by definition. Do not render an
     // "Allow" button that the kernel will intentionally ignore; the Settings checkbox
     // explains that unattributed calls stay blocked until strict mode is turned off.
-    if (deps.state()?.config.multiAgent.strictChatAllowlist === true) {
+    if (deps.state()?.config.multiAgent?.strictChatAllowlist === true) {
       actionBar.append(remove);
       row.append(top, actionBar);
       return row;
@@ -509,7 +509,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     });
     actions.push(block);
 
-    if (deps.state()?.config.multiAgent.strictChatAllowlist === true) {
+    if (deps.state()?.config.multiAgent?.strictChatAllowlist === true) {
       const trusted = trustedChats.has(summary.conversationId);
       const trust = document.createElement('button');
       trust.className = `btn sess-action sess-trust${trusted ? ' is-trusted' : ''}`;
