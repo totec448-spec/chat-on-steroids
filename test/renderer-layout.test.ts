@@ -77,6 +77,14 @@ it('places context before the model picker and keeps native compaction actions i
   expect(document.getElementById('contextMeterInfo')!.parentElement?.id).toBe('contextMeter');
 });
 
+it('keeps composer actions on one row by compacting labels instead of stacking at narrow widths', () => {
+  expect(css).not.toContain('@media (max-width: 1000px)');
+  expect(css).toContain('container: chat-session / inline-size');
+  expect(css).toMatch(/@container chat-session \(max-width: 520px\)[\s\S]*?\.composer \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto minmax\(0, 84px\) 36px;/);
+  expect(css).toMatch(/@container chat-session \(max-width: 520px\)[\s\S]*?#composerModeLabel,[\s\S]*?#contextMeterCompact \{ display: none; \}/);
+  expect(css).toMatch(/@container chat-session \(max-width: 520px\)[\s\S]*?\.composer #modelMenu \{ width: 84px; max-width: 84px; \}/);
+});
+
 it('centers the accessible Chats refresh icon without an extra grid text row', () => {
   const refresh = document.getElementById('chatRefresh')!;
   expect(refresh.getAttribute('aria-label')).toBe('Refresh chats');
