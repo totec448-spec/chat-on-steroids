@@ -1711,7 +1711,6 @@
   "See changes as you adjust the workspace.": "Xem thay đổi ngay khi điều chỉnh không gian làm việc.",
   "Set the provider, model, and credentials for API-based decisions.": "Thiết lập nhà cung cấp, mô hình và thông tin xác thực cho các quyết định qua API.",
   "Set worker limits and which chats can resume after interruptions.": "Đặt giới hạn worker và chọn cuộc trò chuyện được tiếp tục sau gián đoạn.",
-  "Shape how Goal and Loop write their next instruction.": "Định hướng cách Goal và Loop viết hướng dẫn tiếp theo.",
   "Use account-observed models for sub-agents.": "Dùng các mô hình đã được quan sát trên tài khoản cho tác nhân phụ.",
   "Verified native sends alongside model, shared and feature limits reported by ChatGPT.": "Các lượt gửi gốc đã xác minh, cùng giới hạn mô hình, giới hạn dùng chung và giới hạn tính năng do ChatGPT báo cáo.",
   "{0}K": "{0}K",
@@ -1791,5 +1790,12 @@
   "Local control API": "API điều khiển cục bộ",
   "Let agents on this computer read app status and chats.": "Cho phép tác nhân trên máy này đọc trạng thái ứng dụng và các cuộc trò chuyện.",
   "Allow actions": "Cho phép thao tác",
-  "Let those agents also send and cancel messages. Needs the local control API.": "Các tác nhân đó cũng có thể gửi và hủy tin nhắn. Cần API điều khiển cục bộ."
+  "Let those agents also send and cancel messages. Needs the local control API.": "Các tác nhân đó cũng có thể gửi và hủy tin nhắn. Cần API điều khiển cục bộ.",
+  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "Sau mỗi lần cập nhật, macOS sẽ hỏi mật khẩu một lần để phiên bản này mở được các khóa đã lưu. Hãy nhập mật khẩu đăng nhập máy Mac và chọn “Luôn cho phép”. Các cuộc trò chuyện và kết nối trình duyệt sẽ tiếp tục ngay khi bạn trả lời.",
+  "Handoff length": "Độ dài bàn giao",
+  "How much a Compact & Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.": "Lượng nội dung một bản tóm tắt Compact & Resume giữ lại. Bản dài mang nhiều chi tiết hơn sang cuộc trò chuyện mới; bản ngắn chừa cho nó nhiều chỗ hơn.",
+  "Shape what Compact & Resume keeps and how Goal and Loop write their next instruction.": "Định hướng những gì Compact & Resume giữ lại và cách Goal và Loop viết hướng dẫn tiếp theo.",
+  "Thorough · 10k–30k tokens": "Đầy đủ · 10k–30k token",
+  "Standard · 4k–10k tokens": "Tiêu chuẩn · 4k–10k token",
+  "Short · 2k–6k tokens": "Ngắn · 2k–6k token"
 }

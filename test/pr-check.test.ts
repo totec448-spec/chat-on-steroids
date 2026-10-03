@@ -38,12 +38,12 @@ describe('pull request checklist', () => {
     expect(check({ body: good.replace('Fixes #744\n\n', ''), files: [{ path: 'extension/content.js', changes: 40 }, { path: 'test/content-script.test.ts', changes: 60 }] })).toEqual([]);
   });
 
-  it('requires a test or a stated reason for code changes, and a failing-first claim', () => {
+  it('requires a test or a stated reason for code changes, and leaves the fail-first proof to its job', () => {
     const code = [{ path: 'src/main/goal.ts', changes: 12 }];
     expect(check({ body: good.replace(/## Test[\s\S]*/, '## Test\n\n'), files: code }).join()).toMatch(/Add or update a test/);
     expect(check({ body: good.replace(/## Test[\s\S]*/, '## Test\n\nNo test: the change only renames a log line.'), files: code })).toEqual([]);
-    expect(check({ body: good.replace(/fails without the change/, 'passes'), files: [...code, { path: 'test/goal.test.ts', changes: 5 }] }).join())
-      .toMatch(/fails without your change/);
+    // The "Fail-first test" job runs the new test against main; the description need not say so.
+    expect(check({ body: good.replace(/fails without the change/, 'passes'), files: [...code, { path: 'test/goal.test.ts', changes: 5 }] })).toEqual([]);
   });
 
   it('asks for screenshots when the interface changes', () => {

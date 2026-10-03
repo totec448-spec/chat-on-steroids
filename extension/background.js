@@ -2938,6 +2938,20 @@ async function performBrowserRepairs(repairs, policy) {
           continue;
         }
       }
+      if (target && reason === 'no-tab') {
+        // A no-tab repair exists to give the chat a tab. When it has one again by now, it is
+        // usually the tab a worker wake or another command just opened for it, and reloading that
+        // tab cut its page off in the middle of the send (#864, #882). A tab that is still loading
+        // or answers is the repair; only a silent one is reloaded.
+        const tab = await chrome.tabs.get(target.id);
+        const loading = tab.status === 'loading' || Boolean(tab.pendingUrl);
+        const status = loading ? null : await tabReply(target.id, { type: 'clf-page-status' },
+          documentId ? { documentId } : undefined);
+        if (loading || status?.ok === true) {
+          await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=present`);
+          continue;
+        }
+      }
       if (target) await chrome.tabs.reload(target.id);
       else {
         await createChatTab(`https://chatgpt.com/c/${encodeURIComponent(conversationId)}`, policy.background === true, focus);
