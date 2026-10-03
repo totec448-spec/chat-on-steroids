@@ -362,6 +362,20 @@ describe('settings migration', () => {
     expect((await loadConfig()).compaction.handoffPrompt).toBe(custom);
   });
 
+  it('keeps the thorough handoff length for older and broken configs, and saves a choice', async () => {
+    const config = defaultConfig();
+    expect(config.compaction.handoffLength).toBe('thorough');
+    const older = structuredClone(config) as Record<string, any>;
+    delete older.compaction.handoffLength;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(older), 'utf8');
+    expect((await loadConfig()).compaction.handoffLength).toBe('thorough');
+    await fs.writeFile(path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, compaction: { ...config.compaction, handoffLength: 'tiny' } }), 'utf8');
+    expect((await loadConfig()).compaction.handoffLength).toBe('thorough');
+    await saveConfig({ ...config, compaction: { ...config.compaction, handoffLength: 'short' } });
+    expect((await loadConfig()).compaction.handoffLength).toBe('short');
+  });
+
   /**
    * The Chat panel offers one number and derives the red line from it, `limit = threshold ×
    * 4/3`. A shipped default that does not already satisfy that relation is a state the UI

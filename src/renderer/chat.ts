@@ -71,7 +71,7 @@ import {
   DEFAULT_GOAL_SYSTEM_PROMPT,
   MAX_GOAL_SYSTEM_PROMPT_CHARS
 } from '../shared/goal.js';
-import { DEFAULT_HANDOFF_PROMPT, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
+import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, filterSettingsSections, icon, run, setIcon, toast } from './dom.js';
 
@@ -3937,7 +3937,10 @@ export function chatSettingsPatch(current: Config): {
     compaction: {
       auto: $<HTMLInputElement>('autoCompact').checked,
       autoTokens: threshold,
-      handoffPrompt: $<HTMLTextAreaElement>('handoffPrompt').value.trim() || DEFAULT_HANDOFF_PROMPT
+      handoffPrompt: $<HTMLTextAreaElement>('handoffPrompt').value.trim() || DEFAULT_HANDOFF_PROMPT,
+      handoffLength: (HANDOFF_LENGTHS as readonly string[]).includes($<HTMLSelectElement>('handoffLength').value)
+        ? $<HTMLSelectElement>('handoffLength').value as HandoffLength
+        : DEFAULT_HANDOFF_LENGTH
     },
     multiAgent: {
       defaultModel: $<HTMLSelectElement>('workerModel').value,
@@ -4359,6 +4362,7 @@ const CHAT_INPUTS = [
   'goalCustomModel',
   'goalReasoning',
   'handoffPrompt',
+  'handoffLength',
   'goalPrompt',
   'goalObjectivePrompt',
   'goalLoopPrompt'
@@ -4381,6 +4385,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLTextAreaElement>('handoffPrompt'),
     config.compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
     previous?.compaction.handoffPrompt
+  );
+  applyChatValue(
+    $<HTMLSelectElement>('handoffLength'),
+    config.compaction.handoffLength ?? DEFAULT_HANDOFF_LENGTH,
+    previous?.compaction.handoffLength
   );
   applyAutoCompactHint(config);
   $<HTMLInputElement>('autoCompactTokens').disabled = !config.compaction.auto;

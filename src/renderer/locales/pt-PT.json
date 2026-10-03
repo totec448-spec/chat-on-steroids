@@ -1711,7 +1711,6 @@
   "See changes as you adjust the workspace.": "Veja as alterações enquanto ajusta o espaço de trabalho.",
   "Set the provider, model, and credentials for API-based decisions.": "Defina o fornecedor, o modelo e as credenciais para decisões via API.",
   "Set worker limits and which chats can resume after interruptions.": "Defina os limites de workers e que conversas podem ser retomadas após interrupções.",
-  "Shape how Goal and Loop write their next instruction.": "Defina como o Goal e o Loop escrevem a instrução seguinte.",
   "Use account-observed models for sub-agents.": "Utilize os modelos observados na sua conta para os subagentes.",
   "Verified native sends alongside model, shared and feature limits reported by ChatGPT.": "Envios nativos verificados, a par dos limites de modelo, partilhados e de funcionalidades comunicados pelo ChatGPT.",
   "{0}K": "{0} mil",
@@ -1791,5 +1790,12 @@
   "Local control API": "API de controlo local",
   "Let agents on this computer read app status and chats.": "Permitir que agentes neste computador leiam o estado da aplicação e as conversas.",
   "Allow actions": "Permitir ações",
-  "Let those agents also send and cancel messages. Needs the local control API.": "Esses agentes também podem enviar e cancelar mensagens. Requer a API de controlo local."
+  "Let those agents also send and cancel messages. Needs the local control API.": "Esses agentes também podem enviar e cancelar mensagens. Requer a API de controlo local.",
+  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "O macOS pede a sua palavra-passe uma vez após cada atualização, para que esta versão possa abrir as chaves guardadas. Introduza a palavra-passe de início de sessão do Mac e escolha «Permitir sempre». Os chats e a ligação ao navegador continuam assim que responder.",
+  "Handoff length": "Tamanho da passagem",
+  "How much a Compact & Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.": "Quanto um resumo do Compact & Resume guarda. Resumos longos levam mais detalhe para o novo chat; os curtos deixam-lhe mais espaço.",
+  "Shape what Compact & Resume keeps and how Goal and Loop write their next instruction.": "Defina o que o Compact & Resume guarda e como o Goal e o Loop escrevem a instrução seguinte.",
+  "Thorough · 10k–30k tokens": "Completo · 10k–30k tokens",
+  "Standard · 4k–10k tokens": "Padrão · 4k–10k tokens",
+  "Short · 2k–6k tokens": "Curto · 2k–6k tokens"
 }

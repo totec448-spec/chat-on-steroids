@@ -14,6 +14,7 @@ import { getChatModels, restoreChatModels, startChatModelDiscovery } from './cha
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
+import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
 import { pluginManager } from './plugins/manager.js';
 import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
@@ -351,6 +352,11 @@ void app.whenReady().then(async () => {
   });
   initConfigPath(userData);
   initSecretsPath(userData);
+  initKeychainNotice(userData, {
+    platform: process.platform,
+    contents: () => (window && !window.isDestroyed() ? window.webContents : null),
+    fingerprint: () => executableFingerprint(app.getVersion())
+  });
   initSessionStore(userData);
   try { await initSkillsPath(userData); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }

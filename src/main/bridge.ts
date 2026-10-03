@@ -2179,7 +2179,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const repairFailed = url.searchParams.get('repairFailed');
     const repairAction = url.searchParams.get('repairAction');
     const action = repairAction === 'reloaded' || repairAction === 'reopened' || repairAction === 'resumed' ||
-      repairAction === 'preserved' ? repairAction : null;
+      repairAction === 'preserved' || repairAction === 'present' ? repairAction : null;
     if (repaired) {
       await confirmRepair(repaired.slice(0, 64), action);
     } else if (repairFailed) {
@@ -3405,7 +3405,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           ? nativeHandoffPrompt(
               already.token,
               getConfig().goal.includeToolCalls === true,
-              getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT
+              getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
+              getConfig().compaction.handoffLength
             )
           : null;
       return json(
@@ -3448,7 +3449,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         prompt: nativeHandoffPrompt(
           opened.token,
           getConfig().goal.includeToolCalls === true,
-          getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT
+          getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
+          getConfig().compaction.handoffLength
         ),
         job: resumeJobFor(sessionId)
       },
@@ -4409,8 +4411,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         };
       }
     } else if (command.spec.type === 'revive') {
+      // An error comes from the worker's own page, so the chat did open: what failed is the message.
       const why = error
-        ? `the browser could not reopen the worker's chat — ${error}`
+        ? `the worker's chat did not take the message — ${error}`
         : "the browser could not reopen the worker's chat";
       failWorkerRevival(command.spec.agent, why, command.spec.runId);
       receipt = {
@@ -8711,10 +8714,18 @@ function attributionRepairCurrent(repair: Repair, session: SessionSummary | null
  * this app is no longer waiting on - an older turn's, or one already re-queued - matches
  * nothing and closes nothing, which is the only safe reading of it.
  */
-async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | null): Promise<void> {
+async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state === 'handed' && repair.token === token) {
       if (!compactionRepairCurrent(conversationId, repair)) { repairsInFlight.delete(conversationId); return; }
+      if (action === 'present') {
+        // The chat had a tab again by the time the browser acted, usually the one a worker wake
+        // just opened. Nothing was reloaded, so nothing is waiting to come back (#864).
+        logInfo(`bridge: ${conversationId} was already open again; the browser left its tab as it was`);
+        repair.state = 'done';
+        repairsInFlight.delete(conversationId);
+        return;
+      }
       if (action === 'preserved' && repair.reason === 'assistant-error') {
         logInfo(`bridge: the browser preserved the recovered page for ${conversationId} without spending its assistant-error reload`);
         await updateRepairProgress(
@@ -8810,7 +8821,7 @@ const REPAIR_FAIL_REASONS: Record<string, string> = {
 
 async function failRepairAttempt(
   token: string,
-  action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | null,
+  action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null,
   why: string | null = null
 ): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {

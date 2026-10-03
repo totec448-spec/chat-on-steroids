@@ -1711,7 +1711,6 @@
   "See changes as you adjust the workspace.": "調整工作區時即時查看變化。",
   "Set the provider, model, and credentials for API-based decisions.": "設定用於 API 決策的供應商、模型與憑證。",
   "Set worker limits and which chats can resume after interruptions.": "設定子代理數量上限，以及哪些聊天可在中斷後復原。",
-  "Shape how Goal and Loop write their next instruction.": "調整目標模式與循環模式撰寫下一則指令的方式。",
   "Use account-observed models for sub-agents.": "讓子代理使用帳戶中已偵測到的模型。",
   "Verified native sends alongside model, shared and feature limits reported by ChatGPT.": "同時顯示已驗證的原生傳送數，以及 ChatGPT 回報的模型、共用與功能限額。",
   "{0}K": "{0}千",
@@ -1791,5 +1790,12 @@
   "Local control API": "本機控制 API",
   "Let agents on this computer read app status and chats.": "允許這台電腦上的代理讀取應用程式狀態與聊天。",
   "Allow actions": "允許操作",
-  "Let those agents also send and cancel messages. Needs the local control API.": "這些代理也可以傳送和取消訊息。需要開啟本機控制 API。"
+  "Let those agents also send and cancel messages. Needs the local control API.": "這些代理也可以傳送和取消訊息。需要開啟本機控制 API。",
+  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "每次更新後，macOS 會詢問一次你的密碼，讓此版本開啟已儲存的金鑰。請輸入 Mac 登入密碼並選擇「永遠允許」。你回應後，聊天和瀏覽器連線會立即繼續。",
+  "Handoff length": "交接長度",
+  "How much a Compact & Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.": "Compact & Resume 交接摘要保留多少內容。越長，帶入新聊天的細節越多；越短，給新聊天留的空間越多。",
+  "Shape what Compact & Resume keeps and how Goal and Loop write their next instruction.": "調整 Compact & Resume 保留的內容，以及目標模式與循環模式撰寫下一則指令的方式。",
+  "Thorough · 10k–30k tokens": "詳細 · 1萬–3萬 tokens",
+  "Standard · 4k–10k tokens": "標準 · 4千–1萬 tokens",
+  "Short · 2k–6k tokens": "簡短 · 2千–6千 tokens"
 }
