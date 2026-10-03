@@ -1,11 +1,10 @@
-import { currentLanguage, ui, uiText, t, initLanguage } from './i18n.js';
+import { currentLanguage, ui, uiText, t, initLanguage, onLanguageChange } from './i18n.js';
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
-import { initConnectionAdvanced } from './connection-popover.js';
 import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
 import { initPet } from './pet.js';
@@ -54,11 +53,14 @@ declare global {
 const api = window.api;
 initLanguage();
 publishStopNoticeTexts(texts => api.setStopNoticeTexts(texts));
+// The browser extension shows its texts in the app's language, not Chrome's; the app hands it on.
+const publishUiLanguage = (): void => { void Promise.resolve(api.setUiLanguage?.(currentLanguage())).catch(() => undefined); };
+publishUiLanguage();
+onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
 initSetupGuide();
 // Escape the translucent sidebar's backdrop-filter containing block.
 document.body.append($('connectionPopover'));
-const connectionAdvanced = initConnectionAdvanced();
 const appearance = initAppearance(patch => { void save(patch); });
 
 /** Same shape the platform uses; mirrored here only to grey out step 2 until it is valid. */
@@ -175,15 +177,12 @@ function setConnectionPopover(open: boolean): void {
   popover.hidden = !open;
   trigger.setAttribute('aria-expanded', String(open));
   if (open) {
-    $<HTMLDetailsElement>('connectionAdvanced').open = false;
-    $<HTMLDetailsElement>('connectionRuntime').open = false;
     positionConnectionPopover();
     paintClock();
-    connectionAdvanced.refreshIfOpen();
   }
 }
 
-/** Keep this diagnostic surface anchored to the status button and inside the viewport. */
+/** Keep the connection controls anchored to the status button and inside the viewport. */
 function positionConnectionPopover(): void {
   const popover = $('connectionPopover');
   if (popover.hidden) return;
@@ -607,6 +606,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       developerMode: $<HTMLInputElement>('developerMode').checked,
       playfulStatus: $<HTMLInputElement>('playfulStatus').checked,
       followOutput: $<HTMLInputElement>('followOutput').checked,
+      mentionCore: $<HTMLInputElement>('mentionCore').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
       theme: over.theme ?? previous.ui.theme,
       appearance: over.appearance ?? previous.ui.appearance
@@ -1177,10 +1177,6 @@ function apply(next: AppState): void {
   connectBtn.disabled = disconnecting || (!running && missing !== null);
   connectBtn.title = !running && missing ? missing.text : '';
 
-  ui($('connectionPopoverExtension'), 'textContent', () => next.bridge.extensionVersion
-    ? `v${next.bridge.extensionVersion}`
-    : t("Not reported"));
-
   // ---- out of date, app or extension
   paintUpdate(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {});
@@ -1264,6 +1260,7 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked($<HTMLInputElement>('playfulStatus'), config.ui.playfulStatus === true, previousState?.config.ui.playfulStatus);
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
+  applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
   applyChecked($<HTMLInputElement>('controlApiAllowActions'), config.controlApi?.allowActions === true, previousState?.config.controlApi?.allowActions);
   // Actions need the API itself, so the switch stays off and disabled until it is on.
@@ -1588,7 +1585,7 @@ function facts(next: AppState): HTMLElement[] {
 }
 
 /**
- * Repaints only what ages: the two numbers and the header note. Runs every second so
+ * Repaints only what ages: the two numbers and status tooltips. Runs every second so
  * "verified 8s ago" keeps counting between reports instead of freezing.
  */
 function paintClock(): void {
@@ -1624,13 +1621,7 @@ function paintClock(): void {
   browserRow.dataset.tone = bridge.present ? 'ok' : bridge.paired ? 'wait' : 'bad';
   ui(connectorRow, 'title', () => core?.lastRequestAt ? t("Reached {0}", [ago(core.lastRequestAt)]) : $('connectionPopoverConnector').textContent ?? '');
   ui(browserRow, 'title', () => bridge.lastSeenAt ? t("Seen {0}", [ago(bridge.lastSeenAt)]) : $('connectionPopoverBrowser').textContent ?? '');
-  $('connectionPopoverVerified').hidden = connected;
   ui($('connectionPopoverTitle'), 'title', () => disconnecting ? t('Closing connection…') : status.handshakeAt !== null ? t("verified {0}", [ago(status.handshakeAt)]) : t("no handshake yet"));
-  ui($('connectionPopoverVerified'), 'textContent', () => disconnecting ? t('Closing connection…') : running
-    ? status.handshakeAt === null
-      ? t("no handshake yet")
-      : t("verified {0}", [ago(status.handshakeAt)])
-    : t("Connection is off"));
 
   const triggerText = status.handshakeAt !== null && running
     ? `${t(STATUS_TEXT[status.state])} · ${t("verified {0}", [ago(status.handshakeAt)])}`
@@ -2047,6 +2038,7 @@ for (const id of [
   'developerMode',
   'playfulStatus',
   'followOutput',
+  'mentionCore',
   'controlApiEnabled',
   'controlApiAllowActions',
   'privacyScreenshots',

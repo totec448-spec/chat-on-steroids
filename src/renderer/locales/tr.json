@@ -356,9 +356,6 @@
   "Inject now": "Etkin tura ilet",
   "Send directly": "Doğrudan gönder",
   "After this turn": "Bu turdan sonra",
-  "Continuation timing": "Devam mesajının zamanlaması",
-  "Only finish": "Yalnızca bitişte",
-  "After this turn + finish": "Bu turdan sonra + bitişte",
   "Send": "Gönder",
   "All": "Tümü",
   "Problems": "Sorunlar",
@@ -1769,5 +1766,9 @@
   "Default new-chat model": "Yeni sohbet varsayılan modeli",
   "Used only for a fresh ordinary chat with no conversation selection.": "Yalnızca konuşmaya özel bir seçim bulunmayan yeni bir normal sohbette kullanılır.",
   "Default new-chat reasoning": "Yeni sohbet varsayılan akıl yürütmesi",
-  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Yukarıdaki normal sohbet modeliyle kullanılır; worker ve yardımcılar kendi varsayılanlarını korur."
+  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Yukarıdaki normal sohbet modeliyle kullanılır; worker ve yardımcılar kendi varsayılanlarını korur.",
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Mesajlarımda Chat On Steroids Core'dan bahset: ChatGPT'nin bu uygulamayı her sohbette kullanabilmesini sağlar. ChatGPT basit sorulara gereksiz bir araç çağrısıyla başlıyorsa kapatın; worker'lar, Goal, Loop ve Continue bahsetmeyi korur.",
+  "When to continue": "Ne zaman devam edilsin",
+  "Session Finish only": "Yalnızca oturum bitişinde",
+  "Also after the turn": "Turdan sonra da"
 }

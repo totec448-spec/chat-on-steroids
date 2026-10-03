@@ -524,4 +524,9 @@ $('timeToggle').addEventListener('change', async () => {
 // A popup is open for seconds at a time and the three stages move within those seconds.
 void loadPreferences().catch(() => undefined);
 void refresh().catch(() => undefined);
+// The app's language arrives with its catalog a moment later; repaint once it is there and on
+// every later change, so the popup reads like the app rather than like Chrome.
+const relocalize = () => { localizeDocument(); void refresh().catch(() => undefined); };
+void globalThis.CLF_I18N.ready?.then(relocalize).catch(() => undefined);
+globalThis.addEventListener?.('clf-i18n-changed', relocalize);
 setInterval(() => void refresh().catch(() => undefined), POLL_MS);

@@ -356,9 +356,6 @@
   "Inject now": "Injecter maintenant",
   "Send directly": "Envoyer directement",
   "After this turn": "Après ce tour",
-  "Continuation timing": "Moment de la continuation",
-  "Only finish": "Uniquement à la fin",
-  "After this turn + finish": "Après ce tour + fin",
   "Send": "Envoyer",
   "All": "Tous",
   "Problems": "Problèmes",
@@ -1769,5 +1766,9 @@
   "Default new-chat model": "Modèle par défaut des nouveaux chats",
   "Used only for a fresh ordinary chat with no conversation selection.": "Utilisé uniquement pour un nouveau chat ordinaire sans sélection propre à la conversation.",
   "Default new-chat reasoning": "Raisonnement par défaut des nouveaux chats",
-  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Utilisé avec le modèle de chat ordinaire ci-dessus ; les workers et les assistants conservent leurs propres valeurs par défaut."
+  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Utilisé avec le modèle de chat ordinaire ci-dessus ; les workers et les assistants conservent leurs propres valeurs par défaut.",
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Mentionner Chat On Steroids Core dans mes messages : garantit que ChatGPT peut utiliser cette app dans chaque discussion. Désactivez-le si ChatGPT commence des questions simples par un appel d'outil inutile ; les workers, Goal, Loop et Continue gardent la mention.",
+  "When to continue": "Quand continuer",
+  "Session Finish only": "Uniquement en fin de session",
+  "Also after the turn": "Aussi après le tour"
 }

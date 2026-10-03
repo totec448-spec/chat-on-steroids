@@ -336,9 +336,6 @@
   "Inject now": "지금 삽입",
   "Send directly": "직접 전송",
   "After this turn": "이 턴 이후",
-  "Continuation timing": "계속하기 타이밍",
-  "Only finish": "종료 시에만",
-  "After this turn + finish": "이 턴 이후 + 종료 시",
   "Send": "보내기",
   "All": "전체",
   "Problems": "문제",
@@ -1769,5 +1766,9 @@
   "Default new-chat model": "새 채팅 기본 모델",
   "Used only for a fresh ordinary chat with no conversation selection.": "대화별 선택이 없는 새 일반 채팅에만 사용합니다.",
   "Default new-chat reasoning": "새 채팅 기본 추론 수준",
-  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "위의 일반 채팅 모델과 함께 사용합니다. 워커와 헬퍼는 각자의 기본값을 유지합니다."
+  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "위의 일반 채팅 모델과 함께 사용합니다. 워커와 헬퍼는 각자의 기본값을 유지합니다.",
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "내 메시지에서 Chat On Steroids Core 멘션: 모든 채팅에서 ChatGPT가 이 앱을 사용할 수 있게 합니다. 간단한 질문에 ChatGPT가 불필요한 도구 호출부터 시작하면 끄세요. 워커, Goal, Loop, Continue는 멘션을 유지합니다.",
+  "When to continue": "계속할 시점",
+  "Session Finish only": "세션 종료 시에만",
+  "Also after the turn": "턴 이후에도"
 }

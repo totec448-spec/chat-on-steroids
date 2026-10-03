@@ -1,0 +1,1151 @@
+{
+  "content_app_did_not_answer": {
+    "message": "앱이 응답하지 않았습니다."
+  },
+  "content_app_did_not_answer_lower": {
+    "message": "앱이 응답하지 않았습니다"
+  },
+  "content_app_not_running": {
+    "message": "이 PC에서 Chat On Steroids가 실행 중이 아닙니다."
+  },
+  "content_auto_compaction": {
+    "message": "자동 압축"
+  },
+  "content_auto_compaction_blocked_off": {
+    "message": "여기서는 꺼짐: 이 대화는 앱에서 차단되었습니다"
+  },
+  "content_auto_compaction_manual": {
+    "message": "이 대화를 직접 압축하세요"
+  },
+  "content_auto_compaction_off": {
+    "message": "자동 압축 꺼짐"
+  },
+  "content_auto_compaction_on": {
+    "message": "자동 압축 켜짐$1"
+  },
+  "content_auto_compaction_threshold_app": {
+    "message": "임계값은 앱에서 설정"
+  },
+  "content_auto_compaction_worker_off": {
+    "message": "여기서는 꺼짐: 워커 대화는 자동 압축되지 않습니다"
+  },
+  "content_bootstrap_composer_changed_authorizing": {
+    "message": "부트스트랩 승인 중 입력창이 바뀌었습니다. 초안은 보존되었고 아무것도 보내지 않았습니다"
+  },
+  "content_bootstrap_composer_changed_before_send": {
+    "message": "부트스트랩을 보내기 전에 입력창이 바뀌었습니다. 초안은 보존되었습니다"
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "부트스트랩을 입력하는 동안 ChatGPT가 입력창을 교체했습니다"
+  },
+  "content_bootstrap_composer_unavailable": {
+    "message": "모델 선택 후 ChatGPT가 사용 가능한 입력창을 다시 보여 주지 않았습니다"
+  },
+  "content_bootstrap_fresh_chat_changed": {
+    "message": "부트스트랩을 보내기 전에 표시된 새 대화가 바뀌었습니다. 아무것도 보내지 않았습니다"
+  },
+  "content_bootstrap_handoff": {
+    "message": "이 앱이 넘겨준 인수인계 요약입니다 — 직접 입력한 내용이 아닙니다"
+  },
+  "content_bootstrap_insert_refused": {
+    "message": "ChatGPT가 입력한 텍스트를 거부했습니다$1"
+  },
+  "content_bootstrap_missing_target": {
+    "message": "이미 있는 대화에 제공되었지만 대상 대화를 지정하지 않았습니다"
+  },
+  "content_bootstrap_model_unavailable": {
+    "message": "요청한 모델이나 추론 수준을 ChatGPT에서 사용할 수 없거나 확인할 수 없습니다"
+  },
+  "content_bootstrap_project_not_authorized": {
+    "message": "명령이 프로젝트 진입을 허용하지 않았습니다. 아무것도 보내지 않았습니다"
+  },
+  "content_bootstrap_project_open_failed": {
+    "message": "ChatGPT가 기본 링크로 원본 프로젝트를 열지 못했습니다. 아무것도 보내지 않았습니다"
+  },
+  "content_bootstrap_project_source_changed": {
+    "message": "프로젝트 항목이 더 이상 원본 대화와 일치하지 않습니다. 아무것도 보내지 않았습니다"
+  },
+  "content_bootstrap_resume_marker_invalid": {
+    "message": "재개 부트스트랩에 유효한 연속 표시가 없었습니다"
+  },
+  "content_bootstrap_send_not_accepted": {
+    "message": "ChatGPT가 부트스트랩 전송을 받아들이지 않았습니다"
+  },
+  "content_bootstrap_target_changed": {
+    "message": "보내기 전에 이 메시지의 대상 대화가 바뀌었습니다. 아무것도 보내지 않았습니다"
+  },
+  "content_bootstrap_worker": {
+    "message": "$1입니다 — 이 앱이 워커에게 준 지시이며 직접 입력한 내용이 아닙니다"
+  },
+  "content_bootstrap_wrong_conversation": {
+    "message": "이를 위해 연 페이지가 다른 대화를 보여 주고 있었습니다"
+  },
+  "content_browser_disconnected": {
+    "message": "Chat On Steroids에서 브라우저 연결이 끊어졌습니다."
+  },
+  "content_cancel": {
+    "message": "취소"
+  },
+  "content_chat_blocked": {
+    "message": "대화 차단됨"
+  },
+  "content_chat_blocked_tip": {
+    "message": "이 대화는 Chat On Steroids 앱에서 차단되었습니다. 도구 호출이 거부되고 Goal, Loop, 자동 압축이 꺼집니다. 해제하려면 앱의 대화 탭을 열고 세션 목록에서 이 대화에 마우스를 올린 뒤 차단 아이콘을 누르세요."
+  },
+  "content_chat_still_opening": {
+    "message": "이 대화가 아직 열리는 중입니다 — 다시 시도하세요"
+  },
+  "content_chatgpt_message_box_not_ready": {
+    "message": "ChatGPT 메시지 상자가 준비되지 않았습니다($1). 페이지가 로드될 때까지 기다린 뒤 다시 시도하세요."
+  },
+  "content_chatgpt_tool": {
+    "message": "ChatGPT 도구"
+  },
+  "content_clear": {
+    "message": "지우기"
+  },
+  "content_compact": {
+    "message": "압축"
+  },
+  "content_compact_already_underway": {
+    "message": "이 대화에서 이미 압축이 진행 중입니다. 기다리거나 취소하세요."
+  },
+  "content_compact_app_opening_fresh": {
+    "message": "앱이 새 대화를 열려고 합니다."
+  },
+  "content_compact_asking": {
+    "message": "요청 중…"
+  },
+  "content_compact_attempt_not_repeated": {
+    "message": "$1. 저장된 시도는 두 번 보내지 않습니다."
+  },
+  "content_compact_attempt_owned": {
+    "message": "저장된 인수인계 시도에 이미 소유자가 있습니다. ChatGPT의 표시된 메시지를 맞추는 중입니다."
+  },
+  "content_compact_blocked_unavailable_hint": {
+    "message": "차단된 대화는 압축하거나 재개하지 않습니다. 새 대화가 도구 없이 실행되기 때문입니다. 먼저 앱에서 해제하세요."
+  },
+  "content_compact_cancel": {
+    "message": "압축 취소"
+  },
+  "content_compact_cancel_aria": {
+    "message": "압축 후 계속 취소"
+  },
+  "content_compact_cancel_failed": {
+    "message": "압축을 취소하지 못했습니다."
+  },
+  "content_compact_chat_changed_before_start": {
+    "message": "압축을 시작하기 전에 이 대화가 바뀌었습니다."
+  },
+  "content_compact_chat_changed_preparing": {
+    "message": "인수인계를 준비하는 동안 대화가 바뀌었습니다. 아무것도 보내지 않았습니다."
+  },
+  "content_compact_chat_changed_stopping": {
+    "message": "압축이 턴을 멈추는 동안 이 대화가 바뀌었습니다."
+  },
+  "content_compact_chat_changed_waiting_results": {
+    "message": "압축이 도구 결과를 기다리는 동안 이 대화가 바뀌었습니다."
+  },
+  "content_compact_chat_changed_waiting_tools": {
+    "message": "압축이 로컬 도구를 기다리는 동안 이 대화가 바뀌었습니다."
+  },
+  "content_compact_chatgpt_writing": {
+    "message": "ChatGPT가 인수인계를 작성하는 중"
+  },
+  "content_compact_existing_draft": {
+    "message": "ChatGPT에 이미 초안이 있습니다. 인수인계를 요청하기 전에 메시지 상자를 비우세요."
+  },
+  "content_compact_failed": {
+    "message": "압축 실패"
+  },
+  "content_compact_failed_request_unconfirmed": {
+    "message": "$1 앱이 이 실패한 요청이 닫혔는지 아직 확인하지 않았습니다."
+  },
+  "content_compact_fresh_open": {
+    "message": "새 대화가 열렸습니다"
+  },
+  "content_compact_handoff_already_submitted": {
+    "message": "인수인계 지시가 이미 여기에서 제출되었습니다. 저절로 끝나거나 취소할 수 있습니다."
+  },
+  "content_compact_handoff_incomplete_detail": {
+    "message": "인수인계 응답이 완료되지 않았습니다. 압축을 취소하면 이 대화로 돌아갑니다."
+  },
+  "content_compact_handoff_problem": {
+    "message": "인수인계를 준비하는 동안 ChatGPT가 문제를 보고했습니다."
+  },
+  "content_compact_handoff_request_failed": {
+    "message": "ChatGPT에 인수인계를 요청하지 못했습니다: $1"
+  },
+  "content_compact_handoff_stopped_detail": {
+    "message": "인수인계 응답이 중지되었습니다. 압축을 취소하면 이 대화로 돌아갑니다."
+  },
+  "content_compact_insert_failed": {
+    "message": "브라우저가 인수인계 요청을 입력하지 못했습니다($1). 메시지 상자를 사용할 수 있는지 확인한 뒤 다시 시도하세요."
+  },
+  "content_compact_message_box_changed": {
+    "message": "인수인계 지시를 보내기 전에 메시지 상자가 바뀌었습니다. 초안은 보존되었고 아무것도 압축하지 않았습니다."
+  },
+  "content_compact_message_box_changed_preserved": {
+    "message": "인수인계를 보내기 전에 메시지 상자가 바뀌었습니다. 초안은 보존되었습니다."
+  },
+  "content_compact_missing_handoff_instruction": {
+    "message": "앱이 인수인계 지시를 보내지 않았습니다."
+  },
+  "content_compact_missing_token": {
+    "message": "앱이 압축 토큰을 보내지 않아 아무것도 추적할 수 없었습니다."
+  },
+  "content_compact_nothing_yet": {
+    "message": "아직 압축할 내용이 없습니다 — 메시지를 보내거나 목표를 설정하면 메시지를 작성합니다."
+  },
+  "content_compact_opening_fresh": {
+    "message": "인수인계를 저장했습니다. 새 대화를 여는 중"
+  },
+  "content_compact_policy_unverified": {
+    "message": "이 대화를 압축해도 되는지 확인하지 못했습니다."
+  },
+  "content_compact_results_unconfirmed": {
+    "message": "ChatGPT가 최신 도구 결과를 받았는지 확인하지 않았습니다. 아무것도 압축하지 않았습니다."
+  },
+  "content_compact_resume_cancelled": {
+    "message": "재개 취소됨"
+  },
+  "content_compact_resume_now": {
+    "message": "지금 압축 후 계속"
+  },
+  "content_compact_send_ambiguous": {
+    "message": "전송 결과가 불분명합니다. 아무것도 두 번 보내지 않습니다. ChatGPT가 받지 않았다면 직접 취소하세요."
+  },
+  "content_compact_send_not_ready": {
+    "message": "보내기 버튼이나 메시지 상자가 준비되지 않아 인수인계 요청을 제출하지 않았습니다. 페이지가 준비된 뒤 다시 시도하세요."
+  },
+  "content_compact_send_permission_unconfirmed": {
+    "message": "여기서는 아무것도 제출하지 않았습니다. 인수인계 전송 권한이 확인되지 않았습니다. 기존 요청은 두 번 보내지 않습니다."
+  },
+  "content_compact_send_state_unverified": {
+    "message": "인수인계 전송 상태를 확인하지 못했습니다. 아무것도 멈추지 않았습니다."
+  },
+  "content_compact_settling": {
+    "message": "정리 중…"
+  },
+  "content_compact_source_not_loaded": {
+    "message": "원래 질문이 아직 로드되지 않았습니다. 아무것도 압축하지 않았으며 원본 대화를 기다리는 중입니다."
+  },
+  "content_compact_starting": {
+    "message": "시작 중…"
+  },
+  "content_compact_step_opening": {
+    "message": "새 대화를 여는 중"
+  },
+  "content_compact_step_preparing": {
+    "message": "준비 중"
+  },
+  "content_compact_step_saving": {
+    "message": "저장 중"
+  },
+  "content_compact_step_writing": {
+    "message": "인수인계 작성 중"
+  },
+  "content_compact_stop_failed": {
+    "message": "ChatGPT가 현재 턴을 멈추지 않았습니다. 아무것도 압축하지 않았습니다."
+  },
+  "content_compact_stopping": {
+    "message": "멈추는 중…"
+  },
+  "content_compact_ticket_store_failed": {
+    "message": "압축 티켓을 저장하지 못했습니다."
+  },
+  "content_compact_tools_still_running": {
+    "message": "정리 시간 제한이 지난 뒤에도 로컬 도구가 실행 중이었습니다. 아무것도 압축하지 않았습니다."
+  },
+  "content_compact_tools_stop_unverified": {
+    "message": "로컬 도구가 멈췄는지 확인하지 못했습니다. 아무것도 압축하지 않았습니다."
+  },
+  "content_compact_unavailable": {
+    "message": "압축 후 계속을 사용할 수 없음"
+  },
+  "content_compact_waiting_response": {
+    "message": "인수인계 응답을 기다리는 중"
+  },
+  "content_compact_waiting_store": {
+    "message": "요약이 완성되었습니다. 앱이 저장하기를 기다리는 중입니다."
+  },
+  "content_compact_worker_unavailable_hint": {
+    "message": "워커 대화는 기존 대화에 머무르며 수동으로 압축하거나 재개하지 않습니다."
+  },
+  "content_connector_identity_ambiguous": {
+    "message": "설치된 커넥터의 식별 정보를 사용할 수 없거나 불분명합니다"
+  },
+  "content_connector_refresh_claim_unconfirmed": {
+    "message": "커넥터 새로고침 요청이나 페이지 소유권이 확인되지 않았습니다"
+  },
+  "content_connector_refresh_schema_unchanged": {
+    "message": "새로고침을 요청했지만 변경된 일치 스키마가 관찰되지 않았습니다"
+  },
+  "content_connector_refresh_unverified": {
+    "message": "커넥터 새로고침을 확인할 수 없습니다"
+  },
+  "content_connector_schema_no_refresh": {
+    "message": "커넥터 스키마가 다르지만 ChatGPT에 새로고침 버튼이 없습니다. 현재 도구 스키마를 불러오려면 이 사용자 지정 앱을 다시 만들거나 다시 게시하세요."
+  },
+  "content_connector_settings_unreadable": {
+    "message": "이 요청이 소유한 페이지에서 커넥터 설정 카드를 읽을 수 없습니다"
+  },
+  "content_connector_settings_unverified": {
+    "message": "정확한 커넥터 설정을 확인할 수 없습니다"
+  },
+  "content_delivery_attachment_transfer_failed": {
+    "message": "첨부 파일 전송에 실패했습니다. 메시지를 보내지 않았습니다."
+  },
+  "content_delivery_attachment_transfer_incomplete": {
+    "message": "첨부 파일 전송이 완료되지 않았습니다."
+  },
+  "content_delivery_attachment_upload_unconfirmed": {
+    "message": "첨부 파일 업로드가 확인되지 않았습니다. 다시 시도하기 전에 ChatGPT에서 보내지 않은 초안과 파일 오류를 확인하세요."
+  },
+  "content_delivery_chat_changed": {
+    "message": "직접 전달하기 전에 대화가 바뀌었습니다."
+  },
+  "content_delivery_chat_changed_or_busy": {
+    "message": "대화가 바뀌었거나 멈추지 않았습니다. 메시지를 보내지 않았습니다."
+  },
+  "content_delivery_composer_changed": {
+    "message": "보내기 전에 ChatGPT 입력창이 바뀌었습니다"
+  },
+  "content_delivery_composer_stuck": {
+    "message": "ChatGPT가 답변을 마쳤지만 입력창이 아직 중지 상태입니다. 대기 중인 메시지를 전달하기 전에 이 페이지를 복구하는 중입니다."
+  },
+  "content_delivery_draft_preserved": {
+    "message": "입력창이 바뀌었습니다. 초안은 보존되었습니다"
+  },
+  "content_delivery_editor_not_writable": {
+    "message": "보내기 전에 ChatGPT 편집기가 입력 가능한 상태가 되지 않았습니다."
+  },
+  "content_delivery_existing_draft": {
+    "message": "ChatGPT에 보내지 않은 초안이 이미 있습니다. 다시 시도하기 전에 Chrome에서 그 초안을 보내거나 지우세요."
+  },
+  "content_delivery_model_unconfirmed": {
+    "message": "요청한 모델 또는 추론 수준을 확인할 수 없습니다"
+  },
+  "content_delivery_stop_failed": {
+    "message": "현재 답변을 멈출 수 없었습니다."
+  },
+  "content_delivery_temporary_chat_unconfirmed": {
+    "message": "임시 채팅이 확인되지 않았습니다. 도우미 탭을 열고 임시 채팅 안내를 완료하세요."
+  },
+  "content_delivery_text_not_accepted": {
+    "message": "ChatGPT가 텍스트를 받아들이지 않았습니다$1"
+  },
+  "content_delivery_turn_changed": {
+    "message": "직접 전달하기 전에 턴이 바뀌었습니다."
+  },
+  "content_dismiss": {
+    "message": "닫기"
+  },
+  "content_empty": {
+    "message": "(비어 있음)"
+  },
+  "content_error_compaction_running": {
+    "message": "지금 다른 대화가 압축 중입니다."
+  },
+  "content_error_session_not_recorded": {
+    "message": "이 대화에는 아직 기록된 로컬 세션이 없습니다."
+  },
+  "content_error_turn_still_generating": {
+    "message": "먼저 이 ChatGPT 턴이 끝날 때까지 기다리세요."
+  },
+  "content_failed": {
+    "message": "실패"
+  },
+  "content_goal_add_specific": {
+    "message": "구체적인 목표 추가"
+  },
+  "content_goal_add_specific_hint": {
+    "message": "이 대화가 도달해야 할 것을 적으세요. 도달할 때까지 메시지를 보내고 거기서 멈춥니다."
+  },
+  "content_goal_add_to_start": {
+    "message": "이 대화를 시작하려면 Goal 또는 Loop를 추가하세요"
+  },
+  "content_goal_answer_never_settled": {
+    "message": "답변이 계속 바뀌어서 아무것도 작성하지 않았습니다"
+  },
+  "content_goal_answering": {
+    "message": "$1이(가) 답변하는 중"
+  },
+  "content_goal_backend_chatgpt_helper": {
+    "message": "ChatGPT 도우미"
+  },
+  "content_goal_backend_custom_endpoint": {
+    "message": "사용자 지정 엔드포인트"
+  },
+  "content_goal_backend_no_answer": {
+    "message": "$1이(가) 응답하지 않았습니다"
+  },
+  "content_goal_backend_offline_templates": {
+    "message": "오프라인 템플릿"
+  },
+  "content_goal_backend_offline_templates_title": {
+    "message": "오프라인 템플릿"
+  },
+  "content_goal_checking_again": {
+    "message": "$1 후 다시 확인"
+  },
+  "content_goal_checking_finished": {
+    "message": "답변 확인이 끝났습니다"
+  },
+  "content_goal_delivery": {
+    "message": "$1: $2"
+  },
+  "content_goal_delivery_after_turn_finish": {
+    "message": "세션 종료 시 또는 턴 이후"
+  },
+  "content_goal_delivery_only_finish": {
+    "message": "세션 종료 시에만"
+  },
+  "content_goal_loop_off": {
+    "message": "Goal과 Loop 꺼짐"
+  },
+  "content_goal_loop_stopped": {
+    "message": "목표 루프가 멈췄습니다"
+  },
+  "content_goal_message_box_in_use": {
+    "message": "메시지 상자가 사용 중이어서 아무것도 보내지 않았습니다"
+  },
+  "content_goal_mode_aria": {
+    "message": "Goal 모드"
+  },
+  "content_goal_new_chat_draft_refused": {
+    "message": "ChatGPT가 새 대화 초안을 바꾸지 않았습니다"
+  },
+  "content_goal_no_api_key_unavailable": {
+    "message": "API 키 없음 — Goal과 Loop를 사용할 수 없음"
+  },
+  "content_goal_nothing_sent": {
+    "message": "아무것도 보내지 않았습니다"
+  },
+  "content_goal_off_blocked": {
+    "message": "Goal 꺼짐 — 이 대화는 앱에서 차단되었습니다"
+  },
+  "content_goal_off_prime_writes": {
+    "message": "Goal 꺼짐 — 이 대화는 Prime이 작성합니다"
+  },
+  "content_goal_on": {
+    "message": "Goal 켜짐"
+  },
+  "content_goal_on_chasing": {
+    "message": "Goal 켜짐 — 이 대화의 목표를 향해 진행 중"
+  },
+  "content_goal_on_no_api_key": {
+    "message": "Goal 켜짐 — API 키 없음"
+  },
+  "content_goal_opening_empty": {
+    "message": "모델이 첫 메시지로 아무것도 작성하지 않았습니다"
+  },
+  "content_goal_opening_on_goal": {
+    "message": "이 대화를 목표에 맞춰 시작하는 중"
+  },
+  "content_goal_placeholder": {
+    "message": "이 대화가 무엇에 도달해야 하나요?"
+  },
+  "content_goal_reached": {
+    "message": "Goal 달성"
+  },
+  "content_goal_retrying": {
+    "message": "$1초 후 Goal 다시 시도"
+  },
+  "content_goal_save": {
+    "message": "목표로 저장"
+  },
+  "content_goal_save_failed": {
+    "message": "목표를 이 대화에 저장하지 못했습니다"
+  },
+  "content_goal_send_failed": {
+    "message": "ChatGPT가 메시지를 보내지 않았습니다"
+  },
+  "content_goal_sending_answer_to": {
+    "message": "답변을 $1에 보내는 중"
+  },
+  "content_goal_sending_to_chatgpt": {
+    "message": "ChatGPT로 보내는 중"
+  },
+  "content_goal_status_dismiss": {
+    "message": "Goal 상태 닫기"
+  },
+  "content_goal_step_reading": {
+    "message": "대화 읽는 중"
+  },
+  "content_goal_step_sending": {
+    "message": "보내는 중"
+  },
+  "content_goal_step_settling": {
+    "message": "답변 완료 확인 중"
+  },
+  "content_goal_step_writing": {
+    "message": "답장 작성 중"
+  },
+  "content_goal_wait_recovery_activity": {
+    "message": "복구 후 활동 대기 중"
+  },
+  "content_goal_wait_recovery_reload": {
+    "message": "복구 새로고침 전 대기 중"
+  },
+  "content_goal_wait_resumed": {
+    "message": "ChatGPT가 작업 재개 · 재시도 전 대기 중"
+  },
+  "content_goal_wait_running_tools": {
+    "message": "실행 중인 도구 대기 중"
+  },
+  "content_goal_wait_tool_inactivity": {
+    "message": "도구 활동 종료 대기 중"
+  },
+  "content_goal_wait_workers": {
+    "message": "이 채팅의 서브에이전트 대기 중"
+  },
+  "content_goal_writing_first_message": {
+    "message": "$1이(가) 첫 메시지를 작성하는 중"
+  },
+  "content_goal_wrote_next_message": {
+    "message": "$1이(가) 다음 메시지를 작성했습니다"
+  },
+  "content_loop_add_specific": {
+    "message": "구체적인 루프 추가"
+  },
+  "content_loop_add_specific_hint": {
+    "message": "이 대화가 도달해야 할 것을 적으세요. 그 뒤로 계속 메시지를 보내며 Loop 슬라이더로만 끝낼 수 있습니다."
+  },
+  "content_loop_continuation_paused": {
+    "message": "Loop 연속 진행 일시 중지됨"
+  },
+  "content_loop_on_never_stops": {
+    "message": "Loop 켜짐 — 스스로 멈추지 않음"
+  },
+  "content_loop_on_no_api_key": {
+    "message": "Loop 켜짐 — API 키 없음"
+  },
+  "content_loop_save": {
+    "message": "루프로 저장"
+  },
+  "content_meter_status": {
+    "message": "$1/$2 · 자동 압축 $3"
+  },
+  "content_mode_goal": {
+    "message": "Goal"
+  },
+  "content_mode_goal_hint": {
+    "message": "이 대화의 목표에 도달할 때까지 사용자 대신 답장하고 멈춥니다. $1(으)로 작성합니다."
+  },
+  "content_mode_loop": {
+    "message": "Loop"
+  },
+  "content_mode_loop_hint": {
+    "message": "계속 사용자 대신 답장합니다 — 이 슬라이더로만 끝낼 수 있습니다. $1(으)로 작성합니다."
+  },
+  "content_mode_note_blocked": {
+    "message": "앱에서 차단됨"
+  },
+  "content_mode_note_goal": {
+    "message": "목표에 도달할 때까지 답장"
+  },
+  "content_mode_note_key_required": {
+    "message": "OpenRouter 키 필요"
+  },
+  "content_mode_note_loop": {
+    "message": "계속 답장"
+  },
+  "content_mode_note_off": {
+    "message": "여기서는 답장을 작성하지 않음"
+  },
+  "content_mode_note_prime_writes": {
+    "message": "여기는 Prime이 작성함"
+  },
+  "content_mode_off": {
+    "message": "꺼짐"
+  },
+  "content_mode_off_hint": {
+    "message": "여기서는 아무것도 자동으로 작성하지 않습니다."
+  },
+  "content_model_generic": {
+    "message": "모델"
+  },
+  "content_off": {
+    "message": "꺼짐"
+  },
+  "content_on": {
+    "message": "켜짐"
+  },
+  "content_opened": {
+    "message": "열림"
+  },
+  "content_opening": {
+    "message": "여는 중…"
+  },
+  "content_paused": {
+    "message": "일시 중지됨"
+  },
+  "content_saving": {
+    "message": "저장 중…"
+  },
+  "content_settings_aria": {
+    "message": "Chat On Steroids 설정"
+  },
+  "content_stage_handoff_attention": {
+    "message": "인수인계 응답을 확인해야 합니다"
+  },
+  "content_stage_handoff_stopped": {
+    "message": "인수인계 응답이 중지되었습니다"
+  },
+  "content_stage_opening_fresh_chat": {
+    "message": "새 대화를 여는 중"
+  },
+  "content_stage_saving_handoff": {
+    "message": "인수인계 저장 중"
+  },
+  "content_stage_waiting_for_chrome": {
+    "message": "Chrome을 기다리는 중"
+  },
+  "content_task_add": {
+    "message": "작업 추가"
+  },
+  "content_task_api_key_unavailable": {
+    "message": "먼저 앱에서 OpenRouter API 키를 추가하세요."
+  },
+  "content_task_blocked_unavailable": {
+    "message": "이 대화는 앱에서 차단되었습니다. 다시 사용하려면 앱에서 해제하세요."
+  },
+  "content_task_change_hint": {
+    "message": "이 대화가 도달해야 할 것을 바꾸거나 지우세요. $1(으)로 실행됩니다."
+  },
+  "content_task_edit": {
+    "message": "작업 편집"
+  },
+  "content_task_pick_mode_first": {
+    "message": "먼저 위에서 Goal 또는 Loop를 선택하세요 — 꺼짐은 아무것도 작성하지 않습니다."
+  },
+  "content_task_worker_unavailable": {
+    "message": "워커 대화는 이미 Prime이 이끌고 있습니다."
+  },
+  "content_task_write_hint": {
+    "message": "이 대화가 도달해야 할 것을 적으세요. $1(으)로 실행됩니다."
+  },
+  "content_tokens_from": {
+    "message": "$1 토큰부터"
+  },
+  "content_tool_calls_count": {
+    "message": "도구 호출 $1회"
+  },
+  "content_tool_details_loading": {
+    "message": "기록된 세부 정보를 불러오는 중…"
+  },
+  "content_tool_details_unavailable": {
+    "message": "이 활동 버전의 기록된 세부 정보를 사용할 수 없습니다."
+  },
+  "content_tool_more_changed_files": {
+    "message": "변경된 파일 $1개 더"
+  },
+  "content_tool_outcome_completed": {
+    "message": "완료됨"
+  },
+  "content_tool_outcome_failed": {
+    "message": "실패"
+  },
+  "content_tool_outcome_internal_error": {
+    "message": "내부 오류"
+  },
+  "content_tool_outcome_refused": {
+    "message": "거부됨"
+  },
+  "content_tool_outcome_unknown": {
+    "message": "알 수 없음"
+  },
+  "content_tool_preview_truncated": {
+    "message": "미리 보기가 $1자에서 잘렸습니다."
+  },
+  "content_tool_ran": {
+    "message": "$1 실행함"
+  },
+  "content_tool_recorded_arguments": {
+    "message": "기록된 인수(가림 처리됨)"
+  },
+  "content_tool_recorded_result": {
+    "message": "기록된 결과(가림 처리된 미리 보기)"
+  },
+  "content_turn_auto_continue_stopped": {
+    "message": "자동 Continue가 변화 없는 무응답 턴을 멈췄습니다."
+  },
+  "content_turn_chatgpt_interrupted": {
+    "message": "ChatGPT가 턴을 중단됨으로 표시했습니다"
+  },
+  "content_turn_outcome": {
+    "message": "턴 $1"
+  },
+  "content_turn_replaced_by_user_message": {
+    "message": "새 사용자 메시지가 끝나지 않은 턴을 대체했습니다"
+  },
+  "content_turn_stalled_detail": {
+    "message": "10분 동안 보이는 출력도 진행도 없음"
+  },
+  "content_turn_stalled_error": {
+    "message": "10분 동안 눈에 띄는 진행이 없습니다. 앱에서 이번 턴이 끝났는지 확인하지 못했습니다."
+  },
+  "content_turn_started": {
+    "message": "턴 시작"
+  },
+  "content_turn_stop_requested": {
+    "message": "중지가 요청되었습니다. 페이지에 더 이상 생성 중이 표시되지 않습니다."
+  },
+  "content_unknown_error": {
+    "message": "알 수 없는 오류"
+  },
+  "content_waiting": {
+    "message": "기다리는 중…"
+  },
+  "content_waiting_current_operation": {
+    "message": "현재 작업이 끝나기를 계속 기다리는 중"
+  },
+  "content_waiting_local_tool": {
+    "message": "로컬 도구가 끝나기를 기다리는 중"
+  },
+  "content_waiting_local_tools": {
+    "message": "로컬 도구 $1개가 끝나기를 기다리는 중"
+  },
+  "content_worker_generic": {
+    "message": "워커"
+  },
+  "content_worker_label": {
+    "message": "워커"
+  },
+  "content_worker_retired": {
+    "message": "$2 때문에 $1이(가) 종료되었습니다. 이 대화는 더 이상 로컬 도구를 사용할 수 없습니다."
+  },
+  "content_worker_still_running": {
+    "message": "아직 실행 중인 워커: $1"
+  },
+  "content_workers_still_running": {
+    "message": "워커 $1개가 아직 실행 중"
+  },
+  "content_workers_summary": {
+    "message": "$1개 완료 · $2개 실행 중"
+  },
+  "content_workers_summary_failed": {
+    "message": "$1개 완료 · $2개 실행 중 · $3개 실패"
+  },
+  "content_working": {
+    "message": "작업 중…"
+  },
+  "content_writing": {
+    "message": "작성 중…"
+  },
+  "extension_action_title": {
+    "message": "Chat On Steroids"
+  },
+  "extension_description": {
+    "message": "ChatGPT를 Chat On Steroids에 연결하고 DOM, 스크린샷, 개발자 도구로 백그라운드에서 브라우저 탭을 제어합니다."
+  },
+  "extension_name": {
+    "message": "Chat On Steroids 컴패니언"
+  },
+  "popup_advanced": {
+    "message": "고급"
+  },
+  "popup_attribution_agent_key": {
+    "message": "에이전트 키"
+  },
+  "popup_attribution_exact_request_id": {
+    "message": "정확한 요청 ID"
+  },
+  "popup_attribution_not_placed_in_chat": {
+    "message": "대화에 배치되지 않음"
+  },
+  "popup_attribution_only_chat_generating": {
+    "message": "생성 중인 유일한 대화"
+  },
+  "popup_attribution_request_id_not_resolved": {
+    "message": "요청 ID 확인 안 됨"
+  },
+  "popup_attribution_tool_block_on_page": {
+    "message": "페이지의 도구 블록"
+  },
+  "popup_call_details": {
+    "message": "$1 — 발견 $2 · 앱 수신 $3 · 소유자 $4 · 도구 활동 $5"
+  },
+  "popup_chat_id": {
+    "message": "대화 ID"
+  },
+  "popup_chatgpt_tab": {
+    "message": "ChatGPT 탭"
+  },
+  "popup_confirmed": {
+    "message": "확인됨"
+  },
+  "popup_connect": {
+    "message": "연결"
+  },
+  "popup_copied": {
+    "message": "복사됨"
+  },
+  "popup_copy": {
+    "message": "복사"
+  },
+  "popup_copy_chat_id": {
+    "message": "대화 ID 복사"
+  },
+  "popup_copy_current_request_id": {
+    "message": "현재 요청 ID 복사"
+  },
+  "popup_copy_failed": {
+    "message": "복사 실패"
+  },
+  "popup_count_held": {
+    "message": "$1개 보류"
+  },
+  "popup_count_held_in_page": {
+    "message": "페이지에 $1개 보류"
+  },
+  "popup_count_queued": {
+    "message": "$1개 대기"
+  },
+  "popup_current_request": {
+    "message": "현재 요청"
+  },
+  "popup_detail_app": {
+    "message": "앱"
+  },
+  "popup_detail_app_session": {
+    "message": "앱 세션"
+  },
+  "popup_detail_app_value": {
+    "message": "v$1 · 포트 $2"
+  },
+  "popup_detail_browser_queue_value": {
+    "message": "$1개 보류 · 전체 $2개"
+  },
+  "popup_detail_chat_id": {
+    "message": "대화 ID"
+  },
+  "popup_detail_delivered": {
+    "message": "전송됨"
+  },
+  "popup_detail_extension": {
+    "message": "확장 프로그램"
+  },
+  "popup_detail_extension_value": {
+    "message": "v$1 · 프로토콜 $2"
+  },
+  "popup_detail_in_this_browser": {
+    "message": "이 브라우저에서"
+  },
+  "popup_detail_last_delivery": {
+    "message": "마지막 전송"
+  },
+  "popup_detail_last_delivery_value": {
+    "message": "$1 · $2 · $3 전"
+  },
+  "popup_detail_observed": {
+    "message": "관찰됨"
+  },
+  "popup_detail_observed_value": {
+    "message": "이벤트 $1개 · 호출 $2개"
+  },
+  "popup_detail_ownership": {
+    "message": "소유권"
+  },
+  "popup_detail_page_sends": {
+    "message": "페이지 전송"
+  },
+  "popup_detail_page_sends_value": {
+    "message": "$1 · $2개 실패"
+  },
+  "popup_detail_recorder": {
+    "message": "recorder"
+  },
+  "popup_detail_recorder_value": {
+    "message": "fiber v$1 · 실행 $2"
+  },
+  "popup_detail_tab": {
+    "message": "탭"
+  },
+  "popup_detail_tab_value": {
+    "message": "$1 · 에포크 $2"
+  },
+  "popup_detail_turn": {
+    "message": "턴"
+  },
+  "popup_detail_turn_live": {
+    "message": "$1 · 진행 중"
+  },
+  "popup_no": {
+    "message": "아니요"
+  },
+  "popup_no_record": {
+    "message": "기록 없음"
+  },
+  "popup_overwrite_chatgpt": {
+    "message": "ChatGPT 덮어쓰기"
+  },
+  "popup_owner_confirmed": {
+    "message": "소유자 확인됨"
+  },
+  "popup_pending": {
+    "message": "대기 중"
+  },
+  "popup_pipeline_call_fallback_many": {
+    "message": "앱이 호출 $1개를 요청 ID로 배치하지 못해 $2(으)로 대체했습니다."
+  },
+  "popup_pipeline_call_fallback_one": {
+    "message": "앱이 호출 하나를 요청 ID로 배치하지 못해 $1(으)로 대체했습니다."
+  },
+  "popup_pipeline_delivery_blocked": {
+    "message": "앱 연결과 프로토콜 호환성이 확인될 때까지 전송이 차단됩니다."
+  },
+  "popup_pipeline_delivery_rejected": {
+    "message": "앱이 마지막 전달을 거부했습니다($1)."
+  },
+  "popup_pipeline_extension_blocked": {
+    "message": "확장 프로그램이 이 탭의 관찰을 받아들이지 않습니다($1). ChatGPT 탭을 새로고침하세요."
+  },
+  "popup_pipeline_id_found_waiting_receipt": {
+    "message": "최신 턴에서 ID를 찾았습니다. 앱의 수신 확인을 기다리는 중입니다."
+  },
+  "popup_pipeline_no_recorder": {
+    "message": "이 탭에 recorder가 없습니다. 페이지를 새로고침하세요."
+  },
+  "popup_pipeline_owner_confirmed_no_activity": {
+    "message": "요청 소유자가 확인되었습니다. 아직 일치하는 도구 활동은 기록되지 않았습니다."
+  },
+  "popup_pipeline_queued_retrying": {
+    "message": "여기에 대기 중입니다. 앱으로 다시 전송하는 중입니다."
+  },
+  "popup_pipeline_received_waiting_owner": {
+    "message": "앱이 ID를 받았습니다. 소유자 확인을 기다리는 중입니다."
+  },
+  "popup_pipeline_request_id_matched_many": {
+    "message": "요청 ID $1개가 기록된 도구 활동과 일치했습니다."
+  },
+  "popup_pipeline_request_id_matched_one": {
+    "message": "요청 ID 1개가 기록된 도구 활동과 일치했습니다."
+  },
+  "popup_pipeline_waiting_first_message": {
+    "message": "첫 메시지 대기 중."
+  },
+  "popup_pipeline_waiting_latest_request_id": {
+    "message": "대화가 기록되었습니다. 최신 턴의 요청 ID를 기다리는 중입니다."
+  },
+  "popup_pipeline_waiting_session_receipt": {
+    "message": "앱에 연결할 수 있습니다. 이 대화의 세션 수신 확인을 기다리는 중입니다."
+  },
+  "popup_reaching_app": {
+    "message": "앱 연결 상태"
+  },
+  "popup_recording_this_chat": {
+    "message": "이 대화 기록 중"
+  },
+  "popup_request_id": {
+    "message": "요청 ID"
+  },
+  "popup_request_id_found": {
+    "message": "요청 ID 확인됨"
+  },
+  "popup_section_augment_chatgpt": {
+    "message": "ChatGPT 확장"
+  },
+  "popup_section_session_capture": {
+    "message": "세션 캡처"
+  },
+  "popup_secure_storage_unavailable": {
+    "message": "안전한 자격 증명 저장소를 사용할 수 없습니다. 설정 방법은 Chat On Steroids를 여세요."
+  },
+  "popup_sent_to_app": {
+    "message": "앱으로 전송됨"
+  },
+  "popup_state_app_not_reachable": {
+    "message": "앱에 연결할 수 없음"
+  },
+  "popup_state_app_reachable_port": {
+    "message": "앱 연결됨 · 포트 $1"
+  },
+  "popup_state_disconnected": {
+    "message": "연결 끊김"
+  },
+  "popup_state_looking_for_app": {
+    "message": "앱을 찾는 중"
+  },
+  "popup_state_port_connecting": {
+    "message": "포트 $1 · 연결 중"
+  },
+  "popup_state_version_mismatch": {
+    "message": "버전 불일치"
+  },
+  "popup_status_answering": {
+    "message": "답변 중"
+  },
+  "popup_status_blocked": {
+    "message": "차단됨"
+  },
+  "popup_status_bound": {
+    "message": "연결됨"
+  },
+  "popup_status_failed": {
+    "message": "실패"
+  },
+  "popup_status_id_confirmed": {
+    "message": "ID 확인됨"
+  },
+  "popup_status_idle": {
+    "message": "유휴"
+  },
+  "popup_status_new_chat": {
+    "message": "새 대화"
+  },
+  "popup_status_none_open": {
+    "message": "열린 항목 없음"
+  },
+  "popup_status_none_yet": {
+    "message": "아직 없음"
+  },
+  "popup_status_not_attached": {
+    "message": "연결 안 됨"
+  },
+  "popup_status_ok": {
+    "message": "정상"
+  },
+  "popup_status_reload": {
+    "message": "새로고침"
+  },
+  "popup_status_retired": {
+    "message": "사용 종료"
+  },
+  "popup_status_tool_matched": {
+    "message": "도구 일치"
+  },
+  "popup_status_unbound": {
+    "message": "연결 해제됨"
+  },
+  "popup_status_waiting": {
+    "message": "대기 중"
+  },
+  "popup_time_hours_short": {
+    "message": "$1시간"
+  },
+  "popup_time_minutes_short": {
+    "message": "$1분"
+  },
+  "popup_time_seconds_short": {
+    "message": "$1초"
+  },
+  "popup_timestamps": {
+    "message": "타임스탬프"
+  },
+  "popup_try_again": {
+    "message": "다시 시도"
+  },
+  "popup_version_mismatch_help": {
+    "message": "앱 v$1(프로토콜 $2), 컴패니언 v$3(프로토콜 $4). 브라우저의 확장 프로그램 페이지를 열고 개발자 모드를 켠 뒤 이 컴패니언을 업데이트/새로고침하세요. 불일치가 계속되면 Chat On Steroids에서 확장 프로그램 폴더 열기를 사용해 그 폴더를 불러오세요. 진행 중인 작업이 끝나면 ChatGPT 탭을 새로고침하세요."
+  },
+  "popup_yes": {
+    "message": "예"
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "마지막 응답에서 MCP 도구 호출이 기록되지 않았습니다. ChatGPT가 질문을 하고 있거나 도구 연결이 끊겼을 수 있습니다. 질문에 답하거나 도구가 작동하지 않는 경우 터널을 확인하세요. 자동 계속하기는 일시 중지되며 Loop는 켜진 상태로 유지됩니다."
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "이 답변에 대기 중인 계속하기가 없습니다. 이미 처리되었거나 더 새로운 작업으로 대체되었을 수 있습니다. 다시 시도하기 전에 최신 채팅 활동을 확인하세요."
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "작업과 Goal/Loop 지침이 보조 도구에 보내기엔 너무 깁니다. 작업 또는 설정의 사용자 지정 계속하기 지침을 줄이세요."
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "보조 도구가 전송하기에 너무 긴 계속하기 지시를 작성했습니다. 더 짧은 계속하기 지침을 요청하거나 설정에서 다른 보조 모델을 선택하세요."
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "공급자가 너무 큰 응답을 반환했습니다. 다른 계속하기 모델을 선택하거나 더 짧은 답변을 요청하세요."
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "공급자 응답이 크기 한도를 초과했습니다. 다른 계속하기 모델을 선택하거나 더 짧은 답변을 요청하세요."
+  },
+  "content_goal_error_no_api_key": {
+    "message": "계속하기 공급자의 API 키가 설정되지 않았습니다. 설정에서 키를 추가하거나 ChatGPT 계속하기 소스를 선택하세요."
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "계속하기 공급자가 API 자격 증명을 거부했습니다. 설정에서 API 키와 접근 권한을 확인하세요."
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "계속하기 공급자 계정에 사용 가능한 크레딧이 없습니다. 크레딧을 추가하거나 설정에서 다른 계속하기 소스를 선택하세요."
+  },
+  "content_goal_error_unknown_model": {
+    "message": "계속하기 공급자가 선택한 모델을 찾지 못했습니다. 모델 목록을 새로고침하고 설정에서 사용 가능한 모델을 선택하세요."
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "사용자 지정 계속하기 엔드포인트가 올바르지 않습니다. 설정에서 URL을 확인하세요. HTTPS 또는 로컬 HTTP 엔드포인트를 사용하세요."
+  },
+  "content_goal_error_rate_limited": {
+    "message": "계속하기 공급자가 요청을 속도 제한하고 있습니다. 표시된 재시도 시간까지 기다리거나 다른 계속하기 모델을 선택하세요."
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "계속하기 요청 시간이 초과되었거나 취소되었습니다. 다시 시도하기 전에 보조 채팅이나 공급자 상태를 확인하세요."
+  },
+  "content_goal_error_request_failed": {
+    "message": "계속하기 요청에 실패했습니다. 다시 시도하기 전에 선택한 보조 도구나 API 엔드포인트와 앱 진단을 확인하세요."
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "보조 요청이 이미 대기 중입니다. 새 요청을 시작하기 전에 완료되도록 기다리거나 취소하세요."
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "보조 요청이 취소되었습니다. 계속하려면 다시 시작하세요."
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "보조 프롬프트를 ChatGPT에 전달할 수 없습니다. 보조 채팅을 열어 작성기나 표시된 오류를 확인한 뒤 다시 시도하세요."
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "앱이 ChatGPT가 보조 프롬프트를 받았는지 확인할 수 없습니다. 중복 전송을 피하려면 다시 시도하기 전에 보조 채팅을 확인하세요."
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "다른 브라우저 탭에서 이 계속하기를 처리 중입니다. 해당 탭에서 진행 상황을 확인하세요."
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "앱이 자동 계속하기가 가능한 최종 답변을 확인하지 못했습니다. 소스 채팅에서 아직 작업 중인지 오류가 있는지 확인하세요."
+  },
+  "content_goal_error_astra_finish_only": {
+    "message": "이 채팅은 finish 도구를 통해 계속됩니다. 현재 설정에서는 브라우저의 최종 답변이 다음 메시지를 트리거하지 않습니다."
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "이 채팅의 Goal/Loop가 꺼져 있습니다. 계속하려면 켜세요."
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "워커는 자체 Goal/Loop를 실행할 수 없습니다. 대신 상위 채팅에서 계속하기를 켜세요."
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "이 채팅은 ‘압축 후 계속’로 교체되었습니다. 후속 채팅에서 계속하세요."
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "이 채팅은 앱에서 차단되어 있습니다. 계속하기를 켜기 전에 앱에서 차단을 해제하세요."
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "이 채팅에 대한 기록이 없습니다. 기록을 켜고 자동 계속하기를 사용하기 전에 메시지를 보내세요."
+  },
+  "content_goal_error_no_conversation": {
+    "message": "계속할 수 있는 기록된 대화가 없습니다. 먼저 작업을 보내세요."
+  },
+  "content_goal_error_no_objective": {
+    "message": "작업이 입력되지 않았습니다. Goal/Loop를 시작하기 전에 작업을 입력하세요."
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "보조 도구가 첫 메시지를 만들지 못했습니다. 작업을 더 구체적으로 작성하고 다시 시도하세요."
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "보조 도구가 Loop 계속하기 지시를 작성하지 않고 계속 중지를 선택했습니다. Loop 지침을 검토하거나 다른 보조 모델을 선택하세요."
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "답변에 오프라인 Goal 템플릿이 요구하는 완료 마커가 없습니다. 템플릿 지침을 확인하거나 다른 계속하기 소스를 선택하세요."
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "대기 중인 계속하기를 저장할 수 없습니다. 디스크 여유 공간과 앱 진단을 확인하세요."
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "전달 확인을 저장할 수 없습니다. 디스크 여유 공간을 확인하고 수동으로 다시 보내기 전에 채팅을 확인하세요."
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "Goal/Loop 설정을 저장할 수 없습니다. 디스크 여유 공간을 확인하고 다시 저장하세요."
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "작업을 저장할 수 없습니다. 디스크 여유 공간을 확인하고 다시 저장하세요."
+  }
+}

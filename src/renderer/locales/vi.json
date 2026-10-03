@@ -343,9 +343,6 @@
   "Inject now": "Chèn ngay",
   "Send directly": "Gửi trực tiếp",
   "After this turn": "Sau lượt này",
-  "Continuation timing": "Thời điểm tiếp tục",
-  "Only finish": "Chỉ khi kết thúc",
-  "After this turn + finish": "Sau lượt này + khi kết thúc",
   "Send": "Gửi",
   "All": "Tất cả",
   "Problems": "Sự cố",
@@ -1769,5 +1766,9 @@
   "Default new-chat model": "Mô hình mặc định cho chat mới",
   "Used only for a fresh ordinary chat with no conversation selection.": "Chỉ dùng cho chat thông thường mới khi cuộc trò chuyện chưa có lựa chọn riêng.",
   "Default new-chat reasoning": "Mức suy luận mặc định cho chat mới",
-  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Dùng với mô hình chat thông thường ở trên; worker và helper giữ mặc định riêng của chúng."
+  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "Dùng với mô hình chat thông thường ở trên; worker và helper giữ mặc định riêng của chúng.",
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Nhắc đến Chat On Steroids Core trong tin nhắn của tôi: đảm bảo ChatGPT có thể dùng ứng dụng này trong mọi cuộc trò chuyện. Tắt nếu ChatGPT bắt đầu câu hỏi đơn giản bằng một lệnh gọi công cụ không cần thiết; worker, Goal, Loop và Continue vẫn giữ lời nhắc.",
+  "When to continue": "Khi nào tiếp tục",
+  "Session Finish only": "Chỉ khi kết thúc phiên",
+  "Also after the turn": "Đồng thời sau lượt"
 }
