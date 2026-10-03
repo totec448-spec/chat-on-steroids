@@ -338,6 +338,9 @@ body {
 /* CJK uses natural character wrapping and full-height glyphs. Keep native controls
    flexible at narrow window widths and when the renderer is zoomed. */
 html:lang(zh) body, html:lang(ja) body { letter-spacing: 0; line-break: strict; }
+/* Korean separates words with spaces: wrap there, not inside a word ("이 / 름"). A single
+   overlong token may still break so nothing overflows its card. */
+html:lang(ko) body { word-break: keep-all; overflow-wrap: break-word; }
 html:lang(zh-TW) body { font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft JhengHei UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans CJK TC", sans-serif); }
 html:lang(ja) body { font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, "Segoe UI", "Yu Gothic UI", "Yu Gothic", "Hiragino Sans", "Meiryo", "Noto Sans CJK JP", sans-serif); }
 .language-select { min-width: 8em; max-width: 100%; }
