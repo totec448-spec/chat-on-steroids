@@ -93,6 +93,7 @@ const {
   swarmStateForCaller,
   statusForCaller,
   waitingForSubAgents,
+  workerPrimeOwner,
   workerConversationGone,
   workerRevivalClaimed
 } = await import('../src/main/agents.js');
@@ -210,6 +211,85 @@ function startWorker(id: string, conversationId = `c-${id}`): { caller: Caller }
 function fillContext(conversationId: string): void {
   noteAgentContextTokens(conversationId, WORKER_CONTEXT_CEILING_TOKENS);
 }
+
+describe('exact worker prime provenance', () => {
+  it('keeps the same exact prime through active, sleeping and dormant worker states', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1', 'c-worker-provenance');
+    expect(workerPrimeOwner('c-worker-provenance')).toMatchObject({
+      owned: true, primeConversationId: PRIME_CHAT
+    });
+
+    finishAgent(worker.caller, 'done for now');
+    expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.state).toBe('sleeping');
+    expect(workerPrimeOwner('c-worker-provenance')).toMatchObject({
+      owned: true, primeConversationId: PRIME_CHAT
+    });
+
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(workerPrimeOwner('c-worker-provenance')).toMatchObject({
+      owned: true, primeConversationId: PRIME_CHAT
+    });
+  });
+
+  it('keeps terminal worker ownership after its slot is over and the family parks', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1', 'c-worker-terminal-provenance');
+    fillContext('c-worker-terminal-provenance');
+    expect(finishAgent(worker.caller, 'finished at the ceiling').info.state).toBe('finished');
+    expect(workerPrimeOwner('c-worker-terminal-provenance')).toMatchObject({
+      owned: true, primeConversationId: PRIME_CHAT
+    });
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(workerPrimeOwner('c-worker-terminal-provenance')).toMatchObject({
+      owned: true, primeConversationId: PRIME_CHAT
+    });
+  });
+
+  it('distinguishes same-named workers in independent prime families by exact conversation', async () => {
+    await setEnabled(true, 3);
+    const primeB = { conversationId: 'c-prime-provenance-b' };
+    const a = spawn({ caller: prime, workers: [{ task: 'A work' }] });
+    const b = spawn({ caller: primeB, workers: [{ task: 'B work' }] });
+    expect(bindConversation('worker-1', 'c-worker-provenance-a', a.runId)).toBe(true);
+    expect(bindConversation('worker-1', 'c-worker-provenance-b', b.runId)).toBe(true);
+
+    expect(workerPrimeOwner('c-worker-provenance-a')).toMatchObject({
+      owned: true, primeConversationId: PRIME_CHAT, runId: a.runId
+    });
+    expect(workerPrimeOwner('c-worker-provenance-b')).toMatchObject({
+      owned: true, primeConversationId: primeB.conversationId, runId: b.runId
+    });
+  });
+
+  it('moves worker authority with the broker prime transfer instead of retaining the source chat', async () => {
+    const { beginPrimeTransfer, freezePrimeTransfer, commitPrimeTransfer } = await import('../src/main/agents.js');
+    startSwarm(1);
+    startWorker('worker-1', 'c-worker-transfer-provenance');
+    expect(workerPrimeOwner('c-worker-transfer-provenance').primeConversationId).toBe(PRIME_CHAT);
+
+    expect(beginPrimeTransfer(PRIME_CHAT)).toBe(true);
+    expect(freezePrimeTransfer(PRIME_CHAT)).toBe('frozen');
+    expect(commitPrimeTransfer(PRIME_CHAT, 'c-prime-resumed-provenance')).toBe(true);
+    expect(workerPrimeOwner('c-worker-transfer-provenance')).toMatchObject({
+      owned: true, primeConversationId: 'c-prime-resumed-provenance'
+    });
+  });
+
+  it('fails closed for a published worker whose prime is still provisional and reports no owner for strangers', async () => {
+    await setEnabled(true, 3, true);
+    try {
+      const run = spawn({ caller: { requestId: 'provisional-prime-request' }, workers: [{ task: 'provisional work' }] });
+      expect(bindConversation('worker-1', 'c-worker-provisional', run.runId)).toBe(true);
+      expect(workerPrimeOwner('c-worker-provisional')).toMatchObject({
+        owned: true, primeConversationId: null, runId: run.runId
+      });
+      expect(workerPrimeOwner('c-never-owned')).toEqual({ owned: false, primeConversationId: null, runId: null });
+    } finally {
+      await setEnabled(true);
+    }
+  });
+});
 
 describe('worker chats the browser may close', () => {
   it('names the stopped worker chats beyond the ones most recently used, and no working one', async () => {

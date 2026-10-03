@@ -1426,6 +1426,38 @@ it('keeps the project visible when its removal fails', async () => {
   expect((w.document.querySelector('.project-remove') as HTMLButtonElement).disabled).toBe(false);
 });
 
+it('lists primary and additional project folders in the sidebar and mutates only additional membership', async () => {
+  const project = {
+    id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary',
+    additionalPaths: ['C:\\workspace\\shared'], createdAt: 1
+  };
+  const { w } = await boot([], false, [], [project]);
+  const api = (w as any).api;
+  const group = w.document.querySelector<HTMLDetailsElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  group.querySelector<HTMLElement>('.project-heading')!.click();
+
+  const rows = [...group.querySelectorAll<HTMLElement>('.project-folder-row')];
+  expect(rows.map(row => row.querySelector('.project-folder-path')?.textContent)).toEqual(['C:\\workspace\\primary', 'C:\\workspace\\shared']);
+  expect(rows[0]!.querySelector('.project-folder-remove')).toBeNull();
+  expect(rows[0]!.textContent).toContain('Primary');
+  const remove = rows[1]!.querySelector<HTMLButtonElement>('.project-folder-remove')!;
+  expect(remove.getAttribute('aria-label')).toContain('C:\\workspace\\shared');
+
+  api.addProjectFolder = vi.fn(async () => ({ ok: true, data: { ...project, additionalPaths: [...project.additionalPaths, 'C:\\workspace\\new'] } }));
+  const add = group.querySelector<HTMLButtonElement>('.project-folder-add')!;
+  expect(add.getAttribute('aria-label')).toContain('Workspace');
+  add.click(); await settle();
+  expect(api.addProjectFolder).toHaveBeenCalledExactlyOnceWith(project.id);
+  expect(w.document.querySelector(`[data-project-id="${project.id}"]`)?.textContent).toContain('C:\\workspace\\new');
+
+  api.removeProjectFolder = vi.fn(async () => ({ ok: true, data: { ...project, additionalPaths: ['C:\\workspace\\new'] } }));
+  const refreshed = w.document.querySelector<HTMLDetailsElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  refreshed.querySelectorAll<HTMLButtonElement>('.project-folder-remove')[0]!.click(); await settle();
+  expect(api.removeProjectFolder).toHaveBeenCalledExactlyOnceWith(project.id, 'C:\\workspace\\shared');
+  expect(w.document.querySelector(`[data-project-id="${project.id}"]`)?.textContent).not.toContain('C:\\workspace\\shared');
+  expect(w.document.querySelector(`[data-project-id="${project.id}"]`)?.textContent).toContain('C:\\workspace\\primary');
+});
+
 it('Share a folder creates a sidebar project and keeps it when an older list refresh finishes', async () => {
   const { w, live } = await boot([], false);
   const api = (w as any).api;
