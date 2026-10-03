@@ -2358,16 +2358,14 @@ describe('handoff storage', () => {
     expect(chunkText('short brief', 1000)).toEqual(['short brief']);
   });
 
-  it('asks for compact user-authoritative handoffs within the documented normal budget', () => {
+  it('asks for user-authoritative handoffs up to the documented 30k-token ceiling', () => {
     const prompt = nativeHandoffPrompt();
     expect(prompt).toContain(DEFAULT_HANDOFF_PROMPT);
-    expect(prompt).toMatch(/user messages are authoritative/i);
-    expect(prompt).toMatch(/2,000[–-]6,000 tokens/i);
-    expect(prompt).toMatch(/shortest handoff that preserves all continuation-critical state/i);
-    expect(prompt).toMatch(/go longer only when correctness needs it/i);
-    expect(prompt).not.toMatch(/10,000[–-]30,000 tokens/i);
-    expect(DEFAULT_HANDOFF_PROMPT.length).toBeLessThanOrEqual(3_000);
-    expect(prompt.length).toBeLessThanOrEqual(4_000);
+    expect(prompt).toMatch(/user's messages as the highest-authority source/i);
+    expect(prompt).toMatch(/10,000[–-]30,000 tokens/i);
+    expect(prompt).toMatch(/~6,000-token brief is normally too short/i);
+    expect(prompt).toMatch(/Never exceed 30,000 tokens/i);
+    expect(prompt).toMatch(/lossless operational compression/i);
     expect(prompt).toMatch(/failure.*root cause.*change.*verification/i);
     expect(prompt).toMatch(/PLANNED \/ DECIDED/i);
     expect(prompt).toMatch(/FAILED \/ UNRESOLVED/i);
@@ -2384,6 +2382,25 @@ describe('handoff storage', () => {
     expect(prompt).toContain('omit raw tool-call arguments and result bodies');
     expect(prompt).toContain('Your reply to this message must be the brief itself and nothing else');
     expect(prompt).toContain('no tool calls');
+  });
+
+  it('keeps the thorough default byte for byte and swaps only the length for a shorter brief (#995)', () => {
+    expect(nativeHandoffPrompt('token', true, DEFAULT_HANDOFF_PROMPT, 'thorough')).toBe(nativeHandoffPrompt('token', true));
+    const short = nativeHandoffPrompt('token', true, DEFAULT_HANDOFF_PROMPT, 'short');
+    expect(short).not.toMatch(/10,000[–-]30,000|10k[–-]30k|~6,000-token brief is normally too short|Never exceed 30,000/i);
+    expect(short).toMatch(/target roughly 2,000–6,000 tokens/);
+    expect(short).toContain('Length setting: aim for roughly 2,000–6,000 tokens and never exceed 6,000.');
+    // Everything else the brief must carry stays exactly as it was.
+    expect(short).toMatch(/user's messages as the highest-authority source/i);
+    expect(short).toMatch(/PLANNED \/ DECIDED/i);
+    const standard = nativeHandoffPrompt('token', true, DEFAULT_HANDOFF_PROMPT, 'standard');
+    expect(standard).toMatch(/target roughly 4,000–10,000 tokens/);
+    expect(standard).toContain('never exceed 10,000');
+    // An edited prompt has no default sentence to swap; the code-owned line still sets the length.
+    const custom = 'Carry only the state needed for the next action. Aim for about 20,000 tokens.';
+    const edited = nativeHandoffPrompt('token', true, custom, 'short');
+    expect(edited).toContain(custom);
+    expect(edited).toContain('This replaces any other length target in these instructions.');
   });
 
   it('honors the tool-detail setting in the handoff brief without claiming to erase seen history', () => {
@@ -4073,9 +4090,10 @@ describe('activity windows', () => {
   });
 });
 
-it('ships the compact continuation-critical handoff policy as the editable default', () => {
-  expect(DEFAULT_HANDOFF_PROMPT).toContain('target roughly 2,000–6,000 tokens');
-  expect(DEFAULT_HANDOFF_PROMPT).toContain('shortest handoff that preserves all continuation-critical state');
+it('ships the long-standing handoff brief rules as the editable default, unchanged', () => {
+  // Making the prompt editable must not quietly change Compact & Resume for everyone who never
+  // opens the editor: the default is the brief the app has always asked for.
+  expect(DEFAULT_HANDOFF_PROMPT).toContain('target roughly 10,000–30,000 tokens');
   for (const heading of ['TASK —', 'USER SPECIFICATION —', 'CURRENT STATE —', 'DONE —', 'IN PROGRESS —', 'PLANNED / DECIDED —',
     'FAILED / UNRESOLVED —', 'FILES —', 'VERIFICATION —', 'ENVIRONMENT —', 'NEXT —', 'DO NOT —']) {
     expect(DEFAULT_HANDOFF_PROMPT, heading).toContain(heading);

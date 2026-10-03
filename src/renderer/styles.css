@@ -346,7 +346,7 @@ html:lang(ja) body { font-family: var(--ui-font, -apple-system, BlinkMacSystemFo
 .setup-heading .settings-heading { margin-bottom: 0; padding: 0; }
 .setup-heading .settings-heading p { margin-bottom: 0; }
 .language-tabs { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; justify-self: start; max-width: 100%; padding: 3px; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
-.language-tabs button { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 36px; padding: 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.language-tabs button { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 36px; padding: 6px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .language-tabs button:hover { background: var(--hover); color: var(--ink); }
 .language-tabs button[aria-pressed='true'] { background: var(--hover); border-color: var(--line); color: var(--ink); }
 .language-tabs button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
@@ -429,6 +429,8 @@ code {
 .app-topbar > .btn, .view-menu { -webkit-app-region: no-drag; height: 100%; }
 .app-topbar > .btn { padding: 0 5px; }
 .app-topbar > .btn .ico { --ico: 14px; }
+.app-topbar > .topbar-theme { margin-inline-start: auto; width: 28px; justify-content: center; }
+.app-topbar > .topbar-connection { min-width: 68px; padding-inline: 8px; color: var(--red); font-size: calc(11px * var(--text-scale, 1)); font-weight: 600; }
 .view-menu { position: relative; font-size: calc(12px * var(--text-scale, 1)); }
 .view-menu > summary { display: flex; align-items: center; height: 100%; list-style: none; cursor: pointer; padding: 0 9px; border-radius: 6px; }
 .view-menu > summary:hover, .view-menu[open] > summary { background: var(--hover); }
@@ -2662,6 +2664,11 @@ input.num:disabled { opacity: .5; cursor: default; }
   flex: 0 0 auto;
   width: auto;
   min-width: 132px;
+  /* One line, always. A long choice that does not fit beside its explanation moves below it
+     (the row wraps) instead of breaking its own label over two lines. */
+  max-width: 100%;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* The row's button is its action; the explanation is the thing that yields. Left shrinkable
@@ -3046,7 +3053,9 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .setting > input[type='checkbox']:disabled { opacity: .45; cursor: default; }
 .setting:has(> input[type='checkbox']:disabled) .setting-text { opacity: .6; }
 .setting-timing { margin: -4px 0 8px; padding: 0 0 10px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
-.setting-timing > summary { width: fit-content; cursor: pointer; color: var(--soft); }
+.setting-timing > summary { display: flex; align-items: center; gap: 6px; width: fit-content; cursor: pointer; color: var(--soft); list-style: none; }
+.setting-timing > summary::-webkit-details-marker { display: none; }
+.setting-timing[open] .sum-chev { transform: rotate(90deg); }
 .setting-timing > summary:hover { color: var(--ink); }
 .setting-timing p { max-width: 64ch; margin: 8px 0 0; line-height: 1.55; }
 .model-verification { flex: 0 0 auto; padding: 3px 7px; border: 1px solid #d9a44170; border-radius: 99px; background: #d9a44118; color: #d9a441; font-size: calc(10px * var(--text-scale, 1)); }
@@ -3296,6 +3305,15 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .project-heading:hover .project-new, .project-heading:focus-within .project-new { opacity: 1; }
 .project-remove { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; padding: 4px; color: var(--faint); opacity: 0; }
 .project-heading:hover .project-remove, .project-heading:focus-within .project-remove { opacity: 1; }
+.project-folders { display: grid; gap: 3px; margin: 1px 8px 6px 24px; padding: 4px 0 6px; border-bottom: 1px solid var(--line); }
+.project-folder-row { min-width: 0; display: grid; grid-template-columns: 15px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 27px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+.project-folder-row > .ico { --ico: 13px; color: var(--faint); }
+.project-folder-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-folder-primary { flex-shrink: 0; color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); }
+.project-folder-remove { display: grid; place-items: center; width: 24px; height: 24px; padding: 4px; color: var(--faint); }
+.project-folder-remove:hover:not(:disabled) { color: var(--ink); }
+.project-folder-add { justify-self: start; min-height: 26px; padding: 3px 7px; gap: 5px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+.project-folder-add .ico { --ico: 12px; }
 /* Heading: 8px padding + 17px folder + 9px gap. Rows already supply 10px padding. */
 .project-group > .sess, .project-group > .worker-group { margin-inline-start: 24px; }
 .project-show-more { margin-inline-start: 34px; color: var(--faint); font-size: calc(14px * var(--text-scale, 1)); padding: 6px 0; border: 0; background: transparent; }
@@ -3638,9 +3656,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .queue-delivery { flex-shrink: 0; font-size: calc(11px * var(--text-scale, 1)); padding: 3px 7px; }
 .queue-delivery[aria-pressed="true"] { color: var(--text); border-color: var(--soft); }
 
-/* Compact connection disclosure; extension-only preferences remain in the companion. */
-.connect-prompt { background: var(--red); color: white; border: 0; padding: 8px 18px; font-weight: 600; }
-.connect-prompt[hidden] { display: none; }
 @media (prefers-reduced-motion: no-preference) { .skill-autocomplete:not([hidden]) { animation: skill-reveal 120ms ease-out; } }
 @keyframes skill-reveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 .slash-menu-section-title { padding: 6px 8px; color: var(--soft); font-size: 11px; }
