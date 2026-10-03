@@ -1812,7 +1812,18 @@ describe('session IPC contracts', () => {
     expect(isChatTrusted(conversationId)).toBe(true);
     expect(isChatBlocked(conversationId)).toBe(true);
 
-    const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('simulated trust revoke failure'), { code: 'EIO' }));
+    // Block saves on a short delay. Settle it first, and fail only the trust file's save: a
+    // one-shot failure on whatever renames next went to a late Block save on slow runners.
+    await flushDurable();
+    const realRename = fs.rename.bind(fs);
+    let failed = false;
+    const rename = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (!failed && String(to).includes('trusted-chats')) {
+        failed = true;
+        throw Object.assign(new Error('simulated trust revoke failure'), { code: 'EIO' });
+      }
+      return realRename(from, to);
+    });
     try {
       const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
       expect(deleted.ok).toBe(false);
