@@ -174,6 +174,8 @@ const settingsPatch = z.object({
   ui: z.object({
     appearance: appearanceSchema.optional(),
     autoContinue: z.boolean().optional(),
+    defaultChatModel: z.string().trim().min(1).max(80).optional(),
+    defaultChatReasoning: z.enum(REASONING_EFFORTS).optional(),
     chatBrowser: z.enum(CHAT_BROWSERS).optional(),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
@@ -328,6 +330,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     ui: {
       appearance: mergeAppearance(current.ui.appearance, base.ui.appearance, wanted.ui.appearance),
       autoContinue: pick(current.ui.autoContinue, base.ui.autoContinue, wanted.ui.autoContinue),
+      defaultChatModel: pick(current.ui.defaultChatModel, base.ui.defaultChatModel, wanted.ui.defaultChatModel),
+      defaultChatReasoning: pick(current.ui.defaultChatReasoning, base.ui.defaultChatReasoning, wanted.ui.defaultChatReasoning),
       chatBrowser: pick(current.ui.chatBrowser, base.ui.chatBrowser, wanted.ui.chatBrowser),
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
