@@ -68,7 +68,8 @@ app.whenReady().then(async () => {
     for(let i=0;i<100 && !(await js('!!window.releaseDisconnect'));i++) await new Promise(resolve=>setTimeout(resolve,25));
     assert.deepEqual(await js(`(() => {const b=document.getElementById('connectionPopoverToggle');for(let i=0;i<100;i++) b.click();return {text:b.textContent,disabled:b.disabled,calls:window.disconnectCalls,title:document.getElementById('connectionPopoverTitle').textContent};})()`),
       {text:'Disconnecting…',disabled:true,calls:1,title:'Disconnecting'});
-    assert.equal(await js(`document.getElementById('connectionPopoverVerified').textContent`),'Closing connection…');
+    assert.equal(await js(`document.getElementById('connectionPopoverTitle').title`),'Closing connection…');
+    assert.equal(await js(`document.getElementById('connectionPopoverVerified')`),null);
     assert.equal(await js(`document.getElementById('wizConnect').textContent`),'Disconnecting…');
     assert.equal(await js(`document.getElementById('wizConnect').disabled`),true);
     fs.mkdirSync(output,{recursive:true});

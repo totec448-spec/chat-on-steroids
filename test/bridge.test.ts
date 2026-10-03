@@ -1560,6 +1560,24 @@ describe('activity feed', () => {
     ] }]);
   });
 
+  it('bounds a reply’s cited sources by count and by one budget for the whole reply', async () => {
+    // The per-field limits alone allowed megabytes per message revision.
+    await pair();
+    const conversationId = '99999999-8888-7777-6666-555555555556';
+    const source = (at: number) => ({ title: 'T'.repeat(300), url: `https://example.org/${at}/${'p'.repeat(1500)}`, source: 'Example', snippet: 'S'.repeat(300) });
+    const references = Array.from({ length: 50 }, (_, index) => ({ index, sources: Array.from({ length: 12 }, (_, at) => source(index * 100 + at)) }));
+    const result = await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'assistant_message', messageId: 'reply-many', time: Date.now(), text: 'Cited.', state: 'final', references }
+    ] } });
+    const [reply] = await readEvents(result.body.sessionId, { kinds: ['assistant_message'] });
+    const kept = reply?.kind === 'assistant_message' ? reply.references ?? [] : [];
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.length).toBeLessThanOrEqual(32);
+    expect(Math.max(...kept.map(reference => reference.sources.length))).toBeLessThanOrEqual(8);
+    const chars = kept.flatMap(reference => reference.sources).reduce((sum, item) => sum + item.title.length + item.url.length + (item.source?.length ?? 0) + (item.snippet?.length ?? 0), 0);
+    expect(chars).toBeLessThanOrEqual(32_000);
+  });
+
   it('records the server-resolved reply model, keeps it across sparse updates and drops malformed values', async () => {
     await pair();
     const conversationId = '99999999-8888-7777-6666-555555555552';
@@ -9240,6 +9258,36 @@ describe('unattributed activity recovery', () => {
     const retry = failed.body.repairs?.[0] ?? await maintenance();
     expect(retry?.reason).toBe('assistant-error');
     expect((await request('POST', '/repairs/claim', { body: { token: retry!.token } })).body.allowed).toBe(true);
+  });
+
+  it('says a recovered answer is being waited for instead of a failed reload, and still retries after it', async () => {
+    await pair();
+    await events(PRIME, [openTurn('answering-again'), { kind: 'chat_error', time: Date.now(),
+      text: 'Connection interrupted', recoverable: true }]);
+    const session = await findSessionByConversation(PRIME);
+    const rows = async () => foldProgress((await readEvents(session!.id, { kinds: ['progress'] }))
+      .filter((event): event is Extract<SessionEvent, { kind: 'progress' }> => event.kind === 'progress'))
+      .map((event) => event.kind === 'progress' ? event.message.text : '');
+    const lines = (text: string) => getLog().filter((entry) => entry.message.includes(text)).length;
+    const failedBefore = lines('reported failed assistant-error recovery'), waitingBefore = lines('is answering again');
+    // ChatGPT resumed the answer by itself; the page keeps the reload for after it, twice in a row.
+    let handout = await maintenance();
+    for (let pass = 0; pass < 2; pass++) {
+      expect(handout?.reason).toBe('assistant-error');
+      expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(true);
+      const waiting = await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=streaming`);
+      expect(await rows()).toEqual(['ChatGPT is answering again; recovery waits until it finishes.']);
+      handout = waiting.body.repairs?.[0] ?? await maintenance();
+    }
+    // One info line for the episode, no warning, and no "Trying to reload" row while it waits.
+    expect(lines('is answering again') - waitingBefore).toBe(1);
+    expect(lines('reported failed assistant-error recovery') - failedBefore).toBe(0);
+    // A real failure afterwards still says so, with the page's reason.
+    expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(true);
+    await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=changed`);
+    expect(getLog().some((entry) => entry.message.includes(
+      `reported failed assistant-error recovery for ${PRIME} (reloaded: the page changed before the action)`))).toBe(true);
+    expect(await rows()).toEqual(['Reload failed while recovering an interrupted response; will retry.']);
   });
 
   it('preserves a recovered assistant-error page without spending a later reload on the same question', async () => {

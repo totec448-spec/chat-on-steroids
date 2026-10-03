@@ -44,16 +44,14 @@ app.whenReady().then(async () => {
           document.body.append(popup); popup.style.left = '100px'; popup.style.bottom = '40px';
           popup.hidden = false;
           const compact = name(popup);
-          const advanced = document.querySelector('#connectionAdvanced'); advanced.open = true;
-          const detail = name(document.querySelector('.connection-advanced-body'));
           // Interrupt a reveal and reopen. No delayed callback may hide the new surface.
-          popup.hidden = true; advanced.open = false; void popup.offsetHeight;
-          popup.hidden = false; advanced.open = true;
-          return { settings, sidebar, compact, detail };
+          popup.hidden = true; void popup.offsetHeight;
+          popup.hidden = false;
+          return { settings, sidebar, compact };
         })()`);
         assert.deepEqual(names, reduced
-          ? { settings: ['none', 'none', 'none'], sidebar: ['none', 'none'], compact: 'none', detail: 'none' }
-          : { settings: ['none', 'surface-in', 'sidebar-content-in'], sidebar: ['sidebar-content-in', 'sidebar-content-in'], compact: 'surface-in', detail: 'surface-in' });
+          ? { settings: ['none', 'none', 'none'], sidebar: ['none', 'none'], compact: 'none' }
+          : { settings: ['none', 'surface-in', 'sidebar-content-in'], sidebar: ['sidebar-content-in', 'sidebar-content-in'], compact: 'surface-in' });
         await js('Promise.all(document.getAnimations().filter(a => Number.isFinite(a.effect.getComputedTiming().endTime)).map(a => a.finished.catch(() => {})))');
         const navigation = await js(`(() => {
           const app = document.querySelector('.app');
@@ -86,10 +84,10 @@ app.whenReady().then(async () => {
         });
         const settled = await js(`(() => {
           const el = document.querySelector('#connectionPopover'), rect = el.getBoundingClientRect();
-          const summary = document.querySelector('#connectionAdvanced > summary'), r = summary.getBoundingClientRect();
+          const button = document.querySelector('#connectionPopoverToggle'), r = button.getBoundingClientRect();
           return { visible: el.checkVisibility(), transform: getComputedStyle(el).transform,
             overflow: el.scrollWidth > el.clientWidth, inside: rect.x >= 0 && rect.right <= innerWidth,
-            hit: summary.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) };
+            hit: button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) };
         })()`);
         assert.deepEqual(settled, { visible: true, transform: 'none', overflow: false, inside: true, hit: true });
         if (!reduced) fs.writeFileSync(path.join(output, `${theme}-${width}.png`), (await win.webContents.capturePage()).toPNG());

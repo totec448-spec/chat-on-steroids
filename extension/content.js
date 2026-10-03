@@ -851,6 +851,18 @@
         sendText(source.text.slice(actualMarker[0].length)) === sendText(expected.slice(expectedMarker[0].length))) return true;
     return sendText(unescapeMarkdown(source.text)) === sendText(expected);
   }
+  /**
+   * User messages named by ChatGPT's own Send requests in this document (#942), oldest first.
+   * MAIN reads each id from `POST /backend-api/f/conversation` before the page can redraw a new
+   * chat without its first question. A receipt may take only the first request after its own
+   * click, and only soon after it: that request is the Send the click made.
+   */
+  const SENT_REQUEST_MS = 10_000;
+  const sentRequests = [];
+  function sentRequestSince(since) {
+    const sent = sentRequests.find(entry => entry.epoch === epoch && entry.at >= since);
+    return sent && sent.at - since <= SENT_REQUEST_MS ? { id: sent.id } : null;
+  }
   /** Temporary-planner-only fallback for an accepted user row left on the immediately older Fiber scan. */
   function acceptedTemporaryDecisionUser(message, decision) {
     if (!decision?.temporary || !decision.onTarget() || !message || message.role !== 'user' ||
@@ -907,8 +919,8 @@
    */
   let mentionCore = true;
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
-                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = coreMention) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain,
+                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = coreMention, sentRequest = null) {
+    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -3417,16 +3429,21 @@
     if (!Array.isArray(raw)) return null;
     const out = [];
     const indexes = new Set();
-    for (const entry of raw.slice(0, 64)) {
+    // One budget for the whole reply, as the app applies it again: see MAX_REFERENCES_CHARS.
+    let budget = 32000;
+    for (const entry of raw.slice(0, 32)) {
       if (!entry || typeof entry !== 'object' || !Number.isInteger(entry.index) || entry.index < 0 || entry.index > 9999) continue;
       if (indexes.has(entry.index) || !Array.isArray(entry.sources)) continue;
       const sources = [];
-      for (const source of entry.sources.slice(0, 12)) {
+      for (const source of entry.sources.slice(0, 8)) {
         const url = source && typeof source.url === 'string' && source.url.length <= 2000 && /^https?:\/\/\S+$/i.test(source.url) ? source.url : null;
         if (!url) continue;
         const title = cap(source.title, 300) || url;
         const name = cap(source.source, 80);
         const snippet = cap(source.snippet, 300);
+        const size = title.length + url.length + (name ? name.length : 0) + (snippet ? snippet.length : 0);
+        if (size > budget) break;
+        budget -= size;
         const date = typeof source.date === 'number' && Number.isFinite(source.date) && source.date > 0 && source.date < 1e13 ? Math.round(source.date) : 0;
         sources.push({ title, url, ...(name ? { source: name } : {}), ...(date ? { date } : {}), ...(snippet ? { snippet } : {}) });
       }
@@ -3557,6 +3574,7 @@
         typeof entry.renderedHtml === 'string' && entry.renderedHtml.length <= 120_000 ? entry.renderedHtml : '';
       if (!rawText && !renderedHtml && !attachments.length &&
           !(entry.role === 'assistant' && entry.rawMessageId && entry.rawMessageId === raw.endMessageId)) continue;
+      const references = entry.role === 'assistant' ? readReferences(entry.references) : null;
       const message = {
         messageId,
         rawMessageId: cap(entry.rawMessageId, 200),
@@ -3572,7 +3590,7 @@
             : null,
         ...(entry.role === 'assistant' && typeof entry.resolvedModel === 'string' &&
           /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(entry.resolvedModel) ? { resolvedModel: entry.resolvedModel } : {}),
-        ...(entry.role === 'assistant' && readReferences(entry.references) ? { references: readReferences(entry.references) } : {}),
+        ...(references ? { references } : {}),
         rawText,
         ...(attachments.length ? { attachments } : {}),
         renderedHtml,
@@ -11849,6 +11867,16 @@
     flushStreamRequestOrigins();
   }
   window.addEventListener('message', (event) => {
+    if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-send-request') return;
+    const at = Date.now();
+    const ids = Array.isArray(event.data.messageIds) ? event.data.messageIds : [];
+    if (ids.length !== 1 || typeof ids[0] !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ids[0])) return;
+    sentRequests.push({ id: ids[0], at, epoch });
+    while (sentRequests.length > 8) sentRequests.shift();
+    // A Send still waiting on its receipt re-checks now rather than on the next page mutation.
+    for (const check of pageViewChecks) void check();
+  });
+  window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-send-model') return;
     const model = typeof event.data.model === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(event.data.model) ? event.data.model : null;
     const ids = Array.isArray(event.data.messageIds) ? event.data.messageIds.slice(0, 8) : [];
@@ -12367,6 +12395,13 @@
         return true;
       }, (user, conversation) => {
         if ((!conversation && !temporary) || (target && !onTarget())) return false;
+        // Named by the request this Send's own click made (#942): the row may never be readable,
+        // but the id is ChatGPT's own for exactly the question that request delivered.
+        if (user.sentRequest) {
+          if (!conversation || user.id === previousUserId) return false;
+          receipt = { conversation, user: { id: user.id } };
+          return true;
+        }
         const users = CLF_DOM.messages().filter(row => row.role === 'user');
         if ((!target && users.length !== 1) || users.at(-1)?.id !== user.id || user.id === previousUserId || !matchesSubmittedBootstrap(user, submittedText)) return false;
         // Freeze only identity while native Send still holds the proven row. React
@@ -12374,7 +12409,8 @@
         receipt = { conversation, user: { id: user.id } };
         return true;
       }, matchesSubmittedBootstrap, DESKTOP_RECEIPT_MS, noteWithdraw,
-      input.purpose === 'decision' ? null : input.recovery || agent || mentionCore ? coreMention : null);
+      input.purpose === 'decision' ? null : input.recovery || agent || mentionCore ? coreMention : null,
+      sentRequestSince);
       // #744: one retry when the editor was replaced before anything asked to send it.
       if (!(await nativeSend()) &&
           !(!authorizing && !sendAttempted && !receipt && !draft.current() && draftCurrent() && await nativeSend())) {
