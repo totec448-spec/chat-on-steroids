@@ -200,7 +200,7 @@ const api = {
   setGoalKey: (value: string) => call<AppState>('secret:set', { value, key: 'openRouterApiKey' }),
   // The same, for a custom provider endpoint. Optional: keyless local servers need nothing stored.
   setCustomProviderKey: (value: string) => call<AppState>('secret:set', { value, key: 'customProviderApiKey' }),
-  listGoalModels: (offset: number) => call<GoalModelPage>('goal:models', { offset }),
+  listGoalModels: (offset: number, query = '') => call<GoalModelPage>('goal:models', { offset, query }),
   pickBinary: () => call<AppState>('binary:pick'),
   connect: () => call<AppState>('connection:connect'),
   disconnect: () => call<AppState>('connection:disconnect'),
