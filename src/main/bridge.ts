@@ -2187,7 +2187,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const repairHeld = url.searchParams.get('repairHeld');
     if (repairHeld) noteRepairHeld(repairHeld.slice(0, 64), url.searchParams.get('why'));
-    const revival = pendingBrowserRevival();
+    const revivals = pendingBrowserRevivals();
+    const revival = revivals[0] ?? null;
     const inputRows = await listInputs();
     const browser = browserOf(req);
     if (browser) browserSeenAt.set(browser, Date.now());
@@ -2219,6 +2220,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // Rendering custody follows the actual command ledger, including its retirement.
         commandIds: commands.map(command => command.id),
         revival,
+        revivals,
         placement: pendingBrowserPlacement(null, browser),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
@@ -3066,6 +3068,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // Returning the same inert id here makes a live page the fast path; /status remains the
         // service-worker/restart path. Redeem is still the exclusive ownership boundary.
         revival: pendingBrowserRevival(),
+        revivals: pendingBrowserRevivals(),
         // Recovery only. A placement is normally collected by the `/compact` reply that
         // produced it; this is where it is still found if that reply never reached the page —
         // a navigation, a dropped socket — so a lost response becomes a correctly placed tab
@@ -5854,18 +5857,31 @@ async function abortRejectedResume(token: string, reason: string): Promise<boole
   }
 }
 
-/** The one existing-chat command the extension may route after a fresh tab scan. */
-function pendingBrowserRevival(): {
-  id: string;
-  conversationId: string;
-} | null {
+/** Most wakes handed to the browser in one reply; more than any one run can wake at once. */
+const MAX_REVIVALS_PER_REPLY = 16;
+
+/**
+ * Every existing-chat wake the extension may route after a fresh tab scan, oldest first.
+ *
+ * Handing out only the oldest one held every later wake behind it: a wake whose chat had no tab
+ * and was slow to get one kept the head of the queue, the next status pass handed out the same
+ * one again, and the rest timed out at the revival deadline without reaching the browser at all
+ * (#882: "the browser did not claim this command before its deadline", eight workers in #864).
+ */
+function pendingBrowserRevivals(): Array<{ id: string; conversationId: string }> {
   tidyCommands();
-  const command = commands.find(
-    (entry) => entry.spec.type === 'revive' && entry.owner === null && !revivalDeliveryProven(entry)
-  );
-  return command && command.spec.type === 'revive'
-    ? { id: command.id, conversationId: command.spec.conversationId }
-    : null;
+  const waiting: Array<{ id: string; conversationId: string }> = [];
+  for (const entry of commands) {
+    if (waiting.length >= MAX_REVIVALS_PER_REPLY) break;
+    if (entry.spec.type === 'revive' && entry.owner === null && !revivalDeliveryProven(entry))
+      waiting.push({ id: entry.id, conversationId: entry.spec.conversationId });
+  }
+  return waiting;
+}
+
+/** The oldest of them, for an extension older than 2.1.27 that reads one `revival`. */
+function pendingBrowserRevival(): { id: string; conversationId: string } | null {
+  return pendingBrowserRevivals()[0] ?? null;
 }
 
 // ------------------------------------------------- where a fresh chat is opened
