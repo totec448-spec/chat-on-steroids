@@ -7,7 +7,7 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const ALWAYS = ['Chat-On-Steroids-Extension.zip', 'Chat-On-Steroids-Native-Sources.tar.gz'];
+const ALWAYS = ['Chat-On-Steroids-Extension.zip', 'Chat-On-Steroids-Firefox.zip', 'Chat-On-Steroids-Native-Sources.tar.gz'];
 
 export function releaseTargets(platforms = 'all', targets = JSON.parse(readFileSync(new URL('../.github/release-targets.json', import.meta.url), 'utf8'))) {
   if (platforms !== 'all' && platforms !== 'common') throw new Error(`platforms must be all or common, got ${platforms}`);

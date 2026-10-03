@@ -3747,6 +3747,12 @@ the package preserves userData. Synchronize package/main/extension versions deli
 a bundler. `electron-builder.yml` puts executable tunnel/rg, extension and required native
 payloads outside asar. `extension-path.ts` transactionally mirrors the packaged extension to
 stable `userData/extension`, never an ephemeral AppImage mount.
+The release assembler also derives `Chat-On-Steroids-Firefox.zip` from that same canonical
+extension tree using `stage-firefox-extension.mjs`: it changes only the Gecko manifest packaging
+shape, carries the shared runtime bytes/build stamp, and joins the ordinary release checksum and
+post-publish asset verification. A valid staged ZIP is packaging evidence only. Firefox runtime,
+background lifecycle and browser-API support require separate live Gecko validation before the
+product can claim Firefox support.
 The macOS afterPack hook removes Electron's unused camera, microphone and audio-capture
 privacy descriptions before sealing, retaining Screen Recording. Strict plist readback and
 bundle smoke checks reject failed cleanup. This does not establish publisher signing,
@@ -3782,7 +3788,7 @@ path, development does not stage. Explicit install may relaunch; ordinary quit d
 relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
 
 CI verifies supported OS families; native `release.yml` builds/smokes all six targets, then
-assembles installers, extension ZIP, native-sources archive and `SHA256SUMS.txt`. `publish.yml`
+assembles installers, Chromium and Firefox extension ZIPs, native-sources archive and `SHA256SUMS.txt`. `publish.yml`
 is dispatched **at the reviewed version tag**, calls that reusable build in the same run,
 requires `docs/release-notes/vX.Y.Z.md`, rechecks versions/privacy/hashes and refuses an existing
 release. A tag alone does not build/publish. An unpublished candidate can be built separately,
