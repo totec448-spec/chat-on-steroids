@@ -183,6 +183,17 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
   }
   expect(releaseFocus).toHaveBeenCalledTimes(3);
 
+  // The work area can change by a pixel mid-drag (menu bar, Dock): the pet stays held, follows the
+  // pointer, and lands on release instead of staying lifted with its moves ignored.
+  pointer(tur, 'pointerdown', 120, 120, 10);
+  boundsListener!({ width: 1000, height: 799, scaleFactor: 1 });
+  pointer(tur, 'pointermove', 170, 160, 10);
+  expect(tur.dataset.state).toBe('held');
+  pointer(tur, 'pointerup', 170, 160, 10);
+  expect(tur.dataset.dragging).toBe('false');
+  expect(tur.dataset.state).toBe('landing');
+  boundsListener!({ width: 1000, height: 800, scaleFactor: 1 });
+
   const willow = dom.window.document.querySelector<HTMLElement>('.pet-shell[data-pet-id="willow"]')!;
   willow.dispatchEvent(new dom.window.MouseEvent('contextmenu', { clientX: 320, clientY: 280, bubbles: true }));
   const hide = [...dom.window.document.querySelectorAll<HTMLButtonElement>('.pet-menu button')]
