@@ -42,6 +42,7 @@ app.whenReady().then(async () => {
     const ok=data=>Promise.resolve({ok:true,data});
     window.api = new Proxy({ getState:()=>ok(state),getLog:()=>ok([]),
       listProjects:()=>ok(projects),listSessions:()=>ok({sessions:rows,total:22,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
+      setProjectColor:(id,color)=>{const value=projects.find(row=>row.id===id);if(!value)return Promise.resolve({ok:false,error:'Project not found'});if(color)value.color=color;else delete value.color;return ok({...value})},
       getSwarm:()=>ok({running:false,runId:null,agents:[],maxWorkers:2,pendingReports:0}),
       getChatModels:()=>ok({state:'unknown',models:[]}),
       saveSettings:patch=>{state.config={...state.config,...patch};return ok(state)},
@@ -103,6 +104,21 @@ app.whenReady().then(async () => {
     assert.deepEqual(folders.paths,['C:/demo','C:/shared']); assert.deepEqual(folders.roles,['listitem','listitem']);
     assert.equal(folders.primaryRemove,false); assert.equal(folders.removeCount,1);
     assert.match(folders.removeLabel,/C:\/shared/); assert.match(folders.addLabel,/VideoClipper/);
+    // The disclosure click above leaves the real pointer hovering the heading, which intentionally
+    // reveals its otherwise-quiet controls, and summary activation can retain focus too. Clear both
+    // before checking the idle baseline; hover/focus are separately intended to reveal the control.
+    win.webContents.sendInputEvent({type:'mouseMove',x:1090,y:890});
+    await js('document.activeElement?.blur(); new Promise(r=>requestAnimationFrame(r))');
+    assert.equal(await js(`document.querySelector('.project-color').dataset.color`),'');
+    assert.equal(await js(`getComputedStyle(document.querySelector('.project-color')).opacity`),'0');
+    await js(`document.querySelector('.project-color').click()`);
+    assert.equal(await js(`document.querySelector('.project-color').getAttribute('aria-expanded')`),'true');
+    await js(`document.querySelector('[data-project-color-choice="blue"]').click()`);
+    for(let i=0;i<100 && await js(`document.querySelector('.project-group').dataset.projectColor!=='blue'`);i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.querySelector('.project-group').dataset.projectColor`),'blue');
+    assert.equal(await js(`document.querySelector('.project-color').dataset.color`),'blue');
+    assert.equal(await js(`getComputedStyle(document.querySelector('.project-color')).opacity`),'1');
+    await screenshot('project-color-blue.png');
     await js(`document.querySelector('.project-heading').focus()`);
     for (const keyCode of ['Space','Enter']) {
       win.webContents.sendInputEvent({type:'keyDown',keyCode});

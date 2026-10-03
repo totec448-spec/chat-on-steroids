@@ -489,6 +489,7 @@
   "New chat in this project": "在此项目中新建聊天",
   "Remove project from sidebar; keep conversations and files": "从侧栏移除项目，保留对话和文件",
   "Remove project {0}": "移除项目 {0}",
+  "Change project color": "更改项目颜色",
   "Project removed; conversations kept": "项目已移除，对话已保留",
   "Show more": "显示更多",
   "Show more tasks in {0}": "显示 {0} 中的更多任务",

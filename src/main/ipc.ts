@@ -62,6 +62,7 @@ import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } fro
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
+import { PROJECT_COLORS } from '../shared/projects.js';
 import { bridgePortSelection } from './bridge-ports.js';
 import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts, goalBackendFor, goalSwitchFor, setGoalSwitchNow, setGoalReplyActiveNow, setGoalObjectiveNow } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
@@ -71,7 +72,7 @@ import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addProjectFolder, getProject, getSessionProject, listProjects, projectWorkspace, removeProject, removeProjectFolder } from './projects.js';
+import { addProject, addProjectFolder, getProject, getSessionProject, listProjects, projectWorkspace, removeProject, removeProjectFolder, setProjectColor } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -843,6 +844,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('projects:removeFolder', async payload => {
     const { id, path: folder } = z.object({ id: z.string().uuid(), path: z.string().min(1).max(32768) }).strict().parse(payload);
     const project = await removeProjectFolder(id, folder);
+    push('session:changed');
+    return project;
+  });
+  handle('projects:color', async payload => {
+    const { id, color } = z.object({ id: z.string().uuid(), color: z.enum(PROJECT_COLORS).nullable() }).strict().parse(payload);
+    const project = await setProjectColor(id, color);
     push('session:changed');
     return project;
   });

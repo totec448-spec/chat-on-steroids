@@ -489,6 +489,7 @@
   "New chat in this project": "このプロジェクトで新しいチャット",
   "Remove project from sidebar; keep conversations and files": "サイドバーからプロジェクトを取り除き、会話とファイルは残す",
   "Remove project {0}": "プロジェクト {0}を取り除く",
+  "Change project color": "プロジェクトの色を変更",
   "Project removed; conversations kept": "プロジェクトを取り除きました。会話は残っています",
   "Show more": "さらに表示",
   "Show more tasks in {0}": "{0}のタスクをさらに表示",

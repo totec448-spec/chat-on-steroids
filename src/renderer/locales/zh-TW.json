@@ -662,6 +662,7 @@
   "New chat in this project": "在此專案中新增聊天",
   "Remove project from sidebar; keep conversations and files": "從側欄移除專案，保留對話和檔案",
   "Remove project {0}": "移除專案 {0}",
+  "Change project color": "變更專案顏色",
   "Project removed; conversations kept": "專案已移除，對話已保留",
   "Show more": "顯示更多",
   "Show more tasks in {0}": "顯示 {0} 中的更多任務",
