@@ -67,7 +67,7 @@ const { openInPreferredBrowser } = await import('../src/main/browser.js');
 const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
 const { extensionDownloadUrl } = await import('../src/main/version.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceEntries } = await import('../src/main/workspace.js');
-const { makeTempDir, removeTempDir } = await import('./helpers.js');
+const { faultGate, makeTempDir, removeTempDir } = await import('./helpers.js');
 
 let dir: string;
 let currentWindow: {
@@ -1534,6 +1534,44 @@ describe('session IPC contracts', () => {
     } finally {
       rename.mockRestore();
       resetBlockedChatsForTests();
+      resetTrustedChatsForTests();
+    }
+  });
+
+  it('fences concurrent Trust while session deletion is waiting on its durable revoke', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const conversationId = 'cdcdcdcd-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'trust raced with delete', conversationId });
+    await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: conversationId, trusted: true
+    });
+    expect(isChatTrusted(conversationId)).toBe(true);
+
+    const gate = faultGate();
+    const originalRename = fs.rename.bind(fs);
+    const rename = vi.spyOn(fs, 'rename').mockImplementationOnce(async (...args: Parameters<typeof fs.rename>) => {
+      await gate.hold();
+      return originalRename(...args);
+    });
+    try {
+      const deleting = handlers.get('sessions:delete')!(null, { id: session.id }) as Promise<any>;
+      await gate.entered;
+
+      const racedTrust = (await handlers.get('sessions:trust')!(null, {
+        id: session.id, expectedConversationId: conversationId, trusted: true
+      })) as any;
+      expect(racedTrust.ok).toBe(false);
+      expect(racedTrust.error).toMatch(/being deleted/i);
+
+      gate.release();
+      const deleted = await deleting;
+      expect(deleted.ok, deleted.error).toBe(true);
+      expect(await getSession(session.id)).toBeNull();
+      expect(isChatTrusted(conversationId)).toBe(false);
+    } finally {
+      gate.release();
+      rename.mockRestore();
       resetTrustedChatsForTests();
     }
   });
