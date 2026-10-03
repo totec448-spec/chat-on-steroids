@@ -1458,7 +1458,7 @@ it('lists primary and additional project folders in the sidebar and mutates only
   expect(w.document.querySelector(`[data-project-id="${project.id}"]`)?.textContent).toContain('C:\\workspace\\primary');
 });
 
-it('cycles project color through the fixed palette without changing project membership', async () => {
+it('picks and clears project color without changing project membership', async () => {
   const project = {
     id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary',
     additionalPaths: ['C:\\workspace\\shared'], createdAt: 1
@@ -1469,11 +1469,21 @@ it('cycles project color through the fixed palette without changing project memb
   const group = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
   const color = group.querySelector<HTMLButtonElement>('.project-color')!;
   expect(color.dataset.color).toBe('');
+  expect(color.getAttribute('aria-expanded')).toBe('false');
   color.click(); await settle();
-  expect(api.setProjectColor).toHaveBeenCalledExactlyOnceWith(project.id, 'blue');
-  const refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  expect(color.getAttribute('aria-expanded')).toBe('true');
+  group.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!.click(); await settle();
+  expect(api.setProjectColor).toHaveBeenNthCalledWith(1, project.id, 'blue');
+  let refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
   expect(refreshed.dataset.projectColor).toBe('blue');
+  expect(refreshed.querySelector<HTMLButtonElement>('.project-color')?.dataset.color).toBe('blue');
   expect(refreshed.querySelector('.project-folder-path')?.textContent).toBe('C:\\workspace\\primary');
+  refreshed.querySelector<HTMLButtonElement>('.project-color')!.click(); await settle();
+  refreshed.querySelector<HTMLButtonElement>('[data-project-color-choice=""]')!.click(); await settle();
+  expect(api.setProjectColor).toHaveBeenNthCalledWith(2, project.id, null);
+  refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  expect(refreshed.dataset.projectColor).toBeUndefined();
+  expect(refreshed.querySelector<HTMLButtonElement>('.project-color')?.dataset.color).toBe('');
 });
 
 it('Share a folder creates a sidebar project and keeps it when an older list refresh finishes', async () => {
