@@ -523,6 +523,128 @@ it('commits a project summary click before an immediate state repaint replaces i
   expect(group().open).toBe(true);
 });
 
+it('keeps strict chat allowlisting separate from Block and exposes explicit Trust on session rows', async () => {
+  const session = {
+    id: 'strict-session', title: 'Strict policy chat', conversationId: 'strict-chat-0001', chatIds: ['strict-chat-0001'],
+    startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+    lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastHandoffId: null, lastHandoffAt: null,
+    lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null
+  };
+  const workerSession = {
+    ...session,
+    id: 'strict-worker-session', title: 'Strict worker chat', conversationId: 'strict-worker-chat-0001',
+    chatIds: ['strict-worker-chat-0001'],
+    origin: { kind: 'worker' as const, fromSessionId: null, agentId: 'worker-1', task: 'owned work' }
+  };
+  const setSessionTrusted = vi.fn(async () => ({ ok: true, data: [session.conversationId] }));
+  const setSessionBlocked = vi.fn(async () => ({ ok: true, data: [session.conversationId] }));
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [] }),
+    listSessions: async () => ({ ok: true, data: {
+      sessions: [session, workerSession], activeId: null, pressure: [], blocked: [], trusted: []
+    } }),
+    setSessionTrusted,
+    setSessionBlocked
+  });
+  const doc = mounted.window.document;
+  mounted.state.config.multiAgent.strictChatAllowlist = true;
+  mounted.push(structuredClone(mounted.state));
+  const primeRow = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
+  const workerRow = () => doc.querySelector<HTMLElement>(`[data-id="${workerSession.id}"]`)!;
+  await vi.waitFor(() => expect(primeRow().querySelector('.sess-trust')).not.toBeNull());
+  expect(workerRow().querySelector('.sess-trust')).toBeNull();
+  expect(workerRow().querySelector('.sess-block')).not.toBeNull();
+
+  (primeRow().querySelector('.sess-trust') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(setSessionTrusted).toHaveBeenCalledWith(session.id, session.conversationId, true));
+  expect(setSessionBlocked).not.toHaveBeenCalled();
+
+  (primeRow().querySelector('.sess-block') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(setSessionBlocked).toHaveBeenCalledWith(session.id, true));
+});
+
+it('shows committed resume inheritance as trusted and revokes it through the current row', async () => {
+  const source = 'strict-resume-source-0001';
+  const current = 'strict-resume-current-0001';
+  const session = {
+    id: 'strict-resume-session', title: 'Resumed trusted chat', conversationId: current, chatIds: [source, current],
+    startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+    lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastHandoffId: 'handoff-resume-0001', lastHandoffAt: 1,
+    lastCommittedResumeHandoffId: 'handoff-resume-0001',
+    lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null
+  };
+  const setSessionTrusted = vi.fn(async () => ({ ok: true, data: [] }));
+  const setSessionBlocked = vi.fn(async () => ({ ok: true, data: [] }));
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [] }),
+    listSessions: async () => ({ ok: true, data: {
+      sessions: [session], activeId: null, pressure: [], blocked: [], trusted: [source]
+    } }),
+    setSessionTrusted,
+    setSessionBlocked
+  });
+  const doc = mounted.window.document;
+  mounted.state.config.multiAgent.strictChatAllowlist = true;
+  mounted.push(structuredClone(mounted.state));
+  const row = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
+  await vi.waitFor(() => expect(row().querySelector('.sess-trust')).not.toBeNull());
+  const trust = row().querySelector('.sess-trust') as HTMLButtonElement;
+  expect(trust.classList.contains('is-trusted')).toBe(true);
+  const block = row().querySelector('.sess-block') as HTMLButtonElement;
+  expect(block.classList.contains('is-blocked')).toBe(false);
+  trust.click();
+  await vi.waitFor(() => expect(setSessionTrusted).toHaveBeenCalledWith(session.id, current, false));
+});
+
+it('shows an inherited Block ahead of Trust on a committed resumed row', async () => {
+  const source = 'strict-resume-blocked-source-0001';
+  const current = 'strict-resume-blocked-current-0001';
+  const session = {
+    id: 'strict-resume-blocked-session', title: 'Resumed blocked chat', conversationId: current, chatIds: [source, current],
+    startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+    lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastHandoffId: 'handoff-resume-blocked-0001', lastHandoffAt: 1,
+    lastCommittedResumeHandoffId: 'handoff-resume-blocked-0001',
+    lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null
+  };
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [] }),
+    listSessions: async () => ({ ok: true, data: {
+      sessions: [session], activeId: null, pressure: [], blocked: [source], trusted: [source]
+    } })
+  });
+  const doc = mounted.window.document;
+  mounted.state.config.multiAgent.strictChatAllowlist = true;
+  mounted.push(structuredClone(mounted.state));
+  const row = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
+  await vi.waitFor(() => expect(row().querySelector('.sess-trust')).not.toBeNull());
+  expect((row().querySelector('.sess-block') as HTMLButtonElement).classList.contains('is-blocked')).toBe(true);
+  expect((row().querySelector('.sess-trust') as HTMLButtonElement).classList.contains('is-trusted')).toBe(false);
+});
+
+it('saves strict chat allowlisting and disables the unattributed switch while strict mode is on', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const strict = doc.getElementById('strictChatAllowlist') as HTMLInputElement;
+  const unattributed = doc.getElementById('allowUnattributedCalls') as HTMLInputElement;
+  const copy = strict.closest('.setting')!.textContent ?? '';
+  expect(copy).toContain("Only chats you trust can use this computer's tools.");
+  expect(copy).toContain('Existing chats start untrusted');
+  expect(copy).toMatch(/sidebar.*Trust/i);
+  expect(copy).not.toContain('Sessions');
+
+  strict.checked = true;
+  strict.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls.some(call => call.multiAgent?.strictChatAllowlist === true)).toBe(true));
+
+  const next = structuredClone(mounted.state);
+  next.config.multiAgent.strictChatAllowlist = true;
+  mounted.push(next);
+  expect(unattributed.disabled).toBe(true);
+});
+
 it('keeps project keyboard focus across activity repaint without taking composer focus or reloading on disclosure', async () => {
   const { project, session } = projectSidebarFixture();
   const listSessions = vi.fn(async () => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } }));

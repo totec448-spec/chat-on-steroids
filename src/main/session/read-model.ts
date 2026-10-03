@@ -6,6 +6,7 @@ import { tokenPressure } from '../../shared/session.js';
 import { listInputs } from './input.js';
 import { activeSessionId } from './recorder.js';
 import { blockedChatIds } from './blocked-chats.js';
+import { trustedChatIds } from './trusted-chats.js';
 import { findSessionByConversation, getSession, listSessionPage, readEvents, readRecentEvents } from './store.js';
 import type { SessionListCursor } from './store.js';
 import type { SessionEventKind, SessionSummary } from '../../shared/session.js';
@@ -60,6 +61,9 @@ export async function readSessionList(options: { cursor?: SessionListCursor; lim
     // not belong in any session's meta.json. It rides the list for the same reason
     // `activeId` and `pressure` do — one paint, one round trip.
     blocked: blockedChatIds(),
+    // Explicit roots only. Renderer projects committed resume lineage from each returned summary;
+    // keeping the roots here avoids copying derived trust into a second authority surface.
+    trusted: trustedChatIds(),
     pressure: sessions.map((summary) => ({
       id: summary.id,
       // Pressure belongs to the currently attached ChatGPT context. `estimatedTokens` is

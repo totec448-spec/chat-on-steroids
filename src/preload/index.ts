@@ -68,6 +68,8 @@ export interface SessionList {
   activeId: string | null;
   /** ChatGPT conversation ids the user has blocked from using local tools. */
   blocked: string[];
+  /** ChatGPT conversation ids explicitly trusted for strict allowlisting. */
+  trusted?: string[];
   pressure: Array<TokenPressure & { id: string }>;
   /** Total retained sessions, not merely the current IPC page. */
   total: number;
@@ -306,6 +308,8 @@ const api = {
   // to own is refused until it is released. Returns the whole blocked set, so one press
   // repaints without a second read.
   setSessionBlocked: (id: string, blocked: boolean) => call<string[]>('sessions:block', { id, blocked }),
+  setSessionTrusted: (id: string, expectedConversationId: string, trusted: boolean) =>
+    call<string[]>('sessions:trust', { id, expectedConversationId, trusted }),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
 
