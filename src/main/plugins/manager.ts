@@ -15,6 +15,16 @@ import { terminateProcessTree } from '../exec.js';
 import { pluginCatalog, reviewedPluginLicense } from './catalog.js';
 import sharp from 'sharp';
 import { pluginExposure } from './exposure.js';
+import { logWarn } from '../logger.js';
+
+/**
+ * Removes a plugin's folder. On Windows a server's process tree can keep its folder locked for a
+ * few seconds after it was killed, and a single attempt then fails with EBUSY. Node retries
+ * EBUSY/EPERM/ENOTEMPTY with a linear back-off: 10 retries of 200 ms add up to about 11 s.
+ */
+function removePluginFolder(directory: string): Promise<void> {
+  return fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+}
 import { PluginOAuth, PluginNeedsAuth, PluginOAuthSetupError, clearPluginOAuth } from './oauth.js';
 export { PLUGIN_MAX_TOOLS, PLUGIN_MAX_SCHEMA_BYTES } from './exposure.js';
 
@@ -315,7 +325,7 @@ export class PluginManager {
         return this.snapshot();
       } catch (e) {
         if (!row || !this.records.includes(row)) {
-          await fs.rm(directory, { recursive: true, force: true });
+          await removePluginFolder(directory);
           for (const key of row?.credentialKeys ?? []) await clearSecret(`plugin:${id}:${key}`);
         }
         throw new Error(String(this.redact((e as Error).message)));
@@ -408,12 +418,12 @@ export class PluginManager {
       // Installation rollback must not undo a newer user policy request.
       Object.assign(row, old, { enabled: row.enabled, disabledTools: row.disabledTools });
       this.exposureCache = null;
-      await fs.rm(directory, { recursive: true, force: true });
+      await removePluginFolder(directory);
       if (row.enabled) await this.connect(row);
       throw new Error(`Update rolled back: ${String(this.redact((e as Error).message))}`);
     }
     // Cleanup after the commit is best-effort: an old-directory deletion failure must never undo durable publication.
-    await fs.rm(old.directory, { recursive: true, force: true }).catch(() => undefined);
+    await removePluginFolder(old.directory).catch(() => undefined);
   }
   setEnabled(id: string, enabled: boolean): Promise<PluginSnapshot> {
     const row = this.row(id);
@@ -464,7 +474,11 @@ export class PluginManager {
       }
       for (const key of row.credentialKeys) await clearSecret(`plugin:${id}:${key}`);
       await clearPluginOAuth(id);
-      await fs.rm(path.join(this.root, id), { recursive: true, force: true });
+      // The plugin is already gone from the list and its credentials are cleared. A folder that a
+      // just-killed server still holds must not turn that finished removal into an error.
+      await removePluginFolder(path.join(this.root, id)).catch((error: unknown) => {
+        logWarn(`Plugin ${id} was removed, but its folder is still in use and stays on disk: ${error instanceof Error ? error.message : String(error)}`);
+      });
       this.changed();
       return this.snapshot();
     });

@@ -13,7 +13,9 @@ export async function makeTempDir(prefix = 'clf-'): Promise<string> {
 }
 
 export async function removeTempDir(dir: string): Promise<void> {
-  await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  // Windows can keep a folder locked for seconds after a killed process tree exits (an EBUSY in
+  // the live plugin catalog test on CI); the same budget as the app's plugin folder removal.
+  await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 /** Writes a map of "a/b.txt" -> contents, creating parent folders as needed. */

@@ -500,8 +500,8 @@ describe('who is allowed to talk to it', () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(getConfig().ui.browserPreferences).toBeUndefined();
     expect((await request('POST', '/diagnostics', { body: diagnostics({ overwrite: false, durations: true }, true) })).status).toBe(200);
-    await new Promise(resolve => setTimeout(resolve, 20));
-    expect(getConfig().ui.browserPreferences).toEqual({ overwrite: false, durations: true });
+    // The save runs after the reply; a busy CI runner can take longer than any fixed pause.
+    await vi.waitFor(() => expect(getConfig().ui.browserPreferences).toEqual({ overwrite: false, durations: true }));
     await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'en' } });
     const status = await request('POST', '/status', { body: { openConversations: [] } });
     expect(status.body).toMatchObject({ language: 'en', browserPreferences: { overwrite: false, durations: true } });
@@ -4789,6 +4789,23 @@ describe('delivering a bootstrap', () => {
     expect(storedAfterRetry?.commands?.some((entry: any) => entry?.id === id)).toBe(false);
   });
 
+  it('hands the browser every pending wake, not only the oldest (#882)', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'first audit' }, { task: 'second audit' }], caller: { conversationId: PRIME_CHAT } });
+    const chats = ['abababab-7654-3210-fedc-ba9876543210', 'cdcdcdcd-7654-3210-fedc-ba9876543210'];
+    for (const [index, conversationId] of chats.entries()) {
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: `worker-${index + 1}` } });
+      finishAgent({ conversationId }, 'reported, waiting for more');
+    }
+    wake([{ to: 'worker-1', text: 'one more thing' }, { to: 'worker-2', text: 'and you too' }]);
+    await waitForRevival();
+    const status = await request('GET', '/status');
+    // The second wake reaches the browser now, not only after the first one's page claims it.
+    expect(status.body.revivals.map((entry: { conversationId: string }) => entry.conversationId).sort()).toEqual([...chats].sort());
+    expect(status.body.revival).toEqual(status.body.revivals[0]);
+  });
+
   it('puts the worker back to sleep, with its slot and its message intact, when the browser cannot wake it', async () => {
     await pair();
     spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
@@ -4808,6 +4825,8 @@ describe('delivering a bootstrap', () => {
     });
     expect(ack.status).toBe(200);
     expect(ack.body).toMatchObject({ committed: false });
+    // The page answered, so the chat did open; what failed is the message (#882).
+    expect(getLog().some(entry => entry.message.includes("the worker's chat did not take the message — the tab was closed"))).toBe(true);
 
     // Nothing was typed, so nothing was delivered. The worker is exactly where it was, the
     // slot it had reserved is free again, and the prime is told rather than left waiting.
@@ -7293,7 +7312,7 @@ describe('unattributed activity recovery', () => {
    */
   async function maintenanceBatch(
     repaired?: string,
-    repairAction?: 'reloaded' | 'reopened'
+    repairAction?: 'reloaded' | 'reopened' | 'present'
   ): Promise<Array<{ conversationId: string; token: string; reason: string }>> {
     const path = repaired
       ? `/status?repaired=${encodeURIComponent(repaired)}${repairAction ? `&repairAction=${repairAction}` : ''}`
@@ -7312,7 +7331,7 @@ describe('unattributed activity recovery', () => {
    */
   async function maintenance(
     repaired?: string,
-    repairAction?: 'reloaded' | 'reopened'
+    repairAction?: 'reloaded' | 'reopened' | 'present'
   ): Promise<{ conversationId: string; token: string; reason: string } | null> {
     const batch = await maintenanceBatch(repaired, repairAction);
     expect(batch.length).toBeLessThanOrEqual(1);
@@ -8733,6 +8752,26 @@ describe('unattributed activity recovery', () => {
     const handout = await maintenance();
     expect(chatOf(handout)).toBe(WORKER);
     expect(handout!.reason).toBe('no-tab');
+  });
+
+  it('closes a no-tab repair without a reload when the browser finds the chat open again (#864)', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+    const bootstrap = await redeem();
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+    });
+    await events(WORKER, [openTurn('turn-worker-gone'), endTurn('turn-worker-gone', 'completed')]);
+    await request('POST', '/closed', { body: { conversationId: WORKER } });
+    const handout = await maintenance();
+    expect(handout!.reason).toBe('no-tab');
+    const priorLogs = new Set(getLog());
+
+    // By the time the browser acted, a wake had opened the chat's tab itself; it was left alone.
+    expect(await maintenance(handout!.token, 'present')).toBeNull();
+    const fresh = getLog().filter(entry => !priorLogs.has(entry)).map(entry => entry.message);
+    expect(fresh).toContain(`bridge: ${WORKER} was already open again; the browser left its tab as it was`);
+    expect(fresh.some(message => message.includes('confirmed no-tab recovery'))).toBe(false);
   });
 
   it('reopens the chat of a prime whose run ended long ago', async () => {
