@@ -621,23 +621,37 @@ it('keeps titlebar Connect clickable with incomplete setup and focuses the missi
   expect(connect).not.toHaveBeenCalled();
 });
 
-it('keeps titlebar Disconnect wired to the existing connection toggle while running', async () => {
-  let live: any;
+it('shows titlebar Connect only before connection and never turns it into Disconnect', async () => {
   const connect = vi.fn();
-  const disconnect = vi.fn(() => {
-    live.status.state = 'disconnected';
-    return Promise.resolve({ ok: true as const, data: structuredClone(live) });
-  });
+  const disconnect = vi.fn();
   const mounted = await mountChat({ hasApiKey: true }, [], { connect, disconnect });
-  live = mounted.state;
-  live.status.state = 'connected';
-  mounted.push(structuredClone(live));
-
   const header = mounted.window.document.getElementById('headerConnect') as HTMLButtonElement;
-  expect(header.textContent).toBe('Disconnect');
-  expect(header.disabled).toBe(false);
+  const pushState = (state: any) => mounted.push({ ...mounted.state, status: { ...mounted.state.status, state } });
+
+  for (const state of ['disconnected', 'auth-failed', 'tunnel-unavailable'] as const) {
+    pushState(state);
+    expect(header.hidden).toBe(false);
+    expect(header.textContent).toBe('Connect');
+    expect(header.disabled).toBe(false);
+    expect(header.classList.contains('is-running')).toBe(false);
+  }
+  for (const state of ['starting-server', 'connecting-tunnel'] as const) {
+    pushState(state);
+    expect(header.hidden).toBe(false);
+    expect(header.textContent).toBe('Connecting…');
+    expect(header.disabled).toBe(true);
+    expect(header.classList.contains('is-running')).toBe(false);
+  }
+  for (const state of ['connected', 'offline', 'disconnecting'] as const) {
+    pushState(state);
+    expect(header.hidden).toBe(true);
+    expect(header.classList.contains('is-running')).toBe(false);
+  }
+
+  pushState('connected');
   header.click();
-  await vi.waitFor(() => expect(disconnect).toHaveBeenCalledOnce());
+  await settle();
+  expect(disconnect).not.toHaveBeenCalled();
   expect(connect).not.toHaveBeenCalled();
 });
 
@@ -662,8 +676,8 @@ it('keeps global connection controls in a compact sidebar popover', async () => 
   const popover = doc.getElementById('connectionPopover') as HTMLElement;
   expect(doc.querySelector('#chatTitle')!.closest('header')!.querySelector('#connectBtn')).toBeNull();
   expect(topbarAction.closest('.app-topbar')).not.toBeNull();
-  expect(topbarAction.hidden).toBe(false);
-  expect(topbarAction.textContent).toBe('Disconnect');
+  expect(topbarAction.hidden).toBe(true);
+  expect(topbarAction.classList.contains('is-running')).toBe(false);
   expect(trigger.closest('.sidebar-bottom')).not.toBeNull();
   expect(trigger.textContent?.trim()).toBe('');
   expect(trigger.getAttribute('aria-label')).toMatch(/Connected.*verified/i);
