@@ -61,6 +61,8 @@ export async function readSessionList(options: { cursor?: SessionListCursor; lim
     // not belong in any session's meta.json. It rides the list for the same reason
     // `activeId` and `pressure` do — one paint, one round trip.
     blocked: blockedChatIds(),
+    // Explicit roots only. Renderer projects committed resume lineage from each returned summary;
+    // keeping the roots here avoids copying derived trust into a second authority surface.
     trusted: trustedChatIds(),
     pressure: sessions.map((summary) => ({
       id: summary.id,

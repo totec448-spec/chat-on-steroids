@@ -80,7 +80,7 @@ losing the project, history, workers or queued instructions when a chat grows to
 | Prime / worker | One owning conversation and its reusable subordinate chats. Several prime families may run independently. |
 | Decision helper / planner | A role-specific chat that produces a continuation decision or workflow; it must not execute the reference task. |
 | Code-mode `exec` | Bounded JavaScript composition of one MCP surface's tools. `exec_command` runs an OS process. |
-| Stop / End turn / Block / Trust | Stop requests native generation cancellation; End turn releases a finish hold; Block revokes exact-chat local tool access. Trust is the separate explicit allow entry used only when strict chat allowlisting is on. |
+| Stop / End turn / Block / Trust | Stop requests native generation cancellation; End turn releases a finish hold; Block revokes exact-chat local tool access. Trust is the separate explicit allow entry used only when strict chat allowlisting is on; broker-owned workers and committed resumed chats derive effective trust from their exact parent provenance rather than receiving copied Trust entries. |
 
 ### Product-wide invariants
 
@@ -196,7 +196,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8. | Legacy absent enabled/allow-unattributed fields remain false. Existing choices stay exact. |
 | Wait for sub-agents | Off. | When on, a Goal/Loop chat's next automatic step waits for the workers that exact chat started. A chat with no run, or a run with no workers, waits either way. See §16. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
-| Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution to a conversation explicitly trusted in Sessions. Block still wins; unattributed calls are refused even when the ordinary unattributed allowance is on. |
+| Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution. Ordinary chats require explicit Trust; broker-owned workers follow their exact owning prime and a committed Compact & Resume successor follows its durable source lineage. Block still wins, revocation is dynamic, and unattributed calls are refused even when the ordinary unattributed allowance is on. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-5.6-sol` High. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
@@ -597,16 +597,34 @@ A positively known blocked, retired, ended or superseded caller is refused regar
 preference. Refused historical calls must not revive workers, acknowledge inboxes or grant
 activity to a successor chat.
 
-`multiAgent.strictChatAllowlist` is an independent, opt-in default-deny boundary. Its allow set is
-`state/trusted-chats.json`, keyed only by exact ChatGPT conversation id and restored before MCP
-traffic. Missing/corrupt trust state therefore means no trusted chats. Strict mode waits through the
-same request-id evidence window used by blocked-chat enforcement, refuses unknown/unattributed
-callers even if `allowUnattributedCalls` is true, and runs no handler or worker-liveness side effect
-for a denied caller. Block always outranks Trust. Unblocking does not trust, deleting the session row
-removes both policies for that conversation, and Compact & Resume/new-chat bindings never inherit
-the predecessor conversation's trust. Trust/Untrust IPC carries the row's expected conversation id
-and refuses a stale A→B rebind; each trust mutation is serialized and published only after
-`writeDurableNow()` commits its exact snapshot, so an acknowledged revoke cannot be undone by crash.
+`multiAgent.strictChatAllowlist` is an independent, opt-in default-deny boundary. Its explicit allow
+set is `state/trusted-chats.json`, keyed only by exact ChatGPT conversation id and restored before MCP
+traffic. Missing/corrupt trust state therefore means no explicitly trusted chats. Strict mode waits
+through the same request-id evidence window used by blocked-chat enforcement, refuses
+unknown/unattributed callers even if `allowUnattributedCalls` is true, and runs no handler or
+worker-liveness side effect for a denied caller. Block always outranks Trust and Unblocking does not
+trust.
+
+Effective trust may additionally be derived from two exact app-owned provenance links; neither
+copies a Trust bit into the child. A broker-owned worker follows the owning prime recorded by its
+published active/dormant family, including sleeping and terminal worker history. Direct Trust of a
+worker is refused by Sessions IPC/UI, ambiguous or provisional ownership fails closed, and every call
+re-resolves the parent so Untrust, Block or a committed prime transfer takes effect immediately. A
+Compact & Resume successor stays untrusted before commit, then may inherit effective trust from the
+durable session `chatIds` lineage only after the continuation commit atomically rebinds the session
+and records `lastCommittedResumeHandoffId`. Ordinary new/browser chats and anything without either
+exact provenance link do not inherit. Sessions projects that inherited state onto the current row;
+Untrust there atomically removes every explicit Trust entry in its committed lineage, while Trust on
+an otherwise-untrusted successor deliberately makes only that current conversation explicit. Session
+deletion performs the same atomic lineage revoke before detach/delete so a hidden predecessor cannot
+survive as orphan authority. Block is projected independently onto the same current row: a predecessor
+Block still wins over derived Trust, and Release on the current resumed row clears committed-lineage
+blocks without changing Trust. Blocking the exact caller still wins over every derived path.
+
+Deleting the session row removes both explicit policies for that conversation. Trust/Untrust IPC
+carries the row's expected conversation id and refuses a stale A→B rebind; each trust mutation is
+serialized and published only after `writeDurableNow()` commits its exact snapshot, so an
+acknowledged revoke cannot be undone by crash.
 If that durable commit fails, the failed proposed generation is superseded by the still-published
 trust set before background retry. Session deletion durably revokes Trust before releasing Block,
 detaching the conversation or deleting the row; a failed revoke therefore leaves all prior authority intact.

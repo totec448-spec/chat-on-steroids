@@ -23,6 +23,7 @@ import { WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-compu
  */
 
 import { rawPromises as fs } from '../rawfs.js';
+import { randomUUID } from 'node:crypto';
 import { beginToolTiming, inboundRequestId, inboundPublication } from './inbound.js';
 import { McpServer, type ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
@@ -68,6 +69,7 @@ import {
   hasRetiredWorkerLeases,
   offerMessagesForCaller,
   persistCriticalSwarmNow,
+  workerPrimeOwner,
   requestWorkerRevivals,
   releaseQuiescentRun,
   retiredWorkerForConversation,
@@ -94,12 +96,13 @@ import {
   evidenceWindow,
   freshCallOrigin,
   recordAgentMessage,
+  recordProgress,
   recordToolCall
 } from '../session/recorder.js';
 import { requestCorrelation } from '../session/correlation.js';
 import { summarizeRunningCall } from '../session/summarize.js';
-import { anyChatBlocked, isChatBlocked } from '../session/blocked-chats.js';
-import { conversationAccessRefusal, strictChatAllowlistEnabled } from '../session/conversation-access.js';
+import { anyChatBlocked, BLOCKED_CHAT_REFUSAL, isChatBlocked } from '../session/blocked-chats.js';
+import { STRICT_CHAT_REFUSAL, conversationAccessRefusal, strictChatAllowlistEnabled } from '../session/conversation-access.js';
 import { anyContinuationOpen, compactingConversation } from '../session/continuation.js';
 import {
   acknowledgeBackgroundExecOutput,
@@ -121,6 +124,63 @@ import type { StoredText, ToolOutcome } from '../../shared/session.js';
 
 /** The page's exact proof of a request id, by which a running call counts for its chat. */
 const requestOwner = (requestId: string): string | null => requestCorrelation(requestId)?.conversationId ?? null;
+
+const UNTRUSTED_NOTICE = 'A tool call from an untrusted chat was refused. Trust this chat in Sessions to allow it.';
+const UNTRUSTED_WORKER_NOTICE =
+  'A tool call from a worker whose owning prime is not currently allowed was refused. In Sessions, Trust the owning prime if it is untrusted or Release it if it is blocked.';
+const UNPROVEN_WORKER_NOTICE =
+  'A tool call from an app-created worker was refused because no unique owning prime is currently proven. Return to the owning prime chat and retry after the worker is attached or recovered there.';
+const untrustedNoticeEpisodes = new Map<string, true>();
+const UNTRUSTED_NOTICE_MAX = 128;
+
+/**
+ * One timeline-only explanation per continuous refusal episode.
+ *
+ * Recording requires the same exact request/session/conversation proof as the call itself. The
+ * key is reserved before awaits so parallel retries cannot race two rows into the transcript.
+ * A later exact call that is no longer strict-refused clears the episode and permits one future
+ * notice if the user revokes trust again.
+ */
+function untrustedRefusalEpisodeKey(context: CallContext): string | null {
+  const { caller } = context;
+  return caller.conversationId && caller.sessionId ? `${caller.sessionId}\0${caller.conversationId}` : null;
+}
+
+function clearUntrustedRefusalEpisode(context: CallContext): void {
+  const key = untrustedRefusalEpisodeKey(context);
+  if (key) untrustedNoticeEpisodes.delete(key);
+}
+
+async function recordUntrustedRefusalNotice(context: CallContext): Promise<void> {
+  const { caller } = context;
+  const key = untrustedRefusalEpisodeKey(context);
+  if (!key || !caller.conversationId || !caller.sessionId) return;
+  if (untrustedNoticeEpisodes.has(key)) return;
+  untrustedNoticeEpisodes.set(key, true);
+  const exact = requestCorrelation(caller.requestId);
+  if (exact?.conversationId !== caller.conversationId || exact.sessionId !== caller.sessionId ||
+      await conversationAttachment(caller.conversationId, caller.sessionId) !== 'current') {
+    untrustedNoticeEpisodes.delete(key);
+    return;
+  }
+  const worker = workerPrimeOwner(caller.conversationId);
+  const message = worker.owned
+    ? worker.primeConversationId ? UNTRUSTED_WORKER_NOTICE : UNPROVEN_WORKER_NOTICE
+    : UNTRUSTED_NOTICE;
+  // A progress id is a presentation identity: reusing it would make foldProgress() collapse a
+  // later refusal episode into the old row. The in-memory exact-pair map does deduplication;
+  // the durable row therefore gets a fresh identity for each episode.
+  const recorded = await recordProgress(caller.sessionId, `strict-chat-refusal:${randomUUID()}`, message);
+  if (!recorded) {
+    untrustedNoticeEpisodes.delete(key);
+    return;
+  }
+  while (untrustedNoticeEpisodes.size > UNTRUSTED_NOTICE_MAX) {
+    const oldest = untrustedNoticeEpisodes.keys().next().value as string | undefined;
+    if (!oldest) break;
+    untrustedNoticeEpisodes.delete(oldest);
+  }
+}
 
 export interface ToolContext {
   exposedFinishTool?: boolean;
@@ -268,6 +328,7 @@ export function lastToolCallAt(surface?: SurfaceId): number | null {
 /** Cleared with the server, so the answer is always about the current session. */
 export function resetToolClock(): void {
   identityRecovery.clear();
+  untrustedNoticeEpisodes.clear();
   toolCallSeenAt = null;
   surfaceToolCallAt.clear();
   transportIdentity = { checked: false, present: false };
@@ -706,7 +767,12 @@ async function dispatchTracked(
   const supersededConversation = context.caller.conversationId
     ? (await conversationAttachment(context.caller.conversationId, context.caller.sessionId ?? null)) === 'superseded'
     : false;
-  const conversationPolicyRefusal = conversationAccessRefusal(context.caller.conversationId);
+  // Preserve the pre-strict fast path exactly: when strict mode is off, Block is a synchronous
+  // exact-chat lookup and ordinary calls do not acquire extra microtask yields. Interactive PTYs
+  // are timing-sensitive enough that needless awaits can change which terminal frame a poll sees.
+  const conversationPolicyRefusal = strictChatAllowlistEnabled()
+    ? await conversationAccessRefusal(context.caller.conversationId)
+    : isChatBlocked(context.caller.conversationId) ? BLOCKED_CHAT_REFUSAL : null;
   let silentFinishAuthorized = false;
   // Two things about liveness, both before the agent is resolved so that the answer this
   // call gets is the state this call itself established.
@@ -851,12 +917,32 @@ async function dispatchTracked(
   // handler reads the queue. New queued input is still offered only with its result.
   if (!nested) await acknowledgeToolInput(context.caller.sessionId, context.caller.conversationId, requestId, startedAt)
     .catch(() => logWarn('Prior user input receipt could not be saved; its existing claim is preserved'));
-  if (!nested && requestId && !conversationPolicyRefusal && !supersededConversation && !compacting) {
+  // Permission can change while the liveness/recovery bookkeeping above awaits disk or browser
+  // evidence. A prior refusal is monotonic, while a new revoke must take effect before any
+  // background result is acknowledged or the requested handler is entered.
+  let preAckPolicyRefusal = conversationPolicyRefusal;
+  if (!preAckPolicyRefusal && strictChatAllowlistEnabled()) {
+    preAckPolicyRefusal = await conversationAccessRefusal(context.caller.conversationId);
+  }
+  if (!nested && requestId && !preAckPolicyRefusal && !supersededConversation && !compacting) {
     const explicitPoll = name === 'write_stdin' && args && typeof args === 'object'
       ? (args as { session_id?: number }).session_id : undefined;
     const principal = executionPrincipal(requestId, context.caller.sessionId, allowUnattributed);
     await acknowledgeBackgroundExecOutput(principal, startedAt, explicitPoll);
   }
+  let admissionRefusal = preAckPolicyRefusal;
+  if (!admissionRefusal && strictChatAllowlistEnabled()) {
+    admissionRefusal = await conversationAccessRefusal(context.caller.conversationId);
+  }
+  if (!admissionRefusal) {
+    // Make the final policy decision with no intervening await before the handler is entered.
+    // This is the revoke race's last fence. Only a final allow ends a prior refusal episode.
+    if (strictChatAllowlistEnabled()) {
+      admissionRefusal = await conversationAccessRefusal(context.caller.conversationId);
+    }
+    if (!admissionRefusal) clearUntrustedRefusalEpisode(context);
+  }
+  if (admissionRefusal === STRICT_CHAT_REFUSAL) await recordUntrustedRefusalNotice(context);
   let handlerRan = false;
   markTiming('identity');
   const invokeHandler = (): Promise<ToolResult> => {
@@ -864,8 +950,8 @@ async function dispatchTracked(
     return run();
   };
   const result = await runInCallContext(context, () =>
-      conversationPolicyRefusal
-        ? Promise.resolve(fail(conversationPolicyRefusal))
+      admissionRefusal
+        ? Promise.resolve(fail(admissionRefusal))
         : compacting
         ? Promise.resolve(fail(COMPACTION_IN_PROGRESS_REFUSAL))
         : supersededConversation
@@ -920,8 +1006,11 @@ async function dispatchTracked(
   await reconcileAgentRequestOwners().catch(error => {
     logWarn(`Worker ownership recovery deferred after tool completion: ${error instanceof Error ? error.message : String(error)}`);
   });
+  const deliveryPolicyRefusal = strictChatAllowlistEnabled()
+    ? await conversationAccessRefusal(context.caller.conversationId)
+    : isChatBlocked(context.caller.conversationId) ? BLOCKED_CHAT_REFUSAL : null;
   const deliveryFenced = Boolean(conversationPolicyRefusal) || compacting || supersededConversation || Boolean(silentCeilingWorker) ||
-    Boolean(conversationAccessRefusal(context.caller.conversationId)) ||
+    Boolean(deliveryPolicyRefusal) ||
     compactingConversation(context.caller.conversationId) !== null || Boolean(context.caller.conversationId &&
       (await conversationAttachment(context.caller.conversationId, context.caller.sessionId ?? null)) === 'superseded');
   // Never erase an identity a handler proved more strongly (agents::callerNow). The old

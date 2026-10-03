@@ -3,7 +3,8 @@
  *
  * This is deliberately separate from blocked chats. Releasing a block says only that a chat is
  * no longer forcibly stopped; it does not grant access under a default-deny policy. Likewise,
- * Compact & Resume creates a different ChatGPT conversation and does not inherit trust.
+ * Compact & Resume may derive effective trust from this explicit set through committed session
+ * provenance; no successor id is copied into this file merely because it resumed a trusted chat.
  */
 import { readDurable, writeDurableNow, writeDurableSoon } from '../durable.js';
 
@@ -46,19 +47,23 @@ export function trustedChatIds(): string[] {
   return [...trusted];
 }
 
-export function setChatTrusted(conversationId: string, next: boolean): Promise<void> {
-  if (!validConversationId(conversationId)) throw new Error('Not a ChatGPT conversation id');
+export function setChatsTrusted(conversationIds: readonly string[], next: boolean): Promise<void> {
+  const ids = [...new Set(conversationIds)];
+  if (ids.length === 0 || ids.some((conversationId) => !validConversationId(conversationId))) {
+    throw new Error('Not a ChatGPT conversation id');
+  }
   const operation = mutationQueue.then(async () => {
-    if (next === trusted.has(conversationId)) return;
     const updated = new Set(trusted);
     if (next) {
-      if (updated.size >= MAX_TRUSTED_CHATS) {
+      const additions = ids.filter((conversationId) => !updated.has(conversationId));
+      if (updated.size + additions.length > MAX_TRUSTED_CHATS) {
         throw new Error(`Too many trusted chats (${MAX_TRUSTED_CHATS}). Untrust one before trusting another.`);
       }
-      updated.add(conversationId);
+      for (const conversationId of additions) updated.add(conversationId);
     } else {
-      updated.delete(conversationId);
+      for (const conversationId of ids) updated.delete(conversationId);
     }
+    if (updated.size === trusted.size && [...updated].every((conversationId) => trusted.has(conversationId))) return;
     try {
       await writeDurableNow(TRUSTED_STATE, snapshot(updated));
     } catch (error) {
@@ -73,6 +78,10 @@ export function setChatTrusted(conversationId: string, next: boolean): Promise<v
   });
   mutationQueue = operation.then(() => undefined, () => undefined);
   return operation;
+}
+
+export function setChatTrusted(conversationId: string, next: boolean): Promise<void> {
+  return setChatsTrusted([conversationId], next);
 }
 
 export function resetTrustedChatsForTests(): void {

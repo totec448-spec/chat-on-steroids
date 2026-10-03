@@ -1773,7 +1773,7 @@
   "Also after the turn": "Также после хода",
   "Search models": "Поиск моделей",
   "Trust only selected chats": "Доверять только выбранным чатам",
-  "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "По умолчанию запрещать локальные инструменты и разрешать только чаты, которым вы явно доверили доступ в разделе «Сессии». Неатрибутированные вызовы остаются заблокированными, пока этот режим включён.",
   "Untrust this chat: strict mode refuses its tool calls": "Отозвать доверие к этому чату: строгий режим отклоняет его вызовы инструментов",
-  "Trust this chat: strict mode lets its tool calls run": "Доверять этому чату: строгий режим разрешает его вызовы инструментов"
+  "Trust this chat: strict mode lets its tool calls run": "Доверять этому чату: строгий режим разрешает его вызовы инструментов",
+  "Default-deny local tools to chats you explicitly Trust in Sessions. Workers and resumed chats follow their trusted parent; unattributed calls stay blocked.": "По умолчанию запрещать локальные инструменты и разрешать только чаты, которым вы явно доверили доступ в разделе «Сессии». Воркеры и возобновлённые чаты следуют доверию родительского чата; неатрибутированные вызовы остаются заблокированными."
 }

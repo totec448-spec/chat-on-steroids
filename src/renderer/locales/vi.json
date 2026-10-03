@@ -1773,7 +1773,7 @@
   "Also after the turn": "Đồng thời sau lượt",
   "Search models": "Tìm mô hình",
   "Trust only selected chats": "Chỉ tin cậy các cuộc trò chuyện đã chọn",
-  "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "Mặc định từ chối công cụ cục bộ và chỉ cho phép các cuộc trò chuyện bạn chủ động Tin cậy trong Phiên. Các lệnh gọi không xác định được cuộc trò chuyện vẫn bị chặn khi tùy chọn này bật.",
   "Untrust this chat: strict mode refuses its tool calls": "Bỏ tin cậy cuộc trò chuyện này: chế độ nghiêm ngặt sẽ từ chối các lệnh gọi công cụ của nó",
-  "Trust this chat: strict mode lets its tool calls run": "Tin cậy cuộc trò chuyện này: chế độ nghiêm ngặt cho phép các lệnh gọi công cụ của nó"
+  "Trust this chat: strict mode lets its tool calls run": "Tin cậy cuộc trò chuyện này: chế độ nghiêm ngặt cho phép các lệnh gọi công cụ của nó",
+  "Default-deny local tools to chats you explicitly Trust in Sessions. Workers and resumed chats follow their trusted parent; unattributed calls stay blocked.": "Mặc định từ chối công cụ cục bộ và chỉ cho phép các cuộc trò chuyện bạn chủ động Tin cậy trong Phiên. Worker và cuộc trò chuyện được tiếp tục sẽ theo trạng thái tin cậy của cuộc trò chuyện cha; các lệnh gọi không xác định được cuộc trò chuyện vẫn bị chặn."
 }

@@ -1773,7 +1773,7 @@
   "Also after the turn": "턴 이후에도",
   "Search models": "모델 검색",
   "Trust only selected chats": "선택한 채팅만 신뢰",
-  "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "로컬 도구를 기본적으로 거부하고 세션에서 명시적으로 신뢰한 채팅만 허용합니다. 이 옵션이 켜져 있는 동안 출처를 확인할 수 없는 호출은 계속 차단됩니다.",
   "Untrust this chat: strict mode refuses its tool calls": "이 채팅 신뢰 해제: 엄격 모드에서 도구 호출을 거부합니다",
-  "Trust this chat: strict mode lets its tool calls run": "이 채팅 신뢰: 엄격 모드에서 도구 호출을 허용합니다"
+  "Trust this chat: strict mode lets its tool calls run": "이 채팅 신뢰: 엄격 모드에서 도구 호출을 허용합니다",
+  "Default-deny local tools to chats you explicitly Trust in Sessions. Workers and resumed chats follow their trusted parent; unattributed calls stay blocked.": "로컬 도구를 기본적으로 거부하고 세션에서 명시적으로 신뢰한 채팅만 허용합니다. 워커와 재개된 채팅은 신뢰된 상위 채팅을 따르며, 출처를 확인할 수 없는 호출은 계속 차단됩니다."
 }

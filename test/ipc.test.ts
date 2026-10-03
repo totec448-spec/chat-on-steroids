@@ -1473,6 +1473,47 @@ describe('session IPC contracts', () => {
     resetTrustedChatsForTests();
   });
 
+  it('refuses direct worker Trust while allowing its prime and stale worker Untrust cleanup', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests, setChatTrusted } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const primeConversationId = 'strict-prime-ipc-owner';
+    const workerConversationId = 'strict-worker-ipc-owned';
+    const primeSession = await createSession({ title: 'strict prime owner', conversationId: primeConversationId });
+    const run = spawn({ caller: { conversationId: primeConversationId }, workers: [{ task: 'owned work' }] });
+    expect(bindConversation('worker-1', workerConversationId, run.runId)).toBe(true);
+    const workerSession = await createSession({
+      title: 'strict owned worker',
+      conversationId: workerConversationId,
+      origin: { kind: 'worker', fromSessionId: primeSession.id, agentId: 'worker-1', task: 'owned work' }
+    });
+
+    try {
+      const workerTrust = (await handlers.get('sessions:trust')!(null, {
+        id: workerSession.id, expectedConversationId: workerConversationId, trusted: true
+      })) as any;
+      expect(workerTrust.ok).toBe(false);
+      expect(workerTrust.error).toMatch(/worker trust follows its owning prime/i);
+      expect(isChatTrusted(workerConversationId)).toBe(false);
+
+      const primeTrust = (await handlers.get('sessions:trust')!(null, {
+        id: primeSession.id, expectedConversationId: primeConversationId, trusted: true
+      })) as any;
+      expect(primeTrust.ok, primeTrust.error).toBe(true);
+      expect(isChatTrusted(primeConversationId)).toBe(true);
+
+      // A pre-fix durable worker bit is not authority anymore, but Untrust must remain usable to
+      // clean it up rather than trapping stale state behind the new guard.
+      await setChatTrusted(workerConversationId, true);
+      const cleanup = (await handlers.get('sessions:trust')!(null, {
+        id: workerSession.id, expectedConversationId: workerConversationId, trusted: false
+      })) as any;
+      expect(cleanup.ok, cleanup.error).toBe(true);
+      expect(isChatTrusted(workerConversationId)).toBe(false);
+    } finally {
+      resetTrustedChatsForTests();
+    }
+  });
+
   it('refuses stale trust intent after Compact & Resume rebinds the same session to a new chat', async () => {
     const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
     resetTrustedChatsForTests();
@@ -1495,6 +1536,69 @@ describe('session IPC contracts', () => {
     expect(current.ok, current.error).toBe(true);
     expect(isChatTrusted(chatB)).toBe(true);
     resetTrustedChatsForTests();
+  });
+
+  it('Untrust on the current resumed row revokes the explicit source instead of leaving inherited authority', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    const { conversationAccessRefusal } = await import('../src/main/session/conversation-access.js');
+    resetTrustedChatsForTests();
+    const chatA = '33333333-aaaa-bbbb-cccc-333333333333';
+    const chatB = '44444444-aaaa-bbbb-cccc-444444444444';
+    const session = await createSession({ title: 'inherited resumed trust', conversationId: chatA });
+    getConfig().multiAgent.strictChatAllowlist = true;
+    try {
+      const trustA = (await handlers.get('sessions:trust')!(null, {
+        id: session.id, expectedConversationId: chatA, trusted: true
+      })) as any;
+      expect(trustA.ok, trustA.error).toBe(true);
+      expect(await rebindSession(session.id, chatA, chatB, 'handoff-resume-trust-0001')).toBe(true);
+      expect(await conversationAccessRefusal(chatB)).toBeNull();
+      expect(isChatTrusted(chatA)).toBe(true);
+      expect(isChatTrusted(chatB)).toBe(false);
+
+      const untrustB = (await handlers.get('sessions:trust')!(null, {
+        id: session.id, expectedConversationId: chatB, trusted: false
+      })) as any;
+      expect(untrustB.ok, untrustB.error).toBe(true);
+      expect(untrustB.data).toEqual([]);
+      expect(isChatTrusted(chatA)).toBe(false);
+      expect(isChatTrusted(chatB)).toBe(false);
+      expect(await conversationAccessRefusal(chatB)).toMatch(/^CHAT_NOT_TRUSTED:/);
+    } finally {
+      getConfig().multiAgent.strictChatAllowlist = false;
+      resetTrustedChatsForTests();
+    }
+  });
+
+  it('Release on the current resumed row clears a blocking source without removing its Trust', async () => {
+    const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    const { conversationAccessRefusal } = await import('../src/main/session/conversation-access.js');
+    resetBlockedChatsForTests();
+    resetTrustedChatsForTests();
+    const chatA = '77777777-aaaa-bbbb-cccc-777777777777';
+    const chatB = '88888888-aaaa-bbbb-cccc-888888888888';
+    const session = await createSession({ title: 'blocked resumed source', conversationId: chatA });
+    getConfig().multiAgent.strictChatAllowlist = true;
+    try {
+      expect(((await handlers.get('sessions:trust')!(null, {
+        id: session.id, expectedConversationId: chatA, trusted: true
+      })) as any).ok).toBe(true);
+      expect(((await handlers.get('sessions:block')!(null, { id: session.id, blocked: true })) as any).ok).toBe(true);
+      expect(await rebindSession(session.id, chatA, chatB, 'handoff-release-block-0001')).toBe(true);
+      expect(await conversationAccessRefusal(chatB)).toMatch(/^CHAT_NOT_TRUSTED:/);
+
+      const released = (await handlers.get('sessions:block')!(null, { id: session.id, blocked: false })) as any;
+      expect(released.ok, released.error).toBe(true);
+      expect(isChatBlocked(chatA)).toBe(false);
+      expect(isChatBlocked(chatB)).toBe(false);
+      expect(isChatTrusted(chatA)).toBe(true);
+      expect(await conversationAccessRefusal(chatB)).toBeNull();
+    } finally {
+      getConfig().multiAgent.strictChatAllowlist = false;
+      resetBlockedChatsForTests();
+      resetTrustedChatsForTests();
+    }
   });
 
   it('releases a block when the row that carries its button is deleted', async () => {
@@ -1525,6 +1629,55 @@ describe('session IPC contracts', () => {
     expect(deleted.ok, deleted.error).toBe(true);
     expect(isChatTrusted(conversationId)).toBe(false);
     resetTrustedChatsForTests();
+  });
+
+  it('deleting a resumed row atomically revokes hidden explicit source trust', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    const { conversationAccessRefusal } = await import('../src/main/session/conversation-access.js');
+    resetTrustedChatsForTests();
+    const chatA = '55555555-aaaa-bbbb-cccc-555555555555';
+    const chatB = '66666666-aaaa-bbbb-cccc-666666666666';
+    const session = await createSession({ title: 'resumed trust deleted', conversationId: chatA });
+    getConfig().multiAgent.strictChatAllowlist = true;
+    try {
+      const trusted = (await handlers.get('sessions:trust')!(null, {
+        id: session.id, expectedConversationId: chatA, trusted: true
+      })) as any;
+      expect(trusted.ok, trusted.error).toBe(true);
+      expect(await rebindSession(session.id, chatA, chatB, 'handoff-delete-trust-0001')).toBe(true);
+      expect(await conversationAccessRefusal(chatB)).toBeNull();
+
+      const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+      expect(deleted.ok, deleted.error).toBe(true);
+      expect(isChatTrusted(chatA)).toBe(false);
+      expect(isChatTrusted(chatB)).toBe(false);
+
+      await createSession({ title: 'old source returned', conversationId: chatA });
+      expect(await conversationAccessRefusal(chatA)).toMatch(/^CHAT_NOT_TRUSTED:/);
+    } finally {
+      getConfig().multiAgent.strictChatAllowlist = false;
+      resetTrustedChatsForTests();
+    }
+  });
+
+  it('deleting a resumed row releases a hidden committed source Block', async () => {
+    const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    resetBlockedChatsForTests();
+    const chatA = '99999999-aaaa-bbbb-cccc-999999999999';
+    const chatB = 'aaaaaaaa-aaaa-bbbb-cccc-aaaaaaaaaaaa';
+    const session = await createSession({ title: 'resumed source block deleted', conversationId: chatA });
+    try {
+      expect(((await handlers.get('sessions:block')!(null, { id: session.id, blocked: true })) as any).ok).toBe(true);
+      expect(isChatBlocked(chatA)).toBe(true);
+      expect(await rebindSession(session.id, chatA, chatB, 'handoff-delete-block-0001')).toBe(true);
+
+      const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+      expect(deleted.ok, deleted.error).toBe(true);
+      expect(isChatBlocked(chatA)).toBe(false);
+      expect(isChatBlocked(chatB)).toBe(false);
+    } finally {
+      resetBlockedChatsForTests();
+    }
   });
 
   it('preserves the session, Block and Trust when durable trust revocation fails during delete', async () => {
@@ -1592,6 +1745,43 @@ describe('session IPC contracts', () => {
       gate.release();
       rename.mockRestore();
       resetTrustedChatsForTests();
+    }
+  });
+
+  it('fences concurrent Block while session deletion is waiting on filesystem removal', async () => {
+    const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    resetBlockedChatsForTests();
+    const conversationId = 'efefefef-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'block raced with delete', conversationId });
+    await handlers.get('sessions:block')!(null, { id: session.id, blocked: true });
+    expect(isChatBlocked(conversationId)).toBe(true);
+
+    const gate = faultGate();
+    const originalRm = fs.rm.bind(fs);
+    const rm = vi.spyOn(fs, 'rm').mockImplementationOnce(async (...args: Parameters<typeof fs.rm>) => {
+      await gate.hold();
+      return originalRm(...args);
+    });
+    try {
+      const deleting = handlers.get('sessions:delete')!(null, { id: session.id }) as Promise<any>;
+      await gate.entered;
+      expect(isChatBlocked(conversationId)).toBe(false);
+
+      const racedBlock = (await handlers.get('sessions:block')!(null, {
+        id: session.id, blocked: true
+      })) as any;
+      expect(racedBlock.ok).toBe(false);
+      expect(racedBlock.error).toMatch(/being deleted/i);
+
+      gate.release();
+      const deleted = await deleting;
+      expect(deleted.ok, deleted.error).toBe(true);
+      expect(await getSession(session.id)).toBeNull();
+      expect(isChatBlocked(conversationId)).toBe(false);
+    } finally {
+      gate.release();
+      rm.mockRestore();
+      resetBlockedChatsForTests();
     }
   });
 
