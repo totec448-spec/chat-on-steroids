@@ -79,12 +79,20 @@ it('reports only app reachability from compatible health and pairing', () => {
   (popup!.window as any).paintHeader({ connected: true, paired: true, compatible: true, port: 8765 });
   expect(document.getElementById('state')!.textContent).toBe('App reachable · Port 8765');
   expect(document.getElementById('state')!.textContent).not.toContain('Connected');
+  const hint = document.getElementById('appHint') as HTMLElement;
+  expect(hint.hidden).toBe(true);
   (popup!.window as any).paintHeader({ connected: false });
   expect(document.getElementById('state')!.textContent).toBe('App not reachable');
+  // Unreachable is the state people report as "it doesn't work": say what to do, right there.
+  expect(hint.hidden).toBe(false);
+  expect(hint.textContent).toBe('Make sure Chat On Steroids is open on this computer. The companion connects on its own.');
   expect(document.getElementById('unpairBtn')).toBeNull();
   (popup!.window as any).paintHeader({ connected: true, paired: false, disconnected: true, compatible: true, port: 8765 });
   expect(document.getElementById('retryBtn')!.textContent).toBe('Connect');
   expect((document.getElementById('retryBtn') as HTMLButtonElement).hidden).toBe(false);
+  expect(hint.hidden).toBe(true);
+  (popup!.window as any).paintHeader({ connected: true, paired: true, compatible: true, port: 8765 });
+  expect(hint.hidden).toBe(true);
 });
 
 it('explains manual mismatch recovery with both versions', () => {
