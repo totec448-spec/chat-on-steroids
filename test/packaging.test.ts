@@ -165,7 +165,7 @@ describe('cross-platform packaging targets', () => {
     expect(releaseTargets('common').include.map((target: { name: string }) => target.name)).toEqual(['Windows x64', 'macOS arm64', 'Linux x64']);
     expect(releaseTargets('common').files).toEqual(['Chat-On-Steroids-Setup-x64.exe', 'Chat-On-Steroids-macOS-arm64.dmg',
       'Chat-On-Steroids-macOS-arm64.zip', 'Chat-On-Steroids-Linux-x64.AppImage', 'Chat-On-Steroids-Linux-x64.deb',
-      'Chat-On-Steroids-Extension.zip', 'Chat-On-Steroids-Native-Sources.tar.gz']);
+      'Chat-On-Steroids-Extension.zip', 'Chat-On-Steroids-Firefox.zip', 'Chat-On-Steroids-Native-Sources.tar.gz']);
     expect(() => releaseTargets('some')).toThrow();
     const canary = yamlFile('.github/workflows/canary.yml');
     expect(canary.jobs.candidate.with).toEqual({ platforms: 'common' });
@@ -219,6 +219,9 @@ describe('cross-platform packaging targets', () => {
     ]);
     expect(parsed.jobs.package['runs-on']).toBe('${{ matrix.runner }}');
     expect(workflow).toContain('name: chat-on-steroids-candidate-${{ github.run_id }}');
+    expect(workflow).toContain('Package Firefox extension groundwork');
+    expect(workflow).toContain('npm run extension:firefox:stage');
+    expect(workflow).toContain('Chat-On-Steroids-Firefox.zip');
     expect(workflow).toContain('Install generated DEB on target distro');
     expect(workflow).toContain('Launch installed DEB normally under Xvfb');
     expect(workflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-on-steroids');
@@ -697,6 +700,7 @@ Load command 11
       'Chat-On-Steroids-Linux-arm64.AppImage',
       'Chat-On-Steroids-Linux-arm64.deb',
       'Chat-On-Steroids-Extension.zip',
+      'Chat-On-Steroids-Firefox.zip',
       'SHA256SUMS.txt'
     ];
     const checksumStep = release.slice(
