@@ -390,6 +390,22 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
     await manager.uninstall(row.id);
     expect(manager.snapshot().plugins).toEqual([]);
   });
+  it('finishes an uninstall whose folder the stopped server still holds (Windows EBUSY)', async () => {
+    const row = (await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } })).plugins[0]!;
+    const realRm = fs.rm.bind(fs);
+    const rm = vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
+      if (String(target).endsWith(row.id)) throw Object.assign(new Error('EBUSY: resource busy or locked, rmdir'), { code: 'EBUSY' });
+      return realRm(target, options);
+    });
+    try {
+      // The record and its credentials are already gone; a locked leftover folder is logged, not an error.
+      await expect(manager.uninstall(row.id)).resolves.toBeDefined();
+      expect(manager.snapshot().plugins).toEqual([]);
+      expect(rm).toHaveBeenCalledWith(expect.stringContaining(row.id), expect.objectContaining({ maxRetries: 10, retryDelay: 200 }));
+    } finally {
+      rm.mockRestore();
+    }
+  });
   it('refuses queued replacement work once shutdown begins', async () => {
     const row = (await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } })).plugins[0]!;
     const update = manager.update(row.id);
