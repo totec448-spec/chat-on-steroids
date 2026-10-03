@@ -11055,7 +11055,7 @@
   let commandJournalGate = false;
 
   /**
-   * Waits for ChatGPT to expose a connected composer without putting bootstrap delivery
+   * Waits for ChatGPT to expose a connected, writable composer without putting bootstrap delivery
    * behind a chain of timer samples.
    *
    * The old readiness gate required `document.readyState === 'complete'` four times in a
@@ -11069,7 +11069,7 @@
   function waitForComposer(timeoutMs = 12_000, stillCurrent = () => true) {
     if (!stillCurrent()) return Promise.resolve(null);
     const current = CLF_DOM.composer();
-    if (current && current.isConnected) return Promise.resolve(current);
+    if (current && current.isConnected && CLF_DOM.composerWritable()) return Promise.resolve(current);
     return new Promise((resolve) => {
       let timer = null;
       let observer = null;
@@ -11081,10 +11081,19 @@
       const check = () => {
         if (!stillCurrent()) return finish(null);
         const composer = CLF_DOM.composer();
-        if (composer && composer.isConnected) finish(composer);
+        if (composer && composer.isConnected && CLF_DOM.composerWritable()) finish(composer);
       };
       observer = new MutationObserver(check);
-      observer.observe(document.documentElement, { childList: true, subtree: true });
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: [
+          'class', 'style', 'hidden', 'aria-hidden', 'inert',
+          'contenteditable', 'aria-disabled', 'role',
+          'data-chatgpt-composer', 'data-composer-markdown'
+        ]
+      });
       timer = setTimeout(() => finish(null), timeoutMs);
       // Close the tiny race between the first lookup and installing the observer.
       check();
@@ -11238,6 +11247,11 @@
       reportClaim(false);
       return;
     }
+    const commandExpiresAt = Number.isFinite(boot.expiresAt) ? boot.expiresAt : null;
+    const commandAlive = () => commandExpiresAt === null || Date.now() < commandExpiresAt;
+    const commandWaitMs = (fallbackMs, reserveMs = 0) => commandExpiresAt === null
+      ? fallbackMs
+      : Math.max(1, commandExpiresAt - Date.now() - reserveMs);
 
     // `/commands/redeem` persists RUN_ID as the command owner before returning `boot`. This is
     // the exact boundary the service worker needs before it may close the app-opened fallback:
@@ -11322,7 +11336,7 @@
     // the marker still names this command, and ChatGPT still has not assigned/opened a chat.
     // A command handed over by the service worker has no marker in this tab's URL to check;
     // the conversation fence above is the stronger half of the same proof and applies to it.
-    const stillOnTarget = () => alive && epoch === sendEpoch && (!fromUrl || markerId() === id) && onTarget();
+    const stillOnTarget = () => commandAlive() && alive && epoch === sendEpoch && (!fromUrl || markerId() === id) && onTarget();
     const failIfRetargeted = async () => {
       if (stillOnTarget()) return false;
       await fail(
@@ -11361,7 +11375,7 @@
     // transient unmount as a failed bootstrap: reacquire the editing host under the
     // same route/command fence before inserting authored text. This is deliberately
     // after selection, because the pre-selection composer is no longer authoritative.
-    if ((boot.model || boot.reasoningEffort) && !(await waitForComposer(12_000, stillOnTarget))) {
+    if ((boot.model || boot.reasoningEffort) && !(await waitForComposer(commandWaitMs(12_000, 5_000), stillOnTarget))) {
       if (await failIfRetargeted()) return;
       return void (await fail(t(
         'content_bootstrap_composer_unavailable',
@@ -11419,7 +11433,8 @@
         insertionFailure ? ` (${insertionFailure})` : ''
       )));
     }
-    const sendingBootstrap = submittedSendLifetime(target);
+    const submittedLifetime = submittedSendLifetime(target);
+    const sendingBootstrap = () => commandAlive() && submittedLifetime();
     // Stop/composer-clear may acknowledge acceptance before the authored row mounts.
     // Keep the original draft lease through that receipt, exactly as desktop delivery does;
     // identical text alone must never erase a later trusted edit or a replacement editor.
@@ -11597,7 +11612,7 @@
     // The route and exact submitted user row must agree for workers as for resumes;
     // a missing receipt is still ambiguous and cannot report a successful binding.
     const found = await waitPageView(bootstrapConversation,
-      () => !attempt?.cancelled && sendingBootstrap(), 40000);
+      () => !attempt?.cancelled && sendingBootstrap(), Math.min(40000, commandWaitMs(40000, 2_000)));
     if (!found || !sendingBootstrap()) return;
     if (boot.type === 'resume') rememberResumeGoalPending(found, boot.id);
     const acknowledged = await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID });
