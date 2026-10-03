@@ -40,7 +40,7 @@ import {
   SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS,
   SUPERSEDED_GOAL_SYSTEM_PROMPTS
 } from '../shared/goal.js';
-import { DEFAULT_HANDOFF_PROMPT, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
+import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { logError } from './logger.js';
 import { RESERVED_ROOT_NAMES } from './sandbox.js';
 import { capabilitiesForPlatform } from './platform.js';
@@ -123,7 +123,8 @@ const DEFAULT_COMPACTION: CompactionSettings = {
   // waiting for a chat that is already over the line and compacting it on sight.
   auto: true,
   autoTokens: DEFAULT_SESSIONS.advisoryTokens,
-  handoffPrompt: DEFAULT_HANDOFF_PROMPT
+  handoffPrompt: DEFAULT_HANDOFF_PROMPT,
+  handoffLength: DEFAULT_HANDOFF_LENGTH
 };
 /**
  * The goal loop's defaults.
@@ -379,10 +380,12 @@ const configSchema = z.object({
         .optional()
         .default(DEFAULT_COMPACTION.handoffPrompt)
         .transform((prompt) => prompt.trim() === '' ? DEFAULT_COMPACTION.handoffPrompt : prompt.trim())
-        .catch(DEFAULT_COMPACTION.handoffPrompt)
+        .catch(DEFAULT_COMPACTION.handoffPrompt),
+      // Absent in every config before 2.1.27: those keep the shipped 10k–30k brief.
+      handoffLength: z.enum(HANDOFF_LENGTHS).optional().default(DEFAULT_HANDOFF_LENGTH).catch(DEFAULT_HANDOFF_LENGTH)
     })
     .optional()
-    .default({ ...DEFAULT_COMPACTION }),
+    .default({ ...DEFAULT_COMPACTION, handoffLength: DEFAULT_HANDOFF_LENGTH }),
   multiAgent: z
     .object({
       enabled: z.boolean().optional().default(DEFAULT_MULTI_AGENT.enabled),

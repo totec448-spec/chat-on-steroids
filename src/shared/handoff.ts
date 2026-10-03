@@ -38,3 +38,30 @@ VERIFICATION — tests, builds, smoke checks and live evidence already run, with
 ENVIRONMENT — commands, versions, running processes, repo/dirty-tree state, installation/release state, and anything the next agent must preserve.
 NEXT — the concrete next actions, in order.
 DO NOT — what the next agent should not redo or undo.`;
+
+
+/**
+ * How long a Compact & Resume brief should be (#995). Thorough is the shipped prompt unchanged.
+ * The shorter choices swap the default prompt's two length sentences and add one code-owned line
+ * that overrides any other target, so they also apply to an edited prompt.
+ */
+export const HANDOFF_LENGTHS = ['thorough', 'standard', 'short'] as const;
+export type HandoffLength = (typeof HANDOFF_LENGTHS)[number];
+export const DEFAULT_HANDOFF_LENGTH: HandoffLength = 'thorough';
+
+const DEFAULT_LENGTH_RULE = DEFAULT_HANDOFF_PROMPT.split('\n').find(line => line.startsWith('- Treat the brief as a lossless operational compression'))!;
+const DEFAULT_NAVIGABLE = 'so a 10k–30k-token brief remains navigable';
+
+const SHORTER: Record<Exclude<HandoffLength, 'thorough'>, { range: string; max: string }> = {
+  standard: { range: '4,000–10,000', max: '10,000' },
+  short: { range: '2,000–6,000', max: '6,000' }
+};
+
+/** The content instructions with the chosen length applied. Thorough returns the prompt as it is. */
+export function handoffPromptForLength(prompt: string, length: HandoffLength = DEFAULT_HANDOFF_LENGTH): string {
+  if (length === 'thorough' || !SHORTER[length]) return prompt;
+  const { range, max } = SHORTER[length];
+  const rule = `- Treat the brief as a dense operational compression, not an executive summary. For a substantial session, target roughly ${range} tokens: keep every user requirement and correction, the current state, failures and the next actions, and cut narration and repetition first. Go shorter when there is less useful state. Never exceed ${max} tokens.`;
+  const adapted = prompt.replace(DEFAULT_LENGTH_RULE, rule).replace(DEFAULT_NAVIGABLE, 'so the brief remains navigable');
+  return `${adapted}\n\nLength setting: aim for roughly ${range} tokens and never exceed ${max}. This replaces any other length target in these instructions.`;
+}

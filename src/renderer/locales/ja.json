@@ -1706,7 +1706,6 @@
   "See changes as you adjust the workspace.": "ワークスペースを調整しながら変更を確認できます。",
   "Set the provider, model, and credentials for API-based decisions.": "API ベースの判断に使うプロバイダー、モデル、認証情報を設定します。",
   "Set worker limits and which chats can resume after interruptions.": "ワーカー数の上限と、中断後に再開できるチャットを設定します。",
-  "Shape how Goal and Loop write their next instruction.": "ゴールとループが次の指示を作成する方法を設定します。",
   "Use account-observed models for sub-agents.": "アカウントで確認されたモデルをサブエージェントに使用します。",
   "Verified native sends alongside model, shared and feature limits reported by ChatGPT.": "確認済みのネイティブ送信数と、ChatGPT が報告したモデル別・共有・機能別の利用枠を表示します。",
   "{0}K": "{0}千",
@@ -1787,5 +1786,11 @@
   "Let agents on this computer read app status and chats.": "このコンピューター上のエージェントにアプリの状態とチャットの読み取りを許可します。",
   "Allow actions": "操作を許可",
   "Let those agents also send and cancel messages. Needs the local control API.": "それらのエージェントにメッセージの送信とキャンセルも許可します。ローカル制御APIが必要です。",
-  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "アップデートのたびに一度だけ、このバージョンが保存済みのキーを開けるよう macOS がパスワードを求めます。Mac のログインパスワードを入力し、「常に許可」を選んでください。応答するとすぐに、チャットとブラウザ接続が再開します。"
+  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "アップデートのたびに一度だけ、このバージョンが保存済みのキーを開けるよう macOS がパスワードを求めます。Mac のログインパスワードを入力し、「常に許可」を選んでください。応答するとすぐに、チャットとブラウザ接続が再開します。",
+  "Handoff length": "引き継ぎの長さ",
+  "How much a Compact & Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.": "Compact & Resume の引き継ぎに残す量です。長いほど新しいチャットに多くの詳細を持ち込み、短いほど新しいチャットに余裕を残します。",
+  "Shape what Compact & Resume keeps and how Goal and Loop write their next instruction.": "Compact & Resume が残す内容と、ゴールとループが次の指示を作成する方法を設定します。",
+  "Thorough · 10k–30k tokens": "詳細 · 1万～3万トークン",
+  "Standard · 4k–10k tokens": "標準 · 4千～1万トークン",
+  "Short · 2k–6k tokens": "短め · 2千～6千トークン"
 }
