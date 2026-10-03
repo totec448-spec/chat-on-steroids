@@ -3042,6 +3042,9 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .setting > input[type='checkbox']:checked { background: var(--accent-fill, var(--ink)); }
 .setting > input[type='checkbox']:checked::after { left: 16px; background: var(--on-accent, var(--page)); }
 .setting > input[type='checkbox']:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+/* A switch that needs another one first (Allow actions needs the control API) reads as inactive. */
+.setting > input[type='checkbox']:disabled { opacity: .45; cursor: default; }
+.setting:has(> input[type='checkbox']:disabled) .setting-text { opacity: .6; }
 .setting-timing { margin: -4px 0 8px; padding: 0 0 10px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
 .setting-timing > summary { width: fit-content; cursor: pointer; color: var(--soft); }
 .setting-timing > summary:hover { color: var(--ink); }

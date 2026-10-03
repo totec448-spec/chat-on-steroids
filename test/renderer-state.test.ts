@@ -1233,6 +1233,27 @@ it('keeps folder access discoverable after setup and navigates without granting 
   expect(mounted.calls).toEqual([]);
 });
 
+it('keeps the app-wide options on the General page, not in Setup, and saves them from there', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const general = doc.querySelector('[data-panel="general"]')!;
+  const setup = doc.querySelector('[data-panel="setup"]')!;
+  for (const id of ['followOutput', 'playfulStatus', 'mentionCore', 'privacyScreenshots', 'developerMode', 'controlApiEnabled', 'controlApiAllowActions']) {
+    expect(general.contains(doc.getElementById(id)), id).toBe(true);
+    expect(setup.contains(doc.getElementById(id)), id).toBe(false);
+  }
+  doc.querySelector<HTMLButtonElement>('#tabs [data-tab="general"]')!.click();
+  expect(doc.querySelector('.panel.is-active')?.getAttribute('data-panel')).toBe('general');
+  expect(doc.querySelector('#tabs [data-tab="general"]')!.classList.contains('is-sel')).toBe(true);
+  // Allow actions needs the control API first.
+  expect(doc.getElementById('controlApiAllowActions')!.hasAttribute('disabled')).toBe(true);
+  const follow = doc.getElementById('followOutput') as HTMLInputElement;
+  expect(follow.checked).toBe(true);
+  follow.checked = false;
+  follow.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.followOutput).toBe(false));
+});
+
 it('always requires the live browser because recording is an invariant', async () => {
   const mounted = await mountChat({
     hasApiKey: true,
