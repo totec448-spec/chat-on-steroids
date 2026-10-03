@@ -53,9 +53,6 @@ app.whenReady().then(async () => {
       window.fixtureSaves=[]; window.fixtureAttached=[];
       const personal={id:'review',name:'Code review',description:'Read the complete change, check behavior and preserve existing work.',path:'/skills/review/SKILL.md',managed:true,scope:'managed',source:'managed',allowImplicitInvocation:true};
       const projectSkill={id:'project-check--repo-fixture',name:'Project checks',description:'Use this project’s build, conventions and verification routes.',path:'/demo/.agents/skills/check/SKILL.md',managed:false,scope:'repo',source:'repo-agents',allowImplicitInvocation:true};
-      const diag={capturedAt:Date.now(),status:{connected:true,paired:true,compatible:true,extensionVersion:'2.1.13',extensionProtocol:14,appProtocol:14},
-        preferences:{overwrite:true,durations:false},tab:{tab:17,isChat:true,bound:true,recorder:true,conversationId:'fixture-chat',
-        page:{events:2,session:'fixture-session',requestId:'fixture-request',trace:[{requestId:'fixture-request',read:true,sent:true,confirmed:true,app:'request_id',tool:'read'}]}}};
       window.api=new Proxy({getState:()=>ok(state),getLog:()=>ok([]),getZoom:()=>ok(1),listProjects:()=>ok(projects),
         listSessions:()=>ok({sessions:rows,total:3,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
         getSession:id=>ok({events:[{seq:1,time:1,source:'extension',kind:'user_message',messageId:'question',message:{text:'Review this project',chars:19,truncated:false}},
@@ -63,7 +60,6 @@ app.whenReady().then(async () => {
         getSwarm:()=>ok({running:false,runId:null,agents:[],maxWorkers:2,pendingReports:0}),getChatModels:()=>ok({state:'unknown',models:[]}),
         skillLibrary:()=>ok({skills:[personal,projectSkill],roots:[],errors:[],includeInstructions:true}),
         listSkills:()=>ok([personal]),listInputs:()=>ok([]),getSessionPlan:()=>ok(null),browserPreferences:()=>ok({overwrite:true,durations:false}),
-        companionDiagnostics:()=>ok(diag),internalBrowser:undefined,
         listProjectFiles:(id,directory='')=>ok({projectId:id,projectName:'Demo workspace',directory,truncated:false,
           entries:['README.md','example.ts','preview.pdf'].map(name=>({name,path:name,kind:'file',bytes:files[name]?.length??${pdf.length}}))}),
         watchProjectFiles:()=>ok(true),previewProjectFile:(id,name)=>ok(info(id,name)),
@@ -215,11 +211,12 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".file-pdf-canvas:not([hidden])")');
     assert.ok(await js(`(()=>{const c=document.querySelector('.file-pdf-canvas');return c.width*c.height>100&&c.width*c.height<=16*1024*1024;})()`));
     await screenshot('pdf-rendered');
-    await js(`document.getElementById('sidebarConnection').click();document.getElementById('connectionAdvanced').open=true`);
-    await until('document.getElementById("connectionPipelineWhy").textContent.includes("matched to recorded tool activity")');
+    await js(`document.getElementById('sidebarConnection').click()`);
+    assert.equal(await js('document.getElementById("connectionPopoverTitle").textContent'), 'Not connected');
+    assert.equal(await js('document.querySelector("#connectionPopover details")'), null);
     const bounds=await js(`(()=>{const r=document.getElementById('connectionPopover').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,fits:r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight};})()`);
     assert.equal(bounds.fits,true,JSON.stringify(bounds));
-    await screenshot('connection-diagnostics');
+    await screenshot('connection-status');
     await js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
     assert.equal(await js('document.getElementById("connectionPopover").hidden'),true);
     assert.equal(await js('document.activeElement.id'),'sidebarConnection');
@@ -266,11 +263,12 @@ app.whenReady().then(async () => {
     await screenshot('traditional-chinese-settings');
     // Every opening is compact, including when translucency creates a sidebar stacking context.
     await js(`document.documentElement.dataset.translucentSidebar='true';document.getElementById('sidebarConnection').click()`);
-    assert.equal(await js('document.getElementById("connectionAdvanced").open'),false);
+    assert.equal(await js('document.getElementById("connectionAdvanced")'),null);
     assert.equal(await js('document.getElementById("connectionPopoverSettings")'),null);
     assert.equal(await js('document.getElementById("connectionAdvancedOverwrite")'),null);
-    await js(`document.getElementById('connectionAdvanced').open=true;document.getElementById('connectionRuntime').open=true;document.getElementById('sidebarConnection').click();document.getElementById('sidebarConnection').click()`);
-    assert.equal(await js('document.getElementById("connectionAdvanced").open || document.getElementById("connectionRuntime").open'),false);
+    await js(`document.getElementById('sidebarConnection').click();document.getElementById('sidebarConnection').click()`);
+    assert.equal(await js('document.querySelector("#connectionPopover details")'),null);
+    assert.equal(await js('document.getElementById("connectionPopover").hidden'),false);
     await screenshot('connection-compact');
     await js(`document.getElementById('sidebarConnection').click();document.getElementById('viewMenu').open=true`);
     assert.ok(await js(`(()=>{const n=document.getElementById('zoomIn'),r=n.getBoundingClientRect();return n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`));
@@ -302,8 +300,8 @@ app.whenReady().then(async () => {
     await until('document.getElementById("headerConnect").hidden && document.getElementById("sidebarConnection").classList.contains("is-connected")');
     const errors=await js('window.fixtureErrors');
     assert.deepEqual(errors,[]);
-    fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({renderer:'current source in Chromium; synthetic backend',results,save:true,draftRoundTrip:true,gitChanges:true,pdf:true,diagnostics:bounds,skillsDraftRoundTrip:true,sharedLibrary:true,sidebar:true,composer,errors},null,2));
-    console.log('PASS: current renderer Files layouts, read-only Git Changes/diff, real editor draft navigation, PDF rendering, diagnostics, Skills chips/shared library, Projects/Chats, Spanish and Traditional Chinese. '+output);
+    fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({renderer:'current source in Chromium; synthetic backend',results,save:true,draftRoundTrip:true,gitChanges:true,pdf:true,connection:bounds,skillsDraftRoundTrip:true,sharedLibrary:true,sidebar:true,composer,errors},null,2));
+    console.log('PASS: current renderer Files layouts, read-only Git Changes/diff, real editor draft navigation, PDF rendering, connection status, Skills chips/shared library, Projects/Chats, Spanish and Traditional Chinese. '+output);
   } finally { win?.destroy(); await server?.close(); }
   app.exit(0);
 }).catch(error=>{console.error(error);app.exit(1)});
