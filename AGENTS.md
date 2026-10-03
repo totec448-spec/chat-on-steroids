@@ -293,6 +293,16 @@ A restored catalog is observed again only on Refresh, after a send whose model c
 confirmed, or once per saved Settings choice it does not offer (Goal helper, default worker:
 `refreshForUnoffered`). Those two are passive: they ask an open ChatGPT page, never open a browser.
 
+macOS builds are ad-hoc signed, so the Keychain trusts each build by its code hash and the first
+launch of a new build waits on the login-password prompt before it may read the safeStorage key.
+Every `safeStorage` call in `secrets.ts` goes through `keychain()`, which first awaits
+`keychain-notice.ts::beforeKeychainRead()`: when the executable's fingerprint (version, size,
+mtime) differs from `keychain-build.json`, main sends `keychain:waiting` true to a loaded window and
+waits up to 1.5 s for `keychain:noticeReady` (5 s for a window still loading; no window, no wait).
+All first callers share that one gate, because the first call of any kind (the availability check
+included) sets up the encryptor. The renderer shows `#keychainNotice` only if `keychain:waiting`
+false has not come within 600 ms. A successful call records the build; a refused one does not.
+
 Settings use validated current config and `effectiveCapabilities()`. Fresh-install defaults,
 legacy omitted fields and malformed-file recovery are three different cases. User choices must
 not be widened because a newer version added a field. Read-only derives from the write-capability
