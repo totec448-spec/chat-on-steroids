@@ -107,6 +107,7 @@ import { forgetSession, onSessionChange } from './session/recorder.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatBlocked } from './session/blocked-chats.js';
+import { setChatTrusted, trustedChatIds } from './session/trusted-chats.js';
 import {
   clearAgent,
   onSwarmChange,
@@ -215,6 +216,7 @@ const settingsPatch = z.object({
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
     maxWorkers: z.number().int().min(1).max(8),
     allowUnattributedCalls: z.boolean(),
+    strictChatAllowlist: z.boolean().optional(),
     recoverAgentTabs: z.boolean(),
     waitForSubAgents: z.boolean().optional(),
     endSleepingWorkerProcesses: z.boolean().optional()
@@ -384,6 +386,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.multiAgent.allowUnattributedCalls,
         base.multiAgent.allowUnattributedCalls,
         wanted.multiAgent.allowUnattributedCalls
+      ),
+      strictChatAllowlist: pick(
+        current.multiAgent.strictChatAllowlist ?? false,
+        base.multiAgent.strictChatAllowlist ?? false,
+        wanted.multiAgent.strictChatAllowlist ?? false
       ),
       recoverAgentTabs: pick(
         current.multiAgent.recoverAgentTabs,
@@ -1220,6 +1227,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return blockedChatIds();
   });
 
+  handle('sessions:trust', async (payload) => {
+    const { id, trusted } = z
+      .object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), trusted: z.boolean() })
+      .parse(payload);
+    const summary = await getSession(id);
+    const conversationId = summary?.conversationId;
+    if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
+      throw new Error('This session has no valid ChatGPT conversation');
+    }
+    setChatTrusted(conversationId, trusted);
+    logInfo(trusted
+      ? `conversation ${conversationId} trusted for strict chat allowlisting`
+      : `conversation ${conversationId} removed from strict chat allowlisting`);
+    return trustedChatIds();
+  });
+
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
     // Detach first. The recorder maps live ChatGPT conversations to session ids, so
@@ -1231,7 +1254,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // deletion would refuse that conversation's tools with nothing left in the app that could
     // ever release it.
     const summary = await getSession(id);
-    if (summary?.conversationId) setChatBlocked(summary.conversationId, false);
+    if (summary?.conversationId) {
+      setChatBlocked(summary.conversationId, false);
+      setChatTrusted(summary.conversationId, false);
+    }
     await deleteSession(id);
     logInfo(
       detached.length > 0

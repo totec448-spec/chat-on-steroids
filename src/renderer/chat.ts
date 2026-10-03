@@ -276,6 +276,8 @@ let swarm: SwarmState | null = null;
  * main process and repaints from the answer it gets back.
  */
 let blockedChats = new Set<string>();
+/** Exact conversations explicitly allowed while strict chat allowlisting is enabled. */
+let trustedChats = new Set<string>();
 /** Badges the list is currently drawn with. See repaintBadges. */
 let badgeKey = '';
 
@@ -356,7 +358,8 @@ function syncSessionSpinner(indicator: HTMLElement): void {
  * the row draws it with the same button and the same word as a blocked chat.
  */
 function unattributedBlocked(): boolean {
-  return deps.state()?.config.multiAgent.allowUnattributedCalls === false;
+  const multiAgent = deps.state()?.config.multiAgent;
+  return multiAgent?.strictChatAllowlist === true || multiAgent?.allowUnattributedCalls === false;
 }
 
 function sessionBadges(summary: SessionSummary): Badge[] {
@@ -459,6 +462,14 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 
   const actions: HTMLButtonElement[] = [];
   if (summary.conversationId === null) {
+    // Strict mode cannot trust an unattributed stream by definition. Do not render an
+    // "Allow" button that the kernel will intentionally ignore; the Settings checkbox
+    // explains that unattributed calls stay blocked until strict mode is turned off.
+    if (deps.state()?.config.multiAgent.strictChatAllowlist === true) {
+      actionBar.append(remove);
+      row.append(top, actionBar);
+      return row;
+    }
     // The same button in the same column as a chat's, because it is the same decision: may
     // this activity use local tools? It has no conversation to be stored against, so it moves
     // the app-wide switch — the checkbox on the settings sheet — and nothing else.
@@ -498,6 +509,22 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     });
     actions.push(block);
 
+    if (deps.state()?.config.multiAgent.strictChatAllowlist === true) {
+      const trusted = trustedChats.has(summary.conversationId);
+      const trust = document.createElement('button');
+      trust.className = `btn sess-action sess-trust${trusted ? ' is-trusted' : ''}`;
+      trust.type = 'button';
+      ui(trust, 'title', () => trusted
+        ? t("Untrust this chat: strict mode refuses its tool calls")
+        : t("Trust this chat: strict mode lets its tool calls run"));
+      trust.append(icon(trusted ? 'i-lock' : 'i-check'));
+      trust.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void toggleSessionTrust(summary.id, !trusted);
+      });
+      actions.push(trust);
+    }
+
     const open = document.createElement('button');
     open.className = 'btn sess-action sess-open';
     open.type = 'button';
@@ -532,6 +559,13 @@ async function toggleSessionBlock(id: string, blocked: boolean): Promise<void> {
   const next = await run(api.setSessionBlocked(id, blocked));
   if (next === null) return;
   blockedChats = new Set(next);
+  paintSessions();
+}
+
+async function toggleSessionTrust(id: string, trusted: boolean): Promise<void> {
+  const next = await run(api.setSessionTrusted(id, trusted));
+  if (next === null) return;
+  trustedChats = new Set(next);
   paintSessions();
 }
 
@@ -605,6 +639,7 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   // Whole-set replacement on every page, older pages included: a block belongs to a
   // conversation, not to whichever page happened to carry its row.
   blockedChats = new Set(list.blocked);
+  trustedChats = new Set(list.trusted ?? []);
   if (loadedOlderSessions) {
     for (const entry of list.pressure) pressure.set(entry.id, entry);
   } else {
@@ -635,6 +670,7 @@ async function loadMoreSessions(): Promise<void> {
     sessionTotal = page.total;
     sessionPageCursor = page.nextCursor;
     blockedChats = new Set(page.blocked);
+    trustedChats = new Set(page.trusted ?? []);
     for (const entry of page.pressure) pressure.set(entry.id, entry);
     paintSessions();
   } finally {
@@ -3899,6 +3935,7 @@ export function chatSettingsPatch(current: Config): {
       enabled: $<HTMLInputElement>('homeMaEnabled').checked,
       maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8),
       allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked,
+      strictChatAllowlist: $<HTMLInputElement>('strictChatAllowlist').checked,
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked,
       waitForSubAgents: $<HTMLInputElement>('waitForSubAgents').checked,
       endSleepingWorkerProcesses: $<HTMLInputElement>('endSleepingWorkerProcesses').checked
@@ -4286,6 +4323,7 @@ const CHAT_INPUTS = [
   'autoCompactTokens',
   'maWorkers',
   'allowUnattributedCalls',
+  'strictChatAllowlist',
   'recoverAgentTabs',
   'waitForSubAgents',
   'endSleepingWorkerProcesses',
@@ -4327,6 +4365,12 @@ export function chatApply(state: AppState, previous?: Config): void {
     config.multiAgent.allowUnattributedCalls,
     previous?.multiAgent.allowUnattributedCalls
   );
+  applyChatChecked(
+    $<HTMLInputElement>('strictChatAllowlist'),
+    config.multiAgent.strictChatAllowlist === true,
+    previous?.multiAgent.strictChatAllowlist
+  );
+  $<HTMLInputElement>('allowUnattributedCalls').disabled = config.multiAgent.strictChatAllowlist === true;
   applyChatChecked(
     $<HTMLInputElement>('recoverAgentTabs'),
     config.multiAgent.recoverAgentTabs,

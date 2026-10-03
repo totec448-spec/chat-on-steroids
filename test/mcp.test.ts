@@ -40,6 +40,7 @@ import { observeRequestCorrelation } from '../src/main/session/correlation.js';
 import { WINDOWS_COMPUTER_METHODS, WINDOWS_COMPUTER_READ_METHODS } from '../src/shared/windows-computer.js';
 import { BROWSER_TOOLS, BROWSER_READ_TOOLS } from '../src/shared/browser-control.js';
 import { resetBlockedChatsForTests, setChatBlocked } from '../src/main/session/blocked-chats.js';
+import { resetTrustedChatsForTests, setChatTrusted } from '../src/main/session/trusted-chats.js';
 import {
   abortContinuation,
   attachSummary,
@@ -294,6 +295,8 @@ beforeEach(async () => {
   ctx.roots = [{ name: 'workspace', path: approved }];
   ctx.sessionTools = false;
   ctx.agentTools = false;
+  getConfig().multiAgent.strictChatAllowlist = false;
+  resetTrustedChatsForTests();
   // A fresh endpoint gives every test a fresh ChatGPT tool-surface snapshot. Tests
   // that change permissions mid-flight still exercise the real live-config path.
   endpoint = await startMcpServer(() => ctx);
@@ -3860,8 +3863,16 @@ describe('blocked chats', () => {
       requestId ? { 'x-request-id': `${requestId}/att1` } : {}
     );
 
-  beforeEach(() => resetBlockedChatsForTests());
-  afterAll(() => resetBlockedChatsForTests());
+  beforeEach(() => {
+    resetBlockedChatsForTests();
+    resetTrustedChatsForTests();
+    getConfig().multiAgent.strictChatAllowlist = false;
+  });
+  afterAll(() => {
+    resetBlockedChatsForTests();
+    resetTrustedChatsForTests();
+    getConfig().multiAgent.strictChatAllowlist = false;
+  });
 
   it('refuses a blocked chat’s call and tells the model to stop instead of retrying', async () => {
     setChatBlocked(ROGUE, true);
@@ -3942,5 +3953,38 @@ describe('blocked chats', () => {
     const after = await readAs(requestId);
     expect(failed(after)).toBe(false);
     expect(textOf(after)).toContain('/workspace/notes.txt');
+  });
+
+  it('strict mode refuses untrusted and unattributed calls, then admits only the exact trusted chat', async () => {
+    getConfig().multiAgent.strictChatAllowlist = true;
+
+    const untrusted = await readAs(owned(BYSTANDER));
+    expect(failed(untrusted)).toBe(true);
+    expect(textOf(untrusted)).toContain('CHAT_NOT_TRUSTED');
+    expect(textOf(untrusted)).not.toContain('/workspace/notes.txt');
+
+    const unattributed = await readAs(null);
+    expect(failed(unattributed)).toBe(true);
+    expect(textOf(unattributed)).toContain('CHAT_NOT_TRUSTED');
+
+    setChatTrusted(BYSTANDER, true);
+    const trusted = await readAs(owned(BYSTANDER));
+    expect(failed(trusted)).toBe(false);
+    expect(textOf(trusted)).toContain('/workspace/notes.txt');
+  });
+
+  it('strict mode waits for late exact proof and block still wins over trust', async () => {
+    getConfig().multiAgent.strictChatAllowlist = true;
+    setChatTrusted(ROGUE, true);
+
+    const trustedLate = await readAs(provenLate(ROGUE, 40));
+    expect(failed(trustedLate)).toBe(false);
+    expect(textOf(trustedLate)).toContain('/workspace/notes.txt');
+
+    setChatBlocked(ROGUE, true);
+    const blocked = await readAs(owned(ROGUE));
+    expect(failed(blocked)).toBe(true);
+    expect(textOf(blocked)).toContain('CHAT_BLOCKED');
+    expect(textOf(blocked)).not.toContain('CHAT_NOT_TRUSTED');
   });
 });

@@ -98,7 +98,8 @@ import {
 } from '../session/recorder.js';
 import { requestCorrelation } from '../session/correlation.js';
 import { summarizeRunningCall } from '../session/summarize.js';
-import { BLOCKED_CHAT_REFUSAL, anyChatBlocked, isChatBlocked } from '../session/blocked-chats.js';
+import { anyChatBlocked, isChatBlocked } from '../session/blocked-chats.js';
+import { conversationAccessRefusal, strictChatAllowlistEnabled } from '../session/conversation-access.js';
 import { anyContinuationOpen, compactingConversation } from '../session/continuation.js';
 import {
   acknowledgeBackgroundExecOutput,
@@ -692,7 +693,11 @@ async function dispatchTracked(
   // now means the page never proved it, not that the page had not proved it yet.
   //
   // A chat being compacted is refused on the same terms, so it waits on the same terms.
-  if (!context.caller.conversationId && (anyChatBlocked() || anyContinuationOpen()) && requestId) {
+  if (
+    !context.caller.conversationId &&
+    (strictChatAllowlistEnabled() || anyChatBlocked() || anyContinuationOpen()) &&
+    requestId
+  ) {
     setCallerConversation(
       context,
       await awaitFreshCallOrigin(name, startedAt, identityWindow(REQUEST_ID_GRACE_MS), { requestId })
@@ -701,6 +706,7 @@ async function dispatchTracked(
   const supersededConversation = context.caller.conversationId
     ? (await conversationAttachment(context.caller.conversationId, context.caller.sessionId ?? null)) === 'superseded'
     : false;
+  const conversationPolicyRefusal = conversationAccessRefusal(context.caller.conversationId);
   let silentFinishAuthorized = false;
   // Two things about liveness, both before the agent is resolved so that the answer this
   // call gets is the state this call itself established.
@@ -716,7 +722,7 @@ async function dispatchTracked(
   // thought asleep takes the free execution slot back for that family, so the liveness
   // bookkeeping below sees the same run it would have seen had the parking not happened. A
   // chat the user stopped from the app is refused below anyway and reclaims nothing.
-  if (!supersededConversation && !isChatBlocked(context.caller.conversationId)) {
+  if (!supersededConversation && !conversationPolicyRefusal) {
     const conversationId = context.caller.conversationId;
     const recoveryAuthority = silentCeilingRecoveryAuthority(conversationId);
     let recovered = false;
@@ -744,14 +750,14 @@ async function dispatchTracked(
     }
     if (!recovered && !isFinish) reactivateDormantRunForConversation(conversationId);
   }
-  const alive = supersededConversation || isChatBlocked(context.caller.conversationId) ? null : noteAgentAlive(context.caller.conversationId);
-  const callerSession = !supersededConversation && context.caller.conversationId
+  const alive = supersededConversation || conversationPolicyRefusal ? null : noteAgentAlive(context.caller.conversationId);
+  const callerSession = !supersededConversation && !conversationPolicyRefusal && context.caller.conversationId
     ? await findSessionByConversation(context.caller.conversationId, { requireUnique: true }).catch(() => null)
     : null;
   const callerRequestOriginMax = callerSession && context.caller.conversationId
     ? await requestTurnOwnershipCutoff(callerSession.id, context.caller.conversationId).catch(() => null)
     : null;
-  const quietWorkers = supersededConversation ? [] : sleepSilentWorkers(
+  const quietWorkers = supersededConversation || conversationPolicyRefusal ? [] : sleepSilentWorkers(
     Date.now(),
     undefined,
     id => runningToolProgress(id) !== null,
@@ -822,7 +828,6 @@ async function dispatchTracked(
   // a lifecycle state the broker derived: somebody looked at a rogue turn they could not stop
   // from the page and stopped it here instead, so it applies to every tool on every surface,
   // `agents` finish included. A blocked chat has nothing left to finish.
-  const blockedChat = isChatBlocked(context.caller.conversationId);
   // A chat whose session is on its way to a fresh chat. Compact & Resume interrupts the turn
   // from the page and waits for the app's in-flight count to reach zero, but neither is a
   // fact about the model: ChatGPT's Stop control can vanish while the server-side turn goes
@@ -833,7 +838,7 @@ async function dispatchTracked(
   // every call passes: from the moment the continuation is filed until its commit hands the
   // chat over to `superseded`, chat A gets no tool at all, and each refusal tells the model
   // the only thing it can usefully do is write the brief.
-  const compacting = !blockedChat && compactingConversation(context.caller.conversationId) !== null;
+  const compacting = !conversationPolicyRefusal && compactingConversation(context.caller.conversationId) !== null;
   const retiredLeaseAmbiguous =
     !allowUnattributed && hasRetiredWorkerLeases() && !context.caller.conversationId;
   const dormantLeaseAmbiguous =
@@ -846,7 +851,7 @@ async function dispatchTracked(
   // handler reads the queue. New queued input is still offered only with its result.
   if (!nested) await acknowledgeToolInput(context.caller.sessionId, context.caller.conversationId, requestId, startedAt)
     .catch(() => logWarn('Prior user input receipt could not be saved; its existing claim is preserved'));
-  if (!nested && requestId && !blockedChat && !supersededConversation && !compacting) {
+  if (!nested && requestId && !conversationPolicyRefusal && !supersededConversation && !compacting) {
     const explicitPoll = name === 'write_stdin' && args && typeof args === 'object'
       ? (args as { session_id?: number }).session_id : undefined;
     const principal = executionPrincipal(requestId, context.caller.sessionId, allowUnattributed);
@@ -859,8 +864,8 @@ async function dispatchTracked(
     return run();
   };
   const result = await runInCallContext(context, () =>
-      blockedChat
-        ? Promise.resolve(fail(BLOCKED_CHAT_REFUSAL))
+      conversationPolicyRefusal
+        ? Promise.resolve(fail(conversationPolicyRefusal))
         : compacting
         ? Promise.resolve(fail(COMPACTION_IN_PROGRESS_REFUSAL))
         : supersededConversation
@@ -915,8 +920,8 @@ async function dispatchTracked(
   await reconcileAgentRequestOwners().catch(error => {
     logWarn(`Worker ownership recovery deferred after tool completion: ${error instanceof Error ? error.message : String(error)}`);
   });
-  const deliveryFenced = blockedChat || compacting || supersededConversation || Boolean(silentCeilingWorker) ||
-    isChatBlocked(context.caller.conversationId) ||
+  const deliveryFenced = Boolean(conversationPolicyRefusal) || compacting || supersededConversation || Boolean(silentCeilingWorker) ||
+    Boolean(conversationAccessRefusal(context.caller.conversationId)) ||
     compactingConversation(context.caller.conversationId) !== null || Boolean(context.caller.conversationId &&
       (await conversationAttachment(context.caller.conversationId, context.caller.sessionId ?? null)) === 'superseded');
   // Never erase an identity a handler proved more strongly (agents::callerNow). The old
