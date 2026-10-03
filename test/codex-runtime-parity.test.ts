@@ -1,7 +1,7 @@
 import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   UnifiedExecError,
   UnifiedExecProcessManager,
@@ -276,6 +276,78 @@ describe('Codex unified exec runtime parity', () => {
     expect(output.exitCode).toBe(17);
     expect(output.rawOutput.toString('utf8')).toContain('stdout-marker');
     expect(output.rawOutput.toString('utf8')).toContain('stderr-marker');
+  });
+
+  it('publishes a process change when a yielded child exits on its own', async () => {
+    const instance = manager();
+    managers.push(instance);
+    const changed = vi.fn();
+    instance.setProcessChangeListener(changed);
+    const processId = instance.allocateProcessId();
+    const initial = await instance.execCommand({
+      command: [process.execPath, '-e', "setTimeout(() => process.exit(0), 600)"],
+      shellType: process.platform === 'win32' ? 'powershell' : 'bash',
+      hookCommand: 'background status parity child',
+      processId,
+      yieldTimeMs: 250,
+      maxOutputTokens: undefined,
+      truncationPolicy,
+      cwd: process.cwd(),
+      displayCwd: process.cwd(),
+      env: applyUnifiedExecEnv(process.env),
+      tty: false
+    });
+
+    expect(initial.processId).toBe(processId);
+    const listed = instance.listProcesses().find(item => item.processId === processId);
+    expect(listed?.startedAt).toEqual(expect.any(Number));
+    const beforeExit = changed.mock.calls.length;
+    expect(initial.completion).toBeDefined();
+    await initial.completion;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(changed.mock.calls.length).toBeGreaterThan(beforeExit);
+    expect(instance.listProcesses().some(item => item.processId === processId)).toBe(false);
+  });
+
+  it('fences stale renderer stops by incarnation and preserves output after natural exit', async () => {
+    const instance = manager();
+    managers.push(instance);
+    const processId = instance.allocateProcessId();
+    const initial = await instance.execCommand({
+      command: [process.execPath, '-e', "setTimeout(() => process.stdout.write('retained-after-exit\\n'), 500); setTimeout(() => process.exit(0), 900)"],
+      shellType: process.platform === 'win32' ? 'powershell' : 'bash',
+      hookCommand: 'stale renderer stop child',
+      processId,
+      yieldTimeMs: 250,
+      maxOutputTokens: undefined,
+      truncationPolicy,
+      cwd: process.cwd(),
+      displayCwd: process.cwd(),
+      env: applyUnifiedExecEnv(process.env),
+      tty: false
+    });
+
+    expect(initial.processId).toBe(processId);
+    const listed = instance.listProcesses().find(item => item.processId === processId)!;
+    await expect(instance.terminateProcess(processId, listed.incarnation + 1)).resolves.toBe(false);
+    expect(instance.listProcesses().some(item => item.processId === processId)).toBe(true);
+
+    await initial.completion;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await expect(instance.terminateProcess(processId, listed.incarnation)).resolves.toBe(false);
+    expect(instance.backgroundState(new Set([processId])).exitedUnread).toEqual([
+      { processId, exitCode: 0 }
+    ]);
+
+    const retained = await instance.writeStdin({
+      processId,
+      input: '',
+      yieldTimeMs: 250,
+      maxOutputTokens: undefined,
+      truncationPolicy
+    });
+    expect(retained.completedSessionId).toBe(processId);
+    expect(retained.rawOutput.toString('utf8')).toContain('retained-after-exit');
   });
 
   it('returns an empty write_stdin poll as soon as the first output arrives', async () => {

@@ -46,10 +46,12 @@ function workerInfo(
 function runtime(processId = PROCESS_ID) {
   return {
     processId,
+    incarnation: processId + 1,
     command: 'npm run dev',
     cwd: '/repo',
     pid: 1_001,
-    tty: true
+    tty: true,
+    startedAt: OLD
   };
 }
 
