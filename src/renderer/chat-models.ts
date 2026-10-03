@@ -13,6 +13,7 @@ let discovery: Promise<void> | null = null;
 let catalogSubscribed = false;
 type ObservedSelection = { model: string; reasoningEffort?: ReasoningEffort; observedAt: number };
 let composerContext: { scope: string | null; observation: ObservedSelection | null; edited: boolean } | null = null;
+let ordinaryDefaults: { model: string; reasoningEffort: string } = { model: '', reasoningEffort: '' };
 /**
  * The user's explicit choice to send with whatever model ChatGPT already has selected.
  *
@@ -30,7 +31,12 @@ function currentModelOffered(): boolean {
 function currentModelChosen(): boolean {
   return useCurrentModel && currentModelOffered();
 }
-const pairs = [['composerModel', 'composerReasoning'], ['workerModel', 'workerReasoning'], ['helperModel', 'helperReasoning']] as const;
+const pairs = [
+  ['composerModel', 'composerReasoning', false],
+  ['defaultChatModel', 'defaultChatReasoning', true],
+  ['workerModel', 'workerReasoning', false],
+  ['helperModel', 'helperReasoning', false]
+] as const;
 const effortNames: Record<string, string> = { none: "Instant", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", pro: 'Pro' } satisfies Record<ReasoningEffort, string>;
 const composerEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'pro'] as const;
 const effortLabel = (effort: string): string => effortNames[effort] ? t(effortNames[effort]) : effort;
@@ -40,8 +46,11 @@ function observedModel(value: string) {
 
 function paintComposerContext(): void {
   if (!composerContext || composerContext.edited) return;
+  if (composerContext.scope === null) {
+    paintPair('composerModel', 'composerReasoning', ordinaryDefaults.model, ordinaryDefaults.reasoningEffort);
+    return;
+  }
   const observed = composerContext.observation;
-  if (composerContext.scope === null) return;
   const match = observed && observedModel(observed.model);
   // An unknown session model must not inherit the previous chat's valid Send choice.
   paintPair('composerModel', 'composerReasoning', match?.id ?? observed?.model ?? 'not-observed', observed?.reasoningEffort ?? 'not-observed');
@@ -51,7 +60,6 @@ function paintComposerContext(): void {
 export function applyComposerSessionModel(scope: string | null, observation: ObservedSelection | null): void {
   if (!composerContext || composerContext.scope !== scope) {
     composerContext = { scope, observation, edited: false };
-    if (scope === null) paintPair('composerModel', 'composerReasoning', '', '');
   } else if (observation && (!composerContext.observation || observation.observedAt >= composerContext.observation.observedAt)) {
     composerContext.observation = observation;
   }
@@ -127,7 +135,7 @@ function distinctModelChoices(models: ChatModelCatalog['models']): Array<{ id: s
   });
 }
 
-function paintPair(modelId: string, effortId: string, modelValue?: string, effortValue?: string): void {
+function paintPair(modelId: string, effortId: string, modelValue?: string, effortValue?: string, allowEmpty = false): void {
   const model = document.getElementById(modelId) as HTMLSelectElement | null;
   const effort = document.getElementById(effortId) as HTMLSelectElement | null;
   if (!model || !effort) return;
@@ -139,23 +147,32 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
     // A saved execution alias is an exact lane request. The family effort union
     // cannot prove which efforts that alias supports. Retain both requested values
     // until the user deliberately selects a family; native selection proves the pair.
-    options(model, [...distinctModelChoices(models), { id: nextModel, label: `${observed.label} · ${nextModel}` }], nextModel);
-    options(effort, [{ id: nextEffort, label: () => nextEffort ? effortLabel(nextEffort) : t('Keep requested model settings') }], nextEffort);
+    const modelChoices = [...distinctModelChoices(models), { id: nextModel, label: `${observed.label} · ${nextModel}` }];
+    if (allowEmpty) modelChoices.unshift({ id: '', label: () => t('Automatic') });
+    options(model, modelChoices, nextModel);
+    const effortChoices = [{ id: nextEffort, label: () => nextEffort ? effortLabel(nextEffort) : t('Keep requested model settings') }];
+    if (allowEmpty && nextEffort) effortChoices.unshift({ id: '', label: () => t('Automatic') });
+    options(effort, effortChoices, nextEffort);
     return;
   }
   nextModel = observed?.id ?? nextModel;
-  if (models.length && !nextModel) {
+  if (models.length && !nextModel && !allowEmpty) {
     // A preference selects only a model/effort actually observed in this catalog.
     const preferred = models.find(item => /^gpt[ -]?6$/i.test(item.label) && item.efforts.includes('high'));
     nextModel = (preferred ?? models[0]!).id;
     nextEffort = '';
   }
   const supported = models.find(item => item.id === nextModel)?.efforts;
-  if (supported && !nextEffort) {
+  if (supported && !nextEffort && !allowEmpty) {
     nextEffort = supported.includes('high') ? 'high' : supported[0] ?? '';
   }
-  options(model, distinctModelChoices(models), nextModel);
-  options(effort, (models.find(item => item.id === model.value)?.efforts ?? []).map(id => ({ id, label: () => effortLabel(id) })), nextEffort);
+  const modelChoices = distinctModelChoices(models);
+  if (allowEmpty) modelChoices.unshift({ id: '', label: () => t('Automatic') });
+  const effortChoices: Array<{ id: string; label: string | (() => string) }> =
+    (models.find(item => item.id === nextModel)?.efforts ?? []).map(id => ({ id, label: () => effortLabel(id) }));
+  if (allowEmpty) effortChoices.unshift({ id: '', label: () => t('Automatic') });
+  options(model, modelChoices, nextModel);
+  options(effort, effortChoices, nextEffort);
 }
 
 function paintComposerChoices(): void {
@@ -363,7 +380,7 @@ function discoverModels(): Promise<void> {
     const result = await run(window.api.requestChatModels()).catch(() => null);
     if (requested !== generation) return;
     catalog = result ?? { ...catalog, state: 'unavailable', error: t("Model discovery could not start.") };
-    for (const [modelId, effortId] of pairs) paintPair(modelId, effortId);
+    for (const [modelId, effortId, allowEmpty] of pairs) paintPair(modelId, effortId, undefined, undefined, allowEmpty);
     paintComposerContext(); paintStatus();
   })();
   discovery = work.finally(() => { discovery = null; });
@@ -390,14 +407,17 @@ export function applyChatModels(config: Config, previous?: Config): void {
     const select = document.getElementById(id) as HTMLSelectElement | null;
     return select && document.activeElement === select && previous && select.value !== (prior ?? '') ? select.value : value;
   };
+  ordinaryDefaults = { model: config.ui?.defaultChatModel ?? '', reasoningEffort: config.ui?.defaultChatReasoning ?? '' };
+  paintPair('defaultChatModel', 'defaultChatReasoning', chosen('defaultChatModel', ordinaryDefaults.model, previous?.ui?.defaultChatModel), chosen('defaultChatReasoning', ordinaryDefaults.reasoningEffort, previous?.ui?.defaultChatReasoning), true);
   paintPair('workerModel', 'workerReasoning', chosen('workerModel', config.multiAgent.defaultModel ?? '', previous?.multiAgent.defaultModel), chosen('workerReasoning', config.multiAgent.defaultReasoning ?? '', previous?.multiAgent.defaultReasoning));
   paintPair('helperModel', 'helperReasoning', chosen('helperModel', config.goal.helperModel ?? 'gpt-5.6-sol', previous?.goal.helperModel ?? 'gpt-5.6-sol'), chosen('helperReasoning', config.goal.helperReasoning ?? 'high', previous?.goal.helperReasoning ?? 'high'));
+  paintComposerContext();
   if (catalogSubscribed && catalog.state !== 'unknown') return;
   const requested = ++generation;
   void window.api.getChatModels().then(result => {
     if (requested !== generation || !result?.ok || !result.data) return;
     catalog = result.data;
-    for (const [modelId, effortId] of pairs) paintPair(modelId, effortId);
+    for (const [modelId, effortId, allowEmpty] of pairs) paintPair(modelId, effortId, undefined, undefined, allowEmpty);
     paintComposerContext();
     paintStatus();
   });
@@ -410,19 +430,23 @@ export function initChatModels(onPaint?: () => void): void {
     window.api.onChatModelsChanged(value => {
       // A current push supersedes every older startup/read/refresh response.
       ++generation; catalog = value;
-      for (const [modelId, effortId] of pairs) paintPair(modelId, effortId);
+      for (const [modelId, effortId, allowEmpty] of pairs) paintPair(modelId, effortId, undefined, undefined, allowEmpty);
       paintComposerContext(); paintStatus();
     });
   }
   document.getElementById('modelMenu')?.addEventListener('toggle', () => {
     if (($('modelMenu') as HTMLDetailsElement).open && !catalog.models.length) $('refreshComposerModels').click();
   });
-  for (const [modelId, effortId] of pairs) {
+  for (const [modelId, effortId, allowEmpty] of pairs) {
     document.getElementById(modelId)?.addEventListener('change', () => {
       if (modelId === 'composerModel' && composerContext) composerContext.edited = true;
       const model = $<HTMLSelectElement>(modelId);
+      const effort = $<HTMLSelectElement>(effortId);
       const supported = catalog.models.find(item => item.id === model.value)?.efforts ?? [];
-      paintPair(modelId, effortId, model.value, supported.includes('high') ? 'high' : supported[0] ?? '');
+      const nextEffort = allowEmpty
+        ? supported.includes(effort.value as ReasoningEffort) ? effort.value : ''
+        : model.value ? supported.includes('high') ? 'high' : supported[0] ?? '' : '';
+      paintPair(modelId, effortId, model.value, nextEffort, allowEmpty);
       paintStatus();
     });
     document.getElementById(effortId)?.addEventListener('change', () => {
@@ -431,6 +455,6 @@ export function initChatModels(onPaint?: () => void): void {
     });
   }
   for (const id of ['refreshChatModels', 'refreshComposerModels']) document.getElementById(id)?.addEventListener('click', () => { void discoverModels(); });
-  for (const [modelId, effortId] of pairs) paintPair(modelId, effortId);
+  for (const [modelId, effortId, allowEmpty] of pairs) paintPair(modelId, effortId, undefined, undefined, allowEmpty);
   paintStatus();
 }
