@@ -916,6 +916,22 @@ describe('the running turn\'s caption (#942)', () => {
 
 // -------------------------------------------------------------------- auth
 
+describe('extension update holds', () => {
+  it('logs once per reason why the browser extension waits to update, from its status report', async () => {
+    await pair();
+    const lines = () => getLog().filter(entry => entry.message.includes('browser extension waits to update'));
+    const before = lines().length;
+    const status = (updateHold?: string) => request('POST', '/status', { body: { openConversations: [], ...(updateHold ? { updateHold } : {}) } });
+    await status('chat-busy'); await status('chat-busy');
+    expect(lines().slice(before).map(entry => entry.message)).toEqual(['bridge: the browser extension waits to update: a ChatGPT tab is still answering']);
+    await status('already-tried');
+    expect(lines().at(-1)!.message).toContain('already tried this update once; reload it in chrome://extensions');
+    // An unknown reason is not logged, and a report without a hold resets it.
+    await status('made-up'); await status(); await status('chat-busy');
+    expect(lines().slice(before)).toHaveLength(3);
+  });
+});
+
 describe('authorisation', () => {
   it('refuses every route but /hello and /pair without a token', async () => {
     await pair();
