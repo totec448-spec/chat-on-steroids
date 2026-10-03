@@ -431,7 +431,6 @@ code {
 .app-topbar > .btn .ico { --ico: 14px; }
 .app-topbar > .topbar-theme { margin-inline-start: auto; width: 28px; justify-content: center; }
 .app-topbar > .topbar-connection { min-width: 68px; padding-inline: 8px; color: var(--red); font-size: calc(11px * var(--text-scale, 1)); font-weight: 600; }
-.app-topbar > .topbar-connection.is-running { color: var(--soft); }
 .view-menu { position: relative; font-size: calc(12px * var(--text-scale, 1)); }
 .view-menu > summary { display: flex; align-items: center; height: 100%; list-style: none; cursor: pointer; padding: 0 9px; border-radius: 6px; }
 .view-menu > summary:hover, .view-menu[open] > summary { background: var(--hover); }

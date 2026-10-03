@@ -3418,19 +3418,20 @@ Late startup results retire their own handles without publishing them; late tunn
 for the accepted-response drain first. Activity logs record Disconnect admission and the
 accepted-response count.
 
-The app title bar exposes the global Connect/Disconnect action; the sidebar footer owns the compact
-connection-status popover outside the translucent sidebar stacking context and keeps the same
-action available there. Both call the renderer's one connection toggle path. The popover's
+The app title bar exposes a compact Connect shortcut only before a connection is running: it stays
+visible as disabled `Connecting…` during server/tunnel startup and is hidden once connected,
+offline or disconnecting. The sidebar footer owns the compact connection-status popover outside
+the translucent sidebar stacking context and is the running-state Disconnect surface. The popover's
 sidebar-themed surface is 160 CSS pixels wide, with
 single-line labels and status dots. Status text remains accessible to screen readers and in
 tooltips. The header states connection status once; no redundant off/verification subtitle
 appears. Verification/last-seen ages remain in tooltips. Advanced session capture, request IDs
 and runtime diagnostics belong to the companion extension, not this desktop popover. Its only
 action is Connect/Disconnect; opening it does not request companion diagnostics.
-Extension-only Overwrite/Timestamps and the redundant settings link are absent. A red header
-Connect prompt is absent; the title-bar action always mirrors Connect/Disconnect and briefly
-highlights the footer status on a newly confirmed connection (respecting reduced motion). Setup stays reachable from
-Settings and from Connect when configuration is incomplete. The View menu has its own foreground
+Extension-only Overwrite/Timestamps and the redundant settings link are absent. The title-bar
+Connect shortcut briefly highlights the footer status on a newly confirmed connection (respecting
+reduced motion); it never becomes a Disconnect action. Setup stays reachable from Settings and from
+Connect when configuration is incomplete, and that click focuses the exact missing step. The View menu has its own foreground
 stacking layer; Appearance rows align controls at a shared minimum height and Setup uses a stable
 responsive title/language grid across locales.
 The companion sends a bounded snapshot on the authenticated `/diagnostics` route, outside the
