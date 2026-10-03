@@ -1081,7 +1081,11 @@ time alone cannot take this path. The same outbox expiry rule applies during nor
 Desktop delivery captures the native user-message identity inside the same Send acceptance
 operation that proves its text and route. It must not discard that receipt and rediscover the
 row after an await: React may already have replaced it. Navigation still revokes the operation;
-composer clear or a Stop button alone cannot supply a desktop delivery receipt. After the click,
+composer clear or a Stop button alone cannot supply a desktop delivery receipt. A new chat's
+shell can redraw its first exchange without the question before any read sees that row (#942);
+then the first `POST /backend-api/f/conversation` after this click, reported by `usage.js` as
+`cos-send-request` (exactly one user message id, never the prompt) within `SENT_REQUEST_MS`,
+supplies the id once the route is concrete. An older or later request cannot. After the click,
 the wait for that receipt is bounded (`DESKTOP_RECEIPT_MS`) and never clicks again. When it ends
 unproven, the page reports the fixed reason `Native Send receipt was not confirmed.` and frees its
 input slot. `failBrowserInput` then retires the authorized row as the same uncertain send the
@@ -1734,7 +1738,9 @@ replacement editor or a user's intervening edit never grants cleanup authority.
 
 `chat-models.ts` owns the app catalog and selection validation. The existing MAIN bridge reads
 bounded account-evaluated metadata, then the native picker confirms the actual model/effort for
-Send. A visible option, an English label, a remembered release name or “Upgrade required” is not
+Send. An already selected, account-evaluated exact model/effort pair closes the picker without
+visiting unrelated versions; a display caption or denied choice cannot take that path.
+A visible option, an English label, a remembered release name or “Upgrade required” is not
 entitlement. Do not enumerate every model × effort or create helper tabs to compensate for an
 uncertain catalog. Exact family rules live in `shared/chat-models.ts`.
 
@@ -2946,6 +2952,17 @@ runs, by the page's exact proof of its request id (`requestCorrelation`, install
 a second while the chat works. The row is presentation only: it records nothing and is not
 completion evidence. Page step labels are recognised by English wording; in other languages
 the row says Thinking.
+Between the running call and the page step, the row shows the running turn's newest
+unpublished sentence (#942). In a new chat's first turn ChatGPT draws the model's preambles from
+id-less view items and keeps their messages out of every mapping until history is fetched again.
+fiber.js reports the newest such preamble as the turn descriptor's optional `preview` (at most
+300 characters, only while the turn has no end message and only when no readable source message
+matches it). content.js forwards it as `live_preview` for the generation it owns and clears it
+at `finishGeneration`. background.js relays it to `POST /live-preview`, and `/closed` also clears
+it. `src/main/live-preview.ts` holds it in memory, dropping it after ten minutes without a
+refresh. `sessions:livePreview` (preload `livePreview`) returns it beside `sessions:runningTools`.
+It is a caption only: it is never recorded and never becomes a message id, so the sentence is
+recorded once, in its place, when ChatGPT publishes it.
 Setup's Show/Hide guide button stays available even while setup is incomplete. Manual collapse
 survives status pushes. Profile management stays out of first-run Setup: a compact row below
 Language in Appearance has a dropdown, a plus button with a name dialog and a delete button
@@ -3385,6 +3402,9 @@ activity remain distinct evidence. Optional embedded-host presentation does not 
 implement an embedded browser.
 
 `tunnel/*` owns pinned-client discovery, child lifetime, health metrics and confirmed outages;
+development discovery uses Electron's app root for `resources/tunnel`, independent of source
+nesting, bundle layout and the launching shell's working directory. Restore missing binaries
+with `npm run tunnel`, which verifies the pinned archive checksum before staging it.
 `diagnostics.ts` tests the chain hop by hop. Transient health evidence must not produce repeated
 replacement tunnels or claim a broken provider was repaired. Update checks (§20), browser wake
 and MCP connection have separate lifecycles.

@@ -2880,7 +2880,7 @@ async function performBrowserRepairs(repairs, policy) {
               tab.pendingUrl || conversationForTab(tab) !== conversationId || tabDocuments[String(target.id)] !== documentId) {
             // No browser action occurred. Release only this exact claim; a
             // concurrently retired episode cannot be reconstructed by this ACK.
-            await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
+            await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=changed`);
             continue;
           }
         }
@@ -2889,7 +2889,7 @@ async function performBrowserRepairs(repairs, policy) {
         const tab = await chrome.tabs.get(target.id);
         if (tab.pendingUrl || conversationForTab(tab) !== conversationId ||
             (tab.discarded !== true && tab.frozen !== true) || tabDocuments[String(target.id)] !== documentId) {
-          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
+          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=changed`);
           continue;
         }
       }
@@ -2918,7 +2918,8 @@ async function performBrowserRepairs(repairs, policy) {
           documentId ? { documentId } : undefined);
         if (status?.ok === true && status.streaming === true &&
             (reason !== 'assistant-error' || status.assistantError === false)) {
-          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
+          // Not a failure: ChatGPT is answering, and the app says so instead of "Reload failed".
+          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=streaming`);
           continue;
         }
         if (reason === 'assistant-error' && status?.ok === true && status.assistantError === false) {
@@ -2934,7 +2935,7 @@ async function performBrowserRepairs(repairs, policy) {
       // A tab changed between the scan and action, or Chrome refused it. Report the exact failed
       // handout so the app can show the failure while keeping the same repair retryable. The
       // rest of the batch is unaffected: these are separate chats and separate failures.
-      await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
+      await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=error`);
       continue;
     }
     await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=${repairAction}`);
@@ -3593,6 +3594,16 @@ const HANDLERS = {
     }
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
+  /** The running turn's newest unpublished sentence (#942), as a live caption in the app. */
+  async live_preview(message, _sender, source) {
+    await load();
+    const conversationId = cleanConversationId(message.conversationId);
+    const text = message.text === null ? null
+      : typeof message.text === 'string' && message.text.length > 0 && message.text.length <= 300 ? message.text : undefined;
+    if (!conversationId || text === undefined) return { ok: false, status: 400, error: 'bad_live_preview' };
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    return call('/live-preview', { method: 'POST', body: JSON.stringify({ conversationId, text }) });
+  },
   /** Reads one already-recorded call only for the exact currently bound page document. */
   async activity_detail(message, _sender, source) {
     await load();
@@ -3985,6 +3996,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'bind',
     'activity',
     'activity_detail',
+    'live_preview',
     'correlate',
     'closed',
     'compact',

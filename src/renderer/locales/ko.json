@@ -336,9 +336,6 @@
   "Inject now": "지금 삽입",
   "Send directly": "직접 전송",
   "After this turn": "이 턴 이후",
-  "Continuation timing": "계속하기 타이밍",
-  "Only finish": "종료 시에만",
-  "After this turn + finish": "이 턴 이후 + 종료 시",
   "Send": "보내기",
   "All": "전체",
   "Problems": "문제",
@@ -1766,5 +1763,8 @@
   "Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "새 출력 따라가기: 답변이 늘어나는 동안 채팅 끝에 머뭅니다(여기와 ChatGPT). 위로 스크롤하면 일시 중지됩니다.",
   "End background processes of workers asleep for more than 30 minutes": "30분 넘게 잠든 워커의 백그라운드 프로세스 종료",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "워커 채팅과 기록은 계속 재사용할 수 있습니다. 기본값은 꺼짐이며 각 정리 작업은 해당 워커의 기록에 남습니다.",
-  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "내 메시지에서 Chat On Steroids Core 멘션: 모든 채팅에서 ChatGPT가 이 앱을 사용할 수 있게 합니다. 간단한 질문에 ChatGPT가 불필요한 도구 호출부터 시작하면 끄세요. 워커, Goal, Loop, Continue는 멘션을 유지합니다."
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "내 메시지에서 Chat On Steroids Core 멘션: 모든 채팅에서 ChatGPT가 이 앱을 사용할 수 있게 합니다. 간단한 질문에 ChatGPT가 불필요한 도구 호출부터 시작하면 끄세요. 워커, Goal, Loop, Continue는 멘션을 유지합니다.",
+  "When to continue": "계속할 시점",
+  "Session Finish only": "세션 종료 시에만",
+  "Also after the turn": "턴 이후에도"
 }

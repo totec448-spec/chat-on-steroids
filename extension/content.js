@@ -851,6 +851,18 @@
         sendText(source.text.slice(actualMarker[0].length)) === sendText(expected.slice(expectedMarker[0].length))) return true;
     return sendText(unescapeMarkdown(source.text)) === sendText(expected);
   }
+  /**
+   * User messages named by ChatGPT's own Send requests in this document (#942), oldest first.
+   * MAIN reads each id from `POST /backend-api/f/conversation` before the page can redraw a new
+   * chat without its first question. A receipt may take only the first request after its own
+   * click, and only soon after it: that request is the Send the click made.
+   */
+  const SENT_REQUEST_MS = 10_000;
+  const sentRequests = [];
+  function sentRequestSince(since) {
+    const sent = sentRequests.find(entry => entry.epoch === epoch && entry.at >= since);
+    return sent && sent.at - since <= SENT_REQUEST_MS ? { id: sent.id } : null;
+  }
   /** Temporary-planner-only fallback for an accepted user row left on the immediately older Fiber scan. */
   function acceptedTemporaryDecisionUser(message, decision) {
     if (!decision?.temporary || !decision.onTarget() || !message || message.role !== 'user' ||
@@ -907,8 +919,8 @@
    */
   let mentionCore = true;
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
-                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = coreMention) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain,
+                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = coreMention, sentRequest = null) {
+    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -2367,6 +2379,7 @@
     // other named turn by accident. Modern generations always mint/adopt an id; this is the
     // fail-closed guard for stale/legacy/reinjected state.
     const endedTurnId = turnId;
+    syncLivePreview(livePreviewSent.conversationId, null);
     streamGone = null;
     resumedOrder = 0;
     generating = false;
@@ -3680,8 +3693,10 @@
       codeIds.add(messageId);
       codeModeCalls.push({ messageId, tool: 'functions.exec', requestId: cap(entry.requestId, 100), answered: entry.answered === true });
     }
+    // Presentation only (#942): a caption line for a running turn, never a recorded message.
+    const preview = !endMessageId && typeof raw.preview === 'string' ? cap(raw.preview.trim(), 300) : null;
     if (codeModeCalls.length === 0 && kept.length === 0 && requests.length === 0 && keptMessages.length === 0 && keptActivities.length === 0 &&
-        keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId) {
+        keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId && !preview) {
       return null;
     }
     return {
@@ -3697,7 +3712,8 @@
       messages: keptMessages,
       activities: keptActivities,
       thoughtNotifications: keptThoughtNotifications,
-      images: keptImages
+      images: keptImages,
+      preview
     };
   }
 
@@ -4098,6 +4114,28 @@
     return fiberRepairing ? await fiberRepairing : null;
   }
 
+  /** The caption last sent for the running turn (#942), so an unchanged scan sends nothing. */
+  let livePreviewSent = { conversationId: null, text: null };
+  /**
+   * Tells the app the newest sentence ChatGPT shows for a running turn whose message it has not
+   * published yet. ChatGPT keeps a new chat's first-turn narration out of its page model until it
+   * fetches history again, so without this the app showed only the calls until the final answer.
+   * The app holds it in memory as a caption; the sentence is recorded the ordinary way, with its
+   * own message id, once ChatGPT publishes it.
+   */
+  function syncLivePreview(forConversation, text) {
+    const id = typeof forConversation === 'string' && /^[0-9a-f-]{8,64}$/i.test(forConversation) ? forConversation : null;
+    const next = id && typeof text === 'string' && text ? text : null;
+    const previous = livePreviewSent;
+    if (previous.conversationId === id && previous.text === next) return;
+    livePreviewSent = { conversationId: id, text: next };
+    // A route change must not leave the old chat's caption behind.
+    if (previous.text && previous.conversationId && previous.conversationId !== id) {
+      void ask({ type: 'live_preview', conversationId: previous.conversationId, text: null });
+    }
+    if (id && (next || previous.conversationId === id)) void ask({ type: 'live_preview', conversationId: id, text: next });
+  }
+
   async function refreshFiber(settled = null, presentationOnly = false) {
     // A bound chat can briefly lose its /c/<id> route during React/router churn, and a real
     // navigation to a fresh composer has the exact same pathname until ChatGPT assigns the
@@ -4300,6 +4338,11 @@
     }
     const activeTurnIndex =
       ownedPageTurn && activeLocalTurnId ? answer.turns.indexOf(ownedPageTurn) : -1;
+    // #942: a caption for the generation this document owns right now, never for a settled scan.
+    if (!presentationOnly && !settled) {
+      syncLivePreview(askedConversation || concreteConversation(CLF_DOM.conversationId()),
+        activeTurnIndex >= 0 && generating ? ownedPageTurn.preview : null);
+    }
     if (askedConversation) {
       // Ownership evidence is no longer gated on `activeTurnIndex`.
       //
@@ -8011,8 +8054,8 @@
         [
           goalConfig.mode === 'loop' ? t('content_mode_loop', 'Loop') : t('content_mode_goal', 'Goal'),
           goalConfig.afterTurn
-            ? t('content_goal_delivery_after_turn_finish', 'After this turn + finish')
-            : t('content_goal_delivery_only_finish', 'Only finish')
+            ? t('content_goal_delivery_after_turn_finish', 'At Session Finish or after the turn')
+            : t('content_goal_delivery_only_finish', 'At Session Finish only')
         ]
       );
       delivery.disabled = menuBusy || !!goalConfig.blocked;
@@ -11818,6 +11861,16 @@
     flushStreamRequestOrigins();
   }
   window.addEventListener('message', (event) => {
+    if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-send-request') return;
+    const at = Date.now();
+    const ids = Array.isArray(event.data.messageIds) ? event.data.messageIds : [];
+    if (ids.length !== 1 || typeof ids[0] !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ids[0])) return;
+    sentRequests.push({ id: ids[0], at, epoch });
+    while (sentRequests.length > 8) sentRequests.shift();
+    // A Send still waiting on its receipt re-checks now rather than on the next page mutation.
+    for (const check of pageViewChecks) void check();
+  });
+  window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-send-model') return;
     const model = typeof event.data.model === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(event.data.model) ? event.data.model : null;
     const ids = Array.isArray(event.data.messageIds) ? event.data.messageIds.slice(0, 8) : [];
@@ -12336,6 +12389,13 @@
         return true;
       }, (user, conversation) => {
         if ((!conversation && !temporary) || (target && !onTarget())) return false;
+        // Named by the request this Send's own click made (#942): the row may never be readable,
+        // but the id is ChatGPT's own for exactly the question that request delivered.
+        if (user.sentRequest) {
+          if (!conversation || user.id === previousUserId) return false;
+          receipt = { conversation, user: { id: user.id } };
+          return true;
+        }
         const users = CLF_DOM.messages().filter(row => row.role === 'user');
         if ((!target && users.length !== 1) || users.at(-1)?.id !== user.id || user.id === previousUserId || !matchesSubmittedBootstrap(user, submittedText)) return false;
         // Freeze only identity while native Send still holds the proven row. React
@@ -12343,7 +12403,8 @@
         receipt = { conversation, user: { id: user.id } };
         return true;
       }, matchesSubmittedBootstrap, DESKTOP_RECEIPT_MS, noteWithdraw,
-      input.purpose === 'decision' ? null : input.recovery || agent || mentionCore ? coreMention : null);
+      input.purpose === 'decision' ? null : input.recovery || agent || mentionCore ? coreMention : null,
+      sentRequestSince);
       // #744: one retry when the editor was replaced before anything asked to send it.
       if (!(await nativeSend()) &&
           !(!authorizing && !sendAttempted && !receipt && !draft.current() && draftCurrent() && await nativeSend())) {
