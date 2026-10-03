@@ -913,7 +913,7 @@ The frozen `deliveryText` includes executor setup only for a new-chat opening at
 text remains separate. A failed write cannot later become a successful hidden enqueue.
 Browser Send puts a Chat On Steroids Core app mention in front of the text, because some accounts
 (Plus in Chat mode, #861) attach the app to a message only when the message mentions it.
-`ui.mentionCore` (Settings › App, default on, delivered to the page with the activity reply) can
+`ui.mentionCore` (Settings › General, default on, delivered to the page with the activity reply) can
 leave the mention off the user's own prompts, which on other accounts start plain questions with a
 probe tool call (#952). Workers, Continue recovery, Goal and Loop always keep it, because they need
 the app to answer. A Goal helper decision (`purpose: 'decision'`) never gets it.
@@ -3274,7 +3274,7 @@ Separate local listener health, public tunnel reachability, ChatGPT connector co
 browser attachment in both status and diagnosis. Stale connect/disconnect results cannot replace
 a newer endpoint. Secret paths/tokens are not public diagnostics.
 
-The local control API (`control-api.ts`, Settings → Setup → Advanced, off by default) serves
+The local control API (`control-api.ts`, Settings → General → For developers, off by default) serves
 `/v1/health` (which also lists the routes this build serves), `/v1/status` and the read routes
 below to a trusted local caller, typically an agent's MCP server watching the app from outside
 its process. It binds 127.0.0.1 on an ephemeral port

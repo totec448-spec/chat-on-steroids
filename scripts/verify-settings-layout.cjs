@@ -74,7 +74,7 @@ app.whenReady().then(async () => {
     for (const theme of ['dark', 'light']) for (const width of [900, 1440]) for (const zoom of [1, 1.25]) {
       win.setSize(width, 950); win.webContents.setZoomFactor(zoom);
       await js(`document.documentElement.dataset.theme = '${theme}'`);
-      for (const page of ['home', 'appearance', 'usage', 'setup', 'chat', 'activity']) {
+      for (const page of ['home', 'general', 'appearance', 'usage', 'setup', 'chat', 'activity']) {
         const result = await js(`(async () => {
           for (const panel of document.querySelectorAll('.panel')) panel.classList.toggle('is-active', panel.dataset.panel === '${page}');
           for (const button of document.querySelectorAll('#tabs button')) button.classList.toggle('is-sel', button.dataset.tab === ('${page}' === 'chat' ? 'settings' : '${page}'));
