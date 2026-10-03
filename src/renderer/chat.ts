@@ -15,7 +15,7 @@ import { messageReaction, withoutMessageReaction } from '../shared/message-react
 import { goalErrorMessage } from '../shared/goal-errors.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
 import { renderGoalReasoning } from './goal-reasoning.js';
-import { preserveTimelineViewport } from './timeline-scroll.js';
+import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
@@ -5436,12 +5436,18 @@ export function initChat(next: Deps): void {
   // content and the pane corrects the hold after layout and before paint, so the held message never
   // shows a clamped frame.
   if (typeof ResizeObserver === 'function') {
+    // Content height at the last observation. Following needs real growth: at a fractional zoom a
+    // badge can move the height by a rounding pixel, and following that moved every message.
+    let observedHeight = $('chatBody').scrollHeight;
     const observer = new ResizeObserver(() => {
       holdSentMessage();
       // Growth that no repaint saw (a row expanding, an image loading, streamed text): follow it
       // while the reader is at the end. Older history pages never follow.
       const pane = $('chatBody');
-      if (followOutput() && readerAtEnd && !sendAnchor && !readingAfterSend && historyBefore === null && distanceFromTail() > 1) {
+      const grew = pane.scrollHeight - observedHeight >= ROUNDING_PX;
+      observedHeight = pane.scrollHeight;
+      if (grew && followOutput() && readerAtEnd && !sendAnchor && !readingAfterSend && historyBefore === null &&
+          distanceFromTail() >= ROUNDING_PX) {
         pane.scrollTop = pane.scrollHeight;
         paintJumpLatest();
       }
