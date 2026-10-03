@@ -1401,20 +1401,26 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
   });
 }
 /** Initial provider binding uses the same reserved session as local admission. */
-async function bindOpening(entry: InputEntry, conversationId: string, firstAttach: boolean): Promise<boolean> {
+async function bindOpening(entry: InputEntry, conversationId: string): Promise<boolean> {
   if (!entry.opening || !entry.sessionId) return false;
   if (entry.conversationId && entry.conversationId !== conversationId) return false;
   if (await conversationWasSuperseded(conversationId)) return false;
   await materializeOpening(entry);
   const session = await getSession(entry.sessionId);
   if (!session || (session.conversationId && session.conversationId !== conversationId)) return false;
-  const trustThisAttach = firstAttach && getConfig().multiAgent.strictChatAllowlist === true;
-  if (!session.conversationId && !await rebindSession(session.id, null, conversationId)) return false;
+  const strictAtAuthoritativeBind = !session.conversationId && getConfig().multiAgent.strictChatAllowlist === true;
+  let boundSessionNow = false;
+  if (!session.conversationId) {
+    if (!await rebindSession(session.id, null, conversationId)) return false;
+    boundSessionNow = true;
+  }
   // This is the first exact provider attachment that can prove the chat was opened by the CoS
   // composer: the durable outbox row is an opening, the browser proved its exact owner/id pair,
-  // and the reserved local session now owns this exact conversation. Direct/browser-created chats
+  // and this operation committed the reserved session's null -> conversation bind while strict
+  // mode was already on. Recovered outbox rows whose session attached earlier may reconcile their
+  // row here, but that stale first outbox binding cannot mint Trust. Direct/browser-created chats
   // never traverse this boundary. Keep strict-off openings out of the explicit Trust registry.
-  if (trustThisAttach && getConfig().multiAgent.strictChatAllowlist === true) {
+  if (boundSessionNow && strictAtAuthoritativeBind && getConfig().multiAgent.strictChatAllowlist === true) {
     if (!deliveryHooks?.trustOpening || !await deliveryHooks.trustOpening(session.id, conversationId)) return false;
   }
   return true;
@@ -1429,10 +1435,9 @@ export function bindBrowserInputProject(id: string, owner: string, conversationI
     if (entry.requiresAuthorization && entry.sendAuthorizedAt === undefined) return false;
     if (entry.conversationId && entry.conversationId !== conversationId) return false;
     if (await conversationWasSuperseded(conversationId)) return false;
-    const firstAttach = !entry.conversationId;
     const bound = { ...entry, conversationId };
     if (!entry.conversationId) await commit(current.map(row => row === entry ? bound : row));
-    if (entry.opening) return bindOpening(bound, conversationId, firstAttach);
+    if (entry.opening) return bindOpening(bound, conversationId);
     // Legacy pre-reservation project inputs keep their exact receipt binding.
     const heldSessionId = entry.sessionId ?? entry.deliveredSessionId;
     const session = heldSessionId ? await getSession(heldSessionId) :
@@ -1461,7 +1466,7 @@ export function acknowledgeBrowserInput(id: string, owner: string, conversationI
     const deliveredConversation = conversationId ?? entry.conversationId;
     if (entry.opening && deliveredConversation) {
       if (entry.state === 'cancelled' && entry.requiresAuthorization && entry.sendAuthorizedAt === undefined) return false;
-      if (!await bindOpening(entry, deliveredConversation, !entry.conversationId)) return false;
+      if (!await bindOpening(entry, deliveredConversation)) return false;
     }
     if (!entry.sessionId && entry.purpose !== 'decision' && deliveredConversation) {
       await noteChatOrigin(deliveredConversation, { kind: 'desktop', fromSessionId: null, agentId: null, task: '' });

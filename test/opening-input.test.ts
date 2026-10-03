@@ -205,6 +205,48 @@ it('does not create an unnecessary Trust bit for a CoS opening while strict mode
   expect(isChatTrusted(conversation)).toBe(false);
 });
 
+it('fails closed instead of trusting a recovered opening whose durable attach outran its outbox ACK', async () => {
+  const row = await enqueueInput(args());
+  const conversation = randomUUID();
+  await claimBrowserInput(row.id, 'recovered-opening-owner', null, true);
+  await authorizeBrowserInput(row.id, 'recovered-opening-owner', null);
+
+  // Model a crash boundary after the authoritative reserved-session bind but before the outbox
+  // ACK transition records that same conversation id.
+  expect(await rebindSession(row.sessionId!, null, conversation)).toBe(true);
+  expect((await listInputs()).find(entry => entry.id === row.id)?.conversationId).toBeNull();
+  expect(isChatTrusted(conversation)).toBe(false);
+  resetInputForTests(); resetSessionStoreForTests(); initSessionStore(directory);
+
+  const config = defaultConfig();
+  await saveConfig({ ...config, multiAgent: { ...config.multiAgent, strictChatAllowlist: true } });
+  await expect(acknowledgeBrowserInput(row.id, 'recovered-opening-owner', conversation, 'recovered-message'))
+    .rejects.toThrow('Reserved opening session belongs to another ChatGPT conversation');
+  expect((await getSession(row.sessionId!))?.conversationId).toBe(conversation);
+  expect(isChatTrusted(conversation)).toBe(false);
+});
+
+it('does not trust a recovered /input/bind when the reserved session already attached while strict mode was off', async () => {
+  const row = await enqueueInput(args());
+  const conversation = randomUUID();
+  await claimBrowserInput(row.id, 'recovered-bind-owner', null, true);
+  await authorizeBrowserInput(row.id, 'recovered-bind-owner', null);
+
+  // Crash boundary: session metadata reached A under strict-Off, but the opening outbox row did
+  // not publish its conversationId. A later /input/bind may reconcile that row, but it did not
+  // perform the authoritative null -> A session bind and therefore must not create Trust.
+  expect(await rebindSession(row.sessionId!, null, conversation)).toBe(true);
+  expect((await listInputs()).find(entry => entry.id === row.id)?.conversationId).toBeNull();
+  expect(isChatTrusted(conversation)).toBe(false);
+  resetInputForTests(); resetSessionStoreForTests(); initSessionStore(directory);
+
+  const config = defaultConfig();
+  await saveConfig({ ...config, multiAgent: { ...config.multiAgent, strictChatAllowlist: true } });
+  expect(await bindBrowserInputProject(row.id, 'recovered-bind-owner', conversation)).toBe(true);
+  expect((await getSession(row.sessionId!))?.conversationId).toBe(conversation);
+  expect(isChatTrusted(conversation)).toBe(false);
+});
+
 it('rejects another recording collision and never binds a cancelled unauthorized opening', async () => {
   const row = await enqueueInput(args());
   await claimBrowserInput(row.id, 'owner', null, true);
