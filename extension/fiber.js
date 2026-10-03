@@ -860,7 +860,7 @@
         const messageId = context && typeof context.messageId === 'string' && context.messageId.length <= 200 ? context.messageId : null;
         if (!sources || index < 0 || !messageId) continue;
         const kept = [];
-        for (const source of sources.slice(0, 12)) {
+        for (const source of sources.slice(0, 8)) {
           if (!source || typeof source !== 'object') continue;
           const url = typeof source.url === 'string' && source.url.length <= 2000 && /^https?:\/\//i.test(source.url) ? source.url : null;
           if (!url) continue;
@@ -874,7 +874,7 @@
         }
         if (!kept.length) continue;
         const references = byMessage.get(messageId) || [];
-        if (!references.some(entry => entry.index === index)) references.push({ index, sources: kept });
+        if (references.length < 32 && !references.some(entry => entry.index === index)) references.push({ index, sources: kept });
         byMessage.set(messageId, references);
       }
     }
