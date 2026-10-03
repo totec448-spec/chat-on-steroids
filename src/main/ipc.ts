@@ -60,10 +60,12 @@ import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema } from './config.js';
+import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { bridgePortSelection } from './bridge-ports.js';
 import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts, goalBackendFor, goalSwitchFor, setGoalSwitchNow, setGoalReplyActiveNow, setGoalObjectiveNow } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
 import { runningToolActivity } from './mcp/call-context.js';
+import { livePreview } from './live-preview.js';
 import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
@@ -178,6 +180,9 @@ const settingsPatch = z.object({
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     followOutput: z.boolean().optional(),
+    mentionCore: z.boolean().optional(),
+    language: z.enum(UI_LANGUAGES).optional(),
+    browserPreferences: z.object({ overwrite: z.boolean(), durations: z.boolean() }).strict().optional(),
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),
     finishAction: z.enum(['notify', 'goal']).optional(),
@@ -331,6 +336,10 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
+      mentionCore: pick(current.ui.mentionCore, base.ui.mentionCore, wanted.ui.mentionCore),
+      // Not part of the settings form: reported by the window and the extension, carried through.
+      language: current.ui.language,
+      browserPreferences: current.ui.browserPreferences,
       finishTool: pick(current.ui.finishTool, base.ui.finishTool, wanted.ui.finishTool),
       planBackend: pick(current.ui.planBackend, base.ui.planBackend, wanted.ui.planBackend),
       finishAction: pick(current.ui.finishAction, base.ui.finishAction, wanted.ui.finishAction),
@@ -667,6 +676,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('projects:list', () => listProjects());
+  handle('ui:language', async payload => {
+    // The renderer owns the choice; the main process keeps it for the browser extension.
+    const language = z.enum(UI_LANGUAGES).parse(payload);
+    if (getConfig().ui.language !== language) await updateConfig(config => ({ ...config, ui: { ...config.ui, language } }));
+  });
   handle('ui:stopNoticeTexts', async payload => {
     // The renderer's catalogs translate the stopped-chat notices (#855); bounded and allowlisted.
     setStopNoticeTranslations(z.record(z.string().max(200), z.string().max(400)).refine(value => Object.keys(value).length <= 16).parse(payload));
@@ -1146,6 +1160,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:runningTools', async (payload) => {
     const { conversationIds } = z.object({ conversationIds: z.array(z.string().min(1).max(200)).max(16) }).parse(payload);
     return runningToolActivity(conversationIds);
+  });
+  // The newest sentence a working chat shows before ChatGPT publishes it (#942).
+  handle('sessions:livePreview', async (payload) => {
+    const { conversationIds } = z.object({ conversationIds: z.array(z.string().min(1).max(200)).max(16) }).parse(payload);
+    return livePreview(conversationIds);
   });
   handle('sessions:retryHelper', async (payload) => {
     const { id, sourceSessionId } = z.object({ id: z.string().uuid(), sourceSessionId: z.string().min(8).max(64) }).parse(payload);

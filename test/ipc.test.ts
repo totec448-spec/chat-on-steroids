@@ -86,6 +86,20 @@ const removeRoot = (payload: unknown): Promise<any> => handlers.get('roots:remov
 const sessionEvents = (payload: unknown): Promise<any> => handlers.get('sessions:events')!(null, payload) as Promise<any>;
 const sessionList = (): Promise<any> => handlers.get('sessions:list')!(null, undefined) as Promise<any>;
 
+it('keeps the reported interface language and the extension preferences through a Settings save', async () => {
+  // Neither is part of the settings form. The save replaces the whole `ui` object, so both must be
+  // carried through, or the extension would lose its language and its kept preferences.
+  await handlers.get('ui:language')!(null, 'en');
+  expect(getConfig().ui.language).toBe('en');
+  expect(await handlers.get('ui:language')!(null, 'klingon')).toMatchObject({ ok: false });
+  expect(getConfig().ui.language).toBe('en');
+  await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, browserPreferences: { overwrite: false, durations: true } } });
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.language).toBe('en');
+  expect(getConfig().ui.browserPreferences).toEqual({ overwrite: false, durations: true });
+});
+
 it.each(['playfulStatus', 'followOutput'] as const)('saves the %s display switch from Settings', async key => {
   // Both are plain ui booleans saved by the general Settings save. The save schema dropped keys
   // it did not list, so a switch that was not listed reverted on the next state push.

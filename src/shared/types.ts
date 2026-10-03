@@ -153,6 +153,15 @@ export interface UiPrefs {
   playfulStatus?: boolean;
   /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */
   followOutput?: boolean;
+  /** Add the Chat On Steroids Core mention to the user's own prompts sent from the app. On unless false. */
+  mentionCore?: boolean;
+  /** The interface language the window last reported; the browser extension follows it. */
+  language?: import('./ui-language.js').UiLanguage;
+  /**
+   * The extension's own preferences as it last reported them stored. The app keeps them so a
+   * reinstalled extension, which starts with empty storage under a new id, gets them back.
+   */
+  browserPreferences?: { overwrite: boolean; durations: boolean };
   minimizeToTray: boolean;
   autoConnect: boolean;
   startAtLogin?: boolean;

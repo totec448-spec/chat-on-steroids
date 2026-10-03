@@ -366,9 +366,6 @@
   "Inject now": "今すぐ挿入",
   "Send directly": "直接送信",
   "After this turn": "このターンの後",
-  "Continuation timing": "続行のタイミング",
-  "Only finish": "終了通知時のみ",
-  "After this turn + finish": "このターンの後＋終了通知時",
   "Send": "送信",
   "All": "すべて",
   "Problems": "問題",
@@ -1769,5 +1766,9 @@
   "Default new-chat model": "新規チャットの既定モデル",
   "Used only for a fresh ordinary chat with no conversation selection.": "会話ごとの選択がない新しい通常チャットにのみ使用します。",
   "Default new-chat reasoning": "新規チャットの既定推論",
-  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "上の通常チャット用モデルと組み合わせて使用します。ワーカーとヘルパーはそれぞれの既定値を維持します。"
+  "Used with the ordinary chat model above; workers and helpers keep their own defaults.": "上の通常チャット用モデルと組み合わせて使用します。ワーカーとヘルパーはそれぞれの既定値を維持します。",
+  "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "自分のメッセージで Chat On Steroids Core をメンションする：どのチャットでも ChatGPT がこのアプリを使えるようにします。簡単な質問で ChatGPT が不要なツール呼び出しから始める場合はオフにしてください。ワーカー、Goal、Loop、Continue は常にメンションします。",
+  "When to continue": "続行するタイミング",
+  "Session Finish only": "セッション終了通知時のみ",
+  "Also after the turn": "ターン後にも送信"
 }

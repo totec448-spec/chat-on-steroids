@@ -4874,6 +4874,7 @@ it.each([
   ['blind', { ok: true, draft: false, streaming: true }, 0],
   ['blind', { ok: true, draft: false, streaming: false }, 1],
   ['assistant-error', { ok: true, draft: false, streaming: true, assistantError: true }, 1],
+  ['assistant-error', { ok: true, draft: false, streaming: true, assistantError: false }, 0],
   ['assistant-error', { ok: true, draft: false, streaming: false, assistantError: true }, 1],
   ['assistant-error', { ok: true, draft: false, streaming: false, assistantError: false }, 0],
   ['assistant-error', { ok: true, draft: false, streaming: false }, 1],
@@ -4902,6 +4903,8 @@ it.each([
     expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(0);
   } else {
     expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(1 - reloads);
+    // A stream that is running again is a reason to wait, and the app is told so (not "Reload failed").
+    if (reloads === 0) expect(reported.find((url) => url.includes('repairFailed='))).toContain('&why=streaming');
   }
 });
 
