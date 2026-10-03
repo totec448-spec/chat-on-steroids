@@ -1803,5 +1803,6 @@
   "Clear workers": "清除子智能体",
   "Workers cleared": "已清除子智能体",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "没有正在运行的子智能体。它们的历史记录仍可供启动它们的聊天使用；“清除子智能体”会永久删除。",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "从你的账户提供的选项中，为新聊天和子智能体选择默认模型和推理强度。"
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "从你的账户提供的选项中，为新聊天和子智能体选择默认模型和推理强度。",
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "清除所有子智能体？正在运行的会停止，其保存的历史记录将被永久删除。它们的聊天仍保留在 ChatGPT 中。"
 }
