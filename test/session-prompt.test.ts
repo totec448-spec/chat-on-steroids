@@ -84,6 +84,22 @@ it('drops optional additional-folder discoverability before sacrificing the AGEN
   expect(result).toContain('A'.repeat(5000));
   expect(result).toContain('# Selected skill: /review');
 });
+
+it('drops a short optional linked-folder hint before shortening a selected Skill body', () => {
+  const agents = { directory: '/work', text: 'A'.repeat(5000), truncated: false };
+  const skillText = 'SKILL_START\n' + 'B'.repeat(1000) + '\nSKILL_END';
+  const skills = [{ id: 'review', text: skillText }];
+  const withoutAdditional = fitSessionPrompt(
+    'Task', 'Core', agents, { maxChars: Infinity, maxBytes: Infinity }, skills
+  );
+  const withAdditional = { ...agents, additionalDirectories: ['/linked/x'] };
+  const result = fitSessionPrompt(
+    'Task', 'Core', withAdditional, { maxChars: withoutAdditional.length, maxBytes: Infinity }, skills
+  );
+  expect(result).not.toContain('Additional project folders:');
+  expect(result).toContain(skillText);
+  expect(result).not.toContain('[Shortened to fit the message.');
+});
 beforeEach(async () => {
   directory = await makeTempDir('cos-session-prompt-');
   initConfigPath(directory); initDurableStore(directory); initSessionStore(directory);

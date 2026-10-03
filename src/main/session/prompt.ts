@@ -104,14 +104,19 @@ export function fitSessionPrompt(text: string, core: string, agents: ProjectInst
     else if (projectHeader) sections.push(projectHeader);
     return prependUserPrompt(text, [core, ...sections].filter(Boolean).join('\n\n'));
   };
-  // Linked folders are discoverability, not mandatory execution framing. If their bounded catalog
-  // projection would displace task/Core/Skill references or the 5k AGENTS floor, omit it rather
-  // than rejecting the send.
+  // Linked folders are discoverability, not mandatory execution framing. Give the complete prompt
+  // one chance to carry them; if it does not fit, drop the optional projection before shortening
+  // AGENTS or any selected Skill body.
   let requiredAgentsFloor = skills.length ? Math.min(5_000, content.length) : 0;
   if (requiredAgentsFloor < content.length && /[\uD800-\uDBFF]/.test(content[requiredAgentsFloor - 1] ?? '')) requiredAgentsFloor++;
-  const includeAdditional = !additionalHeader || fits(render(requiredAgentsFloor, 0, true));
-  const full = render(content.length, Infinity, includeAdditional);
+  let includeAdditional = true;
+  let full = render(content.length, Infinity, includeAdditional);
   if (fits(full)) return full;
+  if (additionalHeader) {
+    includeAdditional = false;
+    full = render(content.length, Infinity, includeAdditional);
+    if (fits(full)) return full;
+  }
   const largestFit = (low: number, high: number, candidate: (n: number) => string): string => {
     while (low < high) {
       const middle = Math.ceil((low + high) / 2);
