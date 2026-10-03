@@ -1147,5 +1147,8 @@
   },
   "content_goal_error_goal_objective_not_durable": {
     "message": "Не удалось сохранить задачу. Проверьте свободное место на диске и повторите сохранение."
+  },
+  "popup_app_not_running_help": {
+    "message": "Убедитесь, что Chat On Steroids открыт на этом компьютере. Расширение подключится само."
   }
 }
