@@ -1770,5 +1770,6 @@
   "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Mesajlarımda Chat On Steroids Core'dan bahset: ChatGPT'nin bu uygulamayı her sohbette kullanabilmesini sağlar. ChatGPT basit sorulara gereksiz bir araç çağrısıyla başlıyorsa kapatın; worker'lar, Goal, Loop ve Continue bahsetmeyi korur.",
   "When to continue": "Ne zaman devam edilsin",
   "Session Finish only": "Yalnızca oturum bitişinde",
-  "Also after the turn": "Turdan sonra da"
+  "Also after the turn": "Turdan sonra da",
+  "Search models": "Model ara"
 }
