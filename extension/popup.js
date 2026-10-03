@@ -257,6 +257,8 @@ function paintHeader(status) {
           ? t('popup_state_app_reachable_port', 'App reachable · Port $1', status.port)
           : t('popup_state_port_connecting', 'Port $1 · connecting', status.port);
 
+  // The one state with nothing to click at the top: say what to do instead of a grey pill alone.
+  $('appHint').hidden = !(status && !connected && !off);
   $('retryBtn').hidden = ready || incompatible;
   $('retryBtn').textContent = off ? t('popup_connect', 'Connect') : t('popup_try_again', 'Try again');
   return ready;

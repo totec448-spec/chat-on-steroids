@@ -1147,5 +1147,8 @@
   },
   "content_goal_error_goal_objective_not_durable": {
     "message": "작업을 저장할 수 없습니다. 디스크 여유 공간을 확인하고 다시 저장하세요."
+  },
+  "popup_app_not_running_help": {
+    "message": "이 컴퓨터에서 Chat On Steroids가 열려 있는지 확인하세요. 확장 프로그램은 자동으로 연결됩니다."
   }
 }
