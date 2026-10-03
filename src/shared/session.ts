@@ -760,7 +760,25 @@ export interface SessionChange {
   allTranscripts?: true;
 }
 
+export interface HandoffProvenance {
+  /** ChatGPT frontend that authored the brief. */
+  sourceConversationId: string | null;
+  /** One-based position of that frontend in the durable session lineage, when known. */
+  sourceGeneration: number | null;
+  /** Exact source turn pinned by the continuation transaction, when one existed. */
+  sourceTurnId: string | null;
+  /**
+   * Non-authority fingerprint of the continuation transaction.
+   *
+   * This is derived from the one-time continuation token. Provenance stores the fingerprint
+   * instead of the raw token because handoffs are readable through ordinary session IPC.
+   */
+  continuationId: string | null;
+}
+
 export interface Handoff {
+  /** New writes are v1. Absent means a legacy handoff written before provenance existed. */
+  version?: 1;
   id: string;
   sessionId: string;
   createdAt: number;
@@ -771,6 +789,8 @@ export interface Handoff {
   sourceTokens: number;
   /** Set when the model stopped early or the pack dropped material. */
   notes: string[];
+  /** Immutable source identity for new versioned handoffs. */
+  provenance?: HandoffProvenance;
 }
 
 // ---------------------------------------------------------------- agents
