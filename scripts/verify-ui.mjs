@@ -31,6 +31,16 @@ const scripts = readdirSync(path.join(root, 'scripts'))
 const retries = Number(process.env.VERIFY_UI_RETRY) || 0;
 const flaky = [];
 const results = [];
+// macOS runners print Electron Helper XPC/sandbox complaints on every check. They are never the
+// reason, and as the last lines of a silent failure they used to hide it completely.
+const noise = /sandbox_extension|task_policy|js2c|XPC error|com\.apple\.|Connection invalid/;
+const reasonFor = outcome => {
+  const lines = outcome.output.split('\n').filter(line => line.trim() && !noise.test(line));
+  const reason = lines.filter(line => /Error|assert|Timeout|timed out|expected|actual/i.test(line)).slice(0, 6);
+  const shown = reason.length ? reason : lines.slice(-8);
+  return (shown.length ? shown : [outcome.code === 'timeout' ? 'timed out with no output' : `exited with ${outcome.code} and no output`])
+    .map(line => `      ${line.slice(0, 800)}`).join('\n');
+};
 for (const name of scripts) {
   if (skip.has(name)) { console.log(`SKIP  ${name}  (needs a real GPU and display timing; run it locally)`); continue; }
   const how = special[name] ?? { command: electron, args: [] };
@@ -45,6 +55,7 @@ for (const name of scripts) {
     child.on('close', code => { clearTimeout(timer); resolve({ code, output }); });
   });
   let outcome = await run();
+  const first = outcome;
   for (let attempt = 0; outcome.code !== 0 && attempt < retries; attempt++) {
     const retried = await run();
     if (retried.code === 0) { flaky.push(name); outcome = retried; }
@@ -53,16 +64,8 @@ for (const name of scripts) {
   results.push({ name, ok, seconds: Math.round((Date.now() - started) / 1000) });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}  (${results.at(-1).seconds}s)${flaky.includes(name) ? '  (failed once, passed on retry)' : ''}`);
   if (flaky.includes(name) && process.env.GITHUB_ACTIONS) console.log(`::warning title=Flaky UI check::${name} failed once and passed on retry`);
-  if (!ok) {
-    // macOS runners print Electron Helper XPC/sandbox complaints on every check. They are never the
-    // reason, and as the last lines of a silent failure they used to hide it completely.
-    const noise = /sandbox_extension|task_policy|js2c|XPC error|com\.apple\.|Connection invalid/;
-    const lines = outcome.output.split('\n').filter(line => line.trim() && !noise.test(line));
-    const reason = lines.filter(line => /Error|assert|Timeout|timed out|expected|actual/i.test(line)).slice(0, 6);
-    const shown = reason.length ? reason : lines.slice(-8);
-    console.log((shown.length ? shown : [outcome.code === 'timeout' ? 'timed out with no output' : `exited with ${outcome.code} and no output`])
-      .map(line => `      ${line.slice(0, 240)}`).join('\n'));
-  }
+  // A retry that passes still keeps why the first run failed: that is the only evidence of a flake.
+  if (!ok || flaky.includes(name)) console.log(reasonFor(ok ? first : outcome));
 }
 const failed = results.filter(result => !result.ok);
 console.log(`\n${results.length - failed.length} of ${results.length} UI checks passed${skip.size ? `, ${[...skip].filter(name => scripts.includes(name)).length} skipped` : ''}.`);

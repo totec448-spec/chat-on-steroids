@@ -2357,6 +2357,11 @@ silence wait. Trying/failed receipts do not prove a reload; only actual completi
 The canonical authored question owns one error reload, not document-local generation ids or
 ended-turn counts. Without a recorded question, the latest durable start is the legacy owner.
 A queued error repair retires when a new question or a newly recovered final supersedes it.
+The user can also cancel it from its countdown row (× → `sessions:cancelRecovery`,
+`cancelAssistantRecovery`) until the browser claims it (#1032). The cancel is recorded for that
+authored question, so repeated notices of the same lost stream do not re-offer it; the next
+question owns its own reload. Attributed tool calls never cancel it: they prove the request-id
+join, not the page's stream (2026-08-31 trace).
 Its exact token is claimed after the extension's tab scan; unclaimed offers retain that token,
 and that claim reserves the authored question's error budget before the browser action. A lost
 acknowledgement cannot refund it, including when a later silence repair replaces the old repair.
@@ -2844,6 +2849,9 @@ envelope or the transport's top-level failure, then use the existing delayed ret
 `chat_still_working` stays on Answer settling; rate limits and transport failures cannot
 release the claim for every activity update to collect again. Off or a new pickup invalidates
 the old delayed retry, and a settled refusal waits for a new authorized episode.
+The conversation-less Goal opening uses that same page-owned retry loop. When `/goal/open`
+returns a structured `retryAfterMs`, the existing wait honors it (never shorter than 15 seconds,
+bounded to one hour) instead of polling the provider every 15 seconds through a rate limit.
 If a delayed retry yields to temporary native work or compaction after its wait elapsed,
 release its page pickup claim. The existing activity feed may collect the same still-pending
 server obligation once safe; do not acknowledge it as handled or require a reload to recover.
@@ -3275,6 +3283,11 @@ bottom, then right; the latter two buttons toggle their panels. There is no sepa
 close button. Layout controls grant no new file, terminal or worker authority.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
 History appends the failed-worker count only when it is nonzero; the existing group counts remain unchanged.
+Each worker row also projects its recorded tool-call count and the newest bounded tool activity
+from the session summary. The store owns that compact latest-activity projection and preserves
+event-time order when late attribution repairs append older calls, so the overview never loads
+every worker transcript just to paint one line. These fields are read-only telemetry; lifecycle,
+scheduling, messaging and execution authority remain with the existing broker/tool owners.
 Its tab close or Escape closes the pane; a selected worker retains its title and Back button.
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are
 retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.

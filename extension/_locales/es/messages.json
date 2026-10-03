@@ -1147,5 +1147,8 @@
   },
   "content_goal_error_goal_objective_not_durable": {
     "message": "La aplicación no pudo guardar la tarea. Comprueba el espacio libre en disco e intenta guardarla de nuevo."
+  },
+  "popup_app_not_running_help": {
+    "message": "Asegúrate de que Chat On Steroids esté abierto en este ordenador. La extensión se conecta sola."
   }
 }

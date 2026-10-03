@@ -1810,5 +1810,9 @@
   "Remove this chat and its saved history from the app. The chat stays in ChatGPT.": "从应用中移除此聊天及其保存的历史记录。聊天仍保留在 ChatGPT 中。",
   "Chat removed from the app": "已从应用中移除聊天",
   "Pet instructions copied": "已复制宠物说明",
-  "Skill added to your library": "技能已添加到你的技能库"
+  "Skill added to your library": "技能已添加到你的技能库",
+  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "切换已保存的隧道 ID 和隧道 API 密钥，例如用于另一个 ChatGPT 账户。",
+  "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "ChatGPT 页面丢失了这条回答的实时流。回答可能仍在进行：刷新会重新连接页面，而不会停止回答。",
+  "Don't reload this answer": "不要刷新这条回答",
+  "The reload has already started.": "刷新已经开始。"
 }

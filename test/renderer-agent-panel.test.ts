@@ -129,6 +129,51 @@ it('shows the worker task and only a model observed for its current conversation
   expect(card.dataset.state).toBe('working');
 });
 
+it('shows latest recorded worker activity and action count without loading worker history', () => {
+  dom = new JSDOM('<main></main><button></button>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
+  const load = vi.fn(async () => ({ events: [] }));
+  const now = Date.now();
+  const panel = createAgentPanel({
+    host,
+    toggle,
+    load,
+    render: () => [],
+    openMain: vi.fn(),
+    working: () => true
+  });
+  const worker = {
+    id: 'worker',
+    title: 'worker-2',
+    conversationId: 'chat-worker',
+    startedAt: now - 90_000,
+    updatedAt: now,
+    toolCalls: 1_200,
+    lastToolCallAt: now - 1_000,
+    lastToolActivity: { kind: 'read', title: 'Read src/main/agents.ts' },
+    origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-2', task: 'Inspect activity' }
+  } as SessionSummary;
+
+  panel.update('prime', [worker]);
+  toggle.click();
+  expect(load).not.toHaveBeenCalled();
+  expect(host.querySelector('.agent-card-activity')?.textContent).toBe('Read src/main/agents.ts');
+  expect((host.querySelector('.agent-card-activity') as HTMLElement)?.dataset.kind).toBe('read');
+  expect(host.querySelector('.agent-card-meta')?.textContent).toContain('1.2k actions');
+
+  panel.update('prime', [{
+    ...worker,
+    updatedAt: now + 1,
+    toolCalls: 1_201,
+    lastToolCallAt: now + 1,
+    lastToolActivity: { kind: 'run', title: 'Ran npm test' }
+  }]);
+  expect(load).not.toHaveBeenCalled();
+  expect(host.querySelector('.agent-card-activity')?.textContent).toBe('Ran npm test');
+  expect(host.querySelector('.agent-card-meta')?.textContent).toContain('1.2k actions');
+});
+
 it('uses the exact broker worker state and reused assignment over stale session metadata', () => {
   dom = new JSDOM('<main></main><button></button>');
   Object.assign(globalThis, { document: dom.window.document });
