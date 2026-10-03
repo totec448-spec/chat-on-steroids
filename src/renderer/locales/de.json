@@ -1764,5 +1764,6 @@
   "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Chat On Steroids Core in meinen Nachrichten erwähnen: stellt sicher, dass ChatGPT diese App in jedem Chat nutzen kann. Ausschalten, wenn ChatGPT einfache Fragen mit einem unnötigen Tool-Aufruf beginnt; Worker, Goal, Loop und Continue behalten die Erwähnung.",
   "When to continue": "Wann fortsetzen",
   "Session Finish only": "Nur zum Sitzungsende",
-  "Also after the turn": "Auch nach dem Durchlauf"
+  "Also after the turn": "Auch nach dem Durchlauf",
+  "Search models": "Modelle suchen"
 }
