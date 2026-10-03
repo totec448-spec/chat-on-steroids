@@ -1116,15 +1116,25 @@ function paintSetupFields(): void {
   if (state) paintConnectButtons(state);
 }
 
-/** Connect is enabled from the persisted state or from valid drafts still in the fields. */
+/** Setup Connect buttons require readiness; the title-bar action stays available to reach Setup. */
 function paintConnectButtons(next: AppState): void {
   const running = isRunning(next.status.state), disconnecting = next.status.state === 'disconnecting';
   const missing = currentSetupMissingStep(next);
+  const header = $<HTMLButtonElement>('headerConnect');
+  header.disabled = disconnecting;
+  header.title = !running && missing ? missing.text : '';
   for (const id of ['connectionPopoverToggle', 'wizConnect']) {
     const button = $<HTMLButtonElement>(id);
     button.disabled = disconnecting || (!running && missing !== null);
     button.title = !running && missing ? missing.text : '';
   }
+}
+
+/** The title-bar shortcut is only another ingress to the persisted Appearance theme owner. */
+function paintThemeButton(theme: 'light' | 'dark'): void {
+  const dark = theme === 'dark';
+  ui($('themeBtn'), 'aria-label', () => t(dark ? 'Switch to light mode' : 'Switch to dark mode'));
+  ui($('themeBtn'), 'title', () => t(dark ? 'Switch to light mode' : 'Switch to dark mode'));
 }
 
 function apply(next: AppState): void {
@@ -1147,13 +1157,14 @@ function apply(next: AppState): void {
   // ---- theme
   const appearanceUi = requestedSettings?.ui ?? config.ui;
   appearance.apply(appearanceUi);
+  paintThemeButton(appearanceUi.theme);
 
   const headerConnect = $<HTMLButtonElement>('headerConnect');
-  const wasVisible = !headerConnect.hidden;
-  headerConnect.hidden = connected;
-  headerConnect.disabled = busy;
-  ui(headerConnect, 'textContent', () => disconnecting ? t('Disconnecting…') : busy ? t('Connecting…') : t('Connect'));
-  if (connected && wasVisible && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) $('sidebarConnection').animate([
+  headerConnect.classList.toggle('is-running', running);
+  headerConnect.disabled = disconnecting;
+  headerConnect.title = !running && missing ? missing.text : '';
+  ui(headerConnect, 'textContent', () => disconnecting ? t('Disconnecting…') : running ? t('Disconnect') : t('Connect'));
+  if (connected && previousState && previousState.status.state !== 'connected' && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) $('sidebarConnection').animate([
     { boxShadow: '0 0 0 0 var(--green)' }, { boxShadow: '0 0 0 12px transparent' }
   ], { duration: 850, iterations: 2 });
 
@@ -1833,7 +1844,13 @@ async function toggleConnection(): Promise<void> {
   if (!state || state.status.state === 'disconnecting') return;
   if (!isRunning(state.status.state) && !(await persistSetupDraftsForConnection())) {
     const missing = state ? missingStep(state) : null;
-    if (missing) { showTab('setup'); step(missing.step).scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    if (missing) {
+      showTab('setup');
+      const target = step(missing.step);
+      target.tabIndex = -1;
+      target.focus();
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
     return;
   }
   if (!state) return;
@@ -1952,14 +1969,17 @@ function installUpdate(): void {
 
 $('updateInstall').addEventListener('click', installUpdate);
 $('installUpdate').addEventListener('click', installUpdate);
-$('headerConnect').addEventListener('click', async () => {
+$('themeBtn').addEventListener('click', () => {
   if (!state) return;
-  if (missingStep(state)) { showTab('setup'); return; }
-  if (isRunning(state.status.state)) {
-    const disconnected = await run(api.disconnect()); if (!disconnected) return; apply(disconnected);
-  }
-  const connected = await run(api.connect()); if (connected) apply(connected);
+  // Derive from the latest requested value so two quick presses remain two distinct choices
+  // while the first settings save is still in flight.
+  const currentUi = requestedSettings?.ui ?? state.config.ui;
+  const next = currentUi.theme === 'dark' ? 'light' : 'dark';
+  appearance.apply({ ...currentUi, theme: next });
+  paintThemeButton(next);
+  void save({ theme: next });
 });
+$('headerConnect').addEventListener('click', () => void toggleConnection());
 $('connectionPopoverToggle').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
 

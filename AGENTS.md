@@ -2836,9 +2836,10 @@ Current persistence/publication exceptions are in §21.
 
 ## 18. Desktop workspace, plugins, connection and native control
 
-Dark is the default theme. Theme selection belongs in Appearance settings; the main header
-has no light/dark shortcut. Files and worker-panel controls attach to the header independently
-of appearance controls.
+Dark is the default theme. Appearance settings remain the durable theme owner; the app title bar
+also exposes a compact light/dark shortcut through that same settings-save path. The chat header
+has no theme or connection action. Files and worker-panel controls attach to the chat header
+independently of appearance controls.
 
 ### Renderer and IPC
 
@@ -3390,16 +3391,18 @@ Late startup results retire their own handles without publishing them; late tunn
 for the accepted-response drain first. Activity logs record Disconnect admission and the
 accepted-response count.
 
-The sidebar footer owns global connection controls in a compact popover outside the translucent
-sidebar stacking context. Its sidebar-themed surface is 160 CSS pixels wide, with
+The app title bar exposes the global Connect/Disconnect action; the sidebar footer owns the compact
+connection-status popover outside the translucent sidebar stacking context and keeps the same
+action available there. Both call the renderer's one connection toggle path. The popover's
+sidebar-themed surface is 160 CSS pixels wide, with
 single-line labels and status dots. Status text remains accessible to screen readers and in
 tooltips. The header states connection status once; no redundant off/verification subtitle
 appears. Verification/last-seen ages remain in tooltips. Advanced session capture, request IDs
 and runtime diagnostics belong to the companion extension, not this desktop popover. Its only
 action is Connect/Disconnect; opening it does not request companion diagnostics.
 Extension-only Overwrite/Timestamps and the redundant settings link are absent. A red header
-Connect action remains visible while disconnected and disappears only on confirmed connection,
-briefly highlighting the footer status (respecting reduced motion). Setup stays reachable from
+Connect prompt is absent; the title-bar action always mirrors Connect/Disconnect and briefly
+highlights the footer status on a newly confirmed connection (respecting reduced motion). Setup stays reachable from
 Settings and from Connect when configuration is incomplete. The View menu has its own foreground
 stacking layer; Appearance rows align controls at a shared minimum height and Setup uses a stable
 responsive title/language grid across locales.
