@@ -500,8 +500,8 @@ describe('who is allowed to talk to it', () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(getConfig().ui.browserPreferences).toBeUndefined();
     expect((await request('POST', '/diagnostics', { body: diagnostics({ overwrite: false, durations: true }, true) })).status).toBe(200);
-    await new Promise(resolve => setTimeout(resolve, 20));
-    expect(getConfig().ui.browserPreferences).toEqual({ overwrite: false, durations: true });
+    // The save runs after the reply; a busy CI runner can take longer than any fixed pause.
+    await vi.waitFor(() => expect(getConfig().ui.browserPreferences).toEqual({ overwrite: false, durations: true }));
     await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'en' } });
     const status = await request('POST', '/status', { body: { openConversations: [] } });
     expect(status.body).toMatchObject({ language: 'en', browserPreferences: { overwrite: false, durations: true } });
