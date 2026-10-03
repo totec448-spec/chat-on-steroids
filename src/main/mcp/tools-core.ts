@@ -116,6 +116,7 @@ import {
   statusForCaller,
   stageFinishAgent,
   stageMessages,
+  stagePrimeMessage,
   stageSpawn,
   swarmRunning,
   swarmStateForCaller,
@@ -1121,51 +1122,40 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
     toolDeclaration('agents', () => ({
       title: 'Multi-agent run',
       description:
-        'Run ChatGPT workers. Omit model and reasoning_effort unless the user explicitly requests an override; saved app defaults apply. Do not ask the user to choose them. Reuse a suitable sleeping worker with message before spawn. ' +
-        'message: prime↔worker. Reports ride tool results, never restart primes. Use status once to collect pending reports before finalizing; otherwise state that review is pending. Never poll repeatedly. ' +
-        'status: your active, sleeping/revivable and terminal workers, including parked families. finish: record the report, then normally sleep.',
+        'Run ChatGPT workers. Reuse a suitable sleeping worker with message before spawn. Omit model/reasoning unless the user asks; app settings supply defaults. ' +
+        'message: local prime↔worker, or target_run_id to an existing prime only. Use status once to collect pending reports before finalizing; otherwise state that review is pending. Reports arrive with tool results. finish: record the report, then normally sleep.',
       inputSchema: z.object({
         action: z.enum(['spawn', 'message', 'status', 'finish']).describe('What to do.'),
-        run_id: z.string().uuid().optional().describe('Select your returned worker family when status lists several; never grants another caller’s workers.'),
+        run_id: z.string().uuid().optional().describe('Select one of your returned families; never grants foreign workers.'),
         context: z
           .string()
           .max(4000)
           .optional()
-          .describe(
-            'spawn: shared instructions prepended to every task, e.g. repo, conventions, edit limits and validation.'
-          ),
+          .describe('spawn: shared repo, constraints and validation for every worker.'),
         workers: z
           .array(
             z.object({
-              label: z.string().max(60).optional().describe('Short name shown to the user, e.g. "Security".'),
+              label: z.string().max(60).optional().describe('Short user-visible name.'),
               task: z
                 .string()
                 .min(1)
                 .max(4000)
-                .describe(
-                  'This worker\'s job: objective, relevant files, constraints and expected handoff.'
-                ),
+                .describe('Worker objective, files, constraints and handoff.'),
               model: z
                 .string()
                 .max(80)
                 .optional()
-                .describe(
-                  'Omit unless explicitly requested by the user; app settings supply defaults. Use an exact account-observed model id or provider alias. Invalid overrides return observed ids before opening; the browser confirms availability before Send.'
-                ),
+                .describe('Omit unless the user explicitly asks; app settings supply defaults. Use an observed model id or alias.'),
               reasoning_effort: z
                 .enum(REASONING_EFFORTS)
                 .optional()
-                .describe(
-                  'Omit unless explicitly requested by the user; app settings supply defaults. Do not ask just to spawn a worker. This selects reasoning only, never a model.'
-                )
+                .describe('Omit unless the user asks; app settings supply defaults. Selects reasoning only.')
             }).strict()
           )
           .min(1)
           .max(8)
           .optional()
-          .describe(
-            'spawn: fresh workers to create only after checking status for a suitable sleeping worker; revive one explicitly with message.'
-          ),
+          .describe('spawn: fresh workers only after checking status for a suitable sleeper.'),
         messages: z
           .array(
             z.object({
@@ -1176,27 +1166,28 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .min(1)
           .max(16)
           .optional()
-          .describe(
-            'message: atomic batch; prefer this to one call per recipient.'
-          ),
+          .describe('message: atomic batch; prefer one batch call.'),
         to: z
           .string()
           .min(1)
           .max(40)
           .optional()
-          .describe('message: one recipient; messaging a sleeping worker wakes it.'),
+          .describe('message: one recipient; wakes a sleeping worker.'),
+        target_run_id: z
+          .string()
+          .uuid()
+          .optional()
+          .describe('message: other existing prime by run id; prime-only, no worker/status access.'),
         text: z.string().min(1).max(4000).optional().describe('message: what to say.'),
         result: z
           .string()
           .min(1)
           .max(4000)
           .optional()
-          .describe(
-            'finish: factual handoff under RESULT / CHANGES / VALIDATION / BLOCKERS.'
-          )
+          .describe('finish: RESULT / CHANGES / VALIDATION / BLOCKERS.')
       })
       .superRefine((input, ctx) => {
-        const reject = (field: 'context' | 'workers' | 'messages' | 'to' | 'text' | 'result', message: string): void => {
+        const reject = (field: 'context' | 'workers' | 'messages' | 'to' | 'target_run_id' | 'text' | 'result', message: string): void => {
           if (input[field] !== undefined) ctx.addIssue({ code: 'custom', path: [field], message });
         };
         if (input.action !== 'spawn') {
@@ -1206,6 +1197,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         if (input.action !== 'message') {
           reject('messages', 'messages is only valid with action=message');
           reject('to', 'to is only valid with action=message');
+          reject('target_run_id', 'target_run_id is only valid with action=message');
           reject('text', 'text is only valid with action=message');
         }
         if (input.action !== 'finish') reject('result', 'result is only valid with action=finish');
@@ -1291,6 +1283,60 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         }
 
         if (input.action === 'message') {
+          if (input.target_run_id) {
+            if (input.messages?.length) {
+              return fail('agents action=message with target_run_id takes one text message, not messages[].');
+            }
+            if (input.to && input.to !== PRIME_ID) {
+              return fail('agents action=message with target_run_id can address only the destination prime.');
+            }
+            if (!input.text) {
+              return fail('agents action=message with target_run_id requires text.');
+            }
+            const caller = await callerNow(startedAt, { runId: input.run_id, member: true });
+            const staged = stagePrimeMessage(caller, input.target_run_id, input.text);
+            let accepted = false;
+            try {
+              let durable = false;
+              try {
+                durable = await persistCriticalSwarmNow();
+              } catch (error) {
+                throw new Error(
+                  `The prime message could not cross its durable acceptance barrier. Nothing was queued; retry the same message request. (${error instanceof Error ? error.message : String(error)})`
+                );
+              }
+              if (!durable) {
+                throw new Error(
+                  'The prime message could not cross its durable acceptance barrier. Nothing was queued; retry the same message request.'
+                );
+              }
+              if (!staged.commit()) {
+                throw new Error(
+                  'TARGET_RUN_UNAVAILABLE: the destination prime family changed before acceptance. Nothing was queued.'
+                );
+              }
+              accepted = true;
+            } catch (error) {
+              if (!accepted) staged.rollback();
+              throw error;
+            }
+            if (currentCall()) currentCall()!.caller.runId = staged.sourceRunId;
+            await recordAgentMessage(staged.message, 'sent', caller.conversationId);
+            return {
+              content: [{
+                type: 'text' as const,
+                text:
+                  `Queued for prime family ${staged.targetRunId}. The recipient can reply with target_run_id=${staged.sourceRunId}.`
+              }],
+              structuredContent: {
+                action: 'message',
+                run_id: staged.sourceRunId,
+                target_run_id: staged.targetRunId,
+                queued: [{ to: PRIME_ID }]
+              }
+            };
+          }
+
           // Two spellings of one operation. A single message is the common case and stays a
           // pair of scalars; `messages` is the same thing in bulk. Both in one call is a
           // request whose intended order nobody can read, so it is refused rather than

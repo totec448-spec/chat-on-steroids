@@ -88,6 +88,7 @@ const {
   stageFinishAgent,
   stageWorkerConversationFinish,
   stageMessages,
+  stagePrimeMessage,
   stageSpawn,
   snapshotSwarm,
   spawn,
@@ -2852,6 +2853,7 @@ describe('through the MCP endpoint', () => {
       (tool) => tool.name === 'agents'
     )!.inputSchema;
     expect(schema.properties.action.enum.slice().sort()).toEqual(['finish', 'message', 'spawn', 'status']);
+    expect(schema.properties.target_run_id).toBeDefined();
     // Revive is gone from the wire as well as from the broker: no field survives for it.
     expect(Object.keys(schema.properties)).not.toContain('agent');
   });
@@ -3994,6 +3996,58 @@ describe('through the MCP endpoint', () => {
     expect(pendingCount('worker-1')).toBe(0);
   });
 
+  it('lets existing primes exchange messages by explicit run address without exposing foreign workers', async () => {
+    const primeB: Caller = { conversationId: 'mcp-peer-prime-b' };
+    const a = spawn({ caller: prime, workers: [{ task: 'A worker' }] });
+    const b = spawn({ caller: primeB, workers: [{ task: 'B worker' }] });
+    expect(bindConversation('worker-1', 'mcp-peer-worker-a', a.runId)).toBe(true);
+
+    const sent = await structuredAsChat(PRIME_CHAT, 'message', {
+      target_run_id: b.runId,
+      text: 'B, audit the parser lane'
+    });
+    expect(sent).toMatchObject({
+      action: 'message',
+      run_id: a.runId,
+      target_run_id: b.runId,
+      queued: [{ to: PRIME_ID }]
+    });
+
+    const received = await asChat(primeB.conversationId!, 'status');
+    expect(received).toContain('B, audit the parser lane');
+    expect(received).toContain(`source_run_id=${a.runId}`);
+    expect(received).not.toContain('mcp-peer-worker-a');
+
+    const reply = await asChat(primeB.conversationId!, 'message', {
+      target_run_id: a.runId,
+      text: 'A, parser lane is covered'
+    });
+    expect(reply).toContain(b.runId);
+    const bSession = await findSessionByConversation(primeB.conversationId!);
+    const delivered = bSession
+      ? (await readRecentEvents(bSession.id, 50, { kinds: ['agent_message'] })).filter(
+          event => event.kind === 'agent_message' && event.delivery === 'delivered' && event.message.text === 'B, audit the parser lane'
+        )
+      : [];
+    expect(delivered).toEqual([expect.objectContaining({ fromRunId: a.runId })]);
+    const returned = await asChat(PRIME_CHAT, 'status');
+    expect(returned).toContain('A, parser lane is covered');
+    expect(returned).toContain(`source_run_id=${b.runId}`);
+
+    const refused = await asChat('mcp-peer-worker-a', 'message', {
+      target_run_id: b.runId,
+      text: 'worker bypass'
+    });
+    expect(refused).toMatch(/only a prime/i);
+
+    const foreignWorker = await asChat(PRIME_CHAT, 'message', {
+      target_run_id: b.runId,
+      to: 'worker-1',
+      text: 'reach through to B worker'
+    });
+    expect(foreignWorker).toMatch(/destination prime/i);
+  });
+
   it('carries the run and every agent in machine-readable form beside the prose', async () => {
     startSwarm(1);
     bindConversation('worker-1', 'c-worker-1');
@@ -4220,6 +4274,87 @@ describe('simultaneous independent prime families', () => {
     expect(offerMessagesForConversation(PRIME_CHAT)?.messages.map(m => m.text).join('')).toContain('A-only result');
     expect(offerMessagesForConversation(primeB.conversationId)?.messages).toEqual([]);
     expect(() => recruit({ conversationId: 'parallel-worker-b' }, 1)).toThrow(/worker/i);
+  });
+
+  it('routes an explicit prime-to-prime message durably and preserves its reply address across restart', () => {
+    const a = recruit(prime, 1), b = recruit(primeB, 1);
+    const staged = stagePrimeMessage({ ...prime, runId: a.runId }, b.runId, 'coordinate with B');
+    expect(staged).toMatchObject({ sourceRunId: a.runId, targetRunId: b.runId });
+    expect(staged.message).toMatchObject({
+      from: PRIME_ID,
+      to: PRIME_ID,
+      fromRunId: a.runId,
+      text: 'coordinate with B'
+    });
+    // Staged rows are invisible until the same durable barrier used by ordinary agent messages
+    // accepts them.
+    expect(offerMessagesForConversation(primeB.conversationId)?.messages).toEqual([]);
+    expect(staged.commit()).toBe(true);
+
+    const snapshot = JSON.parse(JSON.stringify(snapshotSwarm()));
+    resetAgentsForTests();
+    restoreSwarm(snapshot);
+    const received = offerMessagesForConversation(primeB.conversationId)?.messages;
+    expect(received).toEqual([
+      expect.objectContaining({
+        from: PRIME_ID,
+        to: PRIME_ID,
+        fromRunId: a.runId,
+        text: 'coordinate with B'
+      })
+    ]);
+    expect(statusForCaller(prime).state.agents.map(agent => agent.runId)).toEqual([a.runId, a.runId]);
+    expect(statusForCaller(primeB).state.agents.map(agent => agent.runId)).toEqual([b.runId, b.runId]);
+  });
+
+  it('keeps a cross-prime row unpublished until its critical snapshot is durable', async () => {
+    const a = recruit(prime, 1), b = recruit(primeB, 1);
+    const staged = stagePrimeMessage({ ...prime, runId: a.runId }, b.runId, 'durable peer handoff');
+    const publicBefore = snapshotSwarm()?.activeRuns
+      ?.find(run => run.runId === b.runId)?.agents
+      .find(agent => agent.info.id === PRIME_ID)?.queue ?? [];
+    expect(publicBefore).toEqual([]);
+
+    const writes: Array<ReturnType<typeof snapshotSwarm>> = [];
+    onSwarmPersistNow(async snapshot => {
+      writes.push(structuredClone(snapshot));
+    });
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    const durableQueue = writes.at(-1)?.activeRuns
+      ?.find(run => run.runId === b.runId)?.agents
+      .find(agent => agent.info.id === PRIME_ID)?.queue ?? [];
+    expect(durableQueue).toEqual([
+      expect.objectContaining({ text: 'durable peer handoff', fromRunId: a.runId })
+    ]);
+
+    expect(staged.commit()).toBe(true);
+    const publicAfter = snapshotSwarm()?.activeRuns
+      ?.find(run => run.runId === b.runId)?.agents
+      .find(agent => agent.info.id === PRIME_ID)?.queue ?? [];
+    expect(publicAfter).toEqual([
+      expect.objectContaining({ text: 'durable peer handoff', fromRunId: a.runId })
+    ]);
+  });
+
+  it('keeps the foreign-family boundary closed around the prime-to-prime address', () => {
+    const a = recruit(prime, 1), b = recruit(primeB, 1);
+    expect(bindConversation('worker-1', 'parallel-peer-worker-a', a.runId)).toBe(true);
+
+    expect(() =>
+      stagePrimeMessage({ conversationId: 'parallel-peer-worker-a', runId: a.runId }, b.runId, 'bypass')
+    ).toThrow(/only a prime/i);
+    expect(() =>
+      stagePrimeMessage({ ...prime, runId: a.runId }, a.runId, 'talk to myself')
+    ).toThrow(/own families/i);
+    expect(() =>
+      stagePrimeMessage({ ...prime, runId: a.runId }, '00000000-0000-4000-8000-000000000000', 'guess')
+    ).toThrow(/TARGET_RUN_UNAVAILABLE/);
+
+    // Existing family-local commands keep their ownership rule even though the caller knows B's
+    // run id. The new address is a message endpoint for B's prime, not a capability for B's rows.
+    expect(() =>
+      stageMessages({ ...prime, runId: b.runId }, [{ to: 'worker-1', text: 'foreign worker' }])
+    ).toThrow(/AGENTS_BUSY/);
   });
 
   it('allows independent staged spawns while rollback cannot erase another accepted owner', async () => {
