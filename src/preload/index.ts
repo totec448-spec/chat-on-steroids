@@ -231,6 +231,8 @@ const api = {
   listProjects: () => call<LocalProject[]>('projects:list'),
   addProject: () => call<LocalProject | null>('projects:add'),
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
+  addProjectFolder: (id: string) => call<LocalProject | null>('projects:addFolder', { id }),
+  removeProjectFolder: (id: string, path: string) => call<LocalProject>('projects:removeFolder', { id, path }),
   listProjectFiles: (projectId: string, directory = '') => call<ProjectDirectoryListing>('projectFiles:list', { projectId, directory }),
   watchProjectFiles: (projectId: string | null, directories: string[]) => call<boolean>('projectFiles:watch', { projectId, directories }),
   onProjectFilesChanged: (listener: (event: ProjectFilesChanged) => void): (() => void) => {
