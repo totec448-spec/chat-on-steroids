@@ -233,7 +233,7 @@
 [data-view='settings'] .pane h3 { margin: 24px 0 10px; }
 [data-view='settings'] .pane > h3:first-child { margin-top: 0; }
 [data-view='settings'] .setting { padding: 15px 0; }
-[data-view='settings'] .setting select { max-width: 46%; min-width: 100px; border-radius: 8px; background: var(--hover); }
+[data-view='settings'] .setting select { max-width: 100%; min-width: 100px; border-radius: 8px; background: var(--hover); }
 .automation-switch { display: flex; padding: 3px; gap: 3px; border-radius: 10px; background: var(--sunk); }
 .automation-switch button { justify-content: center; padding: 8px 12px; transition: background .15s ease; color: var(--soft); }
 .automation-switch button[aria-checked='true'] { background: color-mix(in srgb, var(--accent) 18%, var(--card)); color: var(--ink); box-shadow: 0 1px 3px #0002; }
