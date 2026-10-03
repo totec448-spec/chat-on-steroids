@@ -1806,7 +1806,7 @@
   "Send Automatic Goal": "Otomatik Hedef gönder",
   "Write Directly": "Doğrudan yaz",
   "Open this chat in your browser": "Bu sohbeti tarayıcınızda açın",
-  "Remove this chat from the app. It stays in ChatGPT.": "Bu sohbeti uygulamadan kaldır. ChatGPT'de kalır.",
+  "Remove this chat and its saved history from the app. The chat stays in ChatGPT.": "Bu sohbeti ve kayıtlı geçmişini uygulamadan kaldır. Sohbet ChatGPT'de kalır.",
   "Chat removed from the app": "Sohbet uygulamadan kaldırıldı",
   "Pet instructions copied": "Evcil hayvan talimatları kopyalandı",
   "Skill added to your library": "Beceri kitaplığınıza eklendi"

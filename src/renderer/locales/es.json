@@ -1806,7 +1806,7 @@
   "Send Automatic Goal": "Enviar Objetivo automático",
   "Write Directly": "Escribir directamente",
   "Open this chat in your browser": "Abrir este chat en tu navegador",
-  "Remove this chat from the app. It stays in ChatGPT.": "Quitar este chat de la app. Se mantiene en ChatGPT.",
+  "Remove this chat and its saved history from the app. The chat stays in ChatGPT.": "Quitar este chat y su historial guardado de la app. El chat se mantiene en ChatGPT.",
   "Chat removed from the app": "Chat quitado de la app",
   "Pet instructions copied": "Instrucciones de mascotas copiadas",
   "Skill added to your library": "Skill añadida a tu biblioteca"

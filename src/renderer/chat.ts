@@ -454,7 +454,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   const remove = document.createElement('button');
   remove.className = 'btn sess-action sess-del';
   remove.type = 'button';
-  ui(remove, 'title', () => t("Remove this chat from the app. It stays in ChatGPT."));
+  ui(remove, 'title', () => t("Remove this chat and its saved history from the app. The chat stays in ChatGPT."));
   remove.append(icon('i-trash'));
   remove.addEventListener('click', (event) => {
     event.stopPropagation();
