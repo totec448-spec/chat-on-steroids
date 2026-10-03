@@ -44,6 +44,14 @@ app.whenReady().then(async () => {
         lastToolCallAt:null,processExitNonzero:0,toolRejected:0,toolInternalErrors:0,errors:0,estimatedTokens:0,contextTokens:0,
         lastHandoffId:null,lastHandoffAt:null,lastTurnOutcome:'completed',activeTurnId:null,agents:[],origin:{kind:'desktop'}}));
       rows.push({...rows[0],id:'standalone',title:'Standalone chat',projectId:undefined});
+      const monitorNow=Date.now();
+      const monitorWorker={...rows[0],id:'worker-monitor',title:'worker-2 · Backend',conversationId:'chat-worker-monitor',
+        chatIds:['chat-worker-monitor'],startedAt:monitorNow-90_000,updatedAt:monitorNow,endedAt:null,events:1205,userMessages:2,toolCalls:1200,
+        lastToolCallAt:monitorNow-1000,lastToolActivity:{kind:'read',title:'Read src/main/agents.ts'},lastTurnOutcome:null,activeTurnId:'turn-monitor',
+        origin:{kind:'worker',fromSessionId:'task-0',agentId:'worker-2',task:'Inspect worker activity'}};
+      const monitorAgent={runId:'fixture-run',primeConversationId:'prime-fixture',id:'worker-2',role:'worker',label:'Backend',
+        task:'Inspect worker activity',reasoningEffort:null,model:null,state:'active',createdAt:monitorNow-90_000,activatedAt:monitorNow-89_000,
+        finishedAt:null,result:null,pending:0,awaitingAck:0,delivered:0,conversationId:'chat-worker-monitor',detachedAt:null,lastSeenAt:monitorNow,revivable:true};
       const files={'README.md':'# Demo workspace\\n\\nProject files, local drafts and bounded previews.\\n','example.ts':'export const value = 1;\\r\\n'};
       const ok=data=>Promise.resolve({ok:true,data});
       const info=(projectId,name)=>({projectId,projectName:projects.find(p=>p.id===projectId).name,path:name,name,
@@ -54,10 +62,10 @@ app.whenReady().then(async () => {
       const personal={id:'review',name:'Code review',description:'Read the complete change, check behavior and preserve existing work.',path:'/skills/review/SKILL.md',managed:true,scope:'managed',source:'managed',allowImplicitInvocation:true};
       const projectSkill={id:'project-check--repo-fixture',name:'Project checks',description:'Use this project’s build, conventions and verification routes.',path:'/demo/.agents/skills/check/SKILL.md',managed:false,scope:'repo',source:'repo-agents',allowImplicitInvocation:true};
       window.api=new Proxy({getState:()=>ok(state),getLog:()=>ok([]),getZoom:()=>ok(1),listProjects:()=>ok(projects),
-        listSessions:()=>ok({sessions:rows,total:3,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
+        listSessions:()=>ok({sessions:rows,total:rows.length,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
         getSession:id=>ok({events:[{seq:1,time:1,source:'extension',kind:'user_message',messageId:'question',message:{text:'Review this project',chars:19,truncated:false}},
           {seq:2,time:2,source:'extension',kind:'assistant_message',messageId:'answer',final:true,state:'final',message:{text:'The project workspace is ready for inspection.',chars:47,truncated:false}}],total:2,nextFrom:3}),
-        getSwarm:()=>ok({running:false,runId:null,agents:[],maxWorkers:2,pendingReports:0}),getChatModels:()=>ok({state:'unknown',models:[]}),
+        getSwarm:()=>ok({enabled:true,running:true,agents:[monitorAgent]}),getChatModels:()=>ok({state:'unknown',models:[]}),
         skillLibrary:()=>ok({skills:[personal,projectSkill],roots:[],errors:[],includeInstructions:true}),
         listSkills:()=>ok([personal]),listInputs:()=>ok([]),getSessionPlan:()=>ok(null),browserPreferences:()=>ok({overwrite:true,durations:false}),
         listProjectFiles:(id,directory='')=>ok({projectId:id,projectName:'Demo workspace',directory,truncated:false,
@@ -80,7 +88,9 @@ app.whenReady().then(async () => {
       await import('/main.ts');
       const {setLanguage,t}=await import('/i18n.ts');
       const {EditorView}=await import('@codemirror/view');
-      window.fixture={setLanguage,t,readyConnection(){state.hasApiKey=true;config.tunnel.tunnelId='tunnel_'+'1'.repeat(32);},edit(text){const view=EditorView.findFromDOM(document.querySelector('.file-preview .cm-editor'));
+      window.fixture={setLanguage,t,readyConnection(){state.hasApiKey=true;config.tunnel.tunnelId='tunnel_'+'1'.repeat(32);},
+        addMonitorWorker(){if(!rows.some(row=>row.id===monitorWorker.id))rows.push(monitorWorker);},
+        edit(text){const view=EditorView.findFromDOM(document.querySelector('.file-preview .cm-editor'));
         if(!view)throw new Error('Editor not ready');view.dispatch({changes:{from:0,to:view.state.doc.length,insert:text}});}};
       window.fixtureReady=true;
     `;
@@ -125,8 +135,13 @@ app.whenReady().then(async () => {
     await screenshot('dock-shortcuts');
     await js(`document.querySelector('#workDockRight .work-dock-quick[data-view=review]').click()`);
     await until('!!document.querySelector("#workDockRight .review-panel:not([hidden])")');
+    await js(`window.fixture.addMonitorWorker();document.getElementById('chatRefresh').click()`);
+    await js(`new Promise(resolve=>setTimeout(resolve,300))`);
     await js(`document.querySelector('#workDockRight .work-dock-tab.is-selected .btn-icon').click();document.querySelector('#workDockRight .work-dock-quick[data-view=agents]').click()`);
-    await until('!!document.querySelector("#workDockRight .agent-panel:not([hidden])")');
+    await until('!!document.querySelector("#workDockRight .agent-panel:not([hidden]) .agent-panel-row")');
+    assert.equal(await js(`document.querySelector('.agent-panel-row .agent-card-activity')?.textContent`),'Read src/main/agents.ts');
+    assert.match(await js(`document.querySelector('.agent-panel-row .agent-card-meta')?.textContent||''`),/1\.2k actions/);
+    await screenshot('agent-monitor-activity');
     await js(`document.querySelector('#workDockRight .work-dock-tab.is-selected .btn-icon').click();document.querySelector('#workDockRight .work-dock-quick[data-view=files]').click()`);
     await until('document.querySelectorAll(".file-tree-row[data-path]").length>=3');
     await until('document.querySelector(".file-panel-changes-badge")?.textContent==="2"');
@@ -300,8 +315,8 @@ app.whenReady().then(async () => {
     await until('document.getElementById("headerConnect").hidden && !document.getElementById("headerConnect").classList.contains("is-running") && document.getElementById("connectionPopoverToggle").textContent===window.fixture.t("Disconnect") && document.getElementById("sidebarConnection").classList.contains("is-connected")');
     const errors=await js('window.fixtureErrors');
     assert.deepEqual(errors,[]);
-    fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({renderer:'current source in Chromium; synthetic backend',results,save:true,draftRoundTrip:true,gitChanges:true,pdf:true,connection:bounds,skillsDraftRoundTrip:true,sharedLibrary:true,sidebar:true,composer,errors},null,2));
-    console.log('PASS: current renderer Files layouts, read-only Git Changes/diff, real editor draft navigation, PDF rendering, connection status, Skills chips/shared library, Projects/Chats, Spanish and Traditional Chinese. '+output);
+    fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({renderer:'current source in Chromium; synthetic backend',results,save:true,draftRoundTrip:true,gitChanges:true,pdf:true,connection:bounds,skillsDraftRoundTrip:true,sharedLibrary:true,sidebar:true,composer,agentMonitor:{latestActivity:true,actionCount:true},errors},null,2));
+    console.log('PASS: current renderer Files layouts, Agent Monitor activity/count, read-only Git Changes/diff, real editor draft navigation, PDF rendering, connection status, Skills chips/shared library, Projects/Chats, Spanish and Traditional Chinese. '+output);
   } finally { win?.destroy(); await server?.close(); }
   app.exit(0);
 }).catch(error=>{console.error(error);app.exit(1)});

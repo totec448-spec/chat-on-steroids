@@ -52,6 +52,7 @@ const {
   bridgeStatus,
   companionDiagnostics,
   sessionControlsFor,
+  cancelAssistantRecovery,
   onBridgeChange,
   compactSession,
   setSessionObjective,
@@ -7405,6 +7406,33 @@ describe('unattributed activity recovery', () => {
     await maintenance(retry!.token, 'reloaded');
     await events(OTHER, [{ kind: 'chat_error', time: Date.now(), turnId: 'h2-turn', text: 'another notice', recoverable: true, reason: 'stream_gone' }]);
     expect(await maintenance()).toBeNull();
+  });
+
+  it('lets the user cancel an interrupted-response reload for this answer only (#1032)', async () => {
+    await pair();
+    const errorFor = (turnId: string) => ({ kind: 'chat_error' as const, time: Date.now(), turnId,
+      text: 'Connection interrupted. Waiting for the complete answer', recoverable: true });
+    await events(PRIME, [{ kind: 'user_message', time: Date.now(), messageId: 'cancel-q1', text: 'Refactor it' }, openTurn('cancel-t1')]);
+    await events(PRIME, [errorFor('cancel-t1')]);
+    const session = (await findSessionByConversation(PRIME))!;
+    const shown = async () => (await sessionControlsFor(session.id)).recovery?.filter(countdown => countdown.kind === 'assistant-error') ?? [];
+    expect(await shown()).toHaveLength(1);
+    expect(await cancelAssistantRecovery(session.id)).toBe(true);
+    expect(await shown()).toEqual([]);
+    expect(await maintenance()).toBeNull();
+    // The page keeps reporting the same lost stream: the cancelled answer stays cancelled.
+    await events(PRIME, [errorFor('cancel-t1')]);
+    expect(await shown()).toEqual([]);
+    expect(await maintenance()).toBeNull();
+    // The next question is a new answer and gets its own reload again.
+    await events(PRIME, [endTurn('cancel-t1', 'failed'),
+      { kind: 'user_message', time: Date.now(), messageId: 'cancel-q2', text: 'Try again' }, openTurn('cancel-t2')]);
+    await events(PRIME, [errorFor('cancel-t2')]);
+    expect(await shown()).toHaveLength(1);
+    // Once the browser has claimed the reload it is already happening; cancel no longer applies.
+    const repair = await maintenance();
+    expect((await request('POST', '/repairs/claim', { body: { token: repair!.token } })).body.allowed).toBe(true);
+    expect(await cancelAssistantRecovery(session.id)).toBe(false);
   });
 
   it.each(['idle', 'old-turn', 'old-question', 'final', 'foreign-turn'])('H2 rejects %s evidence before it can spend the current question reload', async scenario => {
