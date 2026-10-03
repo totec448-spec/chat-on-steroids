@@ -1,7 +1,8 @@
 import { getConfig } from '../config.js';
 import { workerPrimeOwner } from '../agents.js';
+import { committedResumeAncestorsFromSummary } from '../../shared/session.js';
 import { BLOCKED_CHAT_REFUSAL, isChatBlocked } from './blocked-chats.js';
-import { committedResumeAncestors } from './store.js';
+import { findSessionByConversation } from './store.js';
 import { isChatTrusted } from './trusted-chats.js';
 
 export const STRICT_CHAT_REFUSAL =
@@ -15,12 +16,18 @@ export function strictChatAllowlistEnabled(): boolean {
 /** The one conversation-level policy decision used before any model-facing tool handler runs. */
 async function trustedByExactProvenance(conversationId: string): Promise<boolean> {
   if (isChatBlocked(conversationId)) return false;
-  if (isChatTrusted(conversationId)) return true;
-  const ancestors = await committedResumeAncestors(conversationId);
-  // The durable lineage lookup above can yield to Block/Trust IPC. Re-read the exact chat before
-  // using inherited authority so a revoke that lands during disk I/O still wins this call.
+  const summary = await findSessionByConversation(conversationId, { requireUnique: true });
+  // The durable lookup above can yield to Block/Trust IPC. Re-read policy before spending any
+  // authority so a revoke that lands during disk I/O still wins this call.
   if (isChatBlocked(conversationId)) return false;
+  // Broker history is intentionally bounded, but the session origin lasts with the transcript.
+  // Once a worker's exact prime owner can no longer be proven, that durable worker identity is
+  // fail-closed forever: a stale/direct worker Trust bit must never turn it into an ordinary chat.
+  if (summary?.conversationId === conversationId && summary.origin?.kind === 'worker') return false;
   if (isChatTrusted(conversationId)) return true;
+  const ancestors = summary?.conversationId === conversationId
+    ? committedResumeAncestorsFromSummary(summary, conversationId)
+    : [];
   for (const source of ancestors) {
     // A blocked predecessor revokes inherited trust just as blocking the live prime revokes its
     // workers. Otherwise the nearest explicitly trusted predecessor is sufficient proof.

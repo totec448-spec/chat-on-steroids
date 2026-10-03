@@ -418,6 +418,24 @@ function enqueueSessionOperation<T>(entry: OpenSession, label: string, operation
 }
 
 /**
+ * Serializes an external durable policy mutation against session ownership changes.
+ *
+ * `rebindSession()` uses the same per-session queue. Callers that need to validate the current
+ * ChatGPT conversation and then await a different durable store (for example trusted-chats)
+ * must keep that validation and write in one fence, otherwise Compact & Resume can commit A -> B
+ * between them and turn stale intent for A into authority inherited by B.
+ *
+ * The summary is read-only by contract; mutate session state only through store primitives.
+ */
+export async function withSessionMutationFence<T>(
+  id: string,
+  operation: (summary: Readonly<SessionSummary>) => Promise<T>
+): Promise<T> {
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'external policy fence', () => operation(entry.summary));
+}
+
+/**
  * The summary is rewritten on a short delay rather than on every event. A long agent
  * session appends thousands of events; rewriting the summary for each one would turn
  * an append-only log into a write-amplified one for no benefit.

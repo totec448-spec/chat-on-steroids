@@ -101,7 +101,8 @@ import {
   getSession,
   getImageStorage,
   readHandoff,
-  readToolEditReview
+  readToolEditReview,
+  withSessionMutationFence
 } from './session/store.js';
 import { forgetSession, onSessionChange } from './session/recorder.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
@@ -1223,21 +1224,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (deletingSessionIds.has(id)) {
       throw new Error('This session is being deleted; its block cannot be changed');
     }
-    const summary = await getSession(id);
-    // getSession is async. Delete may have started while this lookup was in flight.
-    if (deletingSessionIds.has(id)) {
-      throw new Error('This session is being deleted; its block cannot be changed');
-    }
-    const conversationId = summary?.conversationId;
-    if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
-      throw new Error('This session has no valid ChatGPT conversation');
-    }
-    setChatsBlocked(
-      blocked
-        ? [conversationId]
-        : [conversationId, ...committedResumeAncestorsFromSummary(summary!, conversationId)],
-      blocked
-    );
+    const conversationId = await withSessionMutationFence(id, async (summary) => {
+      if (deletingSessionIds.has(id)) {
+        throw new Error('This session is being deleted; its block cannot be changed');
+      }
+      const currentConversationId = summary.conversationId;
+      if (!currentConversationId || !/^[0-9a-z-]{8,64}$/i.test(currentConversationId)) {
+        throw new Error('This session has no valid ChatGPT conversation');
+      }
+      setChatsBlocked(
+        blocked
+          ? [currentConversationId]
+          : [currentConversationId, ...committedResumeAncestorsFromSummary(summary, currentConversationId)],
+        blocked
+      );
+      return currentConversationId;
+    });
     logInfo(
       blocked
         ? `conversation ${conversationId} blocked; its tool calls are refused until it is released`
@@ -1261,31 +1263,34 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (deletingSessionIds.has(id)) {
       throw new Error('This session is being deleted; its trust cannot be changed');
     }
-    const summary = await getSession(id);
-    // getSession is async. Delete may have started while this lookup was in flight.
-    if (deletingSessionIds.has(id)) {
-      throw new Error('This session is being deleted; its trust cannot be changed');
-    }
-    const conversationId = summary?.conversationId;
-    if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
-      throw new Error('This session has no valid ChatGPT conversation');
-    }
-    if (conversationId !== expectedConversationId) {
-      throw new Error('This session moved to another ChatGPT conversation; refresh Sessions before changing trust');
-    }
-    const workerOwner = workerPrimeOwner(conversationId);
-    if (trusted && workerOwner.owned) {
-      throw new Error('Worker trust follows its owning prime; trust the prime chat instead');
-    }
-    // The current resumed row is the only UI handle left after A -> B. Its Untrust action must
-    // remove every explicit Trust entry that can still grant B through committed provenance;
-    // deleting only B would immediately fall through to a still-trusted A. Worker Untrust is
-    // deliberately exact-only so stale pre-fix worker entries can be cleaned without touching
-    // the owning prime.
-    const trustTargets = !trusted && !workerOwner.owned
-      ? [conversationId, ...committedResumeAncestorsFromSummary(summary!, conversationId)]
-      : [conversationId];
-    await setChatsTrusted(trustTargets, trusted);
+    const conversationId = await withSessionMutationFence(id, async (summary) => {
+      // Delete may have started while this operation was waiting behind an earlier session write.
+      // If Trust entered this queue first it linearizes before Delete; otherwise the tombstone wins.
+      if (deletingSessionIds.has(id)) {
+        throw new Error('This session is being deleted; its trust cannot be changed');
+      }
+      const currentConversationId = summary.conversationId;
+      if (!currentConversationId || !/^[0-9a-z-]{8,64}$/i.test(currentConversationId)) {
+        throw new Error('This session has no valid ChatGPT conversation');
+      }
+      if (currentConversationId !== expectedConversationId) {
+        throw new Error('This session moved to another ChatGPT conversation; refresh Sessions before changing trust');
+      }
+      const workerOwner = workerPrimeOwner(currentConversationId);
+      if (trusted && (workerOwner.owned || summary.origin?.kind === 'worker')) {
+        throw new Error('Worker chats cannot be trusted directly; trust the owning prime chat instead');
+      }
+      // The current resumed row is the only UI handle left after A -> B. Its Untrust action must
+      // remove every explicit Trust entry that can still grant B through committed provenance;
+      // deleting only B would immediately fall through to a still-trusted A. Worker Untrust is
+      // deliberately exact-only so stale pre-fix worker entries can be cleaned without touching
+      // the owning prime.
+      const trustTargets = !trusted && !workerOwner.owned
+        ? [currentConversationId, ...committedResumeAncestorsFromSummary(summary, currentConversationId)]
+        : [currentConversationId];
+      await setChatsTrusted(trustTargets, trusted);
+      return currentConversationId;
+    });
     logInfo(trusted
       ? `conversation ${conversationId} trusted for strict chat allowlisting`
       : `conversation ${conversationId} removed from strict chat allowlisting`);

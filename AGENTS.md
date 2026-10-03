@@ -610,6 +610,9 @@ copies a Trust bit into the child. A broker-owned worker follows the owning prim
 published active/dormant family, including sleeping and terminal worker history. Direct Trust of a
 worker is refused by Sessions IPC/UI, ambiguous or provisional ownership fails closed, and every call
 re-resolves the parent so Untrust, Block or a committed prime transfer takes effect immediately. A
+worker session keeps its durable `origin.kind=worker` classification even after bounded broker and
+retired-worker history expires; without a unique broker owner that identity stays fail-closed and a
+stale/direct Trust bit is never treated as ordinary-chat authority. A
 Compact & Resume successor stays untrusted before commit, then may inherit effective trust from the
 durable session `chatIds` lineage only after the continuation commit atomically rebinds the session
 and records `lastCommittedResumeHandoffId`. Ordinary new/browser chats and anything without either

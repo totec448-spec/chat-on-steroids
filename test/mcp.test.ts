@@ -4042,6 +4042,27 @@ describe('blocked chats', () => {
     expect(textOf(parentBlocked)).toContain('CHAT_NOT_TRUSTED');
   });
 
+  it('keeps durable worker identity fail-closed after broker provenance expires', async () => {
+    const worker = 'strict-worker-durable-origin';
+    const session = await createSession({
+      title: 'strict durable worker origin',
+      conversationId: worker,
+      origin: { kind: 'worker', fromSessionId: null, agentId: 'worker-9', task: 'old worker task' }
+    });
+    getConfig().multiAgent.strictChatAllowlist = true;
+    // Simulate a pre-fix direct worker Trust entry that outlived the broker family's bounded
+    // active/dormant/retired retention. Durable session origin must still keep it fail-closed.
+    await setChatTrusted(worker, true);
+
+    const refused = await readAs(ownedSession(worker, session.id));
+    expect(failed(refused)).toBe(true);
+    expect(textOf(refused)).toContain('CHAT_NOT_TRUSTED');
+    const notices = (await readRecentEvents(session.id, 20))
+      .filter(event => event.kind === 'progress' && /app-created worker/.test(event.message.text));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.kind === 'progress' && notices[0].message.text).toContain('no unique owning prime');
+  });
+
   it('keeps a trusted chat authorized only after its Compact & Resume successor commits', async () => {
     const chatA = 'f0f00009-1111-4111-8111-111111111111';
     const chatB = 'f0f00010-1111-4111-8111-111111111111';

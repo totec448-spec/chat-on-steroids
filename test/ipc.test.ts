@@ -1492,7 +1492,7 @@ describe('session IPC contracts', () => {
         id: workerSession.id, expectedConversationId: workerConversationId, trusted: true
       })) as any;
       expect(workerTrust.ok).toBe(false);
-      expect(workerTrust.error).toMatch(/worker trust follows its owning prime/i);
+      expect(workerTrust.error).toMatch(/worker chats cannot be trusted directly/i);
       expect(isChatTrusted(workerConversationId)).toBe(false);
 
       const primeTrust = (await handlers.get('sessions:trust')!(null, {
@@ -1512,6 +1512,25 @@ describe('session IPC contracts', () => {
     } finally {
       resetTrustedChatsForTests();
     }
+  });
+
+  it('refuses direct Trust for durable worker identity after broker ownership is gone', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const workerConversationId = 'strict-worker-durable-only';
+    const workerSession = await createSession({
+      title: 'durable worker without retained broker owner',
+      conversationId: workerConversationId,
+      origin: { kind: 'worker', fromSessionId: null, agentId: 'worker-7', task: 'old retained work' }
+    });
+
+    const refused = (await handlers.get('sessions:trust')!(null, {
+      id: workerSession.id, expectedConversationId: workerConversationId, trusted: true
+    })) as any;
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/worker chats cannot be trusted directly/i);
+    expect(isChatTrusted(workerConversationId)).toBe(false);
+    resetTrustedChatsForTests();
   });
 
   it('refuses stale trust intent after Compact & Resume rebinds the same session to a new chat', async () => {
@@ -1536,6 +1555,42 @@ describe('session IPC contracts', () => {
     expect(current.ok, current.error).toBe(true);
     expect(isChatTrusted(chatB)).toBe(true);
     resetTrustedChatsForTests();
+  });
+
+  it('serializes Trust with Compact & Resume so an in-flight stale A action cannot authorize B', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const chatA = '12121212-aaaa-bbbb-cccc-121212121212';
+    const chatB = '34343434-aaaa-bbbb-cccc-343434343434';
+    const session = await createSession({ title: 'trust raced with resume', conversationId: chatA });
+    const gate = faultGate();
+    const originalRename = fs.rename.bind(fs);
+    const rename = vi.spyOn(fs, 'rename').mockImplementationOnce(async (...args: Parameters<typeof fs.rename>) => {
+      await gate.hold();
+      return originalRename(...args);
+    });
+    try {
+      const moving = rebindSession(session.id, chatA, chatB, 'handoff-trust-race-0001');
+      await gate.entered;
+      let trustSettled = false;
+      const trusting = (handlers.get('sessions:trust')!(null, {
+        id: session.id, expectedConversationId: chatA, trusted: true
+      }) as Promise<any>).then((result) => { trustSettled = true; return result; });
+      await Promise.resolve();
+      expect(trustSettled).toBe(false);
+
+      gate.release();
+      expect(await moving).toBe(true);
+      const stale = await trusting;
+      expect(stale.ok).toBe(false);
+      expect(stale.error).toMatch(/moved to another ChatGPT conversation/i);
+      expect(isChatTrusted(chatA)).toBe(false);
+      expect(isChatTrusted(chatB)).toBe(false);
+    } finally {
+      gate.release();
+      rename.mockRestore();
+      resetTrustedChatsForTests();
+    }
   });
 
   it('Untrust on the current resumed row revokes the explicit source instead of leaving inherited authority', async () => {
