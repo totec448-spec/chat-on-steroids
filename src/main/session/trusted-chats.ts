@@ -5,7 +5,7 @@
  * no longer forcibly stopped; it does not grant access under a default-deny policy. Likewise,
  * Compact & Resume creates a different ChatGPT conversation and does not inherit trust.
  */
-import { readDurable, writeDurableNow } from '../durable.js';
+import { readDurable, writeDurableNow, writeDurableSoon } from '../durable.js';
 
 const MAX_TRUSTED_CHATS = 200;
 const TRUSTED_STATE = 'trusted-chats';
@@ -59,7 +59,15 @@ export function setChatTrusted(conversationId: string, next: boolean): Promise<v
     } else {
       updated.delete(conversationId);
     }
-    await writeDurableNow(TRUSTED_STATE, snapshot(updated));
+    try {
+      await writeDurableNow(TRUSTED_STATE, snapshot(updated));
+    } catch (error) {
+      // writeDurableNow deliberately retains a failed generation for retry. This permission
+      // change was not acknowledged, so that generation must never become authoritative later:
+      // supersede it with the currently published set before the retry timer fires.
+      writeDurableSoon(TRUSTED_STATE, snapshot(trusted));
+      throw error;
+    }
     trusted.clear();
     for (const id of updated) trusted.add(id);
   });

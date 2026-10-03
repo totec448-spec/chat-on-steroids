@@ -606,6 +606,9 @@ removes both policies for that conversation, and Compact & Resume/new-chat bindi
 the predecessor conversation's trust. Trust/Untrust IPC carries the row's expected conversation id
 and refuses a stale A→B rebind; each trust mutation is serialized and published only after
 `writeDurableNow()` commits its exact snapshot, so an acknowledged revoke cannot be undone by crash.
+If that durable commit fails, the failed proposed generation is superseded by the still-published
+trust set before background retry. Session deletion durably revokes Trust before releasing Block,
+detaching the conversation or deleting the row; a failed revoke therefore leaves all prior authority intact.
 
 ### Three lifetimes and five outcomes
 

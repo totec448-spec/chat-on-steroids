@@ -38,7 +38,7 @@ vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: vi.fn(async (
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, resetSecretsCacheForTests } = await import('../src/main/secrets.js');
-const { appendEvent, createSession, initSessionStore, rebindSession, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
+const { appendEvent, createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { pendingCommands, resetBridgeForTests, setBrowserOpener, startBridge, stopBridge } = await import(
   '../src/main/bridge.js'
@@ -1506,6 +1506,36 @@ describe('session IPC contracts', () => {
     expect(deleted.ok, deleted.error).toBe(true);
     expect(isChatTrusted(conversationId)).toBe(false);
     resetTrustedChatsForTests();
+  });
+
+  it('preserves the session, Block and Trust when durable trust revocation fails during delete', async () => {
+    const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetBlockedChatsForTests();
+    resetTrustedChatsForTests();
+    const conversationId = 'abababab-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'policy survives failed delete', conversationId });
+    await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: conversationId, trusted: true
+    });
+    await handlers.get('sessions:block')!(null, { id: session.id, blocked: true });
+    expect(isChatTrusted(conversationId)).toBe(true);
+    expect(isChatBlocked(conversationId)).toBe(true);
+
+    const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('simulated trust revoke failure'), { code: 'EIO' }));
+    try {
+      const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+      expect(deleted.ok).toBe(false);
+      expect(deleted.error).toMatch(/simulated trust revoke failure/i);
+      expect(isChatTrusted(conversationId)).toBe(true);
+      expect(isChatBlocked(conversationId)).toBe(true);
+      expect(await getSession(session.id)).not.toBeNull();
+      await flushDurable();
+    } finally {
+      rename.mockRestore();
+      resetBlockedChatsForTests();
+      resetTrustedChatsForTests();
+    }
   });
 
   it('reports the blocked set with every session list, so one paint marks every row', async () => {

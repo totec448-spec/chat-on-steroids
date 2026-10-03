@@ -1,5 +1,6 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
+import { flushDurable, initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import {
   isChatTrusted,
   resetTrustedChatsForTests,
@@ -60,6 +61,24 @@ describe('trusted chats', () => {
     await writeDurableNow('trusted-chats', { version: 999, entries: [TRUSTED] });
     await restoreTrustedChats();
     expect(trustedChatIds()).toEqual([]);
+  });
+
+  it('supersedes a failed Trust generation so a later retry cannot grant rejected permission', async () => {
+    const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('simulated durable failure'), { code: 'EIO' }));
+    try {
+      await expect(setChatTrusted(TRUSTED, true)).rejects.toThrow(/simulated durable failure/i);
+      expect(isChatTrusted(TRUSTED)).toBe(false);
+
+      // writeDurableNow retains failed state for retry. The trust registry must already have
+      // superseded that proposal with the still-authoritative empty set before retry/quit flush.
+      await flushDurable();
+      resetTrustedChatsForTests();
+      await restoreTrustedChats();
+      expect(isChatTrusted(TRUSTED)).toBe(false);
+      expect(trustedChatIds()).toEqual([]);
+    } finally {
+      rename.mockRestore();
+    }
   });
 
   it('is bounded without silently evicting older trusted chats', async () => {
