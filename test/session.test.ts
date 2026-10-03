@@ -2384,6 +2384,25 @@ describe('handoff storage', () => {
     expect(prompt).toContain('no tool calls');
   });
 
+  it('keeps the thorough default byte for byte and swaps only the length for a shorter brief (#995)', () => {
+    expect(nativeHandoffPrompt('token', true, DEFAULT_HANDOFF_PROMPT, 'thorough')).toBe(nativeHandoffPrompt('token', true));
+    const short = nativeHandoffPrompt('token', true, DEFAULT_HANDOFF_PROMPT, 'short');
+    expect(short).not.toMatch(/10,000[–-]30,000|10k[–-]30k|~6,000-token brief is normally too short|Never exceed 30,000/i);
+    expect(short).toMatch(/target roughly 2,000–6,000 tokens/);
+    expect(short).toContain('Length setting: aim for roughly 2,000–6,000 tokens and never exceed 6,000.');
+    // Everything else the brief must carry stays exactly as it was.
+    expect(short).toMatch(/user's messages as the highest-authority source/i);
+    expect(short).toMatch(/PLANNED \/ DECIDED/i);
+    const standard = nativeHandoffPrompt('token', true, DEFAULT_HANDOFF_PROMPT, 'standard');
+    expect(standard).toMatch(/target roughly 4,000–10,000 tokens/);
+    expect(standard).toContain('never exceed 10,000');
+    // An edited prompt has no default sentence to swap; the code-owned line still sets the length.
+    const custom = 'Carry only the state needed for the next action. Aim for about 20,000 tokens.';
+    const edited = nativeHandoffPrompt('token', true, custom, 'short');
+    expect(edited).toContain(custom);
+    expect(edited).toContain('This replaces any other length target in these instructions.');
+  });
+
   it('honors the tool-detail setting in the handoff brief without claiming to erase seen history', () => {
     expect(nativeHandoffPrompt('token', false)).toContain('omit raw tool-call arguments and result bodies');
     expect(nativeHandoffPrompt('token', false)).toContain('not the history you already saw');
