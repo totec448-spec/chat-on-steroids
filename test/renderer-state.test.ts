@@ -1765,6 +1765,24 @@ it('opens, saves and restores the editable goal prompt', async () => {
   expect(mounted.calls.at(-1)?.goal.prompt).toBe(DEFAULT_GOAL_SYSTEM_PROMPT);
 });
 
+it('asks before Clear workers ends running workers and removes their histories', async () => {
+  const resetSwarm = vi.fn(async () => ({ ok: true as const, data: { running: false, agents: [], retainedHistory: false } }));
+  const mounted = await mountChat({ hasGoalKey: true }, [], { resetSwarm });
+  const w = mounted.window;
+  const button = w.document.getElementById('swarmReset') as HTMLButtonElement;
+  button.disabled = false;
+  const confirm = vi.fn(() => false);
+  w.confirm = confirm;
+  button.click();
+  await settle();
+  expect(confirm).toHaveBeenCalledWith(expect.stringContaining('removed for good'));
+  expect(resetSwarm).not.toHaveBeenCalled();
+  confirm.mockReturnValue(true);
+  button.click();
+  await settle();
+  expect(resetSwarm).toHaveBeenCalledTimes(1);
+});
+
 it('opens, saves and restores the editable handoff prompt', async () => {
   const mounted = await mountChat({ hasGoalKey: true });
   const doc = mounted.window.document;

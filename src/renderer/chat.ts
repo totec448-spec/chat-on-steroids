@@ -5614,6 +5614,9 @@ export function initChat(next: Deps): void {
   });
 
   $('swarmReset').addEventListener('click', async () => {
+    // Permanent, like removing recorded images: ask first. A misclick used to end running
+    // workers and delete every worker history at once.
+    if (!window.confirm(t('Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.'))) return;
     const state = await run(api.resetSwarm());
     if (state) {
       paintSwarm(state);

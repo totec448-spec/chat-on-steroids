@@ -1803,5 +1803,6 @@
   "Clear workers": "Yardımcı ajanları temizle",
   "Workers cleared": "Yardımcı ajanlar temizlendi",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "Çalışan yardımcı ajan yok. Geçmişleri, onları başlatan sohbetlerde kullanılabilir kalır; Yardımcı ajanları temizle bunları kalıcı olarak siler.",
-  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Yeni sohbetler ve yardımcı ajanlar için varsayılan modeli ve akıl yürütmeyi hesabınızın sunduklarından seçin."
+  "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Yeni sohbetler ve yardımcı ajanlar için varsayılan modeli ve akıl yürütmeyi hesabınızın sunduklarından seçin.",
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Tüm yardımcı ajanlar temizlensin mi? Çalışanlar durur ve kayıtlı geçmişleri kalıcı olarak silinir. Sohbetleri ChatGPT’de kalır."
 }
