@@ -29,12 +29,20 @@ import { SURFACE_LIST, surfaceDefinition, type SurfaceId } from '../src/main/mcp
 import {
   createSession,
   initSessionStore,
+  readRecentEvents,
   rebindSession,
   readSessionPlan
 } from '../src/main/session/store.js';
+import {
+  bindConversation,
+  onSpawnRequest,
+  onSwarmPersistNow,
+  resetAgentsForTests,
+  spawn
+} from '../src/main/agents.js';
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
 import { DEFAULT_CAPABILITIES, type Capabilities, type Root } from '../src/shared/types.js';
-import type { ToolOutcome } from '../src/shared/session.js';
+import { foldProgress, type ToolOutcome } from '../src/shared/session.js';
 import { emptyEvidence, noteExec, noteOutcome, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
 import { WINDOWS_COMPUTER_METHODS, WINDOWS_COMPUTER_READ_METHODS } from '../src/shared/windows-computer.js';
@@ -46,6 +54,8 @@ import {
   attachSummary,
   dispatchContinuationSourceSendNow,
   beginContinuationSourceSendNow,
+  claimContinuationNow,
+  commitContinuation,
   openContinuationNow,
   resetContinuationsForTests
 } from '../src/main/session/continuation.js';
@@ -3832,6 +3842,22 @@ describe('blocked chats', () => {
     return requestId;
   };
 
+  /** Same proof, but tied to a real durable session so app notices can be asserted. */
+  const ownedSession = (conversationId: string, sessionId: string): string => {
+    const requestId = `wfr_block_session_${++proofSeq}`;
+    expect(
+      observeRequestCorrelation({
+        requestId,
+        conversationId,
+        sessionId,
+        messageId: `message-block-session-${proofSeq}`,
+        tool: 'read',
+        observedAt: Date.now()
+      })
+    ).toBe('stored');
+    return requestId;
+  };
+
   /**
    * The same proof, deliberately late: the page reporting *after* the call has already landed.
    *
@@ -3866,11 +3892,15 @@ describe('blocked chats', () => {
   beforeEach(() => {
     resetBlockedChatsForTests();
     resetTrustedChatsForTests();
+    resetAgentsForTests();
+    onSwarmPersistNow(async () => undefined);
+    onSpawnRequest(() => undefined);
     getConfig().multiAgent.strictChatAllowlist = false;
   });
   afterAll(() => {
     resetBlockedChatsForTests();
     resetTrustedChatsForTests();
+    resetAgentsForTests();
     getConfig().multiAgent.strictChatAllowlist = false;
   });
 
@@ -3986,5 +4016,100 @@ describe('blocked chats', () => {
     expect(failed(blocked)).toBe(true);
     expect(textOf(blocked)).toContain('CHAT_BLOCKED');
     expect(textOf(blocked)).not.toContain('CHAT_NOT_TRUSTED');
+  });
+
+  it('lets a trusted prime worker use tools and revokes it with the prime', async () => {
+    const prime = 'strict-prime-owner';
+    const worker = 'strict-worker-owned';
+    getConfig().multiAgent.strictChatAllowlist = true;
+    const run = spawn({ caller: { conversationId: prime }, workers: [{ task: 'read the project' }] });
+    expect(bindConversation('worker-1', worker, run.runId)).toBe(true);
+
+    await setChatTrusted(prime, true);
+    const allowed = await readAs(owned(worker));
+    expect(failed(allowed), textOf(allowed)).toBe(false);
+    expect(textOf(allowed)).toContain('/workspace/notes.txt');
+
+    await setChatTrusted(prime, false);
+    const untrusted = await readAs(owned(worker));
+    expect(failed(untrusted)).toBe(true);
+    expect(textOf(untrusted)).toContain('CHAT_NOT_TRUSTED');
+
+    await setChatTrusted(prime, true);
+    setChatBlocked(prime, true);
+    const parentBlocked = await readAs(owned(worker));
+    expect(failed(parentBlocked)).toBe(true);
+    expect(textOf(parentBlocked)).toContain('CHAT_NOT_TRUSTED');
+  });
+
+  it('keeps a trusted chat authorized only after its Compact & Resume successor commits', async () => {
+    const chatA = 'f0f00009-1111-4111-8111-111111111111';
+    const chatB = 'f0f00010-1111-4111-8111-111111111111';
+    const chatC = 'f0f00012-1111-4111-8111-111111111111';
+    const summary = await createSession({ title: 'strict resume owner', conversationId: chatA });
+    getConfig().multiAgent.strictChatAllowlist = true;
+    await setChatTrusted(chatA, true);
+
+    const opened = await openContinuationNow(summary.id, chatA, false);
+    expect((await beginContinuationSourceSendNow(opened.token))?.allowed).toBe(true);
+    expect(await dispatchContinuationSourceSendNow(opened.token)).toBe(true);
+    await attachSummary(opened.token, 'STRICT_RESUME_SUMMARY\n'.repeat(40));
+    expect(await claimContinuationNow(opened.token, 'strict-resume-document')).not.toBeNull();
+
+    const beforeCommit = await readAs(ownedSession(chatB, summary.id));
+    expect(failed(beforeCommit)).toBe(true);
+    expect(textOf(beforeCommit)).toContain('CHAT_NOT_TRUSTED');
+
+    expect(await commitContinuation(opened.token, chatB)).toBe(true);
+    const afterCommit = await readAs(ownedSession(chatB, summary.id));
+    expect(failed(afterCommit), textOf(afterCommit)).toBe(false);
+    expect(textOf(afterCommit)).toContain('/workspace/notes.txt');
+
+    // The durable lineage remains transitive across later committed resumes; B has no copied
+    // Trust bit of its own, so C still derives from the original explicit source A.
+    expect(await rebindSession(summary.id, chatB, chatC, 'handoff-resume-chain-0001')).toBe(true);
+    const afterSecondCommit = await readAs(ownedSession(chatC, summary.id));
+    expect(failed(afterSecondCommit), textOf(afterSecondCommit)).toBe(false);
+    expect(textOf(afterSecondCommit)).toContain('/workspace/notes.txt');
+
+    await setChatTrusted(chatA, false);
+    const revoked = await readAs(ownedSession(chatC, summary.id));
+    expect(failed(revoked)).toBe(true);
+    expect(textOf(revoked)).toContain('CHAT_NOT_TRUSTED');
+
+    await setChatTrusted(chatA, true);
+    setChatBlocked(chatB, true);
+    const intermediateBlocked = await readAs(ownedSession(chatC, summary.id));
+    expect(failed(intermediateBlocked)).toBe(true);
+    expect(textOf(intermediateBlocked)).toContain('CHAT_NOT_TRUSTED');
+    setChatBlocked(chatB, false);
+    setChatBlocked(chatA, true);
+    const sourceBlocked = await readAs(ownedSession(chatC, summary.id));
+    expect(failed(sourceBlocked)).toBe(true);
+    expect(textOf(sourceBlocked)).toContain('CHAT_NOT_TRUSTED');
+  });
+
+  it('records one visible notice when strict mode refuses an attributed untrusted chat', async () => {
+    const conversationId = 'f0f00011-1111-4111-8111-111111111111';
+    const session = await createSession({ title: 'strict refusal notice', conversationId });
+    getConfig().multiAgent.strictChatAllowlist = true;
+
+    const parallel = await Promise.all([
+      readAs(ownedSession(conversationId, session.id)),
+      readAs(ownedSession(conversationId, session.id))
+    ]);
+    expect(parallel.every(reply => textOf(reply).includes('CHAT_NOT_TRUSTED'))).toBe(true);
+    const notes = (await readRecentEvents(session.id, 20))
+      .filter(event => event.kind === 'progress' && /untrusted chat was refused/.test(event.message.text));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.kind === 'progress' && notes[0].message.text).toContain('Trust this chat in Sessions');
+
+    await setChatTrusted(conversationId, true);
+    expect(failed(await readAs(ownedSession(conversationId, session.id)))).toBe(false);
+    await setChatTrusted(conversationId, false);
+    expect(textOf(await readAs(ownedSession(conversationId, session.id)))).toContain('CHAT_NOT_TRUSTED');
+    const nextEpisode = foldProgress(await readRecentEvents(session.id, 20))
+      .filter(event => event.kind === 'progress' && /untrusted chat was refused/.test(event.message.text));
+    expect(nextEpisode).toHaveLength(2);
   });
 });

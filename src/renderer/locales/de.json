@@ -1773,7 +1773,7 @@
   "Also after the turn": "Auch nach dem Durchlauf",
   "Search models": "Modelle suchen",
   "Trust only selected chats": "Nur ausgewählten Chats vertrauen",
-  "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "Lokale Tools standardmäßig verweigern und nur Chats zulassen, denen Sie in Sitzungen ausdrücklich vertrauen. Nicht zugeordnete Aufrufe bleiben blockiert, solange dies aktiviert ist.",
   "Untrust this chat: strict mode refuses its tool calls": "Vertrauen für diesen Chat aufheben: Im strikten Modus werden seine Tool-Aufrufe abgelehnt",
-  "Trust this chat: strict mode lets its tool calls run": "Diesem Chat vertrauen: Im strikten Modus dürfen seine Tool-Aufrufe ausgeführt werden"
+  "Trust this chat: strict mode lets its tool calls run": "Diesem Chat vertrauen: Im strikten Modus dürfen seine Tool-Aufrufe ausgeführt werden",
+  "Default-deny local tools to chats you explicitly Trust in Sessions. Workers and resumed chats follow their trusted parent; unattributed calls stay blocked.": "Lokale Tools standardmäßig verweigern und nur Chats zulassen, denen Sie in Sitzungen ausdrücklich vertrauen. Worker und fortgesetzte Chats folgen ihrem vertrauenswürdigen übergeordneten Chat; nicht zugeordnete Aufrufe bleiben blockiert."
 }

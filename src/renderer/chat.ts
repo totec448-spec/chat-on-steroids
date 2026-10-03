@@ -57,6 +57,7 @@ import type {
 import {
   ATTRIBUTION_LABELS,
   CHAT_ACTIVE_MS,
+  committedResumeAncestorsFromSummary,
   continuationMarkerOf,
   TURN_OUTCOME_LABELS,
   foldProgress,
@@ -492,10 +493,32 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     return row;
   }
   if (summary.conversationId) {
+    const policyLineage = [
+      summary.conversationId,
+      ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
+    ];
+    const strictAllowlist = deps.state()?.config.multiAgent?.strictChatAllowlist === true;
+    // Mirror main's exact decision order for presentation: exact Block wins; in strict mode an
+    // exact Trust wins before inherited lineage, then each committed predecessor is considered
+    // nearest-first with Block ahead of Trust. An older policy hidden behind a nearer decision is
+    // not the current effective state and must not paint this row inconsistently with the kernel.
+    let effectivePolicy: 'blocked' | 'trusted' | null = blockedChats.has(summary.conversationId)
+      ? 'blocked'
+      : strictAllowlist && trustedChats.has(summary.conversationId)
+        ? 'trusted'
+        : null;
+    if (strictAllowlist && effectivePolicy === null) {
+      for (const conversationId of policyLineage.slice(1)) {
+        if (blockedChats.has(conversationId)) { effectivePolicy = 'blocked'; break; }
+        if (trustedChats.has(conversationId)) { effectivePolicy = 'trusted'; break; }
+      }
+    }
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
     // here can — it takes this chat's tools away, and a model whose every call is refused with
     // an instruction to stop finishes its turn on its own.
-    const blocked = blockedChats.has(summary.conversationId);
+    // A resumed row is the only control left for its committed predecessors. Project a source
+    // Block onto that row so Release can clear the exact lineage that currently fences tools.
+    const blocked = effectivePolicy === 'blocked';
     const block = document.createElement('button');
     block.className = `btn sess-action sess-block${blocked ? ' is-blocked' : ''}`;
     block.type = 'button';
@@ -509,8 +532,11 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     });
     actions.push(block);
 
-    if (deps.state()?.config.multiAgent?.strictChatAllowlist === true) {
-      const trusted = trustedChats.has(summary.conversationId);
+    if (strictAllowlist && summary.origin?.kind !== 'worker') {
+      // `trustedChats` is the explicit durable registry. A committed resumed chat can be
+      // effectively trusted by one of those historical ids, so project the same durable lineage
+      // that main enforces. This only chooses the button state; IPC remains authoritative.
+      const trusted = effectivePolicy === 'trusted';
       const trust = document.createElement('button');
       trust.className = `btn sess-action sess-trust${trusted ? ' is-trusted' : ''}`;
       trust.type = 'button';

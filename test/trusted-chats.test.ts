@@ -6,6 +6,7 @@ import {
   resetTrustedChatsForTests,
   restoreTrustedChats,
   setChatTrusted,
+  setChatsTrusted,
   trustedChatIds
 } from '../src/main/session/trusted-chats.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -44,6 +45,17 @@ describe('trusted chats', () => {
     expect(trustedChatIds()).toEqual([TRUSTED]);
 
     await setChatTrusted(TRUSTED, false);
+    resetTrustedChatsForTests();
+    await restoreTrustedChats();
+    expect(trustedChatIds()).toEqual([]);
+  });
+
+  it('revokes a committed trust lineage atomically in one durable mutation', async () => {
+    await setChatTrusted(TRUSTED, true);
+    await setChatTrusted(OTHER, true);
+    await setChatsTrusted([TRUSTED, OTHER, TRUSTED], false);
+    expect(trustedChatIds()).toEqual([]);
+
     resetTrustedChatsForTests();
     await restoreTrustedChats();
     expect(trustedChatIds()).toEqual([]);
