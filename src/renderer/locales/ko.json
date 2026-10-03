@@ -1764,5 +1764,6 @@
   "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "내 메시지에서 Chat On Steroids Core 멘션: 모든 채팅에서 ChatGPT가 이 앱을 사용할 수 있게 합니다. 간단한 질문에 ChatGPT가 불필요한 도구 호출부터 시작하면 끄세요. 워커, Goal, Loop, Continue는 멘션을 유지합니다.",
   "When to continue": "계속할 시점",
   "Session Finish only": "세션 종료 시에만",
-  "Also after the turn": "턴 이후에도"
+  "Also after the turn": "턴 이후에도",
+  "Search models": "모델 검색"
 }

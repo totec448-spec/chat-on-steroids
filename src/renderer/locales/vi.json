@@ -1764,5 +1764,6 @@
   "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Nhắc đến Chat On Steroids Core trong tin nhắn của tôi: đảm bảo ChatGPT có thể dùng ứng dụng này trong mọi cuộc trò chuyện. Tắt nếu ChatGPT bắt đầu câu hỏi đơn giản bằng một lệnh gọi công cụ không cần thiết; worker, Goal, Loop và Continue vẫn giữ lời nhắc.",
   "When to continue": "Khi nào tiếp tục",
   "Session Finish only": "Chỉ khi kết thúc phiên",
-  "Also after the turn": "Đồng thời sau lượt"
+  "Also after the turn": "Đồng thời sau lượt",
+  "Search models": "Tìm mô hình"
 }
