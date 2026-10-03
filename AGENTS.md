@@ -2163,7 +2163,10 @@ regressions do not establish those tabs' original cause or live validation of th
 
 `tabRecoveryWanted()` means **active Goal/Loop OR the user's recoverAgentTabs switch**. It gates
 silence/no-tab recovery for workers, primes and ordinary chats. Reload repair for exact errors,
-Unattributed incidents and compaction has its own evidence. “Recover agents” is not blanket
+Unattributed incidents and compaction has its own evidence. A no-tab repair only gives the chat a
+tab: if the browser finds one by the time it acts (often the tab a worker wake just opened) that is
+still loading or answers `clf-page-status`, it reports `repairAction=present` and never reloads it,
+which used to cut a wake off mid-send (#864). Only a silent tab is reloaded. “Recover agents” is not blanket
 permission to reopen the session list. A plain historical chat with no current work is unprotected.
 An explicit `/closed` departure with `manual: true` persists `browserRecoveryDismissedAt` in the
 existing session metadata and withdraws every unexecuted browser repair. It revokes synthetic
