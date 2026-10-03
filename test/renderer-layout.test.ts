@@ -178,8 +178,9 @@ describe('the session card header', () => {
     expect(rule('.connection-popover::-webkit-scrollbar-track')).toContain('margin-block: 10px');
     expect(rule('#workspaceSettings')).toContain('height: 36px');
     expect(rule('.sidebar-connection')).toContain('width: 36px; height: 36px');
-    expect(document.getElementById('connectionAdvanced')).not.toBeNull();
-    expect(document.getElementById('connectionAdvancedGrid')).not.toBeNull();
+    expect(document.getElementById('connectionPopover')!.querySelector('details')).toBeNull();
+    expect(document.getElementById('connectionAdvanced')).toBeNull();
+    expect(document.getElementById('connectionPopoverVerified')).toBeNull();
     expect(document.getElementById('sessionControls')!.closest('#composerSettings')).not.toBeNull();
     expect(header.querySelector('.session-controls')).toBeNull();
   });
