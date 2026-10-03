@@ -1786,6 +1786,7 @@
   "Let agents on this computer read app status and chats.": "이 컴퓨터의 에이전트가 앱 상태와 채팅을 읽을 수 있도록 허용합니다.",
   "Allow actions": "작업 허용",
   "Let those agents also send and cancel messages. Needs the local control API.": "해당 에이전트가 메시지를 보내고 취소할 수도 있습니다. 로컬 제어 API가 필요합니다.",
+  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "업데이트할 때마다 한 번, 이 버전이 저장된 키를 열 수 있도록 macOS가 암호를 요청합니다. Mac 로그인 암호를 입력하고 “항상 허용”을 선택하세요. 응답하면 바로 채팅과 브라우저 연결이 이어집니다.",
   "Handoff length": "인계 길이",
   "How much a Compact & Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.": "Compact & Resume 인계 요약에 남길 분량입니다. 길수록 새 채팅에 더 많은 세부 정보가 넘어가고, 짧을수록 새 채팅에 여유가 생깁니다.",
   "Shape what Compact & Resume keeps and how Goal and Loop write their next instruction.": "Compact & Resume가 남기는 내용과 Goal과 Loop가 다음 지시를 작성하는 방식을 설정합니다.",

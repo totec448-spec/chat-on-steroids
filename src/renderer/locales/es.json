@@ -1786,6 +1786,7 @@
   "Let agents on this computer read app status and chats.": "Permitir que los agentes de este equipo lean el estado de la app y los chats.",
   "Allow actions": "Permitir acciones",
   "Let those agents also send and cancel messages. Needs the local control API.": "Esos agentes también pueden enviar y cancelar mensajes. Requiere la API de control local.",
+  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "macOS pide tu contraseña una vez después de cada actualización para que esta versión pueda abrir sus claves guardadas. Introduce la contraseña de inicio de sesión de tu Mac y elige «Permitir siempre». Los chats y la conexión con el navegador continúan en cuanto respondas.",
   "Handoff length": "Longitud del traspaso",
   "How much a Compact & Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.": "Cuánto conserva un resumen de Compact & Resume. Los más largos llevan más detalle al chat nuevo; los más cortos le dejan más espacio.",
   "Shape what Compact & Resume keeps and how Goal and Loop write their next instruction.": "Define qué conserva Compact & Resume y cómo Objetivo y Bucle escriben su siguiente instrucción.",

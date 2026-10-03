@@ -4411,8 +4411,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         };
       }
     } else if (command.spec.type === 'revive') {
+      // An error comes from the worker's own page, so the chat did open: what failed is the message.
       const why = error
-        ? `the browser could not reopen the worker's chat — ${error}`
+        ? `the worker's chat did not take the message — ${error}`
         : "the browser could not reopen the worker's chat";
       failWorkerRevival(command.spec.agent, why, command.spec.runId);
       receipt = {

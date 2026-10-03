@@ -4808,6 +4808,8 @@ describe('delivering a bootstrap', () => {
     });
     expect(ack.status).toBe(200);
     expect(ack.body).toMatchObject({ committed: false });
+    // The page answered, so the chat did open; what failed is the message (#882).
+    expect(getLog().some(entry => entry.message.includes("the worker's chat did not take the message — the tab was closed"))).toBe(true);
 
     // Nothing was typed, so nothing was delivered. The worker is exactly where it was, the
     // slot it had reserved is free again, and the prime is told rather than left waiting.
