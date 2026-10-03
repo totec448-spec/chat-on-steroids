@@ -95,10 +95,11 @@
 .connector-chevron { color: var(--soft); }
 .setup-profile-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 8px; color: var(--muted); font-size: calc(12px * var(--text-scale, 1)); }
 .setup-profile-controls { display: flex; min-width: 0; align-items: center; gap: 4px; }
-.setup-profile-controls .btn { height: 28px; padding: 4px 8px; font-size: calc(12px * var(--text-scale, 1)); color: var(--soft); }
-#setupProfile { anchor-name: --setup-profile; min-width: 100px; max-width: 180px; justify-content: space-between; gap: 12px; }
+.setup-profile-controls .btn { height: 36px; padding: 8px; color: var(--soft); }
+/* The profile picker is a popover, not a <select>, but reads as one: same frame as its neighbours. */
+#setupProfile { anchor-name: --setup-profile; min-width: 132px; max-width: 180px; justify-content: space-between; gap: 12px; padding: 8px 12px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--card); color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); font-weight: 400; }
 #setupProfileCurrent { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#setupProfileAdd { width: 28px; padding: 5px; }
+#setupProfileAdd { width: 36px; }
 #setupProfileMenu { position: fixed; position-anchor: --setup-profile; position-area: bottom span-left; position-try-fallbacks: flip-block, flip-inline; inset: auto; margin: 6px 0; width: min(260px, calc(100vw - 32px)); max-height: min(360px, 70vh); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); box-shadow: 0 8px 30px #0004; }
 .setup-profile-option { display: grid; gap: 4px; border-radius: 6px; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; }
 .setup-profile-option:has([aria-pressed="true"]) { background: var(--hover); }
