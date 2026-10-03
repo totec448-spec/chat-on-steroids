@@ -340,7 +340,7 @@ describe('settings migration', () => {
     expect(loaded.compaction.auto).toBe(true);
     expect(loaded.compaction.autoTokens).toBe(loaded.sessions.advisoryTokens);
     expect(loaded.compaction.autoTokens).toBe(400_000);
-    expect(loaded.compaction.handoffPrompt).toMatch(/10,000[–-]30,000 tokens/i);
+    expect(loaded.compaction.handoffPrompt).toMatch(/2,000[–-]6,000 tokens/i);
   });
 
   it('defaults, validates and preserves the editable handoff prompt', async () => {
@@ -360,6 +360,25 @@ describe('settings migration', () => {
     const custom = 'Preserve the exact next action and unresolved evidence. Keep the rest compact.';
     await saveConfig({ ...config, compaction: { ...config.compaction, handoffPrompt: custom } });
     expect((await loadConfig()).compaction.handoffPrompt).toBe(custom);
+  });
+
+  it('upgrades only the untouched verbose handoff default', async () => {
+    const { PREVIOUS_DEFAULT_HANDOFF_PROMPT } = await import('../src/shared/handoff-prompt-history.js');
+    const config = defaultConfig();
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, compaction: { ...config.compaction, handoffPrompt: PREVIOUS_DEFAULT_HANDOFF_PROMPT } }),
+      'utf8'
+    );
+    expect((await loadConfig()).compaction.handoffPrompt).toBe(defaultConfig().compaction.handoffPrompt);
+
+    const customized = `${PREVIOUS_DEFAULT_HANDOFF_PROMPT}\ncustom sentence`;
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, compaction: { ...config.compaction, handoffPrompt: customized } }),
+      'utf8'
+    );
+    expect((await loadConfig()).compaction.handoffPrompt).toBe(customized);
   });
 
   /**
