@@ -19,10 +19,36 @@ const catalogSchema = z.array(projectSchema).max(200);
 let mutations: Promise<unknown> = Promise.resolve();
 const samePath = (a: string, b: string) => nativePathIdentity(a) === nativePathIdentity(b);
 const folders = (project: LocalProject): string[] => [project.path, ...(project.additionalPaths ?? [])];
-const duplicateCatalogFolder = (projects: LocalProject[]): boolean => {
-  const identities = projects.flatMap(folders).map(nativePathIdentity);
-  return new Set(identities).size !== identities.length;
-};
+
+/**
+ * Primary workspace identity is authoritative and therefore must stay unambiguous. Older builds
+ * and hand-edited catalogs can, however, leave the same optional member more than once. Reading
+ * those rows must not hide every project: all primaries win first, then additional members keep
+ * the first stored identity in catalog order. A later mutation naturally rewrites the cleaned
+ * projection without adding a second migration owner.
+ */
+function sanitizeAdditionalFolders(projects: LocalProject[]): LocalProject[] {
+  const primary = new Set<string>();
+  for (const project of projects) {
+    const identity = nativePathIdentity(project.path);
+    if (primary.has(identity)) throw new Error('Project catalog is invalid');
+    primary.add(identity);
+  }
+  const claimed = new Set(primary);
+  return projects.map(project => {
+    if (!project.additionalPaths?.length) return project;
+    const kept: string[] = [];
+    for (const folder of project.additionalPaths) {
+      const identity = nativePathIdentity(folder);
+      if (claimed.has(identity)) continue;
+      claimed.add(identity);
+      kept.push(folder);
+    }
+    if (kept.length === project.additionalPaths.length && kept.every((folder, index) => folder === project.additionalPaths![index])) return project;
+    const { additionalPaths: _, ...primaryOnly } = project;
+    return kept.length ? { ...primaryOnly, additionalPaths: kept } : primaryOnly;
+  });
+}
 
 async function approvedDirectory(folderPath: string, message: string): Promise<string> {
   if (!path.isAbsolute(folderPath)) throw new Error(message);
@@ -43,10 +69,10 @@ export async function listProjects(): Promise<LocalProject[]> {
   const raw = await readDurable<unknown>('projects');
   if (raw === null) return [];
   const parsed = catalogSchema.safeParse(raw);
-  if (!parsed.success || new Set(parsed.data.map(row => row.id)).size !== parsed.data.length || duplicateCatalogFolder(parsed.data)) {
+  if (!parsed.success || new Set(parsed.data.map(row => row.id)).size !== parsed.data.length) {
     throw new Error('Project catalog is invalid');
   }
-  return parsed.data;
+  return sanitizeAdditionalFolders(parsed.data);
 }
 export async function getProject(id: string): Promise<LocalProject | null> {
   return (await listProjects()).find(project => project.id === id) ?? null;
@@ -148,6 +174,17 @@ export async function projectWorkspace(projectId: string, folderPath?: string): 
   const current = await getProject(projectId);
   if (!current || !folders(current).some(folder => samePath(folder, resolved.real))) {
     throw new Error('Folder no longer belongs to the project');
+  }
+  return resolved;
+}
+/** Optional members are useful only while their independently approved root still resolves. */
+export async function projectAdditionalWorkspaces(projectId: string): Promise<Array<{ virtual: string; real: string }>> {
+  const project = await getProject(projectId);
+  if (!project) throw new Error('Project not found');
+  const resolved: Array<{ virtual: string; real: string }> = [];
+  for (const folder of project.additionalPaths ?? []) {
+    try { resolved.push(await projectWorkspace(projectId, folder)); }
+    catch { /* Membership is retained so the user can detach it; revoked/unavailable folders are not projected. */ }
   }
   return resolved;
 }

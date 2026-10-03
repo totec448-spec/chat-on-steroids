@@ -668,7 +668,16 @@ old single-folder rows require no rewrite. Adding either kind uses the native fo
 selection/approved-root flow, resolves the real directory and keeps canonical/native-case folder
 identity unique across the entire catalog. Direct project mutation never approves a root. `projects:addFolder` and
 `projects:removeFolder` are the fixed IPC mutations for additional membership; removing membership
-does not remove its approved root. Session metadata owns only `projectId`, never a member path.
+does not remove its approved root. The sidebar project disclosure lists the primary and additional
+folders, adds through that same independently approved picker flow, and exposes removal only for
+additional membership. Session metadata owns only `projectId`, never a member path.
+
+Catalog restore fails closed on duplicate project ids or duplicate **primary** workspace identity.
+Duplicate optional member identities are compatibility noise instead: primaries take precedence,
+then restore keeps the first additional native identity in stored catalog order and ignores later
+duplicates/case aliases. This cleanup is a read projection; the next catalog mutation persists the
+cleaned shape. Downgrading to an older build that does not understand `additionalPaths` can drop
+those memberships if that build rewrites the project catalog; it does not change the primary path.
 
 Before send/use, `projectWorkspace(id)` and `getSessionProject()` re-resolve the primary under
 current roots and reject moved/unavailable folders. `projectWorkspace(id, folder)` is the explicit
@@ -676,8 +685,12 @@ member lookup: it re-resolves that folder under current roots and accepts it onl
 identity is the primary or one of `additionalPaths`. Revoking or losing an additional folder makes
 that lookup fail closed and never changes the primary cwd; the stored member can still be detached.
 Null means no project; a broken explicit binding is an error, not a reason to infer a new cwd.
-Project prompt/Skill scope, Files and default project terminals continue to use the primary only;
-additional folders do not merge their `AGENTS.md` files or become implicit cwd candidates.
+Project Skill scope, Files and default project terminals continue to use the primary only;
+additional folders do not merge their `AGENTS.md` files or become implicit cwd candidates. The
+opening project/worker prompt is the bounded discoverability consumer: it names currently approved
+additional folders by virtual path while still naming the primary as the sole default cwd and
+instruction directory. Unapproved/unavailable additional members are omitted, never treated as
+permission or as a reason to fail an otherwise valid primary project.
 
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary

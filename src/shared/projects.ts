@@ -4,7 +4,7 @@ export interface LocalProject {
   name: string;
   /** Authoritative default workspace and project-instruction directory. */
   path: string;
-  /** Canonical approved folders addressable only when a caller targets one explicitly. */
+  /** Canonical linked folders; membership never grants access and the primary remains authoritative. */
   additionalPaths?: string[];
   createdAt: number;
   /** Removed sidebar group; existing conversations and queued work retain their folder. */
