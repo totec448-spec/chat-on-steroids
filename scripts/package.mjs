@@ -17,7 +17,10 @@ function value(name, fallback) {
 const platform = normalizePlatform(value('platform', process.platform));
 const arches = value('arch', process.arch).split(',').map((item) => normalizeArch(item.trim()));
 const dirOnly = args.includes('--dir');
-const windowsSigning = platform === 'win32' ? resolveWindowsSigningMode(process.env) : { mode: 'unsigned-capable' };
+const requireOfficialWindowsSigning = process.env.COS_WINDOWS_SIGNING_REQUIRED === '1';
+const windowsSigning = platform === 'win32'
+  ? resolveWindowsSigningMode(process.env, { requireOfficial: requireOfficialWindowsSigning })
+  : { mode: 'unsigned-capable' };
 
 function run(command, commandArgs, env = process.env) {
   const result = spawnSync(command, commandArgs, { cwd: root, stdio: 'inherit', env });

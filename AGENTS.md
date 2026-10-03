@@ -3646,16 +3646,18 @@ the package preserves userData. Synchronize package/main/extension versions deli
 a bundler. `electron-builder.yml` puts executable tunnel/rg, extension and required native
 payloads outside asar. `extension-path.ts` transactionally mirrors the packaged extension to
 stable `userData/extension`, never an ephemeral AppImage mount.
-Windows publisher signing is optional until the maintainer configures a reputable certificate.
-Stable tagged publishing passes the four optional Windows signing values through an all-or-none
-preflight: zero values preserves the existing unsigned-capable path, any partial set fails before
-native packaging, and a complete set activates electron-builder through its standard
+Stable tagged publishing requires Windows publisher signing. Its preflight requires all four
+signing values; a wholly missing or partial set fails before native packaging. The stable caller
+passes `official_windows_signing: true` into the reusable release workflow, whose Windows package
+job rechecks required mode and passes `COS_WINDOWS_SIGNING_REQUIRED=1` into `scripts/package.mjs`
+for the packaging boundary to recheck again. The reusable workflow defaults this requirement Off,
+so canary, contributor and ordinary local packaging remain unsigned-capable without repository
+secrets. A complete set activates electron-builder through its standard
 `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD` inputs. The configured expected certificate subject and SHA-1
 fingerprint are independent audit authority. Complete official mode enables builder
 `forceCodeSigning`, then the native runner requires Authenticode `Valid` on both the unpacked main
-executable and the NSIS installer with that same exact subject/fingerprint. Canary and contributor
-jobs receive none of these repository secrets, and ordinary local builds stay unsigned-capable.
-This source support does not prove that release credentials are configured or establish Smart App
+executable and the NSIS installer with that same exact subject/fingerprint.
+This source support does not prove release credentials are configured or establish Smart App
 Control reputation; those require real release artifacts signed with the maintainer's reputable
 certificate and observed by Windows trust policy.
 The macOS afterPack hook removes Electron's unused camera, microphone and audio-capture

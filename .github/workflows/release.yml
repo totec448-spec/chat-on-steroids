@@ -7,6 +7,10 @@ on:
         description: all for a release; common for a canary (the targets most installs use, see scripts/release-targets.mjs)
         type: string
         default: all
+      official_windows_signing:
+        description: Require the Windows package jobs to use the complete official signing credential set
+        type: boolean
+        default: false
     secrets:
       WINDOWS_CSC_LINK:
         required: false
@@ -102,7 +106,7 @@ jobs:
       - name: Prove native runner target
         run: node -e "if(process.platform!=='${{ matrix.platform }}'||process.arch!=='${{ matrix.arch }}')throw new Error('Expected ${{ matrix.platform }}-${{ matrix.arch }}, got '+process.platform+'-'+process.arch)"
 
-      - name: Resolve optional Windows signing mode
+      - name: Resolve Windows signing mode
         id: windows-signing
         if: matrix.platform == 'win32'
         env:
@@ -110,7 +114,7 @@ jobs:
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
           COS_WINDOWS_SIGNER_SUBJECT: ${{ secrets.WINDOWS_SIGNER_SUBJECT }}
           COS_WINDOWS_CERTIFICATE_SHA1: ${{ secrets.WINDOWS_CERTIFICATE_SHA1 }}
-        run: node scripts/windows-signing-mode.mjs --github-output
+        run: node scripts/windows-signing-mode.mjs --github-output ${{ inputs.official_windows_signing && '--require-official' || '' }}
 
       - name: Package
         run: npm run ${{ matrix.script }}
@@ -119,6 +123,7 @@ jobs:
           WIN_CSC_KEY_PASSWORD: ${{ matrix.platform == 'win32' && secrets.WINDOWS_CSC_KEY_PASSWORD || '' }}
           COS_WINDOWS_SIGNER_SUBJECT: ${{ matrix.platform == 'win32' && secrets.WINDOWS_SIGNER_SUBJECT || '' }}
           COS_WINDOWS_CERTIFICATE_SHA1: ${{ matrix.platform == 'win32' && secrets.WINDOWS_CERTIFICATE_SHA1 || '' }}
+          COS_WINDOWS_SIGNING_REQUIRED: ${{ matrix.platform == 'win32' && inputs.official_windows_signing && '1' || '' }}
 
       - name: Smoke packaged runtime natively
         run: node scripts/smoke-packaged-runtime.mjs --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}

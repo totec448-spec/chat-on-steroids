@@ -13,8 +13,8 @@ const clearedKeys = new Set([
 ]);
 const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !clearedKeys.has(key)));
 
-function run(extra: Record<string, string> = {}) {
-  return spawnSync(process.execPath, [script], {
+function run(extra: Record<string, string> = {}, args: string[] = []) {
+  return spawnSync(process.execPath, [script, ...args], {
     cwd: process.cwd(),
     encoding: 'utf8',
     env: { ...baseEnv, ...extra }
@@ -25,6 +25,13 @@ it('keeps zero-secret contributor and canary mode unsigned-capable', () => {
   const result = run();
   expect(result.status).toBe(0);
   expect(result.stdout).toContain('windows-signing-mode=unsigned-capable');
+});
+
+it('fails zero-secret official mode closed when stable publishing requires signing', () => {
+  const result = run({}, ['--require-official']);
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('Official Windows signing is required');
+  expect(result.stdout).not.toContain('windows-signing-mode=unsigned-capable');
 });
 
 it('publishes only the non-secret signing mode to GitHub step output', () => {

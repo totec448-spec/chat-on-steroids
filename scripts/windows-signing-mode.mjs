@@ -11,9 +11,14 @@ const REQUIRED = [
 
 const value = (env, key) => typeof env[key] === 'string' ? env[key].trim() : '';
 
-export function resolveWindowsSigningMode(env = process.env) {
+export function resolveWindowsSigningMode(env = process.env, { requireOfficial = false } = {}) {
   const missing = REQUIRED.filter((key) => value(env, key) === '');
-  if (missing.length === REQUIRED.length) return { mode: 'unsigned-capable' };
+  if (missing.length === REQUIRED.length) {
+    if (requireOfficial) {
+      throw new Error(`Official Windows signing is required; missing: ${REQUIRED.join(', ')}`);
+    }
+    return { mode: 'unsigned-capable' };
+  }
   if (missing.length) throw new Error(
     `Windows signing credentials must be all present or all absent; missing: ${missing.join(', ')}`
   );
@@ -37,7 +42,9 @@ export function resolveWindowsSigningMode(env = process.env) {
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isMain) {
   try {
-    const mode = resolveWindowsSigningMode(process.env);
+    const mode = resolveWindowsSigningMode(process.env, {
+      requireOfficial: process.argv.includes('--require-official')
+    });
     process.stdout.write(`windows-signing-mode=${mode.mode}\n`);
     if (mode.mode === 'official') process.stdout.write(`certificate-sha1=${mode.expectedThumbprint}\n`);
     if (process.argv.includes('--github-output')) {
