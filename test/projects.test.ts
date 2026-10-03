@@ -7,7 +7,7 @@ import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, r
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
-import { addProject, addProjectFolder, assignSessionProject, getSessionProject, inheritSessionProject, listProjects, projectWorkspace, removeProject, removeProjectFolder } from '../src/main/projects.js';
+import { addProject, addProjectFolder, assignSessionProject, getSessionProject, inheritSessionProject, listProjects, projectWorkspace, removeProject, removeProjectFolder, setProjectColor } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
 let directory: string, approved: string;
@@ -42,6 +42,17 @@ it('loads legacy single-folder records as primary-only projects without requirin
   await writeDurableNow('projects', [legacy]);
   expect(await listProjects()).toEqual([legacy]);
   expect(await projectWorkspace(legacy.id)).toMatchObject({ real: legacy.path, virtual: '/work/first' });
+});
+
+it('persists only predefined presentation colors without changing project workspace authority', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const colored = await setProjectColor(project.id, 'purple');
+  expect(colored).toEqual({ ...project, color: 'purple' });
+  expect(await projectWorkspace(project.id)).toMatchObject({ real: project.path, virtual: '/work/first' });
+  resetDurableForTests(); initDurableStore(directory);
+  expect(await listProjects()).toEqual([colored]);
+  await expect(setProjectColor(project.id, 'chartreuse' as any)).rejects.toThrow();
+  expect(await setProjectColor(project.id, null)).toEqual(project);
 });
 
 it('drops duplicate additional folder identities on read while primary ownership stays authoritative', async () => {

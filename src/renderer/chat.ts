@@ -32,7 +32,7 @@ import { answerAnchors } from '../shared/markdown-export.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
 import { injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
-import type { LocalProject } from '../shared/projects.js';
+import { PROJECT_COLORS, type LocalProject, type ProjectColor } from '../shared/projects.js';
 import type { TaskProgress } from '../shared/task-progress.js';
 /**
  * Desktop chat workspace: recorded prose/tool truth, exact-session controls and a composer.
@@ -790,6 +790,7 @@ function paintSessions(): void {
   for (const { id } of orderedProjects) {
     const project = projects.find(row => row.id === id);
     const section = document.createElement('details'); section.className = 'project-group'; section.dataset.projectId = id;
+    if (project?.color) section.dataset.projectColor = project.color;
     section.dataset.sortId = id; section.dataset.sortScope = SIDEBAR_PROJECT_SCOPE;
     section.open = expandedProjects.has(id);
     const heading = el('summary', 'project-heading');
@@ -808,6 +809,25 @@ function paintSessions(): void {
       section.open = open;
     });
     if (project) {
+      const color = el('button', 'btn project-color') as HTMLButtonElement;
+      color.type = 'button'; color.dataset.color = project.color ?? '';
+      ui(color, 'title', () => t('Change project color'));
+      ui(color, 'aria-label', () => t('Change project color'));
+      color.addEventListener('click', async event => {
+        event.preventDefault(); event.stopPropagation();
+        if (color.disabled) return;
+        color.disabled = true;
+        const current = project.color ? PROJECT_COLORS.indexOf(project.color) : -1;
+        const next: ProjectColor | null = current >= PROJECT_COLORS.length - 1 ? null : PROJECT_COLORS[current + 1]!;
+        try {
+          const updated = await run(api.setProjectColor(id, next));
+          if (!updated) return;
+          ++sessionsLoadGeneration;
+          projects = projects.map(row => row.id === id ? updated : row);
+          paintSessions();
+        } finally { color.disabled = false; }
+      });
+      heading.prepend(color);
       const create = el('button', 'btn project-new'); create.append(icon('i-pencil')); create.setAttribute('type', 'button'); create.dataset.newProject = id;
       ui(create, 'title', () => t("New chat in this project")); ui(create, 'aria-label', () => t("New chat in this project"));
       create.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); selectNewChat(id); }); heading.append(create);

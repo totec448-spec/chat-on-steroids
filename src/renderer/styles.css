@@ -3300,6 +3300,14 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .project-heading { display: flex; align-items: center; gap: 9px; cursor: pointer; padding: 6px 8px; list-style: none; }
 .project-heading[data-sort-handle] { cursor: grab; user-select: none; }
 .project-heading::-webkit-details-marker { display: none; }
+.project-color { flex: 0 0 auto; width: 14px; height: 14px; min-height: 14px; padding: 0; border-radius: 50%; border: 1px solid var(--edge); background: var(--sunk); box-shadow: inset 0 0 0 2px var(--page); }
+.project-color[data-color='blue'] { background: #4c7fc1; }
+.project-color[data-color='green'] { background: #3f9b68; }
+.project-color[data-color='amber'] { background: #c38b2f; }
+.project-color[data-color='purple'] { background: #8063b2; }
+.project-color[data-color='rose'] { background: #bd5d72; }
+.project-color[data-color='teal'] { background: #388f91; }
+.project-color:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .project-name { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .project-new { display: grid; place-items: center; width: 26px; height: 26px; padding: 4px; opacity: 0; }
 .project-heading:hover .project-new, .project-heading:focus-within .project-new { opacity: 1; }
