@@ -80,7 +80,7 @@ losing the project, history, workers or queued instructions when a chat grows to
 | Prime / worker | One owning conversation and its reusable subordinate chats. Several prime families may run independently. |
 | Decision helper / planner | A role-specific chat that produces a continuation decision or workflow; it must not execute the reference task. |
 | Code-mode `exec` | Bounded JavaScript composition of one MCP surface's tools. `exec_command` runs an OS process. |
-| Stop / End turn / Block | Stop requests native generation cancellation; End turn releases a finish hold; Block revokes exact-chat local tool access. |
+| Stop / End turn / Block / Trust | Stop requests native generation cancellation; End turn releases a finish hold; Block revokes exact-chat local tool access. Trust is the separate explicit allow entry used only when strict chat allowlisting is on. |
 
 ### Product-wide invariants
 
@@ -196,6 +196,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8. | Legacy absent enabled/allow-unattributed fields remain false. Existing choices stay exact. |
 | Wait for sub-agents | Off. | When on, a Goal/Loop chat's next automatic step waits for the workers that exact chat started. A chat with no run, or a run with no workers, waits either way. See §16. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
+| Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution to a conversation explicitly trusted in Sessions. Block still wins; unattributed calls are refused even when the ordinary unattributed allowance is on. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-5.6-sol` High. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
@@ -281,7 +282,7 @@ second-instance/tray/Dock is gated until restore, CSP, permissions and IPC are r
 begins, no delayed startup callback may re-enable window creation.
 
 Startup initializes config/secrets/session/durable paths, restores the saved model catalog and
-plugin manager, loads Goal ledgers, exact correlations and blocked chats, then retired workers
+plugin manager, loads Goal ledgers, exact correlations and blocked/trusted chat policy, then retired workers
 and every active/dormant prime family. Persistence hooks exist even when multi-agent is Off.
 Continuation restore follows swarm restore because it may repair prime ownership. IPC/input
 hooks precede browser traffic. Then the secure window/tray, bridge for recording or agents,
@@ -594,6 +595,15 @@ recipient. `session_finish` still targets an exact live session; its hold never 
 A positively known blocked, retired, ended or superseded caller is refused regardless of that
 preference. Refused historical calls must not revive workers, acknowledge inboxes or grant
 activity to a successor chat.
+
+\`multiAgent.strictChatAllowlist\` is an independent, opt-in default-deny boundary. Its allow set is
+\`state/trusted-chats.json\`, keyed only by exact ChatGPT conversation id and restored before MCP
+traffic. Missing/corrupt trust state therefore means no trusted chats. Strict mode waits through the
+same request-id evidence window used by blocked-chat enforcement, refuses unknown/unattributed
+callers even if \`allowUnattributedCalls\` is true, and runs no handler or worker-liveness side effect
+for a denied caller. Block always outranks Trust. Unblocking does not trust, deleting the session row
+removes both policies for that conversation, and Compact & Resume/new-chat bindings never inherit
+the predecessor conversation's trust.
 
 ### Three lifetimes and five outcomes
 

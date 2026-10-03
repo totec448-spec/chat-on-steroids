@@ -1764,5 +1764,9 @@
   "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "Chat On Steroids Core in meinen Nachrichten erwähnen: stellt sicher, dass ChatGPT diese App in jedem Chat nutzen kann. Ausschalten, wenn ChatGPT einfache Fragen mit einem unnötigen Tool-Aufruf beginnt; Worker, Goal, Loop und Continue behalten die Erwähnung.",
   "When to continue": "Wann fortsetzen",
   "Session Finish only": "Nur zum Sitzungsende",
-  "Also after the turn": "Auch nach dem Durchlauf"
+  "Also after the turn": "Auch nach dem Durchlauf",
+  "Trust only selected chats": "Nur ausgewählten Chats vertrauen",
+  "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "Lokale Tools standardmäßig verweigern und nur Chats zulassen, denen Sie in Sitzungen ausdrücklich vertrauen. Nicht zugeordnete Aufrufe bleiben blockiert, solange dies aktiviert ist.",
+  "Untrust this chat: strict mode refuses its tool calls": "Vertrauen für diesen Chat aufheben: Im strikten Modus werden seine Tool-Aufrufe abgelehnt",
+  "Trust this chat: strict mode lets its tool calls run": "Diesem Chat vertrauen: Im strikten Modus dürfen seine Tool-Aufrufe ausgeführt werden"
 }

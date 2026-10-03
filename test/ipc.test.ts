@@ -1425,6 +1425,29 @@ describe('session IPC contracts', () => {
     resetBlockedChatsForTests();
   });
 
+  it('trusts and untrusts only the stored conversation for strict allowlisting', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const conversationId = 'dddddddd-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'trusted chat', conversationId });
+
+    const trusted = (await handlers.get('sessions:trust')!(null, { id: session.id, trusted: true })) as any;
+    expect(trusted.ok, trusted.error).toBe(true);
+    expect(trusted.data).toEqual([conversationId]);
+    expect(isChatTrusted(conversationId)).toBe(true);
+
+    const untrusted = (await handlers.get('sessions:trust')!(null, { id: session.id, trusted: false })) as any;
+    expect(untrusted.ok, untrusted.error).toBe(true);
+    expect(untrusted.data).toEqual([]);
+    expect(isChatTrusted(conversationId)).toBe(false);
+
+    const unattributed = await createSession({ title: 'no conversation to trust', conversationId: null });
+    const refused = (await handlers.get('sessions:trust')!(null, { id: unattributed.id, trusted: true })) as any;
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/no valid ChatGPT conversation/i);
+    resetTrustedChatsForTests();
+  });
+
   it('releases a block when the row that carries its button is deleted', async () => {
     const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
     resetBlockedChatsForTests();
@@ -1439,6 +1462,20 @@ describe('session IPC contracts', () => {
     expect(isChatBlocked(conversationId)).toBe(false);
   });
 
+  it('removes trust when the row that carries its button is deleted', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const conversationId = 'eeeeeeee-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'trusted then deleted', conversationId });
+    await handlers.get('sessions:trust')!(null, { id: session.id, trusted: true });
+    expect(isChatTrusted(conversationId)).toBe(true);
+
+    const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+    expect(deleted.ok, deleted.error).toBe(true);
+    expect(isChatTrusted(conversationId)).toBe(false);
+    resetTrustedChatsForTests();
+  });
+
   it('reports the blocked set with every session list, so one paint marks every row', async () => {
     const { resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
     resetBlockedChatsForTests();
@@ -1449,6 +1486,18 @@ describe('session IPC contracts', () => {
     await handlers.get('sessions:block')!(null, { id: session.id, blocked: true });
     expect((await sessionList()).data.blocked).toEqual([conversationId]);
     resetBlockedChatsForTests();
+  });
+
+  it('reports the trusted set with every session list as live access policy', async () => {
+    const { resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const conversationId = 'ffffffff-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'listed while trusted', conversationId });
+
+    expect((await sessionList()).data.trusted).toEqual([]);
+    await handlers.get('sessions:trust')!(null, { id: session.id, trusted: true });
+    expect((await sessionList()).data.trusted).toEqual([conversationId]);
+    resetTrustedChatsForTests();
   });
 
   it('opens only the stored conversation URL in Chrome', async () => {

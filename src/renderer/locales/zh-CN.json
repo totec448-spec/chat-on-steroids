@@ -1764,5 +1764,9 @@
   "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "在我的消息中提及 Chat On Steroids Core：确保 ChatGPT 在每个聊天中都能使用此应用。如果 ChatGPT 在简单问题前先进行不必要的工具调用，请关闭；工作者、Goal、Loop 和 Continue 始终保留提及。",
   "When to continue": "何时继续",
   "Session Finish only": "仅在轮次结束通知时",
-  "Also after the turn": "也可在轮后发送"
+  "Also after the turn": "也可在轮后发送",
+  "Trust only selected chats": "仅信任选定的聊天",
+  "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "默认拒绝本地工具，只允许你在“会话”中明确设为信任的聊天。启用时，无法归属到聊天的调用仍会被阻止。",
+  "Untrust this chat: strict mode refuses its tool calls": "取消信任此聊天：严格模式将拒绝其工具调用",
+  "Trust this chat: strict mode lets its tool calls run": "信任此聊天：严格模式将允许其工具调用"
 }

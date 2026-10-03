@@ -1764,5 +1764,9 @@
   "Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.": "내 메시지에서 Chat On Steroids Core 멘션: 모든 채팅에서 ChatGPT가 이 앱을 사용할 수 있게 합니다. 간단한 질문에 ChatGPT가 불필요한 도구 호출부터 시작하면 끄세요. 워커, Goal, Loop, Continue는 멘션을 유지합니다.",
   "When to continue": "계속할 시점",
   "Session Finish only": "세션 종료 시에만",
-  "Also after the turn": "턴 이후에도"
+  "Also after the turn": "턴 이후에도",
+  "Trust only selected chats": "선택한 채팅만 신뢰",
+  "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "로컬 도구를 기본적으로 거부하고 세션에서 명시적으로 신뢰한 채팅만 허용합니다. 이 옵션이 켜져 있는 동안 출처를 확인할 수 없는 호출은 계속 차단됩니다.",
+  "Untrust this chat: strict mode refuses its tool calls": "이 채팅 신뢰 해제: 엄격 모드에서 도구 호출을 거부합니다",
+  "Trust this chat: strict mode lets its tool calls run": "이 채팅 신뢰: 엄격 모드에서 도구 호출을 허용합니다"
 }
