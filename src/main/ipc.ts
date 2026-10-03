@@ -1255,6 +1255,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
 
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
+    const summary = await getSession(id);
+    // Trust is permission. Revoke it durably before any other deletion side effect; otherwise
+    // a failed disk commit could leave this chat both trusted and newly unblocked, with its row
+    // already gone and no user control left to repair that authority.
+    if (summary?.conversationId) await setChatTrusted(summary.conversationId, false);
     // Detach first. The recorder maps live ChatGPT conversations to session ids, so
     // deleting the folder underneath a live one left it appending to a session that no
     // longer existed — the events went to a resurrected half-session with no summary.
@@ -1263,10 +1268,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // Release first. The block button lives on this row, so a block left behind by the row's
     // deletion would refuse that conversation's tools with nothing left in the app that could
     // ever release it.
-    const summary = await getSession(id);
     if (summary?.conversationId) {
       setChatBlocked(summary.conversationId, false);
-      await setChatTrusted(summary.conversationId, false);
     }
     await deleteSession(id);
     logInfo(
