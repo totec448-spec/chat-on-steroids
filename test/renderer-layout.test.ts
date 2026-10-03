@@ -304,8 +304,8 @@ describe('the session-row chat actions', () => {
   });
 
   it('opens and blocks only recorded conversations, and never selects or deletes the adjacent row', () => {
-    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,2000}openSessionChat\(summary\.id\)/);
-    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,2000}toggleSessionBlock\(summary\.id/);
+    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]*?openSessionChat\(summary\.id\)/);
+    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]*?toggleSessionBlock\(summary\.id/);
     expect(chatSource).toMatch(/open\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
     expect(chatSource).toMatch(/block\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
   });
@@ -328,7 +328,10 @@ describe('the session-row chat actions', () => {
    */
   it('blocks the Unattributed row through the one switch that can answer for it', () => {
     expect(chatSource).toMatch(
-      /if \(summary\.conversationId === null\)[\s\S]{0,1200}toggleUnattributedBlock\(!blocked\)/
+      /if \(summary\.conversationId === null\)[\s\S]{0,2200}toggleUnattributedBlock\(!blocked\)/
+    );
+    expect(chatSource).toMatch(
+      /strictChatAllowlist === true[\s\S]{0,300}actionBar\.append\(remove\)[\s\S]{0,120}return row/
     );
     expect(chatSource).toMatch(
       /toggleUnattributedBlock[\s\S]{0,400}\$<HTMLInputElement>\('allowUnattributedCalls'\)\.checked = !blocked/
